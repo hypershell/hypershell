@@ -3,20 +3,11 @@
 
 #include "hysh/interface/data_buffer.h"
 
-struct hy_string_methods;
+hy_declare_interface(hy_string);
 
-typedef struct hy_string {
-    void *self;
-    
-    struct hy_string_methods *methods;
-    
-} hy_string;
-
-typedef struct hy_string_methods {
-    hy_data_buffer_methods parent;
-    
+hy_define_interface(hy_string, hy_data_buffer)
     hy_error (*length)(void *self, uint64_t *retval);
     
     hy_error (*c_string)(void *self, const char **retval);
     
-} hy_string_methods;
+hy_end_define

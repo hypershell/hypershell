@@ -4,6 +4,8 @@
 #include "hysh/interface/object.h"
 #include "hysh/interface/string.h"
 #include "hysh/impl/basic_error.h"
+#include "hysh/interface/stream_handler.h"
+#include "hysh/interface/http.h"
 
 hy_define_basic_error(test_error, 500, "testing");
 

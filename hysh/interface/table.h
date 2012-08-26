@@ -4,20 +4,10 @@
 #include "hysh/interface/string.h"
 #include "hysh/interface/list.h"
 
-struct hy_table_methods;
+hy_declare_interface(hy_table);
 
-typedef typedef hy_table {
-    void *self;
-    
-    struct hy_table_methods *methods;
-    
-} hy_table;
-
-typedef struct hy_table_methods {
-    hy_object_methods parent;
-    
+hy_define_interface(hy_table, hy_object)
     hy_error (*get_value)(void *self, hy_string key, hy_string *retval);
     
     hy_error (*get_keys)(void *self, hy_typed_list *retval);
-    
-} hy_table_methods;
+hy_end_define

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "hysh/interface/error.h"
 
 #define hy_cast(target, interface, object) \
@@ -9,16 +10,19 @@
     (target).methods = (interface##_methods*) (object).methods
 
 #define hy_define_interface(name, parent_name) \
-    typedef struct name##_methods name##_methods; \
-    typedef struct name { \
+    struct name##_methods; \
+    struct name { \
         void *self; \
         \
-        name##_methods *methods; \
-    } name; \
+        struct name##_methods *methods; \
+    }; \
     struct name##_methods { \
-        parent_name##_methods parent; 
+        struct parent_name##_methods parent; 
 
 #define hy_end_define };
+
+#define hy_declare_interface(name) \
+    typedef struct name name;
 
 typedef uint64_t hy_iid;
 

@@ -4,54 +4,27 @@
 #include "hysh/interface/table.h"
 #include "hysh/interface/stream.h"
 
-struct hy_stream_handler_methods;
-struct hy_stream_handler_listener_methods;
-struct hy_stream_result_writer_methods;
+hy_declare_interface(hy_stream_handler);
+hy_declare_interface(hy_stream_handler_listener);
+hy_declare_interface(hy_stream_result_writer);
 
-typedef struct hy_stream_handler {
-    void *self;
-    
-    struct hy_stream_handler_methods *methods;
-} hy_stream_handler;
-
-typedef struct hy_stream_handler_listener {
-    void *self;
-    
-    struct hy_stream_handler_listener_methods *methods;
-} hy_stream_handler_listener;
-
-typedef struct hy_stream_result_writer {
-    void *self;
-    
-    struct hy_stream_result_writer_methods *methods;
-} hy_stream_result_writer;
-
-typedef struct hy_stream_handler_methods {
-    hy_object_methods parent;
-    
+hy_define_interface(hy_stream_handler, hy_object)
     hy_error (*process_stream)(void *self, 
         hy_table args,
         hy_read_stream input_stream, 
         hy_stream_result_writer writer);
-    
-} hy_stream_handler_methods;
+hy_end_define
 
-typedef struct hy_stream_handler_listener_methods {
-    hy_object_methods parent;
-    
+hy_define_interface(hy_stream_handler_listener, hy_object)
     hy_error (*on_result_stream_available)(void *self,
         hy_read_stream result_stream);
         
     hy_error (*on_error)(void *self,
         hy_error error);
-    
-} hy_stream_handler_listener_methods;
+hy_end_define
 
-typedef struct hy_stream_result_writer_methods {
-    hy_object_methods parent;
-    
+hy_define_interface(hy_stream_result_writer, hy_object)
     hy_error (*write_result)(void *self, hy_read_stream result_stream);
     
     hy_error (*write_error)(void *self, hy_error error);
-    
-} hy_stream_result_writer_methods;
+hy_end_define
