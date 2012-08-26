@@ -19,7 +19,7 @@
     struct name##_methods { \
         struct parent_name##_methods parent; 
 
-#define hy_end_define };
+#define hy_end };
 
 #define hy_declare_interface(name) \
     typedef struct name name;

@@ -45,7 +45,8 @@ hy_error_methods hy_basic_error_methods = {
     hy_basic_error_error_message
 };
 
-hy_define_basic_error(hy_fatal_error, hy_fatal_error_code, "A fatal error has occured.");
+hy_define_basic_error(hy_fatal_error, hy_fatal_error_code, "A fatal error has occured");
 hy_define_basic_error(hy_failure, hy_failure_code, "Fail to perform operation");
-hy_define_basic_error(hy_query_interface_error, hy_query_interface_error_code, "Cannot cast to requested object.");
+hy_define_basic_error(hy_query_interface_error, hy_query_interface_error_code, "Cannot cast to requested object");
 hy_define_basic_error(hy_not_found, hy_not_found_code, "Requested element not found");
+hy_define_basic_error(hy_not_implemented, hy_not_implemented_code, "Method not implemented");

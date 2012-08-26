@@ -40,3 +40,4 @@ hy_declare_basic_error(hy_fatal_error);
 hy_declare_basic_error(hy_failure);
 hy_declare_basic_error(hy_query_interface_failure);
 hy_declare_basic_error(hy_not_found);
+hy_declare_basic_error(hy_not_implemented);

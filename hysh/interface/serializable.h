@@ -1,0 +1,10 @@
+
+#pragma once
+
+#include "hysh/interface/string.h"
+
+hy_declare_interface(hy_serializable);
+
+hy_define_interface(hy_serializable, hy_object)
+    hy_error (*to_string)(void *self, hy_string *retval);
+hy_end
