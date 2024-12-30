@@ -421,6 +421,7 @@ class SearchableMixin:
     show_completed: bool = False
     show_succeeded: bool = False
     show_remaining: bool = False
+    show_pending: bool = False
 
     def build_query(self: SearchableMixin) -> Query:
         """Build original query interface."""
@@ -476,6 +477,9 @@ class SearchableMixin:
             self.where_clauses.append('exit_status != null')
         if self.show_remaining:
             self.where_clauses.append('exit_status == null')
+        if self.show_pending:
+            self.where_clauses.append('exit_status == null')
+            self.where_clauses.append('schedule_time != null')
         if not self.where_clauses:
             return []
         else:
@@ -498,7 +502,7 @@ SEARCH_SYNOPSIS = f'{SEARCH_PROGRAM} [-h] [FIELD [FIELD ...]] [-w COND [COND ...
 SEARCH_USAGE = f"""\
 Usage:
   hs task search [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]]
-                 [--failed | --succeeded | --completed | --remaining]
+                 [--failed | --succeeded | --completed | --remaining | --pending]
                  [--order-by FIELD [--desc]] [--count | --limit NUM]
                  [-f FORMAT | --json | --csv]  [-d CHAR]
   
@@ -523,6 +527,8 @@ Options:
   -S, --succeeded            Alias for `-w exit_status == 0`.
   -C, --completed            Alias for `-w exit_status != null`.
   -R, --remaining            Alias for `-w exit_status == null`.
+  -P, --pending              Alias for `-w exit_status == null`
+                                   and `-w schedule_time != null`.
   -f, --format      FORMAT   Format output (normal, plain, table, csv, json).
       --json                 Format output as JSON (alias for `--format=json`).
       --csv                  Format output as CSV (alias for `--format=csv`.
@@ -564,11 +570,13 @@ class TaskSearchApp(Application, SearchableMixin):
     show_completed: bool = False
     show_succeeded: bool = False
     show_remaining: bool = False
+    show_pending: bool = False
     search_alias_interface = interface.add_mutually_exclusive_group()
     search_alias_interface.add_argument('-F', '--failed', action='store_true', dest='show_failed')
     search_alias_interface.add_argument('-C', '--completed', action='store_true', dest='show_completed')
     search_alias_interface.add_argument('-S', '--succeeded', action='store_true', dest='show_succeeded')
     search_alias_interface.add_argument('-R', '--remaining', action='store_true', dest='show_remaining')
+    search_alias_interface.add_argument('-P', '--pending', action='store_true', dest='show_pending')
     search_alias_interface.add_argument('--finished', action='store_true', dest='show_completed')
     # NOTE: --finished retained for backwards compatibility
 
