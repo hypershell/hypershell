@@ -63,8 +63,8 @@ Fixes
 
 |
 
-Issue `#12 <https://github.com/glentner/hypershell/issues/12>`_
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Issue `#12 <https://github.com/hypershell/hypershell/issues/12>`_
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The ``--ssh`` mode for the `cluster` workflow allows for you to specify
 a hostname list inline with the command. In the initial implementation it
@@ -77,8 +77,8 @@ For example, ``some-[00-04,08].local,other-[02,05].local`` will expand correctly
 
 |
 
-Issue `#15 <https://github.com/glentner/hypershell/issues/15>`_
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Issue `#15 <https://github.com/hypershell/hypershell/issues/15>`_
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 A breaking
 `change <https://github.com/sqlalchemy/sqlalchemy/commit/1a24813bab99376ccd1c726dd7b69db3635a2d2b>`_

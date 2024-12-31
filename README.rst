@@ -5,8 +5,8 @@ HyperShell v2: Distributed Task Execution for HPC
     :target: https://www.apache.org/licenses/LICENSE-2.0
     :alt: License
 
-.. image:: https://img.shields.io/github/v/release/glentner/hypershell?sort=semver
-    :target: https://github.com/glentner/hypershell/releases
+.. image:: https://img.shields.io/github/v/release/hypershell/hypershell?sort=semver
+    :target: https://github.com/hypershell/hypershell/releases
     :alt: Github Release
 
 .. image:: https://img.shields.io/badge/Python-3.10+-blue.svg

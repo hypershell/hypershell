@@ -253,8 +253,8 @@ Fixes
 
 |
 
-Issue `#18 <https://github.com/glentner/hypershell/issues/18>`_
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Issue `#18 <https://github.com/hypershell/hypershell/issues/18>`_
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Incorrect type inferred for task search filters.
 
