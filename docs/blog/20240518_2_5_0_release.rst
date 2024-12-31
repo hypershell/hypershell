@@ -49,7 +49,7 @@ New capabilities for task management
 
 Previously the ``hs task update`` command would only allow you to specify a single task
 UUID, a field to change, and the new value.
-In `Issue #27 <https://github.com/glentner/hypershell/issues/27>`_ we consider the much
+In `Issue #27 <https://github.com/hypershell/hypershell/issues/27>`_ we consider the much
 need capability to *cancel* a task. But what about other sorts of actions (singular and
 bulk) such as *deletion*, *reversion*, or even updating tags en masse?
 
@@ -258,8 +258,8 @@ Fixes
 |
 
 
-Tags not duplicated on task retry `#26 <https://github.com/glentner/hypershell/issues/26>`_
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Tags not duplicated on task retry `#26 <https://github.com/hypershell/hypershell/issues/26>`_
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 When a task fails and ``-r``, ``--max-retries`` is used to automatically re-submit a task,
 tags were not properly replicated. This was a simple omission in the code that duplicates
@@ -269,8 +269,8 @@ This fix will likely be applied as a patch release in `v2.4.1` as well.
 
 |
 
-IntegrityError: duplicate violates unique constraint `#29 <https://github.com/glentner/hypershell/issues/29>`_
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+IntegrityError: duplicate violates unique constraint `#29 <https://github.com/hypershell/hypershell/issues/29>`_
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 At high throughput, when many clients are connecting, when a database is involved, if the server
 decides to evict a client because you have the eviction policy set too low (seconds), the client

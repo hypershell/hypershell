@@ -6,7 +6,7 @@ readme = "README.rst"
 license = "Apache-2.0"
 homepage = "https://hypershell.org"
 documentation = "https://hypershell.readthedocs.io"
-repository = "https://github.com/glentner/hypershell"
+repository = "https://github.com/hypershell/hypershell"
 authors = [
     "Geoffrey Lentner <glentner@purdue.edu>"
 ]

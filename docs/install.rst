@@ -27,7 +27,7 @@ or administrative privileges, we recommend the following.
 
     .. code-block:: shell
 
-        pipx install https://github.com/glentner/hypershell/archive/refs/tags/2.6.1.tar.gz
+        pipx install https://github.com/hypershell/hypershell/archive/refs/tags/2.6.1.tar.gz
 
 .. warning::
 
@@ -75,7 +75,7 @@ manual page. Some desired runtime, ``python3.12``, is already loaded.
         cd /apps/x86_64-any/hypershell/2.6.1
 
         mkdir -p bin share
-        git clone --depth 1 --branch 2.6.1 https://github.com/glentner/hypershell ./src
+        git clone --depth 1 --branch 2.6.1 https://github.com/hypershell/hypershell ./src
 
         python3.12 -m venv libexec
         libexec/bin/pip install ./src
@@ -129,7 +129,7 @@ Development
 
 As a library dependency, `HyperShell` can easily be added to your project using whatever package
 tooling you like. For development of `HyperShell` itself, contributors should create their own fork
-of the repository on `GitHub <https://github.com/glentner/hypershell>`_ and clone the fork locally.
+of the repository on `GitHub <https://github.com/hypershell/hypershell>`_ and clone the fork locally.
 We use `Poetry <https://python-poetry.org>`_ for managing the development environment. The
 ``poetry.lock`` file is included in the repository, simply run the following command to initialize
 your virtual environment.

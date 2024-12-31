@@ -64,8 +64,8 @@ Fixes
 
 |
 
-Issue `#16 <https://github.com/glentner/hypershell/issues/16>`_
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Issue `#16 <https://github.com/hypershell/hypershell/issues/16>`_
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In a few places, specifically within the ``task`` subcommands, normal error
 modes would not be handled correctly because of the way global exception handling
@@ -74,8 +74,8 @@ these sorts of things print a nice message instead of a nasty traceback.
 
 |
 
-Issue `#17 <https://github.com/glentner/hypershell/issues/15>`_
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Issue `#17 <https://github.com/hypershell/hypershell/issues/15>`_
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 We don't yet have robust enough testing of all the different sorts of
 scenarios that might arise when using the application. We parse users'
