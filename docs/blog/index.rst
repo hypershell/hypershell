@@ -5,6 +5,17 @@ Blog
 
 A place for announcements, release notes, thoughts and ideas for the project.
 
+-----
+
+:ref:`Release Notes (v2.6.1) <20241231_2_6_1_release>`
+------------------------------------------------------
+
+`December 31, 2024`
+
+The v2.6.1 release includes support for Python 3.9 and minor improvements.
+
+- Allow Python 3.9
+- Improved optional dependency handling
 
 -----
 
@@ -105,6 +116,7 @@ a few quality of life improvements, and a fix for SSH-mode.
     :hidden:
     :maxdepth: 1
 
+    20241231_2_6_1_release
     20241115_announce_logo
     20241115_2_6_0_release
     20240706_2_5_2_release

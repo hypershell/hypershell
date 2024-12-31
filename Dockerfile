@@ -1,6 +1,6 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 
-LABEL version="2.6.0"
+LABEL version="2.6.1"
 LABEL authors="glentner@purdue.edu"
 
 
@@ -17,7 +17,7 @@ RUN pip install poetry psycopg2 && \
     poetry config virtualenvs.create false && \
     poetry install --no-dev
 
-ENV HYPERSHELL_LOGGING_LEVEL=DEBUG \
+ENV HYPERSHELL_LOGGING_LEVEL=TRACE \
     HYPERSHELL_LOGGING_STYLE=SYSTEM
 
 USER app

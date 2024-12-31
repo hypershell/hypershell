@@ -94,11 +94,9 @@ class HyperShellApp(ApplicationGroup):
     interface = Interface(APP_NAME, APP_USAGE, APP_HELP)
     interface.add_argument('-v', '--version', action='version',
                            version=f'HyperShell v{__version__} (Python {python_version()})')
-
     interface.add_argument('--citation', action='version', version=__citation__)
     interface.add_argument('command')
 
-    command = None
     commands = {
         'submit': SubmitApp,
         'server': ServerApp,

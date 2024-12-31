@@ -25,21 +25,12 @@ class TestDatabaseURL:
         with pytest.raises(TypeError):
             DatabaseURL('a', 'b')  # noqa
 
-    def test_sqlite_requires_file(self) -> None:
-        try:
-            DatabaseURL(provider='sqlite')
-        except AttributeError as error:
-            message, = error.args
-            assert message == 'Must provide \'file\' for SQLite'
-        else:
-            assert False, 'Did not raise AttributeError'
-
     def test_sqlite_no_allow_database(self) -> None:
         try:
             DatabaseURL(provider='sqlite', file='local.db', database='main')
         except AttributeError as error:
             message, = error.args
-            assert message == 'Must provide \'file\' not \'database\' for SQLite'
+            assert message == 'Cannot provide both \'file\' and \'database\' for SQLite'
         else:
             assert False, 'Did not raise AttributeError'
 

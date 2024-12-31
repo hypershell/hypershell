@@ -24,7 +24,7 @@ from sqlalchemy.exc import ArgumentError
 # internal libs
 from hypershell.core.config import config
 from hypershell.core.logging import handler
-from hypershell.core.exceptions import write_traceback
+from hypershell.core.exceptions import display_critical, write_traceback
 
 # public interface
 __all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', ]
@@ -220,6 +220,13 @@ try:
     engine = get_engine()
     factory = sessionmaker(bind=engine)
     Session = scoped_session(factory)
+except ModuleNotFoundError as error:
+    if 'psycopg2' in error.args[0]:
+        display_critical(f'Missing optional dependency "psycopg2" needed for PostgreSQL', module=__name__)
+        sys.exit(exit_status.runtime_error)
+    else:
+        write_traceback(error, module=__name__)
+        sys.exit(exit_status.bad_config)
 except Exception as error:
     write_traceback(error, module=__name__)
     sys.exit(exit_status.bad_config)

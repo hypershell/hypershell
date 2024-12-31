@@ -17,7 +17,7 @@ import contextlib
 import subprocess
 
 # external libs
-import toml
+import tomlkit
 from pygments.styles import STYLE_MAP as CONSOLE_THEMES
 from cmdkit.app import Application, ApplicationGroup
 from cmdkit.cli import Interface, ArgumentError
@@ -239,19 +239,9 @@ class ConfigGetApp(Application):
     def format_section(self: ConfigGetApp, value: dict) -> str:
         """Format an entire section for output."""
         if self.varpath == '.':
-            value = toml.dumps(value)
+            return tomlkit.dumps(value)
         else:
-            value = toml.dumps({self.varpath: value})
-        # NOTE: Fix weird formatting of section headings.
-        #       The `toml.dumps` output has unnecessary quoting.
-        lines = []
-        for line in value.strip().split('\n'):
-            if not line.startswith('['):
-                lines.append(line)
-            else:
-                lines.append(line.replace('"', ''))
-        value = '\n'.join(lines)
-        return value
+            return tomlkit.dumps({self.varpath: value})
 
 
 SET_PROGRAM = 'hs config set'
@@ -442,10 +432,8 @@ class ConfigApp(ApplicationGroup):
     """Manage configuration."""
 
     interface = Interface(PROGRAM, USAGE, HELP)
-
     interface.add_argument('command')
 
-    command = None
     commands = {'get': ConfigGetApp,
                 'set': ConfigSetApp,
                 'edit': ConfigEditApp,

@@ -1047,11 +1047,9 @@ class TaskGroupApp(ApplicationGroup):
     """Search, submit, track, and manage individual tasks."""
 
     interface = Interface(TASK_PROGRAM, TASK_USAGE, TASK_HELP)
-
-    interface.add_argument('command')
     interface.add_argument('--list-columns', action='version', version=' '.join(Task.columns))
+    interface.add_argument('command')
 
-    command = None
     commands = {
         'submit': TaskSubmitApp,
         'info': TaskInfoApp,

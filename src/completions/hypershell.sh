@@ -384,7 +384,7 @@ function _hs_task_search ()
 	done
 
 	local all_opts="-h --help -w --where -t --with-tag -s --order-by --desc -F --failed -C
-	--completed -S --succeeded -R --remaining -f --format --csv --json -d --delimiter
+	--completed -S --succeeded -R --remaining -P --pending -f --format --csv --json -d --delimiter
 	-l --limit -c --count --"
 
 	case "${active_collector}" in

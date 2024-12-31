@@ -18,24 +18,24 @@ Basic Installation
 
 |
 
-The `pipx <https://pipx.pypa.io/stable/>`_ utility wraps all of this up nicely for user-level
+The `uv <https://docs.astral.sh/uv/>`_ utility wraps all of this up nicely for user-level
 installations. On any platform, if installing for yourself, especially if you lack root
 or administrative privileges, we recommend the following.
 
-.. admonition:: Install HyperShell using Pipx
+.. admonition:: Install HyperShell using uv
     :class: note
 
     .. code-block:: shell
 
-        pipx install https://github.com/glentner/hypershell/archive/refs/tags/2.6.0.tar.gz
+        uv tool install git+https://github.com/hypershell/hypershell
 
 .. warning::
 
         The `HyperShell` project has transitioned away from using the hyphen in any
         context (command-line, filesystem, variables, online documentation, etc).
-        But because of a temporary naming issue with the Python Package Index (pypi.org, pip)
-        we have not secured the unhyphenated ``hypershell`` name on the index. So
-        until then, we must install the old package name or from GitHub directly.
+        But because of a temporary naming `issue <https://github.com/pypi/support/issues/4104>`_
+        with the Python Package Index (pypi.org, pip) we have not yet secured the unhyphenated
+        ``hypershell`` name on the index. So until then, we recommend installing from GitHub.
 
 
 For `macOS` users we can accomplish the same thing with `Homebrew <https://brew.sh>`_.
@@ -47,7 +47,7 @@ This formula essentially does the same thing as Pipx but managed by ``brew`` ins
 
     .. code-block:: shell
 
-        brew tap glentner/tap
+        brew tap hypershell/tap
         brew install hypershell
 
 -------------------
@@ -71,13 +71,14 @@ manual page. Some desired runtime, ``python3.12``, is already loaded.
 
     .. code-block:: shell
 
-        mkdir -p /apps/x86_64-any/hypershell/2.6.0
-        cd /apps/x86_64-any/hypershell/2.6.0
+        mkdir -p /apps/x86_64-any/hypershell/2.6.1
+        cd /apps/x86_64-any/hypershell/2.6.1
 
         mkdir -p bin share
-        git clone --depth 1 --branch 2.6.0 https://github.com/glentner/hypershell ./src
+        git clone --depth 1 --branch 2.6.1 https://github.com/hypershell/hypershell ./src
 
         python3.12 -m venv libexec
+        libexec/bin/pip install psycopg2
         libexec/bin/pip install ./src
 
         ln -sf ../libexec/bin/hs bin/hs
@@ -89,13 +90,13 @@ manual page. Some desired runtime, ``python3.12``, is already loaded.
 Based on this installation, a simple `LMOD <https://lmod.readthedocs.io/en/latest/>`_
 configuration file might then be:
 
-.. admonition:: Module file definition (e.g., /etc/module/x86_64-any/hypershell/2.6.0.lua)
+.. admonition:: Module file definition (e.g., /etc/module/x86_64-any/hypershell/2.6.1.lua)
     :class: note
 
     .. code-block:: lua
 
         local appname = "hypershell"
-        local version = "2.6.0"
+        local version = "2.6.1"
         local appsdir = "/apps/x86_64-any"
         local modroot = pathJoin(appsdir, appname, version)
 
@@ -129,7 +130,7 @@ Development
 
 As a library dependency, `HyperShell` can easily be added to your project using whatever package
 tooling you like. For development of `HyperShell` itself, contributors should create their own fork
-of the repository on `GitHub <https://github.com/glentner/hypershell>`_ and clone the fork locally.
+of the repository on `GitHub <https://github.com/hypershell/hypershell>`_ and clone the fork locally.
 We use `Poetry <https://python-poetry.org>`_ for managing the development environment. The
 ``poetry.lock`` file is included in the repository, simply run the following command to initialize
 your virtual environment.

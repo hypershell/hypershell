@@ -7,8 +7,8 @@ Release v\ |release| (:ref:`Getting Started <getting_started>`)
     :target: https://www.apache.org/licenses/LICENSE-2.0
     :alt: License
 
-.. image:: https://img.shields.io/github/v/release/glentner/hypershell?sort=semver
-    :target: https://github.com/glentner/hypershell/releases
+.. image:: https://img.shields.io/github/v/release/hypershell/hypershell?sort=semver
+    :target: https://github.com/hypershell/hypershell/releases
     :alt: Github Release
 
 .. image:: https://img.shields.io/badge/Python-3.10+-blue.svg
@@ -84,9 +84,9 @@ Support
 Join the `Discord <https://discord.gg/wmv5gyUfkN>`_ server to post questions, discuss your project,
 share with the community, keep in touch with announcements and upcoming events!
 
-*HyperShell* is an open-source project developed on `GitHub <https://github.com/glentner/hypershell>`_.
-If you find bugs or issues with the software please create an `Issue <https://github.com/glentner/hypershell/issues>`_.
-Contributions are welcome in the form of `Pull requests <https://github.com/glentner/hypershell/pulls>`_
+*HyperShell* is an open-source project developed on `GitHub <https://github.com/hypershell/hypershell>`_.
+If you find bugs or issues with the software please create an `Issue <https://github.com/hypershell/hypershell/issues>`_.
+Contributions are welcome in the form of `Pull requests <https://github.com/hypershell/hypershell/pulls>`_
 for bug fixes, documentation, and minor feature improvements.
 
 -------------------

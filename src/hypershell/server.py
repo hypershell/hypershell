@@ -92,9 +92,6 @@ class SchedulerState(State, Enum):
     HALT = 5
 
 
-# Note:
-#   Unless specified otherwise for larger problems, a bundle of size one allows
-#   for greater concurrency on smaller workloads.
 DEFAULT_BUNDLESIZE: Final[int] = default.server.bundlesize
 """Default size for task bundles."""
 

@@ -171,13 +171,13 @@ in the Python logging documentation.
     ``%(elapsed)s``            Relative time elapsed since start of program formatted
                                as integer number of seconds.
 
-    ``%(elapses_ms)s``         Relative time elapsed since start of program formatted
+    ``%(elapsed_ms)s``         Relative time elapsed since start of program formatted
                                as integer number of milliseconds.
 
-    ``%(elapses_delta)s``      Relative time elapsed since start of program formatted
+    ``%(elapsed_delta)s``      Relative time elapsed since start of program formatted
                                in automatically (e.g., ``1 hr 2 sec``).
 
-    ``%(elapses_hms)s``        Relative time elapsed since start of program formatted
+    ``%(elapsed_hms)s``        Relative time elapsed since start of program formatted
                                in hour, minutes, and seconds: ``HH::MM::SS``.
 
     ``%(ansi_level)s``         ANSI escape sequence associated with message level
