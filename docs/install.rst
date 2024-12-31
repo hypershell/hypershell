@@ -18,24 +18,24 @@ Basic Installation
 
 |
 
-The `pipx <https://pipx.pypa.io/stable/>`_ utility wraps all of this up nicely for user-level
+The `uv <https://docs.astral.sh/uv/>`_ utility wraps all of this up nicely for user-level
 installations. On any platform, if installing for yourself, especially if you lack root
 or administrative privileges, we recommend the following.
 
-.. admonition:: Install HyperShell using Pipx
+.. admonition:: Install HyperShell using uv
     :class: note
 
     .. code-block:: shell
 
-        pipx install https://github.com/hypershell/hypershell/archive/refs/tags/2.6.1.tar.gz
+        uv tool install git+https://github.com/hypershell/hypershell
 
 .. warning::
 
         The `HyperShell` project has transitioned away from using the hyphen in any
         context (command-line, filesystem, variables, online documentation, etc).
         But because of a temporary naming issue with the Python Package Index (pypi.org, pip)
-        we have not secured the unhyphenated ``hypershell`` name on the index. So
-        until then, we must install the old package name or from GitHub directly.
+        we have not yet secured the unhyphenated ``hypershell`` name on the index. So
+        until then, we must install directly from GitHub.
 
 
 For `macOS` users we can accomplish the same thing with `Homebrew <https://brew.sh>`_.
@@ -47,7 +47,7 @@ This formula essentially does the same thing as Pipx but managed by ``brew`` ins
 
     .. code-block:: shell
 
-        brew tap glentner/tap
+        brew tap hypershell/tap
         brew install hypershell
 
 -------------------

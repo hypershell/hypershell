@@ -16,23 +16,23 @@ See the :ref:`installation <install>` guide for more options
 and additional notes and recommendations.
 
 
-.. tab:: pipx
-
-    .. code-block:: shell
-
-        pipx install https://github.com/hypershell/hypershell/archive/refs/tags/2.6.1.tar.gz
-
 .. tab:: uv
 
     .. code-block:: shell
 
-        uv tool install https://github.com/hypershell/hypershell/archive/refs/tags/2.6.1.tar.gz
+        uv tool install git+https://github.com/hypershell/hypershell
+
+.. tab:: pipx
+
+    .. code-block:: shell
+
+        pipx install git+https://github.com/hypershell/hypershell
 
 .. tab:: homebrew
 
     .. code-block:: shell
 
-        brew tap glentner/tap
+        brew tap hypershell/tap
         brew install hypershell
 
 .. warning::
@@ -40,8 +40,8 @@ and additional notes and recommendations.
         The `HyperShell` project has transitioned away from using the hyphen in any
         context (command-line, filesystem, variables, online documentation, etc).
         But because of a temporary naming issue with the Python Package Index (pypi.org, pip)
-        we have not secured the unhyphenated ``hypershell`` name on the index. So
-        until then, we must install the old package name or from GitHub directly.
+        we have not yet secured the unhyphenated ``hypershell`` name on the index. So
+        until then, we must install directly from GitHub.
 
 
 -------------------
