@@ -1,0 +1,58 @@
+.. _20241231_2_6_1_release:
+
+Release Notes (v2.6.1)
+======================
+
+`December 31, 2024`
+
+The v2.6.1 release includes support for Python 3.9 and minor improvements.
+
+- Allow Python 3.9
+- Improved optional dependency handling
+
+-----
+
+Changes
+-------
+
+|
+
+Support for Python 3.9
+^^^^^^^^^^^^^^^^^^^^^^
+
+Quite some time ago we had thought adopting a Python 3.10+ stance would allow us to
+capitalize on some of its new features without fear of being stuck with compatibility
+issues. The reality is though that this has not been an issue and there is nothing in
+the code preventing use of Python 3.9.
+
+In an effort to allow for wider deployability within the Linux distribution ecosystem,
+we've decided to lift the version restriction and allow HyperShell to be installed with
+Python 3.9.
+
+|
+
+Improved optional dependency handling
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+We've always allowed `psycopg2 <https://www.psycopg.org>`_ as an optional dependency that
+provided for PostgreSQL as a database backend instead of SQLite. This has always worked as
+intended; however, the installation process and warning message at runtime were not as
+smooth as they could be.
+
+In this release we introduce proper use of a package "extra" that allows for a single target
+during installation, ``hypershell[postgres]``. This greatly simplifies the procedure for tools
+like `uv <https://docs.astral.sh/uv/>`_ and `pipx <https://pipx.pypa.io/latest/>`_.
+
+When the program is run in an environment that lacks the ``psycopg2`` dependency and
+the user defines the database `provider` as `postgres` (e.g., via configuration or
+environment variable) there is an uncaught exception on ``ModuleNotFoundError`` stating as such.
+In v2.6.1 the program will instead show a `critical` warning with a more descriptive message,
+
+.. admonition:: Warning on missing optional dependency
+    :class: note
+
+    .. code-block:: none
+
+        CRITICAL [hypershell.data.core] Missing optional dependency "psycopg2" needed for PostgreSQL
+
+|
