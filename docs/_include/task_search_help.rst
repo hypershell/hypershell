@@ -37,6 +37,9 @@ Options
 ``-R``, ``--remaining``
     Alias for ``-w 'exit_status == null'``.
 
+``-P``, ``--pending``
+    Alias for ``-w 'exit_status == null' 'schedule_time != null'``.
+
 ``-f``, ``--format`` *FORMAT*
     Specify output format (either ``normal``, ``plain``, ``table``, ``csv``, ``json``).
 
