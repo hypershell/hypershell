@@ -7,13 +7,12 @@ Getting Started
 Installation
 ------------
 
-`HyperShell` should be isolated within its own virtual environment
-and only expose the top-level entry point *script* on your `PATH`.
-The well-known `pipx <https://pipx.pypa.io/stable/>`_ utility handles all
-of this nicely for unprivileged users installing for themselves.
+`HyperShell` should be isolated within its own virtual environment and only expose the
+top-level entry point *script* on your `PATH`. The well-known `uv <https://docs.astral.sh/uv/>`_
+utility handles all of this nicely for unprivileged users installing for themselves.
 
-See the :ref:`installation <install>` guide for more options
-and additional notes and recommendations.
+See the :ref:`installation <install>` guide for more options and additional notes and
+recommendations.
 
 
 .. tab:: uv
@@ -39,9 +38,9 @@ and additional notes and recommendations.
 
         The `HyperShell` project has transitioned away from using the hyphen in any
         context (command-line, filesystem, variables, online documentation, etc).
-        But because of a temporary naming issue with the Python Package Index (pypi.org, pip)
-        we have not yet secured the unhyphenated ``hypershell`` name on the index. So
-        until then, we must install directly from GitHub.
+        But because of a temporary naming `issue <https://github.com/pypi/support/issues/4104>`_
+        with the Python Package Index (pypi.org, pip) we have not yet secured the unhyphenated
+        ``hypershell`` name on the index. So until then, we recommend installing from GitHub.
 
 
 -------------------

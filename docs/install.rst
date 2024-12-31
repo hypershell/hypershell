@@ -33,9 +33,9 @@ or administrative privileges, we recommend the following.
 
         The `HyperShell` project has transitioned away from using the hyphen in any
         context (command-line, filesystem, variables, online documentation, etc).
-        But because of a temporary naming issue with the Python Package Index (pypi.org, pip)
-        we have not yet secured the unhyphenated ``hypershell`` name on the index. So
-        until then, we must install directly from GitHub.
+        But because of a temporary naming `issue <https://github.com/pypi/support/issues/4104>`_
+        with the Python Package Index (pypi.org, pip) we have not yet secured the unhyphenated
+        ``hypershell`` name on the index. So until then, we recommend installing from GitHub.
 
 
 For `macOS` users we can accomplish the same thing with `Homebrew <https://brew.sh>`_.
@@ -78,6 +78,7 @@ manual page. Some desired runtime, ``python3.12``, is already loaded.
         git clone --depth 1 --branch 2.6.1 https://github.com/hypershell/hypershell ./src
 
         python3.12 -m venv libexec
+        libexec/bin/pip install psycopg2
         libexec/bin/pip install ./src
 
         ln -sf ../libexec/bin/hs bin/hs
