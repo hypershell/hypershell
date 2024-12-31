@@ -20,13 +20,13 @@ and additional notes and recommendations.
 
     .. code-block:: shell
 
-        pipx install https://github.com/glentner/hypershell/archive/refs/tags/2.6.0.tar.gz
+        pipx install https://github.com/glentner/hypershell/archive/refs/tags/2.6.1.tar.gz
 
 .. tab:: uv
 
     .. code-block:: shell
 
-        uv tool install https://github.com/glentner/hypershell/archive/refs/tags/2.6.0.tar.gz
+        uv tool install https://github.com/glentner/hypershell/archive/refs/tags/2.6.1.tar.gz
 
 .. tab:: homebrew
 
