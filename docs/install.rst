@@ -71,11 +71,11 @@ manual page. Some desired runtime, ``python3.12``, is already loaded.
 
     .. code-block:: shell
 
-        mkdir -p /apps/x86_64-any/hypershell/2.6.1
-        cd /apps/x86_64-any/hypershell/2.6.1
+        mkdir -p /apps/x86_64-any/hypershell/2.6.2
+        cd /apps/x86_64-any/hypershell/2.6.2
 
         mkdir -p bin share
-        git clone --depth 1 --branch 2.6.1 https://github.com/hypershell/hypershell ./src
+        git clone --depth 1 --branch 2.6.2 https://github.com/hypershell/hypershell ./src
 
         python3.12 -m venv libexec
         libexec/bin/pip install psycopg2
@@ -90,13 +90,13 @@ manual page. Some desired runtime, ``python3.12``, is already loaded.
 Based on this installation, a simple `LMOD <https://lmod.readthedocs.io/en/latest/>`_
 configuration file might then be:
 
-.. admonition:: Module file definition (e.g., /etc/module/x86_64-any/hypershell/2.6.1.lua)
+.. admonition:: Module file definition (e.g., /etc/module/x86_64-any/hypershell/2.6.2.lua)
     :class: note
 
     .. code-block:: lua
 
         local appname = "hypershell"
-        local version = "2.6.1"
+        local version = "2.6.2"
         local appsdir = "/apps/x86_64-any"
         local modroot = pathJoin(appsdir, appname, version)
 
