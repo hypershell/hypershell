@@ -39,7 +39,7 @@ hs = "hypershell:main"
 [tool.poetry.dependencies]
 python = ">=3.9,<4.0"
 cmdkit = {version = "^2.7.7", extras = ["toml"]}
-pyyaml = "^6.0.2"
+pyyaml = "^6.0.1"  # Allow 6.0.1 for EPEL9 compatibility (2025-01-02)
 tomlkit = "^0.13.2"
 sqlalchemy = "^2.0.29"
 rich = "^13.7.1"
