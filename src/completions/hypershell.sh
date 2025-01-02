@@ -807,6 +807,11 @@ function _hs_cluster ()
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
 }
 
-
-complete -o bashdefault -F _hs hs
-complete -o bashdefault -F _hs hyper-shell
+if [[ "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 || "${BASH_VERSINFO[0]}" -gt 4 ]]
+then
+    complete -F _hs -o nosort -o bashdefault -o default hs
+    complete -F _hs -o nosort -o bashdefault -o default hyper-shell
+else
+    complete -F _hs -o bashdefault -o default hs
+    complete -F _hs -o bashdefault -o default hyper-shell
+fi
