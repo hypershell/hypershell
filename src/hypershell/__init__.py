@@ -4,6 +4,9 @@
 """Initialization and entry-point for console application."""
 
 
+# Path sanitizer must happen first
+import hypershell.core.sys
+
 # standard libs
 import sys
 from importlib.metadata import version as get_version
