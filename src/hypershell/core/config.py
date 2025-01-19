@@ -26,6 +26,7 @@ from cmdkit.app import exit_status
 # internal libs
 from hypershell.core.platform import path, home
 from hypershell.core.exceptions import write_traceback
+from hypershell.core.sys import PATH_SEP
 
 # public interface
 __all__ = ['config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
@@ -328,18 +329,12 @@ def _inplace_update(original: dict, partial: dict) -> dict:
     return original
 
 
-if os.name == 'nt':
-    PATH_DELIMITER = ';'
-else:
-    PATH_DELIMITER = ':'
-
-
 T = TypeVar('T')
 
 
 def __collapse_if_list_impl(value: Union[T, List[str]]) -> Union[T, str]:
     """If `value` is a list, collapse it to a path-like list (with ':' or ';')."""
-    return value if not isinstance(value, list) else PATH_DELIMITER.join([str(member) for member in value])
+    return value if not isinstance(value, list) else PATH_SEP.join([str(member) for member in value])
 
 
 def __collapse_lists(ns: Namespace) -> Namespace:
