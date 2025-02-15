@@ -32,7 +32,7 @@ __all__ = ['HyperShellApp', 'main', '__version__']
 
 # project metadata
 __version__     = get_version('hypershell')
-__website__     = 'https://github.com/glentner/hypershell'
+__website__     = 'https://github.com/hypershell/hypershell'
 __description__ = 'Process shell commands over a distributed, asynchronous queue.'
 __citation__    = """\
 @inproceedings{lentner_2022,
