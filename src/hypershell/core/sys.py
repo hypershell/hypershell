@@ -28,7 +28,7 @@ import platform
 __all__ = ['HYPERSHELL_PYTHONPATH', 'PATH_SEP']
 
 
-if platform.system() != 'Windows':
+if platform.system() == 'Windows':
     PATH_SEP: Final[str] = ';'
 else:
     PATH_SEP: Final[str] = ':'
