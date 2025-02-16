@@ -10,18 +10,18 @@
 # to leave this module in place for the time being.
 
 
-# standard libs
+# Standard libs
 import os
 import sys
 import ctypes
 import platform
 
-# external libs
+# External libs
 from cmdkit.config import Namespace
 from cmdkit.app import exit_status
 from cmdkit.ansi import bold, magenta
 
-# public interface
+# Public interface
 __all__ = ['cwd', 'home', 'site', 'path', 'default_path']
 
 

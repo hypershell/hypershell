@@ -4,11 +4,11 @@
 """SSH-based cluster implementation."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Type, List, Iterable, Tuple, IO, Final
 
-# standard libs
+# Standard libs
 import re
 import sys
 import time
@@ -16,10 +16,10 @@ import shlex
 import secrets
 from subprocess import Popen
 
-# external libs
+# External libs
 from cmdkit.config import ConfigurationError, Namespace
 
-# internal libs
+# Internal libs
 from hypershell.core.config import config, blame
 from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger, HOSTNAME
@@ -28,10 +28,10 @@ from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
 
-# public interface
+# Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name('hypershell.cluster')
 
 

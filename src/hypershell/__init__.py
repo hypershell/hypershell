@@ -7,16 +7,16 @@
 # Path sanitizer must happen first
 import hypershell.core.sys
 
-# standard libs
+# Standard libs
 import sys
 from importlib.metadata import version as get_version
 from platform import python_version
 
-# external libs
+# External libs
 from cmdkit.app import Application, ApplicationGroup
 from cmdkit.cli import Interface
 
-# internal libs
+# Internal libs
 from hypershell.core.logging import Logger, initialize_logging
 from hypershell.core.signal import register_handlers
 from hypershell.submit import SubmitApp
@@ -27,7 +27,7 @@ from hypershell.task import TaskGroupApp
 from hypershell.config import ConfigApp
 from hypershell.data import InitDBApp
 
-# public interface
+# Public interface
 __all__ = ['HyperShellApp', 'main', '__version__']
 
 # project metadata
@@ -50,7 +50,7 @@ __citation__    = """\
 }\
 """
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name('hypershell')
 
 

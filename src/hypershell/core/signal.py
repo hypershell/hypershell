@@ -4,20 +4,20 @@
 """Signal handling facility."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Optional, Final, Dict
 from types import FrameType
 
-# standard libs
+# Standard libs
 import platform
 from signal import signal as register
 
 
-# internal libs
+# Internal libs
 from hypershell.core.logging import Logger
 
-# public interface
+# Public interface
 __all__ = ['check_signal', 'RECEIVED', 'SIGNAL_MAP',
            'handler', 'register_handlers', 'register',
            'SIGUSR1', 'SIGUSR2', 'SIGINT', 'SIGTERM', 'SIGKILL']
@@ -36,7 +36,7 @@ else:
     SIGKILL: Final[int] = 9
 
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

@@ -4,16 +4,16 @@
 """Core interface for database engine and session manager."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Any, Type
 
-# standard libs
+# Standard libs
 import sys
 import logging
 from urllib.parse import urlencode
 
-# external libs
+# External libs
 from cmdkit.app import exit_status
 from cmdkit.config import Namespace, ConfigurationError
 from sqlalchemy.engine import create_engine, Engine
@@ -21,12 +21,12 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import ArgumentError
 
-# internal libs
+# Internal libs
 from hypershell.core.config import config
 from hypershell.core.logging import handler
 from hypershell.core.exceptions import display_critical, write_traceback
 
-# public interface
+# Public interface
 __all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', ]
 
 

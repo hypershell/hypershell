@@ -4,10 +4,10 @@
 """Automatic type coercion of input data."""
 
 
-# type annotations
+# Type annotations
 from typing import TypeVar
 
-# public interface
+# Public interface
 __all__ = ['smart_coerce', 'JSONValue']
 
 

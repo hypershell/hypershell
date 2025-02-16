@@ -40,12 +40,12 @@ Warning:
 """
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import List, Dict, Tuple, Iterable, IO, Optional, Callable, Type, Final
 from types import TracebackType
 
-# standard libs
+# Standard libs
 import sys
 import time
 from enum import Enum
@@ -54,11 +54,11 @@ from functools import cached_property
 from itertools import islice
 from queue import Empty as QueueEmpty, Full as QueueFull
 
-# external libs
+# External libs
 from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
 
-# internal libs
+# Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import config, default, find_available_ports
 from hypershell.core.logging import Logger
@@ -72,13 +72,13 @@ from hypershell.data import ensuredb, DATABASE_ENABLED
 from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT
 from hypershell.client import ClientInfo
 
-# public interface
+# Public interface
 __all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
            'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_QUERY_PAUSE',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

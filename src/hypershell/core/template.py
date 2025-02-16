@@ -4,12 +4,12 @@
 """Template expansion facility for task execution."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Dict, Callable
 from types import ModuleType
 
-# standard libs
+# Standard libs
 import os
 import re
 import math
@@ -17,10 +17,10 @@ import datetime
 import subprocess
 import functools
 
-# internal libs
+# Internal libs
 from hypershell.core.types import smart_coerce
 
-# public interface
+# Public interface
 __all__ = ['Template', 'DEFAULT_TEMPLATE', ]
 
 

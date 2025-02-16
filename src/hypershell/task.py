@@ -4,11 +4,11 @@
 """Task based operations."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import List, Dict, Callable, IO, Tuple, Any, Optional, Type, Final
 
-# standard libs
+# Standard libs
 import os
 import re
 import sys
@@ -21,7 +21,7 @@ from datetime import timedelta, datetime
 from dataclasses import dataclass
 from shutil import copyfileobj
 
-# external libs
+# External libs
 import yaml
 from rich.console import Console
 from rich.syntax import Syntax
@@ -34,7 +34,7 @@ from sqlalchemy.orm import Query
 from sqlalchemy.orm.exc import StaleDataError
 from sqlalchemy.sql.elements import BinaryExpression
 
-# internal libs
+# Internal libs
 from hypershell.core.platform import default_path
 from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, handle_exception_silently, get_shared_exception_mapping
@@ -46,10 +46,10 @@ from hypershell.data.core import Session
 from hypershell.data.model import Task, to_json_type
 from hypershell.data import ensuredb
 
-# public interface
+# Public interface
 __all__ = ['TaskGroupApp', ]
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

@@ -4,17 +4,17 @@
 """Tag interface and parsing."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Dict, List, Optional, Type
 
-# standard libs
+# Standard libs
 from dataclasses import dataclass
 
-# internal libs
+# Internal libs
 from hypershell.core.types import JSONValue, smart_coerce
 
-# public interface
+# Public interface
 __all__ = ['Tag', ]
 
 

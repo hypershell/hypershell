@@ -4,13 +4,13 @@
 """Unit tests for database core module."""
 
 
-# standard libs
+# Standard libs
 import os
 
-# external libs
+# External libs
 import pytest
 
-# internal libs
+# Internal libs
 from hypershell.data.core import DatabaseURL, Namespace
 
 

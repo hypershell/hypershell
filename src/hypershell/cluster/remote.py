@@ -4,11 +4,11 @@
 """Remote cluster implementation."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Tuple, List, Dict, IO, Iterable, Callable, Type, Final
 
-# standard libs
+# Standard libs
 import os
 import sys
 import time
@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from functools import cached_property
 from subprocess import Popen
 
-# internal libs
+# Internal libs
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.config import default, load_task_env
 from hypershell.core.thread import Thread
@@ -30,14 +30,14 @@ from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
 
-# public interface
+# Public interface
 __all__ = ['run_cluster', 'RemoteCluster', 'AutoScalingCluster',
            'DEFAULT_REMOTE_EXE', 'DEFAULT_LAUNCHER',
            'DEFAULT_AUTOSCALE_POLICY', 'DEFAULT_AUTOSCALE_PERIOD', 'DEFAULT_AUTOSCALE_FACTOR',
            'DEFAULT_AUTOSCALE_INIT_SIZE', 'DEFAULT_AUTOSCALE_MIN_SIZE', 'DEFAULT_AUTOSCALE_MAX_SIZE',
            'DEFAULT_AUTOSCALE_LAUNCHER', ]
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name('hypershell.cluster')
 
 

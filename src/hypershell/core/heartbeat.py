@@ -4,20 +4,20 @@
 """Heartbeat data passed between client and server."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Type
 
-# standard libs
+# Standard libs
 import json
 from enum import Enum
 from datetime import datetime
 from dataclasses import dataclass
 
-# internal libs
+# Internal libs
 from hypershell.core.logging import HOSTNAME, INSTANCE
 
-# public interface
+# Public interface
 __all__ = ['ClientState', 'Heartbeat']
 
 

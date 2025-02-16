@@ -4,15 +4,15 @@
 """Local cluster implementation."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Iterable, IO
 
-# standard libs
+# Standard libs
 import time
 import secrets
 
-# internal libs
+# Internal libs
 from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
@@ -20,10 +20,10 @@ from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
 from hypershell.client import ClientThread, DEFAULT_DELAY, DEFAULT_SIGNALWAIT, set_client_standalone
 
-# public interface
+# Public interface
 __all__ = ['run_local', 'LocalCluster']
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name('hypershell.cluster')
 
 

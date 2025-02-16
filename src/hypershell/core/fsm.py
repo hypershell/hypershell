@@ -4,11 +4,11 @@
 """Instrumentation for building finite state machines."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Dict, Callable, Type
 
-# standard libs
+# Standard libs
 from enum import Enum
 from abc import ABC
 # FUZZ: import time
@@ -16,11 +16,11 @@ from abc import ABC
 # PERF: from collections import defaultdict
 # PERF: from time import perf_counter
 
-# internal libs
+# Internal libs
 from hypershell.core.exceptions import write_traceback
 from hypershell.core.logging import Logger
 
-# public interface
+# Public interface
 __all__ = ['State', 'StateMachine', ]
 
 
