@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 
-LABEL version="2.6.4"
+LABEL version="2.6.5"
 LABEL authors="glentner@purdue.edu"
 
 
