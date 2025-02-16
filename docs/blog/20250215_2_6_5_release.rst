@@ -1,0 +1,53 @@
+.. _20250215_2_6_5_release:
+
+Release Notes (v2.6.5)
+======================
+
+`February 15, 2024`
+
+The v2.6.5 release includes new installation hardening feature.
+
+- New ``HYPERSHELL_PYTHONPATH`` environment variable.
+
+-----
+
+Features
+--------
+
+|
+
+New ``HYPERSHELL_PYTHONPATH`` environment variable
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The HyperShell application is built on Python and as such is amenable to the standard
+``PYTHONPATH`` environment variable. Further, depending on how you install the package
+it might also be exposed to the user's local `site-packages` directory.
+
+This is an issue in both directions. It is very well possible (likely even) that the very
+tasks the user wants to run are themselves Python programs or scripts. It is therefore
+problematic to install HyperShell in such a way as to rely on the ``PYTHONPATH``
+as that would interfere with the user program. Similarly, we do not want the user to expose
+HyperShell to other Python package sites that might contain conflicting packages
+(e.g., alternative releases of ``tomli`` or ``sqlalchemy``).
+
+The ``HYPERSHELL_PYTHONPATH`` environment variable acts in much the same way as the standard
+``PYTHONPATH`` in that it accepts a listing of paths. However, the paths are not *appended*
+to the ``sys.path`` but takes its place entirely as a frozen set. This allows for both an
+installation to be split across multiple prefixes as well as hardening the installation from
+being broken by things like the user's current working directory, local `site-packages` or
+other coincidental additions.
+
+For example, let's say we have a system-wide Python runtime and want to install HyperShell
+in a hybrid manner where some of the dependencies are deployed in a secondary location.
+
+.. admonition:: Contents of some ``/etc/hypershell.pythonpath``
+    :class: note
+
+    .. code-block:: shell
+
+        /usr/local/lib/python3.12
+        /usr/local/lib/python3.12/lib-dynload
+        /usr/local/lib/python3.12/site-packages
+        /usr/local/hypershell/libexec
+
+|

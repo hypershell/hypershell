@@ -7,6 +7,17 @@ A place for announcements, release notes, thoughts and ideas for the project.
 
 -----
 
+:ref:`Release Notes (v2.6.5) <20250215_2_6_5_release>`
+------------------------------------------------------
+
+`February 15, 2024`
+
+The v2.6.5 release includes new installation hardening feature.
+
+- New ``HYPERSHELL_PYTHONPATH`` environment variable.
+
+-----
+
 :ref:`Release Notes (v2.6.1) <20241231_2_6_1_release>`
 ------------------------------------------------------
 
@@ -116,6 +127,7 @@ a few quality of life improvements, and a fix for SSH-mode.
     :hidden:
     :maxdepth: 1
 
+    20250215_2_6_5_release
     20241231_2_6_1_release
     20241115_announce_logo
     20241115_2_6_0_release
