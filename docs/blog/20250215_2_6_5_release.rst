@@ -31,11 +31,12 @@ HyperShell to other Python package sites that might contain conflicting packages
 (e.g., alternative releases of ``tomli`` or ``sqlalchemy``).
 
 The ``HYPERSHELL_PYTHONPATH`` environment variable acts in much the same way as the standard
-``PYTHONPATH`` in that it accepts a listing of paths. However, the paths are not *appended*
-to the ``sys.path`` but takes its place entirely as a frozen set. This allows for both an
-installation to be split across multiple prefixes as well as hardening the installation from
-being broken by things like the user's current working directory, local `site-packages` or
-other coincidental additions.
+``PYTHONPATH`` in that it accepts a listing of paths. However it also accepts a file name
+which should contain the listing of paths with one path per line, for which the paths are not
+*appended* to the ``sys.path`` but takes its place entirely as a frozen set.
+This allows both for an installation to be split across multiple prefixes as well
+as hardening the installation from being broken by things like the user's current working
+directory, local `site-packages`, or other coincidental additions.
 
 For example, let's say we have a system-wide Python runtime and want to install HyperShell
 in a hybrid manner where some of the dependencies are deployed in a secondary location.
