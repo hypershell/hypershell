@@ -83,7 +83,14 @@ have enumerated all variations with `Library`, `Logs`, and `Config` in each case
         - ``$HYPERSHELL_SITE/log``
         - ``$HYPERSHELL_SITE/config.toml``
 
+------
+
+Runtime Package Resolution
+--------------------------
+
 |
+
+.. include:: _include/config_pythonpath.rst
 
 ------
 

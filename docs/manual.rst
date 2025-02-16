@@ -230,6 +230,8 @@ within files.
 
 .. include:: _include/config_site_vars.rst
 
+.. include:: _include/config_pythonpath.rst
+
 .. include:: _include/config_task_env_alt.rst
 
 We also respect setting the following environment variables to force disable/enable

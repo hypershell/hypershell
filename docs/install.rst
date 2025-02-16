@@ -111,6 +111,37 @@ Presumably, users would then be able to activate the software by loading the mod
 
         module load hypershell
 
+------
+
+Runtime Package Resolution
+--------------------------
+
+|
+
+.. include:: _include/config_pythonpath.rst
+
+For example, from the above installation we might add the following to our module:
+
+.. admonition:: Extra setting for LMOD
+    :class: note
+
+    .. code-block:: lua
+
+        ...
+        prepend_path("HYPERSHELL_PYTHONPATH", pathJoin(modroot, "frozen-python.path"))
+        ...
+
+And we can include the following paths in our frozen set.
+
+.. admonition:: Contents of ``frozen-python.path``
+    :class: note
+
+    .. code-block:: shell
+
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.12
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.12/lib-dynload
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.12/site-packages
+
 
 -------------------
 
