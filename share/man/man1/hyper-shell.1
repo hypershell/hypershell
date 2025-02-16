@@ -34,28 +34,28 @@ hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
 .INDENT 0.0
 .TP
-.B hs [\-h] [\-v] [\-\-citation] ...
+.B hs [\-h] [\-v] [–citation] …
 Top\-level command. Show help, version, or citation info.
 .TP
-.B hs cluster [\-h] \fIFILE\fP [\-\-ssh \fIHOST\fP\&... | \-\-mpi | \-\-launcher \fIARGS\fP\&...] ...
+.B hs cluster [\-h] \fIFILE\fP [–ssh \fIHOST\fP… | –mpi | –launcher \fIARGS\fP…] …
 Run managed cluster.
 .TP
-.B hs submit [\-h] \fIFILE\fP ...
+.B hs submit [\-h] \fIFILE\fP …
 Submit tasks from file.
 .TP
-.B hs server [\-h] \fIFILE\fP ...
+.B hs server [\-h] \fIFILE\fP …
 Run stand\-alone server.
 .TP
-.B hs client [\-h] ...
+.B hs client [\-h] …
 Run stand\-alone client.
 .TP
-.B hs config [\-h] {get | set | which | edit } ...
+.B hs config [\-h] {get | set | which | edit } …
 Configuration management.
 .TP
-.B hs task [\-h] {submit | info | wait | run | search | update} ...
+.B hs task [\-h] {submit | info | wait | run | search | update} …
 Task management.
 .TP
-.B hs initdb [\-h] [\-\-truncate [\-\-yes]]
+.B hs initdb [\-h] [–truncate [–yes]]
 Initialize database.
 .UNINDENT
 .SH DESCRIPTION
@@ -105,16 +105,16 @@ Path to input task file (default: <stdin>).
 .SS Modes
 .INDENT 0.0
 .TP
-.B \fB\-\-ssh\fP \fIHOST\fP\&...
+.B \fB\-\-ssh\fP \fIHOST\fP…
 Launch directly with SSH host(s). This can be a single host, a comma\-separated list of hosts,
-or an expandable pattern, e.g., \(dqcluster\-a[00\-04].xyz\(dq.
+or an expandable pattern, e.g., “cluster\-a[00\-04].xyz”.
 .sp
 See also \fB\-\-ssh\-group\fP and \fB\-\-ssh\-args\fP\&.
 .TP
 .B \fB\-\-mpi\fP
 Same as \fB\-\-launcher=mpirun\fP\&.
 .TP
-.B \fB\-\-launcher\fP \fIARGS\fP\&...
+.B \fB\-\-launcher\fP \fIARGS\fP…
 Use specific launch interface. This can be any program that handles process management on a
 distributed system. For example, on a \fISLURM\fP cluster one might want to use \fBsrun\fP\&. In this
 case you would specify \fB\-\-launcher=srun\fP; however, the \fIARGS\fP are not merely the executable
@@ -130,9 +130,9 @@ For example, \fB\-N4\fP would create four workers, but \fB\-N4 \-\-ssh \(aqclust
 creates two clients and a total of eight workers.
 .TP
 .B \fB\-t\fP, \fB\-\-template\fP \fICMD\fP
-Command\-line template pattern (default: \(dq{}\(dq).
+Command\-line template pattern (default: “{}”).
 .sp
-This is expanded by the client just before execution. With the default \(dq{}\(dq the input
+This is expanded by the client just before execution. With the default “{}” the input
 command\-line will be run verbatim. Specifying a template pattern allows for simple input
 arguments (e.g., file paths) to be transformed into some common form; such as
 \fB\-t \(aq./some_command.py {} >outputs/{/\-}.out\(aq\fP\&.
@@ -193,7 +193,7 @@ bundles directly to the queue.
 Auto\-initialize database.
 .sp
 If a database is configured for use with the workflow (e.g., Postgres), auto\-initialize
-tables if they don\(aqt already exist. This is a short\-hand for pre\-creating tables with the
+tables if they don’t already exist. This is a short\-hand for pre\-creating tables with the
 \fBhs initdb\fP command. This happens by default with SQLite databases.
 .sp
 Mutually exclusive to \fB\-\-no\-db\fP\&. See \fBhs initdb\fP command.
@@ -226,7 +226,7 @@ it can easily continue where it left off, halting if nothing to be done.
 .sp
 Conflicts with \fB\-\-no\-db\fP and mutually exclusive to \fB\-\-forever\fP\&.
 .TP
-.B \fB\-\-ssh\-args\fP \fIARGS\fP\&...
+.B \fB\-\-ssh\-args\fP \fIARGS\fP…
 Command\-line arguments for SSH. For example, \fB\-\-ssh\-args \(aq\-i ~/.ssh/my_key\(aq\fP\&.
 .TP
 .B \fB\-\-ssh\-group\fP \fINAME\fP
@@ -482,7 +482,7 @@ bundles directly to the queue.
 Auto\-initialize database.
 .sp
 If a database is configured for use with the workflow (e.g., Postgres), auto\-initialize
-tables if they don\(aqt already exist. This is a short\-hand for pre\-creating tables with the
+tables if they don’t already exist. This is a short\-hand for pre\-creating tables with the
 \fBhs initdb\fP command. This happens by default with SQLite databases.
 .sp
 Mutually exclusive to \fB\-\-no\-db\fP\&. See \fBhs initdb\fP command.
@@ -553,9 +553,9 @@ these are directed to individual files for each task.
 Number of task executors (default: 1).
 .TP
 .B \fB\-t\fP, \fB\-\-template\fP \fICMD\fP
-Command\-line template pattern (default: \(dq{}\(dq).
+Command\-line template pattern (default: “{}”).
 .sp
-This is expanded by the client just before execution. With the default \(dq{}\(dq the input
+This is expanded by the client just before execution. With the default “{}” the input
 command\-line will be run verbatim. Specifying a template pattern allows for simple input
 arguments (e.g., file paths) to be transformed into some common form; such as
 \fB\-t \(aq./some_command.py {} >outputs/{/\-}.out\(aq\fP\&.
@@ -675,10 +675,10 @@ Path to input task file (default: <stdin>).
 .INDENT 0.0
 .TP
 .B \fB\-t\fP, \fB\-\-template\fP \fICMD\fP
-Command\-line template pattern (default: \(dq{}\(dq).
+Command\-line template pattern (default: “{}”).
 .sp
 This is expanded at submit\-time before sending to the database.
-With the default \(dq{}\(dq the input command\-line will be run verbatim.
+With the default “{}” the input command\-line will be run verbatim.
 Specifying a template pattern allows for simple input arguments (e.g., file paths)
 to be transformed into some common form; such as
 \fB\-t \(aq./some_command.py {} >outputs/{/\-}.out\(aq\fP\&.
@@ -706,12 +706,12 @@ See also \fB\-\-bundlesize\fP\&.
 Auto\-initialize database.
 .sp
 If a database is configured for use with the workflow (e.g., Postgres), auto\-initialize
-tables if they don\(aqt already exist. This is a short\-hand for pre\-creating tables with the
+tables if they don’t already exist. This is a short\-hand for pre\-creating tables with the
 \fBhs initdb\fP command. This happens by default with SQLite databases.
 .sp
 See \fBhs initdb\fP command.
 .TP
-.B \fB\-\-tag\fP \fITAG\fP\&...
+.B \fB\-\-tag\fP \fITAG\fP…
 Assign one or more tags.
 .sp
 Tags allow for user\-defined tracking of information related to individual tasks or large
@@ -755,7 +755,7 @@ Colorization is disabled for non\-TTY invocations.
 .SS Arguments
 .INDENT 0.0
 .TP
-.B \fISECTION[...].VAR\fP
+.B \fISECTION[…].VAR\fP
 Path to variable (default is entire configuration).
 .UNINDENT
 .SS Options
@@ -794,7 +794,7 @@ Set configuration option.
 .SS Arguments
 .INDENT 0.0
 .TP
-.B SECTION[...].VAR
+.B SECTION[…].VAR
 Path to variable.
 .TP
 .B VALUE
@@ -845,7 +845,7 @@ Show origin of configuration option.
 .SS Arguments
 .INDENT 0.0
 .TP
-.B SECTION[...].VAR
+.B SECTION[…].VAR
 Path to variable.
 .UNINDENT
 .SS Options
@@ -867,7 +867,7 @@ See \fBtask info\fP command.
 .SS Arguments
 .INDENT 0.0
 .TP
-.B ARGS...
+.B ARGS…
 Command\-line arguments.
 .sp
 The full command\-line for some shell task.
@@ -876,7 +876,7 @@ To use options, preface with leading \fB\-\-\fP\&.
 .SS Options
 .INDENT 0.0
 .TP
-.B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP\&...
+.B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP…
 Assign one or more tags.
 .sp
 Tags allow for user\-defined tracking of information related to individual tasks or large
@@ -985,7 +985,7 @@ See \fBtask info\fP and \fBtask wait\fP commands.
 .SS Arguments
 .INDENT 0.0
 .TP
-.B ARGS...
+.B ARGS…
 Command\-line arguments.
 .sp
 The full command\-line for some shell task.
@@ -997,7 +997,7 @@ To use options, preface with leading \fB\-\-\fP\&.
 .B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
 Time in seconds to wait between polling (default: 5).
 .TP
-.B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP\&...
+.B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP…
 Assign one or more tags.
 .sp
 Tags allow for user\-defined tracking of information related to individual tasks or large
@@ -1032,13 +1032,13 @@ Default is to include all fields.
 .SS Options
 .INDENT 0.0
 .TP
-.B \fB\-w\fP, \fB\-\-where\fP \fICOND...\fP
+.B \fB\-w\fP, \fB\-\-where\fP \fICOND…\fP
 List of conditional statements to filter results (e.g., \fB\-w \(aqduration >= 600\(aq\fP).
 .sp
 Operators include \fB==\fP, \fB!=\fP, \fB>=\fP, \fB<=\fP, \fB>\fP, \fB<\fP, \fB~\fP\&.
 The \fB~\fP operator applies a regular expression.
 .TP
-.B \fB\-t\fP, \fB\-\-with\-tag\fP \fITAG\fP\&...
+.B \fB\-t\fP, \fB\-\-with\-tag\fP \fITAG\fP…
 Filter on one or more tags. (e.g., \fB\-t special\fP or \fB\-t file:a\fP).
 .sp
 Leaving the \fIvalue\fP unspecified will return any task for which the \fIkey\fP exists.
@@ -1116,7 +1116,7 @@ and \fIVALUE\fP as positional arguments remains valid.
 .SS Arguments
 .INDENT 0.0
 .TP
-.B ARGS...
+.B ARGS…
 Assignment pairs for update.
 .UNINDENT
 .SS Options
@@ -1141,16 +1141,16 @@ Delete specified tasks.
 Deleting a task fully drops the record from the database.
 All task information will be lost and not recoverable.
 .TP
-.B \fB\-\-remove\-tag\fP \fITAG...\fP
+.B \fB\-\-remove\-tag\fP \fITAG…\fP
 Strip the specified \fItag\fP from task records.
 .TP
-.B \fB\-w\fP, \fB\-\-where\fP \fICOND...\fP
+.B \fB\-w\fP, \fB\-\-where\fP \fICOND…\fP
 List of conditional statements to filter results (e.g., \fB\-w \(aqduration >= 600\(aq\fP).
 .sp
 Operators include \fB==\fP, \fB!=\fP, \fB>=\fP, \fB<=\fP, \fB>\fP, \fB<\fP, \fB~\fP\&.
 The \fB~\fP operator applies a regular expression.
 .TP
-.B \fB\-t\fP, \fB\-\-with\-tag\fP \fITAG\fP\&...
+.B \fB\-t\fP, \fB\-\-with\-tag\fP \fITAG\fP…
 Filter on one or more tags. (e.g., \fB\-t special\fP or \fB\-t file:a\fP).
 .sp
 Leaving the \fIvalue\fP unspecified will return any task for which the \fIkey\fP exists.
@@ -1195,7 +1195,7 @@ Executing the command with these three positional arguments is still valid.
 Unique UUID.
 .TP
 .B FIELD
-Task field name (e.g., \(dqargs\(dq).
+Task field name (e.g., “args”).
 .TP
 .B VALUE
 New value.
@@ -1473,7 +1473,7 @@ Date/time format, standard codes apply (default: \fB\(aq%Y\-%m\-%d %H:%M:%S\(aq\
 .B \fB\&.format\fP
 Log message format.
 .sp
-Default set by the \(dqdefault\(dq \fBlogging.style\fP\&.
+Default set by the “default” \fBlogging.style\fP\&.
 See the \X'tty: link https://docs.python.org/3/library/logging.html#logrecord-attributes'\fI\%available attributes\fP\X'tty: link'
 defined by the underlying Python logging interface.
 .sp
@@ -1494,8 +1494,8 @@ See also \fI\%database\fP section.
 .INDENT 7.0
 .TP
 .B \fB\&.provider\fP
-Database provider (default: \(aqsqlite\(aq). Supported alternatives include
-\(aqpostgres\(aq (or compatible). Support for other providers may be considered in
+Database provider (default: ‘sqlite’). Supported alternatives include
+‘postgres’ (or compatible). Support for other providers may be considered in
 the future.
 .TP
 .B \fB\&.file\fP
@@ -1887,7 +1887,7 @@ accidentally polluting the package resolution of HyperShell itself from user sof
 As a Python application HyperShell may be exposed to \fBPYTHONPATH\fP\&.
 This can happen in instances where the user tasks themselves are Python based.
 To avoid possible collisions we can guard HyperShell by explicitly setting the
-path list (\fBsys.argv\fP). This environment variable may be set in a similar
+path list (\fBsys.path\fP). This environment variable may be set in a similar
 fashion as the standard \fBPYTHONPATH\fP\&. Or it may instead contain a file path,
 in which case the content of the file should have one path per line.
 .UNINDENT
