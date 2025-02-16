@@ -4,21 +4,21 @@
 """Run full cluster with server and managed clients."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import IO, Optional, Iterable, Dict, Callable, Type
 from types import TracebackType
 
-# standard libs
+# Standard libs
 import sys
 import shlex
 from functools import cached_property
 
-# external libs
+# External libs
 from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
 
-# internal libs
+# Internal libs
 from hypershell.core.config import config, blame
 from hypershell.core.queue import QueueConfig
 from hypershell.core.logging import Logger
@@ -35,14 +35,14 @@ from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCl
                                        DEFAULT_AUTOSCALE_MIN_SIZE, DEFAULT_AUTOSCALE_MAX_SIZE,
                                        DEFAULT_AUTOSCALE_INIT_SIZE)
 
-# public interface
+# Public interface
 __all__ = ['run_local', 'run_cluster', 'run_ssh',
            'LocalCluster', 'RemoteCluster', 'AutoScalingCluster', 'SSHCluster',
            'DEFAULT_REMOTE_EXE', 'DEFAULT_AUTOSCALE_FACTOR', 'DEFAULT_AUTOSCALE_PERIOD',
            'DEFAULT_AUTOSCALE_MIN_SIZE', 'DEFAULT_AUTOSCALE_MAX_SIZE', 'DEFAULT_AUTOSCALE_INIT_SIZE',
            'ClusterApp', ]
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

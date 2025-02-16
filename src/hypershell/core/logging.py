@@ -4,7 +4,7 @@
 """Logging configuration."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Tuple, Dict, Any, Type
 
@@ -16,16 +16,16 @@ import logging
 import functools
 import datetime
 
-# external libs
+# External libs
 from cmdkit.app import exit_status
 from cmdkit.config import ConfigurationError
 from cmdkit.ansi import Ansi, COLOR_STDERR
 
-# internal libs
+# Internal libs
 from hypershell.core.config import config, blame
 from hypershell.core.exceptions import write_traceback
 
-# public interface
+# Public interface
 __all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'handler', 'initialize_logging', ]
 
 

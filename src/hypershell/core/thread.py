@@ -4,15 +4,15 @@
 """Thread base class implementation."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Optional, Type
 
-# standard libs
+# Standard libs
 import threading
 from abc import ABC, abstractmethod
 
-# public interface
+# Public interface
 __all__ = ['Thread', ]
 
 

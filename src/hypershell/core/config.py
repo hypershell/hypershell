@@ -4,11 +4,11 @@
 """Runtime configuration for HyperShell."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator
 
-# standard libs
+# Standard libs
 import os
 import re
 import sys
@@ -19,15 +19,16 @@ import socket
 import functools
 from datetime import datetime
 
-# external libs
+# External libs
 from cmdkit.config import Namespace, Configuration, Environ, ConfigurationError
 from cmdkit.app import exit_status
 
-# internal libs
+# Internal libs
 from hypershell.core.platform import path, home
 from hypershell.core.exceptions import write_traceback
+from hypershell.core.sys import PATH_SEP
 
-# public interface
+# Public interface
 __all__ = ['config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
            'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
            'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
@@ -328,18 +329,12 @@ def _inplace_update(original: dict, partial: dict) -> dict:
     return original
 
 
-if os.name == 'nt':
-    PATH_DELIMITER = ';'
-else:
-    PATH_DELIMITER = ':'
-
-
 T = TypeVar('T')
 
 
 def __collapse_if_list_impl(value: Union[T, List[str]]) -> Union[T, str]:
     """If `value` is a list, collapse it to a path-like list (with ':' or ';')."""
-    return value if not isinstance(value, list) else PATH_DELIMITER.join([str(member) for member in value])
+    return value if not isinstance(value, list) else PATH_SEP.join([str(member) for member in value])
 
 
 def __collapse_lists(ns: Namespace) -> Namespace:

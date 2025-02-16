@@ -4,17 +4,17 @@
 """Database models."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import List, Dict, Tuple, Any, Type, TypeVar, Union, Optional
 
-# standard libs
+# Standard libs
 import re
 import json
 from uuid import uuid4 as gen_uuid
 from datetime import datetime
 
-# external libs
+# External libs
 from sqlalchemy import Column, Index, func
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
@@ -22,17 +22,17 @@ from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.types import Integer, DateTime, Text, Boolean, JSON as _JSON
 from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as POSTGRES_JSON
 
-# internal libs
+# Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
 from hypershell.core.types import JSONValue
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
 
-# public interface
+# Public interface
 __all__ = ['Task', 'Client', 'Entity', 'to_json_type', 'from_json_type', ]
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

@@ -83,7 +83,14 @@ have enumerated all variations with `Library`, `Logs`, and `Config` in each case
         - ``$HYPERSHELL_SITE/log``
         - ``$HYPERSHELL_SITE/config.toml``
 
+------
+
+Runtime Package Resolution
+--------------------------
+
 |
+
+.. include:: _include/config_pythonpath.rst
 
 ------
 
@@ -102,5 +109,29 @@ Task Environment
 |
 
 .. include:: _include/config_task_env.rst
+
+|
+
+We also respect setting the following environment variables to force disable/enable
+the use of colors in all console output.
+
+``NO_COLOR``
+    If this variable is set to anything but a blank string, all colors are disabled.
+    See `no-color.org <https://no-color.org>`_ for details.
+
+``FORCE_COLOR``
+    If this variable is set to anything but a blank string, colors will be enabled
+    regardless of whether `stdout` or `stderr` are a TTY.
+
+------
+
+Signals
+-------
+
+|
+
+HyperShell traps the following UNIX signals (does not apply on Microsoft Windows).
+
+.. include:: _include/signals.rst
 
 |

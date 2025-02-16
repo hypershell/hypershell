@@ -94,7 +94,7 @@ html_theme_options = {
     'footer_icons': [
         {
             'name': 'GitHub',
-            'url': 'https://github.com/glentner/hypershell',
+            'url': 'https://github.com/hypershell/hypershell',
             'html': '',
             'class': 'fa-brands fa-solid fa-github fa-2x',
         },

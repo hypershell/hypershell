@@ -4,7 +4,7 @@
 """Core exception handling useful for import-time issues."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Dict, Union, Callable, Type
 
@@ -16,16 +16,16 @@ import functools
 import traceback
 from datetime import datetime
 
-# external libs
+# External libs
 from cmdkit.app import exit_status
 from cmdkit.config import Namespace
 from cmdkit.config import ConfigurationError
 from cmdkit.ansi import faint, bold, magenta, yellow, red, COLOR_STDERR
 
-# internal libs
+# Internal libs
 from hypershell.core.platform import default_path
 
-# public interface
+# Public interface
 __all__ = ['display_warning', 'display_error', 'display_critical', 'traceback_filepath', 'write_traceback',
            'handle_exception', 'handle_exception_silently', 'handle_disconnect', 'handle_address_unknown',
            'HostAddressInfo', 'DatabaseUninitialized',

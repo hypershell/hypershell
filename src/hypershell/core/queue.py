@@ -4,21 +4,21 @@
 """Queue server/client implementation."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Dict, List, Callable, Union, Optional, Any, Iterable, Type
 from types import TracebackType
 
-# standard libs
+# Standard libs
 from multiprocessing.managers import BaseManager
 from multiprocessing import JoinableQueue
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-# internal libs
+# Internal libs
 from hypershell.core.config import default, config as _config
 
-# public interface
+# Public interface
 __all__ = ['QueueConfig', 'QueueInterface', 'QueueServer', 'QueueClient']
 
 

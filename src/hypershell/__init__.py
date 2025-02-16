@@ -4,16 +4,19 @@
 """Initialization and entry-point for console application."""
 
 
-# standard libs
+# Path sanitizer must happen first
+import hypershell.core.sys
+
+# Standard libs
 import sys
 from importlib.metadata import version as get_version
 from platform import python_version
 
-# external libs
+# External libs
 from cmdkit.app import Application, ApplicationGroup
 from cmdkit.cli import Interface
 
-# internal libs
+# Internal libs
 from hypershell.core.logging import Logger, initialize_logging
 from hypershell.core.signal import register_handlers
 from hypershell.submit import SubmitApp
@@ -24,12 +27,12 @@ from hypershell.task import TaskGroupApp
 from hypershell.config import ConfigApp
 from hypershell.data import InitDBApp
 
-# public interface
+# Public interface
 __all__ = ['HyperShellApp', 'main', '__version__']
 
 # project metadata
 __version__     = get_version('hypershell')
-__website__     = 'https://github.com/glentner/hypershell'
+__website__     = 'https://github.com/hypershell/hypershell'
 __description__ = 'Process shell commands over a distributed, asynchronous queue.'
 __citation__    = """\
 @inproceedings{lentner_2022,
@@ -47,7 +50,7 @@ __citation__    = """\
 }\
 """
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name('hypershell')
 
 

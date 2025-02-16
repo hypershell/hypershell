@@ -4,11 +4,11 @@
 """Manage configuration."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Any
 
-# standard libs
+# Standard libs
 import os
 import io
 import sys
@@ -16,7 +16,7 @@ import json
 import contextlib
 import subprocess
 
-# external libs
+# External libs
 import tomlkit
 from pygments.styles import STYLE_MAP as CONSOLE_THEMES
 from cmdkit.app import Application, ApplicationGroup
@@ -25,7 +25,7 @@ from cmdkit.config import ConfigurationError
 from rich.console import Console
 from rich.syntax import Syntax
 
-# internal libs
+# Internal libs
 from hypershell.core.platform import path
 from hypershell.core.types import smart_coerce
 from hypershell.core.logging import Logger
@@ -33,10 +33,10 @@ from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS,
                                     default as default_config, config as full_config)
 
-# public interface
+# Public interface
 __all__ = ['ConfigApp', ]
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

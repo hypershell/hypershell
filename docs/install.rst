@@ -8,7 +8,7 @@ Installation
 Installing *HyperShell* can take several forms. At the end of the day it is a Python package
 and needs to live within some prefix and be tied to some Python runtime. As a system utility
 we probably do not want to expose our dependencies to other user environments incidentally.
-For these reason, it is recommended to isolate *HyperShell* within its own virtual environment
+For these reasons, it is recommended to isolate *HyperShell* within its own virtual environment
 and only exposed the top-level entry point *script* to the users `PATH`.
 
 -------------------
@@ -27,19 +27,11 @@ or administrative privileges, we recommend the following.
 
     .. code-block:: shell
 
-        uv tool install git+https://github.com/hypershell/hypershell
-
-.. warning::
-
-        The `HyperShell` project has transitioned away from using the hyphen in any
-        context (command-line, filesystem, variables, online documentation, etc).
-        But because of a temporary naming `issue <https://github.com/pypi/support/issues/4104>`_
-        with the Python Package Index (pypi.org, pip) we have not yet secured the unhyphenated
-        ``hypershell`` name on the index. So until then, we recommend installing from GitHub.
+        uv tool install hypershell
 
 
 For `macOS` users we can accomplish the same thing with `Homebrew <https://brew.sh>`_.
-This formula essentially does the same thing as Pipx but managed by ``brew`` instead.
+This formula essentially does the same thing but managed by ``brew`` instead.
 
 
 .. admonition:: Install HyperShell using Homebrew
@@ -71,32 +63,31 @@ manual page. Some desired runtime, ``python3.12``, is already loaded.
 
     .. code-block:: shell
 
-        mkdir -p /apps/x86_64-any/hypershell/2.6.4
-        cd /apps/x86_64-any/hypershell/2.6.4
+        mkdir -p /apps/x86_64-any/hypershell/$VERSION
+        cd /apps/x86_64-any/hypershell/$VERSION
 
-        mkdir -p bin share
-        git clone --depth 1 --branch 2.6.4 https://github.com/hypershell/hypershell ./src
+        git clone --depth=1 --branch=$VERSION https://github.com/hypershell/hypershell src
 
         python3.12 -m venv libexec
-        libexec/bin/pip install psycopg2
         libexec/bin/pip install ./src
+        libexec/bin/pip install psycopg2
 
+        mkdir -p bin share
         ln -sf ../libexec/bin/hs bin/hs
-        ln -sf ../src/man share/man
-        ln -sf src/src/completions
+        ln -sf ../src/share
 
 |
 
 Based on this installation, a simple `LMOD <https://lmod.readthedocs.io/en/latest/>`_
 configuration file might then be:
 
-.. admonition:: Module file definition (e.g., /etc/module/x86_64-any/hypershell/2.6.4.lua)
+.. admonition:: Module file definition (e.g., /etc/module/x86_64-any/hypershell/<VERSION>.lua)
     :class: note
 
     .. code-block:: lua
 
         local appname = "hypershell"
-        local version = "2.6.4"
+        local version = "<version>" -- replace with actual version
         local appsdir = "/apps/x86_64-any"
         local modroot = pathJoin(appsdir, appname, version)
 
@@ -109,10 +100,9 @@ configuration file might then be:
         prepend_path("MANPATH", pathJoin(modroot, "share", "man"))
 
         -- Raw source b/c `complete -F _hs hs` does not persist with source_sh
-        execute { cmd="source " .. pathJoin(modroot, "completions", "hypershell.sh"), modeA={"load"} }
+        execute { cmd="source " .. pathJoin(modroot, "share", "bash_completion.d", "hs"), modeA={"load"} }
 
 Presumably, users would then be able to activate the software by loading the module as such:
-
 
 .. admonition:: Load module
     :class: note
@@ -120,6 +110,38 @@ Presumably, users would then be able to activate the software by loading the mod
     .. code-block:: shell
 
         module load hypershell
+
+------
+
+Runtime Package Resolution
+--------------------------
+
+|
+
+.. include:: _include/config_pythonpath.rst
+
+For example, from the above installation we might add the following to our module:
+
+.. admonition:: Extra setting for LMOD
+    :class: note
+
+    .. code-block:: lua
+
+        ...
+        prepend_path("HYPERSHELL_PYTHONPATH", pathJoin(modroot, "frozen-python.path"))
+        ...
+
+And we can include the following paths in our frozen set.
+
+.. admonition:: Contents of ``frozen-python.path``
+    :class: note
+
+    .. code-block:: shell
+
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.12
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.12/lib-dynload
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.12/site-packages
+
 
 -------------------
 

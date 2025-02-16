@@ -7,8 +7,9 @@ Getting Started
 Installation
 ------------
 
-`HyperShell` should be isolated within its own virtual environment and only expose the
-top-level entry point *script* on your `PATH`. The well-known `uv <https://docs.astral.sh/uv/>`_
+`HyperShell` is built on Python and can be installed from the Python package index using ``pip``.
+It is recommended however to isolate the application within its own virtual environment and only expose
+the top-level entry point *script* on your `PATH`. The well-known `uv <https://docs.astral.sh/uv/>`_
 utility handles all of this nicely for unprivileged users installing for themselves.
 
 See the :ref:`installation <install>` guide for more options and additional notes and
@@ -19,13 +20,13 @@ recommendations.
 
     .. code-block:: shell
 
-        uv tool install git+https://github.com/hypershell/hypershell
+        uv tool install hypershell
 
 .. tab:: pipx
 
     .. code-block:: shell
 
-        pipx install git+https://github.com/hypershell/hypershell
+        pipx install hypershell
 
 .. tab:: homebrew
 
@@ -33,14 +34,6 @@ recommendations.
 
         brew tap hypershell/tap
         brew install hypershell
-
-.. warning::
-
-        The `HyperShell` project has transitioned away from using the hyphen in any
-        context (command-line, filesystem, variables, online documentation, etc).
-        But because of a temporary naming `issue <https://github.com/pypi/support/issues/4104>`_
-        with the Python Package Index (pypi.org, pip) we have not yet secured the unhyphenated
-        ``hypershell`` name on the index. So until then, we recommend installing from GitHub.
 
 
 -------------------

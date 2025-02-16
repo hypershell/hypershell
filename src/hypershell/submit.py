@@ -37,12 +37,12 @@ Warning:
 """
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import List, Iterable, Iterator, IO, Optional, Dict, Callable, Type, Final
 from types import TracebackType
 
-# standard libs
+# Standard libs
 import io
 import sys
 import functools
@@ -50,12 +50,12 @@ from enum import Enum
 from datetime import datetime
 from queue import Queue, Empty as QueueEmpty, Full as QueueFull
 
-# external libs
+# External libs
 from cmdkit.config import ConfigurationError
 from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
 
-# internal libs
+# Internal libs
 from hypershell.core.logging import Logger
 from hypershell.core.config import config, default
 from hypershell.core.fsm import State, StateMachine
@@ -68,11 +68,11 @@ from hypershell.data.model import Task
 from hypershell.data import initdb, checkdb
 from hypershell.task import Tag
 
-# public interface
+# Public interface
 __all__ = ['submit_from', 'submit_file', 'SubmitThread', 'LiveSubmitThread',
            'SubmitApp', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Jan 02, 2025" "2.6.4" "hypershell"
+.TH "HYPER-SHELL" "1" "Feb 15, 2025" "2.6.4" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -1854,9 +1854,9 @@ transactions. These will be emitted as \fBINFO\fP level messages.
 .sp
 As stated for configuration, any environment variable prefixed as \fBHYPERSHELL_\fP
 where the name aligns to the path to some option, delimited by underscores,
-will set that option.
+will set that option. Example, \fBHYPERSHELL_CLIENT_TIMEOUT\fP maps to the
+corresponding configuration option.
 .sp
-Example, \fBHYPERSHELL_CLIENT_TIMEOUT\fP maps to the corresponding configuration option.
 The following environment variables must be specified as such and cannot be configurable
 within files.
 .INDENT 0.0
@@ -1877,6 +1877,19 @@ configuration changes, defining this environment variable specifies the one
 and only path to a configuration file and all others will be ignored.
 Setting this to empty results in no files being loaded (an environment
 only runtime).
+.UNINDENT
+.sp
+The following environment variable may be set to harden the installation against
+accidentally polluting the package resolution of HyperShell itself from user software.
+.INDENT 0.0
+.TP
+.B \fBHYPERSHELL_PYTHONPATH\fP
+As a Python application HyperShell may be exposed to \fBPYTHONPATH\fP\&.
+This can happen in instances where the user tasks themselves are Python based.
+To avoid possible collisions we can guard HyperShell by explicitly setting the
+path list (\fBsys.path\fP). This environment variable may be set in a similar
+fashion as the standard \fBPYTHONPATH\fP\&. Or it may instead contain a file path,
+in which case the content of the file should have one path per line.
 .UNINDENT
 .sp
 A few common environment variables are defined for every task.
@@ -1972,6 +1985,24 @@ See \X'tty: link https://no-color.org'\fI\%no\-color.org\fP\X'tty: link' for det
 .B \fBFORCE_COLOR\fP
 If this variable is set to anything but a blank string, colors will be enabled
 regardless of whether \fIstdout\fP or \fIstderr\fP are a TTY.
+.UNINDENT
+.SH SIGNALS
+.sp
+HyperShell traps the following UNIX signals (does not apply on Microsoft Windows).
+.INDENT 0.0
+.TP
+.B \fBSIGUSR1\fP
+Sending the \fBSIGUSR1\fP signal will trigger the schedulers to halt and begin
+shutdown procedures. On the client side, this means that all current tasks
+(and any in the local queue) will be allowed to complete, but the system will
+drain and shutdown at the completion of these tasks.
+.TP
+.B \fBSIGUSR2\fP
+Sending the \fBSIGUSR2\fP signal implies the same, but on the client side will
+set a flag to send local interrupts to tasks to come down faster. As described
+in the previous release with regard to the \fBtask.timeout\fP feature, we send
+\fBSIGINT\fP, \fBSIGTERM\fP, and \fBSIGKILL\fP in an escalating fashion to halt
+running tasks.
 .UNINDENT
 .SH EXIT STATUS
 .INDENT 0.0

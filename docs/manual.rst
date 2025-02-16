@@ -222,13 +222,15 @@ Environment Variables
 
 As stated for configuration, any environment variable prefixed as ``HYPERSHELL_``
 where the name aligns to the path to some option, delimited by underscores,
-will set that option.
+will set that option. Example, ``HYPERSHELL_CLIENT_TIMEOUT`` maps to the
+corresponding configuration option.
 
-Example, ``HYPERSHELL_CLIENT_TIMEOUT`` maps to the corresponding configuration option.
 The following environment variables must be specified as such and cannot be configurable
 within files.
 
 .. include:: _include/config_site_vars.rst
+
+.. include:: _include/config_pythonpath.rst
 
 .. include:: _include/config_task_env_alt.rst
 
@@ -242,6 +244,13 @@ the use of colors in all console output.
 ``FORCE_COLOR``
     If this variable is set to anything but a blank string, colors will be enabled
     regardless of whether `stdout` or `stderr` are a TTY.
+
+Signals
+-------
+
+HyperShell traps the following UNIX signals (does not apply on Microsoft Windows).
+
+.. include:: _include/signals.rst
 
 
 Exit Status

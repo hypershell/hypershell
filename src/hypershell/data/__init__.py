@@ -4,15 +4,15 @@
 """Database interface, models, and methods."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Final
 
-# standard libs
+# Standard libs
 import sys
 import functools
 
-# external libs
+# External libs
 from cmdkit.app import Application, exit_status
 from cmdkit.cli import Interface
 from cmdkit.config import ConfigurationError
@@ -20,17 +20,17 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import close_all_sessions
 from sqlalchemy.exc import OperationalError
 
-# internal libs
+# Internal libs
 from hypershell.core.logging import Logger
 from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, DatabaseUninitialized, get_shared_exception_mapping
 from hypershell.data.core import engine, in_memory, schema
 from hypershell.data.model import Entity, Task
 
-# public interface
+# Public interface
 __all__ = ['InitDBApp', 'initdb', 'truncatedb', 'checkdb', 'ensuredb', 'DATABASE_ENABLED', ]
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

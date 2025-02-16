@@ -4,29 +4,29 @@
 """Manage remote connections and data."""
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import Tuple, Optional, Type, Union, IO
 from types import TracebackType
 
-# standard libs
+# Standard libs
 import os
 import sys
 from dataclasses import dataclass
 
-# external libs
+# External libs
 from paramiko import SSHClient, SFTPClient, ProxyCommand, AutoAddPolicy, SSHConfig as SSHConfigParser
 from paramiko.channel import ChannelStdinFile, ChannelFile, ChannelStderrFile
 
-# internal libs
+# Internal libs
 from hypershell.core.logging import Logger
 from hypershell.core.config import config
 from hypershell.core.thread import Thread
 
-# public interface
+# Public interface
 __all__ = ['SSHConfig', 'SSHConnection', 'RemoteProcess', ]
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 

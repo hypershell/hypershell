@@ -28,12 +28,12 @@ Warning:
 """
 
 
-# type annotations
+# Type annotations
 from __future__ import annotations
 from typing import List, Tuple, Optional, Callable, Dict, IO, Type, Final
 from types import TracebackType
 
-# standard libs
+# Standard libs
 import os
 import sys
 import time
@@ -48,12 +48,12 @@ from socket import gaierror
 from dataclasses import dataclass
 from multiprocessing import AuthenticationError, cpu_count
 
-# external libs
+# External libs
 from cmdkit.app import Application, exit_status
 from cmdkit.cli import Interface, ArgumentError
 from cmdkit.config import Namespace
 
-# internal libs
+# Internal libs
 from hypershell.data.model import Task
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
@@ -67,14 +67,14 @@ from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 
-# public interface
+# Public interface
 __all__ = ['run_client', 'ClientThread', 'ClientApp', 'ClientInfo',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE',
            'DEFAULT_NUM_TASKS', 'DEFAULT_DELAY', 'DEFAULT_SIGNALWAIT',
            'DEFAULT_HEARTRATE', 'DEFAULT_HOST', 'DEFAULT_PORT', 'DEFAULT_AUTH',
            'set_client_standalone']
 
-# initialize logger
+# Initialize logger
 log = Logger.with_name(__name__)
 
 
