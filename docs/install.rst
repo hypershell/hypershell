@@ -72,9 +72,9 @@ manual page. Some desired runtime, ``python3.12``, is already loaded.
         libexec/bin/pip install ./src
         libexec/bin/pip install psycopg2
 
-        mkdir -p bin share
+        mkdir -p bin
         ln -sf ../libexec/bin/hs bin/hs
-        ln -sf ../src/share
+        ln -sf src/share
 
 |
 
