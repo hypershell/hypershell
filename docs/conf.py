@@ -24,7 +24,6 @@ author = 'Geoffrey Lentner <glentner@purdue.edu>'
 release = hypershell.__version__
 version = hypershell.__version__
 
-
 # -- General configuration ---------------------------------------------------
 
 # Add any Sphinx extension module names here, as strings. They can be

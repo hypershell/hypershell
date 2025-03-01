@@ -1107,7 +1107,7 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
 APP_NAME = 'hs client'
 APP_USAGE = f"""\
 Usage:
-  hs client [-h] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-H ADDR] [-p PORT] [-k KEY] 
+  hs client [-h] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-H ADDR] [-p PORT] [-k KEY]
             [--capture | [-o PATH] [-e PATH]] [--no-confirm] [-d SEC] [-T SEC] [-W SEC] [-S SEC]
 
   Launch client directly, run tasks in parallel.\
