@@ -28,7 +28,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from cmdkit.app import Application, ApplicationGroup, exit_status
 from cmdkit.cli import Interface, ArgumentError
-from sqlalchemy import Column, type_coerce, JSON, text, func, distinct
+from sqlalchemy import Column, type_coerce, text, func, distinct
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Query
 from sqlalchemy.orm.exc import StaleDataError
@@ -43,7 +43,7 @@ from hypershell.core.remote import SSHConnection
 from hypershell.core.types import smart_coerce, JSONValue
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, to_json_type
+from hypershell.data.model import Task, to_json_type, JSON
 from hypershell.data import ensuredb
 
 # Public interface

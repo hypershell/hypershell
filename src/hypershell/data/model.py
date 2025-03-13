@@ -30,7 +30,10 @@ from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
 
 # Public interface
-__all__ = ['Task', 'Client', 'Entity', 'to_json_type', 'from_json_type', ]
+__all__ = [
+    'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type',
+    'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
+]
 
 # Initialize logger
 log = Logger.with_name(__name__)
