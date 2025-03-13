@@ -525,7 +525,7 @@ Options:
   -R, --remaining            Alias for `-w exit_status == null`.
   -f, --format      FORMAT   Format output (normal, plain, table, csv, json).
       --json                 Format output as JSON (alias for `--format=json`).
-      --csv                  Format output as CSV (alias for `--format=csv`.
+      --csv                  Format output as CSV (alias for `--format=csv`).
   -d, --delimiter   CHAR     Field seperator for plain/csv formats.
   -l, --limit       NUM      Limit the number of results.
   -c, --count                Show count of results.
