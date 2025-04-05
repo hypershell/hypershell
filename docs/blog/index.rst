@@ -10,7 +10,7 @@ A place for announcements, release notes, thoughts and ideas for the project.
 :ref:`Release Notes (v2.6.5) <20250215_2_6_5_release>`
 ------------------------------------------------------
 
-`February 15, 2024`
+`February 15, 2025`
 
 The v2.6.5 release includes new installation hardening feature.
 
