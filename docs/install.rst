@@ -153,8 +153,8 @@ Development
 As a library dependency, `HyperShell` can easily be added to your project using whatever package
 tooling you like. For development of `HyperShell` itself, contributors should create their own fork
 of the repository on `GitHub <https://github.com/hypershell/hypershell>`_ and clone the fork locally.
-We use `Poetry <https://python-poetry.org>`_ for managing the development environment. The
-``poetry.lock`` file is included in the repository, simply run the following command to initialize
+We use `uv <https://docs.astral.sh/uv/>`_ for managing the development environment. The
+``uv.lock`` file is included in the repository, simply run the following command to initialize
 your virtual environment.
 
 .. admonition:: Install development dependencies inside local forked repository
@@ -162,6 +162,6 @@ your virtual environment.
 
     .. code-block:: shell
 
-        poetry install
+        uv sync
 
 |
