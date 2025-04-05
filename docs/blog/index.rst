@@ -7,10 +7,19 @@ A place for announcements, release notes, thoughts and ideas for the project.
 
 -----
 
+:ref:`Release Notes (v2.6.6) <20250405_2_6_6_release>`
+------------------------------------------------------
+
+`April 5, 2025`
+
+The v2.6.6 release includes an important bug fix for PostgreSQL.
+
+-----
+
 :ref:`Release Notes (v2.6.5) <20250215_2_6_5_release>`
 ------------------------------------------------------
 
-`February 15, 2024`
+`February 15, 2025`
 
 The v2.6.5 release includes new installation hardening feature.
 
@@ -127,6 +136,7 @@ a few quality of life improvements, and a fix for SSH-mode.
     :hidden:
     :maxdepth: 1
 
+    20250405_2_6_6_release
     20250215_2_6_5_release
     20241231_2_6_1_release
     20241115_announce_logo

@@ -1,0 +1,58 @@
+.. _20250405_2_6_6_release:
+
+Release Notes (v2.6.6)
+======================
+
+`April 5, 2025`
+
+The v2.6.6 release includes an important bug fix for PostgreSQL.
+
+-----
+
+Fixes
+-----
+
+|
+
+Issue `#34 <https://github.com/hypershell/hypershell/issues/34>`_
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+At some point a regression was introduced either in HyperShell or by its dependencies
+that broke task search for PostgreSQL when tags are included. This is due to a single
+line that incorrectly coerces the query filter using JSON instead of JSONB as it should.
+
+To reproduce this issue, initialize a database locally and populate tags, then attempt
+to search based on those tags. Assuming a configured Postgres provider:
+
+.. admonition:: Submit tasks with tag
+    :class: note
+
+    .. code-block:: shell
+
+        hs submit <(seq 100) --tag group:1
+
+
+.. admonition:: Search for tasks based on tag
+    :class: note
+
+    .. code-block:: shell
+
+        hs task search -t group:1 --count
+
+    .. details:: Output
+
+        .. code-block:: none
+
+            CRITICAL [hypershell.task] ProgrammingError: (psycopg2.errors.UndefinedFunction) operator does not exist:
+            jsonb = json - LINE 4: WHERE (task.tag -> 'group') = '1'::JSON) AS anon_1 - ^ - HINT:  No operator matches
+            the given name and argument types. You might need to add explicit type casts. -  - [SQL: SELECT count(*)
+            AS count_1 - FROM (SELECT task.id AS task_id, task.args AS task_args, task.submit_id AS task_submit_id,
+            task.submit_time AS task_submit_time, task.submit_host AS task_submit_host, task.server_id AS
+            task_server_id, task.server_host AS task_server_host, task.schedule_time AS task_schedule_time,
+            task.client_id AS task_client_id, task.client_host AS task_client_host, task.command AS task_command,
+            task.start_time AS task_start_time, task.completion_time AS task_completion_time, task.exit_status AS
+            task_exit_status, task.outpath AS task_outpath, task.errpath AS task_errpath, task.attempt AS task_attempt,
+            task.retried AS task_retried, task.waited AS task_waited, task.duration AS task_duration, task.previous_id
+            AS task_previous_id, task.next_id AS task_next_id, task.tag AS task_tag  - FROM task  - WHERE (task.tag ->
+            %(tag_1)s) = %(param_1)s::JSON) AS anon_1] - [parameters: {'tag_1': 'group', 'param_1': '1'}] -
+            (Background on this error at: https://sqlalche.me/e/20/f405)
