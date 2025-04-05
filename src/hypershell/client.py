@@ -146,7 +146,7 @@ class ClientScheduler(StateMachine):
 
     queue: QueueClient
     local: Queue[Optional[Task]]
-    bundle: List[bytes]
+    bundle: List[bytes] | None
     client_info: Optional[bytes]
     no_confirm: bool
     timeout: Optional[timedelta]
@@ -194,8 +194,8 @@ class ClientScheduler(StateMachine):
 
     def get_remote(self: ClientScheduler) -> SchedulerState:
         """Get the next task bundle from the server."""
-        if check_signal() in (SIGUSR1, SIGUSR2) and CLIENT_STANDALONE_MODE:
-            log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
+        if (signal := check_signal()) in (SIGUSR1, SIGUSR2) and CLIENT_STANDALONE_MODE:
+            log.warning(f'Signal interrupt ({SIGNAL_MAP[signal]})')
             return SchedulerState.FINAL
         try:
             self.bundle = self.queue.scheduled.get(timeout=2)
@@ -1107,7 +1107,7 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
 APP_NAME = 'hs client'
 APP_USAGE = f"""\
 Usage:
-  hs client [-h] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-H ADDR] [-p PORT] [-k KEY] 
+  hs client [-h] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-H ADDR] [-p PORT] [-k KEY]
             [--capture | [-o PATH] [-e PATH]] [--no-confirm] [-d SEC] [-T SEC] [-W SEC] [-S SEC]
 
   Launch client directly, run tasks in parallel.\

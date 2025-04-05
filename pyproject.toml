@@ -1,6 +1,6 @@
-[tool.poetry]
+[project]
 name = "hypershell"
-version = "2.6.5"
+version = "2.6.6"
 description = "A cross-platform, high-throughput computing utility for processing shell commands over a distributed, asynchronous queue."
 readme = "README.rst"
 license = "Apache-2.0"
@@ -8,7 +8,7 @@ homepage = "https://hypershell.org"
 documentation = "https://hypershell.readthedocs.io"
 repository = "https://github.com/hypershell/hypershell"
 authors = [
-    "Geoffrey Lentner <glentner@purdue.edu>"
+    { name = "Geoffrey Lentner", email = "glentner@purdue.edu" }
 ]
 keywords = [
     "distributed-computing",
@@ -30,51 +30,50 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "License :: OSI Approved :: Apache Software License",
 ]
-packages = [{include = "hypershell", from = "src"}]
+requires-python = ">=3.9"
+dependencies = [
+    "cmdkit[toml]>=2.7.7",
+    "pyyaml>=6.0.1",  # Allow 6.0.1 for EPEL9 compatibility (2025-01-02)
+    "tomlkit>=0.13.2",
+    "sqlalchemy>=2.0.29",
+    "rich>=13.7.1",
+    "paramiko>=3.4.0",
 
-[tool.poetry.scripts]
+]
+
+[project.optional-dependencies]
+postgres = [
+    "psycopg2>=2.9.9"
+]
+
+[dependency-groups]
+dev = [
+    "psycopg2>=2.9.9",
+    "pytest>=8.1.1",
+    "hypothesis>=6.100.0",
+    "sphinx-autobuild>=2024.2.4"
+]
+docs = [
+    "sphinx>=7.2.6",
+    "sphinx-sitemap>=2.5.1",
+    "sphinx-autobuild>=2024.2.4",
+    "sphinx-copybutton>=0.5.2",
+    "sphinxext-opengraph>=0.9.1",
+    "sphinxcontrib-details-directive>=0.1.0",
+    "sphinx-toolbox>=3.5.0",
+    "sphinx-inline-tabs>=2023.4.21",
+    "enum-tools[sphinx]>=0.12.0",
+    "furo>=2024.1.29",
+    "setuptools>=75.8.2",
+]
+
+[tool.uv]
+default-groups = ["dev", "docs"]
+
+[project.scripts]
 hyper-shell = "hypershell:main"  # NOTE: do not remove this
 hs = "hypershell:main"
 
-[tool.poetry.dependencies]
-python = ">=3.9,<4.0"
-cmdkit = {version = "^2.7.7", extras = ["toml"]}
-pyyaml = "^6.0.1"  # Allow 6.0.1 for EPEL9 compatibility (2025-01-02)
-tomlkit = "^0.13.2"
-sqlalchemy = "^2.0.29"
-rich = "^13.7.1"
-paramiko = "^3.4.0"
-psycopg2 = {version = "^2.9.9", optional = true}
-
-[tool.poetry.extras]
-postgres = ["psycopg2"]
-
-[tool.poetry.group.docs.dependencies]
-sphinx = "^7.2.6"
-sphinx-sitemap = "^2.5.1"
-sphinx-autobuild = "^2024.2.4"
-sphinx-copybutton = "^0.5.2"
-sphinxext-opengraph = "^0.9.1"
-sphinxcontrib-details-directive = "^0.1.0"
-sphinx-toolbox = "^3.5.0"
-sphinx-inline-tabs = "^2023.4.21"
-enum-tools = {extras = ["sphinx"], version = "^0.12.0"}
-furo = "^2024.1.29"
-
-[tool.poetry.group.dev.dependencies]
-psycopg2 = "^2.9.9"
-pytest = "^8.1.1"
-hypothesis = "^6.100.0"
-sphinx-autobuild = "^2024.2.4"
-
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.pytest.ini_options]
-addopts = ["--strict-markers", ]
-markers = [
-    "unit: Unit tests are short, interface driven tests on discrete components.",
-    "integration: Integration tests are often longer and deal with the interaction between systems.",
-    "parameterize: Place holder for parameterized tests (not a real type).",
-]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

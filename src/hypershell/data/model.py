@@ -19,8 +19,8 @@ from sqlalchemy import Column, Index, func
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.types import Integer, DateTime, Text, Boolean, JSON as _JSON
-from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as POSTGRES_JSON
+from sqlalchemy.types import Integer, DateTime, Text, Boolean, JSON as JSON_TEXT
+from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES
 
 # Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
@@ -30,7 +30,10 @@ from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
 
 # Public interface
-__all__ = ['Task', 'Client', 'Entity', 'to_json_type', 'from_json_type', ]
+__all__ = [
+    'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type',
+    'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
+]
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -81,7 +84,7 @@ INTEGER = Integer()
 SMALL_INTEGER = Integer().with_variant(SMALLINT, 'postgresql')
 DATETIME = DateTime(timezone=True)
 BOOLEAN = Boolean()
-JSON = _JSON().with_variant(POSTGRES_JSON(), 'postgresql')
+JSON = JSON_TEXT().with_variant(JSON_BYTES(), 'postgresql')
 
 
 class Entity(DeclarativeBase):
