@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 
-LABEL version="2.6.5"
+LABEL version="2.6.6"
 LABEL authors="glentner@purdue.edu"
 LABEL org.opencontainers.image.source="https://github.com/hypershell/hypershell"
 LABEL org.opencontainers.image.description="HyperShell Base Image"
