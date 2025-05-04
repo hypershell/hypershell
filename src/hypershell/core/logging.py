@@ -10,7 +10,6 @@ from typing import Tuple, Dict, Any, Type
 
 # standard libraries
 import sys
-import uuid
 import socket
 import logging
 import functools
@@ -22,6 +21,7 @@ from cmdkit.config import ConfigurationError
 from cmdkit.ansi import Ansi, COLOR_STDERR
 
 # Internal libs
+from hypershell.core.uuid import uuid
 from hypershell.core.config import config, blame
 from hypershell.core.exceptions import write_traceback
 
@@ -35,7 +35,7 @@ HOSTNAME_SHORT = HOSTNAME.split('.', 1)[0]
 
 
 # Unique for every instance of hypershell
-INSTANCE = str(uuid.uuid4())
+INSTANCE = str(uuid())
 
 
 # Canonical colors for logging messages

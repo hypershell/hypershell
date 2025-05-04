@@ -11,7 +11,6 @@ from typing import List, Dict, Tuple, Any, Type, TypeVar, Union, Optional
 # Standard libs
 import re
 import json
-from uuid import uuid4 as gen_uuid
 from datetime import datetime
 
 # External libs
@@ -26,6 +25,7 @@ from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSON
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
 from hypershell.core.types import JSONValue
+from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
 
@@ -660,7 +660,7 @@ class Client(Entity):
             evicted: bool = False,
             **other) -> Client:
         """Create a new client."""
-        return cls(id=(id or str(gen_uuid())), host=host,
+        return cls(id=(id or uuid()), host=host,
                    server_id=server_id, server_host=server_host,
                    evicted=evicted, **other)
 

@@ -45,10 +45,14 @@ dependencies = [
 postgres = [
     "psycopg2>=2.9.9"
 ]
+uuid7 = [
+    "uuid-utils>=0.10.0",
+]
 
 [dependency-groups]
 dev = [
     "psycopg2>=2.9.9",
+    "uuid-utils>=0.10.0",
     "pytest>=8.1.1",
     "hypothesis>=6.100.0",
     "sphinx-autobuild>=2024.2.4"

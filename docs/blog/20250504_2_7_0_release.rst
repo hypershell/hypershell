@@ -60,3 +60,39 @@ one table.
     See `SQLite limits <https://www.sqlite.org/limits.html>`_.
 
 |
+
+Optional UUIDv7 Mode
+^^^^^^^^^^^^^^^^^^^^
+
+A new package extra, ``hypershell[uuid7]``, installs a third-party dependency,
+`uuid-utils <https://pypi.org/project/uuid-utils/>`_, which provides for
+lexicographically-sortable version 7 UUIDs. The format specification for UUID
+version 7 has essentially solidified and library support for use of this format is well supported
+and widely used.
+
+See `RFC 9562 (draft standard) <https://www.rfc-editor.org/rfc/rfc9562.html#name-uuid-version-7>`_
+for reference.
+
+In large-scale performance testing with HyperShell it is difficult to say precisely what the
+net benefit of UUIDv7 has been on overall task throughput. The increase in performance comes from
+less cache-misses in page loads due to the time ordering of task rows. It is likely the case that
+task bundles will consist of tasks submitted close in time to one another. Updating these tasks is
+more efficient when they reside within the same collection of pages, instead of being randomly
+distributed within the b-tree.
+
+Generation of UUIDs within the project has been refactored to an internal routine.
+This routine calls ``uuid.uuid4`` from the standard library and returns a string.
+If ``uuid-utils`` is available in the installation we prefer ``uuid_utils.uuid7``.
+This functionality install-time behavior and is not configurable at runtime.
+
+.. note::
+
+    On SQLite there is no real benefit to UUID v7.
+    SQLite employs a hidden ``rowid`` column when using a non-integer primary key.
+    The pages in the database are actually stored according to this hidden ``rowid``.
+    The overhead of the second lookup is minimal compared to the huge performance improvement
+    due to the page ordering.
+
+    In testing, adding the ``WITHOUT ROWID`` table modifier results in a significant reduction
+    in performance, and adding UUIDv7 on top of that entirely recovers this performance.
+    Incorporating both the table modifier and UUIDv7 is relatively insignificant.
