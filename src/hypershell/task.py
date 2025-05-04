@@ -531,6 +531,7 @@ Options:
   -c, --count                Show count of results.
       --tag-keys             Show all distinct tag keys.
       --tag-values  KEY      Show all distinct tag values for given key.
+  -i, --ignore-partitions    Suppress auto-union feature (SQLite only).
   -h, --help                 Show this message and exit.\
 """
 
@@ -589,6 +590,9 @@ class TaskSearchApp(Application, SearchableMixin):
     tag_search_interface.add_argument('--tag-keys', action='store_true', dest='list_tag_keys')
     tag_search_interface.add_argument('--tag-values', action='store_true', dest='list_tag_values')
 
+    ignore_partitions: bool = False
+    interface.add_argument('-i', '--ignore-partitions', action='store_true', dest='ignore_partitions')
+
     exceptions = {
         StatementError: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
         **get_shared_exception_mapping(__name__)
@@ -597,6 +601,8 @@ class TaskSearchApp(Application, SearchableMixin):
     def run(self: TaskSearchApp) -> None:
         """Search for tasks in database."""
         ensuredb()
+        if not self.ignore_partitions:
+            self.auto_union_sqlite()
         if self.list_tag_keys:
             self.print_tag_keys()
             return
@@ -709,6 +715,37 @@ class TaskSearchApp(Application, SearchableMixin):
         elif self.output_format == 'csv' and len(self.output_delimiter) != 1:
             # NOTE: csv module demands single-char delimiter
             raise ArgumentError(f'Valid --csv output must use single-char delimiter')
+
+    @staticmethod
+    def auto_union_sqlite() -> None:
+        """For sqlite automatically search for partitions and create a temporary view."""
+        if config.database.provider != 'sqlite':
+            return
+        dirname = os.path.dirname(config.database.file)
+        basename, _ = os.path.splitext(os.path.basename(config.database.file))
+        parts = sorted([
+            os.path.join(dirname, filename) for filename in os.listdir(dirname)
+            if re.match(f'^{basename}.[0-9]+$', filename)
+        ], key=(lambda fn: int(fn.split('.')[-1])))
+        if len(parts) == 0:
+            return
+        for i, path in enumerate(parts):
+            log.debug(f'Attaching to {path}')
+            Session.execute(text(f'attach database \'{path}\' as \'part_{i+1}\''))
+        Session.execute(text(
+            SQLITE_UNION_PART + '\n'.join([
+                f'union all\nselect * from part_{i+1}.task'
+                for i, _ in enumerate(parts)
+            ])
+        ))
+        Session.commit()
+
+
+# Start of temporary view used in union query
+SQLITE_UNION_PART: Final[str] = """\
+create temp view 'task' as 
+select * from main.task
+"""
 
 
 # Special exit status indicates cancellation

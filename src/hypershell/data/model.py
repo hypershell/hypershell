@@ -303,8 +303,8 @@ class Task(Entity):
         """Create a new Task."""
         cls.ensure_valid_tag(tag)
         args, inline_tags = cls.split_argline(args)
-        tag = {**(tag or {}), **inline_tags}
-        return Task(id=str(gen_uuid()), args=str(args).strip(),
+        tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
+        return Task(id=uuid(), args=str(args).strip(),
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
                     attempt=attempt, retried=retried, tag=tag, **other)
 

@@ -1,0 +1,62 @@
+.. _20250504_2_7_0_release:
+
+Release Notes (v2.7.0)
+======================
+
+`May 4, 2025`
+
+The v2.7.0 release includes important CLI changes and minor fixes.
+
+-----
+
+Features
+--------
+
+|
+
+Automatic database rotation for SQLite
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When using `SQLite` as a backend for long persistent deployments the overall throughput
+can suffer due to the increased size of the database. What we would like is to keep our long task
+history while alleviating the burden of such a large database on task throughput. To accomplish
+this we've added two new admin routines, ``vacuumdb()`` and ``rotatedb()``, and exposed them via
+the command-line interface via ``hs initdb`` as ``--vacuum``, ``--backup``, and ``--rotate``.
+
+For those unfamiliar with the concept, `VACUUM` is a database operation (PostgreSQL and SQLite)
+that optimizes space and can improve performance in some cases. For SQLite, updated rows are
+written to new pages, even deleting data is only flagged as such. Performing a vacuum copies
+all active pages to a new database file and then replaces the original database file. This
+operation is safe to perform while under load. This on its own is a useful feature to have for
+long running deployments.
+
+For SQLite, the vacuum operation allows for a file path and instead of copying the new cleaned
+pages back to the original file the data is left at the given file path. This capability is what
+drives the ``--backup`` feature, and in turn enables the ``--rotate`` feature.
+
+With this release we now automatically add a ``part:0`` tag to all new tasks. This ``part``, short
+for *partition*, is used to label all completed tasks in the activate database with ``part:N`` in
+a single transaction, where *N* is the N-th partition chosen based on the path to the file. With
+this tag as a means to safely distinguish between the completed tasks in that moment, we can
+partition the activate database using a vacuum operation to a new location, essentially cloning
+the database. Afterwards, we drop any non-``part:N`` tasks from the new clone and any ``part:N``
+from the activate database. This can happen in real time without stopping the server.
+
+Immediately following one of these partition events, there will be few tasks in the activate database.
+While searching task history we want to allow for the full history without losing access because we
+split the database. Now, when invoking task search, if SQLite is in use, we automatically check for
+any/all existing partitions of the same database path and `attach` each to the session. We build a
+temporary `view` that replaces the ``task`` table with a series of ``union all`` on these partitions.
+Any and all queries are applied to this temporary view as if the entire history existed within the
+one table.
+
+.. note::
+
+    With most distributions of Python the `sqlite3` library is built with a compile-time option
+    ``SQLITE_MAX_ATTACHED=10`` by default. While ``--rotate`` can be called any number of times,
+    the automatic attachment of these partitions will be limited by this settings. While it's
+    possible to re-compile SQLite with a higher value, it cannot be increased above 125.
+
+    See `SQLite limits <https://www.sqlite.org/limits.html>`_.
+
+|

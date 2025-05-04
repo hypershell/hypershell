@@ -7,6 +7,15 @@ A place for announcements, release notes, thoughts and ideas for the project.
 
 -----
 
+:ref:`Release Notes (v2.7.0) <20250504_2_7_0_release>`
+------------------------------------------------------
+
+`May 4, 2025`
+
+The v2.7.0 release includes important CLI changes and minor fixes.
+
+-----
+
 :ref:`Release Notes (v2.6.6) <20250405_2_6_6_release>`
 ------------------------------------------------------
 

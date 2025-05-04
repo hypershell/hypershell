@@ -1,1 +1,1 @@
-``hs`` ``initdb`` ``[-h]`` ``[--truncate [--yes]]``
+``hs`` ``initdb`` ``[-h]`` ``[--truncate | --vacuum | --rotate | --backup PATH]`` ``[--yes]``
