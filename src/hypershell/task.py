@@ -40,7 +40,8 @@ from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, handle_exception_silently, get_shared_exception_mapping
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
-from hypershell.core.types import smart_coerce, JSONValue
+from hypershell.core.types import smart_coerce, JSONValue, to_json_type
+from hypershell.core.pretty_print import format_tag, format_json
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
 from hypershell.data.model import Task, to_json_type, JSON
@@ -1146,7 +1147,7 @@ class WhereClause:
 
 def print_normal(task: Task) -> None:
     """Print semi-structured task metadata with all field names."""
-    task_data = {k: json.dumps(to_json_type(v)).strip('"') for k, v in task.to_dict().items()}
+    task_data = {k: format_json(v) for k, v in task.to_dict().items()}
     task_data['waited'] = 'null' if not task.waited else timedelta(seconds=int(task_data['waited']))
     task_data['duration'] = 'null' if not task.duration else timedelta(seconds=int(task_data['duration']))
     task_data['tag'] = ', '.join(format_tag(k, v) for k, v in task.tag.items())
@@ -1168,11 +1169,3 @@ def print_normal(task: Task) -> None:
     print(f' previous_id: {task_data["previous_id"]}')
     print(f'     next_id: {task_data["next_id"]}')
     print(f'        tags: {task_data["tag"]}')
-
-
-def format_tag(key: str, value: JSONValue) -> str:
-    """Format as `key` or `key:value` if not empty string."""
-    if isinstance(value, str) and not value:
-        return key
-    else:
-        return f'{key}:{value}'

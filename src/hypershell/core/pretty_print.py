@@ -7,8 +7,14 @@
 # Type annotations
 from __future__ import annotations
 
+# Standard libs
+import json
+
+# Internal libs
+from hypershell.core.types import JSONValue, to_json_type
+
 # Public interface
-__all__ = ['format_bytes', ]
+__all__ = ['format_bytes', 'format_tag', 'format_json']
 
 
 def format_bytes(size: int) -> str:
@@ -23,3 +29,19 @@ def format_bytes(size: int) -> str:
         size /= 1024
     else:
         return f'{size:3.1f}PB'
+
+
+def format_tag(key: str, value: JSONValue) -> str:
+    """Pretty-print as `key` or `key:value` if not empty string."""
+    if isinstance(value, str) and not value:
+        return key
+    else:
+        return f'{key}:{value}'
+
+
+def format_json(value: JSONValue) -> str:
+    """Pretty-print value as JSON-like while handling quoted arguments."""
+    result = json.dumps(to_json_type(value))
+    if result.startswith('"') and result.endswith('"'):
+        result = result[1:-1]
+    return result.replace('\\"', '"')

@@ -24,7 +24,7 @@ from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSON
 # Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
-from hypershell.core.types import JSONValue
+from hypershell.core.types import JSONValue, to_json_type, from_json_type
 from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
@@ -53,28 +53,6 @@ class NotDistinct(DatabaseError):
 
 class AlreadyExists(DatabaseError):
     """Exception specific to a record with unique properties already existing."""
-
-
-# Extended value type contains datetime types
-# These are not valid JSON and must be converted
-VT = TypeVar('VT', bool, int, float, str, type(None), datetime)
-
-
-def to_json_type(value: VT) -> Union[VT, JSONValue]:
-    """Convert `value` to alternate representation for JSON."""
-    return value if not isinstance(value, datetime) else value.isoformat(sep=' ')
-
-
-def from_json_type(value: JSONValue) -> Union[JSONValue, VT]:
-    """Convert `value` to richer type if possible."""
-    try:
-        # NOTE: minor detail in PyPy datetime implementation
-        if isinstance(value, str) and len(value) > 5:
-            return datetime.fromisoformat(value)
-        else:
-            return value
-    except ValueError:
-        return value
 
 
 # Pre-defining types shortens declarations and makes changes easier
@@ -124,7 +102,7 @@ class Entity(DeclarativeBase):
         return json.dumps(self.to_json()).encode()
 
     @classmethod
-    def from_dict(cls: Type[Entity], data: Dict[str, VT]) -> Entity:
+    def from_dict(cls: Type[Entity], data: Dict[str, Any]) -> Entity:
         """Build from existing dictionary."""
         return cls(**data)  # noqa: __init__ instrumented by declarative_base
 

@@ -64,6 +64,7 @@ from hypershell.core.thread import Thread
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.types import JSONValue
+from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.data.model import Task
 from hypershell.data import initdb, checkdb
