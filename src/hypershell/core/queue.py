@@ -48,7 +48,7 @@ class QueueConfig:
 
 
 class QueueInterface(BaseManager, ABC):
-    """The queue interface provides access to three managed distributed queues."""
+    """The queue interface provides access to four managed distributed queues."""
 
     config: QueueConfig
     scheduled: JoinableQueue[Optional[List[bytes]]]

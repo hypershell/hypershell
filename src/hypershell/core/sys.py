@@ -5,7 +5,7 @@
 Sanitize and supplement package environment.
 
 For most installations this module does nothing and can be ignored.
-For system-wide user-facing non-library installations we do not want user
+For system-wide user-facing non-library installations, we do not want user
 programs (which may be Python-based with PYTHONPATH implications) to interfere
 with this program.
 
@@ -17,7 +17,7 @@ a file, the contents of that file represents a frozen path list.
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Final
+from typing import Final
 
 # Standard libs
 import os
