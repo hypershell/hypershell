@@ -87,6 +87,10 @@
         Specify additional connection details for the underlying SQL dialect provider,
         e.g., ``sqlite3`` or ``psycopg2``.
 
+    ``[pragmas]``
+        Specify one more or pragmas to apply to database connections (SQLite only).
+        For example ``pragmas = { journal_mode = "wal" }`` to enable WAL-mode.
+
     ``*``
         Any additional arguments are forwarded to the provider, e.g., ``encoding = 'utf-8'``.
 

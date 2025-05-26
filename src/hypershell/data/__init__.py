@@ -57,9 +57,12 @@ DATABASE_INFO: Final[str] = f'{config.database.provider} ({DATABASE_SITE})'
 """Concise connection info for database."""
 
 
-def initdb() -> None:
+def initdb(optimize: bool = False) -> None:
     """Initialize database tables."""
     Entity.metadata.create_all(engine)
+    if optimize and DATABASE_PROVIDER == 'sqlite':
+        log.info(f'Optimizing database {DATABASE_SITE}')
+        Session.execute(text('PRAGMA optimize'))
 
 
 def truncatedb() -> None:
@@ -85,9 +88,9 @@ def ensuredb(auto_init: bool = False) -> None:
     If SQLite and `auto_init` we run :meth:`initdb`, else :meth:`checkdb`.
     """
     db = config.database.get('file', None) or config.database.get('database', None)
-    if config.database.provider == 'sqlite' and db in ('', ':memory:', None):
+    if DATABASE_PROVIDER == 'sqlite' and db in ('', ':memory:', None):
         raise ConfigurationError('Missing database configuration')
-    if config.database.provider == 'sqlite' or auto_init is True:
+    if DATABASE_PROVIDER == 'sqlite' or auto_init is True:
         initdb()
     else:
         checkdb()
@@ -100,6 +103,7 @@ def vacuumdb(path: str = None) -> None:
         if DATABASE_PROVIDER == 'sqlite':
             size_before = os.path.getsize(DATABASE_SITE)
             Session.execute(text('VACUUM'))
+            Session.execute(text('PRAGMA optimize'))
             size_after = os.path.getsize(DATABASE_SITE)
             log.info(f'Cleaned {format_bytes(size_before - size_after)} from {DATABASE_SITE}')
         else:
@@ -239,6 +243,7 @@ class InitDBApp(Application):
         else:
             if config.database.provider == 'sqlite':
                 log.info('SQLite database initialized automatically')
+                initdb(optimize=True)
                 return
             if self.confirm_action(f'Initialize {DATABASE_INFO}'):
                 initdb()

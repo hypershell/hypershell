@@ -96,3 +96,46 @@ This functionality install-time behavior and is not configurable at runtime.
     In testing, adding the ``WITHOUT ROWID`` table modifier results in a significant reduction
     in performance, and adding UUIDv7 on top of that entirely recovers this performance.
     Incorporating both the table modifier and UUIDv7 is relatively insignificant.
+
+|
+
+SQLite Pragmas
+^^^^^^^^^^^^^^
+
+It has always been technically possible to enable WAL-mode for SQLite by connecting outside
+of HyperShell and applying the setting. But this is inelegant and doesn't help with settings
+that do not persist between connections. Now you can include a ``pragmas`` section in your
+configuration to automatically apply these to all database connections.
+
+The most useful change from the default behavior is to enable the Write-Ahead Log (WAL)
+``journal_mode`` for SQLite which can improve performance in high-concurrency applications.
+
+.. admonition:: Set user-level configuration option
+    :class: note
+
+    .. code-block:: shell
+
+        hs config set database.pragmas.journal_mode wal
+
+There are many other pragmas we might set.
+Not all configurations of SQLite have been tested for performance.
+
+.. admonition:: Configuration with SQLite pragmas
+    :class: note
+
+    .. code-block:: toml
+
+        [database]
+        file = "/var/lib/hypershell/main.db"
+        pragmas = {journal_mode = "wal", cache_size = 100000}
+
+|
+
+SQLite Optimization
+^^^^^^^^^^^^^^^^^^^
+
+On a related note, all ``vacuumdb()`` operations (used by ``--vacuum`` and ``--rotate``) add
+an automatic ``pragma optimize`` operation. This is mostly harmless and can be invoked safely
+on a regular basis.
+
+See `optimize <https://sqlite.org/pragma.html#pragma_optimize>`_ for details.
