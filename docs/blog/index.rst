@@ -14,6 +14,14 @@ A place for announcements, release notes, thoughts and ideas for the project.
 
 The v2.7.0 release includes major database features and CLI improvements.
 
+- Automatic database rotation for SQLite
+- Optional UUIDv7 mode
+- SQLite pragmas
+- SQLite optimization
+- Simplified command-line interface
+- Version info
+- Improved task submission (global tags)
+
 -----
 
 :ref:`Release Notes (v2.6.6) <20250405_2_6_6_release>`
