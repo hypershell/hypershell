@@ -282,13 +282,14 @@ class Task(Entity):
         cls.ensure_valid_tag(tag)
         args, inline_tags = cls.split_argline(args)
         tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
-        return Task(id=uuid(), args=str(args).strip(),
+        return Task(id=uuid(), args=args,
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
                     attempt=attempt, retried=retried, tag=tag, **other)
 
     @classmethod
     def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONValue]]:
         """Separate input args from possible inline tag comment."""
+        args = str(args).strip()
         if match := re.search(r'#\s*HYPERSHELL:?', args):
             try:
                 tags = Tag.parse_cmdline_list(args[match.end():].strip().split())
@@ -296,9 +297,12 @@ class Task(Entity):
             except (ValueError, TypeError) as error:
                 raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error
             args = args[:match.start()]
-            return args, tags
+            return args.strip(), tags
+        elif match := re.search(r'#', args):
+            args = args[:match.start()]
+            return args.strip(), {}
         else:
-            return args, {}
+            return args.strip(), {}
 
     @staticmethod
     def ensure_valid_tag(tag: Optional[Dict[str, JSONValue]]) -> None:

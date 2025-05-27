@@ -187,3 +187,34 @@ The output of ``hs --version`` now includes more detailed information.
         .. code-block:: none
 
             HyperShell v2.7.0 (CPython 3.13.2)
+
+|
+
+Improved Task Submission
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+In the :ref:`v2.6.0 release <20241115_2_6_0_release>` we added inline tag assignments.
+Any input line in a submission file which included a comment with the special ``# HYPERSHELL: ...``
+syntax allows for tags to be mapped to input arguments on an individual basis.
+
+In this release we extend this behavior to allow processing of non-task lines.
+If an input task line is empty or comment-only we skip that line and do not emit a task.
+If that comment contains the ``# HYPERSHELL: ...`` notation the tags will take effect on all
+future lines.
+
+The following example input file would be processed as 4 tasks.
+
+.. admonition:: Input task file with global tags
+    :class: note
+
+    .. code-block:: shell
+
+        # HYPERSHELL: site:b group:1
+
+        # HYPERSHELL: case:1
+        echo 1
+        echo 2
+
+        # HYPERSHELL: case:2
+        echo 3
+        echo 4

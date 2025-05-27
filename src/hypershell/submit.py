@@ -43,6 +43,8 @@ from typing import List, Iterable, Iterator, IO, Optional, Dict, Callable, Type,
 from types import TracebackType
 
 # Standard libs
+import os
+import re
 import io
 import sys
 import functools
@@ -129,9 +131,21 @@ class Loader(StateMachine):
     def get_task(self: Loader) -> LoaderState:
         """Get the next task from the source."""
         try:
-            self.task = Task.new(args=next(self.source), tag=self.tags)
-            log.trace(f'Loaded task ({self.task.args})')
-            return LoaderState.PUT
+            args = next(self.source)
+            self.task = Task.new(args=args, tag=self.tags)
+            if self.task.args:
+                log.trace(f'Loaded task ({self.task.args})')
+                return LoaderState.PUT
+            else:
+                _, inline_tags = Task.split_argline(args)  # simpler to just reprocess
+                if inline_tags:
+                    tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
+                    log.debug(f'Setting global tags: {tagline}')
+                    for k, v in inline_tags.items():
+                        self.tags[k] = v
+                else:
+                    log.trace(f'Skipping empty line')
+                return LoaderState.GET
         except StopIteration:
             return LoaderState.FINAL
 
