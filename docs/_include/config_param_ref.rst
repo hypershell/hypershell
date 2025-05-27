@@ -88,7 +88,7 @@
         e.g., ``sqlite3`` or ``psycopg2``.
 
     ``[pragmas]``
-        Specify one more or pragmas to apply to database connections (SQLite only).
+        Specify one or more pragmas to apply to database connections (SQLite only).
         For example ``pragmas = { journal_mode = "wal" }`` to enable WAL-mode.
 
     ``*``
