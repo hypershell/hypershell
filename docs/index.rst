@@ -57,7 +57,7 @@ or HPC-specific tools like `ParaFly <https://parafly.sourceforge.net>`_ or
 
     .. code-block:: shell
 
-        seq 1000000 | hs cluster -t 'echo {}' -N64 --ssh 'a[00-32].cluster' > task.out
+        seq 1000000 | hsx -t 'echo {}' -N64 --ssh 'a[00-32].cluster' > task.out
 
 
 See :ref:`getting started <getting_started>` for features and additional usage examples.

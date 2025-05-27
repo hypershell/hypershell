@@ -13,3 +13,5 @@ left off.
 
 Use ``--autoscaling`` with either *fixed* or *dynamic* to run a persistent, elastically scalable
 cluster using an external ``--launcher`` to bring up clients as needed.
+
+Use ``hsx`` in place of ``hs cluster``.

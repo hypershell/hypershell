@@ -8,6 +8,8 @@ Everything shown here is available on Linux and macOS as a *manual page*.
 See our :ref:`Python API <library>` for use as a library.
 See our :ref:`tutorials <tutorial_basic>` (COMING SOON) for use-case specific demonstrations.
 
+The ``hsx`` program is short-hand for ``hs cluster``.
+
 Subcommands
 -----------
 
@@ -20,13 +22,12 @@ Subcommands
     client <client>
     submit <submit>
     initdb <initdb>
+    info <task_info>
+    wait <task_wait>
+    run <task_run>
+    list <task_search>
+    update <task_update>
     config get <config_get>
     config set <config_set>
     config edit <config_edit>
     config which <config_which>
-    task submit <task_submit>
-    task info <task_info>
-    task wait <task_wait>
-    task run <task_run>
-    task search <task_search>
-    task update <task_update>
