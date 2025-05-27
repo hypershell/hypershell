@@ -27,14 +27,19 @@ function _hs() {
 	fi
 
 	case "${cmd}" in
-		initdb)  _hs_initdb  ;;
-		config)  _hs_config  ;;
-		task)    _hs_task    ;;
-		submit)  _hs_submit  ;;
-		server)  _hs_server  ;;
-		client)  _hs_client  ;;
-		cluster) _hs_cluster ;;
-		*)                   ;;
+		initdb)  _hs_initdb      ;;
+		config)  _hs_config      ;;
+		task)    _hs_task        ;;
+		submit)  _hs_submit      ;;
+		server)  _hs_server      ;;
+		client)  _hs_client      ;;
+		cluster) _hs_cluster     ;;
+		info)    _hs_task_info   ;;
+		wait)    _hs_task_wait   ;;
+		run)     _hs_task_run    ;;
+		list)    _hs_task_search ;;
+		update)  _hs_task_update ;;
+		*)                       ;;
 	esac
 }
 
@@ -249,10 +254,10 @@ function _hs_task_submit ()
 		tag)
 			case "${current}" in
 				*:)
-					COMPREPLY=($(compgen -W "`hs task search --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
+					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
 					;;
 				*)
-					COMPREPLY=($(compgen -W "`hs task search --tag-keys 2>/dev/null`" -- "${current}"))
+					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
 					;;
 			esac
 			return
@@ -274,7 +279,7 @@ function _hs_task_info ()
 
 	case "${COMP_CWORD}" in
 		3)
-			COMPREPLY=($(compgen -W "`hs task search id -l ${_HS_TASK_SEARCH_LIMIT} 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "`hs list id -l ${_HS_TASK_SEARCH_LIMIT} 2>/dev/null`" -- "${current}"))
 			;;
 		*)
 			case "${previous}" in
@@ -282,7 +287,7 @@ function _hs_task_info ()
 					COMPREPLY=($(compgen -W "normal yaml json" -- "${current}"))
 					;;
 				-x | --extract)
-					COMPREPLY=($(compgen -W "`hs task --list-columns 2>/dev/null`" -- "${current}"))
+					COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
 					;;
 				*)
 					COMPREPLY=($(compgen -W "-h --help -f --format --yaml --json -x --extract --stdout --stderr" -- "${current}"))
@@ -300,7 +305,7 @@ function _hs_task_wait ()
 
 	case "${COMP_CWORD}" in
 		3)
-			COMPREPLY=($(compgen -W "`hs task search id -l ${_HS_TASK_SEARCH_LIMIT} 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "`hs list id -l ${_HS_TASK_SEARCH_LIMIT} 2>/dev/null`" -- "${current}"))
 			;;
 		*)
 			case "${previous}" in
@@ -344,10 +349,10 @@ function _hs_task_run ()
 		tag)
 			case "${current}" in
 				*:)
-					COMPREPLY=($(compgen -W "`hs task search --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
+					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
 					;;
 				*)
-					COMPREPLY=($(compgen -W "`hs task search --tag-keys 2>/dev/null`" -- "${current}"))
+					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
 					;;
 			esac
 			return
@@ -385,22 +390,22 @@ function _hs_task_search ()
 
 	local all_opts="-h --help -w --where -t --with-tag -s --order-by --desc -F --failed -C
 	--completed -S --succeeded -R --remaining -f --format --csv --json -d --delimiter
-	-l --limit -c --count --"
+	-l --limit -c --count -i --ignore-partitions --fields --tag-keys --tag-values --"
 
 	case "${active_collector}" in
 		-- | where)
-			COMPREPLY=($(compgen -W "`hs task --list-columns 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
 			return
 			;;
 		tag)
 			case "${current}" in
 				*:)
-					#echo "`hs task search --tag-values ${current::-1} 2>/dev/null`" 1>&2
-					COMPREPLY=($(compgen -W "`hs task search --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
+					#echo "`hs list --tag-values ${current::-1} 2>/dev/null`" 1>&2
+					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
 					return
 					;;
 				*)
-					COMPREPLY=($(compgen -W "`hs task search --tag-keys 2>/dev/null`" -- "${current}"))
+					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
 					return
 					;;
 			esac
@@ -409,7 +414,7 @@ function _hs_task_search ()
 
 	case "${previous}" in
 		-s | --order-by)
-			COMPREPLY=($(compgen -W "`hs task --list-columns 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
 			return
 			;;
 		-f | --format)
@@ -426,7 +431,7 @@ function _hs_task_search ()
 			;;
 	esac
 
-	COMPREPLY=($(compgen -W "`hs task --list-columns 2>/dev/null` ${all_opts}" -- "${current}"))
+	COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null` ${all_opts}" -- "${current}"))
 }
 
 
@@ -454,14 +459,14 @@ function _hs_task_update ()
 	--completed -S --succeeded -R --remaining -l --limit -f --no-confirm --"
 
 	local pos_args=
-	for opt in $(hs task --list-columns 2>/dev/null)
+	for opt in $(hs list --fields 2>/dev/null)
 	do
 		case "${opt}" in
 			id) ;;  # We do not allow modifying the 'id' field
 			*) pos_args="${pos_args} ${opt}=";;
 		esac
 	done
-	for tag in $(hs task search --tag-keys 2>/dev/null)
+	for tag in $(hs list --tag-keys 2>/dev/null)
 	do
 		pos_args="${pos_args} ${tag}:"
 	done
@@ -473,17 +478,17 @@ function _hs_task_update ()
 		    ;;
 
 		where)
-			COMPREPLY=($(compgen -W "`hs task --list-columns 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
 			return
 			;;
 		tag | remove-tag)
 			case "${current}" in
 				*:)
-					COMPREPLY=($(compgen -W "`hs task search --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
+					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
 					return
 					;;
 				*)
-					COMPREPLY=($(compgen -W "`hs task search --tag-keys 2>/dev/null`" -- "${current}"))
+					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
 					return
 					;;
 			esac
@@ -492,7 +497,7 @@ function _hs_task_update ()
 
 	case "${previous}" in
 		-s | --order-by)
-			COMPREPLY=($(compgen -W "`hs task --list-columns 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
 			return
 			;;
 		-l | --limit)
@@ -509,7 +514,7 @@ function _hs_submit ()
 {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -t --template --tag -b --bundlesize -w --bundlewait --init-db --"
+	local all_opts="-h --help -f --task-file -t --template --tag -b --bundlesize -w --bundlewait --init-db --"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
@@ -529,9 +534,9 @@ function _hs_submit ()
 	while [[ ${i} -lt ${COMP_CWORD} ]]; do
 		opt="${COMP_WORDS[i]}"
 		case "${opt}" in
-			--)       active_collector=--   ; break;;
-			--tag)    active_collector=tag         ;;
-			-*)       active_collector=none        ;;
+			--)            active_collector=--   ; break;;
+			-t | --tag)    active_collector=tag         ;;
+			-*)            active_collector=none        ;;
 		esac
 		(( i++ ))
 	done
@@ -543,8 +548,8 @@ function _hs_submit ()
 			;;
 		tag)
 			case "${current}" in
-				*:) COMPREPLY=($(compgen -W "`hs task search --tag-values ${current::-1} 2>/dev/null`" -- "${current}")) ;;
-				*)  COMPREPLY=($(compgen -W "`hs task search --tag-keys 2>/dev/null`" -- "${current}")) ;;
+				*:) COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}")) ;;
+				*)  COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}")) ;;
 			esac
 			return
 			;;
@@ -559,10 +564,14 @@ function _hs_submit ()
 			COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}"))
 			return
 			;;
-		-t | --template)
+		--template)
 			COMPREPLY=()  # No completion available for command templates
 			return
 			;;
+		-f | --task-file)
+		    COMPREPLY=($(compgen -f -- "${current}"))
+		    return
+		    ;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))

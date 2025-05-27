@@ -77,6 +77,7 @@ default-groups = ["dev", "docs"]
 [project.scripts]
 hyper-shell = "hypershell:main"  # NOTE: do not remove this
 hs = "hypershell:main"
+hsx = "hypershell:main_x"
 
 [build-system]
 requires = ["hatchling"]

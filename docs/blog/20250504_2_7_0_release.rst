@@ -139,3 +139,31 @@ an automatic ``pragma optimize`` operation. This is mostly harmless and can be i
 on a regular basis.
 
 See `optimize <https://sqlite.org/pragma.html#pragma_optimize>`_ for details.
+
+|
+
+Simplified Command-line Interface
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+As with previous changes, backwards compatibility has been maintained for existing workflows.
+Hierarchy can be a good thing in command-line tools and is often necessary to manage complexity.
+For HyperShell though there is no naming-conflict of actions to justify the added ``task`` layer.
+The following subcommands have been remapped for simplicity and brevity:
+
+- ``hs task submit`` → ``hs submit`` *++*
+- ``hs task info`` → ``hs info``
+- ``hs task wait`` → ``hs wait``
+- ``hs task run`` → ``hs run``
+- ``hs task search`` → ``hs list``
+- ``hs task update`` → ``hs update``
+
+The exception here is ``hs submit`` and ``hs task submit`` which were distinct operations.
+The new ``hs submit`` provides both interfaces in a single command. Positional arguments are treated
+as a single command-line task. If a single positional argument is provided and it is either ``-``
+(stdin) or is a valid non-executable file path it will be read as before. This can be made explicit
+using the new ``-f``/``--task-file`` option.
+
+The new ``hs submit`` also includes better quoting behavior, properly forwarding arguments with
+quoted white space.
+
+A new entry-point, ``hsx``, is also included as shorthand for ``hs cluster``.

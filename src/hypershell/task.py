@@ -48,7 +48,8 @@ from hypershell.data.model import Task, to_json_type, JSON
 from hypershell.data import ensuredb
 
 # Public interface
-__all__ = ['TaskGroupApp', ]
+__all__ = ['TaskGroupApp',
+           'TaskSubmitApp', 'TaskInfoApp', 'TaskWaitApp', 'TaskRunApp', 'TaskSearchApp', 'TaskUpdateApp']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -119,7 +120,7 @@ def check_uuid(value: str) -> None:
         raise ArgumentError(f'Bad UUID: \'{value}\'')
 
 
-INFO_PROGRAM = 'hs task info'
+INFO_PROGRAM = 'hs info'
 INFO_SYNOPSIS = f'{INFO_PROGRAM} [-h] ID [--stdout | --stderr | -x FIELD] [-f FORMAT]'
 INFO_USAGE = f"""\
 Usage: 
@@ -258,7 +259,7 @@ class TaskInfoApp(Application):
 DEFAULT_INTERVAL = 5
 
 
-WAIT_PROGRAM = 'hs task wait'
+WAIT_PROGRAM = 'hs wait'
 WAIT_SYNOPSIS = f'{WAIT_PROGRAM} [-h] ID [-n SEC] [--info [-f FORMAT] | --status | --return]'
 WAIT_USAGE = f"""\
 Usage: 
@@ -348,7 +349,7 @@ class TaskWaitApp(Application):
             break
 
 
-RUN_PROGRAM = 'hs task run'
+RUN_PROGRAM = 'hs run'
 RUN_SYNOPSIS = f'{RUN_PROGRAM} [-h] [-n SEC] [-t TAG [TAG...]] -- ARGS...'
 RUN_USAGE = f"""\
 Usage: 
@@ -494,17 +495,18 @@ class SearchableMixin:
                 raise ArgumentError(f'Invalid field name "{name}"')
 
 
-SEARCH_PROGRAM = 'hs task search'
+SEARCH_PROGRAM = 'hs list'
 SEARCH_SYNOPSIS = f'{SEARCH_PROGRAM} [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] ...'
 SEARCH_USAGE = f"""\
 Usage:
-  hs task search [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]]
-                 [--failed | --succeeded | --completed | --remaining]
-                 [--order-by FIELD [--desc]] [--count | --limit NUM]
-                 [-f FORMAT | --json | --csv]  [-d CHAR]
+  hs list [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]]
+          [--failed | --succeeded | --completed | --remaining]
+          [--order-by FIELD [--desc]] [--count | --limit NUM]
+          [-f FORMAT | --json | --csv]  [-d CHAR] [-i]
   
-  hs task search --tag-keys
-  hs task search --tag-values KEY
+  hs list --fields
+  hs list --tag-keys
+  hs list --tag-values KEY
 
   Search tasks in the database.\
 """
@@ -541,6 +543,7 @@ class TaskSearchApp(Application, SearchableMixin):
     """Search for tasks in database."""
 
     interface = Interface(SEARCH_PROGRAM, SEARCH_USAGE, SEARCH_HELP)
+    interface.add_argument('--fields', action='version', version=' '.join(Task.columns))
 
     field_names: List[str] = ALL_FIELDS
     interface.add_argument('field_names', nargs='*', default=field_names)
@@ -753,13 +756,13 @@ select * from main.task
 CANCEL_STATUS: Final[int] = -1
 
 
-UPDATE_PROGRAM = 'hs task update'
+UPDATE_PROGRAM = 'hs update'
 UPDATE_SYNOPSIS = f'{UPDATE_PROGRAM} [-h] ARG [ARG...] [--cancel | --revert | --delete] ...'
 UPDATE_USAGE = f"""\
 Usage:
-  hs task update [-h] ARG [ARG...] [--cancel | --revert | --delete] [--remove-tag TAG [TAG ...]]
-                 [-w COND [COND ...]] [-t TAG [TAG...]] [--order-by FIELD [--desc]] [--limit NUM]
-                 [--failed | --succeeded | --completed | --remaining] [--no-confirm]
+  hs update [-h] ARG [ARG...] [--cancel | --revert | --delete] [--remove-tag TAG [TAG ...]]
+            [-w COND [COND ...]] [-t TAG [TAG...]] [--order-by FIELD [--desc]] [--limit NUM]
+            [--failed | --succeeded | --completed | --remaining] [--no-confirm]
   
   Update task metadata.\
 """

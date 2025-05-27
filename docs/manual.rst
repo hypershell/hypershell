@@ -10,23 +10,35 @@ hs [-h] [-v] [--citation] ...
 hs cluster [-h] *FILE* [--ssh *HOST*... | --mpi | --launcher *ARGS*...] ...
     Run managed cluster.
 
-hs submit [-h] *FILE* ...
-    Submit tasks from file.
-
 hs server [-h] *FILE* ...
     Run stand-alone server.
 
 hs client [-h] ...
     Run stand-alone client.
 
+hs submit [-h] *FILE* ...
+    Submit tasks from file.
+
+hs initdb [-h] [--truncate | --vacuum | --rotate | --backup PATH] [--yes]
+    Initialize database.
+
+hs info [-h] *ID* [--stdout | --stderr | -x FIELD] [-f FORMAT]
+    Get metadata and/or task outputs.
+
+hs wait [-h] *ID* [-n SEC] [--info [-f FORMAT] | --status | --return]
+    Wait for task to complete.
+
+hs run [-h] [-n SEC] [-t TAG...] -- ARGS...
+    Submit individual task and wait for completion.
+
+hs list [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] ...
+    Search tasks in the database.
+
+hs update [-h] ARG [ARG...] [--cancel | --revert | --delete] ...
+    Update tasks in the database.
+
 hs config [-h] {get | set | which | edit } ...
     Configuration management.
-
-hs task [-h] {submit | info | wait | run | search | update} ...
-    Task management.
-
-hs initdb [-h] [--truncate [--yes]]
-    Initialize database.
 
 Description
 -----------
@@ -93,6 +105,56 @@ Initdb Usage
 .. include:: _include/initdb_help.rst
 
 
+Info Usage
+----------
+
+.. include:: _include/task_info_usage.rst
+
+.. include:: _include/task_info_desc.rst
+
+.. include:: _include/task_info_help.rst
+
+
+Wait Usage
+----------
+
+.. include:: _include/task_wait_usage.rst
+
+.. include:: _include/task_wait_desc.rst
+
+.. include:: _include/task_wait_help.rst
+
+
+Run Usage
+---------
+
+.. include:: _include/task_run_usage.rst
+
+.. include:: _include/task_run_desc.rst
+
+.. include:: _include/task_run_help.rst
+
+
+List Usage
+----------
+
+.. include:: _include/task_search_usage.rst
+
+.. include:: _include/task_search_desc.rst
+
+.. include:: _include/task_search_help.rst
+
+
+Update Usage
+------------
+
+.. include:: _include/task_update_usage.rst
+
+.. include:: _include/task_update_desc.rst
+
+.. include:: _include/task_update_help.rst
+
+
 Config Get Usage
 ----------------
 
@@ -131,66 +193,6 @@ Config Which Usage
 .. include:: _include/config_which_desc.rst
 
 .. include:: _include/config_which_help.rst
-
-
-Task Submit Usage
------------------
-
-.. include:: _include/task_submit_usage.rst
-
-.. include:: _include/task_submit_desc.rst
-
-.. include:: _include/task_submit_help.rst
-
-
-Task Info Usage
----------------
-
-.. include:: _include/task_info_usage.rst
-
-.. include:: _include/task_info_desc.rst
-
-.. include:: _include/task_info_help.rst
-
-
-Task Wait Usage
----------------
-
-.. include:: _include/task_wait_usage.rst
-
-.. include:: _include/task_wait_desc.rst
-
-.. include:: _include/task_wait_help.rst
-
-
-Task Run Usage
---------------
-
-.. include:: _include/task_run_usage.rst
-
-.. include:: _include/task_run_desc.rst
-
-.. include:: _include/task_run_help.rst
-
-
-Task Search Usage
------------------
-
-.. include:: _include/task_search_usage.rst
-
-.. include:: _include/task_search_desc.rst
-
-.. include:: _include/task_search_help.rst
-
-
-Task Update Usage
------------------
-
-.. include:: _include/task_update_usage.rst
-
-.. include:: _include/task_update_desc.rst
-
-.. include:: _include/task_update_help.rst
 
 
 Templates

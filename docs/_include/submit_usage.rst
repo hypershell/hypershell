@@ -1,2 +1,2 @@
-``hs`` ``submit`` ``[-h]`` ``[FILE]``
-    ``[-b NUM]`` ``[-w SEC]`` ``[-t CMD]`` ``[--initdb]`` ``[--tag TAG [TAG...]]``
+``hs`` ``submit`` ``[-h]`` ``[ARGS... | -f FILE]``
+    ``[-b NUM]`` ``[-w SEC]`` ``[--template CMD]`` ``[-t TAG...]`` ``[--initdb]``

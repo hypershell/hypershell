@@ -1,6 +1,6 @@
-``hs`` ``task`` ``update`` ``[-h]`` ``ID`` ``FIELD`` ``VALUE``
+``hs`` ``update`` ``[-h]`` ``ID`` ``FIELD`` ``VALUE``
 
-``hs`` ``task`` ``update``
+``hs`` ``update``
     ``[ARG [ARG ...]]``
     ``[--cancel | --revert | --delete | --remove-tag KEY [KEY...]]``
     ``[-w COND [COND ...]]`` ``[-t TAG [TAG...]]``

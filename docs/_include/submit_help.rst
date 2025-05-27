@@ -1,20 +1,23 @@
 Arguments
 ^^^^^^^^^
 
-FILE
-    Path to input task file (default: <stdin>).
+*ARGS*...
+    Command-line task arguments (for single task submission).
 
 Options
 ^^^^^^^
 
-``-t``, ``--template`` *CMD*
+``-f``, ``--task-file`` *FILE*
+    Input file containing one task per line.
+
+``--template`` *CMD*
     Command-line template pattern (default: "{}").
 
     This is expanded at submit-time before sending to the database.
     With the default "{}" the input command-line will be run verbatim.
     Specifying a template pattern allows for simple input arguments (e.g., file paths)
     to be transformed into some common form; such as
-    ``-t './some_command.py {} >outputs/{/-}.out'``.
+    ``--template './some_command.py {} >outputs/{/-}.out'``.
 
     See section on `templates`.
 
@@ -44,7 +47,7 @@ Options
 
     See ``hs initdb`` command.
 
-``--tag`` *TAG*...
+``-t``, ``--tag`` *TAG*...
     Assign one or more tags.
 
     Tags allow for user-defined tracking of information related to individual tasks or large
