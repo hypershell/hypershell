@@ -167,3 +167,23 @@ The new ``hs submit`` also includes better quoting behavior, properly forwarding
 quoted white space.
 
 A new entry-point, ``hsx``, is also included as shorthand for ``hs cluster``.
+
+|
+
+Version Info
+^^^^^^^^^^^^
+
+The output of ``hs --version`` now includes more detailed information.
+
+.. admonition:: Show version information
+    :class: note
+
+    .. code-block:: shell
+
+        hs --version
+
+    .. details:: Output
+
+        .. code-block:: none
+
+            HyperShell v2.7.0 (CPython 3.13.2)

@@ -3,6 +3,9 @@
 
 """Initialization and entry-point for console application."""
 
+# Type annotations
+from __future__ import annotations
+from typing import List
 
 # Path sanitizer must happen first
 import hypershell.core.sys
@@ -10,7 +13,7 @@ import hypershell.core.sys
 # Standard libs
 import sys
 from importlib.metadata import version as get_version
-from platform import python_version
+from platform import python_version, python_implementation
 
 # External libs
 from cmdkit.app import Application, ApplicationGroup
@@ -60,6 +63,7 @@ Application.log_exception = log.exception
 
 
 APP_NAME = 'hs'
+APP_VERSION = f'HyperShell v{__version__} ({python_implementation()} {python_version()})'
 APP_USAGE = f"""\
 Usage:
   {APP_NAME} [-h] [-v] <command> [<args>...]
@@ -99,8 +103,7 @@ class HyperShellApp(ApplicationGroup):
     """Top-level application class for console application."""
 
     interface = Interface(APP_NAME, APP_USAGE, APP_HELP)
-    interface.add_argument('-v', '--version', action='version',
-                           version=f'HyperShell v{__version__} (Python {python_version()})')
+    interface.add_argument('-v', '--version', action='version', version=APP_VERSION)
     interface.add_argument('--citation', action='version', version=__citation__)
     interface.add_argument('command')
 
