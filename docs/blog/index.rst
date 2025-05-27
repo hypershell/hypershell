@@ -12,7 +12,7 @@ A place for announcements, release notes, thoughts and ideas for the project.
 
 `May 4, 2025`
 
-The v2.7.0 release includes important CLI changes and minor fixes.
+The v2.7.0 release includes major database features and CLI improvements.
 
 -----
 
