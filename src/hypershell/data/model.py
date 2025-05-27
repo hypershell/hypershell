@@ -522,17 +522,21 @@ class Task(Entity):
     def effective_rate_by_client(cls: Type[Task]) -> Optional[Dict[str, float]]:
         """Effective completion rate in tasks per second by client."""
         if server_id := cls.latest_server():
-            return {id: 1 / dt.total_seconds() for id, dt in (
-                cls.query(
-                    cls.client_id,
-                    (func.max(cls.completion_time) - func.min(cls.start_time)) / func.count(cls.id)
-                )
-                .join(Client, Task.client_id == Client.id)
-                .filter(cls.server_id == server_id)
-                .filter(cls.completion_time.isnot(None))
-                .filter(Client.disconnected_at == None)  # noqa: comparison to None
-                .group_by(cls.client_id)
-                .all()
+            return {
+                id: 1 / ((t_max - t_min).total_seconds() / t_n)
+                for id, t_max, t_min, t_n in (
+                    cls.query(
+                        cls.client_id,
+                        func.max(cls.completion_time),
+                        func.min(cls.start_time),
+                        func.count(cls.id)
+                    )
+                    .join(Client, Task.client_id == Client.id)
+                    .filter(cls.server_id == server_id)
+                    .filter(cls.completion_time.isnot(None))
+                    .filter(Client.disconnected_at == None)  # noqa: comparison to None
+                    .group_by(cls.client_id)
+                    .all()
             )}
         else:
             return None
