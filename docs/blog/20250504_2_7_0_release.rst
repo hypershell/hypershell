@@ -54,7 +54,7 @@ one table.
 
     With most distributions of Python the `sqlite3` library is built with a compile-time option
     ``SQLITE_MAX_ATTACHED=10`` by default. While ``--rotate`` can be called any number of times,
-    the automatic attachment of these partitions will be limited by this settings. While it's
+    the automatic attachment of these partitions will be limited by this setting. While it's
     possible to re-compile SQLite with a higher value, it cannot be increased above 125.
 
     See `SQLite limits <https://www.sqlite.org/limits.html>`_.
