@@ -9,6 +9,10 @@ HyperShell v2: Distributed Task Execution for HPC
     :target: https://github.com/hypershell/hypershell/releases
     :alt: Github Release
 
+.. image:: https://static.pepy.tech/badge/hypershell/month
+    :target: https://pypi.org/project/hypershell/
+    :alt: PyPI Monthly Downloads
+
 .. image:: https://img.shields.io/badge/Python-3.9+-blue.svg
     :target: https://www.python.org/downloads
     :alt: Python Versions
