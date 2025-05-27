@@ -40,14 +40,16 @@ from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, handle_exception_silently, get_shared_exception_mapping
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
-from hypershell.core.types import smart_coerce, JSONValue
+from hypershell.core.types import smart_coerce, JSONValue, to_json_type
+from hypershell.core.pretty_print import format_tag, format_json
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, to_json_type, JSON
+from hypershell.data.model import Task, JSON
 from hypershell.data import ensuredb
 
 # Public interface
-__all__ = ['TaskGroupApp', ]
+__all__ = ['TaskGroupApp',
+           'TaskSubmitApp', 'TaskInfoApp', 'TaskWaitApp', 'TaskRunApp', 'TaskSearchApp', 'TaskUpdateApp']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -118,7 +120,7 @@ def check_uuid(value: str) -> None:
         raise ArgumentError(f'Bad UUID: \'{value}\'')
 
 
-INFO_PROGRAM = 'hs task info'
+INFO_PROGRAM = 'hs info'
 INFO_SYNOPSIS = f'{INFO_PROGRAM} [-h] ID [--stdout | --stderr | -x FIELD] [-f FORMAT]'
 INFO_USAGE = f"""\
 Usage: 
@@ -257,7 +259,7 @@ class TaskInfoApp(Application):
 DEFAULT_INTERVAL = 5
 
 
-WAIT_PROGRAM = 'hs task wait'
+WAIT_PROGRAM = 'hs wait'
 WAIT_SYNOPSIS = f'{WAIT_PROGRAM} [-h] ID [-n SEC] [--info [-f FORMAT] | --status | --return]'
 WAIT_USAGE = f"""\
 Usage: 
@@ -347,7 +349,7 @@ class TaskWaitApp(Application):
             break
 
 
-RUN_PROGRAM = 'hs task run'
+RUN_PROGRAM = 'hs run'
 RUN_SYNOPSIS = f'{RUN_PROGRAM} [-h] [-n SEC] [-t TAG [TAG...]] -- ARGS...'
 RUN_USAGE = f"""\
 Usage: 
@@ -493,17 +495,18 @@ class SearchableMixin:
                 raise ArgumentError(f'Invalid field name "{name}"')
 
 
-SEARCH_PROGRAM = 'hs task search'
+SEARCH_PROGRAM = 'hs list'
 SEARCH_SYNOPSIS = f'{SEARCH_PROGRAM} [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] ...'
 SEARCH_USAGE = f"""\
 Usage:
-  hs task search [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]]
-                 [--failed | --succeeded | --completed | --remaining]
-                 [--order-by FIELD [--desc]] [--count | --limit NUM]
-                 [-f FORMAT | --json | --csv]  [-d CHAR]
+  hs list [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]]
+          [--failed | --succeeded | --completed | --remaining]
+          [--order-by FIELD [--desc]] [--count | --limit NUM]
+          [-f FORMAT | --json | --csv]  [-d CHAR] [-i]
   
-  hs task search --tag-keys
-  hs task search --tag-values KEY
+  hs list --fields
+  hs list --tag-keys
+  hs list --tag-values KEY
 
   Search tasks in the database.\
 """
@@ -531,6 +534,7 @@ Options:
   -c, --count                Show count of results.
       --tag-keys             Show all distinct tag keys.
       --tag-values  KEY      Show all distinct tag values for given key.
+  -i, --ignore-partitions    Suppress auto-union feature (SQLite only).
   -h, --help                 Show this message and exit.\
 """
 
@@ -539,6 +543,7 @@ class TaskSearchApp(Application, SearchableMixin):
     """Search for tasks in database."""
 
     interface = Interface(SEARCH_PROGRAM, SEARCH_USAGE, SEARCH_HELP)
+    interface.add_argument('--fields', action='version', version=' '.join(Task.columns))
 
     field_names: List[str] = ALL_FIELDS
     interface.add_argument('field_names', nargs='*', default=field_names)
@@ -589,6 +594,9 @@ class TaskSearchApp(Application, SearchableMixin):
     tag_search_interface.add_argument('--tag-keys', action='store_true', dest='list_tag_keys')
     tag_search_interface.add_argument('--tag-values', action='store_true', dest='list_tag_values')
 
+    ignore_partitions: bool = False
+    interface.add_argument('-i', '--ignore-partitions', action='store_true', dest='ignore_partitions')
+
     exceptions = {
         StatementError: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
         **get_shared_exception_mapping(__name__)
@@ -597,6 +605,8 @@ class TaskSearchApp(Application, SearchableMixin):
     def run(self: TaskSearchApp) -> None:
         """Search for tasks in database."""
         ensuredb()
+        if not self.ignore_partitions:
+            self.auto_union_sqlite()
         if self.list_tag_keys:
             self.print_tag_keys()
             return
@@ -650,7 +660,7 @@ class TaskSearchApp(Application, SearchableMixin):
         for name in self.field_names:
             table.add_column(name)
         for record in results:
-            table.add_row(*[json.dumps(to_json_type(value)).strip('"') for value in record])
+            table.add_row(*[format_json(value) for value in record])
         Console().print(table)
 
     @staticmethod
@@ -663,7 +673,7 @@ class TaskSearchApp(Application, SearchableMixin):
     def print_plain(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print plain text output with given field names, one task per line."""
         for record in results:
-            data = [json.dumps(to_json_type(value)).strip('"') for value in record]
+            data = [format_json(value) for value in record]
             print(self.output_delimiter.join(map(str, data)))
 
     def print_json(self: TaskSearchApp, results: List[Tuple]) -> None:
@@ -710,18 +720,49 @@ class TaskSearchApp(Application, SearchableMixin):
             # NOTE: csv module demands single-char delimiter
             raise ArgumentError(f'Valid --csv output must use single-char delimiter')
 
+    @staticmethod
+    def auto_union_sqlite() -> None:
+        """For sqlite automatically search for partitions and create a temporary view."""
+        if config.database.provider != 'sqlite':
+            return
+        dirname = os.path.dirname(config.database.file)
+        basename, _ = os.path.splitext(os.path.basename(config.database.file))
+        parts = sorted([
+            os.path.join(dirname, filename) for filename in os.listdir(dirname)
+            if re.match(f'^{basename}.[0-9]+$', filename)
+        ], key=(lambda fn: int(fn.split('.')[-1])))
+        if len(parts) == 0:
+            return
+        for i, path in enumerate(parts):
+            log.debug(f'Attaching to {path}')
+            Session.execute(text(f'attach database \'{path}\' as \'part_{i+1}\''))
+        Session.execute(text(
+            SQLITE_UNION_PART + '\n'.join([
+                f'union all\nselect * from part_{i+1}.task'
+                for i, _ in enumerate(parts)
+            ])
+        ))
+        Session.commit()
+
+
+# Start of temporary view used in union query
+SQLITE_UNION_PART: Final[str] = """\
+create temp view 'task' as 
+select * from main.task
+"""
+
 
 # Special exit status indicates cancellation
 CANCEL_STATUS: Final[int] = -1
 
 
-UPDATE_PROGRAM = 'hs task update'
+UPDATE_PROGRAM = 'hs update'
 UPDATE_SYNOPSIS = f'{UPDATE_PROGRAM} [-h] ARG [ARG...] [--cancel | --revert | --delete] ...'
 UPDATE_USAGE = f"""\
 Usage:
-  hs task update [-h] ARG [ARG...] [--cancel | --revert | --delete] [--remove-tag TAG [TAG ...]]
-                 [-w COND [COND ...]] [-t TAG [TAG...]] [--order-by FIELD [--desc]] [--limit NUM]
-                 [--failed | --succeeded | --completed | --remaining] [--no-confirm]
+  hs update [-h] ARG [ARG...] [--cancel | --revert | --delete] [--remove-tag TAG [TAG ...]]
+            [-w COND [COND ...]] [-t TAG [TAG...]] [--order-by FIELD [--desc]] [--limit NUM]
+            [--failed | --succeeded | --completed | --remaining] [--no-confirm]
   
   Update task metadata.\
 """
@@ -1109,7 +1150,7 @@ class WhereClause:
 
 def print_normal(task: Task) -> None:
     """Print semi-structured task metadata with all field names."""
-    task_data = {k: json.dumps(to_json_type(v)).strip('"') for k, v in task.to_dict().items()}
+    task_data = {k: format_json(v) for k, v in task.to_dict().items()}
     task_data['waited'] = 'null' if not task.waited else timedelta(seconds=int(task_data['waited']))
     task_data['duration'] = 'null' if not task.duration else timedelta(seconds=int(task_data['duration']))
     task_data['tag'] = ', '.join(format_tag(k, v) for k, v in task.tag.items())
@@ -1131,11 +1172,3 @@ def print_normal(task: Task) -> None:
     print(f' previous_id: {task_data["previous_id"]}')
     print(f'     next_id: {task_data["next_id"]}')
     print(f'        tags: {task_data["tag"]}')
-
-
-def format_tag(key: str, value: JSONValue) -> str:
-    """Format as `key` or `key:value` if not empty string."""
-    if isinstance(value, str) and not value:
-        return key
-    else:
-        return f'{key}:{value}'

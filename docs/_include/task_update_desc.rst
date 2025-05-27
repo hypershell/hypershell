@@ -1,4 +1,4 @@
-Update task metadata.
+Update tasks in the database.
 
 Include any number of `FIELD=VALUE` or tag `KEY:VALUE` positional arguments.
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Run full cluster with server and managed clients."""
+"""Run cluster with server and managed clients."""
 
 
 # Type annotations
@@ -162,7 +162,7 @@ class ClusterApp(Application):
     ssh_group: str = None
     interface.add_argument('--ssh-group', default=None)
 
-    remote_exe: str = sys.argv[0]
+    remote_exe: str = sys.argv[0].rstrip('x')  # drop x in hsx
     interface.add_argument('--remote-exe', default=remote_exe)
 
     export_env: bool = False

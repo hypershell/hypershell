@@ -1,7 +1,7 @@
 .. _cli_task_info:
 
-Task Info
-=========
+Info
+====
 
 Usage
 -----

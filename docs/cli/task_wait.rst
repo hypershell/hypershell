@@ -1,7 +1,7 @@
 .. _cli_task_wait:
 
-Task Wait
-=========
+Wait
+====
 
 Usage
 -----

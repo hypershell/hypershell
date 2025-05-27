@@ -1,7 +1,7 @@
 .. _cli_task_update:
 
-Task Update
-===========
+Update
+======
 
 Usage
 -----

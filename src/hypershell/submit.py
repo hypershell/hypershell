@@ -43,6 +43,8 @@ from typing import List, Iterable, Iterator, IO, Optional, Dict, Callable, Type,
 from types import TracebackType
 
 # Standard libs
+import os
+import re
 import io
 import sys
 import functools
@@ -64,9 +66,10 @@ from hypershell.core.thread import Thread
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.types import JSONValue
+from hypershell.core.pretty_print import format_tag
+from hypershell.core.tag import Tag
 from hypershell.data.model import Task
 from hypershell.data import initdb, checkdb
-from hypershell.task import Tag
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'SubmitThread', 'LiveSubmitThread',
@@ -128,9 +131,21 @@ class Loader(StateMachine):
     def get_task(self: Loader) -> LoaderState:
         """Get the next task from the source."""
         try:
-            self.task = Task.new(args=next(self.source), tag=self.tags)
-            log.trace(f'Loaded task ({self.task.args})')
-            return LoaderState.PUT
+            args = next(self.source)
+            self.task = Task.new(args=args, tag=self.tags)
+            if self.task.args:
+                log.trace(f'Loaded task ({self.task.args})')
+                return LoaderState.PUT
+            else:
+                _, inline_tags = Task.split_argline(args)  # simpler to just reprocess
+                if inline_tags:
+                    tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
+                    log.debug(f'Setting global tags: {tagline}')
+                    for k, v in inline_tags.items():
+                        self.tags[k] = v
+                else:
+                    log.trace(f'Skipping empty line')
+                return LoaderState.GET
         except StopIteration:
             return LoaderState.FINAL
 
@@ -718,22 +733,26 @@ def submit_file(path: str,
 APP_NAME = 'hs submit'
 APP_USAGE = f"""\
 Usage:
-  {APP_NAME} [-h] [FILE] [-b NUM] [-w SEC] [-t CMD] [--initdb] [--tag TAG [TAG...]]
-  Submit tasks from a file.\
+  {APP_NAME} [-h] [ARGS... | -f FILE] [-b NUM] [-w SEC] [--template CMD] [-t TAG...] [--initdb] 
+  Submit one or more tasks.\
 """
 
 APP_HELP = f"""\
 {APP_USAGE}
 
+  Submit a single command using positional arguments.
+  If a filepath is provided, read many tasks from the file instead.
+
 Arguments:
-  FILE                       Path to task file ("-" for <stdin>).
+  ARGS...                    Command-line task arguments.
 
 Options:
-  -t, --template     CMD     Submit-time template expansion (default: "{DEFAULT_TEMPLATE}").
+  -f, --task-file    FILE    Path to task file ("-" for <stdin>).
+      --template     CMD     Submit-time template expansion (default: "{DEFAULT_TEMPLATE}").
   -b, --bundlesize   NUM     Number of lines to buffer (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait   SEC     Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
       --initdb               Auto-initialize database.
-      --tag          TAG...  Assign tags as `key:value`.
+  -t, --tag          TAG...  Assign tags as `key:value`.
   -h, --help                 Show this message and exit.\
 """
 
@@ -744,9 +763,12 @@ class SubmitApp(Application):
     name = APP_NAME
     interface = Interface(APP_NAME, APP_USAGE, APP_HELP)
 
-    source: IO
-    filepath: str
-    interface.add_argument('filepath', nargs='?', default='-')
+    source: IO | List[str] | None = None
+    task_args: List[str] = []
+    task_file: str = None
+    input_interface = interface.add_mutually_exclusive_group()
+    input_interface.add_argument('task_args', nargs='*')
+    input_interface.add_argument('-f', '--task-file', default=task_file)
 
     bundlesize: int = config.submit.bundlesize
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
@@ -755,16 +777,14 @@ class SubmitApp(Application):
     interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
 
     template: str = DEFAULT_TEMPLATE
-    interface.add_argument('-t', '--template', default=template)
+    interface.add_argument('--template', default=template)
 
     auto_initdb: bool = False
     interface.add_argument('--initdb', action='store_true', dest='auto_initdb')
 
     tags: Dict[str, JSONValue] = {}
     taglist: List[str] = None
-    interface.add_argument('--tag', nargs='*', default=[], dest='taglist')
-
-    count: int = 0
+    interface.add_argument('-t', '--tag', nargs='*', default=[], dest='taglist')
 
     exceptions = {
         **get_shared_exception_mapping(__name__)
@@ -772,20 +792,36 @@ class SubmitApp(Application):
 
     def run(self: SubmitApp) -> None:
         """Run submit thread."""
-        self.submit_all()
-        log.info(f'Submitted {self.count} tasks')
+        self.check_database()
+        self.check_tags()
+        self.check_source()
+        if self.source is not None:
+            self.submit_all()
+        else:
+            self.submit_one()
 
     def submit_all(self: SubmitApp) -> None:
-        """Submit all tasks from source."""
-        self.count = submit_from(self.source, template=self.template,
-                                 bundlesize=self.bundlesize, bundlewait=self.bundlewait, tags=self.tags)
+        """Submit multiple tasks from file-like source."""
+        count = submit_from(self.source, template=self.template,
+                            bundlesize=self.bundlesize, bundlewait=self.bundlewait, tags=self.tags)
+        log.info(f'Submitted {count} tasks')
 
-    @staticmethod
-    def check_config():
+    def submit_one(self: SubmitApp) -> None:
+        """Submit one task from arguments."""
+        args = ' '.join([self.quote_arg(arg) for arg in self.task_args])
+        task = Task.new(args=args, tag=self.tags)
+        Task.add(task)
+        log.info(f'Submitted task ({task.id})')
+
+    def check_database(self: SubmitApp) -> None:
         """Halt if we are not connected to database."""
         db = config.database.get('file', None) or config.database.get('database', None)
         if config.database.provider == 'sqlite' and db in ('', ':memory:', None):
             raise ConfigurationError('Submitting tasks to in-memory database has no effect')
+        if config.database.provider == 'sqlite' or self.auto_initdb:
+            initdb()  # Auto-initialize if local sqlite provider
+        else:
+            checkdb()
 
     def check_tags(self: SubmitApp) -> None:
         """Ensure valid tags."""
@@ -795,21 +831,52 @@ class SubmitApp(Application):
         except (ValueError, TypeError) as error:
             raise ArgumentError(str(error)) from error
 
-    def __enter__(self: SubmitApp) -> SubmitApp:
-        """Open file if not stdin."""
-        self.source = sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')
-        self.check_config()
-        self.check_tags()
-        if config.database.provider == 'sqlite' or self.auto_initdb:
-            initdb()  # Auto-initialize if local sqlite provider
+    def check_source(self: SubmitApp) -> None:
+        """Determine task submission mode."""
+        if self.task_file == '-':
+            log.debug(f'Submitted from <stdin> (explicit)')
+            self.source = sys.stdin
+        elif self.task_file is not None:
+            log.debug(f'Submitted from {self.task_file} (explicit)')
+            self.source = open(self.task_file, mode='r')
+        elif len(self.task_args) == 0:
+            log.debug(f'Submitted from <stdin> (implicit)')
+            self.source = sys.stdin
+        elif len(self.task_args) == 1:
+            filepath = self.task_args[0]
+            if filepath == '-':
+                log.debug(f'Submitted from <stdin> (explicit)')
+                self.source = sys.stdin
+            elif os.path.exists(filepath):
+                if not os.access(filepath, os.X_OK):
+                    log.debug(f'Submitted from {filepath} (implicit - not executable)')
+                    self.source = open(filepath, mode='r')
+                else:
+                    log.debug(f'Submitted single task (implicit - executable)')
+                    self.source = None
+            else:
+                log.debug(f'Submitted single task (implicit)')
+                self.source = None  # program name without arguments
         else:
-            checkdb()
-        return self
+            log.debug(f'Submitted single task (explicit)')
+            self.source = None
+
+    @staticmethod
+    def quote_arg(arg: str) -> str:
+        """Ensure that argument is properly quoted."""
+        if not re.search(r'\s', arg):
+            return arg
+        if '"' not in arg:
+            return f'"{arg}"'
+        if "'" not in arg:
+            return f"'{arg}'"
+        else:
+            raise ArgumentError(f'Could not quote argument: {arg}')
 
     def __exit__(self: SubmitApp,
                  exc_type: Optional[Type[Exception]],
                  exc_val: Optional[Exception],
                  exc_tb: Optional[TracebackType]) -> None:
         """Close file if not stdin."""
-        if self.source is not sys.stdin:
+        if self.source is not None and self.source is not sys.stdin:
             self.source.close()

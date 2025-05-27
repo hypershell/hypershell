@@ -60,3 +60,10 @@ Options
 
 ``-c``, ``--count``
     Show count of results.
+
+``-i``, ``--ignore-partitions``
+    Suppress auto-union feature (SQLite only).
+
+    When using the `sqlite` provider, all databases matching the numbering pattern
+    applied by ``hs initdb --rotate`` will automatically be attached as partitions
+    and used within a temporary view, making full task history searchable.

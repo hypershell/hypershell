@@ -5,10 +5,13 @@
 
 
 # Type annotations
-from typing import TypeVar
+from typing import TypeVar, Union
+
+# Standard libs
+from datetime import datetime
 
 # Public interface
-__all__ = ['smart_coerce', 'JSONValue']
+__all__ = ['smart_coerce', 'JSONValue', 'to_json_type', 'from_json_type']
 
 
 # Each possible input type
@@ -28,5 +31,27 @@ def smart_coerce(value: str) -> JSONValue:
         pass
     try:
         return float(value)
+    except ValueError:
+        return value
+
+
+# Extended value type contains datetime types
+# These are not valid JSON and must be converted
+VT = TypeVar('VT', bool, int, float, str, type(None), datetime)
+
+
+def to_json_type(value: VT) -> Union[VT, JSONValue]:
+    """Convert `value` to alternate representation for JSON."""
+    return value if not isinstance(value, datetime) else value.isoformat(sep=' ')
+
+
+def from_json_type(value: JSONValue) -> Union[JSONValue, VT]:
+    """Convert `value` to richer type if possible."""
+    try:
+        # NOTE: minor detail in PyPy datetime implementation
+        if isinstance(value, str) and len(value) > 5:
+            return datetime.fromisoformat(value)
+        else:
+            return value
     except ValueError:
         return value

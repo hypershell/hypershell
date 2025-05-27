@@ -1,0 +1,38 @@
+Bootstrap: docker
+From: python:3.13-slim
+Stage: final
+
+%labels
+  Version="2.7.0"
+  Author="glentner@purdue.edu"
+
+%files
+  ./src            /app/src
+  ./uv.lock        /app/uv.lock
+  ./LICENSE        /app/LICENSE
+  ./README.rst     /app/README.rst
+  ./pyproject.toml /app/pyproject.toml
+
+%post
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get -yqq update && apt-get -yqq upgrade
+  apt-get -yqq install curl build-essential postgresql libpq-dev
+  rm -rf /var/lib/apt/lists/*
+
+  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/bin" sh
+
+  export UV_LINK_MODE=hardlink
+  export UV_CACHE_DIR=/opt/uv-cache
+  export UV_COMPILE_BYTECODE=1
+  export UV_PROJECT_ENVIRONMENT=/opt/hypershell
+
+  cd /app
+  /bin/uv sync --frozen --all-packages --python 3.13
+  ln -sf /opt/hypershell/bin/hs /bin/hs
+
+%environment
+  export HYPERSHELL_LOGGING_LEVEL=TRACE
+  export HYPERSHELL_LOGGING_STYLE=SYSTEM
+
+%runscript
+  exec /bin/hs "$@"

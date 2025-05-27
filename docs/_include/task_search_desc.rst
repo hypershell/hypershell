@@ -1,4 +1,4 @@
-Search for tasks in database.
+Search tasks in the database.
 
 A database must be configured.
 Specifying *FIELD* names defines what is included in the output

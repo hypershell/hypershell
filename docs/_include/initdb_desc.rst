@@ -1,5 +1,8 @@
 Initialize database.
 
-Create the necessary database tables given your current configuration.
-This occurs automatically for SQLite.
-To clear out all metadata for an existing database use ``--truncate``.
+For SQLite this happens automatically.
+See also ``--initdb`` for the ``hs cluster`` command.
+
+The available special actions are mutually exclusive.
+The ``--rotate`` operation migrates completed tasks to the next database partition,
+and applies a special purpose ``part:N`` tag to the new partition and remaining tasks.

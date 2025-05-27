@@ -3,6 +3,9 @@
 
 """Initialization and entry-point for console application."""
 
+# Type annotations
+from __future__ import annotations
+from typing import List
 
 # Path sanitizer must happen first
 import hypershell.core.sys
@@ -10,7 +13,7 @@ import hypershell.core.sys
 # Standard libs
 import sys
 from importlib.metadata import version as get_version
-from platform import python_version
+from platform import python_version, python_implementation
 
 # External libs
 from cmdkit.app import Application, ApplicationGroup
@@ -23,7 +26,7 @@ from hypershell.submit import SubmitApp
 from hypershell.server import ServerApp
 from hypershell.client import ClientApp
 from hypershell.cluster import ClusterApp
-from hypershell.task import TaskGroupApp
+from hypershell.task import TaskGroupApp, TaskInfoApp, TaskWaitApp, TaskRunApp, TaskSearchApp, TaskUpdateApp
 from hypershell.config import ConfigApp
 from hypershell.data import InitDBApp
 
@@ -54,12 +57,13 @@ __citation__    = """\
 log = Logger.with_name('hypershell')
 
 
-# inject logger setup into command-line framework
+# Inject logger into command-line framework
 Application.log_critical = log.critical
 Application.log_exception = log.exception
 
 
 APP_NAME = 'hs'
+APP_VERSION = f'HyperShell v{__version__} ({python_implementation()} {python_version()})'
 APP_USAGE = f"""\
 Usage:
   {APP_NAME} [-h] [-v] <command> [<args>...]
@@ -70,13 +74,17 @@ APP_HELP = f"""\
 {APP_USAGE}
 
 Commands:
-  config                 {ConfigApp.__doc__}
-  submit                 {SubmitApp.__doc__}
+  cluster                {ClusterApp.__doc__}
   server                 {ServerApp.__doc__}
   client                 {ClientApp.__doc__}
-  cluster                {ClusterApp.__doc__} (recommended)
-  task                   {TaskGroupApp.__doc__}
+  submit                 {SubmitApp.__doc__}
   initdb                 {InitDBApp.__doc__}
+  info                   {TaskInfoApp.__doc__}
+  wait                   {TaskWaitApp.__doc__}
+  run                    {TaskRunApp.__doc__}
+  list                   {TaskSearchApp.__doc__}
+  update                 {TaskUpdateApp.__doc__}
+  config                 {ConfigApp.__doc__}
 
 Options:
   -h, --help             Show this message and exit.
@@ -95,24 +103,33 @@ class HyperShellApp(ApplicationGroup):
     """Top-level application class for console application."""
 
     interface = Interface(APP_NAME, APP_USAGE, APP_HELP)
-    interface.add_argument('-v', '--version', action='version',
-                           version=f'HyperShell v{__version__} (Python {python_version()})')
+    interface.add_argument('-v', '--version', action='version', version=APP_VERSION)
     interface.add_argument('--citation', action='version', version=__citation__)
     interface.add_argument('command')
 
     commands = {
-        'submit': SubmitApp,
+        'cluster': ClusterApp,
         'server': ServerApp,
         'client': ClientApp,
-        'cluster': ClusterApp,
-        'task': TaskGroupApp,
+        'submit': SubmitApp,
         'config': ConfigApp,
         'initdb': InitDBApp,
+        'info': TaskInfoApp,
+        'wait': TaskWaitApp,
+        'run': TaskRunApp,
+        'list': TaskSearchApp,
+        'update': TaskUpdateApp,
+        'task': TaskGroupApp,  # NOTE: left for backwards compatibility
     }
 
 
-def main() -> int:
-    """Entry-point for console application."""
+def main(argv: List[str] | None = None) -> int:
+    """Entry-point for 'hs' console application."""
     initialize_logging()
     register_handlers()
-    return HyperShellApp.main(sys.argv[1:])
+    return HyperShellApp.main(argv or sys.argv[1:])
+
+
+def main_x(argv: List[str] | None = None) -> int:
+    """Entrypoint for 'hsx' console application."""
+    return main(['cluster', ] + (argv or sys.argv[1:]))

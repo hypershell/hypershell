@@ -35,6 +35,14 @@ Functions
 
         This action is destructive, cannot be reversed, and proceeds without confirmation.
 
+|
+
+.. autofunction:: vacuumdb
+
+|
+
+.. autofunction:: rotatedb
+
 -------------------
 
 Constants
@@ -43,5 +51,7 @@ Constants
 |
 
 .. autodata:: DATABASE_ENABLED
+
+.. autodata:: DATABASE_PROVIDER
 
 |

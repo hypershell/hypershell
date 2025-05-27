@@ -11,7 +11,6 @@ from typing import List, Dict, Tuple, Any, Type, TypeVar, Union, Optional
 # Standard libs
 import re
 import json
-from uuid import uuid4 as gen_uuid
 from datetime import datetime
 
 # External libs
@@ -25,7 +24,8 @@ from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSON
 # Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
-from hypershell.core.types import JSONValue
+from hypershell.core.types import JSONValue, to_json_type, from_json_type
+from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
 
@@ -53,28 +53,6 @@ class NotDistinct(DatabaseError):
 
 class AlreadyExists(DatabaseError):
     """Exception specific to a record with unique properties already existing."""
-
-
-# Extended value type contains datetime types
-# These are not valid JSON and must be converted
-VT = TypeVar('VT', bool, int, float, str, type(None), datetime)
-
-
-def to_json_type(value: VT) -> Union[VT, JSONValue]:
-    """Convert `value` to alternate representation for JSON."""
-    return value if not isinstance(value, datetime) else value.isoformat(sep=' ')
-
-
-def from_json_type(value: JSONValue) -> Union[JSONValue, VT]:
-    """Convert `value` to richer type if possible."""
-    try:
-        # NOTE: minor detail in PyPy datetime implementation
-        if isinstance(value, str) and len(value) > 5:
-            return datetime.fromisoformat(value)
-        else:
-            return value
-    except ValueError:
-        return value
 
 
 # Pre-defining types shortens declarations and makes changes easier
@@ -124,7 +102,7 @@ class Entity(DeclarativeBase):
         return json.dumps(self.to_json()).encode()
 
     @classmethod
-    def from_dict(cls: Type[Entity], data: Dict[str, VT]) -> Entity:
+    def from_dict(cls: Type[Entity], data: Dict[str, Any]) -> Entity:
         """Build from existing dictionary."""
         return cls(**data)  # noqa: __init__ instrumented by declarative_base
 
@@ -303,14 +281,15 @@ class Task(Entity):
         """Create a new Task."""
         cls.ensure_valid_tag(tag)
         args, inline_tags = cls.split_argline(args)
-        tag = {**(tag or {}), **inline_tags}
-        return Task(id=str(gen_uuid()), args=str(args).strip(),
+        tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
+        return Task(id=uuid(), args=args,
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
                     attempt=attempt, retried=retried, tag=tag, **other)
 
     @classmethod
     def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONValue]]:
         """Separate input args from possible inline tag comment."""
+        args = str(args).strip()
         if match := re.search(r'#\s*HYPERSHELL:?', args):
             try:
                 tags = Tag.parse_cmdline_list(args[match.end():].strip().split())
@@ -318,9 +297,12 @@ class Task(Entity):
             except (ValueError, TypeError) as error:
                 raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error
             args = args[:match.start()]
-            return args, tags
+            return args.strip(), tags
+        elif match := re.search(r'#', args):
+            args = args[:match.start()]
+            return args.strip(), {}
         else:
-            return args, {}
+            return args.strip(), {}
 
     @staticmethod
     def ensure_valid_tag(tag: Optional[Dict[str, JSONValue]]) -> None:
@@ -540,17 +522,21 @@ class Task(Entity):
     def effective_rate_by_client(cls: Type[Task]) -> Optional[Dict[str, float]]:
         """Effective completion rate in tasks per second by client."""
         if server_id := cls.latest_server():
-            return {id: 1 / dt.total_seconds() for id, dt in (
-                cls.query(
-                    cls.client_id,
-                    (func.max(cls.completion_time) - func.min(cls.start_time)) / func.count(cls.id)
-                )
-                .join(Client, Task.client_id == Client.id)
-                .filter(cls.server_id == server_id)
-                .filter(cls.completion_time.isnot(None))
-                .filter(Client.disconnected_at == None)  # noqa: comparison to None
-                .group_by(cls.client_id)
-                .all()
+            return {
+                id: 1 / ((t_max - t_min).total_seconds() / t_n)
+                for id, t_max, t_min, t_n in (
+                    cls.query(
+                        cls.client_id,
+                        func.max(cls.completion_time),
+                        func.min(cls.start_time),
+                        func.count(cls.id)
+                    )
+                    .join(Client, Task.client_id == Client.id)
+                    .filter(cls.server_id == server_id)
+                    .filter(cls.completion_time.isnot(None))
+                    .filter(Client.disconnected_at == None)  # noqa: comparison to None
+                    .group_by(cls.client_id)
+                    .all()
             )}
         else:
             return None
@@ -660,7 +646,7 @@ class Client(Entity):
             evicted: bool = False,
             **other) -> Client:
         """Create a new client."""
-        return cls(id=(id or str(gen_uuid())), host=host,
+        return cls(id=(id or uuid()), host=host,
                    server_id=server_id, server_host=server_host,
                    evicted=evicted, **other)
 

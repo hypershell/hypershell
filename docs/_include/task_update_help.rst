@@ -1,7 +1,7 @@
 Arguments
 ^^^^^^^^^
 
-ARGS...
+*ARGS*...
     Assignment pairs for update.
 
 Options
@@ -86,5 +86,5 @@ FIELD
 VALUE
     New value.
 
-    Use ``key:value`` notation for tasks.
+    Use ``key:value`` notation for tags.
     Updating ``tag`` will add or update any pre-existing tag with that ``key``.

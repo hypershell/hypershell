@@ -9,11 +9,13 @@ import os
 
 # External libs
 import pytest
+from cmdkit.namespace import Namespace
 
 # Internal libs
-from hypershell.data.core import DatabaseURL, Namespace
+from hypershell.data.core import DatabaseURL
 
 
+@pytest.mark.unit
 class TestDatabaseURL:
     """Unit tests for `DatabaseURL`."""
 

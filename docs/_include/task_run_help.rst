@@ -1,7 +1,7 @@
 Arguments
 ^^^^^^^^^
 
-ARGS...
+*ARGS*...
     Command-line arguments.
 
     The full command-line for some shell task.

@@ -10,6 +10,10 @@
 # to leave this module in place for the time being.
 
 
+# Type annotations
+from __future__ import annotations
+from typing import List, Final
+
 # Standard libs
 import os
 import sys
@@ -25,20 +29,22 @@ from cmdkit.ansi import bold, magenta
 __all__ = ['cwd', 'home', 'site', 'path', 'default_path']
 
 
-cwd = os.getcwd()
-home = os.path.expanduser('~')
+cwd: Final[str] = os.getcwd()
+home: Final[str] = os.path.expanduser('~')
 if 'HYPERSHELL_SITE' not in os.environ:
-    local_site = os.path.join(cwd, '.hypershell')
+    local_site: Final[str] = os.path.join(cwd, '.hypershell')
 else:
-    local_site = os.getenv('HYPERSHELL_SITE')
-    if not os.path.isdir(local_site):
+    local_site: Final[str] = os.getenv('HYPERSHELL_SITE')
+    try:
+        os.makedirs(local_site, exist_ok=True)
+    except Exception as error:
         print(f'{bold(magenta("CRITICAL"))} [{__name__}] '
-              f'Directory does not exist (HYPERSHELL_SITE={local_site})', file=sys.stderr)
+              f'Could not create directory (HYPERSHELL_SITE={local_site}): {error}', file=sys.stderr)
         sys.exit(exit_status.bad_config)
 
 
 if platform.system() == 'Windows':
-    is_admin = ctypes.windll.shell32.IsUserAnAdmin() == 1
+    is_admin: Final[bool] = ctypes.windll.shell32.IsUserAnAdmin() == 1
     site = Namespace(system=os.path.join(os.getenv('ProgramData'), 'HyperShell'),
                      user=os.path.join(os.getenv('AppData'), 'HyperShell'),
                      local=local_site)
@@ -58,7 +64,7 @@ if platform.system() == 'Windows':
     })
 
 elif platform.system() == 'Darwin':
-    is_admin = os.getuid() == 0
+    is_admin: Final[bool] = os.getuid() == 0
     site = Namespace(system='/', user=home, local=local_site)
     path = Namespace({
         'system': {
@@ -76,7 +82,7 @@ elif platform.system() == 'Darwin':
     })
 
 elif os.name == 'posix':  # NOTE: likely Linux
-    is_admin = os.getuid() == 0
+    is_admin: Final[bool] = os.getuid() == 0
     site = Namespace(system='/', user=os.path.join(home, '.hypershell'),
                      local=local_site)
     path = Namespace({
@@ -107,7 +113,7 @@ else:
 
 
 # Automatically initialize default site directories
-default_dirs = [
+default_dirs: Final[List[str]] = [
     default_path.lib,
     default_path.log,
     os.path.join(default_path.lib, 'task'),

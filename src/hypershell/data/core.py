@@ -20,6 +20,7 @@ from sqlalchemy.engine import create_engine, Engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import ArgumentError
+from sqlalchemy import event
 
 # Internal libs
 from hypershell.core.config import config
@@ -174,17 +175,21 @@ providers = {
 }
 
 
+# Clone database-section for modification
 config = Namespace(config.database.copy())
+
+# Pop special sections not forwarded to connection details
 schema = config.pop('schema', None)
 engine_echo = config.pop('echo', False)
 connect_args = config.pop('connect_args', {})
+pragmas = config.pop('pragmas', {})
 
 
-# additional parameters for engine creation
+# Additional parameters for engine creation
 engine_config = {}
 
 
-# sqlite specific configuration
+# Sqlite-specific configuration
 in_memory = False
 if config.provider == 'sqlite':
     in_memory = (config.get('file', None) or config.get('database', None)) in ('', ':memory:', None)
@@ -230,3 +235,13 @@ except ModuleNotFoundError as error:
 except Exception as error:
     write_traceback(error, module=__name__)
     sys.exit(exit_status.bad_config)
+
+
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+    """Automatically inject pragmas into SQLite connection."""
+    if config.provider == 'sqlite':
+        cursor = dbapi_connection.cursor()
+        for name, value in pragmas.items():
+            cursor.execute(f'PRAGMA {name}={value}')
+        cursor.close()
