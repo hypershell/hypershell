@@ -1,4 +1,3 @@
-'\" t
 .\" Man page generated from reStructuredText.
 .
 .
@@ -28,7 +27,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Apr 05, 2025" "2.6.6" "hypershell"
+.TH "HYPER-SHELL" "1" "May 26, 2025" "2.7.0" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -37,26 +36,38 @@ hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .B hs [\-h] [\-v] [\-\-citation] ...
 Top\-level command. Show help, version, or citation info.
 .TP
-.B hs cluster [\-h] \fIFILE\fP [\-\-ssh \fIHOST\fP\&... | \-\-mpi | \-\-launcher \fIARGS\fP\&...] ...
+.B hs cluster [\-h] FILE [\-\-ssh HOST... | \-\-mpi | \-\-launcher ARGS...] ...
 Run managed cluster.
 .TP
-.B hs submit [\-h] \fIFILE\fP ...
-Submit tasks from file.
-.TP
-.B hs server [\-h] \fIFILE\fP ...
+.B hs server [\-h] FILE ...
 Run stand\-alone server.
 .TP
 .B hs client [\-h] ...
 Run stand\-alone client.
 .TP
+.B hs submit [\-h] [ARGS... | \-f FILE] ...
+Submit tasks from file.
+.TP
+.B hs initdb [\-h] [\-\-truncate | \-\-vacuum | \-\-rotate | \-\-backup PATH] [\-\-yes]
+Initialize database.
+.TP
+.B hs info [\-h] ID [\-\-stdout | \-\-stderr | \-x FIELD] [\-f FORMAT]
+Get metadata and/or task outputs.
+.TP
+.B hs wait [\-h] ID [\-n SEC] [\-\-info [\-f FORMAT] | \-\-status | \-\-return]
+Wait for task to complete.
+.TP
+.B hs run [\-h] [\-n SEC] [\-t TAG...] \-\- ARGS...
+Submit individual task and wait for completion.
+.TP
+.B hs list [\-h] [FIELD [FIELD ...]] [\-w COND [COND ...]] [\-t TAG [TAG...]] ...
+Search tasks in the database.
+.TP
+.B hs update [\-h] ARG [ARG...] [\-\-cancel | \-\-revert | \-\-delete] ...
+Update tasks in the database.
+.TP
 .B hs config [\-h] {get | set | which | edit } ...
 Configuration management.
-.TP
-.B hs task [\-h] {submit | info | wait | run | search | update} ...
-Task management.
-.TP
-.B hs initdb [\-h] [\-\-truncate [\-\-yes]]
-Initialize database.
 .UNINDENT
 .SH DESCRIPTION
 .sp
@@ -96,6 +107,8 @@ left off.
 .sp
 Use \fB\-\-autoscaling\fP with either \fIfixed\fP or \fIdynamic\fP to run a persistent, elastically scalable
 cluster using an external \fB\-\-launcher\fP to bring up clients as needed.
+.sp
+Use \fBhsx\fP in place of \fBhs cluster\fP\&.
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -652,36 +665,46 @@ See also \fB\-\-task\-timeout\fP\&.
 .SH SUBMIT USAGE
 .INDENT 0.0
 .TP
-.B \fBhs\fP \fBsubmit\fP \fB[\-h]\fP \fB[FILE]\fP
-\fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-t CMD]\fP \fB[\-\-initdb]\fP \fB[\-\-tag TAG [TAG...]]\fP
+.B \fBhs\fP \fBsubmit\fP \fB[\-h]\fP \fB[ARGS... | \-f FILE]\fP
+\fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP \fB[\-\-initdb]\fP
 .UNINDENT
 .sp
-Submit tasks from file.
+Submit one or more tasks.
+.sp
+Submit one task as positional arguments.
+If a single positional argument refers to a non\-executable file path,
+tasks will be read from the file, one per line (use \fB\-f\fP/\fB\-\-task\-file\fP to be explicit).
 .sp
 Tasks are accumulated and published in bundles to the database.
 The \fB\-b\fP/\fB\-\-bundlesize\fP and \fB\-w\fP/\fB\-\-bundlewait\fP options control the
 size of these bundles and how long to wait before flushing tasks regardless of
 how many have accumulated.
 .sp
-Pre\-format tasks at \fIsubmit\fP\-time with template expansion using \fB\-t\fP/\fB\-\-template\fP\&.
-Any tags specified with \fB\-\-tag\fP are applied to all tasks submitted.
+Pre\-format tasks at \fIsubmit\fP\-time with template expansion using \fB\-\-template\fP\&.
+Any tags specified with \fB\-t\fP/\fB\-\-tag\fP are applied to all tasks submitted.
+.sp
+Use the special comment syntax, \fB# HYPERSHELL: ...\fP, to include tags inline.
+If the comment is alone on the line it will be applied to all tasks that follow.
 .SS Arguments
 .INDENT 0.0
 .TP
-.B FILE
-Path to input task file (default: <stdin>).
+.B \fIARGS\fP\&...
+Command\-line task arguments (for single task submission).
 .UNINDENT
 .SS Options
 .INDENT 0.0
 .TP
-.B \fB\-t\fP, \fB\-\-template\fP \fICMD\fP
+.B \fB\-f\fP, \fB\-\-task\-file\fP \fIFILE\fP
+Input file containing one task per line.
+.TP
+.B \fB\-\-template\fP \fICMD\fP
 Command\-line template pattern (default: \(dq{}\(dq).
 .sp
 This is expanded at submit\-time before sending to the database.
 With the default \(dq{}\(dq the input command\-line will be run verbatim.
 Specifying a template pattern allows for simple input arguments (e.g., file paths)
 to be transformed into some common form; such as
-\fB\-t \(aq./some_command.py {} >outputs/{/\-}.out\(aq\fP\&.
+\fB\-\-template \(aq./some_command.py {} >outputs/{/\-}.out\(aq\fP\&.
 .sp
 See section on \fItemplates\fP\&.
 .TP
@@ -711,7 +734,7 @@ tables if they don\(aqt already exist. This is a short\-hand for pre\-creating t
 .sp
 See \fBhs initdb\fP command.
 .TP
-.B \fB\-\-tag\fP \fITAG\fP\&...
+.B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP\&...
 Assign one or more tags.
 .sp
 Tags allow for user\-defined tracking of information related to individual tasks or large
@@ -721,21 +744,368 @@ will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (incl
 .UNINDENT
 .SH INITDB USAGE
 .sp
-\fBhs\fP \fBinitdb\fP \fB[\-h]\fP \fB[\-\-truncate [\-\-yes]]\fP
+\fBhs\fP \fBinitdb\fP \fB[\-h]\fP \fB[\-\-truncate | \-\-vacuum | \-\-rotate | \-\-backup PATH]\fP \fB[\-\-yes]\fP
 .sp
 Initialize database.
 .sp
-Create the necessary database tables given your current configuration.
-This occurs automatically for SQLite.
-To clear out all metadata for an existing database use \fB\-\-truncate\fP\&.
-.SS Options
+For SQLite this happens automatically.
+See also \fB\-\-initdb\fP for the \fBhs cluster\fP command.
+.sp
+The available special actions are mutually exclusive.
+The \fB\-\-rotate\fP operation migrates completed tasks to the next database partition,
+and applies a special purpose \fBpart:N\fP tag to the new partition and remaining tasks.
+.SS Actions
 .INDENT 0.0
+.TP
+.B \fB\-\-vacuum\fP
+Vacuum an existing database.
+.TP
+.B \fB\-\-backup\fP \fIPATH\fP
+Vacuum into backup file (SQLite only).
+.TP
+.B \fB\-\-rotate\fP
+Rotate completed tasks to new database (SQLite only).
 .TP
 .B \fB\-t\fP, \fB\-\-truncate\fP
 Truncate database (task metadata will be lost).
+.UNINDENT
+.SS Options
+.INDENT 0.0
 .TP
 .B \fB\-y\fP, \fB\-\-yes\fP
-Auto\-confirm truncation (default will prompt).
+Auto\-confirm action (default will prompt).
+.UNINDENT
+.SH INFO USAGE
+.INDENT 0.0
+.TP
+.B \fBhs\fP \fBinfo\fP \fB[\-h]\fP
+\fBID\fP \fB[\-\-stdout | \-\-stderr | \-x FIELD]\fP \fB[\-f FORMAT]\fP
+.UNINDENT
+.sp
+Get metadata and/or task outputs.
+.sp
+Query for the full metadata on task by ID.
+Extract a specific field using \fB\-x\fP/\fB\-\-extract\fP\&.
+.sp
+Alternatively, dump the captured standard output or errors
+from the finished task (if captured). These files are written
+on the client host and synced with SFTP if necessary.
+.SS Arguments
+.INDENT 0.0
+.TP
+.B ID
+Unique task UUID.
+.UNINDENT
+.SS Options
+.INDENT 0.0
+.TP
+.B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
+Format task info ([normal], json, yaml).
+.TP
+.B \fB\-\-json\fP
+Format metadata output as JSON.
+.TP
+.B \fB\-\-yaml\fP
+Format metadata output as YAML.
+.TP
+.B \fB\-x\fP, \fB\-\-extract\fP \fIFIELD\fP
+Print this field only (e.g., \fB\-x submit_time\fP).
+.TP
+.B \fB\-\-stdout\fP
+Print <stdout> of task if captured, fetch from client if necessary.
+.TP
+.B \fB\-\-stderr\fP
+Print <stderr> of task if captured, fetch from client if necessary.
+.UNINDENT
+.SH WAIT USAGE
+.INDENT 0.0
+.TP
+.B \fBhs\fP \fBwait\fP \fB[\-h]\fP
+\fBID\fP \fB[\-n SEC]\fP \fB[\-\-info [\-f FORMAT] | \-\-status | \-\-return]\fP
+.UNINDENT
+.sp
+Wait for task to complete.
+.sp
+Poll the database periodically for the completion status
+of the task. Block until completed.
+.sp
+Optionally, print task metadata after completion.
+.SS Arguments
+.INDENT 0.0
+.TP
+.B ID
+Unique task UUID.
+.UNINDENT
+.SS Options
+.INDENT 0.0
+.TP
+.B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
+Time in seconds to wait between polling (default: 5).
+.TP
+.B \fB\-i\fP, \fB\-\-info\fP
+Print task info after completion.
+.sp
+See \fBtask info\fP command.
+.TP
+.B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
+Format task info ([normal], json, yaml).
+.TP
+.B \fB\-\-json\fP
+Format metadata output as JSON.
+.TP
+.B \fB\-\-yaml\fP
+Format metadata output as YAML.
+.TP
+.B \fB\-s\fP, \fB\-\-status\fP
+Print task exit status only.
+.TP
+.B \fB\-r\fP, \fB\-\-return\fP
+Use exit status from task.
+.UNINDENT
+.SH RUN USAGE
+.sp
+\fBhs\fP \fBrun\fP \fB[\-h]\fP \fB[\-n SEC]\fP \fB[\-t TAG [TAG...]]\fP \fB\-\-\fP \fBARGS...\fP
+.sp
+Submit individual task and wait for completion.
+.sp
+A database must be configured. The task will not run until scheduled
+by the server process. The <stdout> and <stderr> are written locally
+as if run locally, requires the client to have \fB\-\-capture\fP enabled.
+.sp
+See \fBinfo\fP and \fBwait\fP commands.
+.SS Arguments
+.INDENT 0.0
+.TP
+.B \fIARGS\fP\&...
+Command\-line arguments.
+.sp
+The full command\-line for some shell task.
+To use options, preface with leading \fB\-\-\fP\&.
+.UNINDENT
+.SS Options
+.INDENT 0.0
+.TP
+.B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
+Time in seconds to wait between polling (default: 5).
+.TP
+.B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP\&...
+Assign one or more tags.
+.sp
+Tags allow for user\-defined tracking of information related to individual tasks or large
+groups of tasks. They are defined with both a \fIkey\fP and \fIvalue\fP (e.g., \fB\-\-tag file:a\fP).
+The default \fIvalue\fP for tags is blank. When searching with tags, not specifying a \fIvalue\fP
+will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (including blank).
+.UNINDENT
+.SH LIST USAGE
+.INDENT 0.0
+.TP
+.B \fBhs\fP \fBlist\fP \fB[\-h]\fP
+\fB[FIELD [FIELD ...]]\fP \fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP
+\fB[\-\-order\-by FIELD [\-\-desc]]\fP \fB[\-\-count | \-\-limit NUM]\fP
+\fB[\-f FORMAT | \-\-json | \-\-csv]\fP \fB[\-d CHAR]\fP
+\fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP
+.UNINDENT
+.sp
+\fBhs\fP \fBlist\fP \fB\-\-fields\fP
+.sp
+\fBhs\fP \fBlist\fP \fB\-\-tag\-keys\fP
+.sp
+\fBhs\fP \fBlist\fP \fB\-\-tag\-values\fP \fBKEY\fP
+.sp
+Search tasks in the database.
+.sp
+A database must be configured.
+Specifying \fIFIELD\fP names defines what is included in the output
+(by default all fields are included).
+.sp
+This command maps directly to underlying SQL queries.
+.SS Arguments
+.INDENT 0.0
+.TP
+.B FIELD
+Select specific named fields to include in output.
+Default is to include all fields.
+.UNINDENT
+.SS Options
+.INDENT 0.0
+.TP
+.B \fB\-w\fP, \fB\-\-where\fP \fICOND...\fP
+List of conditional statements to filter results (e.g., \fB\-w \(aqduration >= 600\(aq\fP).
+.sp
+Operators include \fB==\fP, \fB!=\fP, \fB>=\fP, \fB<=\fP, \fB>\fP, \fB<\fP, \fB~\fP\&.
+The \fB~\fP operator applies a regular expression.
+.TP
+.B \fB\-t\fP, \fB\-\-with\-tag\fP \fITAG\fP\&...
+Filter on one or more tags. (e.g., \fB\-t special\fP or \fB\-t file:a\fP).
+.sp
+Leaving the \fIvalue\fP unspecified will return any task for which the \fIkey\fP exists.
+Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
+.TP
+.B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
+Order results by field. Optionally, in descending order.
+.TP
+.B \fB\-F\fP, \fB\-\-failed\fP
+Alias for \fB\-w \(aqexit_status != 0\(aq\fP\&.
+.TP
+.B \fB\-S\fP, \fB\-\-succeeded\fP
+Alias for \fB\-w \(aqexit_status == 0\(aq\fP\&.
+.TP
+.B \fB\-C\fP, \fB\-\-completed\fP
+Alias for \fB\-w \(aqexit_status != null\(aq\fP\&.
+.sp
+For backwards compatibility, \fB\-\-finished\fP is also valid.
+.TP
+.B \fB\-R\fP, \fB\-\-remaining\fP
+Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
+.TP
+.B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
+Specify output format (either \fBnormal\fP, \fBplain\fP, \fBtable\fP, \fBcsv\fP, \fBjson\fP).
+.sp
+Default is \fBnormal\fP for whole\-task output. If any \fIFIELD\fP names are given, output is
+formatted in simple \fBplain\fP text; use \fBcsv\fP for compliant output. The pretty\-printed
+\fBtable\fP formatting is good for presentation on wide screens.
+.sp
+See \fB\-\-csv\fP, \fB\-\-json\fP, and \fB\-\-delimiter\fP\&.
+.TP
+.B \fB\-\-csv\fP
+Format output as CSV. (Shorthand for \fB\-\-format=csv\fP).
+.TP
+.B \fB\-\-json\fP
+Format output as JSON. (Shorthand for \fB\-\-format=json\fP).
+.TP
+.B \fB\-d\fP, \fB\-\-delimiter\fP \fICHAR\fP
+Field seperator for plain/csv formats.
+.TP
+.B \fB\-l\fP, \fB\-\-limit\fP \fINUM\fP
+Limit the number of results.
+.TP
+.B \fB\-c\fP, \fB\-\-count\fP
+Show count of results.
+.TP
+.B \fB\-i\fP, \fB\-\-ignore\-partitions\fP
+Suppress auto\-union feature (SQLite only).
+.sp
+When using the \fIsqlite\fP provider, all databases matching the numbering pattern
+applied by \fBhs initdb \-\-rotate\fP will automatically be attached as partitions
+and used within a temporary view, making full task history searchable.
+.UNINDENT
+.SH UPDATE USAGE
+.sp
+\fBhs\fP \fBupdate\fP \fB[\-h]\fP \fBID\fP \fBFIELD\fP \fBVALUE\fP
+.INDENT 0.0
+.TP
+.B \fBhs\fP \fBupdate\fP
+\fB[ARG [ARG ...]]\fP
+\fB[\-\-cancel | \-\-revert | \-\-delete | \-\-remove\-tag KEY [KEY...]]\fP
+\fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP
+\fB[\-\-order\-by FIELD [\-\-desc] \-\-limit NUM]\fP
+\fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP
+\fB[\-\-no\-confirm]\fP
+.UNINDENT
+.sp
+Update tasks in the database.
+.sp
+Include any number of \fIFIELD=VALUE\fP or tag \fIKEY:VALUE\fP positional arguments.
+.sp
+The \fB\-w\fP/\fB\-\-where\fP and \fB\-t\fP/\fB\-\-with\-tag\fP operate just as in the search command.
+.sp
+Using \fB\-\-cancel\fP sets \fIschedule_time\fP to now and \fIexit_status\fP to \-1.
+.sp
+Using \fB\-\-revert\fP reverts everything as if the task was new again.
+.sp
+Using \fB\-\-delete\fP drops the row from the database entirely.
+.sp
+The legacy interface for updating a single task with the \fIID\fP, \fIFIELD\fP,
+and \fIVALUE\fP as positional arguments remains valid.
+.SS Arguments
+.INDENT 0.0
+.TP
+.B \fIARGS\fP\&...
+Assignment pairs for update.
+.UNINDENT
+.SS Options
+.INDENT 0.0
+.TP
+.B \fB\-\-cancel\fP
+Cancel specified tasks.
+.sp
+Cancelling a task means it will no longer be scheduled.
+This is done by setting the \fIschedule_time\fP to \fInow\fP and the \fIexit_status\fP to \-1.
+A task cannot be cancelled after it is sent to remote clients.
+.TP
+.B \fB\-\-revert\fP
+Revert specified tasks.
+.sp
+A reverted task retains its ID and submit info along with any tags.
+It will be as if it were new and never scheduled.
+.TP
+.B \fB\-\-delete\fP
+Delete specified tasks.
+.sp
+Deleting a task fully drops the record from the database.
+All task information will be lost and not recoverable.
+.TP
+.B \fB\-\-remove\-tag\fP \fITAG...\fP
+Strip the specified \fItag\fP from task records.
+.TP
+.B \fB\-w\fP, \fB\-\-where\fP \fICOND...\fP
+List of conditional statements to filter results (e.g., \fB\-w \(aqduration >= 600\(aq\fP).
+.sp
+Operators include \fB==\fP, \fB!=\fP, \fB>=\fP, \fB<=\fP, \fB>\fP, \fB<\fP, \fB~\fP\&.
+The \fB~\fP operator applies a regular expression.
+.TP
+.B \fB\-t\fP, \fB\-\-with\-tag\fP \fITAG\fP\&...
+Filter on one or more tags. (e.g., \fB\-t special\fP or \fB\-t file:a\fP).
+.sp
+Leaving the \fIvalue\fP unspecified will return any task for which the \fIkey\fP exists.
+Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
+.TP
+.B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
+Order results by field. Optionally, in descending order.
+.sp
+When used in an update command, a \fB\-\-limit\fP is required.
+For example, to delete the most recently submitted task,
+\fB\-\-order\-by submit_time \-\-desc \-\-limit 1\fP\&.
+.TP
+.B \fB\-l\fP, \fB\-\-limit\fP \fINUM\fP
+Limit the number of results.
+.TP
+.B \fB\-F\fP, \fB\-\-failed\fP
+Alias for \fB\-w \(aqexit_status != 0\(aq\fP\&.
+.TP
+.B \fB\-S\fP, \fB\-\-succeeded\fP
+Alias for \fB\-w \(aqexit_status == 0\(aq\fP\&.
+.TP
+.B \fB\-C\fP, \fB\-\-completed\fP
+Alias for \fB\-w \(aqexit_status != null\(aq\fP\&.
+.TP
+.B \fB\-R\fP, \fB\-\-remaining\fP
+Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
+.TP
+.B \fB\-f\fP, \fB\-\-no\-confirm\fP
+Do not ask for confirmation.
+.sp
+The program first checks the number of affected tasks.
+The user must confirm the update interactively unless provided with
+\fB\-\-no\-confirm\fP\&.
+.UNINDENT
+.SS Legacy Mode
+.sp
+In previous releases of the software the update command had the following signature.
+Executing the command with these three positional arguments is still valid.
+.INDENT 0.0
+.TP
+.B ID
+Unique UUID.
+.TP
+.B FIELD
+Task field name (e.g., \(dqargs\(dq).
+.TP
+.B VALUE
+New value.
+.sp
+Use \fBkey:value\fP notation for tags.
+Updating \fBtag\fP will add or update any pre\-existing tag with that \fBkey\fP\&.
 .UNINDENT
 .SH CONFIG GET USAGE
 .INDENT 0.0
@@ -853,355 +1223,6 @@ Path to variable.
 .TP
 .B \fB\-\-site\fP
 Output originating site name only.
-.UNINDENT
-.SH TASK SUBMIT USAGE
-.sp
-\fBhs\fP \fBtask\fP \fBsubmit\fP \fB[\-h]\fP \fB[\-t TAG [TAG...]]\fP \fB\-\-\fP \fBARGS...\fP
-.sp
-Submit individual task to the database.
-.sp
-A database must be configured. The task will not run until scheduled
-by the server process. The task UUID will be printed to standard out.
-.sp
-See \fBtask info\fP command.
-.SS Arguments
-.INDENT 0.0
-.TP
-.B ARGS...
-Command\-line arguments.
-.sp
-The full command\-line for some shell task.
-To use options, preface with leading \fB\-\-\fP\&.
-.UNINDENT
-.SS Options
-.INDENT 0.0
-.TP
-.B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP\&...
-Assign one or more tags.
-.sp
-Tags allow for user\-defined tracking of information related to individual tasks or large
-groups of tasks. They are defined with both a \fIkey\fP and \fIvalue\fP (e.g., \fB\-\-tag file:a\fP).
-The default \fIvalue\fP for tags is blank. When searching with tags, not specifying a \fIvalue\fP
-will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (including blank).
-.UNINDENT
-.SH TASK INFO USAGE
-.INDENT 0.0
-.TP
-.B \fBhs\fP \fBtask\fP \fBinfo\fP \fB[\-h]\fP
-\fBID\fP \fB[\-\-stdout | \-\-stderr | \-x FIELD]\fP \fB[\-f FORMAT]\fP
-.UNINDENT
-.sp
-Get metadata and/or task outputs.
-.sp
-Query for the full metadata on task by ID.
-Extract a specific field using \fB\-x\fP/\fB\-\-extract\fP\&.
-.sp
-Alternatively, dump the captured standard output or errors
-from the finished task (if captured). These files are written
-on the client host and synced with SFTP if necessary.
-.SS Arguments
-.INDENT 0.0
-.TP
-.B ID
-Unique task UUID.
-.UNINDENT
-.SS Options
-.INDENT 0.0
-.TP
-.B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Format task info ([normal], json, yaml).
-.TP
-.B \fB\-\-json\fP
-Format metadata output as JSON.
-.TP
-.B \fB\-\-yaml\fP
-Format metadata output as YAML.
-.TP
-.B \fB\-x\fP, \fB\-\-extract\fP \fIFIELD\fP
-Print this field only (e.g., \fB\-x submit_time\fP).
-.TP
-.B \fB\-\-stdout\fP
-Print <stdout> of task if captured, fetch from client if necessary.
-.TP
-.B \fB\-\-stderr\fP
-Print <stderr> of task if captured, fetch from client if necessary.
-.UNINDENT
-.SH TASK WAIT USAGE
-.INDENT 0.0
-.TP
-.B \fBhs\fP \fBtask\fP \fBwait\fP \fB[\-h]\fP
-\fBID\fP \fB[\-n SEC]\fP \fB[\-\-info [\-f FORMAT] | \-\-status | \-\-return]\fP
-.UNINDENT
-.sp
-Wait for task to complete.
-.sp
-Poll the database periodically for the completion status
-of the task. Block until completed.
-.sp
-Optionally, print task metadata after completion.
-.SS Arguments
-.INDENT 0.0
-.TP
-.B ID
-Unique task UUID.
-.UNINDENT
-.SS Options
-.INDENT 0.0
-.TP
-.B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
-Time in seconds to wait between polling (default: 5).
-.TP
-.B \fB\-i\fP, \fB\-\-info\fP
-Print task info after completion.
-.sp
-See \fBtask info\fP command.
-.TP
-.B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Format task info ([normal], json, yaml).
-.TP
-.B \fB\-\-json\fP
-Format metadata output as JSON.
-.TP
-.B \fB\-\-yaml\fP
-Format metadata output as YAML.
-.TP
-.B \fB\-s\fP, \fB\-\-status\fP
-Print task exit status only.
-.TP
-.B \fB\-r\fP, \fB\-\-return\fP
-Use exit status from task.
-.UNINDENT
-.SH TASK RUN USAGE
-.sp
-\fBhs\fP \fBtask\fP \fBrun\fP \fB[\-h]\fP \fB[\-n SEC]\fP \fB[\-t TAG [TAG...]]\fP \fB\-\-\fP \fBARGS...\fP
-.sp
-Submit individual task and wait for completion.
-.sp
-A database must be configured. The task will not run until scheduled
-by the server process. The <stdout> and <stderr> are written locally
-as if run locally, requires the client to have \fB\-\-capture\fP enabled.
-.sp
-See \fBtask info\fP and \fBtask wait\fP commands.
-.SS Arguments
-.INDENT 0.0
-.TP
-.B ARGS...
-Command\-line arguments.
-.sp
-The full command\-line for some shell task.
-To use options, preface with leading \fB\-\-\fP\&.
-.UNINDENT
-.SS Options
-.INDENT 0.0
-.TP
-.B \fB\-n\fP, \fB\-\-interval\fP \fISEC\fP
-Time in seconds to wait between polling (default: 5).
-.TP
-.B \fB\-t\fP, \fB\-\-tag\fP \fITAG\fP\&...
-Assign one or more tags.
-.sp
-Tags allow for user\-defined tracking of information related to individual tasks or large
-groups of tasks. They are defined with both a \fIkey\fP and \fIvalue\fP (e.g., \fB\-\-tag file:a\fP).
-The default \fIvalue\fP for tags is blank. When searching with tags, not specifying a \fIvalue\fP
-will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (including blank).
-.UNINDENT
-.SH TASK SEARCH USAGE
-.INDENT 0.0
-.TP
-.B \fBhs\fP \fBtask\fP \fBsearch\fP \fB[\-h]\fP
-\fB[FIELD [FIELD ...]]\fP \fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP
-\fB[\-\-order\-by FIELD [\-\-desc]]\fP \fB[\-\-count | \-\-limit NUM]\fP
-\fB[\-f FORMAT | \-\-json | \-\-csv]\fP \fB[\-d CHAR]\fP
-\fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP
-.UNINDENT
-.sp
-Search for tasks in database.
-.sp
-A database must be configured.
-Specifying \fIFIELD\fP names defines what is included in the output
-(by default all fields are included).
-.sp
-This command maps directly to underlying SQL queries.
-.SS Arguments
-.INDENT 0.0
-.TP
-.B FIELD
-Select specific named fields to include in output.
-Default is to include all fields.
-.UNINDENT
-.SS Options
-.INDENT 0.0
-.TP
-.B \fB\-w\fP, \fB\-\-where\fP \fICOND...\fP
-List of conditional statements to filter results (e.g., \fB\-w \(aqduration >= 600\(aq\fP).
-.sp
-Operators include \fB==\fP, \fB!=\fP, \fB>=\fP, \fB<=\fP, \fB>\fP, \fB<\fP, \fB~\fP\&.
-The \fB~\fP operator applies a regular expression.
-.TP
-.B \fB\-t\fP, \fB\-\-with\-tag\fP \fITAG\fP\&...
-Filter on one or more tags. (e.g., \fB\-t special\fP or \fB\-t file:a\fP).
-.sp
-Leaving the \fIvalue\fP unspecified will return any task for which the \fIkey\fP exists.
-Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
-.TP
-.B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
-Order results by field. Optionally, in descending order.
-.TP
-.B \fB\-F\fP, \fB\-\-failed\fP
-Alias for \fB\-w \(aqexit_status != 0\(aq\fP\&.
-.TP
-.B \fB\-S\fP, \fB\-\-succeeded\fP
-Alias for \fB\-w \(aqexit_status == 0\(aq\fP\&.
-.TP
-.B \fB\-C\fP, \fB\-\-completed\fP
-Alias for \fB\-w \(aqexit_status != null\(aq\fP\&.
-.sp
-For backwards compatibility, \fB\-\-finished\fP is also valid.
-.TP
-.B \fB\-R\fP, \fB\-\-remaining\fP
-Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
-.TP
-.B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Specify output format (either \fBnormal\fP, \fBplain\fP, \fBtable\fP, \fBcsv\fP, \fBjson\fP).
-.sp
-Default is \fBnormal\fP for whole\-task output. If any \fIFIELD\fP names are given, output is
-formatted in simple \fBplain\fP text; use \fBcsv\fP for compliant output. The pretty\-printed
-\fBtable\fP formatting is good for presentation on wide screens.
-.sp
-See \fB\-\-csv\fP, \fB\-\-json\fP, and \fB\-\-delimiter\fP\&.
-.TP
-.B \fB\-\-csv\fP
-Format output as CSV. (Shorthand for \fB\-\-format=csv\fP).
-.TP
-.B \fB\-\-json\fP
-Format output as JSON. (Shorthand for \fB\-\-format=json\fP).
-.TP
-.B \fB\-d\fP, \fB\-\-delimiter\fP \fICHAR\fP
-Field seperator for plain/csv formats.
-.TP
-.B \fB\-l\fP, \fB\-\-limit\fP \fINUM\fP
-Limit the number of results.
-.TP
-.B \fB\-c\fP, \fB\-\-count\fP
-Show count of results.
-.UNINDENT
-.SH TASK UPDATE USAGE
-.sp
-\fBhs\fP \fBtask\fP \fBupdate\fP \fB[\-h]\fP \fBID\fP \fBFIELD\fP \fBVALUE\fP
-.INDENT 0.0
-.TP
-.B \fBhs\fP \fBtask\fP \fBupdate\fP
-\fB[ARG [ARG ...]]\fP
-\fB[\-\-cancel | \-\-revert | \-\-delete | \-\-remove\-tag KEY [KEY...]]\fP
-\fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP
-\fB[\-\-order\-by FIELD [\-\-desc] \-\-limit NUM]\fP
-\fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP
-\fB[\-\-no\-confirm]\fP
-.UNINDENT
-.sp
-Update task metadata.
-.sp
-Include any number of \fIFIELD=VALUE\fP or tag \fIKEY:VALUE\fP positional arguments.
-.sp
-The \fB\-w\fP/\fB\-\-where\fP and \fB\-t\fP/\fB\-\-with\-tag\fP operate just as in the search command.
-.sp
-Using \fB\-\-cancel\fP sets \fIschedule_time\fP to now and \fIexit_status\fP to \-1.
-.sp
-Using \fB\-\-revert\fP reverts everything as if the task was new again.
-.sp
-Using \fB\-\-delete\fP drops the row from the database entirely.
-.sp
-The legacy interface for updating a single task with the \fIID\fP, \fIFIELD\fP,
-and \fIVALUE\fP as positional arguments remains valid.
-.SS Arguments
-.INDENT 0.0
-.TP
-.B ARGS...
-Assignment pairs for update.
-.UNINDENT
-.SS Options
-.INDENT 0.0
-.TP
-.B \fB\-\-cancel\fP
-Cancel specified tasks.
-.sp
-Cancelling a task means it will no longer be scheduled.
-This is done by setting the \fIschedule_time\fP to \fInow\fP and the \fIexit_status\fP to \-1.
-A task cannot be cancelled after it is sent to remote clients.
-.TP
-.B \fB\-\-revert\fP
-Revert specified tasks.
-.sp
-A reverted task retains its ID and submit info along with any tags.
-It will be as if it were new and never scheduled.
-.TP
-.B \fB\-\-delete\fP
-Delete specified tasks.
-.sp
-Deleting a task fully drops the record from the database.
-All task information will be lost and not recoverable.
-.TP
-.B \fB\-\-remove\-tag\fP \fITAG...\fP
-Strip the specified \fItag\fP from task records.
-.TP
-.B \fB\-w\fP, \fB\-\-where\fP \fICOND...\fP
-List of conditional statements to filter results (e.g., \fB\-w \(aqduration >= 600\(aq\fP).
-.sp
-Operators include \fB==\fP, \fB!=\fP, \fB>=\fP, \fB<=\fP, \fB>\fP, \fB<\fP, \fB~\fP\&.
-The \fB~\fP operator applies a regular expression.
-.TP
-.B \fB\-t\fP, \fB\-\-with\-tag\fP \fITAG\fP\&...
-Filter on one or more tags. (e.g., \fB\-t special\fP or \fB\-t file:a\fP).
-.sp
-Leaving the \fIvalue\fP unspecified will return any task for which the \fIkey\fP exists.
-Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
-.TP
-.B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
-Order results by field. Optionally, in descending order.
-.sp
-When used in an update command, a \fB\-\-limit\fP is required.
-For example, to delete the most recently submitted task,
-\fB\-\-order\-by submit_time \-\-desc \-\-limit 1\fP\&.
-.TP
-.B \fB\-l\fP, \fB\-\-limit\fP \fINUM\fP
-Limit the number of results.
-.TP
-.B \fB\-F\fP, \fB\-\-failed\fP
-Alias for \fB\-w \(aqexit_status != 0\(aq\fP\&.
-.TP
-.B \fB\-S\fP, \fB\-\-succeeded\fP
-Alias for \fB\-w \(aqexit_status == 0\(aq\fP\&.
-.TP
-.B \fB\-C\fP, \fB\-\-completed\fP
-Alias for \fB\-w \(aqexit_status != null\(aq\fP\&.
-.TP
-.B \fB\-R\fP, \fB\-\-remaining\fP
-Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
-.TP
-.B \fB\-f\fP, \fB\-\-no\-confirm\fP
-Do not ask for confirmation.
-.sp
-The program first checks the number of affected tasks.
-The user must confirm the update interactively unless provided with
-\fB\-\-no\-confirm\fP\&.
-.UNINDENT
-.SS Legacy Mode
-.sp
-In previous releases of the software the update command had the following signature.
-Executing the command with these three positional arguments is still valid.
-.INDENT 0.0
-.TP
-.B ID
-Unique UUID.
-.TP
-.B FIELD
-Task field name (e.g., \(dqargs\(dq).
-.TP
-.B VALUE
-New value.
-.sp
-Use \fBkey:value\fP notation for tasks.
-Updating \fBtag\fP will add or update any pre\-existing tag with that \fBkey\fP\&.
 .UNINDENT
 .SH TEMPLATES
 .sp
@@ -1339,8 +1360,9 @@ and command\-line options.
 .sp
 In order of precedence (lowest to highest), three files are loaded:
 .TS
-box center;
-l|l|l.
+center;
+|l|l|l|.
+_
 T{
 Level
 T}	T{
@@ -1372,13 +1394,14 @@ T}	T{
 T}	T{
 \fB\&./.hypershell/config.toml\fP
 T}
+_
 .TE
 .nf
 
 .fi
 .sp
 .sp
-The \X'tty: link https://toml.io'\fI\%TOML\fP\X'tty: link' format is modern and minimal.
+The \fI\%TOML\fP format is modern and minimal.
 .sp
 Every configurable option can be set in one of these files. Further, every option can
 also be set by an environment variable, where the name aligns to the path
@@ -1388,9 +1411,11 @@ For example, set the logging level at the user level with a command:
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.EX
+.nf
+.ft C
 $ hs config set logging.level info \-\-user
-.EE
+.ft P
+.fi
 .UNINDENT
 .UNINDENT
 .sp
@@ -1398,13 +1423,15 @@ The file should now look something like this:
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.EX
+.nf
+.ft C
 # File automatically created on 2022\-07\-02 11:57:29.332993
 # Settings here are merged automatically with defaults and environment variables
 
 [logging]
 level = \(dqinfo\(dq
-.EE
+.ft P
+.fi
 .UNINDENT
 .UNINDENT
 .sp
@@ -1413,9 +1440,11 @@ would be equivalent:
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.EX
+.nf
+.ft C
 $ export HYPERSHELL_LOGGING_LEVEL=INFO
-.EE
+.ft P
+.fi
 .UNINDENT
 .UNINDENT
 .sp
@@ -1426,7 +1455,8 @@ obfuscate sensitive information, such as database connection details.
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.EX
+.nf
+.ft C
 # File automatically created on 2022\-07\-02 11:57:29.332993
 # Settings here are merged automatically with defaults and environment variables
 
@@ -1439,7 +1469,8 @@ database = \(dqhypershell\(dq
 host = \(dqmy.instance.university.edu\(dq
 user = \(dqme\(dq
 password_eval = \(dqpass hypershell/database/password\(dq  # Decrypt using GNU Pass
-.EE
+.ft P
+.fi
 .UNINDENT
 .UNINDENT
 .SS Parameter Reference
@@ -1474,7 +1505,7 @@ Date/time format, standard codes apply (default: \fB\(aq%Y\-%m\-%d %H:%M:%S\(aq\
 Log message format.
 .sp
 Default set by the \(dqdefault\(dq \fBlogging.style\fP\&.
-See the \X'tty: link https://docs.python.org/3/library/logging.html#logrecord-attributes'\fI\%available attributes\fP\X'tty: link'
+See the \fI\%available attributes\fP
 defined by the underlying Python logging interface.
 .sp
 Additional attributes provided beyond the standard include \fIapp_id\fP, \fIhostname\fP, \fIhostname_short\fP,
@@ -1535,6 +1566,10 @@ Special parameter enables verbose logging of all database transactions.
 .B \fB[connection_args]\fP
 Specify additional connection details for the underlying SQL dialect provider,
 e.g., \fBsqlite3\fP or \fBpsycopg2\fP\&.
+.TP
+.B \fB[pragmas]\fP
+Specify one or more pragmas to apply to database connections (SQLite only).
+For example \fBpragmas = { journal_mode = \(dqwal\(dq }\fP to enable WAL\-mode.
 .TP
 .B \fB*\fP
 Any additional arguments are forwarded to the provider, e.g., \fBencoding = \(aqutf\-8\(aq\fP\&.
@@ -1787,7 +1822,7 @@ Rich text display and output parameters.
 .B \fB\&.theme\fP
 Color scheme to use by default in output (such as with \fBtask info\fP and \fBtask search\fP).
 .sp
-This option is passed to the \X'tty: link https://rich.readthedocs.io/en/latest/'\fI\%rich\fP\X'tty: link' library.
+This option is passed to the \fI\%rich\fP library.
 .UNINDENT
 .TP
 .B \fB[export]\fP
@@ -1817,10 +1852,12 @@ SQLite only needs the local file path.
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.EX
+.nf
+.ft C
 [database]
 file = \(dq/var/lib/hypershell/main.db\(dq
-.EE
+.ft P
+.fi
 .UNINDENT
 .UNINDENT
 .sp
@@ -1831,11 +1868,13 @@ local account authentication simply needs to know the database name.
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.EX
+.nf
+.ft C
 [database]
 provider = \(dqpostgres\(dq
 database = \(dqhypershell\(dq
-.EE
+.ft P
+.fi
 .UNINDENT
 .UNINDENT
 .sp
@@ -1958,7 +1997,8 @@ section of your configuration file(s); e.g.,
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.EX
+.nf
+.ft C
 # File automatically created on 2022\-07\-02 11:57:29.332993
 # Settings here are merged automatically with defaults and environment variables
 
@@ -1970,7 +2010,8 @@ level = \(dqinfo\(dq
 [export]
 foo = \(dqvalue\(dq
 path = [\(dq/some/bin\(dq, \(dq/some/other/bin\(dq]
-.EE
+.ft P
+.fi
 .UNINDENT
 .UNINDENT
 .sp
@@ -1980,7 +2021,7 @@ the use of colors in all console output.
 .TP
 .B \fBNO_COLOR\fP
 If this variable is set to anything but a blank string, all colors are disabled.
-See \X'tty: link https://no-color.org'\fI\%no\-color.org\fP\X'tty: link' for details.
+See \fI\%no\-color.org\fP for details.
 .TP
 .B \fBFORCE_COLOR\fP
 If this variable is set to anything but a blank string, colors will be enabled
