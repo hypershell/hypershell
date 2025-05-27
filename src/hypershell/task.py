@@ -44,7 +44,7 @@ from hypershell.core.types import smart_coerce, JSONValue, to_json_type
 from hypershell.core.pretty_print import format_tag, format_json
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, to_json_type, JSON
+from hypershell.data.model import Task, JSON
 from hypershell.data import ensuredb
 
 # Public interface
@@ -660,7 +660,7 @@ class TaskSearchApp(Application, SearchableMixin):
         for name in self.field_names:
             table.add_column(name)
         for record in results:
-            table.add_row(*[json.dumps(to_json_type(value)).strip('"') for value in record])
+            table.add_row(*[format_json(value) for value in record])
         Console().print(table)
 
     @staticmethod
@@ -673,7 +673,7 @@ class TaskSearchApp(Application, SearchableMixin):
     def print_plain(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print plain text output with given field names, one task per line."""
         for record in results:
-            data = [json.dumps(to_json_type(value)).strip('"') for value in record]
+            data = [format_json(value) for value in record]
             print(self.output_delimiter.join(map(str, data)))
 
     def print_json(self: TaskSearchApp, results: List[Tuple]) -> None:
