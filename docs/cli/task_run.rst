@@ -1,7 +1,7 @@
 .. _cli_task_run:
 
-Task Run
-========
+Run
+===
 
 Usage
 -----

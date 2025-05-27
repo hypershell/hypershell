@@ -7,25 +7,25 @@ Synopsis
 hs [-h] [-v] [--citation] ...
     Top-level command. Show help, version, or citation info.
 
-hs cluster [-h] *FILE* [--ssh *HOST*... | --mpi | --launcher *ARGS*...] ...
+hs cluster [-h] FILE [--ssh HOST... | --mpi | --launcher ARGS...] ...
     Run managed cluster.
 
-hs server [-h] *FILE* ...
+hs server [-h] FILE ...
     Run stand-alone server.
 
 hs client [-h] ...
     Run stand-alone client.
 
-hs submit [-h] *FILE* ...
+hs submit [-h] [ARGS... | -f FILE] ...
     Submit tasks from file.
 
 hs initdb [-h] [--truncate | --vacuum | --rotate | --backup PATH] [--yes]
     Initialize database.
 
-hs info [-h] *ID* [--stdout | --stderr | -x FIELD] [-f FORMAT]
+hs info [-h] ID [--stdout | --stderr | -x FIELD] [-f FORMAT]
     Get metadata and/or task outputs.
 
-hs wait [-h] *ID* [-n SEC] [--info [-f FORMAT] | --status | --return]
+hs wait [-h] ID [-n SEC] [--info [-f FORMAT] | --status | --return]
     Wait for task to complete.
 
 hs run [-h] [-n SEC] [-t TAG...] -- ARGS...

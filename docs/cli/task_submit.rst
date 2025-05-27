@@ -1,7 +1,7 @@
 .. _cli_task_submit:
 
-Task Submit
-===========
+Submit
+======
 
 Usage
 -----
