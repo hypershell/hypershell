@@ -57,7 +57,7 @@ dev = [
     "sphinx-autobuild>=2024.2.4"
 ]
 docs = [
-    "sphinx>=7.2.6",
+    "sphinx>=6.0,<8.0",
     "sphinx-sitemap>=2.5.1",
     "sphinx-autobuild>=2024.2.4",
     "sphinx-copybutton>=0.5.2",
