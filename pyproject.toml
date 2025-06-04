@@ -1,6 +1,6 @@
 [project]
 name = "hypershell"
-version = "2.7.0"
+version = "2.7.1"
 description = "A cross-platform, high-throughput computing utility for processing shell commands over a distributed, asynchronous queue."
 readme = "README.rst"
 license = "Apache-2.0"
