@@ -766,9 +766,8 @@ class SubmitApp(Application):
     source: IO | List[str] | None = None
     task_args: List[str] = []
     task_file: str = None
-    input_interface = interface.add_mutually_exclusive_group()
-    input_interface.add_argument('task_args', nargs='*')
-    input_interface.add_argument('-f', '--task-file', default=task_file)
+    interface.add_argument('task_args', nargs='*')
+    interface.add_argument('-f', '--task-file', default=task_file)
 
     bundlesize: int = config.submit.bundlesize
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
@@ -833,6 +832,8 @@ class SubmitApp(Application):
 
     def check_source(self: SubmitApp) -> None:
         """Determine task submission mode."""
+        if self.task_args and self.task_file:
+            raise ArgumentError(f'Cannot specify both -f/--task-file and positional arguments')
         if self.task_file == '-':
             log.debug(f'Submitted from <stdin> (explicit)')
             self.source = sys.stdin
