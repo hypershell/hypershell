@@ -31,7 +31,12 @@ from hypershell.config import ConfigApp
 from hypershell.data import InitDBApp
 
 # Public interface
-__all__ = ['HyperShellApp', 'main', '__version__']
+__all__ = [
+    'HyperShellApp', 'main', '__version__', '__citation__',
+    'APP_VERSION', 'APP_USAGE', 'APP_HELP',
+    'SubmitApp', 'ServerApp', 'ClientApp', 'InitDBApp', 'ConfigApp',
+    'TaskGroupApp', 'TaskInfoApp', 'TaskWaitApp', 'TaskRunApp', 'TaskSearchApp', 'TaskUpdateApp',
+]
 
 # project metadata
 __version__     = get_version('hypershell')
