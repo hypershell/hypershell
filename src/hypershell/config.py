@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Any
+from typing import Any, Final
 
 # Standard libs
 import os
@@ -386,16 +386,16 @@ class ConfigWhichApp(Application):
 
 
 if os.name == 'nt':
-    CONFIG_PATH_INFO = f"""\
+    CONFIG_PATH_INFO: Final[str] = f"""\
   --system         %ProgramData%\\HyperShell\\Config.toml
   --user           %AppData%\\HyperShell\\Config.toml
-  --local          {path.local.config}
+  --local          {path.local.config}\
 """
 else:
-    CONFIG_PATH_INFO = f"""\
+    CONFIG_PATH_INFO: Final[str] = f"""\
   --system         /etc/hypershell.toml
   --user           ~/.hypershell/config.toml
-  --local          {path.local.config}
+  --local          {path.local.config}\
 """
 
 
