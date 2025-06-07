@@ -56,7 +56,7 @@ will manage tasks entirely within memory.
 
     .. code-block:: shell
 
-        seq 4 | hs cluster -t 'echo {}'
+        seq 4 | hsx -t 'echo {}'
 
     .. details:: Output
 
@@ -81,7 +81,7 @@ see additional detail about what is running, where, and when.
 
     .. code-block:: shell
 
-        hs cluster tasks.in -N16 --ssh-group=xyz --capture
+        hsx tasks.in -N16 --ssh-group=xyz --capture
 
     .. details:: Logs
 
@@ -107,7 +107,7 @@ example we stagger the launch process over one minute.
 
     .. code-block:: shell
 
-        hs cluster tasks.in -N128 -b128 --launcher=srun --max-retries=2 --delay-start=-60 >task.out
+        hsx tasks.in -N128 -b128 --launcher=srun --max-retries=2 --delay-start=-60 >task.out
 
     .. details:: Logs
 
@@ -175,7 +175,7 @@ expansion. Many meta-patterns are supported (see full overview of :ref:`template
 
     .. code-block:: shell
 
-        hs cluster tasks.in -N12 -t './some_program.py {} >outputs/{/-}.out'
+        hsx tasks.in -N12 -t './some_program.py {} >outputs/{/-}.out'
 
 Capturing `stdout` and `stderr` is supported directly in fact with the ``--capture`` option.
 See the full documentation for environment variables under :ref:`configuration <config>`.
