@@ -26,7 +26,7 @@ from rich.console import Console
 from rich.syntax import Syntax
 
 # Internal libs
-from hypershell.core.platform import path
+from hypershell.core.platform import path, default_path
 from hypershell.core.types import smart_coerce
 from hypershell.core.logging import Logger
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -386,16 +386,24 @@ class ConfigWhichApp(Application):
 
 
 if os.name == 'nt':
+    CONFIG_PATH_SYSTEM: Final[str] = '%ProgramData%\\HyperShell\\Config.toml'
+    CONFIG_PATH_USER: Final[str] = '%AppData%\\HyperShell\\Config.toml'
+    CONFIG_PATH_LOCAL: Final[str] = path.local.config
+    CONFIG_PATH_DEFAULT: Final[str] = default_path.config
     CONFIG_PATH_INFO: Final[str] = f"""\
-  --system         %ProgramData%\\HyperShell\\Config.toml
-  --user           %AppData%\\HyperShell\\Config.toml
-  --local          {path.local.config}\
+  --system         {CONFIG_PATH_SYSTEM}
+  --user           {CONFIG_PATH_USER}
+  --local          {CONFIG_PATH_LOCAL}\
 """
 else:
+    CONFIG_PATH_SYSTEM: Final[str] = '/etc/hypershell.toml'
+    CONFIG_PATH_USER: Final[str] = '~/.hypershell/config.toml'
+    CONFIG_PATH_LOCAL: Final[str] = path.local.config
+    CONFIG_PATH_DEFAULT: Final[str] = default_path.config
     CONFIG_PATH_INFO: Final[str] = f"""\
-  --system         /etc/hypershell.toml
-  --user           ~/.hypershell/config.toml
-  --local          {path.local.config}\
+  --system         {CONFIG_PATH_SYSTEM}
+  --user           {CONFIG_PATH_USER}
+  --local          {CONFIG_PATH_LOCAL}\
 """
 
 
@@ -421,10 +429,12 @@ Commands:
   which            {ConfigWhichApp.__doc__}
 
 Options:
-  -h, --help       Show this message and exit.
-
-Files:
-{CONFIG_PATH_INFO}\
+      --files      Show all file paths for config.
+      --system     Show system path for config.
+      --user       Show user path for config.
+      --local      Show local path for config.
+      --default    Show default-site path for config.
+  -h, --help       Show this message and exit.\
 """
 
 
@@ -433,6 +443,11 @@ class ConfigApp(ApplicationGroup):
 
     interface = Interface(PROGRAM, USAGE, HELP)
     interface.add_argument('command')
+    interface.add_argument('--files', action='version', version=CONFIG_PATH_INFO)
+    interface.add_argument('--system', action='version', version=CONFIG_PATH_SYSTEM)
+    interface.add_argument('--user', action='version', version=CONFIG_PATH_USER)
+    interface.add_argument('--local', action='version', version=CONFIG_PATH_LOCAL)
+    interface.add_argument('--default', action='version', version=CONFIG_PATH_DEFAULT)
 
     commands = {'get': ConfigGetApp,
                 'set': ConfigSetApp,
