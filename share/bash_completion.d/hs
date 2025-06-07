@@ -52,7 +52,7 @@ function _hs_initdb ()
 
 function _hs_config ()
 {
-	local all_opts="get set edit which -h --help"
+	local all_opts="get set edit which -h --help --system --user --local"
 
 	local i=1 opt= subcmd_i=
 	while [[ ${i} -lt ${COMP_CWORD} ]]; do

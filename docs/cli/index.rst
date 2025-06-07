@@ -27,6 +27,7 @@ Subcommands
     run <task_run>
     list <task_search>
     update <task_update>
+    config <config>
     config get <config_get>
     config set <config_set>
     config edit <config_edit>
