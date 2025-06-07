@@ -6,26 +6,19 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Final, Dict, List, Tuple
-
-# Standard libs
-from subprocess import run, PIPE
+from typing import Final, Dict
 
 # External libs
-from pytest import mark, CaptureFixture
+from pytest import mark
 from cmdkit.app import exit_status
 
 # Internal libs
+from tests import main
 from hypershell import (
     APP_VERSION, APP_USAGE, APP_HELP, __citation__,
-    SubmitApp, ServerApp, ClientApp, InitDBApp, ConfigApp, TaskGroupApp,
+    ClientApp, InitDBApp, ConfigApp, TaskGroupApp,
 )
 
-
-def main(argv: List[str]) -> Tuple[int, str, str]:
-    """Return stdout, stderr, and exit code of command-line interface."""
-    proc = run(argv, stdout=PIPE, stderr=PIPE)
-    return proc.returncode, proc.stdout.decode('utf-8').strip(), proc.stderr.decode('utf-8').strip()
 
 
 @mark.integration
@@ -63,44 +56,6 @@ def test_citation() -> None:
     rc, stdout, stderr = main(['hs', '--citation', ])
     assert rc == exit_status.success
     assert stdout == __citation__
-    assert stderr == ''
-
-
-@mark.integration
-def test_submit_usage() -> None:
-    """The 'hs submit' command prints usage statement without arguments."""
-    rc, stdout, stderr = main(['hs', 'submit', ])
-    assert rc == exit_status.usage
-    assert stdout == SubmitApp.interface.usage_text
-    assert stderr == ''
-
-
-@mark.integration
-@mark.parametrize('opt', ['-h', '--help'])
-def test_submit_help(opt: str) -> None:
-    """The 'hs submit' command prints help statement with -h, --help option."""
-    rc, stdout, stderr = main(['hs', 'submit', opt, ])
-    assert rc == exit_status.success
-    assert stdout == SubmitApp.interface.help_text
-    assert stderr == ''
-
-
-@mark.integration
-def test_server_usage() -> None:
-    """The 'hs server' command prints usage statement without arguments."""
-    rc, stdout, stderr = main(['hs', 'server', ])
-    assert rc == exit_status.usage
-    assert stdout == ServerApp.interface.usage_text
-    assert stderr == ''
-
-
-@mark.integration
-@mark.parametrize('opt', ['-h', '--help'])
-def test_server_help(opt: str) -> None:
-    """The 'hs server' command prints help statement with -h, --help option."""
-    rc, stdout, stderr = main(['hs', 'server', opt, ])
-    assert rc == exit_status.success
-    assert stdout == ServerApp.interface.help_text
     assert stderr == ''
 
 
