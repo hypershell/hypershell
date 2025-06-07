@@ -153,6 +153,7 @@ a few quality of life improvements, and a fix for SSH-mode.
     :hidden:
     :maxdepth: 1
 
+    20250504_2_7_0_release
     20250405_2_6_6_release
     20250215_2_6_5_release
     20241231_2_6_1_release
