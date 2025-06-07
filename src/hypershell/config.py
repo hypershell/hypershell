@@ -386,23 +386,19 @@ class ConfigWhichApp(Application):
 
 
 if os.name == 'nt':
-    CONFIG_PATH_INFO: Final[str] = f"""\
-  --system         %ProgramData%\\HyperShell\\Config.toml
-  --user           %AppData%\\HyperShell\\Config.toml
-  --local          {path.local.config}\
-"""
+    CONFIG_PATH_SYSTEM: Final[str] = '%ProgramData%\\HyperShell\\Config.toml'
+    CONFIG_PATH_USER: Final[str] = '%AppData%\\HyperShell\\Config.toml'
+    CONFIG_PATH_LOCAL: Final[str] = path.local.config
 else:
-    CONFIG_PATH_INFO: Final[str] = f"""\
-  --system         /etc/hypershell.toml
-  --user           ~/.hypershell/config.toml
-  --local          {path.local.config}\
-"""
+    CONFIG_PATH_SYSTEM: Final[str] = '/etc/hypershell.toml'
+    CONFIG_PATH_USER: Final[str] = '~/.hypershell/config.toml'
+    CONFIG_PATH_LOCAL: Final[str] = path.local.config
 
 
 PROGRAM = 'hs config'
 USAGE = f"""\
 Usage:
-  {PROGRAM} [-h]
+  {PROGRAM} [-h] [--system | --user | --local]
   {GET_SYNOPSIS}
   {SET_SYNOPSIS}
   {EDIT_SYNOPSIS}
@@ -421,10 +417,10 @@ Commands:
   which            {ConfigWhichApp.__doc__}
 
 Options:
-  -h, --help       Show this message and exit.
-
-Files:
-{CONFIG_PATH_INFO}\
+      --system     Show system-level config path.
+      --user       Show user-level config path.
+      --local      Show local-level config path.
+  -h, --help       Show this message and exit.\
 """
 
 
@@ -433,8 +429,13 @@ class ConfigApp(ApplicationGroup):
 
     interface = Interface(PROGRAM, USAGE, HELP)
     interface.add_argument('command')
+    interface.add_argument('--system', action='version', version=CONFIG_PATH_SYSTEM)
+    interface.add_argument('--user', action='version', version=CONFIG_PATH_USER)
+    interface.add_argument('--local', action='version', version=CONFIG_PATH_LOCAL)
 
-    commands = {'get': ConfigGetApp,
-                'set': ConfigSetApp,
-                'edit': ConfigEditApp,
-                'which': ConfigWhichApp, }
+    commands = {
+        'get': ConfigGetApp,
+        'set': ConfigSetApp,
+        'edit': ConfigEditApp,
+        'which': ConfigWhichApp,
+    }
