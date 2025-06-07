@@ -1,7 +1,7 @@
 FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-LABEL version="2.7.1"
+LABEL version="2.7.2"
 LABEL authors="glentner@purdue.edu"
 LABEL org.opencontainers.image.source="https://github.com/hypershell/hypershell"
 LABEL org.opencontainers.image.description="HyperShell Base Image"
