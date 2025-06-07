@@ -783,7 +783,7 @@ class SubmitApp(Application):
 
     tags: Dict[str, JSONValue] = {}
     taglist: List[str] = None
-    interface.add_argument('-t', '--tag', nargs='*', default=[], dest='taglist')
+    interface.add_argument('-t', '--tag', nargs='+', default=[], dest='taglist')
 
     exceptions = {
         **get_shared_exception_mapping(__name__)

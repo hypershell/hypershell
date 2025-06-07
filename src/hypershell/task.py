@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Task based operations."""
+"""Task-based operations."""
 
 
 # Type annotations
@@ -85,7 +85,7 @@ class TaskSubmitApp(Application):
 
     tags: Dict[str, JSONValue] = {}
     taglist: List[str] = []
-    interface.add_argument('-t', '--tag', nargs='*', dest='taglist')
+    interface.add_argument('-t', '--tag', nargs='+', dest='taglist')
 
     exceptions = {
         **get_shared_exception_mapping(__name__)
@@ -382,7 +382,7 @@ class TaskRunApp(Application):
     interface.add_argument('-n', '--interval', type=int, default=interval)
 
     taglist: List[str] = []
-    interface.add_argument('-t', '--tag', nargs='*', dest='taglist')
+    interface.add_argument('-t', '--tag', nargs='+', dest='taglist')
 
     exceptions = {
         **get_shared_exception_mapping(__name__)
@@ -549,10 +549,10 @@ class TaskSearchApp(Application, SearchableMixin):
     interface.add_argument('field_names', nargs='*', default=field_names)
 
     where_clauses: List[str] = None
-    interface.add_argument('-w', '--where', nargs='*', default=[], dest='where_clauses')
+    interface.add_argument('-w', '--where', nargs='+', default=[], dest='where_clauses')
 
     taglist: List[str] = None
-    interface.add_argument('-t', '--with-tag', nargs='*', default=[], dest='taglist')
+    interface.add_argument('-t', '--with-tag', nargs='+', default=[], dest='taglist')
 
     order_by: str = None
     order_desc: bool = False
@@ -815,10 +815,10 @@ class TaskUpdateApp(Application, SearchableMixin):
     field_names: List[str] = []
 
     where_clauses: List[str] = None
-    interface.add_argument('-w', '--where', nargs='*', default=[], dest='where_clauses')
+    interface.add_argument('-w', '--where', nargs='+', default=[], dest='where_clauses')
 
     taglist: List[str] = None
-    interface.add_argument('-t', '--with-tag', nargs='*', default=[], dest='taglist')
+    interface.add_argument('-t', '--with-tag', nargs='+', default=[], dest='taglist')
 
     order_by: str = None
     order_desc: bool = False
@@ -847,7 +847,7 @@ class TaskUpdateApp(Application, SearchableMixin):
     action_interface.add_argument('--delete', action='store_true', dest='delete_mode')
 
     remove_tag: List[str] = None
-    interface.add_argument('--remove-tag', nargs='*')
+    interface.add_argument('--remove-tag', nargs='+')
 
     no_confirm: bool = False
     interface.add_argument('-f', '--no-confirm', action='store_true')
