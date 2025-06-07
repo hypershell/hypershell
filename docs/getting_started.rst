@@ -13,7 +13,7 @@ the top-level entry point *script* on your `PATH`. The well-known `uv <https://d
 utility handles all of this nicely for unprivileged users installing for themselves.
 
 See the :ref:`installation <install>` guide for more options and additional notes and
-recommendations.
+recommendations, including package `extras` for PostgreSQL, UUIDv7, etc.
 
 
 .. tab:: uv
