@@ -258,7 +258,7 @@ class InitDBApp(Application):
             raise ArgumentError('Can only rotate SQLite')
         if self.backup_path and os.path.exists(self.backup_path):
             raise RuntimeError(f'Backup path already exists ({self.backup_path})')
-        if not sys.stdout.isatty():
+        if not sys.stdout.isatty() and not self.auto_confirm:
             raise RuntimeError('Non-interactive prompt cannot confirm (see --yes).')
 
     def confirm_action(self: InitDBApp, message: str) -> bool:
