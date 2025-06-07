@@ -3,6 +3,7 @@
 
 """Initialization and entry-point for console application."""
 
+
 # Type annotations
 from __future__ import annotations
 from typing import List
