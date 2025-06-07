@@ -15,9 +15,17 @@ Release v\ |release| (:ref:`Getting Started <getting_started>`)
     :target: https://www.python.org/downloads
     :alt: Python Versions
 
+.. image:: https://static.pepy.tech/badge/hypershell/month
+    :target: https://pypi.org/project/hypershell/
+    :alt: PyPI Monthly Downloads
+
 .. image:: https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg
     :target: https://www.contributor-covenant.org/version/2/1/code_of_conduct/
     :alt: Code of Conduct
+
+.. image:: https://github.com/hypershell/hypershell/actions/workflows/tests.yml/badge.svg
+    :target: https://github.com/hypershell/hypershell/actions/workflows/tests.yml
+    :alt: Tests
 
 |
 
