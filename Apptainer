@@ -3,7 +3,7 @@ From: python:3.13-slim
 Stage: final
 
 %labels
-  Version="2.7.0"
+  Version="2.7.1"
   Author="glentner@purdue.edu"
 
 %files
