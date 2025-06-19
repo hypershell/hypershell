@@ -31,4 +31,4 @@ RUN uv sync --frozen --all-packages --python 3.13
 
 USER hypershell
 ENTRYPOINT ["/opt/hypershell/bin/hs", "server"]
-CMD ["--forever"]
+CMD ["--forever", "--bind", "0.0.0.0"]
