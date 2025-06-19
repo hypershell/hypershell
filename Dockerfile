@@ -4,7 +4,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 LABEL version="2.7.2"
 LABEL authors="glentner@purdue.edu"
 LABEL org.opencontainers.image.source="https://github.com/hypershell/hypershell"
-LABEL org.opencontainers.image.description="HyperShell Base Image"
+LABEL org.opencontainers.image.description="HyperShell"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 RUN DEBIAN_FRONTEND=noninteractive \
