@@ -1167,6 +1167,8 @@ class ServerApp(Application):
         """Fail particular argument combinations."""
         if self.filepath and self.forever_mode:
             raise ArgumentError('Cannot specify both FILE and --forever')
+        if self.filepath and self.restart_mode:
+            raise ArgumentError('Cannot specify both FILE and --restart')
         if self.filepath is None and not self.forever_mode:
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.forever_mode:
