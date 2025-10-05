@@ -8,7 +8,7 @@ Release Notes (v2.8.0)
 The v2.8.0 release includes major features and improvements.
 
 - Local SQLite database enabled by default
-- New default logging level set to INFO
+- Default logging level set to INFO
 - New command-line argument checks
 
 -----
@@ -44,8 +44,8 @@ configuration provided by the user or system disables this new behavior of cours
 
 |
 
-New default logging level set to INFO
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Default logging level set to INFO
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Similar to the above change with the database enabled by default we have also updated the default
 logging level to ``INFO`` instead of ``WARNING``. It is probably never the case that users (particularly

@@ -72,7 +72,7 @@ default = Namespace({
 
     'logging': {
         'color': True,
-        'level': 'warning',
+        'level': 'info',
         'datefmt': '%Y-%m-%d %H:%M:%S',
         'style': DEFAULT_LOGGING_STYLE,
         **LOGGING_STYLES.get(DEFAULT_LOGGING_STYLE),
