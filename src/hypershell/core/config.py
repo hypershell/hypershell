@@ -62,8 +62,8 @@ LOGGING_STYLES = {
 }
 
 
-# environment variables and configuration files are automatically
-# depth-first merged with defaults
+# Environment variables and configuration files are automatically depth-first merged with defaults
+# A default value of 0 may mean "None" or "automatically chosen"
 default = Namespace({
 
     'database': {
@@ -107,6 +107,7 @@ default = Namespace({
         'bundlewait': 5,    # seconds to wait before returning regardless of size
         'heartrate': 10,    # seconds to wait between heartbeats
         'timeout': None,    # seconds to wait for bundle from server before shutting down
+        'ratelimit': 0,     # Maximum allowed tasks per second (no limit by default)
     },
 
     'ssh': {

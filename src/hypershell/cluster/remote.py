@@ -170,6 +170,10 @@ class RemoteCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
+        ratelimit (int, optional):
+            Maximum allowed tasks per second per client (default: none).
+            There is no limit on task throughput unless specified.
+
     Example:
         >>> from hypershell.cluster import RemoteCluster
         >>> cluster = RemoteCluster.new(
@@ -208,7 +212,8 @@ class RemoteCluster(Thread):
                  capture: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
-                 task_signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+                 task_signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: int = None) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
@@ -237,6 +242,8 @@ class RemoteCluster(Thread):
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
             client_args.extend(['-W', str(task_timeout)])
+        if ratelimit is not None:
+            client_args.extend(['-R', str(ratelimit)])
         self.client_argv = [
             *launcher, *launcher_args, remote_exe, 'client',
             '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),
@@ -608,6 +615,10 @@ class AutoScalingCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
+        ratelimit (int, optional):
+            Maximum allowed tasks per second per client (default: none).
+            There is no limit on task throughput unless specified.
+
         policy (str, optional):
             Autoscaling policy (either 'fixed' or 'dynamic').
             See :const:`~hypershell.cluster.remote.DEFAULT_AUTOSCALE_POLICY`
@@ -672,6 +683,7 @@ class AutoScalingCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: int = None,
                  policy: str = DEFAULT_AUTOSCALE_POLICY,
                  period: int = DEFAULT_AUTOSCALE_PERIOD,
                  factor: float = DEFAULT_AUTOSCALE_FACTOR,
@@ -696,6 +708,8 @@ class AutoScalingCluster(Thread):
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
             client_args.extend(['-W', str(task_timeout)])
+        if ratelimit is not None:
+            client_args.extend(['-R', str(ratelimit)])
         launcher.extend([
             *launcher_args, remote_exe, 'client',
             '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),

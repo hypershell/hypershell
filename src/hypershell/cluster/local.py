@@ -128,6 +128,10 @@ class LocalCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
+        ratelimit (int, optional):
+            Maximum allowed tasks per second (default: none).
+            There is no limit on task throughput unless specified.
+
     Example:
         >>> from hypershell.cluster import LocalCluster
         >>> cluster = LocalCluster.new(
@@ -164,7 +168,8 @@ class LocalCluster(Thread):
                  capture: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
-                 task_signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+                 task_signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: int = None) -> None:
         """Initialize with server and single client thread."""
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
@@ -190,7 +195,8 @@ class LocalCluster(Thread):
                                    capture=capture,
                                    client_timeout=client_timeout,
                                    task_timeout=task_timeout,
-                                   task_signalwait=task_signalwait)
+                                   task_signalwait=task_signalwait,
+                                   ratelimit=ratelimit)
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: LocalCluster) -> None:

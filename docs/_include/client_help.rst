@@ -94,6 +94,10 @@ Options
     Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
     If the process still persists the executor itself will shutdown.
 
+``-R``, ``--ratelimit`` *NUM*
+    Maximum allowed tasks per second per client. (default: none).
+    Individual tasks are throttled if exceeding this average limit.
+
 ``-S``, ``--signalwait`` *SEC*
     Task-level signal escalation wait period in seconds (default: 10).
 

@@ -584,7 +584,7 @@ function _hs_client ()
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 	local all_opts="-h --help -N --num-tasks -t --template -b --bundlesize -w --bundlewait
 	-H --host -p --port -k --auth -d --delay-start --no-confirm -o --output -e --errors -c --capture
-	-T --timeout -W --task-timeout"
+	-T --timeout -W --task-timeout -R --ratelimit"
 
 	case "${previous}" in
 		-N | --num-tasks)
@@ -716,7 +716,7 @@ function _hs_cluster ()
 	local all_opts="-N --num-tasks -t --template -p --port -b --bundlesize -w --bundlewait
 	-r --max-retries --eager --no-db --initdb --no-confirm --forever --restart --ssh-args --ssh-group
 	-E --env --remote-exe -d --delay-start -c --capture -o --output -e --errors -f --failures
-	-T --timeout -W --task-timeout -A --autoscaling -F --factor -P --period -I --init-size
+	-T --timeout -W --task-timeout -R --ratelimit -A --autoscaling -F --factor -P --period -I --init-size
 	-X --min-size -Y --max-size -h --help"
 
 	if [ "${COMP_CWORD}" -eq 2 ]

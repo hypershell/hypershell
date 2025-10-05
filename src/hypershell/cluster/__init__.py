@@ -101,6 +101,7 @@ Options:
   -X, --min-size      SIZE     Minimum size of cluster (default: {DEFAULT_AUTOSCALE_MIN_SIZE}).
   -Y, --max-size      SIZE     Maximum size of cluster (default: {DEFAULT_AUTOSCALE_MAX_SIZE}).
   -h, --help                   Show this message and exit.\
+  -R, --ratelimit      NUM      Maximum allowed tasks per second per client (default: none).
 """
 
 
@@ -177,6 +178,8 @@ class ClusterApp(Application):
     interface.add_argument('-o', '--output', default=None, dest='output_path')
     interface.add_argument('-e', '--errors', default=None, dest='errors_path')
     interface.add_argument('-c', '--capture', action='store_true')
+    ratelimit: int = config.task.get('ratelimit', None)
+    interface.add_argument('-R', '--ratelimit', type=int, default=ratelimit)
 
     failure_path: str = None
     interface.add_argument('-f', '--failures', default=None, dest='failure_path')
@@ -217,6 +220,7 @@ class ClusterApp(Application):
                  delay_start=self.delay_start, capture=self.capture,
                  client_timeout=self.client_timeout, task_timeout=self.task_timeout,
                  task_signalwait=self.task_signalwait)
+                 ratelimit=self.ratelimit)
 
     def run_local(self: ClusterApp, **options) -> None:
         """Run local cluster."""

@@ -448,9 +448,10 @@ class TaskState(State, Enum):
     STOP_TASK = 7
     TERM_TASK = 8
     KILL_TASK = 9
-    PUT_LOCAL = 10
-    FINAL = 11
-    HALT = 12
+    WAIT_RATE = 10
+    PUT_LOCAL = 11
+    FINAL = 12
+    HALT = 13
 
 
 class TaskExecutor(StateMachine):
@@ -467,6 +468,7 @@ class TaskExecutor(StateMachine):
     elapsed: timedelta
     timeout: Optional[int]
     signalwait: int
+    ratelimit: Optional[int]
     stop_requested: Optional[datetime]
     attempted_sigint: bool
     attempted_sigterm: bool
@@ -487,7 +489,8 @@ class TaskExecutor(StateMachine):
                  redirect_errors: IO = None,
                  capture: bool = False,
                  timeout: int = None,
-                 signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+                 signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: float = None) -> None:
         """Initialize task executor."""
         self.id = id
         self.template = Template(template)
@@ -498,6 +501,7 @@ class TaskExecutor(StateMachine):
         self.capture = capture
         self.timeout = timeout
         self.signalwait = signalwait
+        self.ratelimit = ratelimit
 
     @functools.cached_property
     def actions(self: TaskExecutor) -> Dict[TaskState, Callable[[], TaskState]]:
@@ -512,6 +516,7 @@ class TaskExecutor(StateMachine):
             TaskState.STOP_TASK: self.stop_task,
             TaskState.TERM_TASK: self.term_task,
             TaskState.KILL_TASK: self.kill_task,
+            TaskState.WAIT_RATE: self.wait_ratelimit,
             TaskState.PUT_LOCAL: self.put_local,
             TaskState.FINAL: self.finalize,
         }
@@ -526,6 +531,7 @@ class TaskExecutor(StateMachine):
         try:
             self.task = self.inbound.get(timeout=1)
             self.inbound.task_done()
+            self.received = datetime.now()
             return TaskState.CREATE_TASK if self.task else TaskState.FINAL
         except QueueEmpty:
             return TaskState.GET_LOCAL
@@ -602,16 +608,16 @@ class TaskExecutor(StateMachine):
 
     def wait_signal(self: TaskExecutor) -> TaskState:
         """Wait on interrupts."""
-        if self.attempted_sigint is False:
+        if not self.attempted_sigint:
             return TaskState.STOP_TASK
         elif (datetime.now() - self.stop_requested).total_seconds() < 1 * self.signalwait:
             return TaskState.WAIT_TASK
-        elif self.attempted_sigterm is False:
+        elif not self.attempted_sigterm:
             log.error(f'Interrupt ignored ({self.task.id})')
             return TaskState.TERM_TASK
         elif (datetime.now() - self.stop_requested).total_seconds() < 2 * self.signalwait:
             return TaskState.WAIT_TASK
-        elif self.attempted_sigkill is False:
+        elif not self.attempted_sigkill:
             log.error(f'Terminate ignored ({self.task.id})')
             return TaskState.KILL_TASK
         elif (datetime.now() - self.stop_requested).total_seconds() < 3 * self.signalwait:
@@ -641,6 +647,24 @@ class TaskExecutor(StateMachine):
         self.process.kill()
         self.attempted_sigkill = True
         return TaskState.WAIT_TASK
+
+    def wait_ratelimit(self: TaskExecutor) -> TaskState:
+        """Ensure the rate limit is not exceeded."""
+        if not self.ratelimit:
+            return TaskState.PUT_LOCAL
+        elapsed = datetime.now() - self.received
+        min_seconds = timedelta(seconds=1/self.ratelimit)
+        if elapsed > min_seconds:
+            return TaskState.PUT_LOCAL
+        remaining = (min_seconds - elapsed).total_seconds()
+        if remaining <= 1:
+            log.trace(f'Rate limit exceeded ({self.task.id}): pausing for {remaining:.2f} seconds')
+            time.sleep(remaining)
+            return TaskState.PUT_LOCAL
+        else:
+            log.trace(f'Rate limit exceeded ({self.task.id}): pausing for 1 second ({remaining:.2f} remaining)')
+            time.sleep(1)
+            return TaskState.WAIT_RATE
 
     def put_local(self: TaskExecutor) -> TaskState:
         """Put completed task on outbound queue."""
@@ -674,13 +698,15 @@ class TaskThread(Thread):
                  redirect_output: IO = None,
                  redirect_errors: IO = None,
                  timeout: int = None,
-                 signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+                 signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: float = None) -> None:
         """Initialize task executor."""
         self.id = id
         super().__init__(name=f'hypershell-executor-{id}')
         self.machine = TaskExecutor(id=id, inbound=inbound, outbound=outbound, template=template,
                                     redirect_output=redirect_output, redirect_errors=redirect_errors,
                                     capture=capture, timeout=timeout, signalwait=signalwait)
+                                    signalwait=signalwait, ratelimit=ratelimit)
 
     def run_with_exceptions(self: TaskThread) -> None:
         """Run machine."""
@@ -877,6 +903,10 @@ class ClientThread(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`DEFAULT_SIGNALWAIT`.
 
+        ratelimit (int, optional):
+            Maximum allowed tasks per second (default: None).
+            There is no limit on task throughput unless specified.
+
     Example:
         >>> from hypershell.client import ClientThread
         >>> client = ClientThread.new(num_tasks=16, address=('localhost', 54321),
@@ -913,7 +943,8 @@ class ClientThread(Thread):
                  no_confirm: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
-                 task_signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+                 task_signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: int = None) -> None:
         """Initialize queue manager and child threads."""
         super().__init__(name='hypershell-client')
         self.num_tasks = num_tasks
@@ -927,11 +958,15 @@ class ClientThread(Thread):
         self.heartbeat = ClientHeartbeatThread(queue=self.client, heartrate=heartrate)
         self.collector = ClientCollectorThread(queue=self.client, local=self.outbound,
                                                bundlesize=bundlesize, bundlewait=bundlewait)
+        if ratelimit is not None:
+            ratelimit = ratelimit / num_tasks
+            log.debug(f'Rate limit enabled: {ratelimit:.2} tasks per second per thread')
         self.executors = [TaskThread(id=count+1,
                                      inbound=self.inbound, outbound=self.outbound,
                                      redirect_output=redirect_output, redirect_errors=redirect_errors,
                                      template=template, capture=capture, timeout=task_timeout,
                                      signalwait=task_signalwait)
+                                     signalwait=task_signalwait, ratelimit=ratelimit)
                           for count in range(num_tasks)]
 
     def run_with_exceptions(self: ClientThread) -> None:
@@ -1013,7 +1048,8 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
                no_confirm: bool = False,
                client_timeout: int = None,
                task_timeout: int = None,
-               task_signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+               task_signalwait: int = DEFAULT_SIGNALWAIT,
+               ratelimit: int = None) -> None:
     """
     Run client until disconnect signal received or `client_timeout` reached.
 
@@ -1074,6 +1110,10 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
             Signal escalation waiting period in seconds on task timeout.
             See :const:`DEFAULT_SIGNALWAIT`.
 
+        ratelimit (int, optional):
+            Maximum allowed tasks per second (default: none).
+            There is no limit on task throughput unless specified.
+
     Example:
         >>> from hypershell.client import run_client
         >>> run_client(num_tasks=16, address=('localhost', 54321),
@@ -1096,7 +1136,8 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
                               no_confirm=no_confirm,
                               client_timeout=client_timeout,
                               task_timeout=task_timeout,
-                              task_signalwait=task_signalwait)
+                              task_signalwait=task_signalwait,
+                              ratelimit=ratelimit)
     try:
         thread.join()
     except Exception:
@@ -1136,6 +1177,7 @@ Options:
   -c, --capture             Capture individual task <stdout> and <stderr>.
   -T, --timeout       SEC   Automatically shutdown if no tasks received (default: never).
   -W, --task-timeout  SEC   Task-level walltime limit (default: none).
+  -R, --ratelimit     NUM   Maximum allowed tasks per second (default: none).
   -S, --signalwait    SEC   Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
   -h, --help                Show this message and exit.\
 """
@@ -1173,8 +1215,10 @@ class ClientApp(Application):
 
     task_timeout: int = config.task.timeout
     client_timeout: int = config.client.timeout
+    ratelimit: Optional[int] = config.client.ratelimit or None
     interface.add_argument('-T', '--timeout', type=int, default=client_timeout, dest='client_timeout')
     interface.add_argument('-W', '--task-timeout', type=int, default=task_timeout, dest='task_timeout')
+    interface.add_argument('-R', '--ratelimit', type=int, default=ratelimit)
 
     task_signalwait: int = config.task.signalwait
     interface.add_argument('-S', '--task-signalwait', type=int, default=task_signalwait, dest='task_signalwait')
@@ -1221,7 +1265,8 @@ class ClientApp(Application):
                        heartrate=config.client.heartrate,
                        client_timeout=self.client_timeout,
                        task_timeout=self.task_timeout,
-                       task_signalwait=self.task_signalwait)
+                       task_signalwait=self.task_signalwait,
+                       ratelimit=self.ratelimit)
         except gaierror:
             raise HostAddressInfo(f'Could not resolve host \'{self.host}\'')
 

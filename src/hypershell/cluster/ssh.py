@@ -161,6 +161,10 @@ class SSHCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
+        ratelimit (int, optional):
+            Maximum allowed tasks per second per client (default: none).
+            There is no limit on task throughput unless specified.
+
     Example:
         >>> from hypershell.cluster import SSHCluster
         >>> cluster = SSHCluster.new(
@@ -202,7 +206,8 @@ class SSHCluster(Thread):
                  capture: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
-                 task_signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+                 task_signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: int = None) -> None:
         """Initialize server and client threads."""
         if nodelist is None:
             raise AttributeError('Expected nodelist')
@@ -232,6 +237,8 @@ class SSHCluster(Thread):
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
             client_args.extend(['-W', str(task_timeout)])
+        if ratelimit is not None:
+            client_args.extend(['-R', str(ratelimit)])
         self.client_argv = [
             [*launcher, *launcher_args, host, *launcher_env, remote_exe, 'client', '-H', HOSTNAME,
              '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),

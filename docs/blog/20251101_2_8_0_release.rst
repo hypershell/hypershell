@@ -7,6 +7,7 @@ Release Notes (v2.8.0)
 
 The v2.8.0 release includes major features and improvements.
 
+- Rate limit task execution
 - Local SQLite database enabled by default
 - Default logging level set to INFO
 - New command-line argument checks
@@ -18,7 +19,21 @@ Features
 
 |
 
-...
+Rate limit task execution
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The concept of rate limiting has been added (available as ``-R``, ``--ratelimit``) for both
+cluster and client commands as a per-client limit on tasks executed per second. For example,
+specifying ``-R5`` would restrict the workflow to only permit a maximum throughput of 5 tasks
+per second or 300 per minute per client. This is applied by computing a *minimum* task walltime
+and entering into a waiting cycle if a task completes in less than this time.
+
+This can be useful in a number of scenarios; for example, data processes where the tasks are
+pulling files over an API and we want to ensure we do not exceed the rate limit of the API.
+
+|
+
+-----
 
 Improvements or Fixes
 ---------------------
