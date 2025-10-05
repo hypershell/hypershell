@@ -1,0 +1,56 @@
+.. _20251101_2_8_0_release:
+
+Release Notes (v2.8.0)
+======================
+
+`November 1, 2025`
+
+The v2.8.0 release includes major features and improvements.
+
+- Local SQLite database enabled by default
+- New default logging level set to INFO
+- New command-line argument checks
+
+-----
+
+Features
+--------
+
+|
+
+...
+
+Improvements or Fixes
+---------------------
+
+|
+
+Local SQLite database enabled by default
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In previous releases of the software we automatically disabled use of the database in favor
+of a *live* queue if there was no database configuration. This behavior is still possible using the
+explicit flags ``--no-db`` (and ``--no-confirm``) which suppresses the warning new users would otherwise
+get for running the software out-of-the-box. With this change we have a smart preload as part of the
+configuration that injects ``main.db`` as the database file name within the default *site* library.
+Use of the ``HYPERSHELL_SITE`` environment variable alters this location.
+
+On Linux this would be ``~/.hypershell/lib/main.db``.
+
+The motivation here is to more seemlessly enable the beneficial features without new users running
+the software for the first time from needing to graple with this behavior. So instead of getting a
+warning message the first time they run the software they get powerful features. Any database
+configuration provided by the user or system disables this new behavior of course.
+
+|
+
+New default logging level set to INFO
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Similar to the above change with the database enabled by default we have also updated the default
+logging level to ``INFO`` instead of ``WARNING``. It is probably never the case that users (particularly
+in a research workflow context) to want zero messages from HyperShell. Even with ``INFO`` level messages
+enabled there are relatively few messages emitted. These messages are predominantly emitted by the
+client as task start. A few messages at the start of operations about the state of the database are
+typically emitted as well.
+

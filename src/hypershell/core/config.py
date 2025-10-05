@@ -17,6 +17,7 @@ import tomlkit
 import logging
 import socket
 import functools
+import platform
 from datetime import datetime
 
 # External libs
@@ -24,13 +25,14 @@ from cmdkit.config import Namespace, Configuration, Environ, ConfigurationError
 from cmdkit.app import exit_status
 
 # Internal libs
-from hypershell.core.platform import path, home
+from hypershell.core.platform import path, home, default_path
 from hypershell.core.exceptions import write_traceback
 from hypershell.core.sys import PATH_SEP
 
 # Public interface
 __all__ = ['config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
            'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
+           'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
            'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
            'find_available_ports']
 
@@ -214,9 +216,17 @@ def get_logging_style(base: Configuration) -> str:
         raise ConfigurationError(f'Unrecognized `logging.style` \'{style}\' ({label})')
 
 
+DEFAULT_DATABASE_NAME: Final[str] = 'Main.db' if platform.system() in ['Windows', 'Darwin'] else 'main.db'
+"""Either Main.db (Windows/macOS) or main.db on Linux/POSIX."""
+
+DEFAULT_DATABASE_FILE: Final[str] = os.path.join(default_path.lib, DEFAULT_DATABASE_NAME)
+"""Default local SQLite database file path if none is provided."""
+
+
 def build_preloads(base: Configuration) -> Namespace:
     """Build 'preload' namespace from base configuration."""
-    return Namespace({'logging': LOGGING_STYLES.get(get_logging_style(base))})
+    return Namespace({'logging': LOGGING_STYLES.get(get_logging_style(base)),
+                      'database': {'file': DEFAULT_DATABASE_FILE},})
 
 
 class LoaderImpl(Protocol):
@@ -289,7 +299,7 @@ def find_available_ports(start: int = default.server.port,
         raise RuntimeError(f'Could not find available port in range {start}-{end}')
 
 
-DEFAULT_CONFIG_HEADERS = f"""\
+DEFAULT_CONFIG_HEADERS: Final[str] = f"""\
 # File automatically created on {datetime.now()}
 # Settings here are merged automatically with defaults and environment variables
 """

@@ -23,7 +23,7 @@ from sqlalchemy.exc import ArgumentError
 from sqlalchemy import event
 
 # Internal libs
-from hypershell.core.config import config
+from hypershell.core.config import config, DEFAULT_DATABASE_FILE
 from hypershell.core.logging import handler
 from hypershell.core.exceptions import display_critical, write_traceback
 
@@ -205,6 +205,8 @@ def get_url() -> DatabaseURL:
         raise ConfigurationError(f'Unsupported database \'{config.provider}\'')
     try:
         params = Namespace({**config, 'provider': providers[config.provider]})
+        if config.provider == 'postgres' and config.file == DEFAULT_DATABASE_FILE:
+            params.pop('file', None)  # Injected automatically from preload
         return DatabaseURL.from_namespace(params)
     except AttributeError as err:
         raise ConfigurationError(str(err)) from err

@@ -372,7 +372,7 @@ class ConfigWhichApp(Application):
             value = '[...]'
         if '[' in default_value:
             default_value = '[...]'
-        if site in ('default', 'logging', ):
+        if site in ('default', 'preload', 'logging', ):
             print(f'{value} ({site})')
         elif site == 'env':
             env_varname = 'HYPERSHELL_' + self.varpath.upper().replace('.', '_')
