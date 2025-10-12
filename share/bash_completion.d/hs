@@ -260,10 +260,17 @@ function _hs_task_submit ()
 			COMPREPLY=()
 			return
 			;;
-		tag)
+	   tag)
 			case "${current}" in
 				*:)
-					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
+					# Extract key and get values, then prepend key: to each value
+					local key="${current%:}"
+					local values=$(hs list --tag-values "${key}" 2>/dev/null)
+					local suggestions=""
+					for value in ${values}; do
+						suggestions="${suggestions} ${key}:${value}"
+					done
+					COMPREPLY=($(compgen -W "${suggestions}" -- "${current}"))
 					;;
 				*)
 					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
@@ -355,10 +362,17 @@ function _hs_task_run ()
 			COMPREPLY=()
 			return
 			;;
-		tag)
+	tag)
 			case "${current}" in
 				*:)
-					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
+					# Extract key and get values, then prepend key: to each value
+					local key="${current%:}"
+					local values=$(hs list --tag-values "${key}" 2>/dev/null)
+					local suggestions=""
+					for value in ${values}; do
+						suggestions="${suggestions} ${key}:${value}"
+					done
+					COMPREPLY=($(compgen -W "${suggestions}" -- "${current}"))
 					;;
 				*)
 					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
@@ -406,11 +420,17 @@ function _hs_task_search ()
 			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
 			return
 			;;
-		tag)
+	tag)
 			case "${current}" in
 				*:)
-					#echo "`hs list --tag-values ${current::-1} 2>/dev/null`" 1>&2
-					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
+					# Extract key and get values, then prepend key: to each value
+					local key="${current%:}"
+					local values=$(hs list --tag-values "${key}" 2>/dev/null)
+					local suggestions=""
+					for value in ${values}; do
+						suggestions="${suggestions} ${key}:${value}"
+					done
+					COMPREPLY=($(compgen -W "${suggestions}" -- "${current}"))
 					return
 					;;
 				*)
@@ -490,10 +510,17 @@ function _hs_task_update ()
 			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
 			return
 			;;
-		tag | remove-tag)
+	tag | remove-tag)
 			case "${current}" in
 				*:)
-					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
+					# Extract key and get values, then prepend key: to each value
+					local key="${current%:}"
+					local values=$(hs list --tag-values "${key}" 2>/dev/null)
+					local suggestions=""
+					for value in ${values}; do
+						suggestions="${suggestions} ${key}:${value}"
+					done
+					COMPREPLY=($(compgen -W "${suggestions}" -- "${current}"))
 					return
 					;;
 				*)
@@ -555,10 +582,21 @@ function _hs_submit ()
 			COMPREPLY=($(compgen -f -- "${current}"))
 			return
 			;;
-		tag)
+	    tag)
 			case "${current}" in
-				*:) COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}")) ;;
-				*)  COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}")) ;;
+				*:)
+					# Extract key and get values, then prepend key: to each value
+					local key="${current%:}"
+					local values=$(hs list --tag-values "${key}" 2>/dev/null)
+					local suggestions=""
+					for value in ${values}; do
+						suggestions="${suggestions} ${key}:${value}"
+					done
+					COMPREPLY=($(compgen -W "${suggestions}" -- "${current}"))
+					;;
+				*)
+					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
+					;;
 			esac
 			return
 			;;
