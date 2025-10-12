@@ -72,7 +72,7 @@ from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 from hypershell.data.model import Task
-from hypershell.data import initdb, checkdb
+from hypershell.data import initdb, checkdb, DATABASE_DIALECT
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'SubmitThread', 'LiveSubmitThread',
@@ -860,9 +860,9 @@ class SubmitApp(Application):
     def check_database(self: SubmitApp) -> None:
         """Halt if we are not connected to database."""
         db = config.database.get('file', None) or config.database.get('database', None)
-        if config.database.provider == 'sqlite' and db in ('', ':memory:', None):
+        if DATABASE_DIALECT == 'sqlite' and db in ('', ':memory:', None):
             raise ConfigurationError('Submitting tasks to in-memory database has no effect')
-        if config.database.provider == 'sqlite' or self.auto_initdb:
+        if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
             initdb()  # Auto-initialize if local sqlite provider
         else:
             checkdb()

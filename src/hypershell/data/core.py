@@ -17,7 +17,6 @@ from urllib.parse import urlencode
 from cmdkit.app import exit_status
 from cmdkit.config import Namespace, ConfigurationError
 from sqlalchemy.engine import create_engine, Engine
-from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import ArgumentError
 from sqlalchemy import event
@@ -28,7 +27,7 @@ from hypershell.core.logging import handler
 from hypershell.core.exceptions import display_critical, write_traceback
 
 # Public interface
-__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', ]
+__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', 'providers']
 
 
 class DatabaseURL(dict):
@@ -75,7 +74,10 @@ class DatabaseURL(dict):
 
     def _validate(self: DatabaseURL) -> None:
         """Validate provided arguments."""
-        if self.provider == 'sqlite':
+        dialect = self.provider
+        if '+' in dialect:
+            dialect, impl = dialect.split('+')
+        if dialect == 'sqlite':
             self._validate_for_sqlite()
         else:
             self._validate_database()
@@ -169,6 +171,7 @@ class DatabaseURL(dict):
 # Mapping translates from name to library/implementation name
 # NOTE: mysql/mariadb and other providers not yet working
 providers = {
+    'turso': 'sqlite+turso',
     'sqlite': 'sqlite',
     'postgres': 'postgresql',
     'postgresql': 'postgresql',
@@ -176,6 +179,7 @@ providers = {
 
 
 # Clone database-section for modification
+full_config = config
 config = Namespace(config.database.copy())
 
 # Pop special sections not forwarded to connection details
@@ -191,12 +195,18 @@ engine_config = {}
 
 # Sqlite-specific configuration
 in_memory = False
-if config.provider == 'sqlite':
+if config.provider in ['sqlite', 'turso']:
     in_memory = (config.get('file', None) or config.get('database', None)) in ('', ':memory:', None)
-    if in_memory:
-        engine_config['poolclass'] = StaticPool
     if 'check_same_thread' not in connect_args:
         connect_args['check_same_thread'] = False
+
+
+if config.provider == 'turso':
+    try:
+        import sqlalchemy_turso  # Enforce registration of implementation
+    except ImportError:
+        display_critical(f'Missing optional dependency "sqlalchemy-turso" needed for Turso', module=__name__)
+        sys.exit(exit_status.runtime_error)
 
 
 def get_url() -> DatabaseURL:
@@ -240,9 +250,9 @@ except Exception as error:
 
 
 @event.listens_for(Engine, "connect")
-def set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+def set_sqlite_pragmas(dbapi_connection, connection_record) -> None:  # noqa: unused connection_record
     """Automatically inject pragmas into SQLite connection."""
-    if config.provider == 'sqlite':
+    if config.provider in ['sqlite', 'turso']:
         cursor = dbapi_connection.cursor()
         for name, value in pragmas.items():
             cursor.execute(f'PRAGMA {name}={value}')

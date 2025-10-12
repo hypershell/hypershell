@@ -42,12 +42,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-postgres = [
-    "psycopg2>=2.9.9"
-]
-uuid7 = [
-    "uuid-utils>=0.10.0",
-]
+postgres = ["psycopg2>=2.9.9"]
+uuid7 = ["uuid-utils>=0.10.0"]
+#TODO: turso = ["pyturso>=0.1.4", "sqlalchemy-turso>=0.2.0"]
 
 [dependency-groups]
 dev = [
@@ -85,9 +82,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
-addopts = ["--strict-markers", ]
+addopts = ["--strict-markers"]
 markers = [
-    'unit', # Unit tests are short, interface driven tests on discrete components.",
-    'integration', # Integration tests are often longer and deal with the interaction between systems.",
+    'unit',         # Unit tests are short, interface driven tests on discrete components.",
+    'integration',  # Integration tests are often longer and deal with the interaction between systems.",
     'parameterize', # Placeholder for parameterized tests (not a real type).",
 ]

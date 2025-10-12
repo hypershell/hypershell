@@ -45,7 +45,7 @@ from hypershell.core.pretty_print import format_tag, format_json
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
 from hypershell.data.model import Task, JSON
-from hypershell.data import ensuredb
+from hypershell.data import ensuredb, DATABASE_DIALECT
 
 # Public interface
 __all__ = ['TaskGroupApp',
@@ -262,7 +262,7 @@ class TaskInfoApp(Application):
 
 
 # Time to wait between database queries
-DEFAULT_INTERVAL = 5
+DEFAULT_INTERVAL: Final[int] = 5
 
 
 WAIT_PROGRAM = 'hs wait'
@@ -406,11 +406,11 @@ class TaskRunApp(Application):
 
 
 # Listing of all field names in order (default for search)
-ALL_FIELDS = list(Task.columns)
+ALL_FIELDS: Final[List[str]] = list(Task.columns)
 
 
 # Reasonable limit on output delimiter (typically just single char).
-DELIMITER_MAX_SIZE = 100
+DELIMITER_MAX_SIZE: Final[int] = 100
 
 
 class SearchableMixin:
@@ -447,14 +447,14 @@ class SearchableMixin:
                 tags_name_only.append(name)
                 tags_with_value.pop(name)
         for name in tags_name_only:
-            if config.database.provider == 'sqlite':
+            if DATABASE_DIALECT == 'sqlite':
                 # NOTE: sqlalchemy adds `json_quote(json_extract(task.tag, ?)) is not null`
                 # and cannot find a way to exclude `json_quote`, so we do it ourselves
                 query = query.filter(text('json_extract(task.tag, :key) is not null')).params(key=f'$."{name}"')
             else:
                 query = query.filter(Task.tag[name].isnot(None))
         for name, value in tags_with_value.items():
-            if config.database.provider == 'sqlite' and value in (True, False):
+            if DATABASE_DIALECT == 'sqlite' and value in (True, False):
                 value = int(value)  # NOTE: SQLite stores as 0/1 not JSON true/false :(
             query = query.filter(Task.tag[name] == type_coerce(value, JSON))
         return query
@@ -629,7 +629,7 @@ class TaskSearchApp(Application, SearchableMixin):
     @staticmethod
     def print_tag_keys() -> None:
         """Print distinct tags present in the database."""
-        if config.database.provider == 'sqlite':
+        if DATABASE_DIALECT == 'sqlite':
             for (key, ) in Session.execute(
                     text('select distinct tag.key from task, json_each(tag) as tag')
             ):
@@ -644,7 +644,7 @@ class TaskSearchApp(Application, SearchableMixin):
         if len(self.field_names) != 1:
             raise ArgumentError(f'Expected single name for --tag-values')
         name, = self.field_names
-        if config.database.provider == 'sqlite':
+        if DATABASE_DIALECT == 'sqlite':
             for (value, ) in Session.execute(
                     text("""select distinct t.value from task, json_each(tag) as t
                             where json_extract(tag, :a) is not null and t.key = :b""")
@@ -894,7 +894,7 @@ class TaskUpdateApp(Application, SearchableMixin):
 
         field_updates, tag_updates = self.process_arguments()
 
-        if config.database.provider == 'sqlite':
+        if DATABASE_DIALECT == 'sqlite':
             site = config.database.file
         else:
             site = config.database.get('host', 'localhost')
@@ -980,7 +980,7 @@ class TaskUpdateApp(Application, SearchableMixin):
             query.update(field_updates)
 
         if tag_updates:
-            if config.database.provider == 'sqlite':
+            if DATABASE_DIALECT == 'sqlite':
                 tag_changes = {}
                 change_expr = 'json_set(task.tag'
                 for i, (k, v) in enumerate(tag_updates.items()):
@@ -998,7 +998,7 @@ class TaskUpdateApp(Application, SearchableMixin):
                     query.update({Task.tag: text(change_expr).params(**params)})
 
         if self.remove_tag:
-            if config.database.provider == 'sqlite':
+            if DATABASE_DIALECT == 'sqlite':
                 tag_changes = {}
                 change_expr = 'json_remove(task.tag'
                 for i, name in enumerate(self.remove_tag):

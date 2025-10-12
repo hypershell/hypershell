@@ -26,6 +26,7 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.data import initdb, checkdb
 from hypershell.client import DEFAULT_NUM_TASKS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
+from hypershell.data import initdb, checkdb, DATABASE_DIALECT
 from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
@@ -361,7 +362,7 @@ class ClusterApp(Application):
     def __enter__(self: ClusterApp) -> ClusterApp:
         """Set up resources and attributes."""
         self.check_arguments()
-        if config.database.provider == 'sqlite' or self.auto_initdb:
+        if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
             initdb()  # Auto-initialize if local sqlite provider
         elif not self.in_memory:
             checkdb()
