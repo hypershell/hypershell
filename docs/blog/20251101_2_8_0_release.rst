@@ -7,6 +7,7 @@ Release Notes (v2.8.0)
 
 The v2.8.0 release includes major features and improvements.
 
+- Queue-only task submission
 - Rate limit task execution
 - Local SQLite database enabled by default
 - Default logging level set to INFO
@@ -16,6 +17,40 @@ The v2.8.0 release includes major features and improvements.
 
 Features
 --------
+
+|
+
+Queue-only task submission
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``hs submit`` command now supports direct submission to a live server queue, bypassing
+the database entirely. This provides a lightweight alternative for transient workflows or
+environments where a database is not configured or desired.
+
+Use the ``-q``/``--queue`` option along with ``-H``/``--host``, ``-p``/``--port``, and
+``-k``/``--auth`` to submit tasks directly to a running server:
+
+.. admonition:: Submit tasks directly to live queue
+    :class: note
+
+    .. code-block:: shell
+
+        # Start a server
+        hs server --forever --auth mykey &
+
+        # Submit tasks directly to the queue
+        hs submit tasks.in -q -H localhost -p 50001 -k mykey
+
+When using queue mode, tasks are sent directly to the server's in-memory queue for
+immediate scheduling by connected clients. Without ``--queue``, the traditional
+database-backed workflow is used, providing persistence, recovery, and search capabilities.
+
+.. note::
+
+    The ``-b``/``--bundlesize`` option controls how tasks are bundled and sent to clients.
+    In queue mode, this directly affects the size of task bundles conveyed to connected clients,
+    which can impact throughput and responsiveness. Coordinate bundle size with the number of
+    executor threads (``-N``/``--num-threads``) on your clients for optimal performance.
 
 |
 

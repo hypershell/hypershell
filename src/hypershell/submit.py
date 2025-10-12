@@ -51,10 +51,11 @@ import functools
 from enum import Enum
 from datetime import datetime
 from queue import Queue, Empty as QueueEmpty, Full as QueueFull
+from multiprocessing import AuthenticationError
 
 # External libs
 from cmdkit.config import ConfigurationError
-from cmdkit.app import Application
+from cmdkit.app import Application, exit_status
 from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
@@ -68,6 +69,8 @@ from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.types import JSONValue
 from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
+from hypershell.core.exceptions import (handle_exception, handle_disconnect,
+                                        handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 from hypershell.data.model import Task
 from hypershell.data import initdb, checkdb
 
@@ -711,9 +714,7 @@ def submit_file(path: str,
         >>> from hypershell.submit import submit_from
         >>> from hypershell.core.queue import QueueConfig
         >>> queue_config = QueueConfig(host='my.server.univ.edu', port=54321, auth='my-secret-key')
-        >>> submit_file('/tmp/tasks.in',
-        ...             queue_config=queue_config,
-        ...             template='my-script {}'
+        >>> submit_file('/tmp/tasks.in', queue_config=queue_config, template='my-script {}',
         ...             tags={'site': 'zzz', 'group': 37})
         3
 
@@ -726,28 +727,45 @@ def submit_file(path: str,
         task_count (int): Count of submitted tasks.
     """
     with open(path, mode='r', **file_options) as stream:
-        return submit_from(stream, queue_config=queue_config, bundlesize=bundlesize,
-                           bundlewait=bundlewait, template=template, tags=tags)
+        return submit_from(stream, queue_config=queue_config, bundlesize=bundlesize, bundlewait=bundlewait,
+                           template=template, cores=cores, memory=memory, timeout=timeout, tags=tags)
 
 
-APP_NAME = 'hs submit'
-APP_USAGE = f"""\
+DEFAULT_HOST: Final[str] = QueueConfig.host
+"""Default host for server connection."""
+
+DEFAULT_PORT: Final[int] = QueueConfig.port
+"""Default port for server connection."""
+
+DEFAULT_AUTH: Final[str] = QueueConfig.auth
+"""Default authentication key for server (**DO NOT USE THIS**)."""
+
+
+APP_NAME: Final[str] = 'hs submit'
+PAD_NAME: Final[str] = ' ' * len(APP_NAME)
+APP_USAGE: Final[str] = f"""\
 Usage:
   {APP_NAME} [-h] [ARGS... | -f FILE] [-b NUM] [-w SEC] [--template CMD] [-t TAG...] [--initdb] 
+  {APP_NAME} [-h] [ARGS... | -f FILE] [-q [-H ADDR] [-p NUM] [-k KEY] | --initdb]
   Submit one or more tasks.\
 """
 
-APP_HELP = f"""\
+APP_HELP: Final[str] = f"""\
 {APP_USAGE}
 
   Submit a single command using positional arguments.
   If a filepath is provided, read many tasks from the file instead.
+  Submit directly to a live queue with --queue.
 
 Arguments:
   ARGS...                    Command-line task arguments.
 
 Options:
   -f, --task-file    FILE    Path to task file ("-" for <stdin>).
+  -q, --queue                Submit to live queue instead of database.
+  -H, --host         ADDR    Hostname for server (default: {DEFAULT_HOST}). Used with --queue.
+  -p, --port         NUM     Port number for server (default: {DEFAULT_PORT}). Used with --queue.
+  -k, --auth         KEY     Cryptographic key to connect to server. Used with --queue.
       --template     CMD     Submit-time template expansion (default: "{DEFAULT_TEMPLATE}").
   -b, --bundlesize   NUM     Number of lines to buffer (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait   SEC     Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
@@ -781,18 +799,37 @@ class SubmitApp(Application):
     auto_initdb: bool = False
     interface.add_argument('--initdb', action='store_true', dest='auto_initdb')
 
+    queue: Optional[QueueConfig]
+    queue_mode: bool = False
+    queue_server: str = QueueConfig.host
+    queue_port: int = QueueConfig.port
+    queue_auth: str = QueueConfig.auth
+    interface.add_argument('-q', '--queue', action='store_true', dest='queue_mode')
+    interface.add_argument('-H', '--host', default=queue_server, dest='queue_host')
+    interface.add_argument('-p', '--port', type=int, default=queue_port, dest='queue_port')
+    interface.add_argument('-k', '--auth', default=queue_auth, dest='queue_auth')
+
     tags: Dict[str, JSONValue] = {}
     taglist: List[str] = None
     interface.add_argument('-t', '--tag', nargs='+', default=[], dest='taglist')
 
     exceptions = {
+        EOFError: functools.partial(handle_disconnect, logger=log),
+        ConnectionResetError: functools.partial(handle_disconnect, logger=log),
+        ConnectionRefusedError: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
+        AuthenticationError: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
+        HostAddressInfo: functools.partial(handle_address_unknown, logger=log, status=exit_status.runtime_error),
         **get_shared_exception_mapping(__name__)
     }
 
     def run(self: SubmitApp) -> None:
         """Run submit thread."""
-        self.check_database()
-        self.check_tags()
+        self.queue = None
+        if self.queue_mode:
+            self.queue = QueueConfig(host=self.queue_server, port=self.queue_port, auth=self.queue_auth)
+        else:
+            self.check_database()
+            self.check_tags()
         self.check_source()
         if self.source is not None:
             self.submit_all()
@@ -801,16 +838,24 @@ class SubmitApp(Application):
 
     def submit_all(self: SubmitApp) -> None:
         """Submit multiple tasks from file-like source."""
-        count = submit_from(self.source, template=self.template,
+        count = submit_from(self.source, template=self.template, queue_config=self.queue,
+                            cores=self.cores, memory=self.memory, timeout=self.timeout,
                             bundlesize=self.bundlesize, bundlewait=self.bundlewait, tags=self.tags)
         log.info(f'Submitted {count} tasks')
 
     def submit_one(self: SubmitApp) -> None:
         """Submit one task from arguments."""
         args = ' '.join([self.quote_arg(arg) for arg in self.task_args])
-        task = Task.new(args=args, tag=self.tags)
-        Task.add(task)
-        log.info(f'Submitted task ({task.id})')
+        if self.queue_mode:
+            submit_from([args, ], queue_config=self.queue,
+                        cores=self.cores, memory=self.memory, timeout=self.timeout,
+                        tags=self.tags)
+        else:
+            task = Task.new(args=args,
+                            cores=self.cores, memory=self.memory, timeout=self.timeout,
+                            tag=self.tags,)
+            Task.add(task)
+            log.info(f'Submitted task ({task.id})')
 
     def check_database(self: SubmitApp) -> None:
         """Halt if we are not connected to database."""

@@ -4,7 +4,8 @@ Submit one task as positional arguments.
 If a single positional argument refers to a non-executable file path,
 tasks will be read from the file, one per line (use ``-f``/``--task-file`` to be explicit).
 
-Tasks are accumulated and published in bundles to the database.
+Tasks are accumulated and published in bundles to the database by default.
+With ``-q``/``--queue``, tasks are submitted directly to a live queue, bypassing the database.
 The ``-b``/``--bundlesize`` and ``-w``/``--bundlewait`` options control the
 size of these bundles and how long to wait before flushing tasks regardless of
 how many have accumulated.

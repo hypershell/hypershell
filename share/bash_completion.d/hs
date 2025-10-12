@@ -523,7 +523,7 @@ function _hs_submit ()
 {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -f --task-file -t --template --tag -b --bundlesize -w --bundlewait --init-db --"
+	local all_opts="-h --help -f --task-file -q --queue -H --host -p --port -k --auth --template -t --tag -b --bundlesize -w --bundlewait -c --cores -m --memory -W --timeout --initdb --"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
@@ -578,9 +578,21 @@ function _hs_submit ()
 			return
 			;;
 		-f | --task-file)
-		    COMPREPLY=($(compgen -f -- "${current}"))
-		    return
-		    ;;
+			COMPREPLY=($(compgen -f -- "${current}"))
+			return
+			;;
+		-H | --host)
+			COMPREPLY=($(compgen -W "`_hs_known_hosts`" -- "${current}"))
+			return
+			;;
+		-p | --port)
+			COMPREPLY=($(compgen -W "`hs config get server.port --raw 2>/dev/null`" -- "${current}"))
+			return
+			;;
+		-k | --auth)
+			COMPREPLY=($(compgen -W "`hs config get server.auth --raw 2>/dev/null`" -- "${current}"))
+			return
+			;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))

@@ -10,6 +10,30 @@ Options
 ``-f``, ``--task-file`` *FILE*
     Input file containing one task per line.
 
+``-q``, ``--queue``
+    Submit directly to live queue instead of database.
+
+    When enabled, tasks are sent directly to a running server's queue for immediate
+    scheduling. This bypasses the database entirely, which is useful for transient
+    workflows or when a database is not configured.
+
+    Requires ``-H``, ``-p``, and ``-k`` options to specify the server connection.
+
+``-H``, ``--host`` *ADDR*
+    Hostname or IP address for server (default: localhost).
+
+    Only used with ``--queue`` mode to specify the server to connect to.
+
+``-p``, ``--port`` *NUM*
+    Port number for server (default: 50001).
+
+    Only used with ``--queue`` mode to specify the server port.
+
+``-k``, ``--auth`` *KEY*
+    Cryptographic authentication key for server.
+
+    Only used with ``--queue`` mode. The key must match the server's authentication key.
+
 ``--template`` *CMD*
     Command-line template pattern (default: "{}").
 
