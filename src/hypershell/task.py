@@ -121,7 +121,7 @@ def check_uuid(value: str) -> None:
 
 
 INFO_PROGRAM = 'hs info'
-INFO_SYNOPSIS = f'{INFO_PROGRAM} [-h] ID [--stdout | --stderr | -x FIELD] [-f FORMAT]'
+INFO_SYNOPSIS = f'{INFO_PROGRAM} [-h] ID [-i] [--stdout | --stderr | -x FIELD] [-f FORMAT]'
 INFO_USAGE = f"""\
 Usage: 
   {INFO_SYNOPSIS}
@@ -132,16 +132,17 @@ INFO_HELP = f"""\
 {INFO_USAGE}
 
 Arguments:
-  ID                     Unique task UUID.
+  ID                        Unique task UUID.
 
 Options:
-  -f, --format   FORMAT  Format task info ([normal], json, yaml).
-      --json             Format task metadata as JSON.
-      --yaml             Format task metadata as YAML.
-  -x, --extract  FIELD   Print single field.
-      --stdout           Print <stdout> from task.
-      --stderr           Print <stderr> from task.
-  -h, --help             Show this message and exit.\
+  -f, --format     FORMAT   Format task info ([normal], json, yaml).
+      --json                Format task metadata as JSON.
+      --yaml                Format task metadata as YAML.
+  -x, --extract    FIELD    Print single field.
+      --stdout              Print <stdout> from task.
+      --stderr              Print <stderr> from task.
+  -i, --ignore-partitions   Suppress auto-union feature (SQLite only).
+  -h, --help                Show this message and exit.\
 """
 
 
@@ -168,6 +169,9 @@ class TaskInfoApp(Application):
     output_interface.add_argument('--json', action='store_const', const='json', dest='output_format')
     output_interface.add_argument('--yaml', action='store_const', const='yaml', dest='output_format')
 
+    ignore_partitions: bool = False
+    interface.add_argument('-i', '--ignore-partitions', action='store_true', dest='ignore_partitions')
+
     exceptions = {
         Task.NotFound: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
         **get_shared_exception_mapping(__name__)
@@ -177,6 +181,8 @@ class TaskInfoApp(Application):
         """Get metadata/status/outputs of task."""
         ensuredb()
         check_uuid(self.uuid)
+        if not self.ignore_partitions:
+            auto_union_sqlite()
         if self.extract_field:
             self.print_field()
         elif self.print_stdout:
@@ -606,7 +612,7 @@ class TaskSearchApp(Application, SearchableMixin):
         """Search for tasks in database."""
         ensuredb()
         if not self.ignore_partitions:
-            self.auto_union_sqlite()
+            auto_union_sqlite()
         if self.list_tag_keys:
             self.print_tag_keys()
             return
@@ -720,29 +726,29 @@ class TaskSearchApp(Application, SearchableMixin):
             # NOTE: csv module demands single-char delimiter
             raise ArgumentError(f'Valid --csv output must use single-char delimiter')
 
-    @staticmethod
-    def auto_union_sqlite() -> None:
-        """For sqlite automatically search for partitions and create a temporary view."""
-        if config.database.provider != 'sqlite':
-            return
-        dirname = os.path.dirname(config.database.file)
-        basename, _ = os.path.splitext(os.path.basename(config.database.file))
-        parts = sorted([
-            os.path.join(dirname, filename) for filename in os.listdir(dirname)
-            if re.match(f'^{basename}.[0-9]+$', filename)
-        ], key=(lambda fn: int(fn.split('.')[-1])))
-        if len(parts) == 0:
-            return
-        for i, path in enumerate(parts):
-            log.debug(f'Attaching to {path}')
-            Session.execute(text(f'attach database \'{path}\' as \'part_{i+1}\''))
-        Session.execute(text(
-            SQLITE_UNION_PART + '\n'.join([
-                f'union all\nselect * from part_{i+1}.task'
-                for i, _ in enumerate(parts)
-            ])
-        ))
-        Session.commit()
+
+def auto_union_sqlite() -> None:
+    """Automatically search for partitions and create a temporary view."""
+    if DATABASE_DIALECT != 'sqlite':
+        return
+    dirname = os.path.dirname(config.database.file)
+    basename, _ = os.path.splitext(os.path.basename(config.database.file))
+    parts = sorted([
+        os.path.join(dirname, filename) for filename in os.listdir(dirname)
+        if re.match(f'^{basename}.[0-9]+$', filename)
+    ], key=(lambda fn: int(fn.split('.')[-1])))
+    if len(parts) == 0:
+        return
+    for i, path in enumerate(parts):
+        log.debug(f'Attached database partition ({path})')
+        Session.execute(text(f'attach database \'{path}\' as \'part_{i+1}\''))
+    Session.execute(text(
+        SQLITE_UNION_PART + '\n'.join([
+            f'union all\nselect * from part_{i+1}.task'
+            for i, _ in enumerate(parts)
+        ])
+    ))
+    Session.commit()
 
 
 # Start of temporary view used in union query
