@@ -1,13 +1,13 @@
 Actions
 ^^^^^^^
 
-``--vacuum``
+``-v``, ``--vacuum``
     Vacuum an existing database.
 
-``--backup`` *PATH*
+``-b``, ``--backup`` *PATH*
     Vacuum into backup file (SQLite only).
 
-``--rotate``
+``-r``, ``--rotate``
     Rotate completed tasks to new database (SQLite only).
 
 ``-t``, ``--truncate``

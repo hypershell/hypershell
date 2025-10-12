@@ -82,13 +82,13 @@ Options
 
     Mutually exclusive with both ``--output`` and ``--errors``.
 
-``--timeout`` *SEC*
+``-T``, ``--timeout`` *SEC*
     Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 
     This feature allows for gracefully scaling down a cluster when task throughput subsides.
 
 
-``--task-timeout`` *SEC*
+``-W``, ``--task-timeout`` *SEC*
     Task-level walltime limit (default: none).
 
     Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.

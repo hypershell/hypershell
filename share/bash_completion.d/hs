@@ -46,7 +46,16 @@ function _hs() {
 function _hs_initdb ()
 {
 	local current="${COMP_WORDS[COMP_CWORD]}"
-	COMPREPLY=($(compgen -W "-h --help -y --yes -t --truncate" -- "${current}"))
+	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
+
+	case "${previous}" in
+		-b | --backup)
+			COMPREPLY=($(compgen -f -- "${current}"))
+			return
+			;;
+	esac
+
+	COMPREPLY=($(compgen -W "-h --help -y --yes -t --truncate -v --vacuum -r --rotate -b --backup" -- "${current}"))
 }
 
 

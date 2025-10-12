@@ -189,9 +189,9 @@ INITDB_HELP = f"""\
   and applies a special purpose `part:N` tag to the new partition and remaining tasks.
 
 Actions:
-      --vacuum             Vacuum an existing database.
-      --backup     PATH    Vacuum into backup file (SQLite only).
-      --rotate             Rotate completed tasks to new database (SQLite only).
+  -v, --vacuum             Vacuum an existing database.
+  -b, --backup     PATH    Vacuum into backup file (SQLite only).
+  -r, --rotate             Rotate completed tasks to new database (SQLite only).
   -t, --truncate           Truncate database (task metadata will be lost).
 
 Options:
