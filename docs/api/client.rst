@@ -45,11 +45,12 @@ Constants
 
 |
 
+.. autodata:: DEFAULT_NUM_THREADS
+.. autodata:: DEFAULT_TEMPLATE
 .. autodata:: DEFAULT_BUNDLESIZE
 .. autodata:: DEFAULT_BUNDLEWAIT
 .. autodata:: DEFAULT_SIGNALWAIT
 .. autodata:: DEFAULT_HEARTRATE
-.. autodata:: DEFAULT_NUM_TASKS
 .. autodata:: DEFAULT_DELAY
 .. autodata:: DEFAULT_HOST
 .. autodata:: DEFAULT_PORT

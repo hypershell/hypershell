@@ -17,7 +17,7 @@ from hypershell.core.types import JSONValue, to_json_type
 __all__ = ['format_bytes', 'format_tag', 'format_json']
 
 
-def format_bytes(size: int) -> str:
+def format_bytes(size: float) -> str:
     """Pretty-print size in bytes."""
     for u in ['', 'K', 'M', 'G', 'T']:
         if abs(size) < 1000:

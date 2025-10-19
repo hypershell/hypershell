@@ -25,8 +25,10 @@ Modes
 Options
 ^^^^^^^
 
-``-N``, ``--num-tasks`` *NUM*
-    Number of task executors per client (default: 1).
+``-N``, ``--num-threads`` *NUM*
+    Number of executor threads per client (default: 1).
+
+    Set to 0 to auto-detect based on available CPU cores on each client.
 
     For example, ``-N4`` would create four workers, but ``-N4 --ssh 'cluster-a[00-01].xyz'``
     creates two clients and a total of eight workers.
@@ -58,7 +60,7 @@ Options
     Using larger bundles is a good idea for large distributed workflows; specifically, it is best
     to coordinate bundle size with the number of executors in use by each client.
 
-    See also ``--num-tasks`` and ``--bundlewait``.
+    See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
     Seconds to wait before flushing tasks (default: 5).
@@ -94,7 +96,7 @@ Options
 ``--initdb``
     Auto-initialize database.
 
-    If a database is configured for use with the workflow (e.g., Postgres), auto-initialize
+    If a database is configured for use with the workflow (e.g., PostgreSQL), auto-initialize
     tables if they don't already exist. This is a short-hand for pre-creating tables with the
     ``hs initdb`` command. This happens by default with SQLite databases.
 
@@ -162,7 +164,7 @@ Options
     This also has the effect of staggering the workload. If your tasks take on the order of 30
     minutes and you have 1000 nodes, choose ``--delay-start=-1800``.
 
-``-c``, ``--capture``
+``--capture``
     Capture individual task <stdout> and <stderr>.
 
     By default, the `stdout` and `stderr` streams of all tasks are fused with that of the `client`
@@ -170,8 +172,8 @@ Options
     tasks need to manage their own output, you can specify a redirect as part of a ``--template``,
     or use ``--capture`` to capture these as ``.out`` and ``.err`` files.
 
-    These are stored local to the `client`. Task outputs can be automatically retrieved via SFTP,
-    see *task* usage.
+    These are stored local to the `client` under `<prefix>/lib/task/<uuid>.[out,err]`.
+    Task outputs can be automatically retrieved via SFTP, see `info`.
 
 ``-o``, ``--output`` *PATH*
     File path for task outputs (default: <stdout>).
@@ -195,14 +197,51 @@ Options
 ``-T``, ``--timeout`` *SEC*
     Timeout in seconds for clients. Automatically shutdown if no tasks received (default: never).
 
-    This option is only valid for an ``--autoscaling`` cluster. This feature allows for gracefully
-    scaling down a cluster when task throughput subsides.
+    This feature allows for gracefully scaling down a cluster when task throughput subsides.
 
 ``-W``, ``--task-timeout`` *SEC*
     Task-level walltime limit (default: none).
 
     Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
     If the process still persists the executor itself will shutdown.
+
+``-c``, ``--cores`` *NUM*
+    Number of CPU cores required per task (default: none).
+
+    When specified, tasks will only be executed when the required number of cores
+    is available. Used with resource-aware scheduling and backfill.
+
+``-m``, ``--memory`` *SIZE*
+    Amount of memory required per task (default: none).
+
+    Specify memory size with units (e.g., '4GB', '512MB'). Tasks will only be
+    executed when the required memory is available. Used with resource-aware
+    scheduling and backfill.
+
+``-C``, ``--client-cores`` *NUM*
+    Limit available cores per client (default: all cores).
+
+    Sets an upper bound on the number of CPU cores that each client can use.
+    This allows running multiple clients on the same node by partitioning resources.
+    Clients will not execute tasks if doing so would exceed this limit.
+
+    See also ``--num-threads=0``.
+
+``-M``, ``--client-memory`` *SIZE*
+    Limit available memory per client (default: all memory).
+
+    Sets an upper bound on the amount of memory that each client can use.
+    Specify memory size with units (e.g., '16GB', '4096MB'). This allows running
+    multiple clients on the same node by partitioning resources.
+
+``--monitor``
+    Enable resource monitoring for tasks.
+
+    When enabled, clients will monitor CPU and memory usage of running tasks
+    and their child processes, reporting peak usage back to the server.
+    Time-series data is stored in CSV format alongside task outputs.
+
+    See also ``--capture``.
 
 ``-R``, ``--ratelimit`` *NUM*
     Maximum allowed tasks per second per client. (default: none).

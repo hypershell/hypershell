@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, Callable
+from typing import Dict, Callable, Final
 from types import ModuleType
 
 # Standard libs
@@ -29,7 +29,8 @@ PATTERN: re.Pattern = re.compile(r'{(.*?)}')
 
 
 # A plain {} is replaced verbatim with the input arguments
-DEFAULT_TEMPLATE = '{}'
+DEFAULT_TEMPLATE: Final[str] = '{}'
+"""Default command pattern for template expansion."""
 
 
 # Exposed modules for lambda expressions in templates

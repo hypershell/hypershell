@@ -37,7 +37,7 @@ Options
     Using larger bundles is a good idea for large distributed workflows; specifically, it is best
     to coordinate bundle size with the number of executors in use by each client.
 
-    See also ``--num-tasks`` and ``--bundlewait``.
+    See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
     Seconds to wait before flushing tasks (default: 5).
@@ -63,6 +63,34 @@ Options
     defines the appetite for re-submitting failed tasks. By default, failed tasks will only be
     scheduled when there are no more remaining novel tasks.
 
+``-c``, ``--task-cores`` *NUM*
+    Number of CPU cores required per task (default: none).
+
+    When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
+    This option sets the default core requirement for all submitted tasks.
+    Individual tasks can override this with inline comments (e.g., ``#HYPERSHELL: cores: 8``).
+
+    See also ``--task-memory`` and ``--task-timeout``.
+
+``-m``, ``--task-memory`` *SIZE*
+    Amount of memory required per task (default: none).
+
+    When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
+    This option sets the default memory requirement for all submitted tasks.
+    Specify memory size with units (e.g., '4GB', '512MB'). Individual tasks can override this
+    with inline comments (e.g., ``#HYPERSHELL: memory: 8GB``).
+
+    See also ``--task-cores`` and ``--task-timeout``.
+
+``-W``, ``--task-timeout`` *SEC*
+    Task-level walltime limit in seconds (default: none).
+
+    When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
+    This option sets the default timeout for all submitted tasks. Individual
+    tasks can override this with inline comments (e.g., ``#HYPERSHELL: timeout: 3600``).
+
+    See also ``--task-cores`` and ``--task-memory``.
+
 ``--no-db``
     Disable database (submit directly to clients).
 
@@ -73,7 +101,7 @@ Options
 ``--initdb``
     Auto-initialize database.
 
-    If a database is configured for use with the workflow (e.g., Postgres), auto-initialize
+    If a database is configured for use with the workflow (e.g., PostgreSQL), auto-initialize
     tables if they don't already exist. This is a short-hand for pre-creating tables with the
     ``hs initdb`` command. This happens by default with SQLite databases.
 

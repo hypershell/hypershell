@@ -1,8 +1,10 @@
 Options
 ^^^^^^^
 
-``-N``, ``--num-tasks`` *NUM*
-    Number of task executors (default: 1).
+``-N``, ``--num-threads`` *NUM*
+    Number of task executor threads (default: 1).
+
+    Set to 0 to auto-detect based on available CPU cores.
 
 ``-t``, ``--template`` *CMD*
     Command-line template pattern (default: "{}").
@@ -20,7 +22,7 @@ Options
     Using larger bundles is a good idea for large distributed workflows; specifically, it is best
     to coordinate bundle size with the number of executors in use by each client.
 
-    See also ``--num-tasks`` and ``--bundlewait``.
+    See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
     Seconds to wait before flushing tasks (default: 5).
@@ -69,7 +71,7 @@ Options
 ``-e``, ``--errors`` *PATH*
     File path for task errors (default: <stderr>).
 
-``-c``, ``--capture``
+``--capture``
     Capture individual task <stdout> and <stderr>.
 
     By default, the `stdout` and `stderr` streams of all tasks are fused with that of the `client`
@@ -77,8 +79,8 @@ Options
     tasks need to manage their own output, you can specify a redirect as part of a ``--template``,
     or use ``--capture`` to capture these as ``.out`` and ``.err`` files.
 
-    These are stored local to the `client` under `<prefix>/lib/task/<uuid>.[out,err]`.
-    Task outputs can be automatically retrieved via SFTP, see *task* usage.
+    These are stored local to the `client` under `<site>/lib/task/<uuid>.[out,err]`.
+    Task outputs can be automatically retrieved via SFTP, see `hs info`.
 
     Mutually exclusive with both ``--output`` and ``--errors``.
 
@@ -93,6 +95,31 @@ Options
 
     Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
     If the process still persists the executor itself will shutdown.
+
+``-C``, ``--client-cores`` *NUM*
+    Limit available cores for client (default: all cores).
+
+    Sets an upper bound on the number of CPU cores that the client can use.
+    This allows running multiple clients on the same node by partitioning resources.
+    The client will not execute tasks if doing so would exceed this limit.
+
+    See also ``--num-threads=0``.
+
+``-M``, ``--client-memory`` *SIZE*
+    Limit available memory for client (default: all memory).
+
+    Sets an upper bound on the amount of memory that the client can use.
+    Specify memory size with units (e.g., '16GB', '4096MB'). This allows running
+    multiple clients on the same node by partitioning resources.
+
+``--monitor``
+    Enable resource monitoring for tasks.
+
+    When enabled, the client will monitor CPU and memory usage of running tasks
+    and their child processes, reporting peak usage back to the server.
+    Time-series data is stored in CSV format alongside task outputs.
+
+    See also ``--capture``.
 
 ``-R``, ``--ratelimit`` *NUM*
     Maximum allowed tasks per second per client. (default: none).

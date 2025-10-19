@@ -1,4 +1,4 @@
 ``hs`` ``submit`` ``[-h]`` ``[ARGS... | -f FILE]``
-    ``[-b NUM]`` ``[-w SEC]`` ``[--template CMD]`` ``[-t TAG...]`` ``[--initdb]``
     ``[-q [--host ADDR] [--port NUM] [--auth KEY] | --initdb]``
+    ``[-b NUM]`` ``[-w SEC]`` ``[-c NUM]`` ``[-m SIZE]`` ``[-W SEC]``
     ``[--template CMD]`` ``[-t TAG...]``

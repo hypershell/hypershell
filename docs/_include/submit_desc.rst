@@ -10,8 +10,8 @@ The ``-b``/``--bundlesize`` and ``-w``/``--bundlewait`` options control the
 size of these bundles and how long to wait before flushing tasks regardless of
 how many have accumulated.
 
-Pre-format tasks at `submit`-time with template expansion using ``--template``.
+Pre-format tasks at submit time with template expansion using ``--template``.
 Any tags specified with ``-t``/``--tag`` are applied to all tasks submitted.
 
-Use the special comment syntax, ``# HYPERSHELL: ...``, to include tags inline.
+Use the special comment syntax, ``# HYPERSHELL: ...``, to include resource limits or tags inline.
 If the comment is alone on the line it will be applied to all tasks that follow.

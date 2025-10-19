@@ -76,7 +76,7 @@ limit has been reached.
         from hypershell.client import ClientThread
         ...
 
-        client = ClientThread.new(num_tasks=16, address=('my.server.univ.edu', 54321),
+        client = ClientThread.new(num_threads=16, address=('my.server.univ.edu', 54321),
                                   auth='my-secret-key', client_timeout=600)
         ...
         client.join()
@@ -92,7 +92,7 @@ join will be managed together.
     .. code-block:: python
 
         from hypershell.client import run_client
-        run_client(num_tasks=16, address=('my.server.univ.edu', 54321),
+        run_client(num_threads=16, address=('my.server.univ.edu', 54321),
                    auth='my-secret-key', client_timeout=600)
 
 -------------------

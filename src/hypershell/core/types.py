@@ -5,13 +5,14 @@
 
 
 # Type annotations
-from typing import TypeVar, Union
+from typing import Final, Dict, TypeVar, Union
 
 # Standard libs
+import re
 from datetime import datetime
 
 # Public interface
-__all__ = ['smart_coerce', 'JSONValue', 'to_json_type', 'from_json_type']
+__all__ = ['smart_coerce', 'JSONValue', 'to_json_type', 'from_json_type', 'parse_bytes']
 
 
 # Each possible input type
@@ -55,3 +56,23 @@ def from_json_type(value: JSONValue) -> Union[JSONValue, VT]:
             return value
     except ValueError:
         return value
+
+
+MEMORY_SCALES: Final[Dict[str, int]] = {
+    'B': 1,
+    'KB': 1024,
+    'MB': 1024 * 1024,
+    'GB': 1024 * 1024 * 1024,
+    'TB': 1024 * 1024 * 1024 * 1024,
+}
+
+
+MEMORY_PATTERN: re.Pattern = re.compile(r'(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>[KMGT]B)?')
+
+
+def parse_bytes(value: str) -> int:
+    """Parse memory string to integer bytes (e.g., '512MB')."""
+    if match := MEMORY_PATTERN.match(value.upper()):
+        return int(float(match.group('num')) * MEMORY_SCALES[match.group('unit') or 'B'])
+    else:
+        raise ValueError(f'Memory string {value!r} is not a valid memory unit')

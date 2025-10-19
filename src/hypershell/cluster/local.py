@@ -37,7 +37,7 @@ def run_local(**options) -> None:
     Example:
         >>> from hypershell.cluster import run_local
         >>> run_local(['echo AAA', 'echo BBB', 'echo CCC'],
-        ...           num_tasks=16, in_memory=True, no_confirm=True)
+        ...           num_threads=16, in_memory=True, no_confirm=True)
 
     See Also:
         - :class:`~hypershell.cluster.local.LocalCluster`
@@ -60,13 +60,27 @@ class LocalCluster(Thread):
             A new `source` results in a :class:`~hypershell.submit.SubmitThread` populating
             either the database or the queue directly depending on `in_memory`.
 
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`~hypershell.client.DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection).
+            See :const:`~hypershell.client.DEFAULT_NUM_THREADS`.
 
         template (str, optional):
             Template command pattern.
             See :const:`~hypershell.client.DEFAULT_TEMPLATE`.
+
+        cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        client_cores (int, optional):
+            Set core limit for client (default: all available cores).
+
+        client_memory (int, optional):
+            Set memory limit for client (default: all available memory).
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -113,16 +127,17 @@ class LocalCluster(Thread):
             See :const:`~hypershell.client.DEFAULT_DELAY`.
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
 
         client_timeout (int, optional):
             Timeout in seconds before disconnecting from server.
             By default, the client waits for server tor request disconnect.
 
         task_timeout (int, optional):
-            Task-level walltime limit in seconds.
-            By default, the client waits indefinitely on tasks.
+            Task-level walltime limit in seconds (default: none).
 
         task_signalwait (int, optional):
             Signal escalation waiting period in seconds on task timeout.
@@ -136,7 +151,7 @@ class LocalCluster(Thread):
         >>> from hypershell.cluster import LocalCluster
         >>> cluster = LocalCluster.new(
         ...     ['echo AAA', 'echo BBB', 'echo CCC'],
-        ...     num_tasks=16, in_memory=True, no_confirm=True
+        ...     num_threads=16, in_memory=True, no_confirm=True
         ... )
         >>> cluster.join()
 
@@ -151,8 +166,12 @@ class LocalCluster(Thread):
 
     def __init__(self: LocalCluster,
                  source: Iterable[str] = None,
-                 num_tasks: int = 1,
+                 num_threads: int = 1,
                  template: str = DEFAULT_TEMPLATE,
+                 cores: int = None,
+                 memory: int = None,
+                 client_cores: int = None,
+                 client_memory: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  in_memory: bool = False,
@@ -166,6 +185,7 @@ class LocalCluster(Thread):
                  redirect_errors: IO = None,
                  delay_start: float = DEFAULT_DELAY,
                  capture: bool = False,
+                 monitor: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
@@ -173,6 +193,9 @@ class LocalCluster(Thread):
         """Initialize with server and single client thread."""
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
+                                   task_cores=cores,
+                                   task_memory=memory,
+                                   task_timeout=task_timeout,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    auth=auth,
@@ -183,7 +206,7 @@ class LocalCluster(Thread):
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
                                    redirect_failures=redirect_failures)
-        self.client = ClientThread(num_tasks=num_tasks,
+        self.client = ClientThread(num_threads=num_threads,
                                    template=template,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
@@ -193,6 +216,9 @@ class LocalCluster(Thread):
                                    redirect_errors=redirect_errors,
                                    delay_start=delay_start,
                                    capture=capture,
+                                   monitor=monitor,
+                                   cores=client_cores,
+                                   memory=client_memory,
                                    client_timeout=client_timeout,
                                    task_timeout=task_timeout,
                                    task_signalwait=task_signalwait,

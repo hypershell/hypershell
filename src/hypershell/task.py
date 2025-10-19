@@ -41,7 +41,7 @@ from hypershell.core.exceptions import handle_exception, handle_exception_silent
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.types import smart_coerce, JSONValue, to_json_type
-from hypershell.core.pretty_print import format_tag, format_json
+from hypershell.core.pretty_print import format_tag, format_json, format_bytes
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
 from hypershell.data.model import Task, JSON
@@ -156,10 +156,12 @@ class TaskInfoApp(Application):
 
     print_stdout: bool = False
     print_stderr: bool = False
+    print_perf: bool = False
     extract_field: str = None
     print_interface = interface.add_mutually_exclusive_group()
     print_interface.add_argument('--stdout', action='store_true', dest='print_stdout')
     print_interface.add_argument('--stderr', action='store_true', dest='print_stderr')
+    print_interface.add_argument('--perf', action='store_true', dest='print_perf')
     print_interface.add_argument('-x', '--extract', default=None, choices=Task.columns, dest='extract_field')
 
     output_format: str = 'normal'
@@ -186,9 +188,11 @@ class TaskInfoApp(Application):
         if self.extract_field:
             self.print_field()
         elif self.print_stdout:
-            self.print_file(self.outpath, self.task.outpath, sys.stdout)
+            self.print_file('outpath')
         elif self.print_stderr:
-            self.print_file(self.errpath, self.task.errpath, sys.stderr)
+            self.print_file('errpath')
+        elif self.print_perf:
+            self.print_file('csvpath')
         elif self.output_format == 'normal':
             print_normal(self.task)
         else:
@@ -221,14 +225,15 @@ class TaskInfoApp(Application):
         else:
             print(output, file=sys.stdout, flush=True)
 
-    def print_file(self: TaskInfoApp, local_path: str, task_path: Optional[str], out_stream: IO) -> None:
+    def print_file(self: TaskInfoApp, filetype: str) -> None:
         """Print file contents, fetch from client if necessary."""
-        if task_path is None:
-            raise RuntimeError(f'No {out_stream.name} for task ({self.uuid})')
+        remote_path, local_path, stream = self.remote_files[filetype]
+        if remote_path is None:
+            raise RuntimeError(f'"{filetype}" unavailable for task ({self.uuid})')
         if not os.path.exists(local_path) and self.task.client_host != HOSTNAME:
             self.copy_remote_files()
         with open(local_path, mode='r') as in_stream:
-            copyfileobj(in_stream, out_stream)
+            copyfileobj(in_stream, stream)
 
     @functools.cached_property
     def format_method(self: TaskInfoApp) -> Dict[str, Callable[[dict], str]]:
@@ -238,12 +243,22 @@ class TaskInfoApp(Application):
             'json': functools.partial(json.dumps, indent=4),
         }
 
+    @functools.cached_property
+    def remote_files(self: TaskInfoApp) -> Dict[str, Tuple[str | None, str, IO]]:
+        """Mapping of remote to local file paths with associated ."""
+        return {
+            'outpath': (self.task.outpath, self.outpath, sys.stdout),
+            'errpath': (self.task.errpath, self.errpath, sys.stderr),
+            'csvpath': (self.task.csvpath, self.csvpath, sys.stdout),
+        }
+
     def copy_remote_files(self: TaskInfoApp) -> None:
         """Copy output and error files and to local host."""
         log.debug(f'Fetching remote files ({self.task.client_host})')
         with SSHConnection(self.task.client_host) as remote:
-            remote.get_file(self.task.outpath, self.outpath)
-            remote.get_file(self.task.errpath, self.errpath)
+            for filetype, (remote_path, local_path, _) in self.remote_files.items():
+                if remote_path:
+                    remote.get_file(remote_path, local_path)
 
     @functools.cached_property
     def task(self: TaskInfoApp) -> Task:
@@ -259,6 +274,11 @@ class TaskInfoApp(Application):
     def errpath(self: TaskInfoApp) -> str:
         """Local task error file path."""
         return os.path.join(default_path.lib, 'task', f'{self.task.id}.err')
+
+    @functools.cached_property
+    def csvpath(self: TaskInfoApp) -> str:
+        """Local task perf file path."""
+        return os.path.join(default_path.lib, 'task', f'{self.task.id}.csv')
 
 
 # Time to wait between database queries
@@ -1157,12 +1177,20 @@ class WhereClause:
 def print_normal(task: Task) -> None:
     """Print semi-structured task metadata with all field names."""
     task_data = {k: format_json(v) for k, v in task.to_dict().items()}
-    task_data['waited'] = 'null' if not task.waited else timedelta(seconds=int(task_data['waited']))
-    task_data['duration'] = 'null' if not task.duration else timedelta(seconds=int(task_data['duration']))
+    task_data['waited'] = 'null' if task.waited is None else timedelta(seconds=int(task_data['waited']))
+    task_data['duration'] = 'null' if task.duration is None else timedelta(seconds=int(task_data['duration']))
     task_data['tag'] = ', '.join(format_tag(k, v) for k, v in task.tag.items())
+    cores = int(task.cores or 0)
+    cores_max = 'null' if not task.cores_max else f'{task.cores_max:.2f}'
+    memory = format_bytes(int(task.memory or 0))
+    memory_max = 'null' if not task.memory_max else format_bytes(int(task.memory_max))
+    timeout = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
     print(f'          id: {task_data["id"]}')
     print(f'        args: {task_data["args"]}')
     print(f'     command: {task_data["command"]}')
+    print(f'       cores: {cores} (used: {cores_max})')
+    print(f'      memory: {memory} (used: {memory_max})')
+    print(f'     timeout: {timeout}')
     print(f' exit_status: {task_data["exit_status"]}')
     print(f'   submitted: {task_data["submit_time"]}')
     print(f'   scheduled: {task_data["schedule_time"]}')
@@ -1175,6 +1203,7 @@ def print_normal(task: Task) -> None:
     print(f'     retried: {task_data["retried"]}')
     print(f'     outpath: {task_data["outpath"]}')
     print(f'     errpath: {task_data["errpath"]}')
+    print(f'     csvpath: {task_data["csvpath"]}')
     print(f' previous_id: {task_data["previous_id"]}')
     print(f'     next_id: {task_data["next_id"]}')
     print(f'        tags: {task_data["tag"]}')

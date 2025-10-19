@@ -36,7 +36,7 @@ __all__ = ['config', 'update', 'default', 'ConfigurationError', 'Namespace', 'bl
            'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
            'find_available_ports']
 
-# partial logging (not yet configured - initialized afterward)
+# Partial logging (not yet configured - initialized afterward)
 log = logging.getLogger(__name__)
 
 
@@ -80,33 +80,38 @@ default = Namespace({
 
     'task': {
         'cwd': os.getcwd(),
-        'timeout': None,    # seconds, period to wait before killing tasks
-        'signalwait': 10,   # seconds to wait between signal escalation (INT, TERM, KILL)
+        'cores': 0,          # Default cores allocated per task (default is unconstrained)
+        'memory': 0,         # Default memory in bytes allocated per task (default is unconstrained)
+        'timeout': 0,        # Default task-level walltime limit (default is unconstrained)
+        'signalwait': 10,    # Wait time in seconds between signal escalation (INT, TERM, KILL)
     },
 
     'submit': {
-        'bundlesize': 1,    # size of task bundle to accumulate before committing
-        'bundlewait': 5     # seconds to wait before committing regardless of size
+        'bundlesize': 1,    # Size of task bundle to accumulate before committing
+        'bundlewait': 5,    # Seconds to wait before committing regardless of size
     },
 
     'server': {
-        'bind': 'localhost',
+        'bind': 'localhost',   # Used by server
+        'host': 'localhost',   # Used by clients
         'port': 50_001,
-        'auth': '__HYPERSHELL__BAD__AUTHKEY__',
-        'queuesize': 1,     # only allow a single bundle (scheduler must wait)
+        'auth': '__HYPERSHELL__BAD__AUTHKEY__',  # DO NOT USE THIS
+        'queuesize': 1,        # Only allow a single bundle (scheduler must wait)
         'bundlesize': 1,
-        'bundlewait': 5,    # seconds
+        'bundlewait': 5,       # Seconds
         'attempts': 1,
-        'eager': False,     # prefer failed tasks to new tasks
-        'wait': 5,          # seconds to wait between database queries
-        'evict': 600,       # assume client is gone if no heartbeat after this many seconds
+        'eager': False,        # Prefer failed tasks to new tasks
+        'wait': 1,             # Seconds to wait between database queries if no tasks available
+        'evict': 600,          # Seconds to wait before evicting client
     },
 
     'client': {
-        'bundlesize': 1,    # size of task bundle to accumulate before returning
-        'bundlewait': 5,    # seconds to wait before returning regardless of size
-        'heartrate': 10,    # seconds to wait between heartbeats
-        'timeout': None,    # seconds to wait for bundle from server before shutting down
+        'bundlesize': 1,    # Size of task bundle to accumulate before returning
+        'bundlewait': 5,    # Seconds to wait before returning regardless of size
+        'heartrate': 10,    # Seconds to wait between heartbeats
+        'timeout': 0,       # Client-level timeout in seconds if no tasks available (never if 0/none)
+        'cores': 0,         # Client-level resource constraint (all available resources if 0/none)
+        'memory': 0,        # Client-level resource constraint (all available resources if 0/none)
         'ratelimit': 0,     # Maximum allowed tasks per second (no limit by default)
     },
 
@@ -118,8 +123,8 @@ default = Namespace({
     'autoscale': {
         'policy': 'fixed',  # Either 'fixed' or 'dynamic'
         'factor': 1,
-        'period': 60,  # seconds to wait between checks
-        'launcher': '',  # empty means just 'hs client'
+        'period': 60,       # Seconds to wait between checks
+        'launcher': '',     # Empty means just 'hs client ...'
         'size': {
             'init': 1,
             'min': 0,

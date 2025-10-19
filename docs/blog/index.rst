@@ -7,6 +7,23 @@ A place for announcements, release notes, thoughts and ideas for the project.
 
 -----
 
+:ref:`Release Notes (v2.8.0) <20251101_2_8_0_release>`
+------------------------------------------------------
+
+`November 1, 2025`
+
+The v2.8.0 release includes major features and improvements.
+
+- Resource-aware task scheduling
+- Resource monitoring
+- Queue-only task submission
+- Rate limit task execution
+- Local SQLite database enabled by default
+- Default logging level set to INFO
+- New command-line argument checks
+
+-----
+
 :ref:`Release Notes (v2.7.0) <20250504_2_7_0_release>`
 ------------------------------------------------------
 

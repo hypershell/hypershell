@@ -100,7 +100,7 @@ def test_cluster_multiple_arguments() -> None:
 
 
 OPTION_PAIR: Final[Dict[str, str]] = {
-    '-N': '-N/--num-tasks', '--num-tasks': '-N/--num-tasks',
+    '-N': '-N/--num-threads/--num-tasks', '--num-threads': '-N/--num-threads/--num-tasks',
     '-t': '-t/--template', '--template': '-t/--template',
     '-p': '-p/--port', '--port': '-p/--port',
     '-b': '-b/--bundlesize', '--bundlesize': '-b/--bundlesize',

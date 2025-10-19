@@ -6,7 +6,7 @@ Connect to server and run tasks.
 
 Example:
     >>> from hypershell.client import run_client
-    >>> run_client(num_tasks=4, address=('<IP ADDRESS>', 8080), auth='<secret>')
+    >>> run_client(num_threads=4, address=('<IP ADDRESS>', 8080), auth='<secret>')
 
 Embed a `ClientThread` in your application directly. Call `stop()` to stop early.
 Clients cannot connect to a remote machine unless you set the server's `bind` address
@@ -14,7 +14,7 @@ to 0.0.0.0 (as opposed to localhost which is the default).
 
 Example:
     >>> from hypershell.client import ClientThread
-    >>> client_thread = ClientThread.new(num_tasks=4, address=('<IP ADDRESS>', 8080), auth='<secret>')
+    >>> client_thread = ClientThread.new(num_threads=4, address=('<IP ADDRESS>', 8080), auth='<secret>')
 
 Note:
     In order for the `ClientThread` to actively monitor the state set by `stop` and
@@ -43,9 +43,12 @@ import functools
 from enum import Enum
 from datetime import datetime, timedelta
 from queue import Queue, Empty as QueueEmpty, Full as QueueFull
+from threading import Lock
 from subprocess import Popen, TimeoutExpired
 from socket import gaierror
 from dataclasses import dataclass
+from collections import defaultdict
+from itertools import islice
 from multiprocessing import AuthenticationError, cpu_count
 
 # External libs
@@ -59,6 +62,9 @@ from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import default, config, load_task_env, SSH_GROUPS
 from hypershell.core.fsm import State, StateMachine
+from hypershell.core.pretty_print import format_bytes
+from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
+from hypershell.core.types import parse_bytes
 from hypershell.core.thread import Thread
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2, SIGINT
 from hypershell.core.queue import QueueClient, QueueConfig
@@ -70,7 +76,8 @@ from hypershell.core.exceptions import (handle_exception, handle_disconnect,
 # Public interface
 __all__ = ['run_client', 'ClientThread', 'ClientApp', 'ClientInfo',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE',
-           'DEFAULT_NUM_TASKS', 'DEFAULT_DELAY', 'DEFAULT_SIGNALWAIT',
+           'DEFAULT_NUM_THREADS', 'DEFAULT_NUM_TASKS',  # DEFAULT_NUM_TASKS for backwards compatibility
+           'DEFAULT_DELAY', 'DEFAULT_SIGNALWAIT',
            'DEFAULT_HEARTRATE', 'DEFAULT_HOST', 'DEFAULT_PORT', 'DEFAULT_AUTH',
            'set_client_standalone']
 
@@ -416,6 +423,9 @@ class ClientCollectorThread(Thread):
 DEFAULT_SIGNALWAIT: Final[int] = default.task.signalwait
 """Default signal escalation wait period in seconds."""
 
+DEFAULT_TEMPLATE: Final[str] = DEFAULT_TEMPLATE  # redefined for documentation purposes
+"""Default command pattern for template expansion."""
+
 
 def task_env(task: Task) -> Dict[str, str]:
     """Build environment dictionary for the given `task`."""
@@ -433,7 +443,138 @@ def task_env(task: Task) -> Dict[str, str]:
         'TASK_CWD': config.task.cwd,
         'TASK_OUTPATH': os.path.join(default_path.lib, 'task', f'{task.id}.out'),
         'TASK_ERRPATH': os.path.join(default_path.lib, 'task', f'{task.id}.err'),
+        'TASK_CSVPATH': os.path.join(default_path.lib, 'task', f'{task.id}.csv'),
     }
+
+
+# Global CPU count and main memory tracking variables
+executor_lock: Lock = Lock()
+cores_total: int = CPU_COUNT
+cores_active: int = 0
+memory_total: int = MEMORY_TOTAL
+memory_active: int = 0
+tasks_priority: Dict[str, int] = defaultdict(int)
+tasks_active: Dict[str, Task] = {}
+tasks_pending: Dict[str, Task] = {}
+
+# Tolerances for resource limit exceeded warnings
+CPU_TOL: Final[float] = 0.05
+MEM_TOL: Final[int] = parse_bytes('5MB')
+
+
+def backfill_possible(task: Task) -> bool:
+    """Check if possible to backfill task before highest priority task start."""
+
+    # This function should never be called directly.
+    # It relies on the global lock within acquire_resources()
+
+    # If we are here than the task has either core or memory requirements and is not the highest-priority task.
+    # This procedure determines what the worst-case expected start-time of the highest-priority task is
+    # given the current running tasks' resources and when they will be reclaimed.
+    # If and only if we can account for those resources and the given task has a known walltime time that
+    # is less than this expected start-time do we allow it to start (return True).
+
+    if not task.timeout:
+        return False  # Cannot backfill if we don't know when the task will end
+
+    max_priority = max(tasks_priority.values())
+    priority_task, = islice(filter(lambda t: tasks_priority[t.id] == max_priority, tasks_pending.values()), 1)
+    available_cores = cores_total - cores_active
+    available_memory = memory_total - memory_active
+
+    # Walk active tasks in order of expected worst-case completion time if known,
+    # accumulate cores and memory until we have enough for next highest priority task,
+    # if current task can finish in less time than this expected time then let it start
+    now = datetime.now().astimezone()
+    end_times = {t.id: (t.start_time or now) + timedelta(seconds=t.timeout)
+                 for t in tasks_active.values() if t.timeout}
+    for next_task_id in sorted(end_times.keys(), key=lambda task_id: end_times[task_id]):
+        next_task = tasks_active[next_task_id]
+        time_remaining = end_times[next_task_id] - now
+        available_cores += next_task.cores or 0
+        available_memory += next_task.memory or 0
+        if (available_cores >= (priority_task.cores or 0) and
+            available_memory >= (priority_task.memory or 0) and
+            task.timeout < (dt := time_remaining.total_seconds())
+        ):
+            log.debug(f'Backfilling task ({task.id}): timeout={task.timeout} < {dt:.1f} seconds')
+            return True
+    else:
+        return False
+
+
+def set_resources(cores: Optional[int] = None, memory: Optional[int] = None) -> None:
+    """Set total resources (if we are not using the whole node)."""
+    global cores_total, memory_total
+    with executor_lock:
+        cores_total = cores or CPU_COUNT
+        memory_total = memory or MEMORY_TOTAL
+
+
+def acquire_resources(task: Task) -> Tuple[bool, str, float]:
+    """
+    Track resources and return (can_start, reason, priority_ratio).
+    The priority_ratio is used to compute an adaptive sleep time for waiting tasks.
+    We build a range of [0.5, 1.0] seconds to naturally wake up in an orderly fashion.
+    """
+
+    global cores_active, memory_active
+    with executor_lock:
+
+        # Cores may be unspecified or 0, we bypass this if no resources required
+        if task.cores and (available_cores := cores_total - cores_active) < task.cores:
+            tasks_priority[task.id] += 1
+            tasks_pending[task.id] = task
+            max_priority = max(tasks_priority.values())
+            return (False,
+                    f'cores: {available_cores} < {task.cores}',
+                    tasks_priority[task.id] / max_priority)
+
+        # Memory may be unspecified or 0, we bypass this if no resources required
+        if task.memory and (available_memory := memory_total - memory_active) < task.memory:
+            tasks_priority[task.id] += 1
+            tasks_pending[task.id] = task
+            max_priority = max(tasks_priority.values())
+            return (False,
+                    f'memory: {format_bytes(available_memory)} < {format_bytes(task.memory)}',
+                    tasks_priority[task.id] / max_priority)
+
+        priority = tasks_priority[task.id]  # Force initialization to 0 if first pass
+        max_priority = max(tasks_priority.values())  # Might be the same task
+
+        # If these are the same task we short-circuit the backfill process (priority == max_priority)
+        if priority < max_priority and not backfill_possible(task):
+            tasks_priority[task.id] += 1
+            tasks_pending[task.id] = task
+            return (False,
+                    f'priority: {priority} < {max_priority}',
+                    tasks_priority[task.id] / max_priority)
+        else:
+            cores_active += task.cores or 0
+            memory_active += task.memory or 0
+            tasks_priority.pop(task.id, None)
+            tasks_pending.pop(task.id, None)
+            tasks_active[task.id] = task
+            return True, '', 1.0
+
+
+def release_resources(task: Task) -> None:
+    """Release cores and memory."""
+    global cores_active, memory_active
+    with executor_lock:
+        cores_active -= task.cores or 0
+        memory_active -= task.memory or 0
+        tasks_active.pop(task.id, None)
+
+
+def insufficient_resources(task: Task) -> Tuple[bool, str]:
+    """Signal if and why a client cannot run a task due to insufficient resources."""
+    if task.cores and cores_total < task.cores:
+        return False, f'cores: {cores_total} < {task.cores}'
+    if task.memory and memory_total < task.memory:
+        return False, f'memory: {memory_total} < {task.memory}'
+    else:
+        return True, ''
 
 
 class TaskState(State, Enum):
@@ -454,6 +595,11 @@ class TaskState(State, Enum):
     HALT = 13
 
 
+# Special exit status indicates cancellation
+TASK_TEMPLATE_ERROR: Final[int] = -2
+TASK_RESOURCE_ERROR: Final[int] = -3
+
+
 class TaskExecutor(StateMachine):
     """Run tasks locally."""
 
@@ -463,8 +609,11 @@ class TaskExecutor(StateMachine):
     template: Template
     redirect_output: IO
     redirect_errors: IO
+    redirect_monitor: IO | None
+    monitor: bool
     capture: bool
 
+    received: datetime
     elapsed: timedelta
     timeout: Optional[int]
     signalwait: int
@@ -473,6 +622,8 @@ class TaskExecutor(StateMachine):
     attempted_sigint: bool
     attempted_sigterm: bool
     attempted_sigkill: bool
+    resource_limit_warned_cores: bool
+    resource_limit_warned_memory: bool
 
     inbound: Queue[Optional[Task]]
     outbound: Queue[Optional[Task]]
@@ -488,6 +639,7 @@ class TaskExecutor(StateMachine):
                  redirect_output: IO = None,
                  redirect_errors: IO = None,
                  capture: bool = False,
+                 monitor: bool = False,
                  timeout: int = None,
                  signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: float = None) -> None:
@@ -498,7 +650,9 @@ class TaskExecutor(StateMachine):
         self.outbound = outbound
         self.redirect_output = redirect_output or sys.stdout
         self.redirect_errors = redirect_errors or sys.stderr
+        self.redirect_monitor = None
         self.capture = capture
+        self.monitor = monitor
         self.timeout = timeout
         self.signalwait = signalwait
         self.ratelimit = ratelimit
@@ -544,27 +698,50 @@ class TaskExecutor(StateMachine):
             self.task.command = self.template.expand(self.task.args)
             return TaskState.START_TASK
         except Exception as error:
-            log.error(f'{error.__class__.__name__}: {error}')
+            log.error(f'Template expansion failed for task ({self.task.id}): {error} (cancelled)')
             self.task.start_time = datetime.now().astimezone()
             self.task.completion_time = datetime.now().astimezone()
-            self.task.exit_status = -1
+            self.task.exit_status = TASK_TEMPLATE_ERROR
             return TaskState.PUT_LOCAL
 
     def start_task(self: TaskExecutor) -> TaskState:
         """Start current task locally."""
-        # NOTE: enforce tz aware submit_time (in case of sqlite backend)
-        self.task.start_time = datetime.now().astimezone()
+        eligible, reason = insufficient_resources(self.task)
+        if not eligible:
+            log.error(f'Insufficient resources for task ({self.task.id}): {reason} (cancelled)')
+            self.task.start_time = datetime.now().astimezone()
+            self.task.completion_time = datetime.now().astimezone()
+            self.task.exit_status = TASK_RESOURCE_ERROR
+            return TaskState.PUT_LOCAL
+        resources_available, reason, priority_ratio = acquire_resources(self.task)
+        if not resources_available:
+            # Adaptive sleep based on priority ratio with added jitter
+            # High priority (ratio=1.0) sleeps ~0.5s, low priority (ratio=0.0) sleeps ~1.0s
+            base_sleep = 1.0 - 0.5 * priority_ratio  # Linear mapping to [0.5, 1.0]
+            jitter = random.uniform(-0.05, 0.05)  # Prevent exact collisions
+            sleep_time = max(0.5, min(1.0, base_sleep + jitter))  # Safety clamp
+            log.trace(f'Waiting task start ({self.task.id}): {reason} '
+                      f'(priority: {priority_ratio:.3f}, waiting: {sleep_time:.3f}s)')
+            time.sleep(sleep_time)
+            return TaskState.START_TASK
+        self.task.start_time = datetime.now().astimezone()  # Possible TZ aware submit_time
         self.task.waited = int((self.task.start_time - self.task.submit_time.astimezone()).total_seconds())
         env = task_env(self.task)
         if self.capture:
             self.task.outpath = env['TASK_OUTPATH']
             self.task.errpath = env['TASK_ERRPATH']
-            self.redirect_output = open(self.task.outpath, mode='w')
-            self.redirect_errors = open(self.task.errpath, mode='w')
+            self.redirect_output = open(env['TASK_OUTPATH'], mode='w')
+            self.redirect_errors = open(env['TASK_ERRPATH'], mode='w')
+        if self.monitor:
+            self.task.csvpath = env['TASK_CSVPATH']
+            self.redirect_monitor = open(env['TASK_CSVPATH'], mode='w')
+            print('time,cores,memory', file=self.redirect_monitor)
         self.stop_requested = None
         self.attempted_sigint = False
         self.attempted_sigterm = False
         self.attempted_sigkill = False
+        self.resource_limit_warned_cores = False
+        self.resource_limit_warned_memory = False
         self.process = Popen(self.task.command, shell=True,
                              stdout=self.redirect_output, stderr=self.redirect_errors,
                              cwd=config.task.cwd, env=env)
@@ -577,17 +754,47 @@ class TaskExecutor(StateMachine):
         try:
             self.task.exit_status = self.process.wait(timeout=1)
             self.task.completion_time = datetime.now().astimezone()
-            self.task.duration = int((self.task.completion_time - self.task.start_time).total_seconds())
-            log.debug(f'Completed task ({self.task.id})')
+            elapsed = self.task.completion_time - self.task.start_time
+            elapsed_nearest_second = timedelta(seconds=round(elapsed.total_seconds()))
+            self.task.duration = int(elapsed.total_seconds())
+            log.debug(f'Completed task ({self.task.id}) elapsed: {elapsed_nearest_second}')
             if self.capture:
                 self.redirect_output.close()
                 self.redirect_errors.close()
-            return TaskState.PUT_LOCAL
+            if self.monitor:
+                self.redirect_monitor.close()
+                clear_processes(self.process.pid)
+            release_resources(self.task)
+            return TaskState.WAIT_RATE
         except TimeoutExpired:
-            # Only display time elapsed to the nearest second
-            self.elapsed = timedelta(seconds=round((datetime.now().astimezone() -
-                                                    self.task.start_time).total_seconds()))
-            log.trace(f'Waiting on task ({self.task.id}: {self.elapsed})')
+            self.elapsed = datetime.now().astimezone() - self.task.start_time
+            elapsed_nearest_second = timedelta(seconds=round(self.elapsed.total_seconds()))
+            if not self.monitor:
+                log.trace(f'Waiting task completion ({self.task.id}) elapsed: {elapsed_nearest_second}')
+            else:
+                ts, cores, memory = check_resources(self.process.pid)
+                log.trace(f'Waiting task completion ({self.task.id}) '
+                          f'elapsed: {elapsed_nearest_second} '
+                          f'cores: {cores:.2f} '
+                          f'memory: {format_bytes(memory)}')
+                self.task.cores_max = max(self.task.cores_max or 0, cores)
+                self.task.memory_max = max(self.task.memory_max or 0, memory)
+                print(f'{ts},{cores:.2f},{memory}', file=self.redirect_monitor)
+                if (self.task.cores and
+                    self.task.cores_max > (self.task.cores + CPU_TOL) and
+                    not self.resource_limit_warned_cores
+                ):
+                    self.resource_limit_warned_cores = True
+                    log.warning(f'Resource limit exceeded ({self.task.id}): '
+                                f'cores {self.task.cores_max:.2f} (used) > {self.task.cores:.2f} (allocated)')
+                if (self.task.memory and
+                    self.task.memory_max > (self.task.memory + MEM_TOL) and
+                    not self.resource_limit_warned_memory
+                ):
+                    self.resource_limit_warned_memory = True
+                    log.warning(f'Resource limit exceeded ({self.task.id}): memory '
+                                f'{format_bytes(self.task.memory_max)} (used) > '
+                                f'{format_bytes(self.task.memory)} (allocated)')
             if self.stop_requested:
                 return TaskState.WAIT_SIGNAL
             else:
@@ -599,10 +806,11 @@ class TaskExecutor(StateMachine):
             log.warning(f'Signal interrupt (SIGUSR2: executor-{self.id})')
             self.stop_requested = datetime.now()
             return TaskState.WAIT_SIGNAL
-        elif self.timeout is None or self.elapsed.total_seconds() < self.timeout:
+        timeout = min(filter(None, [self.timeout, self.task.timeout]), default=None)
+        if not timeout or self.elapsed.total_seconds() < timeout:
             return TaskState.WAIT_TASK
         else:
-            log.warning(f'Task exceeded walltime limit ({self.elapsed})')
+            log.warning(f'Walltime limit exceeded ({self.task.id}): {self.elapsed} > {timeout}')
             self.stop_requested = datetime.now()
             return TaskState.WAIT_SIGNAL
 
@@ -681,6 +889,8 @@ class TaskExecutor(StateMachine):
             self.redirect_output.close()
         if self.redirect_errors is not sys.stderr:
             self.redirect_errors.close()
+        if self.redirect_monitor is not None:
+            self.redirect_monitor.close()
         return TaskState.HALT
 
 
@@ -695,6 +905,7 @@ class TaskThread(Thread):
                  outbound: Queue[Optional[str]],
                  template: str = DEFAULT_TEMPLATE,
                  capture: bool = False,
+                 monitor: bool = False,
                  redirect_output: IO = None,
                  redirect_errors: IO = None,
                  timeout: int = None,
@@ -705,7 +916,7 @@ class TaskThread(Thread):
         super().__init__(name=f'hypershell-executor-{id}')
         self.machine = TaskExecutor(id=id, inbound=inbound, outbound=outbound, template=template,
                                     redirect_output=redirect_output, redirect_errors=redirect_errors,
-                                    capture=capture, timeout=timeout, signalwait=signalwait)
+                                    capture=capture, monitor=monitor, timeout=timeout,
                                     signalwait=signalwait, ratelimit=ratelimit)
 
     def run_with_exceptions(self: TaskThread) -> None:
@@ -824,8 +1035,11 @@ class ClientHeartbeatThread(Thread):
         super().stop(wait=wait, timeout=timeout)
 
 
-DEFAULT_NUM_TASKS: Final[int] = 1
-"""Default number of task executors per client."""
+DEFAULT_NUM_THREADS: Final[int] = 1
+"""Default number of executor threads per client."""
+
+# Backwards compatibility alias
+DEFAULT_NUM_TASKS: Final[int] = DEFAULT_NUM_THREADS
 
 # We do not delay connecting to the server unless explicitly specified
 DEFAULT_DELAY: Final[int] = 0
@@ -845,11 +1059,12 @@ class ClientThread(Thread):
     """
     Run client within dedicated thread.
     Run until either disconnect requested from server or `client_timeout` reached.
+    Will also halt for SIGUSR2 signal on UNIX.
 
     Args:
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection based on cores).
+            See :const:`DEFAULT_NUM_THREADS`.
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -881,8 +1096,16 @@ class ClientThread(Thread):
             See :const:`DEFAULT_HEARTRATE`,
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
+
+        cores (int, optional):
+            Set core limit for client (default: all available cores).
+
+        memory (int, optional):
+            Set memory limit for client (default: all available memory).
 
         delay_start (float, optional):
             Delay in seconds before connecting to server.
@@ -904,12 +1127,12 @@ class ClientThread(Thread):
             See :const:`DEFAULT_SIGNALWAIT`.
 
         ratelimit (int, optional):
-            Maximum allowed tasks per second (default: None).
+            Maximum allowed tasks per second (default: none).
             There is no limit on task throughput unless specified.
 
     Example:
         >>> from hypershell.client import ClientThread
-        >>> client = ClientThread.new(num_tasks=16, address=('localhost', 54321),
+        >>> client = ClientThread.new(num_threads=16, address=('localhost', 54321),
         ...                           auth='my-secret-key', capture=True)
         >>> client.join()
 
@@ -918,18 +1141,19 @@ class ClientThread(Thread):
     """
 
     client: QueueClient
-    num_tasks: int
+    num_threads: int
     delay_start: float
     no_confirm: bool
 
     inbound: Queue[Optional[Task]]
     outbound: Queue[Optional[Task]]
     scheduler: ClientSchedulerThread
+    heartbeat: ClientHeartbeatThread
     collector: ClientCollectorThread
     executors: List[TaskThread]
 
     def __init__(self: ClientThread,
-                 num_tasks: int = DEFAULT_NUM_TASKS,
+                 num_threads: int = DEFAULT_NUM_THREADS,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  address: Tuple[str, int] = (DEFAULT_HOST, DEFAULT_PORT),
@@ -939,6 +1163,9 @@ class ClientThread(Thread):
                  redirect_errors: IO = None,
                  heartrate: int = DEFAULT_HEARTRATE,
                  capture: bool = False,
+                 monitor: bool = False,
+                 cores: int = None,
+                 memory: int = None,
                  delay_start: float = DEFAULT_DELAY,
                  no_confirm: bool = False,
                  client_timeout: int = None,
@@ -947,7 +1174,11 @@ class ClientThread(Thread):
                  ratelimit: int = None) -> None:
         """Initialize queue manager and child threads."""
         super().__init__(name='hypershell-client')
-        self.num_tasks = num_tasks
+        set_resources(cores, memory)
+        if num_threads == 0:
+            num_threads = CPU_COUNT
+            log.debug(f'Auto-detected {num_threads} executor threads (based on available cores)')
+        self.num_threads = num_threads
         self.delay_start = delay_start
         self.no_confirm = no_confirm
         self.client = QueueClient(config=QueueConfig(host=address[0], port=address[1], auth=auth))
@@ -959,19 +1190,18 @@ class ClientThread(Thread):
         self.collector = ClientCollectorThread(queue=self.client, local=self.outbound,
                                                bundlesize=bundlesize, bundlewait=bundlewait)
         if ratelimit is not None:
-            ratelimit = ratelimit / num_tasks
+            ratelimit = ratelimit / num_threads
             log.debug(f'Rate limit enabled: {ratelimit:.2} tasks per second per thread')
         self.executors = [TaskThread(id=count+1,
                                      inbound=self.inbound, outbound=self.outbound,
                                      redirect_output=redirect_output, redirect_errors=redirect_errors,
-                                     template=template, capture=capture, timeout=task_timeout,
-                                     signalwait=task_signalwait)
+                                     template=template, capture=capture, monitor=monitor, timeout=task_timeout,
                                      signalwait=task_signalwait, ratelimit=ratelimit)
-                          for count in range(num_tasks)]
+                          for count in range(num_threads)]
 
     def run_with_exceptions(self: ClientThread) -> None:
         """Start child threads, wait."""
-        log.debug(f'Started ({self.num_tasks} executors)')
+        log.debug(f'Started ({self.num_threads} executors)')
         self.wait_start()
         with self.client:
             self.start_threads()
@@ -1034,7 +1264,7 @@ class ClientThread(Thread):
         super().stop(wait=wait, timeout=timeout)
 
 
-def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
+def run_client(num_threads: int = DEFAULT_NUM_THREADS,
                bundlesize: int = DEFAULT_BUNDLESIZE,
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                address: Tuple[str, int] = (DEFAULT_HOST, DEFAULT_PORT),
@@ -1043,6 +1273,9 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
                redirect_output: IO = None,
                redirect_errors: IO = None,
                capture: bool = False,
+               monitor: bool = False,
+               cores: int = None,
+               memory: int = None,
                heartrate: int = DEFAULT_HEARTRATE,
                delay_start: float = DEFAULT_DELAY,
                no_confirm: bool = False,
@@ -1054,9 +1287,9 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
     Run client until disconnect signal received or `client_timeout` reached.
 
     Args:
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection based on cores).
+            See :const:`DEFAULT_NUM_THREADS`.
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -1088,8 +1321,16 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
             See :const:`DEFAULT_HEARTRATE`,
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
+
+        cores (int, optional):
+            Set core limit for client (default: all available cores).
+
+        memory (int, optional):
+            Set memory limit for client (default: all available memory).
 
         delay_start (float, optional):
             Delay in seconds before connecting to server.
@@ -1116,19 +1357,22 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
 
     Example:
         >>> from hypershell.client import run_client
-        >>> run_client(num_tasks=16, address=('localhost', 54321),
+        >>> run_client(num_threads=16, address=('localhost', 54321),
         ...            auth='my-secret-key', capture=True)
 
     See Also:
         - :meth:`ClientThread`
     """
-    thread = ClientThread.new(num_tasks=num_tasks,
+    thread = ClientThread.new(num_threads=num_threads,
                               bundlesize=bundlesize,
                               bundlewait=bundlewait,
                               address=address,
                               auth=auth,
                               template=template,
                               capture=capture,
+                              monitor=monitor,
+                              cores=cores,
+                              memory=memory,
                               redirect_output=redirect_output,
                               redirect_errors=redirect_errors,
                               heartrate=heartrate,
@@ -1148,8 +1392,9 @@ def run_client(num_tasks: int = DEFAULT_NUM_TASKS,
 APP_NAME = 'hs client'
 APP_USAGE = f"""\
 Usage:
-  hs client [-h] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-H ADDR] [-p PORT] [-k KEY]
-            [--capture | [-o PATH] [-e PATH]] [--no-confirm] [-d SEC] [-T SEC] [-W SEC] [-S SEC]
+  hs client [-h] [-H ADDR] [-p PORT] [-k KEY] [-N THREADS] [-C CORES] [-M MEMORY]   
+            [--template CMD] [-d DELAY] [-T TIMEOUT] [-W TIMEOUT] [-b SIZE] [-S WAIT] [-w WAIT]
+            [--capture | [-o PATH] [-e PATH]] [--no-confirm] [--monitor]
 
   Launch client directly, run tasks in parallel.\
 """
@@ -1157,24 +1402,32 @@ Usage:
 APP_HELP = f"""\
 {APP_USAGE}
 
-  Tasks are pulled off of the shared queue in bundles from the server and run
-  locally within the same shell as the client. By default the bundle size is one,
-  meaning that at small scales there is greater responsiveness. It is recommended
-  to coordinate these parameters to be the same as the server.
-
+  Tasks are pulled from server in bundles and run locally within the client environment. 
+  By default the bundle size is one, meaning that at small scales there is greater responsiveness. 
+  It is recommended to coordinate these parameters with the server.
+  
+  By default the client uses all available cores and memory on the server.
+  More than one client can run per server by limiting resources allocated to them.
+  The number of executor threads (-N) represents parallel execution slots.
+  Use -N0 for auto-detection (sets threads equal to available cores).
+  With resource management, actual parallelism depends on task requirements.
+  
 Options:
-  -N, --num-tasks     NUM   Number of tasks to run in parallel (default: {DEFAULT_NUM_TASKS}).
+  -N, --num-threads   NUM   Number executor threads, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template      CMD   Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
   -b, --bundlesize    SIZE  Bundle size for finished tasks (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait    SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
-  -H, --host          ADDR  Hostname for server.
-  -p, --port          NUM   Port number for server.
+  -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
+  -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
   -k, --auth          KEY   Cryptographic key to connect to server.
   -d, --delay-start   SEC   Seconds to wait before start-up (default: {DEFAULT_DELAY}).
       --no-confirm          Disable confirmation of task bundle received.
   -o, --output        PATH  Redirect task output (default: <stdout>).
   -e, --errors        PATH  Redirect task errors (default: <stderr>).
-  -c, --capture             Capture individual task <stdout> and <stderr>.
+      --capture             Capture individual task <stdout> and <stderr>.
+      --monitor             Capture cores and memory used by tasks.
+  -C, --client-cores  NUM   Limit available cores for client (default: all cores).
+  -M, --client-memory MEM   Limit available memory for client (default: all memory).
   -T, --timeout       SEC   Automatically shutdown if no tasks received (default: never).
   -W, --task-timeout  SEC   Task-level walltime limit (default: none).
   -R, --ratelimit     NUM   Maximum allowed tasks per second (default: none).
@@ -1189,8 +1442,9 @@ class ClientApp(Application):
     name = APP_NAME
     interface = Interface(APP_NAME, APP_USAGE, APP_HELP)
 
-    num_tasks: int = DEFAULT_NUM_TASKS
-    interface.add_argument('-N', '--num-tasks', type=int, default=num_tasks)
+    num_threads: int = DEFAULT_NUM_THREADS
+    interface.add_argument('-N', '--num-threads', '--num-tasks', type=int, default=num_threads, dest='num_threads')
+    # NOTE: --num-tasks maintained for backwards compatibility
 
     host: str = config.server.bind
     interface.add_argument('-H', '--host', default=host)
@@ -1213,8 +1467,8 @@ class ClientApp(Application):
     delay_start: float = DEFAULT_DELAY
     interface.add_argument('-d', '--delay-start', type=float, default=delay_start)
 
-    task_timeout: int = config.task.timeout
-    client_timeout: int = config.client.timeout
+    task_timeout: Optional[int] = config.task.timeout or None
+    client_timeout: Optional[int] = config.client.timeout or None
     ratelimit: Optional[int] = config.client.ratelimit or None
     interface.add_argument('-T', '--timeout', type=int, default=client_timeout, dest='client_timeout')
     interface.add_argument('-W', '--task-timeout', type=int, default=task_timeout, dest='task_timeout')
@@ -1232,7 +1486,14 @@ class ClientApp(Application):
     interface.add_argument('-e', '--errors', default=None, dest='errors_path')
 
     capture: bool = False
-    interface.add_argument('-c', '--capture', action='store_true')
+    monitor: bool = False
+    interface.add_argument('--capture', action='store_true')
+    interface.add_argument('--monitor', action='store_true')
+
+    client_cores: Optional[int] = config.client.cores or None
+    client_memory: Optional[int] = config.client.memory or None
+    interface.add_argument('-C', '--client-cores', type=int, default=client_cores, dest='client_cores')
+    interface.add_argument('-M', '--client-memory', type=int, default=client_memory, dest='client_memory')
 
     # Hidden options used as helpers for shell completion
     interface.add_argument('--available-cores', action='version', version=str(cpu_count()))
@@ -1251,7 +1512,7 @@ class ClientApp(Application):
         """Run client."""
         try:
             self.check_args()
-            run_client(num_tasks=self.num_tasks,
+            run_client(num_threads=self.num_threads,
                        bundlesize=self.bundlesize,
                        bundlewait=self.bundlewait,
                        address=(self.host, self.port),
@@ -1260,6 +1521,9 @@ class ClientApp(Application):
                        redirect_output=self.output_stream,
                        redirect_errors=self.errors_stream,
                        capture=self.capture,
+                       monitor=self.monitor,
+                       cores=self.client_cores,
+                       memory=self.client_memory,
                        delay_start=self.delay_start,
                        no_confirm=self.no_confirm,
                        heartrate=config.client.heartrate,

@@ -61,6 +61,7 @@ from cmdkit.cli import Interface, ArgumentError
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import config, default, find_available_ports
+from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread
@@ -125,7 +126,8 @@ class Scheduler(StateMachine):
 
     def __init__(self: Scheduler, queue: QueueServer, bundlesize: int = DEFAULT_BUNDLESIZE,
                  attempts: int = DEFAULT_ATTEMPTS, eager: bool = DEFAULT_EAGER_MODE,
-                 forever_mode: bool = False, restart_mode: bool = False) -> None:
+                 forever_mode: bool = False, restart_mode: bool = False,
+                 query_pause: int = DEFAULT_QUERY_PAUSE) -> None:
         """Initialize queue and parameters."""
         self.queue = queue
         self.bundle = []
@@ -134,9 +136,8 @@ class Scheduler(StateMachine):
         self.eager = eager
         self.forever_mode = forever_mode
         self.restart_mode = restart_mode
-        if self.restart_mode:
-            # NOTE: Halt if everything in the database is already finished
-            self.startup_phase = False
+        self.query_pause = query_pause
+        self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
 
     @cached_property
     def actions(self: Scheduler) -> Dict[SchedulerState, Callable[[], SchedulerState]]:
@@ -153,17 +154,16 @@ class Scheduler(StateMachine):
         log.debug('Started (scheduler)')
         if self.forever_mode:
             log.info('Scheduler will run forever')
-        task_count = Task.count()
-        tasks_remaining = Task.count_remaining()
-        if task_count > 0:
-            log.warning(f'Database exists ({task_count} previous tasks)')
-            if tasks_remaining == 0:
-                log.warning(f'All tasks completed - did you mean to use the same database?')
+        if Task.count() > 0:
+            if (tasks_remaining := Task.count_remaining()) == 0:
+                log.warning(f'All previous tasks completed - nothing to do')
             else:
                 tasks_interrupted = Task.count_interrupted()
                 log.info(f'Found {tasks_remaining} unfinished task(s)')
                 Task.revert_interrupted()
                 log.info(f'Reverted {tasks_interrupted} previously interrupted task(s)')
+        else:
+            log.info('Empty database - waiting for initial tasks')
         return SchedulerState.LOAD
 
     def load_bundle(self: Scheduler) -> SchedulerState:
@@ -175,11 +175,11 @@ class Scheduler(StateMachine):
         if self.tasks:
             self.startup_phase = False
             return SchedulerState.PACK
-        # An empty database must wait for at least one task
         elif not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0 and not self.startup_phase:
             return SchedulerState.FINAL
         else:
-            time.sleep(DEFAULT_QUERY_PAUSE)
+            log.trace(f'No tasks available - waiting {self.query_pause} seconds')
+            time.sleep(self.query_pause)
             return SchedulerState.LOAD
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
@@ -208,9 +208,13 @@ class Scheduler(StateMachine):
 class SchedulerThread(Thread):
     """Run scheduler within dedicated thread."""
 
-    def __init__(self: SchedulerThread, queue: QueueServer, bundlesize: int = DEFAULT_BUNDLESIZE,
-                 attempts: int = DEFAULT_ATTEMPTS, eager: bool = DEFAULT_EAGER_MODE,
-                 forever_mode: bool = False, restart_mode: bool = False) -> None:
+    def __init__(self: SchedulerThread,
+                 queue: QueueServer,
+                 bundlesize: int = DEFAULT_BUNDLESIZE,
+                 attempts: int = DEFAULT_ATTEMPTS,
+                 eager: bool = DEFAULT_EAGER_MODE,
+                 forever_mode: bool = False,
+                 restart_mode: bool = False) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-scheduler')
         self.machine = Scheduler(queue=queue, bundlesize=bundlesize, attempts=attempts, eager=eager,
@@ -625,6 +629,24 @@ class ServerThread(Thread):
             A new `source` results in a :class:`~hypershell.submit.SubmitThread` populating
             either the database or the queue directly depending on `in_memory`.
 
+        task_cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_timeout (int, optional):
+            Task-level walltime limit in seconds (default: none).
+
+        bundlesize (int, optional):
+            Size of task bundles. See :const:`DEFAULT_BUNDLESIZE`.
+
+        bundlewait (int, optional):
+            Waiting period before forcing task bundle push.
+            See :const:`~hypershell.submit.DEFAULT_BUNDLEWAIT`.
+
         restart_mode (bool, optional):
             If `source` is empty, this option allows for the server to continue
             with scheduling from the database until complete.
@@ -633,13 +655,6 @@ class ServerThread(Thread):
         forever_mode (bool, optional):
             Regardless of `source`, if enabled schedule forever.
             Conflicts with `restart_mode` and `in_memory`. Default is `False`.
-
-        bundlesize (int, optional):
-            Size of task bundles. See :const:`DEFAULT_BUNDLESIZE`.
-
-        bundlewait (int, optional):
-            Waiting period before forcing task bundle push.
-            See :const:`~hypershell.submit.DEFAULT_BUNDLEWAIT`.
 
         in_memory (bool, optional):
             If True, revert to basic in-memory queue.
@@ -690,6 +705,9 @@ class ServerThread(Thread):
 
     def __init__(self: ServerThread,
                  source: Iterable[str] = None,
+                 task_cores: int = None,
+                 task_memory: int = None,
+                 task_timeout: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  in_memory: bool = False,
@@ -715,9 +733,12 @@ class ServerThread(Thread):
         if self.in_memory:
             self.scheduler = None
             self.submitter = None if not source else LiveSubmitThread(
-                source, queue_config=queue_config, bundlesize=bundlesize, bundlewait=bundlewait)
+                source, cores=task_cores, memory=task_memory, timeout=task_timeout, queue_config=queue_config,
+                bundlesize=bundlesize, bundlewait=bundlewait)
         else:
-            self.submitter = None if not source else SubmitThread(source, bundlesize=bundlesize, bundlewait=bundlewait)
+            self.submitter = None if not source else SubmitThread(
+                source, cores=task_cores, memory=task_memory, timeout=task_timeout,
+                bundlesize=bundlesize, bundlewait=bundlewait)
             self.scheduler = SchedulerThread(queue=self.queue, bundlesize=bundlesize, attempts=max_retries + 1,
                                              eager=eager, forever_mode=forever_mode, restart_mode=restart_mode)
         if self.no_confirm:
@@ -747,7 +768,7 @@ class ServerThread(Thread):
             self.submitter.start()
         if self.scheduler is not None:
             self.scheduler.start()
-        if not self.no_confirm:
+        if self.confirm is not None:
             self.confirm.start()
         self.heartmonitor.start()
         self.receiver.start()
@@ -802,6 +823,9 @@ class ServerThread(Thread):
 
 def serve_from(source: Iterable[str],
                restart_mode: bool = False,
+               task_cores: int = None,
+               task_memory: int = None,
+               task_timeout: int = None,
                bundlesize: int = DEFAULT_BUNDLESIZE,
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                in_memory: bool = False,
@@ -819,10 +843,16 @@ def serve_from(source: Iterable[str],
         source (Iterable[str]):
             Any iterable of command-line tasks.
 
-        restart_mode (bool, optional):
-            If `source` is empty, this option allows for the server to continue
-            with scheduling from the database until complete.
-            Conflicts with `in_memory`. Default is `False`.
+        task_cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_timeout (int, optional):
+            Task-level walltime limit in seconds (default: none).
 
         bundlesize (int, optional):
             Size of task bundles. See :const:`DEFAULT_BUNDLESIZE`.
@@ -830,6 +860,11 @@ def serve_from(source: Iterable[str],
         bundlewait (int, optional):
             Waiting period before forcing task bundle push.
             See :const:`~hypershell.submit.DEFAULT_BUNDLEWAIT`.
+
+        restart_mode (bool, optional):
+            If `source` is empty, this option allows for the server to continue
+            with scheduling from the database until complete.
+            Conflicts with `in_memory`. Default is `False`.
 
         in_memory (bool, optional):
             If True, revert to basic in-memory queue.
@@ -867,12 +902,16 @@ def serve_from(source: Iterable[str],
         - :meth:`serve_forever`
     """
     thread = ServerThread.new(source=source,
-                              restart_mode=restart_mode,
+                              task_cores=task_cores,
+                              task_memory=task_memory,
+                              task_timeout=task_timeout,
                               bundlesize=bundlesize,
                               bundlewait=bundlewait,
                               in_memory=in_memory,
                               no_confirm=no_confirm,
-                              address=address, auth=auth,
+                              address=address,
+                              auth=auth,
+                              restart_mode=restart_mode,
                               max_retries=max_retries,
                               eager=eager,
                               redirect_failures=redirect_failures,
@@ -885,6 +924,9 @@ def serve_from(source: Iterable[str],
 
 
 def serve_file(path: str,
+               task_cores: int = None,
+               task_memory: int = None,
+               task_timeout: int = None,
                bundlesize: int = DEFAULT_BUNDLESIZE,
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                in_memory: bool = False,
@@ -902,6 +944,17 @@ def serve_file(path: str,
     Args:
         path (str):
             Path to file containing command-line tasks.
+
+        task_cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_timeout (int, optional):
+            Task-level walltime limit in seconds (default: none).
 
         bundlesize (int, optional):
             Size of task bundles. See :const:`DEFAULT_BUNDLESIZE`.
@@ -951,6 +1004,9 @@ def serve_file(path: str,
     """
     with open(path, mode='r', **file_options) as stream:
         serve_from(stream,
+                   task_cores=task_cores,
+                   task_memory=task_memory,
+                   task_timeout=task_timeout,
                    bundlesize=bundlesize,
                    bundlewait=bundlewait,
                    in_memory=in_memory,
@@ -1015,8 +1071,7 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
         - :meth:`serve_from`
         - :meth:`serve_file`
     """
-    thread = ServerThread.new(source=None,
-                              bundlesize=bundlesize,
+    thread = ServerThread.new(bundlesize=bundlesize,
                               in_memory=in_memory,
                               no_confirm=no_confirm,
                               address=address,
@@ -1036,8 +1091,9 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
 APP_NAME = 'hs server'
 APP_USAGE = f"""\
 Usage:
-  hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]]
-            [-H ADDR] [-p PORT] [-k KEY] [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
+  hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]] [-t SEC]
+            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] 
+            [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
 
   Launch server, schedule directly or asynchronously from database.\
 """
@@ -1066,6 +1122,9 @@ Options:
   -k, --auth            KEY   Cryptographic key to secure server.
       --forever               Schedule forever.
       --restart               Start scheduling from last completed task.
+  -c, --task-cores      NUM   Number of cores to assign each task (default: none).
+  -m, --task-memory     MEM   Memory in bytes to assign each task (default: none).
+  -W, --task-timeout    SEC   Task-level walltime limit in seconds (default: none).
   -b, --bundlesize      NUM   Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait      SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
   -r, --max-retries     NUM   Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
@@ -1093,6 +1152,13 @@ class ServerApp(Application):
 
     bundlewait: int = config.submit.bundlewait
     interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
+
+    task_cores: Optional[int] = config.task.cores or None
+    task_memory: Optional[int] = config.task.memory or None
+    task_timeout: Optional[int] = config.task.timeout or None
+    interface.add_argument('-c', '--task-cores', type=int, default=task_cores)
+    interface.add_argument('-m', '--task-memory', type=parse_bytes, default=task_memory)
+    interface.add_argument('-W', '--task-timeout', type=int, default=task_timeout)
 
     eager_mode: bool = config.server.eager
     max_retries: int = config.server.attempts - 1
@@ -1151,6 +1217,9 @@ class ServerApp(Application):
                           evict_after=config.server.evict)
         else:
             serve_from(source=self.input_stream,
+                       task_cores=self.task_cores,
+                       task_memory=self.task_memory,
+                       task_timeout=self.task_timeout,
                        bundlesize=self.bundlesize,
                        bundlewait=self.bundlewait,
                        address=(self.host, self.port),
@@ -1169,7 +1238,7 @@ class ServerApp(Application):
             raise ArgumentError('Cannot specify both FILE and --forever')
         if self.filepath and self.restart_mode:
             raise ArgumentError('Cannot specify both FILE and --restart')
-        if self.filepath is None and not self.forever_mode:
+        if not self.filepath and not self.forever_mode:
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.forever_mode:
             raise ArgumentError('Using --forever with --restart is invalid')

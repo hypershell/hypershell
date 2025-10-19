@@ -80,13 +80,27 @@ class SSHCluster(Thread):
             List of hostnames for launching clients.
             See also: :class:`~hypershell.cluster.ssh.NodeList`.
 
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`~hypershell.client.DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection).
+            See :const:`~hypershell.client.DEFAULT_NUM_THREADS`.
 
         template (str, optional):
             Template command pattern.
             See :const:`~hypershell.client.DEFAULT_TEMPLATE`.
+
+        cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        client_cores (int, optional):
+            Set core limit for clients (default: all available cores).
+
+        client_memory (int, optional):
+            Set memory limit for clients (default: all available memory).
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -146,16 +160,18 @@ class SSHCluster(Thread):
             See :const:`~hypershell.client.DEFAULT_DELAY`.
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
 
         client_timeout (int, optional):
             Timeout in seconds before disconnecting from server.
             By default, the client waits for server tor request disconnect.
 
         task_timeout (int, optional):
-            Task-level walltime limit in seconds.
-            By default, the client waits indefinitely on tasks.
+            Task-level walltime limit in seconds (default: none).
+            May be overridden by inline-comment.
 
         task_signalwait (int, optional):
             Signal escalation waiting period in seconds on task timeout.
@@ -186,8 +202,12 @@ class SSHCluster(Thread):
     def __init__(self: SSHCluster,
                  source: Iterable[str] = None,
                  nodelist: List[str] = None,
-                 num_tasks: int = 1,
+                 num_threads: int = 1,
                  template: str = DEFAULT_TEMPLATE,
+                 cores: int = None,
+                 memory: int = None,
+                 client_cores: int = None,
+                 client_memory: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  bind: Tuple[str, int] = ('0.0.0.0', DEFAULT_PORT),
@@ -204,6 +224,7 @@ class SSHCluster(Thread):
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,
                  capture: bool = False,
+                 monitor: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
@@ -213,6 +234,9 @@ class SSHCluster(Thread):
             raise AttributeError('Expected nodelist')
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
+                                   task_cores=cores,
+                                   task_memory=memory,
+                                   task_timeout=task_timeout,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    in_memory=in_memory,
@@ -229,10 +253,16 @@ class SSHCluster(Thread):
         if launcher_args is None:
             launcher_args = shlex.split(config.ssh.get('args', ''))
         client_args = []
-        if capture:
-            client_args.append('--capture')
         if no_confirm:
             client_args.append('--no-confirm')
+        if capture:
+            client_args.append('--capture')
+        if monitor:
+            client_args.append('--monitor')
+        if client_cores is not None:
+            client_args.extend(['-C', str(client_cores)])
+        if client_memory is not None:
+            client_args.extend(['-M', str(client_memory)])
         if client_timeout is not None:
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
@@ -241,7 +271,7 @@ class SSHCluster(Thread):
             client_args.extend(['-R', str(ratelimit)])
         self.client_argv = [
             [*launcher, *launcher_args, host, *launcher_env, remote_exe, 'client', '-H', HOSTNAME,
-             '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),
+             '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
              '-t', f'\'{template}\'', '-k', auth, '-d', str(delay_start),
              '-S', str(task_signalwait), *client_args]
             for host in nodelist

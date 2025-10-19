@@ -39,6 +39,7 @@ dependencies = [
     "sqlalchemy>=2.0.29",
     "rich>=13.7.1",
     "paramiko>=3.4.0",
+    "psutil>=7.0.0",
 ]
 
 [project.optional-dependencies]

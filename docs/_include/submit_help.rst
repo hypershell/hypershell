@@ -62,10 +62,29 @@ Options
 
     See also ``--bundlesize``.
 
+``-c``, ``--cores`` *NUM*
+    Number of CPU cores required per task (default: none).
+
+    Sets the default core requirement for all submitted tasks. Individual tasks can override
+    this with inline comments (e.g., ``#HYPERSHELL: cores: 8``).
+
+``-m``, ``--memory`` *SIZE*
+    Amount of memory required per task (default: none).
+
+    Sets the default memory requirement for all submitted tasks. Specify memory size with
+    units (e.g., '4GB', '512MB'). Individual tasks can override this with inline comments
+    (e.g., ``#HYPERSHELL: memory: 8GB``).
+
+``-W``, ``--timeout`` *SEC*
+    Task-level walltime limit in seconds (default: none).
+
+    Sets the default timeout for all submitted tasks. Individual tasks can override this
+    with inline comments (e.g., ``#HYPERSHELL: timeout: 3600``).
+
 ``--initdb``
     Auto-initialize database.
 
-    If a database is configured for use with the workflow (e.g., Postgres), auto-initialize
+    If a database is configured for use with the workflow (e.g., PostgreSQL), auto-initialize
     tables if they don't already exist. This is a short-hand for pre-creating tables with the
     ``hs initdb`` command. This happens by default with SQLite databases.
 

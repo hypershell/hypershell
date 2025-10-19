@@ -7,6 +7,8 @@ Release Notes (v2.8.0)
 
 The v2.8.0 release includes major features and improvements.
 
+- Resource-aware task scheduling
+- Resource monitoring
 - Queue-only task submission
 - Rate limit task execution
 - Local SQLite database enabled by default
@@ -17,6 +19,238 @@ The v2.8.0 release includes major features and improvements.
 
 Features
 --------
+
+|
+
+Resource-aware task scheduling
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+HyperShell now supports resource-aware scheduling with task-level CPU core, memory, and time
+requirements. These requirements can be specified for all tasks en masse or on an individual basis.
+The client-side scheduler intelligently manages task execution based on resource availability.
+
+.. note::
+
+    For existing workflows or simpler cases where no resource requirements are given for
+    tasks, none of the following mechanisms are engaged and task parallelism will behave
+    exactly as it has in previous releases of the software.
+
+    Lack of a resource constraint will be interpreted as 0 cores, 0 memory, and tasks may
+    run indefinitely as before.
+
+
+**Command-line Options**
+
+The following options control resource management across the CLI:
+
+.. list-table:: Resource Management Options
+   :header-rows: 1
+   :widths: 10 20 50 20
+
+   * - Short
+     - Long
+     - Purpose
+     - Config Source
+   * - ``-c``
+     - ``--cores``
+     - CPU cores required per task
+     - ``task.cores``
+   * - ``-m``
+     - ``--memory``
+     - Memory required per task
+     - ``task.memory``
+   * - ``-W``
+     - ``--task-timeout``
+     - Walltime limit per task (seconds)
+     - ``task.timeout``
+   * - ``-C``
+     - ``--client-cores``
+     - Limit cores available to client
+     - ``client.cores``
+   * - ``-M``
+     - ``--client-memory``
+     - Limit memory available to client
+     - ``client.memory``
+   * - ``-T``
+     - ``--timeout``
+     - Client idle timeout (seconds)
+     - ``client.timeout``
+
+These options are available across the ``submit``, ``client``, and ``cluster`` commands where
+appropriate. The ``cluster`` command supports all six options because it both submits tasks
+(with requirements via ``-c``/``-m``/``-W``) and launches clients (with limits via ``-C``/``-M``/``-T``).
+The ``submit`` command supports task-level options (``-c``/``-m``/``-W``), while the ``client``
+command supports client-level options (``-C``/``-M``/``-T``).
+
+Note that ``-W``/``--task-timeout`` sets a per-task walltime limit and is used by the scheduler
+for backfilling decisions, while ``-T``/``--timeout`` controls how long a client waits idle
+before shutting down when no tasks are available. In prior releases of the software the ``client``
+supported a global ``-W``/``--task-timeout`` as well (it still does) which lets the caller
+define a uniform timeout for all tasks executed by the client. In this release we
+combine this with individual task-level timeouts. The ultimate timeout (if there is one) for
+a given task will be the shorter of either of these provided.
+
+**Inline Resource Specification**
+
+Resource requirements can also be specified inline using the ``#HYPERSHELL:`` comment syntax.
+This is a special case for the existing inline tag annotations.
+This allows per-task resource heterogeneity within a single input file, overriding any
+command-line defaults.
+
+.. admonition:: Inline comment directives specify per-task resource requirements
+    :class: note
+
+    .. code-block:: shell
+
+        stress -c 4 -t 10s  #HYPERSHELL: cores:4 memory:2GB timeout:60
+        stress -c 8 -t 60s  #HYPERSHELL: cores:8 memory:4GB timeout:120
+
+**Executor Thread Mechanism**
+
+Each client runs multiple executor threads (configured via ``-N``/``--num-threads``), with each
+thread capable of running one task at a time. When a task is ready to execute:
+
+1. The executor thread attempts to *acquire* the required resources (cores and memory)
+2. If resources are available, the task starts immediately
+3. If resources are insufficient, the task enters a priority-based wait queue
+4. When the task completes, resources are *released* back to the pool
+
+This design allows clients to oversubscribe executor threads relative to available cores,
+enabling efficient resource utilization through intelligent backfilling.
+
+**Priority-based Scheduling with Backfilling**
+
+Tasks waiting for resources are tracked with increasing priority. Higher-priority tasks
+(those waiting longer) are scheduled first. However, the scheduler implements intelligent
+*backfilling* where smaller tasks with shorter timeouts can "jump ahead" if they can complete
+before higher-priority tasks would be able to start.
+
+Consider this example task file:
+
+.. admonition:: Task list example demonstrates backfill scheduling
+    :class: note
+
+    .. code-block:: shell
+
+        stress -c 4 -t  5s  #HYPERSHELL: cores:4 timeout:60 n:1
+        stress -c 4 -t 10s  #HYPERSHELL: cores:4 timeout:60 n:2
+        stress -c 8 -t 10s  #HYPERSHELL: cores:8 timeout:60 n:3
+        stress -c 4 -t 10s  #HYPERSHELL: cores:4 timeout:15 n:4
+        stress -c 4 -t 10s  #HYPERSHELL: cores:4 timeout:60 n:5
+        stress -c 4 -t 10s  #HYPERSHELL: cores:4 timeout:60 n:6
+        stress -c 4 -t 10s  #HYPERSHELL: cores:4 timeout:60 n:7
+        stress -c 4 -t 10s  #HYPERSHELL: cores:4 timeout:60 n:8
+
+On a client with 8 cores and 3 executor threads:
+
+1. Tasks ``n:1`` and ``n:2`` start immediately (4+4=8 cores used)
+2. Task ``n:3`` arrives and waits (needs 8 cores, gets priority 1)
+3. Task ``n:1`` completes after ~5 seconds, freeing 4 cores
+4. Task ``n:4`` arrives and needs 4 cores, gets priority 2
+5. Task ``n:4`` backfills ahead of ``n:3`` because:
+
+   * Task ``n:4`` has a shorter timeout of 15s
+   * Task ``n:2`` will a worst case timeout of 60s (~55s from now)
+
+6. Task ``n:3`` starts when both ``n:2`` and ``n:4`` complete
+
+This backfilling strategy significantly improves throughput for heterogeneous workloads with
+mixed resource requirements and execution times.
+
+**Adaptive Sleep for Priority-based Wakeup**
+
+When multiple tasks are waiting for resources, HyperShell uses an adaptive sleep mechanism
+to ensure tasks wake up and check for availability in priority order. Instead of all waiting
+tasks checking simultaneously (which would create a worst-case n-factorial wait period),
+each task sleeps for a duration proportional to its priority ratio:
+
+* High-priority tasks (ratio=1.0) sleep ~0.5 seconds
+* Low-priority tasks (ratio approaching 0.0) sleep ~1.0 seconds
+* Small random jitter (±0.05s) prevents exact collisions
+
+This creates a natural "wake-up cascade" where the highest-priority task checks first,
+followed by progressively lower-priority tasks. This minimizes lock contention on the
+resource scheduler while ensuring fair, priority-based access. As tasks complete and
+resources become available, waiting tasks are efficiently promoted and scheduled without
+unnecessary polling overhead.
+
+.. admonition:: Warning - Rename command-line option names
+    :class: warning
+
+    The ``--num-tasks`` option has been renamed to ``--num-threads`` to better reflect
+    its purpose as the number of executor threads per client. The old ``--num-tasks``
+    name is maintained for backwards compatibility but may be deprecated in future releases.
+
+|
+
+Resource monitoring
+^^^^^^^^^^^^^^^^^^^
+
+HyperShell can now monitor the actual CPU and memory usage of running tasks and their child
+processes using the ``--monitor`` option. This provides visibility into resource consumption
+and helps identify tasks that may be under or over provisioned.
+
+**Enabling Monitoring**
+
+Add the ``--monitor`` flag to the ``cluster`` (``hsx``) or ``client`` commands:
+
+.. admonition:: Enable resource monitoring for workflow
+    :class: note
+
+    .. code-block:: shell
+
+        hsx tasks.in --monitor -c 4 -m 2G
+
+When monitoring is enabled, HyperShell continuously tracks CPU core utilization and memory
+consumption for each task and all its child processes using the ``psutil`` library.
+For each task, resource usage is sampled during the ~1 second cycle-time during which
+the executor thread is waiting for task completion.
+
+**Data Collection and Storage**
+
+* **Peak usage**: Maximum observed values are stored in the database as ``cores_max`` and
+  ``memory_max`` for each task. These are stored with decimal precision.
+* **High-resolution telemetry**: Full time-series data is written to a CSV file alongside the
+  ``.out`` and ``.err`` files (see ``--capture``). These are stored in the ``$HYPERSHELL_SITE``
+  library (``~/.hypershell/lib`` by default on Linux).
+  There are only three columns: ``time``, ``cores``, ``memory``.
+
+**Resource Limit Warnings**
+
+When both monitoring and resource requirements are specified, HyperShell automatically
+detects when tasks exceed their allocated resources and emits a warning:
+
+.. admonition:: Resource limit warnings when monitoring enabled
+    :class: note
+
+    .. code-block:: text
+
+        ...
+        Resource limit exceeded (...): cores 1.41 (used) > 1.00 (allocated)
+        Resource limit exceeded (...): memory 1.62GB (used) > 1.00GB (allocated)
+
+These warnings:
+
+* Are emitted **once per task** to avoid log spam
+* Help identify tasks that need resource requirement adjustments
+* Do not terminate the task—they serve as informational warnings only
+* Include **tolerances** to avoid false positives from measurement fluctuations
+  or rounding errors:
+
+  * CPU: 0.05 cores tolerance
+  * Memory: 5 MB tolerance
+
+**Use Cases**
+
+* **Profiling**: Understand actual resource consumption to right-size task requirements
+* **Optimization**: Identify resource bottlenecks and opportunities for parallelization
+* **Validation**: Verify that tasks respect their resource allocations
+* **Debugging**: Diagnose memory leaks or unexpected CPU usage patterns
+
+.. tip::
+
+    Use monitoring during development and testing to establish baseline resource requirements,
+    then apply those requirements (``-c``/``-m``) in production runs for optimal scheduling.
 
 |
 
@@ -51,6 +285,7 @@ database-backed workflow is used, providing persistence, recovery, and search ca
     In queue mode, this directly affects the size of task bundles conveyed to connected clients,
     which can impact throughput and responsiveness. Coordinate bundle size with the number of
     executor threads (``-N``/``--num-threads``) on your clients for optimal performance.
+
 
 |
 

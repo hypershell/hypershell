@@ -54,7 +54,7 @@ DATABASE_HOST: Final[str] = config.database.get('host', 'localhost')
 """Database server hostname (default: localhost)."""
 
 DATABASE_SITE: Final[str] = DATABASE_HOST if DATABASE_PROVIDER != 'sqlite' else config.database.get('file', ':memory:')
-"""Database server hostname (Postgres) or file path (SQLite/Turso)."""
+"""Database server hostname (PostgreSQL) or file path (SQLite/Turso)."""
 
 DATABASE_INFO: Final[str] = f'{config.database.provider} ({DATABASE_SITE})'
 """Concise connection info for database."""

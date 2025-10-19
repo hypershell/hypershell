@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Dict, Tuple, Any, Type, TypeVar, Union, Optional
+from typing import List, Dict, Tuple, Any, Type, Optional
 
 # Standard libs
 import re
@@ -18,7 +18,7 @@ from sqlalchemy import Column, Index, func
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.types import Integer, DateTime, Text, Boolean, JSON as JSON_TEXT
+from sqlalchemy.types import Integer, Float, DateTime, Text, Boolean, JSON as JSON_TEXT
 from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES
 
 # Internal libs
@@ -60,6 +60,7 @@ UUID = Text().with_variant(POSTGRES_UUID(as_uuid=False), 'postgresql')
 TEXT = Text()
 INTEGER = Integer()
 SMALL_INTEGER = Integer().with_variant(SMALLINT, 'postgresql')
+FLOAT = Float()
 DATETIME = DateTime(timezone=True)
 BOOLEAN = Boolean()
 JSON = JSON_TEXT().with_variant(JSON_BYTES(), 'postgresql')
@@ -204,6 +205,12 @@ class Task(Entity):
     submit_time: Mapped[datetime] = mapped_column(DATETIME, nullable=False)
     submit_host: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
 
+    cores: Mapped[int] = mapped_column(SMALL_INTEGER, nullable=True)  # NULL means untracked
+    memory: Mapped[int] = mapped_column(INTEGER, nullable=True)  # NULL means untracked
+    cores_max: Mapped[float] = mapped_column(FLOAT, nullable=True)
+    memory_max: Mapped[float] = mapped_column(FLOAT, nullable=True)
+    timeout: Mapped[int] = mapped_column(INTEGER, nullable=True)  # NULL means untracked
+
     server_id: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)
     server_host: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
     schedule_time: Mapped[Optional[datetime]] = mapped_column(DATETIME, nullable=True)
@@ -218,6 +225,7 @@ class Task(Entity):
 
     outpath: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
     errpath: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
+    csvpath: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
 
     attempt: Mapped[int] = mapped_column(SMALL_INTEGER, nullable=False)
     retried: Mapped[bool] = mapped_column(BOOLEAN, nullable=False)
@@ -236,6 +244,11 @@ class Task(Entity):
         'submit_id': str,
         'submit_time': datetime,
         'submit_host': str,
+        'cores': int,
+        'memory': int,
+        'cores_max': float,
+        'memory_max': float,
+        'timeout': int,
         'server_id': str,
         'server_host': str,
         'schedule_time': datetime,
@@ -247,6 +260,7 @@ class Task(Entity):
         'exit_status': int,
         'outpath': str,
         'errpath': str,
+        'csvpath': str,
         'attempt': int,
         'retried': bool,
         'waited': int,
@@ -276,12 +290,19 @@ class Task(Entity):
             raise cls.NotDistinct(f'Multiple tasks with id={id}') from error
 
     @classmethod
-    def new(cls: Type[Task], args: str, attempt: int = 1, retried: bool = False,
-            tag: Dict[str, JSONValue] = None, **other) -> Task:
+    def new(cls: Type[Task],
+            args: str,
+            attempt: int = 1,
+            retried: bool = False,
+            tag: Dict[str, JSONValue] = None,
+            **other: Any) -> Task:
         """Create a new Task."""
         cls.ensure_valid_tag(tag)
         args, inline_tags = cls.split_argline(args)
         tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
+        other['cores'] = tag.pop('cores', other.get('cores', None))
+        other['memory'] = tag.pop('memory', other.get('memory', None))
+        other['timeout'] = tag.pop('timeout', other.get('timeout', None))
         return Task(id=uuid(), args=args,
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
                     attempt=attempt, retried=retried, tag=tag, **other)

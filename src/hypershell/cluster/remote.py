@@ -93,13 +93,27 @@ class RemoteCluster(Thread):
             A new `source` results in a :class:`~hypershell.submit.SubmitThread` populating
             either the database or the queue directly depending on `in_memory`.
 
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`~hypershell.client.DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection).
+            See :const:`~hypershell.client.DEFAULT_NUM_THREADS`.
 
         template (str, optional):
             Template command pattern.
             See :const:`~hypershell.client.DEFAULT_TEMPLATE`.
+
+        cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        client_cores (int, optional):
+            Set core limit for clients (default: all available cores).
+
+        client_memory (int, optional):
+            Set memory limit for clients (default: all available memory).
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -155,16 +169,18 @@ class RemoteCluster(Thread):
             See :const:`~hypershell.client.DEFAULT_DELAY`.
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
 
         client_timeout (int, optional):
             Timeout in seconds before disconnecting from server.
             By default, the client waits for server tor request disconnect.
 
         task_timeout (int, optional):
-            Task-level walltime limit in seconds.
-            By default, the client waits indefinitely on tasks.
+            Task-level walltime limit in seconds (default: none).
+            May be overridden by inline-comment.
 
         task_signalwait (int, optional):
             Signal escalation waiting period in seconds on task timeout.
@@ -193,8 +209,12 @@ class RemoteCluster(Thread):
 
     def __init__(self: RemoteCluster,
                  source: Iterable[str] = None,
-                 num_tasks: int = 1,
+                 num_threads: int = 1,
                  template: str = DEFAULT_TEMPLATE,
+                 cores: int = None,
+                 memory: int = None,
+                 client_cores: int = None,
+                 client_memory: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  bind: Tuple[str, int] = ('0.0.0.0', DEFAULT_PORT),
@@ -210,6 +230,7 @@ class RemoteCluster(Thread):
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,
                  capture: bool = False,
+                 monitor: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
@@ -217,6 +238,9 @@ class RemoteCluster(Thread):
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
+                                   task_cores=cores,
+                                   task_memory=memory,
+                                   task_timeout=task_timeout,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    in_memory=in_memory,
@@ -234,10 +258,16 @@ class RemoteCluster(Thread):
         else:
             launcher_args = [arg for arg_group in launcher_args for arg in shlex.split(arg_group)]
         client_args = []
-        if capture is True:
-            client_args.append('--capture')
-        if no_confirm is True:
+        if no_confirm:
             client_args.append('--no-confirm')
+        if capture:
+            client_args.append('--capture')
+        if monitor:
+            client_args.append('--monitor')
+        if client_cores is not None:
+            client_args.extend(['-C', str(client_cores)])
+        if client_memory is not None:
+            client_args.extend(['-M', str(client_memory)])
         if client_timeout is not None:
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
@@ -246,7 +276,7 @@ class RemoteCluster(Thread):
             client_args.extend(['-R', str(ratelimit)])
         self.client_argv = [
             *launcher, *launcher_args, remote_exe, 'client',
-            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),
+            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
             '-t', template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
         ]
         super().__init__(name='hypershell-cluster')
@@ -538,13 +568,27 @@ class AutoScalingCluster(Thread):
             A new `source` results in a :class:`~hypershell.submit.SubmitThread` populating
             either the database or the queue directly depending on `in_memory`.
 
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`~hypershell.client.DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection).
+            See :const:`~hypershell.client.DEFAULT_NUM_THREADS`.
 
         template (str, optional):
             Template command pattern.
             See :const:`~hypershell.client.DEFAULT_TEMPLATE`.
+
+        cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        client_cores (int, optional):
+            Set core limit for clients (default: all available cores).
+
+        client_memory (int, optional):
+            Set memory limit for clients (default: all available memory).
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -600,16 +644,18 @@ class AutoScalingCluster(Thread):
             See :const:`~hypershell.client.DEFAULT_DELAY`.
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
 
         client_timeout (int, optional):
             Timeout in seconds before disconnecting from server.
             By default, the client waits for server tor request disconnect.
 
         task_timeout (int, optional):
-            Task-level walltime limit in seconds.
-            By default, the client waits indefinitely on tasks.
+            Task-level walltime limit in seconds (default: none).
+            May be overridden by inline-comment.
 
         task_signalwait (int, optional):
             Signal escalation waiting period in seconds on task timeout.
@@ -663,8 +709,12 @@ class AutoScalingCluster(Thread):
 
     def __init__(self: AutoScalingCluster,
                  source: Iterable[str] = None,
-                 num_tasks: int = 1,
+                 num_threads: int = 1,
                  template: str = DEFAULT_TEMPLATE,
+                 cores: int = None,
+                 memory: int = None,
+                 client_cores: int = None,
+                 client_memory: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  bind: Tuple[str, int] = ('0.0.0.0', DEFAULT_PORT),
@@ -680,6 +730,7 @@ class AutoScalingCluster(Thread):
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,
                  capture: bool = False,
+                 monitor: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
@@ -693,8 +744,17 @@ class AutoScalingCluster(Thread):
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
-        self.server = ServerThread(source=source, auth=auth, bundlesize=bundlesize, bundlewait=bundlewait,
-                                   max_retries=max_retries, eager=eager, address=bind, forever_mode=True,
+        self.server = ServerThread(source=source,
+                                   auth=auth,
+                                   address=bind,
+                                   task_cores=cores,
+                                   task_memory=memory,
+                                   task_timeout=task_timeout,
+                                   bundlesize=bundlesize,
+                                   bundlewait=bundlewait,
+                                   max_retries=max_retries,
+                                   eager=eager,
+                                   forever_mode=True,
                                    redirect_failures=redirect_failures)
         launcher = shlex.split(launcher)
         if launcher_args is None:
@@ -704,6 +764,12 @@ class AutoScalingCluster(Thread):
         client_args = []
         if capture:
             client_args.append('--capture')
+        if monitor:
+            client_args.append('--monitor')
+        if client_cores is not None:
+            client_args.extend(['-C', str(client_cores)])
+        if client_memory is not None:
+            client_args.extend(['-M', str(client_memory)])
         if client_timeout is not None:
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
@@ -712,7 +778,7 @@ class AutoScalingCluster(Thread):
             client_args.extend(['-R', str(ratelimit)])
         launcher.extend([
             *launcher_args, remote_exe, 'client',
-            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),
+            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
             '-t', template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
         ])
         self.autoscaler = AutoScalerThread(launcher, policy=policy, factor=factor, period=period,

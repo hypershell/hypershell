@@ -611,6 +611,18 @@ function _hs_submit ()
 			COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}"))
 			return
 			;;
+		-c | --cores)
+			COMPREPLY=($(compgen -W "1 2 4 8 16 32" -- "${current}"))
+			return
+			;;
+		-m | --memory)
+			COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}"))
+			return
+			;;
+		-W | --timeout)
+			COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}"))
+			return
+			;;
 		--template)
 			COMPREPLY=()  # No completion available for command templates
 			return
@@ -641,13 +653,22 @@ function _hs_client ()
 {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -N --num-tasks -t --template -b --bundlesize -w --bundlewait
-	-H --host -p --port -k --auth -d --delay-start --no-confirm -o --output -e --errors -c --capture
+	local all_opts="-h --help -N --num-threads -t --template -b --bundlesize -w --bundlewait
+	-H --host -p --port -k --auth -d --delay-start --no-confirm -o --output -e --errors --capture
+	-C --client-cores -M --client-memory --monitor
 	-T --timeout -W --task-timeout -R --ratelimit -S --signalwait"
 
 	case "${previous}" in
-		-N | --num-tasks)
+		-N | --num-threads)
+			COMPREPLY=($(compgen -W "0 1 $(seq 2 2 `hs client --available-cores`)" -- "${current}"))
+			return
+			;;
+		-C | --client-cores)
 			COMPREPLY=($(compgen -W "1 $(seq 2 2 `hs client --available-cores`)" -- "${current}"))
+			return
+			;;
+		-M | --client-memory)
+			COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}"))
 			return
 			;;
 		-b | --bundlesize)
@@ -716,7 +737,8 @@ function _hs_server ()
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 	local all_opts="-h --help --forever --restart -H --bind -p --port -k --auth
 	--no-db --no-confirm --initdb -f --failures --print
-	-b --bundlesize -w --bundlewait -r --max-retries --eager"
+	-b --bundlesize -w --bundlewait -r --max-retries --eager
+	-c --task-cores -m --task-memory -W --task-timeout"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
@@ -762,6 +784,18 @@ function _hs_server ()
 			COMPREPLY=($(compgen -W "1 2 3 4 5 6" -- "${current}"))
 			return
 			;;
+		-c | --task-cores)
+			COMPREPLY=($(compgen -W "1 2 4 8 16 32" -- "${current}"))
+			return
+			;;
+		-m | --task-memory)
+			COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}"))
+			return
+			;;
+		-W | --task-timeout)
+			COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}"))
+			return
+			;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
@@ -772,9 +806,10 @@ function _hs_cluster ()
 {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-N --num-tasks -t --template -p --port -b --bundlesize -w --bundlewait
+	local all_opts="-N --num-threads -t --template -p --port -b --bundlesize -w --bundlewait
 	-r --max-retries --eager --no-db --initdb --no-confirm --forever --restart --ssh-args --ssh-group
-	-E --env --remote-exe -d --delay-start -c --capture -o --output -e --errors -f --failures
+	-E --env --remote-exe -d --delay-start --capture -o --output -e --errors -f --failures
+	-c --cores -m --memory -C --client-cores -M --client-memory --monitor
 	-T --timeout -W --task-timeout -R --ratelimit -S --signalwait
 	-A --autoscaling -F --factor -P --period -I --init-size -X --min-size -Y --max-size -h --help"
 
@@ -810,8 +845,24 @@ function _hs_cluster ()
 	esac
 
 	case "${previous}" in
-		-N | --num-tasks)
+		-N | --num-threads)
+			COMPREPLY=($(compgen -W "0 1 $(seq 2 2 `hs client --available-cores`)" -- "${current}"))
+			return
+			;;
+		-c | --cores)
+			COMPREPLY=($(compgen -W "1 2 4 8 16 32" -- "${current}"))
+			return
+			;;
+		-m | --memory)
+			COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}"))
+			return
+			;;
+		-C | --client-cores)
 			COMPREPLY=($(compgen -W "1 $(seq 2 2 `hs client --available-cores`)" -- "${current}"))
+			return
+			;;
+		-M | --client-memory)
+			COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}"))
 			return
 			;;
 		-t | --template | --ssh-args | --remote-exe)

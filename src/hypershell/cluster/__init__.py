@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import IO, Optional, Iterable, Dict, Callable, Type
+from typing import Dict, IO, Optional, Iterable, Callable, Type
 from types import TracebackType
 
 # Standard libs
@@ -21,12 +21,12 @@ from cmdkit.cli import Interface, ArgumentError
 # Internal libs
 from hypershell.core.config import config, blame
 from hypershell.core.queue import QueueConfig
+from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.data import initdb, checkdb
-from hypershell.client import DEFAULT_NUM_TASKS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT
+from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
@@ -50,11 +50,11 @@ log = Logger.with_name(__name__)
 APP_NAME = 'hs cluster'
 APP_USAGE = """\
 Usage:
-  hs cluster [-h] [FILE | --restart | --forever] [-N NUM] [-t CMD] [-b SIZE] [-w SEC]
-             [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]]
+  hs cluster [-h] [FILE | --restart | --forever] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-c NUM] [-m MEM] [-W SEC]  
+             [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM]
+             [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
-             [--no-db | --initdb] [--no-confirm] [-d SEC] [-T SEC] [-W SEC] [-S SEC]
-             [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]
+             [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]             
 
   Start cluster locally, over SSH, or with a custom launcher.\
 """
@@ -63,46 +63,51 @@ APP_HELP = f"""\
 {APP_USAGE}
 
 Arguments:
-  FILE                         Path to input task file (default: <stdin>).
+  FILE                          Path to input task file (default: <stdin>).
 
 Modes:
-  --ssh               HOST...  Launch directly with SSH host(s).
-  --mpi                        Same as --launcher=mpirun.
-  --launcher          ARGS...  Use specific launch interface.
+  --ssh                HOST...  Launch directly with SSH host(s).
+  --mpi                         Same as --launcher=mpirun.
+  --launcher           ARGS...  Use specific launch interface.
 
 Options:
-  -N, --num-tasks     NUM      Number of task executors per client (default: {DEFAULT_NUM_TASKS}).
-  -t, --template      CMD      Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
-  -p, --port          NUM      Port number (default: {QueueConfig.port}).
-  -b, --bundlesize    SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
-  -w, --bundlewait    SEC      Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
-  -r, --max-retries   NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
-      --eager                  Schedule failed tasks before new tasks.
-      --no-db                  Disable database (submit directly to clients).
-      --initdb                 Auto-initialize database.
-      --no-confirm             Disable client confirmation of task bundle received.
-      --forever                Schedule forever.
-      --restart                Start scheduling from last completed task.
-      --ssh-args      ARGS     Command-line arguments for SSH.
-      --ssh-group     NAME     SSH nodelist group in config.
-  -E, --env                    Send environment variables.
-      --remote-exe    PATH     Path to executable on remote hosts.
-  -d, --delay-start   SEC      Delay time for launching clients (default: {DEFAULT_DELAY}).
-  -c, --capture                Capture individual task <stdout> and <stderr>.
-  -o, --output        PATH     File path for task outputs (default: <stdout>).
-  -e, --errors        PATH     File path for task errors (default: <stderr>).
-  -f, --failures      PATH     File path to write failed task args (default: <none>).
-  -T, --timeout       SEC      Automatically shutdown clients if no tasks received (default: never).
-  -W, --task-timeout  SEC      Task-level walltime limit (default: none).
-  -S, --signalwait    SEC      Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
-  -A, --autoscaling  [MODE]    Enable autoscaling (default: disabled). Used with --launcher.
-  -F, --factor        VALUE    Scaling factor (default: 1).
-  -P, --period        SEC      Scaling period in seconds (default: {DEFAULT_AUTOSCALE_PERIOD}).
-  -I, --init-size     SIZE     Initial size of cluster (default: {DEFAULT_AUTOSCALE_INIT_SIZE}).
-  -X, --min-size      SIZE     Minimum size of cluster (default: {DEFAULT_AUTOSCALE_MIN_SIZE}).
-  -Y, --max-size      SIZE     Maximum size of cluster (default: {DEFAULT_AUTOSCALE_MAX_SIZE}).
-  -h, --help                   Show this message and exit.\
+  -N, --num-threads    NUM      Number of executor threads per client, 0=auto (default: {DEFAULT_NUM_THREADS}).
+  -t, --template       CMD      Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
+  -p, --port           NUM      Port number (default: {QueueConfig.port}).
+  -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
+  -w, --bundlewait     SEC      Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+  -r, --max-retries    NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
+      --eager                   Schedule failed tasks before new tasks.
+      --no-db                   Disable database (submit directly to clients).
+      --initdb                  Auto-initialize database.
+      --no-confirm              Disable client confirmation of task bundle received.
+      --forever                 Schedule forever.
+      --restart                 Start scheduling from last completed task.
+      --ssh-args       ARGS     Command-line arguments for SSH.
+      --ssh-group      NAME     SSH nodelist group in config.
+  -E, --env                     Send environment variables.
+      --remote-exe     PATH     Path to executable on remote hosts.
+  -d, --delay-start    SEC      Delay time for launching clients (default: {DEFAULT_DELAY}).
+      --capture                 Capture individual task <stdout> and <stderr>.
+      --monitor                 Capture cores and memory used by tasks.
+  -c, --cores          NUM      Required cores per task (default: none).
+  -m, --memory         MEM      Required memory per task (default: none).
+  -C, --client-cores   NUM      Limit available cores for client (default: all cores).
+  -M, --client-memory  MEM      Limit available memory for client (default: all memory).
+  -o, --output         PATH     File path for task outputs (default: <stdout>).
+  -e, --errors         PATH     File path for task errors (default: <stderr>).
+  -f, --failures       PATH     File path to write failed task args (default: <none>).
+  -T, --timeout        SEC      Automatically shutdown clients if no tasks received (default: never).
+  -W, --task-timeout   SEC      Task-level walltime limit (default: none).
   -R, --ratelimit      NUM      Maximum allowed tasks per second per client (default: none).
+  -S, --signalwait     SEC      Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
+  -A, --autoscaling   [MODE]    Enable autoscaling (default: disabled). Used with --launcher.
+  -F, --factor         VALUE    Scaling factor (default: 1).
+  -P, --period         SEC      Scaling period in seconds (default: {DEFAULT_AUTOSCALE_PERIOD}).
+  -I, --init-size      SIZE     Initial size of cluster (default: {DEFAULT_AUTOSCALE_INIT_SIZE}).
+  -X, --min-size       SIZE     Minimum size of cluster (default: {DEFAULT_AUTOSCALE_MIN_SIZE}).
+  -Y, --max-size       SIZE     Maximum size of cluster (default: {DEFAULT_AUTOSCALE_MAX_SIZE}).
+  -h, --help                    Show this message and exit.\
 """
 
 
@@ -115,8 +120,9 @@ class ClusterApp(Application):
     filepath: str
     interface.add_argument('filepath', nargs='?', default=None)
 
-    num_tasks: int = 1
-    interface.add_argument('-N', '--num-tasks', type=int, default=num_tasks)
+    num_threads: int = DEFAULT_NUM_THREADS
+    interface.add_argument('-N', '--num-threads', '--num-tasks', type=int, default=num_threads, dest='num_threads')
+    # NOTE: --num-tasks maintained for backwards compatibility
 
     template: str = DEFAULT_TEMPLATE
     interface.add_argument('-t', '--template', default=template)
@@ -178,17 +184,31 @@ class ClusterApp(Application):
     errors_path: str = None
     interface.add_argument('-o', '--output', default=None, dest='output_path')
     interface.add_argument('-e', '--errors', default=None, dest='errors_path')
-    interface.add_argument('-c', '--capture', action='store_true')
+    interface.add_argument('--capture', action='store_true')
+
+    monitor: bool = False
+    interface.add_argument('--monitor', action='store_true')
+
+    cores: Optional[int] = config.task.cores or None
+    memory: Optional[int] = config.task.memory or None
+    interface.add_argument('-c', '--cores', type=int, default=cores)
+    interface.add_argument('-m', '--memory', type=parse_bytes, default=memory)
+
+    client_cores: Optional[int] = config.client.cores or None
+    client_memory: Optional[int] = config.client.memory or None
+    interface.add_argument('-C', '--client-cores', type=int, default=client_cores)
+    interface.add_argument('-M', '--client-memory', type=parse_bytes, default=client_memory)
+
     ratelimit: int = config.task.get('ratelimit', None)
     interface.add_argument('-R', '--ratelimit', type=int, default=ratelimit)
 
     failure_path: str = None
     interface.add_argument('-f', '--failures', default=None, dest='failure_path')
 
-    task_timeout: int = config.task.timeout
-    client_timeout: int = config.client.timeout
-    interface.add_argument('-T', '--timeout', type=int, default=client_timeout, dest='client_timeout')
+    task_timeout: Optional[int] = config.task.timeout or None
+    client_timeout: Optional[int] = config.client.timeout or None
     interface.add_argument('-W', '--task-timeout', type=int, default=task_timeout, dest='task_timeout')
+    interface.add_argument('-T', '--timeout', type=int, default=client_timeout, dest='client_timeout')
 
     task_signalwait: int = config.task.signalwait
     interface.add_argument('-S', '--signalwait', type=int, default=task_signalwait, dest='task_signalwait')
@@ -214,13 +234,14 @@ class ClusterApp(Application):
     def run(self: ClusterApp) -> None:
         """Run cluster."""
         launcher = self.launchers.get(self.mode)
-        launcher(source=self.source, num_tasks=self.num_tasks, template=self.template,
+        launcher(source=self.source, num_threads=self.num_threads, template=self.template,
                  bundlesize=self.bundlesize, bundlewait=self.bundlewait, max_retries=self.max_retries,
                  in_memory=self.in_memory, no_confirm=self.no_confirm, forever_mode=self.forever_mode,
                  restart_mode=self.restart_mode, redirect_failures=self.failure_stream,
-                 delay_start=self.delay_start, capture=self.capture,
+                 delay_start=self.delay_start, capture=self.capture, monitor=self.monitor,
                  client_timeout=self.client_timeout, task_timeout=self.task_timeout,
-                 task_signalwait=self.task_signalwait)
+                 task_signalwait=self.task_signalwait, cores=self.cores, memory=self.memory,
+                 client_cores=self.client_cores, client_memory=self.client_memory,
                  ratelimit=self.ratelimit)
 
     def run_local(self: ClusterApp, **options) -> None:
