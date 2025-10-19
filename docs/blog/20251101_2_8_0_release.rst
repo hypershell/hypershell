@@ -70,8 +70,8 @@ pulling files over an API and we want to ensure we do not exceed the rate limit 
 
 -----
 
-Improvements or Fixes
----------------------
+Improvements
+------------
 
 |
 
@@ -87,8 +87,8 @@ Use of the ``HYPERSHELL_SITE`` environment variable alters this location.
 
 On Linux this would be ``~/.hypershell/lib/main.db``.
 
-The motivation here is to more seemlessly enable the beneficial features without new users running
-the software for the first time from needing to graple with this behavior. So instead of getting a
+The motivation here is to more seamlessly enable the beneficial features without new users running
+the software for the first time from needing to grapple with this behavior. So instead of getting a
 warning message the first time they run the software they get powerful features. Any database
 configuration provided by the user or system disables this new behavior of course.
 
@@ -103,4 +103,25 @@ in a research workflow context) to want zero messages from HyperShell. Even with
 enabled there are relatively few messages emitted. These messages are predominantly emitted by the
 client as task start. A few messages at the start of operations about the state of the database are
 typically emitted as well.
+
+|
+
+-----
+
+Bug Fixes
+---------
+
+|
+
+Fixed client signalwait option name
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``hs client`` command now uses the correct long option name ``--signalwait`` (with short option
+``-S``) for the task-level signal escalation wait period. Previously, the code used ``--task-signalwait``
+while the documentation and help text specified ``--signalwait``. This has been corrected to match the
+documentation and align with the ``hs cluster`` command, which also uses ``--signalwait``.
+
+This is purely a bug fix for consistency. The functionality remains unchanged, and the option controls
+how long the executor waits between sending escalating signals (SIGINT → SIGTERM → SIGKILL) when
+terminating tasks that exceed their timeout.
 

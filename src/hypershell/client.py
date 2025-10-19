@@ -1221,7 +1221,7 @@ class ClientApp(Application):
     interface.add_argument('-R', '--ratelimit', type=int, default=ratelimit)
 
     task_signalwait: int = config.task.signalwait
-    interface.add_argument('-S', '--task-signalwait', type=int, default=task_signalwait, dest='task_signalwait')
+    interface.add_argument('-S', '--signalwait', type=int, default=task_signalwait, dest='task_signalwait')
 
     no_confirm: bool = False
     interface.add_argument('--no-confirm', action='store_true')
