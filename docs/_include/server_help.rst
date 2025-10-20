@@ -48,6 +48,14 @@ Options
 
     See also ``--bundlesize``.
 
+``-Q``, ``--poll`` *NUM*
+    Polling interval in seconds between database queries if no tasks are available (default: 5).
+
+    This controls how frequently the scheduler checks the database for new tasks when idle.
+    Lower values (e.g., 1-2 seconds) provide faster responsiveness but may increase database
+    query load. Higher values (e.g., 10-30 seconds) reduce query frequency, useful for
+    workflows with infrequent task submission.
+
 ``-r``, ``--max-retries`` *NUM*
     Auto-retry failed tasks (default: 0).
 

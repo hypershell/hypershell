@@ -101,7 +101,7 @@ default = Namespace({
         'bundlewait': 5,       # Seconds
         'attempts': 1,
         'eager': False,        # Prefer failed tasks to new tasks
-        'wait': 1,             # Seconds to wait between database queries if no tasks available
+        'poll': 5,             # Polling interval in seconds between database queries if no tasks
         'evict': 600,          # Seconds to wait before evicting client
     },
 

@@ -17,7 +17,7 @@ from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
+from hypershell.server import ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
 from hypershell.client import ClientThread, DEFAULT_DELAY, DEFAULT_SIGNALWAIT, set_client_standalone
 
 # Public interface
@@ -95,6 +95,10 @@ class LocalCluster(Thread):
 
         no_confirm (bool, optional):
             Disable client confirmation of tasks received.
+
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
 
         forever_mode (bool, optional):
             Regardless of `source`, if enabled schedule forever.
@@ -176,6 +180,7 @@ class LocalCluster(Thread):
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  in_memory: bool = False,
                  no_confirm: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
                  max_retries: int = DEFAULT_ATTEMPTS,
@@ -201,6 +206,7 @@ class LocalCluster(Thread):
                                    auth=auth,
                                    in_memory=in_memory,
                                    no_confirm=no_confirm,
+                                   poll=poll,
                                    max_retries=max_retries,
                                    eager=eager,
                                    forever_mode=forever_mode,

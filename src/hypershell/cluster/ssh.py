@@ -26,7 +26,7 @@ from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
+from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
 
 # Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
@@ -135,6 +135,10 @@ class SSHCluster(Thread):
         no_confirm (bool, optional):
             Disable client confirmation of tasks received.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         forever_mode (bool, optional):
             Regardless of `source`, if enabled schedule forever.
             Conflicts with `restart_mode` and `in_memory`. Default is `False`.
@@ -217,6 +221,7 @@ class SSHCluster(Thread):
                  export_env: bool = False,
                  in_memory: bool = False,
                  no_confirm: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
                  max_retries: int = DEFAULT_ATTEMPTS,
@@ -241,6 +246,7 @@ class SSHCluster(Thread):
                                    bundlewait=bundlewait,
                                    in_memory=in_memory,
                                    no_confirm=no_confirm,
+                                   poll=poll,
                                    address=bind,
                                    auth=auth,
                                    max_retries=max_retries,

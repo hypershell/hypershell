@@ -360,3 +360,33 @@ This is purely a bug fix for consistency. The functionality remains unchanged, a
 how long the executor waits between sending escalating signals (SIGINT → SIGTERM → SIGKILL) when
 terminating tasks that exceed their timeout.
 
+|
+
+Fixed server poll configuration parameter
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The :const:`~hypershell.server.DEFAULT_SERVER_POLL` (previously ``DEFAULT_QUERY_PAUSE``) parameter defines
+the number of seconds the scheduler thread waits between polling the database when no tasks are available.
+This parameter can now be configured via the command-line (``-Q``/``--poll``), configuration file 
+(``server.poll``), or environment variable (``HYPERSHELL_SERVER_POLL``).
+
+Previously, this configuration option was defined but not actually used by the server implementation,
+meaning the hardcoded default always persisted regardless of user settings. This release fixes the
+implementation to properly respect the user's configuration.
+
+The default value remains at 5 seconds, which provides a good balance between responsiveness and database
+load for most use cases. This conservative default is appropriate for new users who may not initially be
+aware of this parameter, while still allowing for customization based on workflow requirements:
+
+- **Lower values** (e.g., 1-2 seconds): More responsive to newly submitted tasks, better for interactive
+  workflows, but may increase database query load when idle
+- **Higher values** (e.g., 10-30 seconds): Reduces database query frequency when idle, useful for
+  large-scale deployments with infrequent task submission or extended idle periods
+
+.. note::
+
+    This was previously defined as ``server.wait`` in the configuration (``HYPERSHELL_SERVER_WAIT``
+    environment variable), and somewhat confusingly ``DEFAULT_QUERY_PAUSE`` in the code. This code
+    variable has been preserved for backwards compatibility. However the configuration parameter
+    name is only now ``server.poll`` as there is no point in maintaining the old name because it
+    was never actually used until now.

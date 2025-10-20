@@ -28,7 +28,7 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.data.model import Task, Client
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
+from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
 
 # Public interface
 __all__ = ['run_cluster', 'RemoteCluster', 'AutoScalingCluster',
@@ -144,6 +144,10 @@ class RemoteCluster(Thread):
         no_confirm (bool, optional):
             Disable client confirmation of tasks received.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         forever_mode (bool, optional):
             Regardless of `source`, if enabled schedule forever.
             Conflicts with `restart_mode` and `in_memory`. Default is `False`.
@@ -223,6 +227,7 @@ class RemoteCluster(Thread):
                  remote_exe: str = DEFAULT_REMOTE_EXE,
                  in_memory: bool = False,
                  no_confirm: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
                  max_retries: int = DEFAULT_ATTEMPTS,
@@ -245,6 +250,7 @@ class RemoteCluster(Thread):
                                    bundlewait=bundlewait,
                                    in_memory=in_memory,
                                    no_confirm=no_confirm,
+                                   poll=poll,
                                    address=bind,
                                    auth=auth,
                                    max_retries=max_retries,
@@ -665,6 +671,10 @@ class AutoScalingCluster(Thread):
             Maximum allowed tasks per second per client (default: none).
             There is no limit on task throughput unless specified.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         policy (str, optional):
             Autoscaling policy (either 'fixed' or 'dynamic').
             See :const:`~hypershell.cluster.remote.DEFAULT_AUTOSCALE_POLICY`
@@ -735,6 +745,7 @@ class AutoScalingCluster(Thread):
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: int = None,
+                 poll: int = DEFAULT_SERVER_POLL,
                  policy: str = DEFAULT_AUTOSCALE_POLICY,
                  period: int = DEFAULT_AUTOSCALE_PERIOD,
                  factor: float = DEFAULT_AUTOSCALE_FACTOR,
@@ -752,6 +763,7 @@ class AutoScalingCluster(Thread):
                                    task_timeout=task_timeout,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
+                                   poll=poll,
                                    max_retries=max_retries,
                                    eager=eager,
                                    forever_mode=True,

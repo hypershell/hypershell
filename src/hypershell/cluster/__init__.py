@@ -27,7 +27,7 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
-from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
+from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
@@ -51,7 +51,7 @@ APP_NAME = 'hs cluster'
 APP_USAGE = """\
 Usage:
   hs cluster [-h] [FILE | --restart | --forever] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-c NUM] [-m MEM] [-W SEC]  
-             [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM]
+             [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
              [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
              [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]             
@@ -101,6 +101,7 @@ Options:
   -W, --task-timeout   SEC      Task-level walltime limit (default: none).
   -R, --ratelimit      NUM      Maximum allowed tasks per second per client (default: none).
   -S, --signalwait     SEC      Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
+  -Q, --poll           NUM      Polling interval between database queries if no tasks (default: {DEFAULT_SERVER_POLL}).
   -A, --autoscaling   [MODE]    Enable autoscaling (default: disabled). Used with --launcher.
   -F, --factor         VALUE    Scaling factor (default: 1).
   -P, --period         SEC      Scaling period in seconds (default: {DEFAULT_AUTOSCALE_PERIOD}).
@@ -149,6 +150,9 @@ class ClusterApp(Application):
 
     no_confirm: bool = False
     interface.add_argument('--no-confirm', action='store_true')
+
+    poll: int = config.server.poll
+    interface.add_argument('-Q', '--poll', type=int, default=poll)
 
     forever_mode: bool = False
     interface.add_argument('--forever', action='store_true', dest='forever_mode')
@@ -235,14 +239,14 @@ class ClusterApp(Application):
         """Run cluster."""
         launcher = self.launchers.get(self.mode)
         launcher(source=self.source, num_threads=self.num_threads, template=self.template,
-                 bundlesize=self.bundlesize, bundlewait=self.bundlewait, max_retries=self.max_retries,
-                 in_memory=self.in_memory, no_confirm=self.no_confirm, forever_mode=self.forever_mode,
-                 restart_mode=self.restart_mode, redirect_failures=self.failure_stream,
-                 delay_start=self.delay_start, capture=self.capture, monitor=self.monitor,
-                 client_timeout=self.client_timeout, task_timeout=self.task_timeout,
-                 task_signalwait=self.task_signalwait, cores=self.cores, memory=self.memory,
-                 client_cores=self.client_cores, client_memory=self.client_memory,
-                 ratelimit=self.ratelimit)
+                 bundlesize=self.bundlesize, bundlewait=self.bundlewait, poll=self.poll,
+                 max_retries=self.max_retries, in_memory=self.in_memory, no_confirm=self.no_confirm,
+                 forever_mode=self.forever_mode, restart_mode=self.restart_mode,
+                 redirect_failures=self.failure_stream, delay_start=self.delay_start,
+                 capture=self.capture, monitor=self.monitor, client_timeout=self.client_timeout,
+                 task_timeout=self.task_timeout, task_signalwait=self.task_signalwait,
+                 cores=self.cores, memory=self.memory, client_cores=self.client_cores,
+                 client_memory=self.client_memory, ratelimit=self.ratelimit)
 
     def run_local(self: ClusterApp, **options) -> None:
         """Run local cluster."""

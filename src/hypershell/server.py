@@ -76,7 +76,7 @@ from hypershell.client import ClientInfo
 # Public interface
 __all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
-           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_QUERY_PAUSE',
+           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
 
 # Initialize logger
@@ -102,8 +102,9 @@ DEFAULT_ATTEMPTS: Final[int] = default.server.attempts
 DEFAULT_EAGER_MODE: Final[bool] = default.server.eager
 """When enabled tasks are retried immediately ahead scheduling new tasks."""
 
-DEFAULT_QUERY_PAUSE: Final[int] = default.server.wait
-"""Default polling interval between database queries if no tasks are available."""
+DEFAULT_QUERY_PAUSE: Final[int] = default.server.poll  # Backwards compatibility
+DEFAULT_SERVER_POLL: Final[int] = default.server.poll
+"""Default polling interval in seconds between database queries if no tasks are available."""
 
 
 class Scheduler(StateMachine):
@@ -118,16 +119,17 @@ class Scheduler(StateMachine):
     eager: bool
     forever_mode: bool
     restart_mode: bool
+    poll: int
+    startup_phase: bool
 
     state = SchedulerState.START
     states = SchedulerState
 
-    startup_phase: bool = True
 
     def __init__(self: Scheduler, queue: QueueServer, bundlesize: int = DEFAULT_BUNDLESIZE,
                  attempts: int = DEFAULT_ATTEMPTS, eager: bool = DEFAULT_EAGER_MODE,
                  forever_mode: bool = False, restart_mode: bool = False,
-                 query_pause: int = DEFAULT_QUERY_PAUSE) -> None:
+                 poll: int = DEFAULT_SERVER_POLL) -> None:
         """Initialize queue and parameters."""
         self.queue = queue
         self.bundle = []
@@ -136,7 +138,7 @@ class Scheduler(StateMachine):
         self.eager = eager
         self.forever_mode = forever_mode
         self.restart_mode = restart_mode
-        self.query_pause = query_pause
+        self.poll = poll
         self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
 
     @cached_property
@@ -178,8 +180,8 @@ class Scheduler(StateMachine):
         elif not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0 and not self.startup_phase:
             return SchedulerState.FINAL
         else:
-            log.trace(f'No tasks available - waiting {self.query_pause} seconds')
-            time.sleep(self.query_pause)
+            log.trace(f'No tasks available - waiting {self.poll} seconds')
+            time.sleep(self.poll)
             return SchedulerState.LOAD
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
@@ -214,11 +216,12 @@ class SchedulerThread(Thread):
                  attempts: int = DEFAULT_ATTEMPTS,
                  eager: bool = DEFAULT_EAGER_MODE,
                  forever_mode: bool = False,
-                 restart_mode: bool = False) -> None:
+                 restart_mode: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-scheduler')
         self.machine = Scheduler(queue=queue, bundlesize=bundlesize, attempts=attempts, eager=eager,
-                                 forever_mode=forever_mode, restart_mode=restart_mode)
+                                 forever_mode=forever_mode, restart_mode=restart_mode, poll=poll)
 
     def run_with_exceptions(self: SchedulerThread) -> None:
         """Run machine."""
@@ -662,6 +665,10 @@ class ServerThread(Thread):
         no_confirm (bool, optional):
             If True, do not check for client confirmation messages.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         address (tuple, optional):
             Bind address for server with port number.
             See :const:`DEFAULT_BIND` and :const:`DEFAULT_PORT`.
@@ -712,6 +719,7 @@ class ServerThread(Thread):
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  in_memory: bool = False,
                  no_confirm: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
                  address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
@@ -740,7 +748,8 @@ class ServerThread(Thread):
                 source, cores=task_cores, memory=task_memory, timeout=task_timeout,
                 bundlesize=bundlesize, bundlewait=bundlewait)
             self.scheduler = SchedulerThread(queue=self.queue, bundlesize=bundlesize, attempts=max_retries + 1,
-                                             eager=eager, forever_mode=forever_mode, restart_mode=restart_mode)
+                                             eager=eager, forever_mode=forever_mode, restart_mode=restart_mode,
+                                             poll=poll)
         if self.no_confirm:
             self.confirm = None
         else:
@@ -830,6 +839,7 @@ def serve_from(source: Iterable[str],
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                in_memory: bool = False,
                no_confirm: bool = False,
+               poll: int = DEFAULT_SERVER_POLL,
                address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
                max_retries: int = DEFAULT_ATTEMPTS - 1,
@@ -872,6 +882,10 @@ def serve_from(source: Iterable[str],
         no_confirm (bool, optional):
             If True, do not check for client confirmation messages.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         address (tuple, optional):
             Bind address for server with port number.
             See :const:`DEFAULT_BIND` and :const:`DEFAULT_PORT`.
@@ -909,6 +923,7 @@ def serve_from(source: Iterable[str],
                               bundlewait=bundlewait,
                               in_memory=in_memory,
                               no_confirm=no_confirm,
+                              poll=poll,
                               address=address,
                               auth=auth,
                               restart_mode=restart_mode,
@@ -931,6 +946,7 @@ def serve_file(path: str,
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                in_memory: bool = False,
                no_confirm: bool = False,
+               poll: int = DEFAULT_SERVER_POLL,
                address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
                max_retries: int = DEFAULT_ATTEMPTS - 1,
@@ -968,6 +984,10 @@ def serve_file(path: str,
 
         no_confirm (bool, optional):
             If True, do not check for client confirmation messages.
+
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
 
         address (tuple, optional):
             Bind address for server with port number.
@@ -1011,6 +1031,7 @@ def serve_file(path: str,
                    bundlewait=bundlewait,
                    in_memory=in_memory,
                    no_confirm=no_confirm,
+                   poll=poll,
                    address=address,
                    auth=auth,
                    max_retries=max_retries,
@@ -1022,6 +1043,7 @@ def serve_file(path: str,
 def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                   in_memory: bool = False,
                   no_confirm: bool = False,
+                  poll: int = DEFAULT_SERVER_POLL,
                   address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                   auth: str = DEFAULT_AUTH,
                   max_retries: int = DEFAULT_ATTEMPTS - 1,
@@ -1051,6 +1073,10 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
         max_retries (int, optional):
             Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
             See :const:`DEFAULT_EAGER_MODE`.
@@ -1074,6 +1100,7 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
     thread = ServerThread.new(bundlesize=bundlesize,
                               in_memory=in_memory,
                               no_confirm=no_confirm,
+                              poll=poll,
                               address=address,
                               auth=auth,
                               redirect_failures=redirect_failures,
@@ -1092,7 +1119,7 @@ APP_NAME = 'hs server'
 APP_USAGE = f"""\
 Usage:
   hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]] [-t SEC]
-            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] 
+            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] [-Q NUM]
             [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
 
   Launch server, schedule directly or asynchronously from database.\
@@ -1127,6 +1154,7 @@ Options:
   -W, --task-timeout    SEC   Task-level walltime limit in seconds (default: none).
   -b, --bundlesize      NUM   Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait      SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+  -Q, --poll            NUM   Polling interval between database queries if no tasks available.
   -r, --max-retries     NUM   Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
       --eager                 Schedule failed tasks before new tasks.
       --no-db                 Disable database (submit directly to clients).
@@ -1171,6 +1199,9 @@ class ServerApp(Application):
     restart_mode: bool = False
     interface.add_argument('--restart', action='store_true', dest='restart_mode')
 
+    poll: int = config.server.poll
+    interface.add_argument('-Q', '--poll', type=int, default=poll)
+
     host: str = config.server.bind
     interface.add_argument('-H', '--bind', default=host, dest='host')
 
@@ -1211,6 +1242,7 @@ class ServerApp(Application):
                           auth=self.auth,
                           in_memory=self.in_memory,
                           no_confirm=self.no_confirm,
+                          poll=self.poll,
                           max_retries=self.max_retries,
                           eager=self.eager_mode,
                           redirect_failures=self.failure_stream,
@@ -1226,6 +1258,7 @@ class ServerApp(Application):
                        auth=self.auth,
                        in_memory=self.in_memory,
                        no_confirm=self.no_confirm,
+                       poll=self.poll,
                        restart_mode=self.restart_mode,
                        max_retries=self.max_retries,
                        eager=self.eager_mode,

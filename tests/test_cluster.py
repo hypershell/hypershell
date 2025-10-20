@@ -105,6 +105,7 @@ OPTION_PAIR: Final[Dict[str, str]] = {
     '-p': '-p/--port', '--port': '-p/--port',
     '-b': '-b/--bundlesize', '--bundlesize': '-b/--bundlesize',
     '-w': '-w/--bundlewait', '--bundlewait': '-w/--bundlewait',
+    '-Q': '-Q/--poll', '--poll': '-Q/--poll',
     '-r': '-r/--max-retries', '--max-retries': '-r/--max-retries',
     '-o': '-o/--output', '--output': '-o/--output',
     '-e': '-e/--errors', '--errors': '-e/--errors',

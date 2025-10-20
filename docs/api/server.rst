@@ -64,7 +64,7 @@ Constants
 .. autodata:: DEFAULT_EVICT
 .. autodata:: DEFAULT_ATTEMPTS
 .. autodata:: DEFAULT_EAGER_MODE
-.. autodata:: DEFAULT_QUERY_PAUSE
+.. autodata:: DEFAULT_SERVER_POLL
 .. autodata:: DEFAULT_BIND
 .. autodata:: DEFAULT_PORT
 .. autodata:: DEFAULT_AUTH
