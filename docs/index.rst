@@ -84,6 +84,59 @@ applications or Python-based workflows.
 
 -------------------
 
+Domain Use Cases
+----------------
+
+|
+
+*HyperShell* is designed for embarrassingly parallel workloads across many scientific and
+engineering domains. Whether processing millions of files, running massive parameter sweeps,
+or executing independent computational tasks, *HyperShell* provides the infrastructure to
+scale and manage your workflow with confidence.
+
+Natural Sciences
+^^^^^^^^^^^^^^^^
+
+* **Genomics** / **Proteomics**: Sequence alignment, variant calling, genome assembly
+* **Bioinformatics**: Pipeline orchestration, batch analysis of biological datasets
+* **Pharmacy** / **Drug Discovery**: Molecular docking, virtual screening, clinical trial simulations
+* **Climate Science** / **Weather Modeling**: Ensemble forecasts, climate scenario analysis
+* **Materials Science**: Molecular dynamics simulations, high-throughput property screening
+* **Computational Chemistry**: Energy calculations, reaction pathway analysis
+* **Geoscience** / **Seismology**: Seismic data processing, geological survey analysis
+* **Neuroscience**: Brain imaging analysis, neural network simulations, connectome mapping
+* **High-Energy Physics**: Collider data processing, event reconstruction
+* **Astronomy** / **Physics**: Sky surveys, photon-transport simulations, particle physics analysis
+* **Cosmology**: gravitational wave analysis
+
+Engineering
+^^^^^^^^^^^
+
+* **Computational Fluid Dynamics (CFD)**: Parameter sweeps for design optimization
+* **Finite Element Analysis (FEA)**: Structural analysis, stress testing, mesh refinement studies
+* **Computer Vision** / **Image Processing**: Batch image analysis, object detection pipelines
+* **Rendering** / **Visual Effects (VFX)**: Distributed rendering, animation frame processing
+* **Network Simulation** / **Cybersecurity**: Traffic analysis, penetration testing, security audits
+* **Financial Modeling** / **Risk Analysis**: Monte Carlo simulations, portfolio optimization
+
+Computer Science & Data Science
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Artificial Intelligence (AI)**: inferencing, model evaluation, model testing
+* **Machine Learning (ML)**: Hyperparameter tuning, model training, feature engineering
+* **Data Science**: Benchmarking, data preprocessing, analysis
+* **Monte Carlo Simulations**: Statistical sampling, uncertainty quantification, stochastic modeling
+
+Mathematics & Optimization
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Numerical Methods**: Parameter sweeps, sensitivity analysis, convergence studies
+* **Optimization**: Grid search, genetic algorithms, multi-objective optimization
+* **Statistical Computing**: Bootstrap resampling, permutation tests, computational inference
+
+
+-------------------
+
 Support
 -------
 
