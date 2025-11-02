@@ -183,3 +183,66 @@ def test_cluster_database(temp_site: Path) -> None:
     assert main_lines(['hs', 'list', 'exit_status', '-f', 'plain', '-s', 'submit_time']) == (
         exit_status.success, ['0'] * 4, NO_OUTPUT
     )
+
+
+BACKFILL_TASKFILE: Final[str] = """\
+sleep 2 && echo 1  #HYPERSHELL: cores:4 timeout:60 n:1
+sleep 5 && echo 2  #HYPERSHELL: cores:4 timeout:60 n:2
+sleep 5 && echo 3  #HYPERSHELL: cores:8 timeout:60 n:3
+sleep 5 && echo 4  #HYPERSHELL: cores:4 timeout:15 n:4
+sleep 5 && echo 5  #HYPERSHELL: cores:4 timeout:60 n:5
+sleep 5 && echo 6  #HYPERSHELL: cores:4 timeout:60 n:6
+sleep 5 && echo 7  #HYPERSHELL: cores:4 timeout:60 n:7
+sleep 5 && echo 8  #HYPERSHELL: cores:4 timeout:60 n:8
+"""
+
+
+@mark.integration
+def test_cluster_backfill(temp_site: Path) -> None:
+    """
+    Verify task backfilling with heterogeneous resource requirements.
+    
+    This test recreates the example from the 2.8.0 release notes where task n:4
+    with a shorter timeout can backfill ahead of the larger task n:3.
+    """
+    
+    # Start with an empty database
+    assert main_lines(['hs', 'list', '--count']) == (
+        exit_status.success, ['0', ], NO_OUTPUT
+    )
+    
+    # Create taskfile matching release notes example
+    # Using sleep instead of stress for CI/CD compatibility
+    taskfile = temp_site / 'tasks.in'
+    with open(taskfile, mode='w', encoding='utf-8') as stream:
+        print(BACKFILL_TASKFILE, file=stream)
+
+    # Pre-submit tasks
+    rc, stdout, stderr = main(['hs', 'submit', '-f', taskfile])
+    assert rc == exit_status.success
+
+    # Now there are 8 tasks in the database
+    assert main_lines(['hs', 'list', '--count']) == (
+        exit_status.success, ['8', ], NO_OUTPUT
+    )
+
+    # Run cluster (~28-30 seconds)
+    rc, stdout, stderr = main([
+        'hs', 'cluster', '--restart', '--client-cores=8', '--num-threads=3',
+    ])
+
+    # Verify all tasks completed
+    assert rc == exit_status.success
+    assert_output(r'\[hypershell.server\] Completed task', stderr, 8)
+    assert_output(r'\[hypershell.client\] Completed task', stderr, 8)
+    
+    # Verify backfill occurred - task n:4 should backfill ahead of n:3
+    assert_output(r'DEBUG.*Backfill.*', stderr, 1)
+
+    # Confirm all tasks completed successfully
+    assert main_lines(['hs', 'list', 'exit_status', '-f', 'plain', '-s', 'submit_time']) == (
+        exit_status.success, ['0'] * 8, NO_OUTPUT
+    )
+
+    # Confirm task output
+    assert sorted(stdout.strip().split('\n')) == list(map(str, range(1, 9)))
