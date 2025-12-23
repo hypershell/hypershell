@@ -385,16 +385,6 @@ class ConfigWhichApp(Application):
             print(f'{value} ({site}: {path[site].config} | default: {default_value})')
 
 
-if os.name == 'nt':
-    CONFIG_PATH_SYSTEM: Final[str] = '%ProgramData%\\HyperShell\\Config.toml'
-    CONFIG_PATH_USER: Final[str] = '%AppData%\\HyperShell\\Config.toml'
-    CONFIG_PATH_LOCAL: Final[str] = path.local.config
-else:
-    CONFIG_PATH_SYSTEM: Final[str] = '/etc/hypershell.toml'
-    CONFIG_PATH_USER: Final[str] = '~/.hypershell/config.toml'
-    CONFIG_PATH_LOCAL: Final[str] = path.local.config
-
-
 PROGRAM = 'hs config'
 USAGE = f"""\
 Usage:
@@ -429,9 +419,9 @@ class ConfigApp(ApplicationGroup):
 
     interface = Interface(PROGRAM, USAGE, HELP)
     interface.add_argument('command')
-    interface.add_argument('--system', action='version', version=CONFIG_PATH_SYSTEM)
-    interface.add_argument('--user', action='version', version=CONFIG_PATH_USER)
-    interface.add_argument('--local', action='version', version=CONFIG_PATH_LOCAL)
+    interface.add_argument('--system', action='version', version=path.system.config)
+    interface.add_argument('--user', action='version', version=path.user.config)
+    interface.add_argument('--local', action='version', version=path.local.config)
 
     commands = {
         'get': ConfigGetApp,

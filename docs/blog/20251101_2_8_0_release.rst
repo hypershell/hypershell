@@ -469,3 +469,26 @@ aware of this parameter, while still allowing for customization based on workflo
     variable has been preserved for backwards compatibility. However the configuration parameter
     name is only now ``server.poll`` as there is no point in maintaining the old name because it
     was never actually used until now.
+|
+
+Fix config command path check bug
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The previous release included top-level flags to inspect the location of the various
+configuration file paths (i.e., ``--system``, ``--user``, ``--local``).
+
+.. admonition:: Check for path of user-level configuration file
+    :class: note
+
+    .. code-block:: shell
+
+        hs config --user
+
+In an attempt to shorten the output as a *smart* feature we hard-coded this
+based on the platform (e.g., `Windows`), where it would output something like
+``%APPDATA%\HyperShell\Config.toml``. This was clever but not actually as useful
+because that doesn't help in scripts. More importantly, it was actually broken because
+it did not correctly check for `MacOS` and would output the `Linux` path instead.
+
+This release does the more sensible thing of directly returning the path object
+actually used in the code.
