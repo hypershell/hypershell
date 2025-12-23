@@ -17,10 +17,9 @@ The v2.8.0 release includes major features and improvements.
 - Resource-aware task scheduling
 - Resource monitoring
 - Queue-only task submission
-- Rate limit task execution
-- Local SQLite database enabled by default
-- Default logging level set to INFO
-- New command-line argument checks
+- Rate limiting task execution
+- Task groups for dependency management
+- Major bug fixes and improvements
 
 -----
 

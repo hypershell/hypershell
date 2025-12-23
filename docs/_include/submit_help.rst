@@ -81,6 +81,16 @@ Options
     Sets the default timeout for all submitted tasks. Individual tasks can override this
     with inline comments (e.g., ``#HYPERSHELL: timeout: 3600``).
 
+``-g``, ``--group`` *NUM*
+    Task group for dependency management (default: 0).
+
+    Assigns submitted tasks to a specific group. Tasks are executed in ascending group order,
+    with all tasks in a group completing before the next group begins. This enables simple
+    workflow management without requiring explicit DAG-based definitions.
+
+    All tasks default to group 0 for backwards compatibility. Users can organize tasks into
+    multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups execute first.
+
 ``--initdb``
     Auto-initialize database.
 

@@ -61,5 +61,6 @@ Constants
 
 .. autodata:: DEFAULT_BUNDLESIZE
 .. autodata:: DEFAULT_BUNDLEWAIT
+.. autodata:: DEFAULT_TASK_GROUP
 
 |

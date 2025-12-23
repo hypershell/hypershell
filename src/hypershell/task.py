@@ -1186,6 +1186,7 @@ def print_normal(task: Task) -> None:
     memory_max = 'null' if not task.memory_max else format_bytes(int(task.memory_max))
     timeout = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
     print(f'          id: {task_data["id"]}')
+    print(f'       group: {task_data["group"]}')
     print(f'        args: {task_data["args"]}')
     print(f'     command: {task_data["command"]}')
     print(f'       cores: {cores} (used: {cores_max})')

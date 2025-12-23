@@ -121,6 +121,7 @@ class Scheduler(StateMachine):
     restart_mode: bool
     poll: int
     startup_phase: bool
+    current_group: Optional[int]
 
     state = SchedulerState.START
     states = SchedulerState
@@ -140,6 +141,7 @@ class Scheduler(StateMachine):
         self.restart_mode = restart_mode
         self.poll = poll
         self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
+        self.current_group = None
 
     @cached_property
     def actions(self: Scheduler) -> Dict[SchedulerState, Callable[[], SchedulerState]]:
@@ -166,6 +168,9 @@ class Scheduler(StateMachine):
                 log.info(f'Reverted {tasks_interrupted} previously interrupted task(s)')
         else:
             log.info('Empty database - waiting for initial tasks')
+        group_info = Task.current_group()
+        log.debug(f'Starting with task group {group_info.value} ({group_info.reason})')
+        self.current_group = group_info.value
         return SchedulerState.LOAD
 
     def load_bundle(self: Scheduler) -> SchedulerState:
@@ -173,7 +178,10 @@ class Scheduler(StateMachine):
         if check_signal() in (SIGUSR1, SIGUSR2):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
             return SchedulerState.FINAL
-        self.tasks = Task.next(limit=self.bundlesize, attempts=self.attempts, eager=self.eager)
+        self.tasks = Task.next(limit=self.bundlesize,
+                               attempts=self.attempts,
+                               eager=self.eager,
+                               group=self.current_group)
         if self.tasks:
             self.startup_phase = False
             return SchedulerState.PACK
@@ -181,6 +189,20 @@ class Scheduler(StateMachine):
             return SchedulerState.FINAL
         else:
             log.trace(f'No tasks available - waiting {self.poll} seconds')
+            group_info = Task.increment_group(self.current_group, attempts=self.attempts)
+            if not group_info.viable:
+                if self.forever_mode:
+                    log.warning(f'Failed task group {group_info.value} ({group_info.reason})')
+                    group_info.reason = f'waiting on failed tasks to be cleared'
+                    # NOTE: Do not halt in this mode
+                else:
+                    log.critical(f'Failed task group {group_info.value} ({group_info.reason})')
+                    return SchedulerState.FINAL
+            elif group_info.value != self.current_group:
+                log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
+                self.current_group = group_info.value
+                return SchedulerState.LOAD
+            log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
             time.sleep(self.poll)
             return SchedulerState.LOAD
 

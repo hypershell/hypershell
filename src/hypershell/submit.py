@@ -70,15 +70,20 @@ from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
-from hypershell.data.model import Task
+from hypershell.data.model import Task, DEFAULT_TASK_GROUP
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT
 
 # Public interface
-__all__ = ['submit_from', 'submit_file', 'SubmitThread', 'LiveSubmitThread',
-           'SubmitApp', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
+__all__ = ['submit_from', 'submit_file', 'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
+           'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
 # Initialize logger
 log = Logger.with_name(__name__)
+
+
+# Redefined for docs
+DEFAULT_TASK_GROUP: Final[int] = DEFAULT_TASK_GROUP
+"""Default task group for backwards compatibility."""
 
 
 class LoaderState(State, Enum):
@@ -100,6 +105,7 @@ class Loader(StateMachine):
     memory: Optional[int]
     timeout: Optional[int]
     template: Template
+    group: int
     count: int
     tags: Dict[str, str]
 
@@ -113,6 +119,7 @@ class Loader(StateMachine):
                  memory: int = None,
                  timeout: int = None,
                  template: str = DEFAULT_TEMPLATE,
+                 group: int = DEFAULT_TASK_GROUP,
                  tags: Dict[str, str] = None) -> None:
         """Initialize source to read tasks and submit to database."""
         self.template = Template(template)
@@ -121,6 +128,7 @@ class Loader(StateMachine):
         self.cores = cores
         self.memory = memory
         self.timeout = timeout
+        self.group = group
         self.tags = tags
         self.count = 0
 
@@ -143,15 +151,18 @@ class Loader(StateMachine):
         """Get the next task from the source."""
         try:
             args = next(self.source)
-            self.task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout, tag=self.tags)
+            self.task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
+                                 group=self.group, tag=self.tags)
             if self.task.args:
                 log.trace(f'Loaded task ({self.task.args})')
                 return LoaderState.PUT
             else:
+                # NOTE: group, cores, memory, etc. are processed as "tags" here,
+                # Though passed as 'tag' they are re-extracted in Task.new()
                 _, inline_tags = Task.split_argline(args)  # simpler to just reprocess
                 if inline_tags:
                     tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
-                    log.debug(f'Setting global tags: {tagline}')
+                    log.debug(f'Setting global attribute or tag: {tagline}')
                     for k, v in inline_tags.items():
                         self.tags[k] = v
                 else:
@@ -186,11 +197,12 @@ class LoaderThread(Thread):
                  cores: int = None,
                  memory: int = None,
                  timeout: int = None,
+                 group: int = DEFAULT_TASK_GROUP,
                  tags: Dict[str, str] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-submit-loader')
         self.machine = Loader(source=source, queue=queue, cores=cores, memory=memory, timeout=timeout,
-                              template=template, tags=tags)
+                              template=template, group=group, tags=tags)
 
     def run_with_exceptions(self: LoaderThread) -> None:
         """Run machine."""
@@ -341,6 +353,9 @@ class SubmitThread(Thread):
         timeout (int, optional):
             Task-level walltime limit in seconds (default: none).
 
+        group (int, optional):
+            Task group for dependency management (default: 0).
+
         tags (Dict[str, JSONValue], optional):
             Tag dictionary for all submitted tasks.
 
@@ -369,12 +384,14 @@ class SubmitThread(Thread):
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  template: str = DEFAULT_TEMPLATE,
+                 group: int = DEFAULT_TASK_GROUP,
                  tags: Dict[str, JSONValue] = None) -> None:
         """Initialize queue and child threads."""
         self.source = source
         self.queue = Queue(maxsize=bundlesize)
         self.loader = LoaderThread(source=source, queue=self.queue,
-                                   cores=cores, memory=memory, timeout=timeout, template=template, tags=tags)
+                                   cores=cores, memory=memory, timeout=timeout,
+                                   template=template, group=group, tags=tags)
         self.committer = DatabaseCommitterThread(queue=self.queue, bundlesize=bundlesize, bundlewait=bundlewait)
         super().__init__(name='hypershell-submit')
 
@@ -565,6 +582,9 @@ class LiveSubmitThread(Thread):
             Task-level walltime limit in seconds (default: none).
             May be overridden by inline-comment.
 
+        group (int, optional):
+            Task group for dependency management (default: 0).
+
         tags (Dict[str, JSONValue], optional):
             Tag dictionary for all submitted tasks.
 
@@ -596,6 +616,7 @@ class LiveSubmitThread(Thread):
                  cores: int = None,
                  memory: int = None,
                  timeout: int = None,
+                 group: int = DEFAULT_TASK_GROUP,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  tags: Dict[str, str] = None) -> None:
@@ -603,7 +624,7 @@ class LiveSubmitThread(Thread):
         self.source = source
         self.local = Queue(maxsize=bundlesize)
         self.loader = LoaderThread(source=source, queue=self.local, cores=cores, memory=memory,
-                                   timeout=timeout, template=template, tags=tags)
+                                   timeout=timeout, group=group, template=template, tags=tags)
         self.client = QueueClient(config=queue_config)
         self.committer = QueueCommitterThread(local=self.local, client=self.client,
                                               bundlesize=bundlesize, bundlewait=bundlewait)
@@ -653,6 +674,7 @@ def submit_from(source: Iterable[str],
                 cores: int = None,
                 memory: int = None,
                 timeout: int = None,
+                group: int = DEFAULT_TASK_GROUP,
                 template: str = DEFAULT_TEMPLATE,
                 tags: Dict[str, JSONValue] = None) -> int:
     """
@@ -693,6 +715,9 @@ def submit_from(source: Iterable[str],
             Task-level walltime limit in seconds (default: none).
             May be overridden by inline-comment.
 
+        group (int, optional):
+            Task group for dependency management (default: 0).
+
         tags (Dict[str, JSONValue], optional):
             Tag dictionary for all submitted tasks.
 
@@ -718,6 +743,7 @@ def submit_from(source: Iterable[str],
                                   bundlesize=bundlesize,
                                   bundlewait=bundlewait,
                                   template=template,
+                                  group=group,
                                   tags=tags)
     else:
         thread = LiveSubmitThread.new(source=source,
@@ -728,6 +754,7 @@ def submit_from(source: Iterable[str],
                                       bundlesize=bundlesize,
                                       bundlewait=bundlewait,
                                       template=template,
+                                      group=group,
                                       tags=tags)
     try:
         thread.join()
@@ -746,6 +773,7 @@ def submit_file(path: str,
                 cores: int = None,
                 memory: int = None,
                 timeout: int = None,
+                group: int = DEFAULT_TASK_GROUP,
                 tags: Dict[str, JSONValue] = None,
                 **file_options) -> int:
     """
@@ -785,6 +813,9 @@ def submit_file(path: str,
             Task-level walltime limit in seconds (default: none).
             May be overridden by inline-comment.
 
+        group (int, optional):
+            Task group for dependency management (default: 0).
+
         tags (Dict[str, JSONValue], optional):
             Tag dictionary for all submitted tasks.
 
@@ -806,7 +837,7 @@ def submit_file(path: str,
     """
     with open(path, mode='r', **file_options) as stream:
         return submit_from(stream, queue_config=queue_config, bundlesize=bundlesize, bundlewait=bundlewait,
-                           template=template, cores=cores, memory=memory, timeout=timeout, tags=tags)
+                           template=template, cores=cores, memory=memory, timeout=timeout, group=group, tags=tags)
 
 
 DEFAULT_HOST: Final[str] = QueueConfig.host
@@ -824,7 +855,7 @@ PAD_NAME: Final[str] = ' ' * len(APP_NAME)
 APP_USAGE: Final[str] = f"""\
 Usage:
   {APP_NAME} [-h] [ARGS... | -f FILE] [-q [-H ADDR] [-p NUM] [-k KEY] | --initdb]
-  {PAD_NAME} [-b NUM] [-w SEC] [-c NUM] [-m MEM] [-W SEC] [--template CMD] [-t TAG...]
+  {PAD_NAME} [-b NUM] [-w SEC] [-c NUM] [-m MEM] [-W SEC] [-g NUM] [--template CMD] [-t TAG...]
 
   Submit one or more tasks.\
 """
@@ -849,6 +880,7 @@ Options:
   -c, --cores        NUM     Required cores per task (default: none).
   -m, --memory       MEM     Required memory per task (default: none).
   -W, --timeout      SEC     Task-level walltime limit (default: none).
+  -g, --group        NUM     Task group for dependency management (default: {DEFAULT_TASK_GROUP}).
   -b, --bundlesize   NUM     Number of lines to buffer (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait   SEC     Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
       --initdb               Auto-initialize database.
@@ -886,6 +918,9 @@ class SubmitApp(Application):
     timeout: Optional[int] = config.task.timeout or None
     interface.add_argument('-W', '--timeout', type=int, default=timeout)
 
+    group: Optional[int] = None
+    interface.add_argument('-g', '--group', type=int, default=group)
+
     auto_initdb: bool = False
     interface.add_argument('--initdb', action='store_true', dest='auto_initdb')
 
@@ -914,13 +949,17 @@ class SubmitApp(Application):
 
     def run(self: SubmitApp) -> None:
         """Run submit thread."""
+        self.check_source()
         self.queue = None
         if self.queue_mode:
             self.queue = QueueConfig(host=self.queue_server, port=self.queue_port, auth=self.queue_auth)
         else:
             self.check_database()
             self.check_tags()
-        self.check_source()
+            if self.group is None:
+                group = Task.current_group()
+                self.group = group.value
+                log.info(f'Auto-selected task group {group.value} ({group.reason})')
         if self.source is not None:
             self.submit_all()
         else:
@@ -929,7 +968,7 @@ class SubmitApp(Application):
     def submit_all(self: SubmitApp) -> None:
         """Submit multiple tasks from file-like source."""
         count = submit_from(self.source, template=self.template, queue_config=self.queue,
-                            cores=self.cores, memory=self.memory, timeout=self.timeout,
+                            cores=self.cores, memory=self.memory, timeout=self.timeout, group=self.group,
                             bundlesize=self.bundlesize, bundlewait=self.bundlewait, tags=self.tags)
         log.info(f'Submitted {count} tasks')
 
@@ -938,10 +977,11 @@ class SubmitApp(Application):
         args = ' '.join([self.quote_arg(arg) for arg in self.task_args])
         if self.queue_mode:
             submit_from([args, ], queue_config=self.queue,
-                        cores=self.cores, memory=self.memory, timeout=self.timeout,
+                        cores=self.cores, memory=self.memory, timeout=self.timeout, group=self.group,
                         tags=self.tags)
         else:
-            task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout, tag=self.tags)
+            task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout, 
+                           group=self.group, tag=self.tags)
             Task.add(task)
             log.info(f'Submitted task ({task.id})')
 

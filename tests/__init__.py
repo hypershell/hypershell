@@ -55,9 +55,9 @@ def assert_output(pattern: str, output: str, count: int = 1, groups: Dict[str, s
     assert n == count
 
 
-def create_taskfile(temp_site: Path, lines: List[str]) -> Path:
+def create_taskfile(temp_site: Path, lines: List[str], filename: str = 'task.in') -> Path:
     """Produce task input file for test, return path."""
-    taskfile = temp_site / 'task.in'
+    taskfile = temp_site / filename
     with open(taskfile, mode='w', encoding='utf-8') as stream:
         for line in lines:
             print(line, file=stream)

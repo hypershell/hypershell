@@ -33,10 +33,16 @@ from hypershell.data.core import schema, Session
 __all__ = [
     'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
+    'DEFAULT_TASK_GROUP', 'TaskGroupInfo',
 ]
 
 # Initialize logger
 log = Logger.with_name(__name__)
+
+
+# Constants
+DEFAULT_TASK_GROUP: Final[int] = 0
+"""Default task group for backwards compatibility."""
 
 
 class DatabaseError(Exception):
@@ -195,10 +201,19 @@ class Entity(DeclarativeBase):
         raise NotImplementedError()  # NOTE: non-strict requirement of base
 
 
+@dataclass
+class TaskGroupInfo:
+    """Information related to the active task group."""
+    value: int
+    reason: Optional[str] = None
+    viable: bool = True
+
+
 class Task(Entity):
     """Task entity within database implements task methods."""
 
     id: Mapped[str] = mapped_column(UUID, primary_key=True, nullable=False)
+    group: Mapped[int] = mapped_column(INTEGER, nullable=False, default=DEFAULT_TASK_GROUP, quote=True, name='group')
     args: Mapped[str] = mapped_column(TEXT, nullable=False)
 
     submit_id: Mapped[str] = mapped_column(UUID, nullable=False)
@@ -240,6 +255,7 @@ class Task(Entity):
 
     columns = {
         'id': str,
+        'group': int,
         'args': str,
         'submit_id': str,
         'submit_time': datetime,
@@ -295,11 +311,13 @@ class Task(Entity):
             attempt: int = 1,
             retried: bool = False,
             tag: Dict[str, JSONValue] = None,
+            group: int = DEFAULT_TASK_GROUP,
             **other: Any) -> Task:
         """Create a new Task."""
         cls.ensure_valid_tag(tag)
         args, inline_tags = cls.split_argline(args)
         tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
+        other['group'] = tag.pop('group', group)
         other['cores'] = tag.pop('cores', other.get('cores', None))
         other['memory'] = tag.pop('memory', other.get('memory', None))
         other['timeout'] = tag.pop('timeout', other.get('timeout', None))
@@ -354,31 +372,108 @@ class Task(Entity):
                                      f'"{key}:{value}"')
 
     @classmethod
-    def select_new(cls: Type[Task], limit: int) -> List[Task]:
-        """Select unscheduled tasks up to some `limit` in order of submit_time."""
-        return (cls.query()
-                .order_by(cls.submit_time)
-                .filter(cls.schedule_time.is_(None))
-                .limit(limit).all())
+    def current_group(cls: Type[Task]) -> TaskGroupInfo:
+        """
+        This computes the currently active task group if we don't already have one.
+        The returned group value follows one of the following rules (in order):
+            1) The most recently scheduled task group (if there are any),
+            2) The default task group (see: DEFAULT_TASK_GROUP) if the database is empty,
+            3) The lowest group if nothing has been scheduled yet.
+        """
 
-    @classmethod
-    def select_failed(cls: Type[Task], attempts: int, limit: int) -> List[Task]:
-        """Select failed tasks for retry up to some `limit` under given number of `attempts`."""
-        return (cls.query()
-                .order_by(cls.completion_time)
-                .filter(cls.exit_status.isnot(None))
-                .filter(cls.exit_status != 0)
-                .filter(cls.attempt < attempts)
-                .filter(cls.retried.is_(False))
-                .limit(limit).all())
+        recent_task = (
+            Session.query(Task)
+            .order_by(Task.schedule_time.desc())
+            .filter(Task.schedule_time.isnot(None))
+            .first()
+        )
 
-    @classmethod
-    def next(cls: Type[Task], limit: int, attempts: int = 1, eager: bool = False) -> List[Task]:
-        """Select tasks for scheduling including failed tasks for re-scheduling."""
-        if eager:
-            tasks = cls.__next_eager(attempts=attempts, limit=limit)
+        if recent_task is not None:
+            return TaskGroupInfo(recent_task.group, f'most recently scheduled task: {recent_task.id}')
+
+        if Task.count() == 0:
+            return TaskGroupInfo(DEFAULT_TASK_GROUP, 'no tasks submitted')
+
         else:
-            tasks = cls.__next_not_eager(attempts, limit)
+            # NOTE: we cannot just naively go with first submitted task (even though that makes sense)
+            # because the groups might have been altered, and we get stuck in an infinite loop waiting on
+            # all tasks to be completed (lower task group never get scheduled) but there are no more groups.
+            submitted_task = Session.query(Task).order_by(Task.group).first()
+            return TaskGroupInfo(submitted_task.group, f'no tasks scheduled - defaulting to earliest group')
+
+    @classmethod
+    def increment_group(cls: Type[Task], previous_group: int, attempts: int) -> TaskGroupInfo:
+        """
+        This should only be called if no tasks are returned by Task.next().
+        Check the current group and increment if necessary with explanation.
+        We assume all tasks in `previous_group` have already been scheduled (see Task.next()).
+        """
+        remaining = (
+            Session.query(Task)
+            .filter(Task.group == previous_group)
+            .filter(Task.completion_time.is_(None))
+            .count()
+        )
+        if remaining > 0:
+            return TaskGroupInfo(previous_group, f'waiting on {remaining} tasks to complete')
+        failed_query = (
+            Session.query(Task)
+            .filter(Task.group == previous_group)
+            .filter(cls.exit_status.isnot(None))
+            .filter(cls.exit_status != 0)
+            .filter(cls.attempt >= attempts)
+            .filter(cls.retried.is_(False))
+        )
+        failed = failed_query.count()
+        if failed > 0:
+            example = failed_query.first()
+            return TaskGroupInfo(previous_group,
+                                 f'at least {failed} tasks exceeding allowed retries, example: {example.id}',
+                                 False)
+        next_group = (
+            Session.query(Task.group)
+            .order_by(Task.group)
+            .filter(Task.group > previous_group)
+            .first()
+        )
+        if not next_group:
+            return TaskGroupInfo(previous_group, f'no task groups remain')
+        else:
+            return TaskGroupInfo(next_group[0])
+
+    @classmethod
+    def select_new(cls: Type[Task], limit: int, group: int = None) -> List[Task]:
+        """Select unscheduled tasks up to some `limit` in order of submit_time."""
+        query = cls.query().order_by(cls.submit_time).filter(cls.schedule_time.is_(None))
+        if group is not None:
+            query = query.filter(cls.group == group)
+        return query.limit(limit).all()
+
+    @classmethod
+    def select_failed(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
+        """Select failed tasks for retry up to some `limit` under given number of `attempts`."""
+        query = (cls.query()
+                 .order_by(cls.completion_time)
+                 .filter(cls.exit_status.isnot(None))
+                 .filter(cls.exit_status != 0)
+                 .filter(cls.attempt < attempts)
+                 .filter(cls.retried.is_(False)))
+        if group is not None:
+            query = query.filter(cls.group == group)
+        return query.limit(limit).all()
+
+    @classmethod
+    def next(cls: Type[Task],
+             limit: int,
+             group: int = DEFAULT_TASK_GROUP,
+             attempts: int = 1,
+             eager: bool = False) -> List[Task]:
+        """Select tasks for scheduling including failed tasks for re-scheduling."""
+        group = group if group is not None else cls.current_group().value
+        if eager:
+            tasks = cls.__next_eager(attempts=attempts, limit=limit, group=group)
+        else:
+            tasks = cls.__next_not_eager(attempts, limit, group=group)
         for task in tasks:
             task.server_id = INSTANCE
             task.server_host = HOSTNAME
@@ -387,36 +482,37 @@ class Task(Entity):
         return tasks
 
     @classmethod
-    def __next_eager(cls: Type[Task], attempts: int, limit: int) -> List[Task]:
+    def __next_eager(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
         """Select next batch of tasks from database preferring previously failed tasks."""
-        tasks = cls.__schedule_next_failed_tasks(attempts, limit)
+        tasks = cls.__schedule_next_failed_tasks(attempts, limit, group=group)
         if len(tasks) < limit:
-            new_tasks = cls.select_new(limit=limit - len(tasks))
+            new_tasks = cls.select_new(limit=limit - len(tasks), group=group)
             tasks.extend(new_tasks)
             log.trace(f'Selected {len(new_tasks)} new tasks')
         return tasks
 
     @classmethod
-    def __next_not_eager(cls: Type[Task], attempts: int, limit: int) -> List[Task]:
+    def __next_not_eager(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
         """Select next batch of tasks for database preferring novel tasks to old failed ones."""
-        tasks = cls.select_new(limit=limit)
+        tasks = cls.select_new(limit=limit, group=group)
         log.trace(f'Selected {len(tasks)} new tasks')
         if len(tasks) < limit and attempts > 1:
-            failed_tasks = cls.__schedule_next_failed_tasks(attempts=attempts, limit=limit - len(tasks))
+            failed_tasks = cls.__schedule_next_failed_tasks(attempts=attempts, limit=limit - len(tasks), group=group)
             tasks.extend(failed_tasks)
         return tasks
 
     @classmethod
-    def __schedule_next_failed_tasks(cls: Type[Task], attempts: int, limit: int) -> List[Task]:
+    def __schedule_next_failed_tasks(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
         """Select previously failed tasks for scheduling."""
         tasks = []
-        failed_tasks = cls.select_failed(attempts=attempts, limit=limit)
+        failed_tasks = cls.select_failed(attempts=attempts, limit=limit, group=group)
         if failed_tasks:
             log.trace(f'Selected {len(failed_tasks)} previously failed tasks')
             new_tasks = [cls.new(args=task.args,
                                  attempt=task.attempt + 1,
                                  previous_id=task.id,
-                                 tag=task.tag)
+                                 tag=task.tag,
+                                 group=task.group)
                          for task in failed_tasks]
             tasks.extend(new_tasks)
             cls.add_all(tasks)
@@ -609,8 +705,8 @@ class Task(Entity):
 
 
 # Indices for efficient queries
-index_scheduled = Index('task_scheduled_index', Task.schedule_time)
-index_retried = Index('task_retries_index', Task.exit_status, Task.retried)
+index_tasks_unscheduled = Index('index_tasks_unscheduled', Task.group, Task.schedule_time)
+index_tasks_retries = Index('index_tasks_retries', Task.exit_status, Task.retried)
 
 
 class Client(Entity):

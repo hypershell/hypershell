@@ -10,10 +10,9 @@ The v2.8.0 release includes major features and improvements.
 - Resource-aware task scheduling
 - Resource monitoring
 - Queue-only task submission
-- Rate limit task execution
-- Local SQLite database enabled by default
-- Default logging level set to INFO
-- New command-line argument checks
+- Rate limiting task execution
+- Task groups for dependency management
+- Major bug fixes and improvements
 
 -----
 
@@ -302,6 +301,86 @@ This can be useful in a number of scenarios; for example, data processes where t
 pulling files over an API and we want to ensure we do not exceed the rate limit of the API.
 
 |
+
+Task groups for dependency management
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Up until now, HyperShell has not concerned itself with this concept and instead focused purely on
+delivering high-throughput execution of independent homogenous collections of tasks.
+This has been incredibly productive for most researchers using the software.
+
+With the addition of resource-aware scheduling of heterogeneous tasks, one might now consider other
+scenarios that naturally call for some kind of dependency management. For example, a large-scale pipeline
+that schedules relatively small inferencing tasks within some time window with some larger final
+integration/combination step. Or similarly, frame rendering in a visualization with a final processing
+step to build the video file from the frames.
+
+Traditional DAG-based frameworks (e.g., `GNU Make <https://www.gnu.org/software/make/>`_,
+`Airflow <https://airflow.apache.org>`_, `Nextflow <https://www.nextflow.io>`_,
+`Snakemake <https://snakemake.github.io>`_) focus on the user-facing *definition* of the workflow with
+explicit task-to-task dependencies, for which an ephemeral group association is typically assigned for the
+execution phase using within-group parallelism. For some of these frameworks, the actual execution system
+is rudimentary with only local threads (`GNU Make`) while other frameworks abstract this responsibility by
+allowing for externally implemented execution through some plugin system (`Nextflow`).
+
+.. note::
+
+    This feature is the last step on the road to becoming a backend to something like `NextFlow`.
+
+We have inverted the relationship between tasks and their dependencies by skipping the graph and
+directly exposing the task execution groups at submit time. That is, task group ID values are persisted
+in the database with tasks belonging to an explicit task group and remain in that group forever.
+This design simplifies how users conceptualize this problem and doesn't require any complicated changes
+to the data model or the introduction of any new syntax.
+
+**In fact, for high-throughput workflows with billions of tasks in the database this is
+altogether preferable in every regard!**
+
+This simple model:
+
+- **Eliminates graph solving**: The scheduler only needs to track the current group number
+- **Minimizes metadata**: A single integer per task instead of arbitrary dependency edges
+- **Enables efficient queries**: Database indexes on ``(group, schedule_time)`` provide O(log n) lookups
+- **Maintains high throughput**: Scheduling decisions remain constant-time operations
+
+HyperShell's scheduler thread now includes this concept of a task group by only scheduling task bundles
+for the current group. All tasks in some group `N` must complete before any tasks in group `N+1`
+may be scheduled. If there are failed tasks in the active group we remain in that group until all retries
+have been exhausted up until the maximum retry limit on all tasks in the group. If the server is operating
+in `forever` mode we will continue to remain here indefinitely, otherwise the server will trigger a shutdown
+with a critical message indicating non-viability of the task such as they are.
+
+Task groups are exposed through a new ``-g``/ ``--group`` option in the ``hs submit`` command:
+
+.. admonition:: Submit tasks to different groups
+    :class: note
+
+    .. code-block:: shell
+
+        # Submit batch of tasks with group 0
+        hs submit tasks-0.in -g 0
+        
+        # Submit batch of tasks with group 1
+        hs submit tasks-1.in -g 1
+
+The default task group is 0 (see :const:`~hypershell.submit.DEFAULT_TASK_GROUP`).
+When no task groups are given the software essentially behaves in a manner indistinguishable
+from previous releases. The scheduler pre-selects the active task group prior to selecting tasks
+from the database using one of following rules (in order):
+
+#. The most recently scheduled task group (if there are any),
+#. The default task group if the database is empty,
+#. The lowest group if nothing has been scheduled yet.
+
+These same rules are followed for automatically selecting the active group as a dynamic default
+if task groups have previously been used and submitting new tasks without specifying.
+
+.. warning::
+
+    Submitting tasks with a group value lower than the active group for a running workflow
+    is considered an error and these tasks will never be scheduled. It is possible to modify the group
+    of an already submitted task using ``hs update``. Depending on the severity of the changes it
+    might be necessary to restart the cluster.
 
 -----
 
