@@ -989,7 +989,7 @@ class ClientHeartbeat(StateMachine):
             else:
                 log.trace(f'Heartbeat - final ({heartbeat.host}: {heartbeat.uuid})')
                 return HeartbeatState.FINAL
-        except QueueEmpty:
+        except QueueFull:
             return HeartbeatState.SUBMIT
 
     def wait(self: ClientHeartbeat) -> HeartbeatState:
