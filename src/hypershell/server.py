@@ -793,6 +793,14 @@ class ServerThread(Thread):
             self.wait_confirm()
         log.debug('Done')
 
+    def start(self: ServerThread) -> None:
+        """Override default start method to wait for queue to be ready."""
+        super().start()
+        while not self.queue:  # None until initialized by __init__()
+            time.sleep(0.1)
+        while not self.queue.ready:
+            time.sleep(0.1)
+
     def start_threads(self: ServerThread) -> None:
         """Start child threads."""
         if self.submitter is not None:

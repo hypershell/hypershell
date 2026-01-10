@@ -287,8 +287,6 @@ class SSHCluster(Thread):
     def run_with_exceptions(self: SSHCluster) -> None:
         """Start child threads, wait."""
         self.server.start()
-        while not self.server.queue.ready:
-            time.sleep(0.1)
         self.clients = []
         for argv in self.client_argv:
             log.debug(f'Launching client: {argv}')

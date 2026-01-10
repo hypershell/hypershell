@@ -235,8 +235,6 @@ class LocalCluster(Thread):
         """Start child threads, wait."""
         set_client_standalone(False)
         self.server.start()
-        while not self.server.queue.ready:
-            time.sleep(0.1)
         self.client.start()
         self.client.join()
         self.server.join()
