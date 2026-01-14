@@ -137,7 +137,7 @@ class ClusterApp(Application):
     delay_start: float = DEFAULT_DELAY
     interface.add_argument('-d', '--delay-start', type=float, default=delay_start)
 
-    eager_mode: bool = False
+    eager_mode: bool = config.server.eager
     max_retries: int = DEFAULT_ATTEMPTS - 1
     interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
     interface.add_argument('--eager', action='store_true', dest='eager_mode')
@@ -240,7 +240,8 @@ class ClusterApp(Application):
         launcher = self.launchers.get(self.mode)
         launcher(source=self.source, num_threads=self.num_threads, template=self.template,
                  bundlesize=self.bundlesize, bundlewait=self.bundlewait, poll=self.poll,
-                 max_retries=self.max_retries, in_memory=self.in_memory, no_confirm=self.no_confirm,
+                 max_retries=self.max_retries, eager=self.eager_mode,
+                 in_memory=self.in_memory, no_confirm=self.no_confirm,
                  forever_mode=self.forever_mode, restart_mode=self.restart_mode,
                  redirect_failures=self.failure_stream, delay_start=self.delay_start,
                  capture=self.capture, monitor=self.monitor, client_timeout=self.client_timeout,
