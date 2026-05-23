@@ -302,9 +302,10 @@ class QueueConfig:
     port: int = default.server.port
     auth: str = default.server.auth
     size: int = default.server.queuesize
+    tls: Optional[TLSConfig] = None  # Optional transport-layer TLS for the queue
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Union[str, int]]) -> QueueConfig:
+    def from_dict(cls, data: Dict[str, Any]) -> QueueConfig:
         """Load config from existing dictionary values."""
         return cls(**data)
 
@@ -358,7 +359,7 @@ def make_sentinel() -> bytes:
     return serialize(SENTINEL)
 
 
-class QueueInterface(BaseManager, ABC):
+class QueueInterface(SecureManager, ABC):
     """The queue interface provides access to four managed distributed queues."""
 
     config: QueueConfig
@@ -378,7 +379,10 @@ class QueueInterface(BaseManager, ABC):
         # We derive a secure key from the auth string in the same way on the server and client.
         # We don't transmit the original auth string or the key itself but hashed again.
         hashed_auth = sha512(derive_secure_key()).digest()
-        super().__init__(address=(self.config.host, self.config.port), authkey=hashed_auth)
+        # `tls` is forwarded to SecureManager: when None or inactive, SecureManager behaves
+        # exactly like a stock BaseManager (cleartext TCP), preserving the existing default.
+        super().__init__(address=(self.config.host, self.config.port), authkey=hashed_auth,
+                         tls=self.config.tls)
 
     @classmethod
     def new(cls: Type[QueueInterface]) -> QueueInterface:
