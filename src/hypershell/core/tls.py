@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Optional, Tuple, Final
+from typing import List, Mapping, Optional, Tuple, Final
 
 # Standard libs
 import os
@@ -36,6 +36,7 @@ __all__ = [
     'get_server_context', 'get_client_context', 'get_tls_config',
     'verify_peer_fingerprint',
     'ensure_default_materials', 'resolve_auto_paths',
+    'from_namespace', 'default_directory',
     'fingerprint_of_pem', 'fingerprint_of_der',
     'format_fingerprint', 'parse_fingerprint',
 ]
@@ -393,3 +394,36 @@ def resolve_auto_paths(cfg: TLSConfig, directory: str) -> TLSConfig:
         ciphers=None if cfg.ciphers in (PARAM_NONE, None) else cfg.ciphers,
         servername=None if cfg.servername in (PARAM_NONE, None) else cfg.servername,
     )
+
+
+def default_directory() -> str:
+    """Default base directory for auto-generated TLS materials (``<site>/tls``)."""
+    from hypershell.core.platform import default_path  # local import: core.platform is a leaf
+    return os.path.join(default_path.lib, DEFAULT_CERT_DIRNAME)
+
+
+def from_namespace(ns: Optional[Mapping] = None,
+                   directory: Optional[str] = None) -> Optional[TLSConfig]:
+    """
+    Build a :class:`TLSConfig` from a hypershell config namespace (e.g. ``config.server.tls``).
+
+    Returns ``None`` when `ns` is missing or its ``enabled`` flag is false, so callers can
+    treat the result as an opt-in toggle. ``<auto>`` sentinels for ``cert``/``key``/``cafile``
+    are resolved against `directory`, which defaults to :func:`default_directory`.
+    """
+    if ns is None:
+        return None
+    if not bool(ns.get('enabled', False)):
+        return None
+    cfg = TLSConfig(
+        enabled=True,
+        cert=ns.get('cert'),
+        key=ns.get('key'),
+        cafile=ns.get('cafile'),
+        fingerprint=ns.get('fingerprint'),
+        insecure=bool(ns.get('insecure', False)),
+        min_version=ns.get('min_version') or DEFAULT_MIN_VERSION,
+        ciphers=ns.get('ciphers'),
+        servername=ns.get('servername'),
+    )
+    return resolve_auto_paths(cfg, directory if directory is not None else default_directory())

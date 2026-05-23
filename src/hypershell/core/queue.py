@@ -35,7 +35,7 @@ from hypershell.core.cipher import (serialize, create_salt, encrypt_token, decry
                                     derive_secure_key, set_secure_key, get_secure_key)
 from hypershell.core.tls import (TLSConfig, install_process_context,
                                  get_server_context, get_client_context, get_tls_config,
-                                 verify_peer_fingerprint)
+                                 verify_peer_fingerprint, from_namespace as _tls_from_namespace)
 
 # Public interface
 __all__ = [
@@ -312,11 +312,15 @@ class QueueConfig:
     @classmethod
     def load(cls: Type[QueueConfig]) -> QueueConfig:
         """Initialize from global configuration."""
+        # `_config.server.get('tls')` returns None when the TOML/env config has not defined
+        # any `[server.tls]` keys; from_namespace then treats that as "TLS off".
+        tls_ns = _config.server.get('tls') if hasattr(_config.server, 'get') else None
         return cls.from_dict({
             'host': _config.server.host,
             'port': _config.server.port,
             'auth': _config.server.auth,
             'size': _config.server.queuesize,
+            'tls': _tls_from_namespace(tls_ns),
         })
 
 

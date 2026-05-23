@@ -103,6 +103,21 @@ default = Namespace({
         'eager': False,        # Prefer failed tasks to new tasks
         'poll': 5,             # Polling interval in seconds between database queries if no tasks
         'evict': 600,          # Seconds to wait before evicting client
+
+        # Transport-layer TLS for queue connections. Disabled by default; when enabled,
+        # '<auto>' values for cert/key/cafile are resolved against the site lib dir on
+        # first server start (see hypershell.core.tls.ensure_default_materials).
+        'tls': {
+            'enabled': False,
+            'cert': '<auto>',        # Path to server certificate or '<auto>'
+            'key': '<auto>',         # Path to server private key or '<auto>'
+            'cafile': '<auto>',      # Trust anchor for clients; '<auto>' mirrors the server cert
+            'fingerprint': '<none>', # Pin peer fingerprint (e.g. 'SHA256:AB:CD:...')
+            'insecure': False,       # Disable peer verification (logs a warning)
+            'min_version': 'TLSv1.2',
+            'ciphers': '<none>',     # OpenSSL cipher string
+            'servername': '<none>',  # Override SNI / hostname check on client side
+        },
     },
 
     'client': {
