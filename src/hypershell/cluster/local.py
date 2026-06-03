@@ -27,7 +27,7 @@ __all__ = ['run_local', 'LocalCluster']
 log = Logger.with_name('hypershell.cluster')
 
 
-def run_local(**options) -> None:
+def run_local(*args, **kwargs) -> None:
     """
     Run local cluster until completion.
 
@@ -42,7 +42,7 @@ def run_local(**options) -> None:
     See Also:
         - :class:`~hypershell.cluster.local.LocalCluster`
     """
-    thread = LocalCluster.new(**options)
+    thread = LocalCluster.new(*args, **kwargs)
     try:
         thread.join()
     except Exception:

@@ -49,7 +49,7 @@ DEFAULT_LAUNCHER: Final[str] = 'mpirun'
 """Default launcher program."""
 
 
-def run_cluster(autoscaling: bool = False, **options) -> None:
+def run_cluster(*args, autoscaling: bool = False, **kwargs) -> None:
     """
     Run cluster with remote clients until completion.
 
@@ -73,9 +73,9 @@ def run_cluster(autoscaling: bool = False, **options) -> None:
         - :class:`~hypershell.cluster.remote.AutoScalingCluster`
     """
     if autoscaling:
-        thread = AutoScalingCluster.new(**options)
+        thread = AutoScalingCluster.new(*args, **kwargs)
     else:
-        thread = RemoteCluster.new(**options)
+        thread = RemoteCluster.new(*args, **kwargs)
     try:
         thread.join()
     except Exception:

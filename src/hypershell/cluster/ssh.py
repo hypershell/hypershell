@@ -40,7 +40,7 @@ DEFAULT_REMOTE_EXE: Final[str] = 'hyper-shell'
 """Default remote executable name."""
 
 
-def run_ssh(**options) -> None:
+def run_ssh(*args, **kwargs) -> None:
     """
     Run cluster with remote clients via SSH until completion.
 
@@ -58,7 +58,7 @@ def run_ssh(**options) -> None:
     See Also:
         - :class:`~hypershell.cluster.ssh.SSHCluster`
     """
-    thread = SSHCluster.new(**options)
+    thread = SSHCluster.new(*args, **kwargs)
     try:
         thread.join()
     except Exception:
