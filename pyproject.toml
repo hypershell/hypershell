@@ -45,6 +45,8 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg2>=2.9.9"]
 uuid7 = ["uuid-utils>=0.10.0"]
+zstd = ["zstandard>=0.25.0"]
+cron = ["cronitor>=6.2.2"]
 #TODO: turso = ["pyturso>=0.1.4", "sqlalchemy-turso>=0.2.0"]
 
 [dependency-groups]

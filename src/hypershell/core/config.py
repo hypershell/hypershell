@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator
+from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Dict
 
 # Standard libs
 import os
@@ -32,16 +32,19 @@ from hypershell.core.sys import PATH_SEP
 # Public interface
 __all__ = ['config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
            'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
-           'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
-           'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
+           'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
+           'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
            'find_available_ports']
+
 
 # Partial logging (not yet configured - initialized afterward)
 log = logging.getLogger(__name__)
 
 
-DEFAULT_LOGGING_STYLE = 'default'
-LOGGING_STYLES = {
+DEFAULT_LOGGING_LEVEL: Final[str] = 'info'
+DEFAULT_LOGGING_STYLE: Final[str] = 'default'
+
+LOGGING_STYLES: Dict[str, Dict[str, str]] = {
     'default': {
         'format': ('%(ansi_bold)s%(ansi_level)s%(levelname)8s%(ansi_reset)s %(ansi_faint)s[%(name)s]%(ansi_reset)s'
                    ' %(message)s'),
@@ -58,8 +61,15 @@ LOGGING_STYLES = {
         'format': ('%(ansi_faint)s%(elapsed_hms)s [%(hostname_short)s] %(ansi_reset)s'
                    '%(ansi_level)s%(ansi_bold)s%(levelname)8s%(ansi_reset)s '
                    '%(ansi_faint)s[%(relative_name)s]%(ansi_reset)s %(message)s'),
+    },
+    'short': {
+        'format': '%(ansi_level)s[%(elapsed).3f]%(ansi_reset)s %(message)s',
     }
 }
+
+
+# For TOML compatibility we cannot use an actual None
+PARAM_UNSET: Final[str] = '<none>'
 
 
 # Environment variables and configuration files are automatically depth-first merged with defaults
@@ -72,10 +82,22 @@ default = Namespace({
 
     'logging': {
         'color': True,
-        'level': 'info',
         'datefmt': '%Y-%m-%d %H:%M:%S',
+        'level': DEFAULT_LOGGING_LEVEL,
         'style': DEFAULT_LOGGING_STYLE,
         **LOGGING_STYLES.get(DEFAULT_LOGGING_STYLE),
+
+        # We allow logging.file = {<path> | 'enabled' | True} for default configuration.
+        # A <path> stands in for logging.file.path with otherwise default values for everything else.
+        # At least one parameter must be set to enable logging to file.
+        'file': {
+            'path': PARAM_UNSET,
+            'level': 'trace',
+            'style': 'system',
+            'rotate': 'never',       # Size-like ('512MB') or cron-like ('@midnight', '0 1 * * 0')
+            'compress': PARAM_UNSET, # Either 'gzip', 'bzip', 'lzma', or 'zstd' (requires 'zstandard' package)
+            'keep': 0,               # Number of uncompressed files to leave on disk (0 = none)
+        },
     },
 
     'task': {

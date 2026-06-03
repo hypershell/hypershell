@@ -11,20 +11,18 @@ from types import FrameType
 
 # Standard libs
 import platform
+import logging  # Use standard library to lazily acquire logger
 from signal import signal as register
 
 
-# Internal libs
-from hypershell.core.logging import Logger
-
 # Public interface
-__all__ = ['check_signal', 'RECEIVED', 'SIGNAL_MAP',
-           'handler', 'register_handlers', 'register',
-           'SIGUSR1', 'SIGUSR2', 'SIGINT', 'SIGTERM', 'SIGKILL']
+__all__ = ['check_signal', 'reset_signal',
+           'handler', 'register_handlers', 'register', 'SIGNAL_MAP',
+           'SIGUSR1', 'SIGUSR2', 'SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP']
 
 
 if platform.system() != 'Windows':
-    from signal import SIGUSR1, SIGUSR2, SIGINT, SIGTERM, SIGKILL
+    from signal import SIGUSR1, SIGUSR2, SIGINT, SIGTERM, SIGKILL, SIGHUP
 else:
     # NOTE:
     # Windows does not provide the signal facility
@@ -34,10 +32,9 @@ else:
     SIGINT: Final[int] = 2
     SIGTERM: Final[int] = 15
     SIGKILL: Final[int] = 9
+    SIGHUP: Final[int] = 1
 
 
-# Initialize logger
-log = Logger.with_name(__name__)
 
 
 # Global signal value set by handler when received
@@ -49,18 +46,25 @@ def check_signal() -> Optional[int]:
     return RECEIVED
 
 
+def reset_signal() -> None:
+    """Reset signal received flag."""
+    global RECEIVED
+    RECEIVED = None
+
+
 SIGNAL_MAP: Final[Dict[int, str]] = {
     SIGUSR1: 'SIGUSR1',
     SIGUSR2: 'SIGUSR2',
     SIGINT:  'SIGINT',
     SIGTERM: 'SIGTERM',
     SIGKILL: 'SIGKILL',
+    SIGHUP:  'SIGHUP',
 }
 
 
 def handler(signum: int, frame: Optional[FrameType]) -> None:  # noqa: unused frame
     """Generic handler assigns `signum` to global variable."""
-    log.debug(f'Received signal {signum}: {SIGNAL_MAP.get(signum, "???")}')
+    logging.getLogger(__name__).debug(f'Received signal {signum}: {SIGNAL_MAP.get(signum, "???")}')
     global RECEIVED
     RECEIVED = signum
 
@@ -77,3 +81,4 @@ else:
         """Register signal handlers for client."""
         register(SIGUSR1, handler)
         register(SIGUSR2, handler)
+        register(SIGHUP, handler)
