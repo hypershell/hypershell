@@ -23,7 +23,7 @@ Note:
 
 Warning:
     Because the `ClientThread` checks state actively to decide whether to halt, it may take
-    some few moments before it shutsdown on its own. If your main program exits however,
+    some few moments before it shutsdown on its own. If your main program exits,
     the thread will be stopped regardless because it runs as a `daemon`.
 """
 
@@ -484,7 +484,7 @@ def backfill_possible(task: Task) -> bool:
 
     # Walk active tasks in order of expected worst-case completion time if known,
     # accumulate cores and memory until we have enough for next highest priority task,
-    # if current task can finish in less time than this expected time then let it start
+    # if current task can finish in less time than this expected worse-case time, then let it start
     now = datetime.now().astimezone()
     end_times = {t.id: (t.start_time or now) + timedelta(seconds=t.timeout)
                  for t in tasks_active.values() if t.timeout}
@@ -696,16 +696,12 @@ class TaskExecutor(StateMachine):
             self.task.client_id = INSTANCE
             self.task.client_host = HOSTNAME
             self.task.command = self.template.expand(self.task.args)
-            return TaskState.START_TASK
         except Exception as error:
             log.error(f'Template expansion failed for task ({self.task.id}): {error} (cancelled)')
             self.task.start_time = datetime.now().astimezone()
             self.task.completion_time = datetime.now().astimezone()
             self.task.exit_status = TASK_TEMPLATE_ERROR
             return TaskState.PUT_LOCAL
-
-    def start_task(self: TaskExecutor) -> TaskState:
-        """Start current task locally."""
         eligible, reason = insufficient_resources(self.task)
         if not eligible:
             log.error(f'Insufficient resources for task ({self.task.id}): {reason} (cancelled)')
@@ -713,6 +709,11 @@ class TaskExecutor(StateMachine):
             self.task.completion_time = datetime.now().astimezone()
             self.task.exit_status = TASK_RESOURCE_ERROR
             return TaskState.PUT_LOCAL
+        else:
+            return TaskState.START_TASK
+
+    def start_task(self: TaskExecutor) -> TaskState:
+        """Start current task locally."""
         resources_available, reason, priority_ratio = acquire_resources(self.task)
         if not resources_available:
             # Adaptive sleep based on priority ratio with added jitter
