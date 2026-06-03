@@ -125,8 +125,8 @@ Engineering
 Computer Science & Data Science
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-* **Artificial Intelligence (AI)**: inferencing, model evaluation, model testing
-* **Machine Learning (ML)**: Hyperparameter tuning, model training, feature engineering
+* **Artificial Intelligence**: inferencing, model evaluation, model training
+* **Machine Learning**: Hyperparameter tuning, feature engineering
 * **Data Science**: Benchmarking, data preprocessing, analysis
 * **Monte Carlo Simulations**: Statistical sampling, uncertainty quantification, stochastic modeling
 
