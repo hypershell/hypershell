@@ -133,3 +133,9 @@ dmypy.json
 
 # PyCharm
 .idea
+
+# MacOS
+.DS_Store
+
+# Local-only security review notes (not for publication)
+.security/
