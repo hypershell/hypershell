@@ -1,6 +1,6 @@
 [project]
 name = "hypershell"
-version = "2.7.2"
+version = "2.8.0a1"
 description = "A cross-platform, high-throughput computing utility for processing shell commands over a distributed, asynchronous queue."
 readme = "README.rst"
 license = "Apache-2.0"
@@ -20,60 +20,72 @@ keywords = [
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Topic :: Utilities",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "License :: OSI Approved :: Apache Software License",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "cmdkit[toml]>=2.7.7",
     "pyyaml>=6.0.1", # Allow 6.0.1 for EPEL9 compatibility (2025-01-02)
     "tomlkit>=0.13.2",
-    "sqlalchemy>=2.0.29",
+    "sqlalchemy>=2.0.50",
     "rich>=13.7.1",
     "paramiko>=3.4.0",
     "psutil>=7.0.0",
+    "cryptography>=48.0.0",
+    "msgpack>=1.1.2",
+    "uuid-utils>=0.10.0",
 ]
 
 [project.optional-dependencies]
-postgres = ["psycopg2>=2.9.9"]
+postgres = ["psycopg>=3.1"]
 uuid7 = ["uuid-utils>=0.10.0"]
 zstd = ["zstandard>=0.25.0"]
-cron = ["cronitor>=6.2.2"]
+cron = ["croniter>=6.2.2"]
 #TODO: turso = ["pyturso>=0.1.4", "sqlalchemy-turso>=0.2.0"]
 
 [dependency-groups]
 dev = [
-    "psycopg2>=2.9.9",
-    "uuid-utils>=0.10.0",
-    "pytest>=8.1.1",
-    "hypothesis>=6.100.0",
-    "sphinx-autobuild>=2024.2.4",
-    "pytest-xdist>=3.7.0",
+    "psycopg>=3.1",
+    "uuid-utils>=0.16.0",
+    "pytest>=9.0.3",
+    "hypothesis>=6.155.1",
+    "pytest-xdist>=3.8.0",
+    "ipython>=9.4.0",
+    "croniter>=6.2.2",
+    "zstandard>=0.25.0",
+    #TODO: "pyturso>=0.1.4",
+    #TODO: "sqlalchemy-turso>=0.2.0",
 ]
 docs = [
+    "docutils-stubs==0.0.22",
+    "types-docutils==0.22.0.20250822",
     "sphinx>=6.0,<8.0",
     "sphinx-sitemap>=2.5.1",
-    "sphinx-autobuild>=2024.2.4",
     "sphinx-copybutton>=0.5.2",
     "sphinxext-opengraph>=0.9.1",
     "sphinxcontrib-details-directive>=0.1.0",
     "sphinx-toolbox>=3.5.0",
     "sphinx-inline-tabs>=2023.4.21",
     "enum-tools[sphinx]>=0.12.0",
-    "furo>=2024.1.29",
-    "setuptools>=75.8.2",
+    "furo>=2025.12.19",
+    "setuptools>=82.0.1",
+#NOTE: Disabling autobuild to avoid PyO3 compatibility headache
+#   "sphinx-autobuild>=2024.2.4",
 ]
 
 [tool.uv]
 default-groups = ["dev", "docs"]
+
+#TODO: [tool.uv.sources]
+#TODO: sqlalchemy-turso = { git = "https://github.com/hypershell/sqlalchemy-turso" }
 
 [project.scripts]
 hyper-shell = "hypershell:main"  # NOTE: do not remove this
@@ -87,7 +99,7 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 addopts = ["--strict-markers"]
 markers = [
-    'unit',         # Unit tests are short, interface driven tests on discrete components.",
+    'unit',         # Unit tests are short, interface-driven tests on discrete components.",
     'integration',  # Integration tests are often longer and deal with the interaction between systems.",
     'parameterize', # Placeholder for parameterized tests (not a real type).",
 ]

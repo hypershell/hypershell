@@ -23,7 +23,7 @@ from sqlalchemy import event
 
 # Internal libs
 from hypershell.core.config import config, DEFAULT_DATABASE_FILE
-from hypershell.core.logging import handler
+from hypershell.core.logging import stream_handler
 from hypershell.core.exceptions import display_critical, write_traceback
 
 # Public interface
@@ -173,14 +173,17 @@ class DatabaseURL(dict):
 providers = {
     'turso': 'sqlite+turso',
     'sqlite': 'sqlite',
-    'postgres': 'postgresql',
-    'postgresql': 'postgresql',
+    'postgres': 'postgresql+psycopg',
+    'postgresql': 'postgresql+psycopg',
 }
 
 
-# Clone database-section for modification
+# Parse full configuration into local copy and allow for simple config
 full_config = config
-config = Namespace(config.database.copy())
+if isinstance(config.database, str):
+    config = Namespace(provider='sqlite', file=config.database)
+else:
+    config = Namespace(config.database.copy())
 
 # Pop special sections not forwarded to connection details
 schema = config.pop('schema', None)
@@ -209,8 +212,14 @@ if config.provider == 'turso':
         sys.exit(exit_status.runtime_error)
 
 
-def get_url() -> DatabaseURL:
+def get_url() -> DatabaseURL | str:
     """Wraps parsing within function."""
+    if 'url' in config:
+        url = str(config.url)
+        provider = url.split('://')[0]
+        if provider not in providers.values():
+            raise ConfigurationError(f'Unsupported provider in URL \'{provider}\'')
+        return str(config.url)
     if config.provider not in providers:
         raise ConfigurationError(f'Unsupported database \'{config.provider}\'')
     try:
@@ -226,9 +235,9 @@ def get_engine() -> Engine:
     """Wraps engine creation."""
     try:
         if engine_echo:
-            logging.getLogger('sqlalchemy.engine').addHandler(handler)
+            logging.getLogger('sqlalchemy.engine').addHandler(stream_handler)
             logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
-        return create_engine(get_url().encode(), connect_args=connect_args, **engine_config)
+        return create_engine(str(get_url()), connect_args=connect_args, **engine_config)
     except ArgumentError as err:
         raise ConfigurationError(f'DatabaseURL: {err}') from err
 
@@ -239,7 +248,7 @@ try:
     Session = scoped_session(factory)
 except ModuleNotFoundError as error:
     if 'psycopg2' in error.args[0]:
-        display_critical(f'Missing optional dependency "psycopg2" needed for PostgreSQL', module=__name__)
+        display_critical(f'Missing optional dependency "psycopg" needed for PostgreSQL', module=__name__)
         sys.exit(exit_status.runtime_error)
     else:
         write_traceback(error, module=__name__)
