@@ -68,7 +68,7 @@ from hypershell.core.thread import Thread
 from hypershell.core.queue import QueueServer, QueueConfig
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
-from hypershell.data.model import Task, Client
+from hypershell.data.model import Task, Client, serialize_tasks, deserialize_tasks
 from hypershell.data import ensuredb, DATABASE_ENABLED
 from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT
 from hypershell.client import ClientInfo
@@ -112,7 +112,7 @@ class Scheduler(StateMachine):
 
     tasks: List[Task]
     queue: QueueServer
-    bundle: List[bytes]
+    bundle: Optional[bytes]
 
     bundlesize: int
     attempts: int
@@ -133,7 +133,8 @@ class Scheduler(StateMachine):
                  poll: int = DEFAULT_SERVER_POLL) -> None:
         """Initialize queue and parameters."""
         self.queue = queue
-        self.bundle = []
+        self.tasks = []
+        self.bundle = None
         self.bundlesize = bundlesize
         self.attempts = attempts
         self.eager = eager
@@ -163,9 +164,9 @@ class Scheduler(StateMachine):
                 log.warning(f'All previous tasks completed - nothing to do')
             else:
                 tasks_interrupted = Task.count_interrupted()
-                log.info(f'Found {tasks_remaining} unfinished task(s)')
+                log.info(f'Found {tasks_remaining} unfinished tasks')
                 Task.revert_interrupted()
-                log.info(f'Reverted {tasks_interrupted} previously interrupted task(s)')
+                log.info(f'Reverted {tasks_interrupted} previously interrupted tasks')
         else:
             log.info('Empty database - waiting for initial tasks')
         group_info = Task.current_group()
@@ -208,7 +209,7 @@ class Scheduler(StateMachine):
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
         """Pack tasks into bundle (list)."""
-        self.bundle = [task.pack() for task in self.tasks]
+        self.bundle = serialize_tasks(self.tasks)
         return SchedulerState.POST
 
     def post_bundle(self: Scheduler) -> SchedulerState:
@@ -311,10 +312,13 @@ class Confirm(StateMachine):
 
     def unpack_info(self: Confirm) -> ConfirmState:
         """Unpack received client info."""
-        self.client_info = ClientInfo.unpack(self.client_data)
-        log.debug(f'Confirmed {len(self.client_info.task_ids)} tasks '
-                  f'({self.client_info.client_host}: {self.client_info.client_id})')
-        return ConfirmState.UPDATE
+        self.client_info = ClientInfo.unpack_or_none(self.client_data)
+        if self.client_info is None:
+            return ConfirmState.FINAL
+        else:
+            log.debug(f'Confirmed {len(self.client_info.task_ids)} tasks '
+                      f'({self.client_info.client_host}: {self.client_info.client_id})')
+            return ConfirmState.UPDATE
 
     def update_info(self: Confirm) -> ConfirmState:
         """Update client info in database for confirmed task bundle."""
@@ -361,9 +365,9 @@ class ReceiverState(State, Enum):
 class Receiver(StateMachine):
     """Collect incoming finished task bundles and update database."""
 
-    tasks: List[Task]
     queue: QueueServer
-    bundle: List[bytes]
+    tasks: List[Task]
+    bundle: Optional[bytes]
 
     in_memory: bool
     redirect_failures: IO
@@ -374,7 +378,8 @@ class Receiver(StateMachine):
     def __init__(self: Receiver, queue: QueueServer, in_memory: bool = False, redirect_failures: IO = None) -> None:
         """Initialize receiver."""
         self.queue = queue
-        self.bundle = []
+        self.tasks = []
+        self.bundle = None
         self.in_memory = in_memory
         self.redirect_failures = redirect_failures
 
@@ -406,8 +411,12 @@ class Receiver(StateMachine):
 
     def unpack_bundle(self: Receiver) -> ReceiverState:
         """Unpack previous bundle into list of tasks."""
-        self.tasks = [Task.unpack(data) for data in self.bundle]
-        return ReceiverState.UPDATE
+        data = deserialize_tasks(self.bundle)
+        if data is None:
+            return ReceiverState.FINAL
+        else:
+            self.tasks = data
+            return ReceiverState.UPDATE
 
     def update_tasks(self: Receiver) -> ReceiverState:
         """Update tasks in database with run details."""
@@ -523,10 +532,11 @@ class HeartMonitor(StateMachine):
             hb_data = self.queue.heartbeat.get(timeout=2)
             self.queue.heartbeat.task_done()
             self.startup_phase = False
-            if not hb_data:
+            hb = Heartbeat.unpack_or_none(hb_data)
+            if hb is None:
                 return HeartbeatState.FINAL
             else:
-                self.latest_heartbeat = Heartbeat.unpack(hb_data)
+                self.latest_heartbeat = hb
                 return HeartbeatState.UPDATE
         except QueueEmpty:
             return HeartbeatState.SWITCH
@@ -593,7 +603,7 @@ class HeartMonitor(StateMachine):
         """Send shutdown signal to all connected clients."""
         log.debug(f'Signaling clients ({len(self.beats)} connected)')
         for hb in self.beats.values():
-            self.queue.scheduled.put(None)
+            self.queue.scheduled.put(make_sentinel())
             log.debug(f'Disconnect requested ({hb.host}: {hb.uuid})')
         self.should_signal = False
         return HeartbeatState.SWITCH
@@ -834,14 +844,14 @@ class ServerThread(Thread):
     def wait_receiver(self: ServerThread) -> None:
         """Wait for receiver to stop."""
         log.trace('Waiting (receiver)')
-        self.queue.completed.put(None)
+        self.queue.completed.put(make_sentinel())
         self.receiver.join()
 
     def wait_confirm(self: ServerThread) -> None:
         """Wait for confirm thread to stop."""
         if not self.no_confirm:
             log.trace('Waiting (confirm)')
-            self.queue.confirmed.put(None)
+            self.queue.confirmed.put(make_sentinel())
             self.confirm.join()
 
     def stop(self: ServerThread, wait: bool = False, timeout: int = None) -> None:
@@ -852,10 +862,10 @@ class ServerThread(Thread):
         if self.scheduler is not None:
             self.scheduler.stop(wait=wait, timeout=timeout)
         self.heartmonitor.stop(wait=wait, timeout=timeout)
-        self.queue.completed.put(None)
+        self.queue.completed.put(make_sentinel())
         self.receiver.stop(wait=wait, timeout=timeout)
         if not self.no_confirm:
-            self.queue.confirmed.put(None)
+            self.queue.confirmed.put(make_sentinel())
             self.confirm.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
 
@@ -969,9 +979,9 @@ def serve_from(source: Iterable[str],
 
 
 def serve_file(path: str,
-               task_cores: int = None,
-               task_memory: int = None,
-               task_timeout: int = None,
+               task_cores: Optional[int] = None,
+               task_memory: Optional[int] = None,
+               task_timeout: Optional[int] = None,
                bundlesize: int = DEFAULT_BUNDLESIZE,
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                in_memory: bool = False,
@@ -981,7 +991,7 @@ def serve_file(path: str,
                auth: str = DEFAULT_AUTH,
                max_retries: int = DEFAULT_ATTEMPTS - 1,
                eager: bool = DEFAULT_EAGER_MODE,
-               redirect_failures: IO = None,
+               redirect_failures: Optional[IO] = None,
                evict_after: int = DEFAULT_EVICT,
                **file_options) -> None:
     """
@@ -1295,7 +1305,7 @@ class ServerApp(Application):
                        redirect_failures=self.failure_stream,
                        evict_after=config.server.evict)
 
-    def check_args(self: ServerApp):
+    def check_args(self: ServerApp) -> None:
         """Fail particular argument combinations."""
         if self.filepath and self.forever_mode:
             raise ArgumentError('Cannot specify both FILE and --forever')

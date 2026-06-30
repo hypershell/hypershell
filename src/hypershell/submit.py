@@ -39,7 +39,7 @@ Warning:
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Iterable, Iterator, IO, Optional, Dict, Callable, Type, Final
+from typing import List, Iterable, Iterator, IO, Optional, Dict, Callable, Type, Optional, Final
 from types import TracebackType
 
 # Standard libs
@@ -65,12 +65,12 @@ from hypershell.core.fsm import State, StateMachine
 from hypershell.core.queue import QueueClient, QueueConfig
 from hypershell.core.thread import Thread
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
-from hypershell.core.types import JSONValue, parse_bytes
+from hypershell.core.types import JSONData, parse_bytes
 from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
-from hypershell.data.model import Task, DEFAULT_TASK_GROUP
+from hypershell.data.model import Task, DEFAULT_TASK_GROUP, serialize_tasks
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT
 
 # Public interface
@@ -159,7 +159,7 @@ class Loader(StateMachine):
             else:
                 # NOTE: group, cores, memory, etc. are processed as "tags" here,
                 # Though passed as 'tag' they are re-extracted in Task.new()
-                _, inline_tags = Task.split_argline(args)  # simpler to just reprocess
+                _, inline_tags = Task.split_argline(args)  # Simpler to just reprocess
                 if inline_tags:
                     tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
                     log.debug(f'Setting global attribute or tag: {tagline}')
@@ -356,7 +356,7 @@ class SubmitThread(Thread):
         group (int, optional):
             Task group for dependency management (default: 0).
 
-        tags (Dict[str, JSONValue], optional):
+        tags (Dict[str, JSONData], optional):
             Tag dictionary for all submitted tasks.
 
     Example:
@@ -385,7 +385,7 @@ class SubmitThread(Thread):
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  template: str = DEFAULT_TEMPLATE,
                  group: int = DEFAULT_TASK_GROUP,
-                 tags: Dict[str, JSONValue] = None) -> None:
+                 tags: Dict[str, JSONData] = None) -> None:
         """Initialize queue and child threads."""
         self.source = source
         self.queue = Queue(maxsize=bundlesize)
@@ -446,7 +446,7 @@ class QueueCommitter(StateMachine):
     client: QueueClient
 
     tasks: List[Task]
-    bundle: List[bytes]
+    bundle: Optional[bytes]
 
     bundlesize: int
     bundlewait: int
@@ -461,7 +461,7 @@ class QueueCommitter(StateMachine):
         self.local = local
         self.client = client
         self.tasks = []
-        self.bundle = []
+        self.bundle = None
         self.bundlesize = bundlesize
         self.bundlewait = bundlewait
 
@@ -500,7 +500,7 @@ class QueueCommitter(StateMachine):
     def pack_bundle(self: QueueCommitter) -> QueueCommitterState:
         """Pack tasks into bundle for remote queue."""
         if self.tasks:
-            self.bundle = [task.pack() for task in self.tasks]
+            self.bundle = serialize_tasks(self.tasks)
             return QueueCommitterState.COMMIT
         else:
             return QueueCommitterState.GET
@@ -513,7 +513,7 @@ class QueueCommitter(StateMachine):
                 for task in self.tasks:
                     log.trace(f'Scheduled task ({task.id})')
                 self.tasks = []
-                self.bundle = []
+                self.bundle = None
                 self.previous_submit = datetime.now()
             return QueueCommitterState.GET
         except QueueFull:
@@ -585,7 +585,7 @@ class LiveSubmitThread(Thread):
         group (int, optional):
             Task group for dependency management (default: 0).
 
-        tags (Dict[str, JSONValue], optional):
+        tags (Dict[str, JSONData], optional):
             Tag dictionary for all submitted tasks.
 
     Example:
@@ -676,7 +676,7 @@ def submit_from(source: Iterable[str],
                 timeout: int = None,
                 group: int = DEFAULT_TASK_GROUP,
                 template: str = DEFAULT_TEMPLATE,
-                tags: Dict[str, JSONValue] = None) -> int:
+                tags: Dict[str, JSONData] = None) -> int:
     """
     Submit all task arguments from `source`, return count of submitted tasks.
 
@@ -718,7 +718,7 @@ def submit_from(source: Iterable[str],
         group (int, optional):
             Task group for dependency management (default: 0).
 
-        tags (Dict[str, JSONValue], optional):
+        tags (Dict[str, JSONData], optional):
             Tag dictionary for all submitted tasks.
 
     Example:
@@ -774,7 +774,7 @@ def submit_file(path: str,
                 memory: int = None,
                 timeout: int = None,
                 group: int = DEFAULT_TASK_GROUP,
-                tags: Dict[str, JSONValue] = None,
+                tags: Dict[str, JSONData] = None,
                 **file_options) -> int:
     """
     Submit all task arguments by reading them from file `path`.
@@ -816,7 +816,7 @@ def submit_file(path: str,
         group (int, optional):
             Task group for dependency management (default: 0).
 
-        tags (Dict[str, JSONValue], optional):
+        tags (Dict[str, JSONData], optional):
             Tag dictionary for all submitted tasks.
 
     Example:
@@ -981,7 +981,7 @@ class SubmitApp(Application):
                         tags=self.tags)
         else:
             task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout, 
-                           group=self.group, tag=self.tags)
+                            group=self.group, tag=self.tags)
             Task.add(task)
             log.info(f'Submitted task ({task.id})')
 

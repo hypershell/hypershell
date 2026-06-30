@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Type
+from typing import Type, Optional
 
 # Standard libs
 import json
@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 # Internal libs
 from hypershell.core.logging import HOSTNAME, INSTANCE
+from hypershell.core.types import serialize, deserialize
 
 # Public interface
 __all__ = ['ClientState', 'Heartbeat']
@@ -44,27 +45,31 @@ class Heartbeat:
 
     @classmethod
     def new(cls: Type[Heartbeat],
-            uuid: str = None,
-            host: str = None,
-            time: datetime = None,
-            state: ClientState = None) -> Heartbeat:
+            uuid: Optional[str] = None,
+            host: Optional[str] = None,
+            time: Optional[datetime] = None,
+            state: Optional[ClientState] = None) -> Heartbeat:
         """Create new instance."""
         return cls(uuid=(uuid or INSTANCE),
                    host=(host or HOSTNAME),
                    time=(time or datetime.now().astimezone()),
-                   state=(state or ClientState.RUNNING))
+                   state=ClientState.default(state))
 
     def pack(self: Heartbeat) -> bytes:
         """Serialize data."""
-        return json.dumps({'uuid': self.uuid,
-                           'host': self.host,
-                           'time': str(self.time),
-                           'state': self.state.value}).encode('utf-8')
+        return serialize({'uuid': self.uuid,
+                          'host': self.host,
+                          'time': str(self.time),
+                          'state': self.state.value})
 
     @classmethod
-    def unpack(cls: Type[Heartbeat], data: bytes) -> Heartbeat:
+    def unpack_or_none(cls: Type[Heartbeat], data: bytes) -> Optional[Heartbeat]:
         """Deserialize from raw `data`."""
-        data = json.loads(data.decode('utf-8'))
-        data['time'] = datetime.fromisoformat(data['time'])
-        data['state'] = ClientState.from_value(data['state'])
-        return cls(**data)
+        unpacked_data = deserialize(data)
+        if unpacked_data is None:
+            return None
+        else:
+            return cls(uuid=unpacked_data['uuid'],
+                       host=unpacked_data['host'],
+                       time=datetime.fromisoformat(unpacked_data['time']),
+                       state=ClientState.from_value(unpacked_data['state']))

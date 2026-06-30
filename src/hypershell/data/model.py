@@ -6,12 +6,13 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Dict, Tuple, Any, Type, Optional
+from typing import List, Dict, Tuple, Any, Type, Optional, Final
 
 # Standard libs
 import re
 import json
 from datetime import datetime
+from dataclasses import dataclass
 
 # External libs
 from sqlalchemy import Column, Index, func
@@ -24,14 +25,14 @@ from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSON
 # Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
-from hypershell.core.types import JSONValue, to_json_type, from_json_type
+from hypershell.core.types import JSONData, to_json_type, from_json_type, serialize, deserialize
 from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
 
 # Public interface
 __all__ = [
-    'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type',
+    'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
     'DEFAULT_TASK_GROUP', 'TaskGroupInfo',
 ]
@@ -46,7 +47,7 @@ DEFAULT_TASK_GROUP: Final[int] = 0
 
 
 class DatabaseError(Exception):
-    """Generic database related exception."""
+    """Generic database-related exception."""
 
 
 class NotFound(DatabaseError):
@@ -100,13 +101,9 @@ class Entity(DeclarativeBase):
         """Convert record to dictionary."""
         return dict(zip(self.columns, self.to_tuple()))
 
-    def to_json(self: Entity) -> Dict[str, JSONValue]:
+    def to_json(self: Entity) -> Dict[str, JSONData]:
         """Convert record to JSON-serializable dictionary."""
         return {key: to_json_type(value) for key, value in self.to_dict().items()}
-
-    def pack(self: Entity) -> bytes:
-        """Encode as raw JSON bytes."""
-        return json.dumps(self.to_json()).encode()
 
     @classmethod
     def from_dict(cls: Type[Entity], data: Dict[str, Any]) -> Entity:
@@ -114,14 +111,22 @@ class Entity(DeclarativeBase):
         return cls(**data)  # noqa: __init__ instrumented by declarative_base
 
     @classmethod
-    def from_json(cls: Type[Entity], data: Dict[str, JSONValue]) -> Entity:
+    def from_json(cls: Type[Entity], data: Dict[str, JSONData]) -> Entity:
         """Build from JSON `text` string."""
         return cls.from_dict({key: from_json_type(value) for key, value in data.items()})
 
+    # NOTE:
+    # The pack() and unpack() remaining available for backwards compatibility, but not recommended.
+    # We now use serialize_tasks() and deserialize_tasks() to serialize task bundles as one object.
+
+    def pack(self: Entity) -> bytes:
+        """Encrypt JSON bytes."""
+        return serialize(self.to_json())
+
     @classmethod
     def unpack(cls: Type[Entity], data: bytes) -> Entity:
-        """Unpack raw JSON byte string."""
-        return cls.from_json(json.loads(data.decode()))
+        """Unpack encrypted JSON byte string."""
+        return cls.from_json(deserialize(data))
 
     @classmethod
     def query(cls: Type[Entity], *fields: Column, caching: bool = True) -> Query:
@@ -199,6 +204,17 @@ class Entity(DeclarativeBase):
     def new(cls: Type[Entity], **attrs: Any) -> Entity:
         """Create new instance with default values."""
         raise NotImplementedError()  # NOTE: non-strict requirement of base
+
+
+def serialize_tasks(tasks: Optional[List[Task]]) -> bytes:
+    """Serialize list of tasks to encrypted JSON byte string."""
+    return serialize(None if tasks is None else [task.to_json() for task in tasks])
+
+
+def deserialize_tasks(data: bytes) -> Optional[List[Task]]:
+    """Deserialize list of tasks from encrypted JSON byte string."""
+    data = deserialize(data)
+    return None if data is None else [Task.from_json(task_data) for task_data in data]
 
 
 @dataclass
@@ -310,7 +326,7 @@ class Task(Entity):
             args: str,
             attempt: int = 1,
             retried: bool = False,
-            tag: Dict[str, JSONValue] = None,
+            tag: Dict[str, JSONData] = None,
             group: int = DEFAULT_TASK_GROUP,
             **other: Any) -> Task:
         """Create a new Task."""
@@ -326,7 +342,7 @@ class Task(Entity):
                     attempt=attempt, retried=retried, tag=tag, **other)
 
     @classmethod
-    def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONValue]]:
+    def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONData]]:
         """Separate input args from possible inline tag comment."""
         args = str(args).strip()
         if match := re.search(r'#\s*HYPERSHELL:?', args):
@@ -344,7 +360,7 @@ class Task(Entity):
             return args.strip(), {}
 
     @staticmethod
-    def ensure_valid_tag(tag: Optional[Dict[str, JSONValue]]) -> None:
+    def ensure_valid_tag(tag: Optional[Dict[str, JSONData]]) -> None:
         """Check tag dictionary and raise if invalid."""
         if tag is None:
             return
@@ -579,7 +595,7 @@ class Task(Entity):
 
     @classmethod
     def revert_interrupted(cls: Type[Task]) -> None:
-        """Revert scheduled but incomplete tasks to un-scheduled state."""
+        """Revert scheduled but incomplete tasks to unscheduled state."""
         while tasks := cls.select_interrupted(100):
             cls.revert_all([task.id for task in tasks])
 
@@ -617,7 +633,7 @@ class Task(Entity):
 
     @classmethod
     def revert_orphaned(cls: Type[Task], client_id: str) -> None:
-        """Revert orphaned tasks from an evicted client to un-scheduled state."""
+        """Revert orphaned tasks from an evicted client to unscheduled state."""
         while tasks := cls.select_orphaned(client_id, 100):
             cls.revert_all([task.id for task in tasks])
 

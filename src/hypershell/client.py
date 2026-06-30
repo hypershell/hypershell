@@ -37,7 +37,6 @@ from types import TracebackType
 import os
 import sys
 import time
-import json
 import random
 import functools
 from enum import Enum
@@ -57,14 +56,14 @@ from cmdkit.cli import Interface, ArgumentError
 from cmdkit.config import Namespace
 
 # Internal libs
-from hypershell.data.model import Task
+from hypershell.data.model import Task, serialize_tasks, deserialize_tasks
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import default, config, load_task_env, SSH_GROUPS
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
-from hypershell.core.types import parse_bytes
+from hypershell.core.types import parse_bytes, serialize, deserialize
 from hypershell.core.thread import Thread
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2, SIGINT
 from hypershell.core.queue import QueueClient, QueueConfig
@@ -117,12 +116,16 @@ class ClientInfo:
 
     def pack(self: ClientInfo) -> bytes:
         """Serialize data."""
-        return json.dumps(self.to_dict()).encode('utf-8')
+        return serialize(self.to_dict())
 
     @classmethod
-    def unpack(cls: Type[ClientInfo], data: bytes) -> ClientInfo:
+    def unpack_or_none(cls: Type[ClientInfo], data: bytes) -> Optional[ClientInfo]:
         """Deserialize from raw `data`."""
-        return cls.from_dict(json.loads(data.decode('utf-8')))
+        info = deserialize(data)
+        if info is None:
+            return None
+        else:
+            return cls.from_dict(info)
 
     @classmethod
     def from_tasks(cls: Type[ClientInfo], tasks: List[Task]) -> ClientInfo:
@@ -153,7 +156,7 @@ class ClientScheduler(StateMachine):
 
     queue: QueueClient
     local: Queue[Optional[Task]]
-    bundle: List[bytes] | None
+    bundle: bytes
     client_info: Optional[bytes]
     no_confirm: bool
     timeout: Optional[timedelta]
@@ -161,7 +164,7 @@ class ClientScheduler(StateMachine):
     previous_received: datetime
 
     task: Task
-    tasks: List[Task]
+    tasks: Optional[List[Task]]
 
     state = SchedulerState.START
     states = SchedulerState
@@ -208,12 +211,7 @@ class ClientScheduler(StateMachine):
             self.bundle = self.queue.scheduled.get(timeout=2)
             self.queue.scheduled.task_done()
             self.previous_received = datetime.now()
-            if self.bundle is not None:
-                log.debug(f'Received {len(self.bundle)} tasks ({HOSTNAME}: {INSTANCE})')
-                return SchedulerState.UNPACK
-            else:
-                log.debug('Disconnect received')
-                return SchedulerState.FINAL
+            return SchedulerState.UNPACK
         except QueueEmpty:
             waited = datetime.now() - self.previous_received
             if self.timeout is None or waited < self.timeout:
@@ -224,7 +222,12 @@ class ClientScheduler(StateMachine):
 
     def unpack_bundle(self: ClientScheduler) -> SchedulerState:
         """Unpack latest bundle of tasks."""
-        self.tasks = [Task.unpack(data) for data in self.bundle]
+        self.tasks = deserialize_tasks(self.bundle)
+        if self.tasks is not None:
+            log.debug(f'Received {len(self.tasks)} tasks ({HOSTNAME}: {INSTANCE})')
+        else:
+            log.debug('Disconnect received')
+            return SchedulerState.FINAL
         if not self.no_confirm:
             self.client_info = ClientInfo.from_tasks(self.tasks).pack()
             return SchedulerState.PUT_CONFIRM
@@ -270,7 +273,7 @@ class ClientSchedulerThread(Thread):
                  queue: QueueClient,
                  local: Queue[Optional[bytes]],
                  no_confirm: bool = False,
-                 timeout: int = None) -> None:
+                 timeout: Optional[int] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-client-scheduler')
         self.machine = ClientScheduler(queue=queue, local=local, no_confirm=no_confirm, timeout=timeout)
@@ -279,7 +282,7 @@ class ClientSchedulerThread(Thread):
         """Run machine."""
         self.machine.run()
 
-    def stop(self: ClientSchedulerThread, wait: bool = False, timeout: int = None) -> None:
+    def stop(self: ClientSchedulerThread, wait: bool = False, timeout: Optional[int] = None) -> None:
         """Stop machine."""
         log.warning('Stopping (scheduler)')
         self.machine.halt()
@@ -308,7 +311,7 @@ class ClientCollector(StateMachine):
     """Collect finished tasks and bundle for outgoing queue."""
 
     tasks: List[Task]
-    bundle: List[bytes]
+    bundle: Optional[bytes]
 
     queue: QueueClient
     local: Queue[Optional[Task]]
@@ -324,7 +327,7 @@ class ClientCollector(StateMachine):
                  bundlesize: int = DEFAULT_BUNDLESIZE, bundlewait: int = DEFAULT_BUNDLEWAIT) -> None:
         """Collect tasks from local queue of finished tasks and push them to the server."""
         self.tasks = []
-        self.bundle = []
+        self.bundle = None
         self.local = local
         self.queue = queue
         self.bundlesize = bundlesize
@@ -375,7 +378,7 @@ class ClientCollector(StateMachine):
 
     def pack_bundle(self: ClientCollector) -> CollectorState:
         """Pack tasks into bundle before pushing back to server."""
-        self.bundle = [task.pack() for task in self.tasks]
+        self.bundle = serialize_tasks(self.tasks)
         return CollectorState.PUT_REMOTE
 
     def put_remote(self: ClientCollector) -> CollectorState:
@@ -384,8 +387,9 @@ class ClientCollector(StateMachine):
             if self.bundle:
                 self.queue.completed.put(self.bundle, timeout=2)
                 log.trace(f'Bundle returned ({len(self.bundle)} tasks)')
+                log.trace(f'Bundle returned ({len(self.tasks)} tasks)')
                 self.tasks.clear()
-                self.bundle.clear()
+                self.bundle = None
                 self.previous_send = datetime.now()
             else:
                 log.trace('Bundle empty')

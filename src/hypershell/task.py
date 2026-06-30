@@ -40,7 +40,7 @@ from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, handle_exception_silently, get_shared_exception_mapping
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
-from hypershell.core.types import smart_coerce, JSONValue, to_json_type
+from hypershell.core.types import smart_coerce, JSONData, to_json_type
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
@@ -83,7 +83,7 @@ class TaskSubmitApp(Application):
     argv: List[str] = []
     interface.add_argument('argv', nargs='+')
 
-    tags: Dict[str, JSONValue] = {}
+    tags: Dict[str, JSONData] = {}
     taglist: List[str] = []
     interface.add_argument('-t', '--tag', nargs='+', dest='taglist')
 
