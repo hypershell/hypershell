@@ -62,8 +62,8 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.logging import Logger
 from hypershell.core.config import config, default
 from hypershell.core.fsm import State, StateMachine
-from hypershell.core.queue import QueueClient, QueueConfig
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
+from hypershell.core.queue import QueueClient, QueueConfig, DEFAULT_LOCAL_TIMEOUT, DEFAULT_REMOTE_TIMEOUT
 from hypershell.core.thread import Thread
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.types import JSONData, parse_bytes
@@ -175,7 +175,7 @@ class Loader(StateMachine):
     def put_task(self: Loader) -> LoaderState:
         """Enqueue loaded task."""
         try:
-            self.queue.put(self.task, timeout=1)
+            self.queue.put(self.task, timeout=DEFAULT_LOCAL_TIMEOUT)
             self.count += 1
             return LoaderState.GET
         except QueueFull:
@@ -272,7 +272,7 @@ class DatabaseCommitter(StateMachine):
     def get_task(self: DatabaseCommitter) -> DatabaseCommitterState:
         """Get tasks from local queue and check buffer."""
         try:
-            task = self.queue.get(timeout=1)
+            task = self.queue.get(timeout=DEFAULT_LOCAL_TIMEOUT)
         except QueueEmpty:
             return DatabaseCommitterState.GET
         if task is not None:
@@ -485,7 +485,7 @@ class QueueCommitter(StateMachine):
     def get_task(self: QueueCommitter) -> QueueCommitterState:
         """Get tasks from local queue and check buffer."""
         try:
-            task = self.local.get(timeout=1)
+            task = self.local.get(timeout=DEFAULT_LOCAL_TIMEOUT)
         except QueueEmpty:
             return QueueCommitterState.GET
         if task is not None:
@@ -510,7 +510,7 @@ class QueueCommitter(StateMachine):
         """Commit tasks to server scheduling queue."""
         try:
             if self.tasks:
-                self.client.scheduled.put(self.bundle, timeout=2)
+                self.client.scheduled.put(self.bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
                 for task in self.tasks:
                     log.trace(f'Scheduled task ({task.id})')
                 self.tasks = []

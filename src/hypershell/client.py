@@ -209,7 +209,7 @@ class ClientScheduler(StateMachine):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[signal]})')
             return SchedulerState.FINAL
         try:
-            self.bundle = self.queue.scheduled.get(timeout=2)
+            self.bundle = self.queue.scheduled.get(timeout=DEFAULT_REMOTE_TIMEOUT)
             self.queue.scheduled.task_done()
             self.previous_received = datetime.now()
             return SchedulerState.UNPACK
@@ -238,7 +238,7 @@ class ClientScheduler(StateMachine):
     def put_confirm(self: ClientScheduler) -> SchedulerState:
         """Put confirmation details back on remote queue."""
         try:
-            self.queue.confirmed.put(self.client_info, timeout=2)
+            self.queue.confirmed.put(self.client_info, timeout=DEFAULT_REMOTE_TIMEOUT)
             log.debug(f'Confirmed {len(self.tasks)} tasks ({HOSTNAME}: {INSTANCE})')
             return SchedulerState.POP_TASK
         except QueueFull:
@@ -255,7 +255,7 @@ class ClientScheduler(StateMachine):
     def put_local(self: ClientScheduler) -> SchedulerState:
         """Put latest task on the local task queue."""
         try:
-            self.local.put(self.task, timeout=1)
+            self.local.put(self.task, timeout=DEFAULT_LOCAL_TIMEOUT)
             return SchedulerState.POP_TASK
         except QueueFull:
             return SchedulerState.PUT_LOCAL
@@ -354,7 +354,7 @@ class ClientCollector(StateMachine):
     def get_local(self: ClientCollector) -> CollectorState:
         """Get the next task from the local completed task queue."""
         try:
-            task = self.local.get(timeout=1)
+            task = self.local.get(timeout=DEFAULT_LOCAL_TIMEOUT)
             self.local.task_done()
             if task:
                 self.tasks.append(task)
@@ -386,8 +386,7 @@ class ClientCollector(StateMachine):
         """Push out bundle of completed tasks."""
         try:
             if self.bundle:
-                self.queue.completed.put(self.bundle, timeout=2)
-                log.trace(f'Bundle returned ({len(self.bundle)} tasks)')
+                self.queue.completed.put(self.bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
                 log.trace(f'Bundle returned ({len(self.tasks)} tasks)')
                 self.tasks.clear()
                 self.bundle = None
@@ -688,7 +687,7 @@ class TaskExecutor(StateMachine):
     def get_local(self: TaskExecutor) -> TaskState:
         """Get the next task from the local queue of new tasks."""
         try:
-            self.task = self.inbound.get(timeout=1)
+            self.task = self.inbound.get(timeout=DEFAULT_LOCAL_TIMEOUT)
             self.inbound.task_done()
             self.received = datetime.now()
             return TaskState.CREATE_TASK if self.task else TaskState.FINAL
@@ -758,7 +757,7 @@ class TaskExecutor(StateMachine):
     def wait_task(self: TaskExecutor) -> TaskState:
         """Wait for current task to complete."""
         try:
-            self.task.exit_status = self.process.wait(timeout=1)
+            self.task.exit_status = self.process.wait(timeout=DEFAULT_LOCAL_TIMEOUT)
             self.task.completion_time = datetime.now().astimezone()
             elapsed = self.task.completion_time - self.task.start_time
             elapsed_nearest_second = timedelta(seconds=round(elapsed.total_seconds()))
@@ -883,7 +882,7 @@ class TaskExecutor(StateMachine):
     def put_local(self: TaskExecutor) -> TaskState:
         """Put completed task on outbound queue."""
         try:
-            self.outbound.put(self.task, timeout=1)
+            self.outbound.put(self.task, timeout=DEFAULT_LOCAL_TIMEOUT)
             return TaskState.GET_LOCAL
         except QueueFull:
             return TaskState.PUT_LOCAL
@@ -988,7 +987,7 @@ class ClientHeartbeat(StateMachine):
         try:
             client_state = self.client_state  # atomic
             heartbeat = Heartbeat.new(state=client_state)
-            self.queue.heartbeat.put(heartbeat.pack(), timeout=2)
+            self.queue.heartbeat.put(heartbeat.pack(), timeout=DEFAULT_REMOTE_TIMEOUT)
             if client_state is ClientState.RUNNING:
                 log.trace(f'Heartbeat - running ({heartbeat.host}: {heartbeat.uuid})')
                 return HeartbeatState.WAIT

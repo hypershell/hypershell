@@ -66,7 +66,8 @@ from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread
-from hypershell.core.queue import QueueServer, QueueConfig
+from hypershell.core.queue import (QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, DEFAULT_LOCAL_TIMEOUT,
+                                   make_sentinel)
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.data.model import Task, Client, serialize_tasks, deserialize_tasks
@@ -216,7 +217,7 @@ class Scheduler(StateMachine):
     def post_bundle(self: Scheduler) -> SchedulerState:
         """Put bundle on outbound queue."""
         try:
-            self.queue.scheduled.put(self.bundle, timeout=2)
+            self.queue.scheduled.put(self.bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
             log.debug(f'Scheduled {len(self.tasks)} tasks')
             for task in self.tasks:
                 log.debug(f'Scheduled task ({task.id})')
@@ -305,7 +306,7 @@ class Confirm(StateMachine):
     def unload_info(self: Confirm) -> ConfirmState:
         """Get the next task bundle confirmation from shared queue."""
         try:
-            self.client_data = self.queue.confirmed.get(timeout=2)
+            self.client_data = self.queue.confirmed.get(timeout=DEFAULT_REMOTE_TIMEOUT)
             self.queue.confirmed.task_done()
             return ConfirmState.UNPACK
         except QueueEmpty:
@@ -403,7 +404,7 @@ class Receiver(StateMachine):
     def unload_bundle(self: Receiver) -> ReceiverState:
         """Get the next bundle from the completed task queue."""
         try:
-            self.bundle = self.queue.completed.get(timeout=2)
+            self.bundle = self.queue.completed.get(timeout=DEFAULT_REMOTE_TIMEOUT)
             self.queue.completed.task_done()
             return ReceiverState.UNPACK
         except QueueEmpty:
@@ -530,7 +531,7 @@ class HeartMonitor(StateMachine):
     def get_next(self: HeartMonitor) -> HeartbeatState:
         """Get and stash heartbeat from clients."""
         try:
-            hb_data = self.queue.heartbeat.get(timeout=2)
+            hb_data = self.queue.heartbeat.get(timeout=DEFAULT_REMOTE_TIMEOUT)
             self.queue.heartbeat.task_done()
             self.startup_phase = False
             hb = Heartbeat.unpack_or_none(hb_data)
