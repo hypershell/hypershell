@@ -21,6 +21,7 @@ from cmdkit.cli import Interface, ArgumentError
 # Internal libs
 from hypershell.core.config import config, blame
 from hypershell.core.queue import QueueConfig
+from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
@@ -54,7 +55,8 @@ Usage:
              [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
              [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
-             [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]             
+             [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]
+             [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
   Start cluster locally, over SSH, or with a custom launcher.\
 """
@@ -108,6 +110,10 @@ Options:
   -I, --init-size      SIZE     Initial size of cluster (default: {DEFAULT_AUTOSCALE_INIT_SIZE}).
   -X, --min-size       SIZE     Minimum size of cluster (default: {DEFAULT_AUTOSCALE_MIN_SIZE}).
   -Y, --max-size       SIZE     Maximum size of cluster (default: {DEFAULT_AUTOSCALE_MAX_SIZE}).
+      --no-tls                  Disable TLS for queue interface (not recommended).
+      --tls-key                 Path to TLS private key file (default: <auto>).
+      --tls-cert                Path to TLS certificate file (default: <auto>).
+      --tls-ca                  Path to TLS CA certificate file (default: <auto>).
   -h, --help                    Show this message and exit.\
 """
 
@@ -231,6 +237,16 @@ class ClusterApp(Application):
     interface.add_argument('-Y', '--max-size', type=int, default=autoscaling_maximum, dest='autoscaling_maximum')
     interface.add_argument('-I', '--init-size', type=int, default=autoscaling_initial, dest='autoscaling_initial')
 
+    tls: Optional[TLSConfig] = None
+    tls_enabled: bool = True
+    tls_cert: str = config.server.tls.cert
+    tls_key: str = config.server.tls.key
+    tls_ca: str = config.server.tls.cafile
+    interface.add_argument('--no-tls', action='store_false', dest='tls_enabled')
+    interface.add_argument('--tls-key', default=tls_key)
+    interface.add_argument('--tls-cert', default=tls_cert)
+    interface.add_argument('--tls-ca', default=tls_ca)
+
     exceptions = {
         **get_shared_exception_mapping(__name__)
     }
@@ -247,7 +263,7 @@ class ClusterApp(Application):
                  capture=self.capture, monitor=self.monitor, client_timeout=self.client_timeout,
                  task_timeout=self.task_timeout, task_signalwait=self.task_signalwait,
                  cores=self.cores, memory=self.memory, client_cores=self.client_cores,
-                 client_memory=self.client_memory, ratelimit=self.ratelimit)
+                 client_memory=self.client_memory, ratelimit=self.ratelimit, tls=self.tls)
 
     def run_local(self: ClusterApp, **options) -> None:
         """Run local cluster."""
@@ -357,6 +373,16 @@ class ClusterApp(Application):
                 log.warning(f'Use of --autoscaling=dynamic without client --timeout does not allow '
                             f'for scaling down after task pressure subsides')
 
+    def enable_tls(self: ClusterApp) -> None:
+        """Configure TLS if enabled."""
+        if self.tls_enabled:
+            self.tls = tls_from_namespace({
+                **config.server.tls,
+                'cert': self.tls_cert,
+                'key': self.tls_key,
+                'cafile': self.tls_ca,
+            })
+
     @cached_property
     def output_stream(self: ClusterApp) -> IO:
         """IO stream to write task outputs."""
@@ -388,6 +414,7 @@ class ClusterApp(Application):
     def __enter__(self: ClusterApp) -> ClusterApp:
         """Set up resources and attributes."""
         self.check_arguments()
+        self.enable_tls()
         if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
             initdb()  # Auto-initialize if local sqlite provider
         elif not self.in_memory:

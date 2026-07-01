@@ -6,16 +6,16 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Iterable, IO
+from typing import Iterable, IO, Optional
 
 # Standard libs
-import time
 import secrets
 
 # Internal libs
 from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
+from hypershell.core.tls import TLSConfig
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
 from hypershell.client import ClientThread, DEFAULT_DELAY, DEFAULT_SIGNALWAIT, set_client_standalone
@@ -151,6 +151,11 @@ class LocalCluster(Thread):
             Maximum allowed tasks per second (default: none).
             There is no limit on task throughput unless specified.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.cluster import LocalCluster
         >>> cluster = LocalCluster.new(
@@ -194,7 +199,8 @@ class LocalCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None) -> None:
+                 ratelimit: int = None,
+                 tls: Optional[TLSConfig] = None) -> None:
         """Initialize with server and single client thread."""
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
@@ -211,7 +217,8 @@ class LocalCluster(Thread):
                                    eager=eager,
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
-                                   redirect_failures=redirect_failures)
+                                   redirect_failures=redirect_failures,
+                                   tls=tls)
         self.client = ClientThread(num_threads=num_threads,
                                    template=template,
                                    bundlesize=bundlesize,
@@ -228,7 +235,8 @@ class LocalCluster(Thread):
                                    client_timeout=client_timeout,
                                    task_timeout=task_timeout,
                                    task_signalwait=task_signalwait,
-                                   ratelimit=ratelimit)
+                                   ratelimit=ratelimit,
+                                   tls=tls)
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: LocalCluster) -> None:

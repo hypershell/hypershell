@@ -14,7 +14,6 @@ import json
 from datetime import datetime
 
 # Public interface
-__all__ = ['smart_coerce', 'JSONValue', 'to_json_type', 'from_json_type', 'parse_bytes']
 __all__ = [
     'smart_coerce', 'NoneType', 'JSONData', 'ExtendedValue',
     'to_json_type', 'from_json_type', 'serialize', 'deserialize',

@@ -66,9 +66,10 @@ from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT
 from hypershell.core.types import parse_bytes, serialize, deserialize
 from hypershell.core.thread import Thread
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2, SIGINT
-from hypershell.core.queue import QueueClient, QueueConfig
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
+from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
+from hypershell.core.queue import QueueClient, QueueConfig, DEFAULT_REMOTE_TIMEOUT, DEFAULT_LOCAL_TIMEOUT
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 
@@ -1135,6 +1136,11 @@ class ClientThread(Thread):
             Maximum allowed tasks per second (default: none).
             There is no limit on task throughput unless specified.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.client import ClientThread
         >>> client = ClientThread.new(num_threads=16, address=('localhost', 54321),
@@ -1176,7 +1182,8 @@ class ClientThread(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None) -> None:
+                 ratelimit: int = None,
+                 tls: Optional[TLSConfig] = None) -> None:
         """Initialize queue manager and child threads."""
         super().__init__(name='hypershell-client')
         set_resources(cores, memory)
@@ -1186,7 +1193,7 @@ class ClientThread(Thread):
         self.num_threads = num_threads
         self.delay_start = delay_start
         self.no_confirm = no_confirm
-        self.client = QueueClient(config=QueueConfig(host=address[0], port=address[1], auth=auth))
+        self.client = QueueClient(config=QueueConfig(host=address[0], port=address[1], auth=auth, tls=tls))
         self.inbound = Queue(maxsize=bundlesize)
         self.outbound = Queue(maxsize=bundlesize)
         self.scheduler = ClientSchedulerThread(queue=self.client, local=self.inbound,
@@ -1287,7 +1294,8 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
                client_timeout: int = None,
                task_timeout: int = None,
                task_signalwait: int = DEFAULT_SIGNALWAIT,
-               ratelimit: int = None) -> None:
+               ratelimit: int = None,
+               tls: Optional[TLSConfig] = None) -> None:
     """
     Run client until disconnect signal received or `client_timeout` reached.
 
@@ -1360,6 +1368,11 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
             Maximum allowed tasks per second (default: none).
             There is no limit on task throughput unless specified.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.client import run_client
         >>> run_client(num_threads=16, address=('localhost', 54321),
@@ -1386,7 +1399,8 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
                               client_timeout=client_timeout,
                               task_timeout=task_timeout,
                               task_signalwait=task_signalwait,
-                              ratelimit=ratelimit)
+                              ratelimit=ratelimit,
+                              tls=tls)
     try:
         thread.join()
     except Exception:
@@ -1400,6 +1414,7 @@ Usage:
   hs client [-h] [-H ADDR] [-p PORT] [-k KEY] [-N THREADS] [-C CORES] [-M MEMORY]   
             [--template CMD] [-d DELAY] [-T TIMEOUT] [-W TIMEOUT] [-b SIZE] [-S WAIT] [-w WAIT]
             [--capture | [-o PATH] [-e PATH]] [--no-confirm] [--monitor]
+            [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
   Launch client directly, run tasks in parallel.\
 """
@@ -1425,6 +1440,10 @@ Options:
   -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
   -k, --auth          KEY   Cryptographic key to connect to server.
+      --no-tls              Disable TLS for queue interface (not recommended).
+      --tls-key             Path to TLS private key file (default: <auto>).
+      --tls-cert            Path to TLS certificate file (default: <auto>).
+      --tls-ca              Path to TLS CA certificate file (default: <auto>).
   -d, --delay-start   SEC   Seconds to wait before start-up (default: {DEFAULT_DELAY}).
       --no-confirm          Disable confirmation of task bundle received.
   -o, --output        PATH  Redirect task output (default: <stdout>).
@@ -1500,6 +1519,16 @@ class ClientApp(Application):
     interface.add_argument('-C', '--client-cores', type=int, default=client_cores, dest='client_cores')
     interface.add_argument('-M', '--client-memory', type=int, default=client_memory, dest='client_memory')
 
+    tls: Optional[TLSConfig] = None
+    tls_enabled: bool = True
+    tls_cert: str = config.server.tls.cert
+    tls_key: str = config.server.tls.key
+    tls_ca: str = config.server.tls.cafile
+    interface.add_argument('--no-tls', action='store_false', dest='tls_enabled')
+    interface.add_argument('--tls-key', default=tls_key)
+    interface.add_argument('--tls-cert', default=tls_cert)
+    interface.add_argument('--tls-ca', default=tls_ca)
+
     # Hidden options used as helpers for shell completion
     interface.add_argument('--available-cores', action='version', version=str(cpu_count()))
     interface.add_argument('--available-ssh-groups', action='version', version='\n'.join(SSH_GROUPS))
@@ -1517,6 +1546,7 @@ class ClientApp(Application):
         """Run client."""
         try:
             self.check_args()
+            self.enable_tls()
             run_client(num_threads=self.num_threads,
                        bundlesize=self.bundlesize,
                        bundlewait=self.bundlewait,
@@ -1535,7 +1565,8 @@ class ClientApp(Application):
                        client_timeout=self.client_timeout,
                        task_timeout=self.task_timeout,
                        task_signalwait=self.task_signalwait,
-                       ratelimit=self.ratelimit)
+                       ratelimit=self.ratelimit,
+                       tls=self.tls)
         except gaierror:
             raise HostAddressInfo(f'Could not resolve host \'{self.host}\'')
 
@@ -1547,6 +1578,20 @@ class ClientApp(Application):
             raise ArgumentError('Client --timeout should be positive integer')
         if self.task_timeout is not None and self.task_timeout <= 0:
             raise ArgumentError('Client --task-timeout should be positive integer')
+        if self.auth == DEFAULT_AUTH:
+            log.warning('Using default authentication key - do not use this in production!')
+        if not self.tls_enabled:
+            log.warning('TLS is disabled - this is not recommended for production!')
+
+    def enable_tls(self: ClientApp) -> None:
+        """Configure TLS if enabled."""
+        if self.tls_enabled:
+            self.tls = tls_from_namespace({
+                **config.server.tls,
+                'cert': self.tls_cert,
+                'key': self.tls_key,
+                'cafile': self.tls_ca,
+            })
 
     @functools.cached_property
     def output_stream(self: ClientApp) -> IO:

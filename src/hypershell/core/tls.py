@@ -56,6 +56,12 @@ DEFAULT_CERT_DIRNAME: Final[str] = 'tls'
 DEFAULT_CERT_FILENAME: Final[str] = 'server.crt'
 DEFAULT_KEY_FILENAME: Final[str] = 'server.key'
 
+# RFC 5280 caps X.520 ``commonName`` at 64 UTF-8 characters. ``socket.getfqdn()`` can return
+# an IPv6 reverse-DNS PTR (e.g. ``...ip6.arpa``, 72 chars) on hosts without a configured FQDN,
+# which would otherwise crash :func:`_generate_self_signed`.
+_X509_CN_MAX_LEN: Final[int] = 64
+_FALLBACK_CN: Final[str] = 'hypershell'
+
 
 _MIN_VERSION_MAPPING: Final[dict] = {
     'TLSv1.2': ssl.TLSVersion.TLSv1_2,
@@ -276,10 +282,41 @@ def _local_san_entries(hostnames: List[str]) -> List[x509.GeneralName]:
 
 
 def _default_hostnames() -> List[str]:
-    """Best-effort list of local hostnames and IPs to embed in an auto-generated cert."""
+    """
+    Best-effort list of local hostnames and IPs to embed in an auto-generated cert.
+
+    Falls back to :func:`socket.gethostname` when :func:`socket.getfqdn` returns a reverse-DNS
+    PTR (``...in-addr.arpa`` / ``...ip6.arpa``) - a known behavior on macOS hosts without a
+    configured forward FQDN, where the PTR record is both unhelpful and may exceed the
+    X.509 ``commonName`` length limit.
+    """
     fqdn = socket.getfqdn()
+    if not fqdn or fqdn.endswith('.arpa'):
+        fqdn = socket.gethostname()
     short = fqdn.split('.', 1)[0] if fqdn else ''
     return [name for name in (fqdn, short, 'localhost', '127.0.0.1', '::1') if name]
+
+
+def _select_subject_cn(hostnames: List[str]) -> str:
+    """
+    Pick an X.509 ``COMMON_NAME`` value that satisfies RFC 5280's 64-byte limit.
+
+    Prefer the first non-empty hostname that fits within ``_X509_CN_MAX_LEN``. When every
+    candidate is too long, truncate the first non-empty entry. Fall back to ``_FALLBACK_CN``
+    only when no usable hostname was supplied. The full hostname list is still embedded in
+    the certificate's SubjectAlternativeName extension, so hostname verification is unaffected.
+    """
+    first_non_empty: Optional[str] = None
+    for name in hostnames:
+        if not name:
+            continue
+        if first_non_empty is None:
+            first_non_empty = name
+        if len(name) <= _X509_CN_MAX_LEN:
+            return name
+    if first_non_empty is not None:
+        return first_non_empty[:_X509_CN_MAX_LEN]
+    return _FALLBACK_CN
 
 
 def _generate_self_signed(hostnames: List[str], validity_days: int) -> Tuple[bytes, bytes]:
@@ -294,7 +331,7 @@ def _generate_self_signed(hostnames: List[str], validity_days: int) -> Tuple[byt
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    subject_cn = hostnames[0] if hostnames else 'hypershell'
+    subject_cn = _select_subject_cn(hostnames)
     subject = x509.Name([
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, 'HyperShell'),
         x509.NameAttribute(NameOID.COMMON_NAME, subject_cn),

@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Tuple, List, Dict, IO, Iterable, Callable, Type, Final
+from typing import Tuple, List, Dict, IO, Iterable, Callable, Type, Optional, Final
 
 # Standard libs
 import os
@@ -21,6 +21,7 @@ from subprocess import Popen
 
 # Internal libs
 from hypershell.core.fsm import State, StateMachine
+from hypershell.core.tls import TLSConfig
 from hypershell.core.config import default, load_task_env
 from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger, HOSTNAME
@@ -194,6 +195,11 @@ class RemoteCluster(Thread):
             Maximum allowed tasks per second per client (default: none).
             There is no limit on task throughput unless specified.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.cluster import RemoteCluster
         >>> cluster = RemoteCluster.new(
@@ -239,7 +245,8 @@ class RemoteCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None) -> None:
+                 ratelimit: int = None,
+                 tls: Optional[TLSConfig] = None) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
@@ -257,7 +264,8 @@ class RemoteCluster(Thread):
                                    eager=eager,
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
-                                   redirect_failures=redirect_failures)
+                                   redirect_failures=redirect_failures,
+                                   tls=tls)
         launcher = shlex.split(launcher)
         if launcher_args is None:
             launcher_args = []
@@ -280,6 +288,10 @@ class RemoteCluster(Thread):
             client_args.extend(['-W', str(task_timeout)])
         if ratelimit is not None:
             client_args.extend(['-R', str(ratelimit)])
+        if tls is not None:
+            client_args.extend(['--tls-ca', tls.cafile,
+                                '--tls-key', tls.key,
+                                '--tls-cert', tls.cert])
         self.client_argv = [
             *launcher, *launcher_args, remote_exe, 'client',
             '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
@@ -697,6 +709,11 @@ class AutoScalingCluster(Thread):
             Maximum size of cluster (number of clients).
             See :const:`~hypershell.cluster.remote.DEFAULT_AUTOSCALE_MAX_SIZE`
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.cluster import AutoScalingCluster
         >>> cluster = AutoScalingCluster.new(
@@ -750,6 +767,7 @@ class AutoScalingCluster(Thread):
                  init_size: int = DEFAULT_AUTOSCALE_INIT_SIZE,
                  min_size: int = DEFAULT_AUTOSCALE_MIN_SIZE,
                  max_size: int = DEFAULT_AUTOSCALE_MAX_SIZE,
+                 tls: Optional[TLSConfig] = None,
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
@@ -765,7 +783,8 @@ class AutoScalingCluster(Thread):
                                    max_retries=max_retries,
                                    eager=eager,
                                    forever_mode=True,
-                                   redirect_failures=redirect_failures)
+                                   redirect_failures=redirect_failures,
+                                   tls=tls)
         launcher = shlex.split(launcher)
         if launcher_args is None:
             launcher_args = []
@@ -786,6 +805,10 @@ class AutoScalingCluster(Thread):
             client_args.extend(['-W', str(task_timeout)])
         if ratelimit is not None:
             client_args.extend(['-R', str(ratelimit)])
+        if tls is not None:
+            client_args.extend(['--tls-ca', tls.cafile,
+                                '--tls-key', tls.key,
+                                '--tls-cert', tls.cert])
         launcher.extend([
             *launcher_args, remote_exe, 'client',
             '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),

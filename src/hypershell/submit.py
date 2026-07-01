@@ -63,6 +63,7 @@ from hypershell.core.logging import Logger
 from hypershell.core.config import config, default
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.queue import QueueClient, QueueConfig
+from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.thread import Thread
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.types import JSONData, parse_bytes
@@ -856,6 +857,7 @@ APP_USAGE: Final[str] = f"""\
 Usage:
   {APP_NAME} [-h] [ARGS... | -f FILE] [-q [-H ADDR] [-p NUM] [-k KEY] | --initdb]
   {PAD_NAME} [-b NUM] [-w SEC] [-c NUM] [-m MEM] [-W SEC] [-g NUM] [--template CMD] [-t TAG...]
+  {PAD_NAME} [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
   Submit one or more tasks.\
 """
@@ -876,6 +878,10 @@ Options:
   -H, --host         ADDR    Hostname for server (default: {DEFAULT_HOST}). Used with --queue.
   -p, --port         NUM     Port number for server (default: {DEFAULT_PORT}). Used with --queue.
   -k, --auth         KEY     Cryptographic key to connect to server. Used with --queue.
+      --no-tls               Disable TLS for queue interface (not recommended).
+      --tls-key              Path to TLS private key file (default: <auto>).
+      --tls-cert             Path to TLS certificate file (default: <auto>).
+      --tls-ca               Path to TLS CA certificate file (default: <auto>).
       --template     CMD     Submit-time template expansion (default: "{DEFAULT_TEMPLATE}").
   -c, --cores        NUM     Required cores per task (default: none).
   -m, --memory       MEM     Required memory per task (default: none).
@@ -934,7 +940,17 @@ class SubmitApp(Application):
     interface.add_argument('-p', '--port', type=int, default=queue_port, dest='queue_port')
     interface.add_argument('-k', '--auth', default=queue_auth, dest='queue_auth')
 
-    tags: Dict[str, JSONValue] = {}
+    tls: Optional[TLSConfig] = None
+    tls_enabled: bool = True
+    tls_cert: str = config.server.tls.cert
+    tls_key: str = config.server.tls.key
+    tls_ca: str = config.server.tls.cafile
+    interface.add_argument('--no-tls', action='store_false', dest='tls_enabled')
+    interface.add_argument('--tls-key', default=tls_key)
+    interface.add_argument('--tls-cert', default=tls_cert)
+    interface.add_argument('--tls-ca', default=tls_ca)
+
+    tags: Dict[str, JSONData] = {}
     taglist: List[str] = None
     interface.add_argument('-t', '--tag', nargs='+', default=[], dest='taglist')
 
@@ -952,7 +968,12 @@ class SubmitApp(Application):
         self.check_source()
         self.queue = None
         if self.queue_mode:
-            self.queue = QueueConfig(host=self.queue_server, port=self.queue_port, auth=self.queue_auth)
+            self.enable_tls()
+            self.queue = QueueConfig(host=self.queue_server, port=self.queue_port, auth=self.queue_auth, tls=self.tls)
+            if self.queue_auth == DEFAULT_AUTH:
+                log.warning('Using default authentication key - do not use this in production!')
+            if not self.tls_enabled:
+                log.warning('TLS is disabled - this is not recommended for production!')
         else:
             self.check_database()
             self.check_tags()
@@ -1046,6 +1067,16 @@ class SubmitApp(Application):
             return f"'{arg}'"
         else:
             raise ArgumentError(f'Could not quote argument: {arg}')
+
+    def enable_tls(self: SubmitApp) -> None:
+        """Configure TLS if enabled."""
+        if self.tls_enabled:
+            self.tls = tls_from_namespace({
+                **config.server.tls,
+                'cert': self.tls_cert,
+                'key': self.tls_key,
+                'cafile': self.tls_ca,
+            })
 
     def __exit__(self: SubmitApp,
                  exc_type: Optional[Type[Exception]],

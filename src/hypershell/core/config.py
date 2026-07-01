@@ -72,6 +72,10 @@ LOGGING_STYLES: Dict[str, Dict[str, str]] = {
 PARAM_UNSET: Final[str] = '<none>'
 
 
+# Default secure key is not secure!
+DEFAULT_AUTH: Final[str] = '<not-secure>'
+
+
 # Environment variables and configuration files are automatically depth-first merged with defaults
 # A default value of 0 may mean "None" or "automatically chosen"
 default = Namespace({
@@ -117,7 +121,7 @@ default = Namespace({
         'bind': 'localhost',   # Used by server
         'host': 'localhost',   # Used by clients
         'port': 50_001,
-        'auth': '__HYPERSHELL__BAD__AUTHKEY__',  # DO NOT USE THIS
+        'auth': DEFAULT_AUTH,  # Initializes to fixed default value (DO NOT USE THIS)
         'queuesize': 1,        # Only allow a single bundle (scheduler must wait)
         'bundlesize': 1,
         'bundlewait': 5,       # Seconds
@@ -130,15 +134,15 @@ default = Namespace({
         # '<auto>' values for cert/key/cafile are resolved against the site lib dir on
         # first server start (see hypershell.core.tls.ensure_default_materials).
         'tls': {
-            'enabled': False,
-            'cert': '<auto>',        # Path to server certificate or '<auto>'
-            'key': '<auto>',         # Path to server private key or '<auto>'
-            'cafile': '<auto>',      # Trust anchor for clients; '<auto>' mirrors the server cert
-            'fingerprint': '<none>', # Pin peer fingerprint (e.g. 'SHA256:AB:CD:...')
-            'insecure': False,       # Disable peer verification (logs a warning)
+            'enabled': True,            # Use --no-tls or other mechanisms to disable (not recommended)
+            'cert': '<auto>',           # Path to server certificate or '<auto>'
+            'key': '<auto>',            # Path to server private key or '<auto>'
+            'cafile': '<auto>',         # Trust anchor for clients; '<auto>' mirrors the server cert
+            'fingerprint': PARAM_UNSET, # Pin peer fingerprint (e.g. 'SHA256:AB:CD:...')
+            'insecure': False,          # Disable peer verification (logs a warning)
             'min_version': 'TLSv1.2',
-            'ciphers': '<none>',     # OpenSSL cipher string
-            'servername': '<none>',  # Override SNI / hostname check on client side
+            'ciphers': PARAM_UNSET,     # OpenSSL cipher string
+            'servername': PARAM_UNSET,  # Override SNI / hostname check on client side
         },
     },
 

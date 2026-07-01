@@ -6,12 +6,11 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Type, List, Iterable, Tuple, IO, Final
+from typing import Type, List, Iterable, Tuple, IO, Final, Optional
 
 # Standard libs
 import re
 import sys
-import time
 import shlex
 import secrets
 from subprocess import Popen
@@ -20,6 +19,7 @@ from subprocess import Popen
 from cmdkit.config import ConfigurationError, Namespace
 
 # Internal libs
+from hypershell.core.tls import TLSConfig
 from hypershell.core.config import config, blame
 from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger, HOSTNAME
@@ -185,6 +185,11 @@ class SSHCluster(Thread):
             Maximum allowed tasks per second per client (default: none).
             There is no limit on task throughput unless specified.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.cluster import SSHCluster
         >>> cluster = SSHCluster.new(
@@ -233,7 +238,8 @@ class SSHCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None) -> None:
+                 ratelimit: int = None,
+                 tls: Optional[TLSConfig] = None) -> None:
         """Initialize server and client threads."""
         if nodelist is None:
             raise AttributeError('Expected nodelist')
@@ -253,7 +259,8 @@ class SSHCluster(Thread):
                                    eager=eager,
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
-                                   redirect_failures=redirect_failures)
+                                   redirect_failures=redirect_failures,
+                                   tls=tls)
         launcher = shlex.split(launcher)
         launcher_env = shlex.split('' if not export_env else compile_env())
         if launcher_args is None:
@@ -275,6 +282,10 @@ class SSHCluster(Thread):
             client_args.extend(['-W', str(task_timeout)])
         if ratelimit is not None:
             client_args.extend(['-R', str(ratelimit)])
+        if tls is not None:
+            client_args.extend(['--tls-ca', tls.cafile,
+                                '--tls-key', tls.key,
+                                '--tls-cert', tls.cert])
         self.client_argv = [
             [*launcher, *launcher_args, host, *launcher_env, remote_exe, 'client', '-H', HOSTNAME,
              '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),

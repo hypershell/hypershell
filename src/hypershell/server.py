@@ -61,6 +61,7 @@ from cmdkit.cli import Interface, ArgumentError
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import config, default, find_available_ports
+from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
@@ -306,7 +307,7 @@ class Confirm(StateMachine):
         try:
             self.client_data = self.queue.confirmed.get(timeout=2)
             self.queue.confirmed.task_done()
-            return ConfirmState.UNPACK if self.client_data else ConfirmState.FINAL
+            return ConfirmState.UNPACK
         except QueueEmpty:
             return ConfirmState.UNLOAD
 
@@ -404,7 +405,7 @@ class Receiver(StateMachine):
         try:
             self.bundle = self.queue.completed.get(timeout=2)
             self.queue.completed.task_done()
-            return ReceiverState.UNPACK if self.bundle else ReceiverState.FINAL
+            return ReceiverState.UNPACK
         except QueueEmpty:
             log.trace('No completed tasks returned - waiting')
             return ReceiverState.UNLOAD
@@ -722,6 +723,11 @@ class ServerThread(Thread):
             Period in seconds to wait before evicting clients that miss heartbeats.
             See :const:`DEFAULT_EVICT`.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.server import ServerThread
         >>> server = ServerThread.new(restart_mode=True, auth='my-secret-key')
@@ -759,7 +765,8 @@ class ServerThread(Thread):
                  max_retries: int = DEFAULT_ATTEMPTS - 1,
                  eager: bool = False,
                  redirect_failures: IO = None,
-                 evict_after: int = DEFAULT_EVICT) -> None:
+                 evict_after: int = DEFAULT_EVICT,
+                 tls: Optional[TLSConfig] = None) -> None:
         """Initialize queue manager and child threads."""
         self.in_memory = in_memory
         self.no_confirm = no_confirm
@@ -768,7 +775,7 @@ class ServerThread(Thread):
             self.in_memory = True
         if self.in_memory and max_retries > 0:
             log.warning('Retries disabled when database disabled')
-        queue_config = QueueConfig(host=address[0], port=address[1], auth=auth, size=config.server.queuesize)
+        queue_config = QueueConfig(host=address[0], port=address[1], auth=auth, size=config.server.queuesize, tls=tls)
         self.queue = QueueServer(config=queue_config)
         if self.in_memory:
             self.scheduler = None
@@ -885,7 +892,8 @@ def serve_from(source: Iterable[str],
                max_retries: int = DEFAULT_ATTEMPTS - 1,
                eager: bool = DEFAULT_EAGER_MODE,
                redirect_failures: IO = None,
-               evict_after: int = DEFAULT_EVICT) -> None:
+               evict_after: int = DEFAULT_EVICT,
+               tls: Optional[TLSConfig] = None) -> None:
     """
     Start server with given task `source`, run until complete.
 
@@ -947,6 +955,11 @@ def serve_from(source: Iterable[str],
             Period in seconds to wait before evicting clients that miss heartbeats.
             See :const:`DEFAULT_EVICT`.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.server import serve_from
         >>> serve_from(['echo AA', 'echo BB', 'echo CC'], auth='my-secret-key')
@@ -970,7 +983,8 @@ def serve_from(source: Iterable[str],
                               max_retries=max_retries,
                               eager=eager,
                               redirect_failures=redirect_failures,
-                              evict_after=evict_after)
+                              evict_after=evict_after,
+                              tls=tls)
     try:
         thread.join()
     except Exception:
@@ -993,6 +1007,7 @@ def serve_file(path: str,
                eager: bool = DEFAULT_EAGER_MODE,
                redirect_failures: Optional[IO] = None,
                evict_after: int = DEFAULT_EVICT,
+               tls: Optional[TLSConfig] = None,
                **file_options) -> None:
     """
     Run server with tasks from a local file `path`, run until complete.
@@ -1050,6 +1065,11 @@ def serve_file(path: str,
             Period in seconds to wait before evicting clients that miss heartbeats.
             See :const:`DEFAULT_EVICT`.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Keyword Args:
         file_options (Any, optional):
             Forwarded to :meth:`open` function.
@@ -1077,7 +1097,8 @@ def serve_file(path: str,
                    max_retries=max_retries,
                    eager=eager,
                    redirect_failures=redirect_failures,
-                   evict_after=evict_after)
+                   evict_after=evict_after,
+                   tls=tls)
 
 
 def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
@@ -1089,7 +1110,8 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                   max_retries: int = DEFAULT_ATTEMPTS - 1,
                   eager: bool = DEFAULT_EAGER_MODE,
                   redirect_failures: IO = None,
-                  evict_after: int = DEFAULT_EVICT) -> None:
+                  evict_after: int = DEFAULT_EVICT,
+                  tls: Optional[TLSConfig] = None) -> None:
     """
     Run server forever.
 
@@ -1128,6 +1150,11 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
             Period in seconds to wait before evicting clients that miss heartbeats.
             See :const:`DEFAULT_EVICT`.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.server import serve_forever
         >>> serve_forever(address=('0.0.0.0', 54321), auth='my-secret-key',
@@ -1147,7 +1174,8 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                               forever_mode=True,
                               max_retries=max_retries,
                               eager=eager,
-                              evict_after=evict_after)
+                              evict_after=evict_after,
+                              tls=tls)
     try:
         thread.join()
     except Exception:
@@ -1161,6 +1189,7 @@ Usage:
   hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]] [-t SEC]
             [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] [-Q NUM]
             [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
+            [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
   Launch server, schedule directly or asynchronously from database.\
 """
@@ -1187,6 +1216,10 @@ Options:
   -H, --bind            ADDR  Bind address (default: {DEFAULT_BIND}).
   -p, --port            NUM   Port number (default: {DEFAULT_PORT}).
   -k, --auth            KEY   Cryptographic key to secure server.
+      --no-tls                Disable TLS for queue interface (not recommended).
+      --tls-key               Path to TLS private key file (default: <auto>).
+      --tls-cert              Path to TLS certificate file (default: <auto>).
+      --tls-ca                Path to TLS CA certificate file (default: <auto>).
       --forever               Schedule forever.
       --restart               Start scheduling from last completed task.
   -c, --task-cores      NUM   Number of cores to assign each task (default: none).
@@ -1231,7 +1264,7 @@ class ServerApp(Application):
     eager_mode: bool = config.server.eager
     max_retries: int = config.server.attempts - 1
     interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
-    interface.add_argument('--eager', action='store_true')
+    interface.add_argument('--eager', action='store_true', dest='eager_mode')
 
     forever_mode: bool = False
     interface.add_argument('--forever', action='store_true', dest='forever_mode')
@@ -1266,6 +1299,16 @@ class ServerApp(Application):
     output_interface.add_argument('--print', action='store_true', dest='print_mode')
     output_interface.add_argument('-f', '--failures', default=None, dest='failure_path')
 
+    tls: Optional[TLSConfig] = None
+    tls_enabled: bool = True
+    tls_cert: str = config.server.tls.cert
+    tls_key: str = config.server.tls.key
+    tls_ca: str = config.server.tls.cafile
+    interface.add_argument('--no-tls', action='store_false', dest='tls_enabled')
+    interface.add_argument('--tls-key', default=tls_key)
+    interface.add_argument('--tls-cert', default=tls_cert)
+    interface.add_argument('--tls-ca', default=tls_ca)
+
     # Hidden options used as helpers for shell completion
     interface.add_argument('--available-ports', action='version',
                            version='\n'.join(map(str, islice(find_available_ports(), 10))))
@@ -1276,6 +1319,9 @@ class ServerApp(Application):
 
     def run(self: ServerApp) -> None:
         """Run server."""
+        self.check_args()
+        self.enable_tls()
+        ensuredb()
         if self.forever_mode:
             serve_forever(bundlesize=self.bundlesize,
                           address=(self.host, self.port),
@@ -1286,7 +1332,8 @@ class ServerApp(Application):
                           max_retries=self.max_retries,
                           eager=self.eager_mode,
                           redirect_failures=self.failure_stream,
-                          evict_after=config.server.evict)
+                          evict_after=config.server.evict,
+                          tls=self.tls)
         else:
             serve_from(source=self.input_stream,
                        task_cores=self.task_cores,
@@ -1303,7 +1350,8 @@ class ServerApp(Application):
                        max_retries=self.max_retries,
                        eager=self.eager_mode,
                        redirect_failures=self.failure_stream,
-                       evict_after=config.server.evict)
+                       evict_after=config.server.evict,
+                       tls=self.tls)
 
     def check_args(self: ServerApp) -> None:
         """Fail particular argument combinations."""
@@ -1315,6 +1363,20 @@ class ServerApp(Application):
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.forever_mode:
             raise ArgumentError('Using --forever with --restart is invalid')
+        if self.auth == DEFAULT_AUTH:
+            log.warning('Using default authentication key - do not use this in production!')
+        if not self.tls_enabled:
+            log.warning('TLS is disabled - this is not recommended for production!')
+
+    def enable_tls(self: ServerApp) -> None:
+        """Configure TLS if enabled."""
+        if self.tls_enabled:
+            self.tls = tls_from_namespace({
+                **config.server.tls,
+                'cert': self.tls_cert,
+                'key': self.tls_key,
+                'cafile': self.tls_ca,
+            })
 
     @cached_property
     def input_stream(self: ServerApp) -> Optional[IO]:
@@ -1336,8 +1398,6 @@ class ServerApp(Application):
 
     def __enter__(self: ServerApp) -> ServerApp:
         """Ensure context and database ready."""
-        self.check_args()
-        ensuredb()
         return self
 
     def __exit__(self: ServerApp,
