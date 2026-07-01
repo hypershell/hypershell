@@ -27,11 +27,17 @@ class ClientState(Enum):
 
     RUNNING = 0
     FINISHED = 1
+    ERROR = 2
 
     @classmethod
     def from_value(cls: Type[ClientState], value: int) -> ClientState:
         """Instance from associated integer value."""
-        return {0: cls.RUNNING, 1: cls.FINISHED}.get(value)
+        return cls(value)
+
+    @classmethod
+    def default(cls: Type[ClientState], state: Optional[ClientState]) -> ClientState:
+        """Default instance of ClientState is RUNNING."""
+        return state or cls.RUNNING
 
 
 @dataclass
