@@ -169,7 +169,7 @@ default = Namespace({
         'size': {
             'init': 1,
             'min': 0,
-            'max': 2,
+            'max': 1,       # Typically this would be the only thing to modify
         },
     },
 
