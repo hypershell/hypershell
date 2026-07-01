@@ -108,6 +108,10 @@ DEFAULT_QUERY_PAUSE: Final[int] = default.server.poll  # Backwards compatibility
 DEFAULT_SERVER_POLL: Final[int] = default.server.poll
 """Default polling interval in seconds between database queries if no tasks are available."""
 
+# Initial value and maximum value for exponential backoff on database queries
+SERVER_POLL_MIN: Final[float] = 0.5
+SERVER_POLL_MAX: Final[float] = 30.0
+
 
 class Scheduler(StateMachine):
     """Enqueue tasks from database."""
@@ -121,7 +125,8 @@ class Scheduler(StateMachine):
     eager: bool
     forever_mode: bool
     restart_mode: bool
-    poll: int
+    poll: float
+    poll_max: float
     startup_phase: bool
     current_group: Optional[int]
 
@@ -142,7 +147,8 @@ class Scheduler(StateMachine):
         self.eager = eager
         self.forever_mode = forever_mode
         self.restart_mode = restart_mode
-        self.poll = poll
+        self.poll = SERVER_POLL_MIN
+        self.poll_max = poll
         self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
         self.current_group = None
 
@@ -187,11 +193,11 @@ class Scheduler(StateMachine):
                                group=self.current_group)
         if self.tasks:
             self.startup_phase = False
+            self.poll = SERVER_POLL_MIN
             return SchedulerState.PACK
         elif not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0 and not self.startup_phase:
             return SchedulerState.FINAL
         else:
-            log.trace(f'No tasks available - waiting {self.poll} seconds')
             group_info = Task.increment_group(self.current_group, attempts=self.attempts)
             if not group_info.viable:
                 if self.forever_mode:
@@ -205,6 +211,7 @@ class Scheduler(StateMachine):
                 log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
                 self.current_group = group_info.value
                 return SchedulerState.LOAD
+            self.poll = min(self.poll_max, 2 * self.poll)
             log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
             time.sleep(self.poll)
             return SchedulerState.LOAD
@@ -220,7 +227,7 @@ class Scheduler(StateMachine):
             self.queue.scheduled.put(self.bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
             log.debug(f'Scheduled {len(self.tasks)} tasks')
             for task in self.tasks:
-                log.debug(f'Scheduled task ({task.id})')
+                log.trace(f'Scheduled task ({task.id})')
             return SchedulerState.LOAD
         except QueueFull:
             return SchedulerState.POST
@@ -741,7 +748,7 @@ class ServerThread(Thread):
     """
 
     queue: QueueServer
-    submitter: Optional[SubmitThread]
+    submitter: Optional[SubmitThread | LiveSubmitThread]
     scheduler: Optional[SchedulerThread]
     confirm: Optional[ConfirmThread]
     receiver: ReceiverThread

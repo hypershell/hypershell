@@ -127,7 +127,7 @@ default = Namespace({
         'bundlewait': 5,       # Seconds
         'attempts': 1,
         'eager': False,        # Prefer failed tasks to new tasks
-        'poll': 5,             # Polling interval in seconds between database queries if no tasks
+        'poll': 30,            # Max polling interval in seconds between database queries if no tasks
         'evict': 600,          # Seconds to wait before evicting client
 
         # Transport-layer TLS for queue connections. Disabled by default; when enabled,
