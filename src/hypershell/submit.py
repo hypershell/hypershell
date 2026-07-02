@@ -523,7 +523,8 @@ class QueueCommitter(StateMachine):
     def finalize(self) -> QueueCommitterState:
         """Force final commit of tasks and halt."""
         self.pack_bundle()
-        self.commit()
+        while self.tasks:  # Force retry if queue is busy (since v2.8.0)
+            self.commit()
         log.debug('Done (committer: no database)')
         return QueueCommitterState.HALT
 
