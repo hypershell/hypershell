@@ -399,7 +399,12 @@ class ClientCollector(StateMachine):
 
     def finalize(self: ClientCollector) -> CollectorState:
         """Push out any remaining tasks and halt."""
-        self.put_remote()
+        # Fixed in v2.8.0:
+        # Executors may complete without reaching the preferred bundlesize in a client timeout situation.
+        # We ensure these get pushed out before shutting down this thread.
+        while self.tasks:
+            self.pack_bundle()
+            self.put_remote()
         log.debug('Done (collector)')
         return CollectorState.HALT
 
