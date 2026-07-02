@@ -739,5 +739,5 @@ def initialize_logging() -> None:
         debug(msg)
 
     if file_handler is not None:
-        recover_interrupted_compression(os.path.dirname(file_handler.filename))
+        recover_interrupted_compression(os.path.dirname(file_handler.filename) or '.')
         compression_jobs.put_nowait(False)  # Bookmark the completion of recovered files
