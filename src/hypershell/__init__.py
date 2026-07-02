@@ -23,10 +23,10 @@ from cmdkit.cli import Interface
 # Internal libs
 from hypershell.core.logging import Logger, initialize_logging
 from hypershell.core.signal import register_handlers
-from hypershell.submit import SubmitApp
-from hypershell.server import ServerApp
-from hypershell.client import ClientApp
-from hypershell.cluster import ClusterApp
+from hypershell.submit import SubmitApp, submit_from, submit_file
+from hypershell.server import ServerApp, serve_from, serve_file, serve_forever
+from hypershell.client import ClientApp, run_client
+from hypershell.cluster import ClusterApp, run_local, run_cluster, run_ssh
 from hypershell.task import TaskGroupApp, TaskInfoApp, TaskWaitApp, TaskRunApp, TaskSearchApp, TaskUpdateApp
 from hypershell.config import ConfigApp
 from hypershell.data import InitDBApp
@@ -35,7 +35,11 @@ from hypershell.data import InitDBApp
 __all__ = [
     'HyperShellApp', 'main', '__version__', '__citation__',
     'APP_VERSION', 'APP_USAGE', 'APP_HELP',
-    'SubmitApp', 'ServerApp', 'ClientApp', 'InitDBApp', 'ConfigApp',
+    'SubmitApp', 'submit_from', 'submit_file',
+    'ServerApp', 'serve_from', 'serve_file', 'serve_forever',
+    'ClientApp', 'run_client',
+    'ClusterApp', 'run_local', 'run_cluster', 'run_ssh',
+    'InitDBApp', 'ConfigApp',
     'TaskGroupApp', 'TaskInfoApp', 'TaskWaitApp', 'TaskRunApp', 'TaskSearchApp', 'TaskUpdateApp',
 ]
 
