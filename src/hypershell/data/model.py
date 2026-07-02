@@ -638,10 +638,10 @@ class Task(Entity):
             cls.revert_all([task.id for task in tasks])
 
     @classmethod
-    def latest_server(cls: Type[Client]) -> Optional[str]:
+    def latest_server(cls: Type[Task]) -> Optional[str]:
         """Unique ID of most recent active server (if reusing database)."""
         if records := (
-                cls.query(cls.server_id)
+                Session.query(Task.server_id)
                 .filter(cls.schedule_time.isnot(None))
                 .order_by(func.max(cls.schedule_time).desc())
                 .group_by(cls.server_id)
