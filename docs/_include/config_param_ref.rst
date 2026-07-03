@@ -3,7 +3,7 @@
 
     ``.level``
         One of ``TRACE``, ``DEBUG``, ``INFO``, ``WARNING``,
-        ``ERROR``, or ``CRITICAL`` (default: ``WARNING``)
+        ``ERROR``, or ``CRITICAL`` (default: ``INFO``)
 
         ``INFO`` level messages are reserved for clients when tasks begin running.
         There are numerous WARNING events (e.g., non-zero exit status of a task).
@@ -38,6 +38,48 @@
     ``.style``
         Presets for ``logging.format`` which can be difficult to define correctly.
         Options are `default`, `detailed`, `detailed-compact`, and `system`.
+
+    ``.color``
+        Enable ANSI color and formatting in console output (default: ``true``).
+
+        Colors are emitted only when `stderr` is a TTY and are always stripped from
+        file-based logs. See also the ``NO_COLOR`` and ``FORCE_COLOR`` environment variables.
+
+    ``[file]``
+        File-based logging (disabled unless at least one parameter is set).
+        See the :ref:`logging <logging>` section for full details on rotation and compression.
+
+        As a shorthand, ``logging.file`` may be set directly to ``"enabled"`` (or ``true``) to
+        log to the default per-process file, or to a path to log there; both forms disable
+        rotation and compression.
+
+        ``.path``
+            Destination file path. Defaults to a per-process, host-scoped file in the site
+            ``log`` directory (e.g. ``server-<host>.log``, ``client-<host>.log``, or
+            ``main.log``). Parent directories are created as needed.
+
+        ``.level``
+            Minimum severity written to the file (default: ``TRACE``).
+            Accepts the same names as ``logging.level``, independent of the console level.
+
+        ``.style``
+            Format preset for the file (default: ``system``). Accepts the same options as
+            ``logging.style``; a ``format`` may be given instead. ANSI color is always stripped.
+
+        ``.rotate``
+            Rotation policy (default: ``never``). Either a size threshold such as ``512MB``
+            (units ``KB``/``MB``/``GB``/``TB``, powers of 1024; a bare number is bytes) or a
+            cron expression such as ``@daily``, ``@midnight``, or ``0 1 * * 0`` (requires the
+            ``croniter`` package). Sending ``SIGHUP`` rotates on demand.
+
+        ``.compress``
+            Compression for rotated files (default: none). One of ``gzip``, ``bzip``,
+            ``lzma``, or ``zstd`` (the last requires the optional ``zstandard`` package).
+            Extensions ``.gz``, ``.bz2``, ``.xz``, and ``.zstd`` respectively.
+
+        ``.keep``
+            Number of *uncompressed* rotated files to retain (default: ``0``). Only applies
+            when compression is enabled; without compression, rotated files are never deleted.
 
 
 ``[database]``

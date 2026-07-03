@@ -40,11 +40,12 @@ from hypershell.core.signal import check_signal, reset_signal, SIGHUP
 from hypershell.core.exceptions import write_traceback
 from hypershell.core.config import (
     config, default as default_config, blame,
-    PARAM_UNSET, DEFAULT_DATABASE_NAME, LOGGING_STYLES, DEFAULT_LOGGING_STYLE, DEFAULT_LOGGING_LEVEL
+    PARAM_UNSET, LOGGING_STYLES, DEFAULT_LOGGING_STYLE, DEFAULT_LOGGING_LEVEL
 )
 
 # Public interface
-__all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'initialize_logging', 'DEFAULT_LOGGING_LEVEL']
+__all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'initialize_logging', 'DEFAULT_LOGGING_LEVEL',
+           'role_from_command', 'default_file_for', 'claim_file_slot']
 
 
 # Cached for later use
@@ -505,13 +506,19 @@ def background_compression(jobs: Queue[str | bool | None]) -> None:
 
 # Program may have halted in the middle of compressing a rotated log file.
 # At program start we trigger this function to attempt re-queueing of these files.
-# We only consider .partial files matching the current compression and naming policy.
-# All other files ending in .partial are flagged as errors
-def recover_interrupted_compression(log_dir: str) -> None:
-    """Recover interrupted compression jobs from previous runs."""
+# We only consider .partial files belonging to *this* process's slot (matched by
+# filename prefix) so a starting process never touches a live sibling's partials,
+# and only those matching the current compression and naming policy. All other
+# files ending in .partial that belong to our slot are flagged as errors.
+def recover_interrupted_compression(log_file: str) -> None:
+    """Recover interrupted compression jobs for this process's log slot."""
     global DELAY_BACKUP_DELETION
     log = getLogger(__name__)
+    log_dir = os.path.dirname(log_file) or '.'
+    prefix = basename_without_ext(log_file) + '.'  # e.g. 'client-node01.'
     for fn in os.listdir(log_dir):
+        if not fn.startswith(prefix):
+            continue  # Skip other roles/hosts/slots sharing this directory
         fp = os.path.join(log_dir, fn)
         if fn.endswith('.partial'):
             c_ext = fn.split('.')[-2]  # Compression type
@@ -627,15 +634,100 @@ queue_listener: Optional[QueueListener] = None
 queue_handler: Optional[FastQueueHandler] = None
 file_handler: Optional[RotatingFileHandler] = None
 
-# Default path for file-based logging if enabled
-DEFAULT_FILE: Final[str] = os.path.join(default_path.log, DEFAULT_DATABASE_NAME.replace('.db', '.log'))
+
+# File-based logging assumes a single live writer per file: the handler renames,
+# compresses, and prunes files out from under anyone else sharing the path. In a
+# distributed cluster many processes would otherwise resolve the same default and
+# clobber each other. So long-running / distributed roles each get their own
+# per-process, host-scoped file; every other command (and library use) shares the
+# 'main' role. The role is declared by the entry point (see `role_from_command`),
+# never sniffed from `sys.argv`, so bare invocations and library imports are safe.
+DEFAULT_ROLE: Final[str] = 'main'
+DISTRIBUTED_ROLES: Final[frozenset] = frozenset({'server', 'cluster', 'client', 'submit'})
+
+
+def role_from_command(command: Optional[str]) -> str:
+    """Map a top-level CLI command to a logging role (see `default_file_for`)."""
+    return command if command in DISTRIBUTED_ROLES else DEFAULT_ROLE
+
+
+def default_file_for(role: str) -> str:
+    """Default file-logging path for a process `role` (host-scoped except 'main')."""
+    stem = DEFAULT_ROLE if role == DEFAULT_ROLE else f'{role}-{HOSTNAME_SHORT}'
+    return os.path.join(default_path.log, f'{stem}.log')
+
+
+# We enforce the single-writer invariant with an advisory lock on a per-file
+# '.lock' sidecar, held (by the OS, so it releases even on a crash) for the life
+# of the process. Contention is only ever same-host because the hostname is baked
+# into the filename, and same-host advisory locks are reliable even on shared
+# network filesystems. Contended slots fall through to 'name-2.log', 'name-3.log',
+# ..., bounding the file count by peak concurrency on a host rather than by the
+# total number of processes ever launched (which matters under autoscaling).
+try:
+    import fcntl
+    def _try_lock(path: str) -> Optional[Any]:
+        """Acquire an exclusive, non-blocking lock; return the held handle or None."""
+        handle = open(path, mode='w')
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return handle
+        except OSError:
+            handle.close()
+            return None
+    _LOCKING = True
+except ImportError:
+    try:
+        import msvcrt
+        def _try_lock(path: str) -> Optional[Any]:
+            """Acquire an exclusive, non-blocking lock; return the held handle or None."""
+            handle = open(path, mode='w')
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                return handle
+            except OSError:
+                handle.close()
+                return None
+        _LOCKING = True
+    except ImportError:
+        _try_lock = None
+        _LOCKING = False
+
+
+# Held lock handles keep claimed slots reserved for the life of the process.
+_slot_locks: List[Any] = []
+
+
+def claim_file_slot(path: str, max_slots: int = 100) -> str:
+    """Return the first unclaimed per-process variant of `path`, holding its lock."""
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    root, ext = os.path.splitext(path)
+    if _LOCKING:
+        for n in range(1, max_slots + 1):
+            candidate = path if n == 1 else f'{root}-{n}{ext}'
+            handle = _try_lock(candidate + '.lock')
+            if handle is not None:
+                _slot_locks.append(handle)
+                return candidate
+        warn(f'Exhausted {max_slots} log-file slots for \'{path}\'; using PID suffix')
+    return f'{root}-{os.getpid()}{ext}'
+
+
+def resolve_log_path(path: str, role: str, is_default: bool) -> str:
+    """Host-scope an explicit client path, then claim an exclusive per-process slot."""
+    if role == 'client' and not is_default:
+        # A client-role process launched across many hosts must not share a user's
+        # explicit path (the default is already host-scoped); decorate it per host.
+        root, ext = os.path.splitext(path)
+        path = f'{root}-client-{HOSTNAME_SHORT}{ext}'
+    return claim_file_slot(path)
 
 
 # Only permit calling initialize_logging once
 _INIT: bool = False
 
 
-def initialize_logging() -> None:
+def initialize_logging(role: str = DEFAULT_ROLE) -> None:
     """Enable logging output to the console and rotating files."""
 
     global _INIT, message_queue, queue_listener, queue_handler, stream_handler, file_handler
@@ -649,8 +741,9 @@ def initialize_logging() -> None:
     logger.addHandler(stream_handler)
     logger.setLevel(DEVEL)  # level filtering set on handlers
 
+    default_file = default_file_for(role)
     info = []
-    file_config = stream_config.pop('file', DEFAULT_FILE)
+    file_config = stream_config.pop('file', default_file)
     if config.which('logging', 'file') == 'default':
         file_config = None  # Only enable file-based logging if any configuration provided
 
@@ -660,7 +753,8 @@ def initialize_logging() -> None:
 
     merely_enabled = [True, 'enabled']
     if isinstance(file_config, (str, bool)):
-        file_path = DEFAULT_FILE if file_config in merely_enabled else file_config
+        is_default = file_config in merely_enabled
+        file_path = resolve_log_path(default_file if is_default else file_config, role, is_default)
         file_handler = TimedRotatingFileHandler(filename=file_path)
         file_handler.setFormatter(Formatter(default_file_format, datefmt=datefmt))
         file_handler.setLevel(LEVEL_MAPPING[default_file_level])
@@ -672,8 +766,9 @@ def initialize_logging() -> None:
 
     elif isinstance(file_config, Namespace):
 
-        file_path = file_config.pop('path', default_config.logging.file.path)
-        file_path = file_path if file_path != PARAM_UNSET else DEFAULT_FILE
+        requested = file_config.pop('path', default_config.logging.file.path)
+        is_default = requested == PARAM_UNSET
+        file_path = resolve_log_path(default_file if is_default else requested, role, is_default)
         file_policy = file_config.pop('rotate', DEFAULT_ROTATION_INTERVAL)
         file_compress = file_config.pop('compress', default_config.logging.file.compress)
         file_compress = file_compress if file_compress != PARAM_UNSET else None
@@ -739,5 +834,5 @@ def initialize_logging() -> None:
         debug(msg)
 
     if file_handler is not None:
-        recover_interrupted_compression(os.path.dirname(file_handler.filename) or '.')
+        recover_interrupted_compression(file_handler.filename)
         compression_jobs.put_nowait(False)  # Bookmark the completion of recovered files

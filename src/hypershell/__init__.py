@@ -21,7 +21,7 @@ from cmdkit.app import Application, ApplicationGroup
 from cmdkit.cli import Interface
 
 # Internal libs
-from hypershell.core.logging import Logger, initialize_logging
+from hypershell.core.logging import Logger, initialize_logging, role_from_command
 from hypershell.core.signal import register_handlers
 from hypershell.submit import SubmitApp, submit_from, submit_file
 from hypershell.server import ServerApp, serve_from, serve_file, serve_forever
@@ -135,9 +135,10 @@ class HyperShellApp(ApplicationGroup):
 
 def main(argv: List[str] | None = None) -> int:
     """Entry-point for 'hs' console application."""
-    initialize_logging()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    initialize_logging(role=role_from_command(argv[0] if argv else None))
     register_handlers()
-    return HyperShellApp.main(argv or sys.argv[1:])
+    return HyperShellApp.main(argv)
 
 
 def main_x(argv: List[str] | None = None) -> int:
