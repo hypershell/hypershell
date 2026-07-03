@@ -537,9 +537,12 @@ class Task(Entity):
         return tasks
 
     @classmethod
-    def count_remaining(cls: Type[Task]) -> int:
-        """Count of remaining unfinished tasks."""
-        return cls.query().filter(cls.completion_time.is_(None)).count()
+    def count_remaining(cls: Type[Task], group: int = None) -> int:
+        """Count of remaining unfinished tasks (all task groups unless `group` given)."""
+        query = cls.query().filter(cls.completion_time.is_(None))
+        if group is not None:
+            query = query.filter(cls.group == group)
+        return query.count()
 
     @classmethod
     def count_interrupted(cls: Type[Task]) -> int:
@@ -701,18 +704,18 @@ class Task(Entity):
             return None
 
     @classmethod
-    def time_to_completion(cls: Type[Task]) -> Optional[float]:
+    def time_to_completion(cls: Type[Task], group: int = None) -> Optional[float]:
         """Estimated time in seconds until all unscheduled tasks are completed."""
         if rate := cls.effective_rate():
-            return cls.count_remaining() / rate
+            return cls.count_remaining(group=group) / rate
         else:
             return None
 
     @classmethod
-    def task_pressure(cls: Type[Task], factor: float) -> Optional[float]:
+    def task_pressure(cls: Type[Task], factor: float, group: int = None) -> Optional[float]:
         """Ratio of current ETC to relative `factor` of task duration."""
         if avg_duration := cls.avg_duration():
-            if toc := cls.time_to_completion():
+            if toc := cls.time_to_completion(group=group):
                 return toc / (factor * avg_duration)
             else:
                 return None

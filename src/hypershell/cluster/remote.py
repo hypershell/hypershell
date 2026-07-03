@@ -468,14 +468,17 @@ class AutoScaler(StateMachine):
         launched_size = len(self.clients)
         registered_size = Client.count_connected()
         task_count = Task.count_remaining()
-        log.debug(f'Autoscale check (clients: {registered_size}/{launched_size}, tasks: {task_count})')
+        group_info = Task.current_group()
+        group_task_count = Task.count_remaining(group=group_info.value)
+        log.debug(f'Autoscale check (clients: {registered_size}/{launched_size}, '
+                  f'tasks: {group_task_count} in group {group_info.value}, {task_count} total)')
         if launched_size < self.min_size:
             log.debug(f'Autoscale min-size reached ({launched_size} < {self.min_size})')
             return AutoScalerState.SCALE
-        if launched_size == 0 and task_count == 0:
+        if launched_size == 0 and group_task_count == 0:
             return AutoScalerState.WAIT
-        if launched_size == 0 and task_count > 0:
-            log.debug(f'Autoscale adding client ({task_count} tasks remaining)')
+        if launched_size == 0 and group_task_count > 0:
+            log.debug(f'Autoscale adding client ({group_task_count} tasks remaining in group {group_info.value})')
             return AutoScalerState.SCALE
         else:
             return AutoScalerState.WAIT
@@ -485,10 +488,13 @@ class AutoScaler(StateMachine):
         launched_size = len(self.clients)
         registered_size = Client.count_connected()
         task_count = Task.count_remaining()
-        pressure = Task.task_pressure(self.factor)
+        group_info = Task.current_group()
+        group_task_count = Task.count_remaining(group=group_info.value)
+        pressure = Task.task_pressure(self.factor, group=group_info.value)
         pressure_val = 'unknown' if pressure is None else f'{pressure:.2f}'
         log.debug(f'Autoscale check (pressure: {pressure_val}, '
-                  f'clients: {registered_size}/{launched_size}, tasks: {task_count})')
+                  f'clients: {registered_size}/{launched_size}, '
+                  f'tasks: {group_task_count} in group {group_info.value}, {task_count} total)')
         if launched_size < self.min_size:
             log.debug(f'Autoscale min-size reached ({launched_size} < {self.min_size})')
             return AutoScalerState.SCALE
@@ -504,11 +510,11 @@ class AutoScaler(StateMachine):
                 log.debug(f'Autoscale pressure low ({pressure:.2f})')
                 return AutoScalerState.WAIT
         else:
-            if launched_size == 0 and task_count == 0:
-                log.debug(f'Autoscale pause (no clients and no tasks)')
+            if launched_size == 0 and group_task_count == 0:
+                log.debug(f'Autoscale pause (no clients and no active tasks)')
                 return AutoScalerState.WAIT
-            if launched_size == 0 and task_count > 0:
-                log.debug(f'Autoscale adding client ({task_count} tasks remaining)')
+            if launched_size == 0 and group_task_count > 0:
+                log.debug(f'Autoscale adding client ({group_task_count} tasks remaining in group {group_info.value})')
                 return AutoScalerState.SCALE
             else:
                 log.debug('Autoscale pause (waiting on clients to complete initial tasks)')

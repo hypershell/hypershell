@@ -291,10 +291,15 @@ Options
     This value expresses some multiple of the average task duration in seconds.
 
     The autoscaler periodically checks ``toc / (factor x avg_duration)``, where
-    ``toc`` is the estimated time of completion for all remaining tasks given current
-    throughput of active clients. This ratio is referred to as *task pressure*, and if
-    it exceeds 1, the pressure is considered *high* and we will add another client if
-    we are not already at the given ``--max-size`` of the cluster.
+    ``toc`` is the estimated time of completion for remaining tasks in the active
+    *task group* given current throughput of active clients. This ratio is referred to
+    as *task pressure*, and if it exceeds 1, the pressure is considered *high* and we
+    will add another client if we are not already at the given ``--max-size`` of the
+    cluster.
+
+    Task pressure is relative to the active task group; tasks waiting in later groups
+    do not contribute. The scheduler only distributes tasks within the active group,
+    so scaling out for a future backlog would only create idle clients.
 
     For example, if the average task length is 30 minutes, and we set ``--factor=2``, then if
     the estimated time of completion of remaining tasks given currently connected executors
