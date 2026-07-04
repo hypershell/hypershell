@@ -303,7 +303,7 @@ class RemoteCluster(Thread):
     def run_with_exceptions(self: RemoteCluster) -> None:
         """Start child threads, wait."""
         self.server.start()
-        log.debug(f'Launching clients: {self.client_argv}')
+        log.debug('Launching clients: ' + redact_secrets(self.client_argv, ['-k']))
         self.clients = Popen(self.client_argv,
                              stdout=sys.stdout, stderr=sys.stderr,
                              env={**os.environ, **load_task_env()})
@@ -431,7 +431,7 @@ class AutoScaler(StateMachine):
     def start(self: AutoScaler) -> AutoScalerState:
         """Jump to INIT state."""
         log.info(f'Autoscale start (policy: {self.policy.name.lower()}, init-size: {self.init_size})')
-        log.debug(f'Autoscale launcher: {self.launcher}')
+        log.debug('Autoscale launcher: ' + redact_secrets(self.launcher, ['-k']))
         return AutoScalerState.INIT
 
     def init(self: AutoScaler) -> AutoScalerState:
@@ -837,3 +837,27 @@ class AutoScalingCluster(Thread):
         self.server.stop(wait=wait, timeout=timeout)
         self.autoscaler.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
+
+
+def redact_secrets(argv: List[str], options: Iterable[str], *, redaction: str = '***') -> str:
+    """
+    Return a shell-quoted command-line string with the *values* following
+    any of the specified options redacted.
+
+    Example:
+        >>> redact_secrets(['client', '-k', 'supersecret', '--verbose', '--auth', 'another'],
+        ...                ['-k', '--auth'])
+        "client -k '***' --verbose --auth '***'"
+    """
+    redact_set = set(options)
+    it = iter(argv)
+    redacted: List[str] = []
+    for arg in it:
+        redacted.append(arg)
+        if arg in redact_set:
+            try:
+                next(it) # Consume the secret value
+                redacted.append(redaction)
+            except StopIteration:
+                pass     # Option had no following value
+    return ' '.join(shlex.quote(x) for x in redacted)

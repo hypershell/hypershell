@@ -30,11 +30,13 @@ from hypershell.core.exceptions import write_traceback
 from hypershell.core.sys import PATH_SEP
 
 # Public interface
-__all__ = ['config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
-           'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
-           'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
-           'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
-           'find_available_ports']
+__all__ = [
+    'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
+    'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
+    'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
+    'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
+    'AUTH_ALLOWED_CHARS', 'AUTH_MINIMUM_LENGTH', 'find_available_ports'
+]
 
 
 # Partial logging (not yet configured - initialized afterward)
@@ -74,6 +76,10 @@ PARAM_UNSET: Final[str] = '<none>'
 
 # Default secure key is not secure!
 DEFAULT_AUTH: Final[str] = '<not-secure>'
+
+# Basic security checks for user-provided auth keys
+AUTH_ALLOWED_CHARS: re.Pattern = re.compile(r'^[A-Za-z0-9._-]+$')
+AUTH_MINIMUM_LENGTH: Final[int] = 16
 
 
 # Environment variables and configuration files are automatically depth-first merged with defaults

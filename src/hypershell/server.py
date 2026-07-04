@@ -60,7 +60,7 @@ from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import config, default, find_available_ports
+from hypershell.core.config import config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
@@ -1375,7 +1375,11 @@ class ServerApp(Application):
         if self.restart_mode and self.forever_mode:
             raise ArgumentError('Using --forever with --restart is invalid')
         if self.auth == DEFAULT_AUTH:
-            log.warning('Using default authentication key - do not use this in production!')
+            raise ArgumentError('Refusing to run server without authentication key')
+        if len(self.auth) < AUTH_MINIMUM_LENGTH:
+            raise ArgumentError(f'Authentication key must be at least {AUTH_MINIMUM_LENGTH} characters')
+        if not AUTH_ALLOWED_CHARS.fullmatch(self.auth):
+            raise ArgumentError(f'Authentication key must contain only "{AUTH_ALLOWED_CHARS.pattern}"')
         if not self.tls_enabled:
             log.warning('TLS is disabled - this is not recommended for production!')
 
