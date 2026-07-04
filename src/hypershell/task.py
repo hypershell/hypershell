@@ -797,6 +797,10 @@ select * from main.task
 CANCEL_STATUS: Final[int] = -1
 
 
+# Iterative update batch size for updates with a limit
+UPDATE_BATCH_SIZE: Final[int] = 100
+
+
 UPDATE_PROGRAM = 'hs update'
 UPDATE_SYNOPSIS = f'{UPDATE_PROGRAM} [-h] ARG [ARG...] [--cancel | --revert | --delete] ...'
 UPDATE_USAGE = f"""\
@@ -996,20 +1000,20 @@ class TaskUpdateApp(Application, SearchableMixin):
         if self.limit is not None:
             # We cannot apply an UPDATE query with a LIMIT field
             # The alternative is to pull the data and batch the update
-            # While terribly inefficient at least it has a LIMIT
+            # While terribly inefficient, at least it has a LIMIT
             tasks = query.all()
             tasks_it = iter(tasks)
             if self.delete_mode:
-                while batch := tuple(itertools.islice(tasks_it, 100)):
+                while batch := tuple(itertools.islice(tasks_it, UPDATE_BATCH_SIZE)):
                     Task.delete_all(list(batch))
             if field_updates:
-                while batch := tuple(itertools.islice(tasks_it, 100)):
+                while batch := tuple(itertools.islice(tasks_it, UPDATE_BATCH_SIZE)):
                     Task.update_all([{'id': task.id, **field_updates} for task in batch])
             if tag_updates:
-                while batch := tuple(itertools.islice(tasks_it, 100)):
+                while batch := tuple(itertools.islice(tasks_it, UPDATE_BATCH_SIZE)):
                     Task.update_all([{'id': task.id, 'tag': {**task.tag, **tag_updates}} for task in batch])
             if self.remove_tag:
-                while batch := tuple(itertools.islice(tasks_it, 100)):
+                while batch := tuple(itertools.islice(tasks_it, UPDATE_BATCH_SIZE)):
                     Task.update_all([
                         {'id': task.id, 'tag': self.drop_items(task.tag, *self.remove_tag)}
                         for task in batch
