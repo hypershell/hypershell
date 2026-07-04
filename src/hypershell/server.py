@@ -66,8 +66,7 @@ from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread
-from hypershell.core.queue import (QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, DEFAULT_LOCAL_TIMEOUT,
-                                   make_sentinel)
+from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.data.model import Task, Client, serialize_tasks, deserialize_tasks
@@ -167,9 +166,13 @@ class Scheduler(StateMachine):
         log.debug('Started (scheduler)')
         if self.forever_mode:
             log.info('Scheduler will run forever')
-        if Task.count() > 0:
+        if (total_tasks := Task.count()) > 0:
             if (tasks_remaining := Task.count_remaining()) == 0:
-                log.warning(f'All previous tasks completed - nothing to do')
+                if self.forever_mode:
+                    log.info(f'All previous tasks completed ({total_tasks:,}) - waiting for new tasks')
+                else:
+                    log.info(f'All previous tasks completed ({total_tasks:,}) - stopping')
+                    return SchedulerState.FINAL
             else:
                 tasks_interrupted = Task.count_interrupted()
                 log.info(f'Found {tasks_remaining} unfinished tasks')
