@@ -17,7 +17,7 @@ from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.tls import TLSConfig
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
+from hypershell.server import ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
 from hypershell.client import ClientThread, DEFAULT_DELAY, DEFAULT_SIGNALWAIT, set_client_standalone
 
 # Public interface
@@ -63,6 +63,10 @@ class LocalCluster(Thread):
         num_threads (int, optional):
             Number of executor threads (use 0 for auto-detection).
             See :const:`~hypershell.client.DEFAULT_NUM_THREADS`.
+
+        port (int, optional):
+            Port number for server (default: 0).
+            See :const:`~hypershell.server.DEFAULT_PORT`.
 
         template (str, optional):
             Template command pattern.
@@ -176,6 +180,7 @@ class LocalCluster(Thread):
     def __init__(self: LocalCluster,
                  source: Iterable[str] = None,
                  num_threads: int = 1,
+                 port: int = DEFAULT_PORT,
                  template: str = DEFAULT_TEMPLATE,
                  cores: int = None,
                  memory: int = None,
@@ -210,6 +215,7 @@ class LocalCluster(Thread):
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    auth=auth,
+                                   address=('localhost', port),
                                    in_memory=in_memory,
                                    no_confirm=no_confirm,
                                    poll=poll,
@@ -224,6 +230,7 @@ class LocalCluster(Thread):
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    auth=auth,
+                                   address=('localhost', port),
                                    no_confirm=no_confirm,
                                    redirect_output=redirect_output,
                                    redirect_errors=redirect_errors,

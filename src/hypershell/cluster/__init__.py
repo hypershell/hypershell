@@ -19,8 +19,7 @@ from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
-from hypershell.core.config import config, blame
-from hypershell.core.queue import QueueConfig
+from hypershell.core.config import config, blame, find_available_ports
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
@@ -28,7 +27,7 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
-from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
+from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
@@ -53,7 +52,7 @@ APP_USAGE = """\
 Usage:
   hs cluster [-h] [FILE | --restart | --forever] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-c NUM] [-m MEM] [-W SEC]  
              [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
-             [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
+             [-H ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
              [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]
              [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
@@ -75,7 +74,8 @@ Modes:
 Options:
   -N, --num-threads    NUM      Number of executor threads per client, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template       CMD      Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
-  -p, --port           NUM      Port number (default: {QueueConfig.port}).
+  -H, --bind           ADDR     Special bind address (default: "localhost" or "0.0.0.0" remote).
+  -p, --port           PORT     Port number (default: {DEFAULT_PORT}).
   -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait     SEC      Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
   -r, --max-retries    NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
@@ -186,7 +186,10 @@ class ClusterApp(Application):
     export_env: bool = False
     interface.add_argument('-E', '--env', action='store_true', dest='export_env')
 
-    port: int = QueueConfig.port
+    host: str = config.server.bind
+    interface.add_argument('-H', '--bind', default=host, dest='host')
+
+    port: int = config.server.port
     interface.add_argument('-p', '--port', default=port, type=int)
 
     capture: bool = False
@@ -267,17 +270,21 @@ class ClusterApp(Application):
 
     def run_local(self: ClusterApp, **options) -> None:
         """Run local cluster."""
-        run_local(**options, redirect_output=self.output_stream, redirect_errors=self.errors_stream)
+        if self.host not in ('localhost', '127.0.0.1'):
+            raise ArgumentError(f'Refusing to bind to non-local host {self.host} for local cluster')
+        run_local(**options, port=self.port,
+                  redirect_output=self.output_stream, redirect_errors=self.errors_stream)
 
     def run_launch(self: ClusterApp, **options) -> None:
         """Run remote cluster with custom launcher."""
-        run_cluster(**options, launcher=self.launch_mode,
-                    remote_exe=self.remote_exe, bind=('0.0.0.0', self.port))
+        bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
+        run_cluster(**options,  launcher=self.launch_mode, remote_exe=self.remote_exe, bind=(bind, self.port))
 
     def run_mpi(self: ClusterApp, **options) -> None:
         """Run remote cluster with 'mpirun'."""
+        bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
         run_cluster(**options, launcher='mpirun',
-                    remote_exe=self.remote_exe, bind=('0.0.0.0', self.port))
+                    remote_exe=self.remote_exe, bind=(bind, self.port))
 
     def run_ssh(self: ClusterApp, **options) -> None:
         """Run remote cluster with SSH."""
@@ -285,16 +292,18 @@ class ClusterApp(Application):
             nodelist = NodeList.from_config(self.ssh_group)
         else:
             nodelist = NodeList.from_cmdline(self.ssh_mode if self.ssh_mode != '<default>' else None)
+        bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
         run_ssh(**options, launcher='ssh', launcher_args=shlex.split(self.ssh_args), nodelist=nodelist,
-                remote_exe=self.remote_exe, bind=('0.0.0.0', self.port), export_env=self.export_env)
+                remote_exe=self.remote_exe, bind=(bind, self.port), export_env=self.export_env)
 
     def run_autoscaling(self: ClusterApp, **options) -> None:
         """Run remote cluster with custom launcher and autoscaling."""
+        bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
         run_cluster(**options, autoscaling=True, launcher=(self.launch_mode or ''),
                     policy=self.autoscaling_policy, factor=self.autoscaling_factor,
                     period=self.autoscaling_period, init_size=self.autoscaling_initial,
                     min_size=self.autoscaling_minimum, max_size=self.autoscaling_maximum,
-                    remote_exe=self.remote_exe, bind=('0.0.0.0', self.port))
+                    remote_exe=self.remote_exe, bind=(bind, self.port))
 
     @cached_property
     def launchers(self: ClusterApp) -> Dict[str, Callable]:
@@ -419,6 +428,8 @@ class ClusterApp(Application):
             initdb()  # Auto-initialize if local sqlite provider
         elif not self.in_memory:
             checkdb()
+        if self.port == DEFAULT_PORT:
+            self.port = next(find_available_ports(bind=self.host))
         return self
 
     def __exit__(self: ClusterApp,

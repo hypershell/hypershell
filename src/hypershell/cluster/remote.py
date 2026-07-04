@@ -292,9 +292,10 @@ class RemoteCluster(Thread):
             client_args.extend(['--tls-ca', tls.cafile,
                                 '--tls-key', tls.key,
                                 '--tls-cert', tls.cert])
+        target = HOSTNAME if bind[0] == '0.0.0.0' else bind[0]
         self.client_argv = [
             *launcher, *launcher_args, remote_exe, 'client',
-            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
+            '-H', target, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
             '-t', template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
         ]
         super().__init__(name='hypershell-cluster')
@@ -524,7 +525,7 @@ class AutoScaler(StateMachine):
         """Launch new client."""
         proc = Popen(self.launcher, stdout=sys.stdout, stderr=sys.stderr,
                      bufsize=0, universal_newlines=True, env={**os.environ, **load_task_env()})
-        log.trace(f'Autoscale adding client ({proc.pid})')
+        log.info(f'Autoscale adding client ({proc.pid})')
         self.clients.append(proc)
         if self.phase is AutoScalerPhase.INIT:
             return AutoScalerState.INIT
@@ -542,7 +543,7 @@ class AutoScaler(StateMachine):
                 if status != 0:
                     log.warning(f'Autoscale client ({i+1}) exited with status {status}')
                 else:
-                    log.debug(f'Autoscale client disconnected ({client.pid})')
+                    log.info(f'Autoscale client disconnected ({client.pid})')
         self.clients = [client for i, client in enumerate(self.clients) if i not in marked]
 
     @staticmethod

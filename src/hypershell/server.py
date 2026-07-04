@@ -804,6 +804,7 @@ class ServerThread(Thread):
         self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures)
         self.heartmonitor = HeartMonitorThread(queue=self.queue, evict_after=evict_after,
                                                in_memory=in_memory, no_confirm=no_confirm)
+        log.info(f'Server listening on {address[0]}:{address[1]}')
         super().__init__(name='hypershell-server')
 
     def run_with_exceptions(self: ServerThread) -> None:
@@ -1318,8 +1319,8 @@ class ServerApp(Application):
     interface.add_argument('--tls-ca', default=tls_ca)
 
     # Hidden options used as helpers for shell completion
-    interface.add_argument('--available-ports', action='version',
-                           version='\n'.join(map(str, islice(find_available_ports(), 10))))
+    show_available_ports: bool = False
+    interface.add_argument('--available-ports', action='store_true', dest='show_available_ports')
 
     exceptions = {
         **get_shared_exception_mapping(__name__)
@@ -1327,6 +1328,8 @@ class ServerApp(Application):
 
     def run(self: ServerApp) -> None:
         """Run server."""
+        if self.special_options():
+            return
         self.check_args()
         self.enable_tls()
         ensuredb()
@@ -1376,6 +1379,14 @@ class ServerApp(Application):
         if not self.tls_enabled:
             log.warning('TLS is disabled - this is not recommended for production!')
 
+    def special_options(self: ServerApp) -> bool:
+        """Special terminating options print information lazily (not import time)."""
+        if self.show_available_ports:
+            print('\n'.join(map(str, islice(find_available_ports(), 10))))
+            return True
+        else:
+            return False
+
     def enable_tls(self: ServerApp) -> None:
         """Configure TLS if enabled."""
         if self.tls_enabled:
@@ -1389,7 +1400,7 @@ class ServerApp(Application):
     @cached_property
     def input_stream(self: ServerApp) -> Optional[IO]:
         """Input IO stream for task args."""
-        if self.forever_mode or self.restart_mode:
+        if self.forever_mode or self.restart_mode or not self.filepath:
             return None
         else:
             return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')

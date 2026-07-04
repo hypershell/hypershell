@@ -332,18 +332,16 @@ except KeyError:
 
 
 def find_available_ports(start: int = default.server.port,
-                         end: int = default.server.port + 1_000) -> Iterator[int]:
+                         end: int = default.server.port + 1_000,
+                         bind: str = '0.0.0.0') -> Iterator[int]:
     """Yield available ports by testing each in turn."""
     for port in range(start, end + 1):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(1)
             try:
-                sock.bind(("0.0.0.0", port))
+                sock.bind((bind, port))
                 yield port
             except socket.error:
                 pass
-    else:
-        raise RuntimeError(f'Could not find available port in range {start}-{end}')
 
 
 DEFAULT_CONFIG_HEADERS: Final[str] = f"""\
