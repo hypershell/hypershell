@@ -247,7 +247,7 @@ try:
     factory = sessionmaker(bind=engine)
     Session = scoped_session(factory)
 except ModuleNotFoundError as error:
-    if 'psycopg2' in error.args[0]:
+    if 'psycopg' in error.args[0]:
         display_critical(f'Missing optional dependency "psycopg" needed for PostgreSQL', module=__name__)
         sys.exit(exit_status.runtime_error)
     else:
