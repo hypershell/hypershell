@@ -450,6 +450,9 @@ class SearchableMixin:
     show_succeeded: bool = False
     show_remaining: bool = False
 
+    group_filter: Optional[int] = None
+    retry_filter: bool = False
+
     def build_query(self: SearchableMixin) -> Query:
         """Build original query interface."""
         query = Task.query(*self.fields)
@@ -504,6 +507,10 @@ class SearchableMixin:
             self.where_clauses.append('exit_status != null')
         if self.show_remaining:
             self.where_clauses.append('exit_status == null')
+        if self.group_filter is not None:
+            self.where_clauses.append(f'group == {self.group_filter}')
+        if self.retry_filter:
+            self.where_clauses.append('attempt > 1')
         if not self.where_clauses:
             return []
         else:
@@ -525,9 +532,9 @@ SEARCH_PROGRAM = 'hs list'
 SEARCH_SYNOPSIS = f'{SEARCH_PROGRAM} [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] ...'
 SEARCH_USAGE = f"""\
 Usage:
-  hs list [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]]
-          [--failed | --succeeded | --completed | --remaining]
-          [--order-by FIELD [--desc]] [--count | --limit NUM]
+  hs list [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] [-g GROUP]
+          [--failed | --succeeded | --completed | --remaining] [--retries]
+          [--order-by FIELD [--desc]] [--count | --limit LIMIT]
           [-f FORMAT | --json | --csv]  [-d CHAR] [-i]
   
   hs list --fields
@@ -546,12 +553,14 @@ Arguments:
 Options:
   -w, --where       COND...  Filter on conditional expression.
   -t, --with-tag    TAG...   Filter by tag.
+  -g, --group       GROUP    Filter by group.
   -s, --order-by    FIELD    Order output by field.
       --desc                 Descending order (requires --order-by).
   -F, --failed               Alias for `-w exit_status != 0`.
   -S, --succeeded            Alias for `-w exit_status == 0`.
   -C, --completed            Alias for `-w exit_status != null`.
   -R, --remaining            Alias for `-w exit_status == null`.
+      --retries              Alias for `-w attempt > 1`.
   -f, --format      FORMAT   Format output (normal, plain, table, csv, json).
       --json                 Format output as JSON (alias for `--format=json`).
       --csv                  Format output as CSV (alias for `--format=csv`).
@@ -602,6 +611,12 @@ class TaskSearchApp(Application, SearchableMixin):
     search_alias_interface.add_argument('-R', '--remaining', action='store_true', dest='show_remaining')
     search_alias_interface.add_argument('--finished', action='store_true', dest='show_completed')
     # NOTE: --finished retained for backwards compatibility
+
+    group_filter: Optional[int] = None
+    interface.add_argument('-g', '--group', type=int, default=None, dest='group_filter')
+
+    retry_filter: bool = False
+    interface.add_argument('--retries', action='store_true', dest='retry_filter')
 
     output_format: str = '<default>'  # 'plain' if field_names else 'normal'
     output_formats: List[str] = ['normal', 'plain', 'table', 'json', 'csv']
@@ -787,8 +802,9 @@ UPDATE_SYNOPSIS = f'{UPDATE_PROGRAM} [-h] ARG [ARG...] [--cancel | --revert | --
 UPDATE_USAGE = f"""\
 Usage:
   hs update [-h] ARG [ARG...] [--cancel | --revert | --delete] [--remove-tag TAG [TAG ...]]
-            [-w COND [COND ...]] [-t TAG [TAG...]] [--order-by FIELD [--desc]] [--limit NUM]
-            [--failed | --succeeded | --completed | --remaining] [--no-confirm]
+            [-w COND [COND ...]] [-t TAG [TAG...]] [-g GROUP] [--order-by FIELD [--desc]]
+            [-l LIMIT] [--failed | --succeeded | --completed | --remaining] [--retries] 
+            [--no-confirm]
   
   Update task metadata.\
 """
@@ -816,6 +832,7 @@ Options:
       --remove-tag  TAG...   Remove specified tags by name.
   -w, --where       COND...  Filter on conditional expression.
   -t, --with-tag    TAG...   Filter by tag.
+  -g, --group       GROUP    Filter by group.
   -s, --order-by    FIELD    Order matches by FIELD.
       --desc                 Descending order (requires --order-by).
   -l, --limit       NUM      Limit matches.
@@ -823,6 +840,7 @@ Options:
   -S, --succeeded            Alias for `-w exit_status == 0`.
   -C, --completed            Alias for `-w exit_status != null`.
   -R, --remaining            Alias for `-w exit_status == null`.
+      --retries              Alias for `-w attempt > 1`.
   -f, --no-confirm           Do not ask for confirmation.
   -h, --help                 Show this message and exit.\
 """
@@ -863,6 +881,12 @@ class TaskUpdateApp(Application, SearchableMixin):
     search_alias_interface.add_argument('-C', '--completed', action='store_true', dest='show_completed')
     search_alias_interface.add_argument('-S', '--succeeded', action='store_true', dest='show_succeeded')
     search_alias_interface.add_argument('-R', '--remaining', action='store_true', dest='show_remaining')
+
+    group_filter: Optional[int] = None
+    interface.add_argument('-g', '--group', type=int, default=None, dest='group_filter')
+
+    retry_filter: bool = False
+    interface.add_argument('--retries', action='store_true', dest='retry_filter')
 
     revert_mode: bool = False
     cancel_mode: bool = False
