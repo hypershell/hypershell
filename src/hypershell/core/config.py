@@ -132,7 +132,6 @@ default = Namespace({
         'auth': DEFAULT_AUTH,  # Initializes to fixed default value (DO NOT USE THIS)
         'queuesize': 1,        # Only allow a single bundle (scheduler must wait)
         'bundlesize': 1,
-        'bundlewait': 5,       # Seconds
         'attempts': 1,
         'eager': False,        # Prefer failed tasks to new tasks
         'poll': 30,            # Max polling interval in seconds between database queries if no tasks
