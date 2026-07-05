@@ -1521,7 +1521,7 @@ class ClientApp(Application):
     client_cores: Optional[int] = config.client.cores or None
     client_memory: Optional[int] = config.client.memory or None
     interface.add_argument('-C', '--client-cores', type=int, default=client_cores, dest='client_cores')
-    interface.add_argument('-M', '--client-memory', type=int, default=client_memory, dest='client_memory')
+    interface.add_argument('-M', '--client-memory', type=parse_bytes, default=client_memory, dest='client_memory')
 
     tls: Optional[TLSConfig] = None
     tls_enabled: bool = True
