@@ -27,6 +27,7 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
+from hypershell.cluster.remote import redact_secrets
 
 # Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
@@ -300,7 +301,7 @@ class SSHCluster(Thread):
         self.server.start()
         self.clients = []
         for argv in self.client_argv:
-            log.debug(f'Launching client: {argv}')
+            log.debug('Launching client: ' + redact_secrets(argv, ['-k']))
             self.clients.append(Popen(argv, stdout=sys.stdout, stderr=sys.stderr))
         for client in self.clients:
             client.wait()

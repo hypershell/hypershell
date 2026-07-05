@@ -36,7 +36,8 @@ __all__ = ['run_cluster', 'RemoteCluster', 'AutoScalingCluster',
            'DEFAULT_REMOTE_EXE', 'DEFAULT_LAUNCHER',
            'DEFAULT_AUTOSCALE_POLICY', 'DEFAULT_AUTOSCALE_PERIOD', 'DEFAULT_AUTOSCALE_FACTOR',
            'DEFAULT_AUTOSCALE_INIT_SIZE', 'DEFAULT_AUTOSCALE_MIN_SIZE', 'DEFAULT_AUTOSCALE_MAX_SIZE',
-           'DEFAULT_AUTOSCALE_LAUNCHER', ]
+           'DEFAULT_AUTOSCALE_LAUNCHER',
+           'redact_secrets']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
