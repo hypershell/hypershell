@@ -11,7 +11,7 @@ Release v\ |release| (:ref:`Getting Started <getting_started>`)
     :target: https://github.com/hypershell/hypershell/releases
     :alt: Github Release
 
-.. image:: https://img.shields.io/badge/Python-3.9+-blue.svg
+.. image:: https://img.shields.io/badge/Python-3.11+-blue.svg
     :target: https://www.python.org/downloads
     :alt: Python Versions
 
