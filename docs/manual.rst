@@ -4,11 +4,14 @@ Manual Page
 Synopsis
 --------
 
-hs [-h] [-v] [--citation] ...
+hs [-h] [-v] [--citation] <command> [<args>...]
     Top-level command. Show help, version, or citation info.
 
 hs cluster [-h] FILE [--ssh HOST... | --mpi | --launcher ARGS...] ...
     Run managed cluster.
+
+hsx [<args>...]
+    Alias for 'hs cluster'.
 
 hs server [-h] FILE ...
     Run stand-alone server.
@@ -17,7 +20,7 @@ hs client [-h] ...
     Run stand-alone client.
 
 hs submit [-h] [ARGS... | -f FILE] ...
-    Submit tasks from file.
+    Submit one or more tasks.
 
 hs initdb [-h] [--truncate | --vacuum | --rotate | --backup PATH] [--yes]
     Initialize database.
@@ -155,6 +158,16 @@ Update Usage
 .. include:: _include/task_update_help.rst
 
 
+Config Usage
+------------
+
+.. include:: _include/config_usage.rst
+
+.. include:: _include/config_desc.rst
+
+.. include:: _include/config_help.rst
+
+
 Config Get Usage
 ----------------
 
@@ -201,6 +214,12 @@ Templates
 .. include:: _include/templates_alt.rst
 
 
+Task Groups
+-----------
+
+.. include:: _include/task_groups_alt.rst
+
+
 Configuration
 -------------
 
@@ -217,6 +236,12 @@ Database
 --------
 
 .. include:: _include/database_alt.rst
+
+
+Security
+--------
+
+.. include:: _include/security_alt.rst
 
 
 Environment Variables

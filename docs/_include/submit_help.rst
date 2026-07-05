@@ -45,7 +45,7 @@ Options
 
     See section on `templates`.
 
-``-b``, ``--bundlesize`` *SIZE*
+``-b``, ``--bundlesize`` *NUM*
     Size of task bundle (default: 1).
 
     The default value allows for greater concurrency and responsiveness on small scales.
@@ -66,20 +66,20 @@ Options
     Number of CPU cores required per task (default: none).
 
     Sets the default core requirement for all submitted tasks. Individual tasks can override
-    this with inline comments (e.g., ``#HYPERSHELL: cores: 8``).
+    this with inline comments (e.g., ``#HYPERSHELL: cores:8``).
 
-``-m``, ``--memory`` *SIZE*
+``-m``, ``--memory`` *MEM*
     Amount of memory required per task (default: none).
 
     Sets the default memory requirement for all submitted tasks. Specify memory size with
     units (e.g., '4GB', '512MB'). Individual tasks can override this with inline comments
-    (e.g., ``#HYPERSHELL: memory: 8GB``).
+    (e.g., ``#HYPERSHELL: memory:8GB``).
 
 ``-W``, ``--timeout`` *SEC*
     Task-level walltime limit in seconds (default: none).
 
     Sets the default timeout for all submitted tasks. Individual tasks can override this
-    with inline comments (e.g., ``#HYPERSHELL: timeout: 3600``).
+    with inline comments (e.g., ``#HYPERSHELL: timeout:3600``).
 
 ``-g``, ``--group`` *NUM*
     Task group for dependency management (default: 0).
@@ -107,3 +107,5 @@ Options
     groups of tasks. They are defined with both a `key` and `value` (e.g., ``--tag file:a``).
     The default `value` for tags is blank. When searching with tags, not specifying a `value`
     will return any task with that `key` defined regardless of `value` (including blank).
+
+.. include:: /_include/tls_cli_options.rst

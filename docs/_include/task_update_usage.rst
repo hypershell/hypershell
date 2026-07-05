@@ -2,8 +2,8 @@
 
 ``hs`` ``update``
     ``[ARG [ARG ...]]``
-    ``[--cancel | --revert | --delete | --remove-tag KEY [KEY...]]``
-    ``[-w COND [COND ...]]`` ``[-t TAG [TAG...]]``
+    ``[--cancel | --revert | --delete]`` ``[--remove-tag TAG [TAG ...]]``
+    ``[-w COND [COND ...]]`` ``[-t TAG [TAG...]]`` ``[-g GROUP]``
     ``[--order-by FIELD [--desc] --limit NUM]``
-    ``[--failed | --succeeded | --completed | --remaining]``
+    ``[--failed | --succeeded | --completed | --remaining]`` ``[--retries]``
     ``[--no-confirm]``

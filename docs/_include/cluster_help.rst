@@ -43,7 +43,13 @@ Options
 
     See section on `templates`.
 
-``-p``, ``--port`` *NUM*
+``-H``, ``--bind`` *ADDR*
+    Bind address (default: localhost, or 0.0.0.0 for remote clients).
+
+    Sets the address the server binds to. When launching clients on remote hosts
+    (``--ssh``, ``--mpi``, or ``--launcher``), bind to *0.0.0.0* so they can connect.
+
+``-p``, ``--port`` *PORT*
     Port number (default: 50001).
 
     This is an arbitrary choice and simply must be an available port. The default option chosen
@@ -219,7 +225,7 @@ Options
     When specified, tasks will only be executed when the required number of cores
     is available. Used with resource-aware scheduling and backfill.
 
-``-m``, ``--memory`` *SIZE*
+``-m``, ``--memory`` *MEM*
     Amount of memory required per task (default: none).
 
     Specify memory size with units (e.g., '4GB', '512MB'). Tasks will only be
@@ -235,7 +241,7 @@ Options
 
     See also ``--num-threads=0``.
 
-``-M``, ``--client-memory`` *SIZE*
+``-M``, ``--client-memory`` *MEM*
     Limit available memory per client (default: all memory).
 
     Sets an upper bound on the amount of memory that each client can use.
@@ -335,9 +341,11 @@ Options
     Only valid with ``--autoscaling``.
 
 ``-Y``, ``--max-size`` *SIZE*
-    Maximum size of cluster (default: 2).
+    Maximum size of cluster (default: 1).
 
     For a *dynamic* autoscaling policy, this sets an upper limit on the number of launched
     clients. When this number is reached, scaling stops regardless of task pressure.
 
     Only valid with ``--autoscaling``.
+
+.. include:: /_include/tls_cli_options.rst

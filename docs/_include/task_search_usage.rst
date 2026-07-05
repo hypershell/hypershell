@@ -1,8 +1,8 @@
 ``hs`` ``list`` ``[-h]``
-    ``[FIELD [FIELD ...]]`` ``[-w COND [COND ...]]`` ``[-t TAG [TAG...]]``
+    ``[FIELD [FIELD ...]]`` ``[-w COND [COND ...]]`` ``[-t TAG [TAG...]]`` ``[-g GROUP]``
     ``[--order-by FIELD [--desc]]`` ``[--count | --limit NUM]``
-    ``[-f FORMAT | --json | --csv]`` ``[-d CHAR]``
-    ``[--failed | --succeeded | --completed | --remaining]``
+    ``[-f FORMAT | --json | --csv]`` ``[-d CHAR]`` ``[-i]``
+    ``[--failed | --succeeded | --completed | --remaining]`` ``[--retries]``
 
 ``hs`` ``list`` ``--fields``
 

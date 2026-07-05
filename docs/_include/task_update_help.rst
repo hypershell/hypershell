@@ -42,6 +42,9 @@ Options
     Leaving the `value` unspecified will return any task for which the `key` exists.
     Specifying a full `key`:`value` pair will match on both.
 
+``-g``, ``--group`` *GROUP*
+    Filter matches to a single task group.
+
 ``-s``, ``--order-by`` *FIELD* ``[--desc]``
     Order results by field. Optionally, in descending order.
 
@@ -63,6 +66,9 @@ Options
 
 ``-R``, ``--remaining``
     Alias for ``-w 'exit_status == null'``.
+
+``--retries``
+    Alias for ``-w 'attempt > 1'`` (tasks that have been retried).
 
 ``-f``, ``--no-confirm``
     Do not ask for confirmation.

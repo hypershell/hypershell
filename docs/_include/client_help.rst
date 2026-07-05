@@ -132,3 +132,5 @@ Options
     this interval in seconds before escalating to the next level of interrupt.
 
     See also ``--task-timeout``.
+
+.. include:: /_include/tls_cli_options.rst

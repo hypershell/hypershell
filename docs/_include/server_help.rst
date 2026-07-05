@@ -26,7 +26,7 @@ Options
     It is expected that the user choose a secure *KEY*. The `cluster` automatically generates
     a secure one-time *KEY*.
 
-``-b``, ``--bundlesize`` *SIZE*
+``-b``, ``--bundlesize`` *NUM*
     Size of task bundle (default: 1).
 
     The default value allows for greater concurrency and responsiveness on small scales. This is
@@ -76,17 +76,17 @@ Options
 
     When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
     This option sets the default core requirement for all submitted tasks.
-    Individual tasks can override this with inline comments (e.g., ``#HYPERSHELL: cores: 8``).
+    Individual tasks can override this with inline comments (e.g., ``#HYPERSHELL: cores:8``).
 
     See also ``--task-memory`` and ``--task-timeout``.
 
-``-m``, ``--task-memory`` *SIZE*
+``-m``, ``--task-memory`` *MEM*
     Amount of memory required per task (default: none).
 
     When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
     This option sets the default memory requirement for all submitted tasks.
     Specify memory size with units (e.g., '4GB', '512MB'). Individual tasks can override this
-    with inline comments (e.g., ``#HYPERSHELL: memory: 8GB``).
+    with inline comments (e.g., ``#HYPERSHELL: memory:8GB``).
 
     See also ``--task-cores`` and ``--task-timeout``.
 
@@ -95,7 +95,7 @@ Options
 
     When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
     This option sets the default timeout for all submitted tasks. Individual
-    tasks can override this with inline comments (e.g., ``#HYPERSHELL: timeout: 3600``).
+    tasks can override this with inline comments (e.g., ``#HYPERSHELL: timeout:3600``).
 
     See also ``--task-cores`` and ``--task-memory``.
 
@@ -156,3 +156,5 @@ Options
     stream. With ``-f``/``--failures``, specify a local file *PATH*.
 
     Mutually exclusive to ``--print``.
+
+.. include:: /_include/tls_cli_options.rst
