@@ -77,8 +77,10 @@ PARAM_UNSET: Final[str] = '<none>'
 # Default secure key is not secure!
 DEFAULT_AUTH: Final[str] = '<not-secure>'
 
-# Basic security checks for user-provided auth keys
-AUTH_ALLOWED_CHARS: re.Pattern = re.compile(r'^[A-Za-z0-9._-]+$')
+# Basic security checks for user-provided auth keys.
+# The character set admits hex, URL-safe tokens, and standard Base64 (``+``, ``/``, ``=``)
+# so that common key generators (e.g. ``openssl rand -base64 48``) are accepted as-is.
+AUTH_ALLOWED_CHARS: re.Pattern = re.compile(r'^[A-Za-z0-9._+/=-]+$')
 AUTH_MINIMUM_LENGTH: Final[int] = 16
 
 
