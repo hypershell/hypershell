@@ -1,7 +1,10 @@
-# Keeps GitHub Actions up to date. For publish.yml this bumps the pinned commit
-# SHAs (and their `# vX.Y.Z` comments); for tests.yml it bumps the version tags.
-# Scoped to actions only — Python dependency floors are pinned deliberately
-# (EPEL/RHEL parity), so we do not want automated pip/uv bumps here.
+# Two ecosystems below.
+#  1) github-actions — version updates (grouped): for publish.yml this bumps the pinned
+#     commit SHAs (and their `# vX.Y.Z` comments); for tests.yml it bumps the version tags.
+#  2) uv (Python) — SECURITY updates only, grouped into one PR. Version updates stay OFF:
+#     dependency floors in pyproject.toml are pinned deliberately for EPEL/RHEL parity, so
+#     we do not want automated floor bumps. Security fixes only touch uv.lock, which does
+#     not affect the EPEL contract, so those are welcome — just batched, not one-per-CVE.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -11,4 +14,16 @@ updates:
     # Batch all action bumps into a single PR to avoid weekly PR spam.
     groups:
       github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Disable version updates entirely (floors are pinned for EPEL/RHEL). Security updates
+    # ignore this limit and fire regardless; the group below collapses them into ONE PR.
+    open-pull-requests-limit: 0
+    groups:
+      python-security:
+        applies-to: security-updates
         patterns: ["*"]
