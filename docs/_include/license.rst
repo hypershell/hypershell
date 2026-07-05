@@ -1,4 +1,4 @@
-Copyright 2019-2025 Geoffrey Lentner.
+Copyright 2019-2026 Geoffrey Lentner.
 
 This program is free software: you can redistribute it and/or modify it under the
 terms of the Apache License (v2.0) as published by the Apache Software Foundation.
