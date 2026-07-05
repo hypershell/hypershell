@@ -1,19 +1,58 @@
 name: Publish
+
 on:
   release:
-    types: [created]
+    types: [published]          # fires for stable AND prereleases, incl. releases published
+                                # from a draft — the old `created` type SKIPS the draft->publish flow
+  workflow_dispatch:            # allow a manual run from the Actions tab (pick any branch/tag),
+                                # e.g. to force a publish without deleting and recreating the release
+
+# Least privilege: only checkout needs repository read; publishing uses the token, not GITHUB_TOKEN.
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false     # never interrupt an in-flight upload
 
 jobs:
   publish:
+    name: Build, validate & publish to PyPI
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d31148d669074a8d0a63714ba94f3201e7020bc3 # v8.3.0
         with:
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
+      # Build against standards-compliant, publishable metadata (ignores [tool.uv.sources]).
+      - name: Build sdist + wheel
+        run: uv build --no-sources
+
+      # The gate that would have caught the 2.8.0 "400: description failed to render" outage:
+      # twine check renders README.rst exactly as PyPI does; --strict also fails on warnings.
+      - name: Verify README renders on PyPI
+        run: uvx twine check --strict dist/*
+
+      # Keep the exact artifacts that were published attached to the run for auditability.
+      - name: Upload distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      # UV_PUBLISH_TOKEN keeps the token off the command line and out of the logs (== __token__).
+      # --check-url skips files already on the index, so an identical re-run is idempotent.
       - name: Publish to PyPI
-        run: uv build && uv publish --token ${{ secrets.PYPI_TOKEN }}
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv publish --check-url https://pypi.org/simple/

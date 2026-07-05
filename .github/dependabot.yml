@@ -1,0 +1,14 @@
+# Keeps GitHub Actions up to date. For publish.yml this bumps the pinned commit
+# SHAs (and their `# vX.Y.Z` comments); for tests.yml it bumps the version tags.
+# Scoped to actions only — Python dependency floors are pinned deliberately
+# (EPEL/RHEL parity), so we do not want automated pip/uv bumps here.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Batch all action bumps into a single PR to avoid weekly PR spam.
+    groups:
+      github-actions:
+        patterns: ["*"]

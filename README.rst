@@ -31,10 +31,6 @@ HyperShell v2: Distributed Task Execution for HPC
 
 |
 
-.. |br| raw:: html
-
-   <br />
-
 *HyperShell* is an elegant, cross-platform, high-throughput computing utility for
 processing shell commands over a distributed, asynchronous queue. It is a highly
 scalable workflow automation tool for *many-task* scenarios.
@@ -46,16 +42,16 @@ not with the flexibility, ergonomics, and scalability provided by HyperShell.
 
 Design elements include but are not limited to:
 
-* **Client-server:** Run the server in stand-alone mode with SQLite or PostgreSQL. |br|
-  Scale clients elastically as needed (even down to zero).
-* **Cross-platform:** trivial to install, run on any platform where Python runs. |br|
-  Mix platforms within a running cluster (Server on Linux, Clients on Windows).
-* **Staggered launch:** Come up gradually to balance the workload. |br|
-  Scale to 1000+ nodes, 250k+ workers without crashing the server.
-* **Database in-the-loop:** persist task metadata across runs. |br|
-  Fault-tolerant by default. Automated retries. Task history.
-* **User-defined tags:** annotate tasks with `key`:`value` tags. |br|
-  Manage catalogs of large collections of tasks with ease.
+* | **Client-server:** Run the server in stand-alone mode with SQLite or PostgreSQL.
+  | Scale clients elastically as needed (even down to zero).
+* | **Cross-platform:** trivial to install, run on any platform where Python runs.
+  | Mix platforms within a running cluster (Server on Linux, Clients on Windows).
+* | **Staggered launch:** Come up gradually to balance the workload.
+  | Scale to 1000+ nodes, 250k+ workers without crashing the server.
+* | **Database in-the-loop:** persist task metadata across runs.
+  | Fault-tolerant by default. Automated retries. Task history.
+* | **User-defined tags:** annotate tasks with ``key``:``value`` tags.
+  | Manage catalogs of large collections of tasks with ease.
 
 
 Usage
