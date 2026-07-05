@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """Database interface, models, and methods."""
@@ -27,13 +27,13 @@ from hypershell.core.logging import Logger
 from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, DatabaseUninitialized, get_shared_exception_mapping
 from hypershell.core.pretty_print import format_bytes
-from hypershell.data.core import Session, engine, in_memory, schema
+from hypershell.data.core import Session, engine, in_memory, schema, providers
 from hypershell.data.model import Entity, Task, JSON
 
 # Public interface
 __all__ = [
     'initdb', 'truncatedb', 'checkdb', 'ensuredb', 'vacuumdb', 'rotatedb',
-    'DATABASE_ENABLED', 'DATABASE_PROVIDER',
+    'DATABASE_ENABLED', 'DATABASE_PROVIDER', 'DATABASE_DIALECT',
     'InitDBApp',
 ]
 
@@ -45,13 +45,16 @@ DATABASE_ENABLED: Final[bool] = not in_memory
 """Set if database has been configured."""
 
 DATABASE_PROVIDER: Final[str] = config.database.provider
+"""Either sqlite/turso or postgres."""
+
+DATABASE_DIALECT: Final[str] = 'sqlite' if DATABASE_PROVIDER in ['sqlite', 'turso'] else 'postgres'
 """Either sqlite or postgres."""
 
 DATABASE_HOST: Final[str] = config.database.get('host', 'localhost')
 """Database server hostname (default: localhost)."""
 
 DATABASE_SITE: Final[str] = DATABASE_HOST if DATABASE_PROVIDER != 'sqlite' else config.database.get('file', ':memory:')
-"""Database server hostname (Postgres) or file path (SQLite)."""
+"""Database server hostname (PostgreSQL) or file path (SQLite/Turso)."""
 
 DATABASE_INFO: Final[str] = f'{config.database.provider} ({DATABASE_SITE})'
 """Concise connection info for database."""
@@ -60,7 +63,7 @@ DATABASE_INFO: Final[str] = f'{config.database.provider} ({DATABASE_SITE})'
 def initdb(optimize: bool = False) -> None:
     """Initialize database tables."""
     Entity.metadata.create_all(engine)
-    if optimize and DATABASE_PROVIDER == 'sqlite':
+    if optimize and DATABASE_DIALECT == 'sqlite':
         log.info(f'Optimizing database {DATABASE_SITE}')
         Session.execute(text('PRAGMA optimize'))
 
@@ -73,7 +76,7 @@ def truncatedb() -> None:
     Entity.metadata.drop_all(engine)
     log.trace('Creating all tables')
     Entity.metadata.create_all(engine)
-    log.warning(f'Truncated database')
+    log.warning('Truncated database')
 
 
 def checkdb() -> None:
@@ -88,9 +91,9 @@ def ensuredb(auto_init: bool = False) -> None:
     If SQLite and `auto_init` we run :meth:`initdb`, else :meth:`checkdb`.
     """
     db = config.database.get('file', None) or config.database.get('database', None)
-    if DATABASE_PROVIDER == 'sqlite' and db in ('', ':memory:', None):
+    if DATABASE_DIALECT == 'sqlite' and db in ('', ':memory:', None):
         raise ConfigurationError('Missing database configuration')
-    if DATABASE_PROVIDER == 'sqlite' or auto_init is True:
+    if DATABASE_DIALECT == 'sqlite' or auto_init is True:
         initdb()
     else:
         checkdb()
@@ -100,7 +103,7 @@ def vacuumdb(path: str = None) -> None:
     """Apply database vacuum (optionally into backup location for SQLite)."""
     if not path:
         log.info(f'Vacuuming database {DATABASE_SITE}')
-        if DATABASE_PROVIDER == 'sqlite':
+        if DATABASE_DIALECT == 'sqlite':
             size_before = os.path.getsize(DATABASE_SITE)
             Session.execute(text('VACUUM'))
             Session.execute(text('PRAGMA optimize'))
@@ -112,7 +115,7 @@ def vacuumdb(path: str = None) -> None:
             with SessionType(autocommit_engine) as session:
                 session.execute(text('VACUUM'))
     else:
-        if DATABASE_PROVIDER != 'sqlite':
+        if DATABASE_DIALECT != 'sqlite':
             raise RuntimeError(f'{DATABASE_PROVIDER} cannot backup database into file ({path})')
         log.info(f'Backing up {DATABASE_SITE} into {path}')
         Session.execute(text(f'VACUUM INTO :path'), params={'path': path})
@@ -121,7 +124,7 @@ def vacuumdb(path: str = None) -> None:
 def rotatedb() -> None:
     """Split main database into next partition (SQLite only)."""
 
-    if DATABASE_PROVIDER != 'sqlite':
+    if DATABASE_DIALECT != 'sqlite':
         raise RuntimeError(f'Cannot rotate database with {DATABASE_PROVIDER} provider')
 
     part_id, part_path = next_rotate_path()
@@ -150,7 +153,7 @@ def rotatedb() -> None:
     Session.execute(text('VACUUM'))
 
     # Now we can drop anything in the new partition not belonging to part:N
-    with sessionmaker(bind=create_engine(f'sqlite:///{part_path}'))() as external_session:
+    with sessionmaker(bind=create_engine(f'{providers[DATABASE_PROVIDER]}:///{part_path}'))() as external_session:
         count_deleted = external_session.query(Task).filter(Task.tag['part'] != type_coerce(part_id, JSON)).delete()
         external_session.commit()
         external_session.execute(text('VACUUM'))
@@ -183,15 +186,15 @@ INITDB_HELP = f"""\
 {INITDB_USAGE}
   For SQLite this happens automatically.
   See also --initdb for the `hs cluster` command.
-  
+
   The available special actions are mutually exclusive.
   The --rotate operation migrates completed tasks to the next database partition,
   and applies a special purpose `part:N` tag to the new partition and remaining tasks.
 
 Actions:
-      --vacuum             Vacuum an existing database.
-      --backup     PATH    Vacuum into backup file (SQLite only).
-      --rotate             Rotate completed tasks to new database (SQLite only).
+  -v, --vacuum             Vacuum an existing database.
+  -b, --backup     PATH    Vacuum into backup file (SQLite only).
+  -r, --rotate             Rotate completed tasks to new database (SQLite only).
   -t, --truncate           Truncate database (task metadata will be lost).
 
 Options:
@@ -201,7 +204,7 @@ Options:
 
 
 class InitDBApp(Application):
-    """Initialize database (not needed for SQLite)."""
+    """Initialize database (not needed for SQLite/Turso)."""
 
     interface = Interface(INITDB_PROGRAM, INITDB_USAGE, INITDB_HELP)
     ALLOW_NOARGS = True
@@ -241,7 +244,7 @@ class InitDBApp(Application):
             if self.confirm_action(f'Truncate {DATABASE_INFO}: {Task.count()} tasks'):
                 truncatedb()
         else:
-            if config.database.provider == 'sqlite':
+            if DATABASE_DIALECT == 'sqlite':
                 log.info('SQLite database initialized automatically')
                 initdb(optimize=True)
                 return
@@ -252,9 +255,9 @@ class InitDBApp(Application):
         """Check configuration and given command-line arguments."""
         if not DATABASE_ENABLED:
             raise ConfigurationError('No database configured')
-        if config.database.provider != 'sqlite' and self.backup_path:
+        if DATABASE_DIALECT != 'sqlite' and self.backup_path:
             raise ArgumentError('Can only backup SQLite')
-        if config.database.provider != 'sqlite' and self.rotate_mode:
+        if DATABASE_DIALECT != 'sqlite' and self.rotate_mode:
             raise ArgumentError('Can only rotate SQLite')
         if self.backup_path and os.path.exists(self.backup_path):
             raise RuntimeError(f'Backup path already exists ({self.backup_path})')

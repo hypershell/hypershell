@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """SSH-based cluster implementation."""
@@ -6,12 +6,11 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Type, List, Iterable, Tuple, IO, Final
+from typing import Type, List, Iterable, Tuple, IO, Final, Optional
 
 # Standard libs
 import re
 import sys
-import time
 import shlex
 import secrets
 from subprocess import Popen
@@ -20,13 +19,15 @@ from subprocess import Popen
 from cmdkit.config import ConfigurationError, Namespace
 
 # Internal libs
+from hypershell.core.tls import TLSConfig
 from hypershell.core.config import config, blame
 from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
+from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
+from hypershell.cluster.remote import redact_secrets
 
 # Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
@@ -40,7 +41,7 @@ DEFAULT_REMOTE_EXE: Final[str] = 'hyper-shell'
 """Default remote executable name."""
 
 
-def run_ssh(**options) -> None:
+def run_ssh(*args, **kwargs) -> None:
     """
     Run cluster with remote clients via SSH until completion.
 
@@ -58,7 +59,7 @@ def run_ssh(**options) -> None:
     See Also:
         - :class:`~hypershell.cluster.ssh.SSHCluster`
     """
-    thread = SSHCluster.new(**options)
+    thread = SSHCluster.new(*args, **kwargs)
     try:
         thread.join()
     except Exception:
@@ -80,13 +81,27 @@ class SSHCluster(Thread):
             List of hostnames for launching clients.
             See also: :class:`~hypershell.cluster.ssh.NodeList`.
 
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`~hypershell.client.DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection).
+            See :const:`~hypershell.client.DEFAULT_NUM_THREADS`.
 
         template (str, optional):
             Template command pattern.
             See :const:`~hypershell.client.DEFAULT_TEMPLATE`.
+
+        cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        client_cores (int, optional):
+            Set core limit for clients (default: all available cores).
+
+        client_memory (int, optional):
+            Set memory limit for clients (default: all available memory).
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -121,6 +136,10 @@ class SSHCluster(Thread):
         no_confirm (bool, optional):
             Disable client confirmation of tasks received.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         forever_mode (bool, optional):
             Regardless of `source`, if enabled schedule forever.
             Conflicts with `restart_mode` and `in_memory`. Default is `False`.
@@ -146,20 +165,31 @@ class SSHCluster(Thread):
             See :const:`~hypershell.client.DEFAULT_DELAY`.
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
 
         client_timeout (int, optional):
             Timeout in seconds before disconnecting from server.
             By default, the client waits for server tor request disconnect.
 
         task_timeout (int, optional):
-            Task-level walltime limit in seconds.
-            By default, the client waits indefinitely on tasks.
+            Task-level walltime limit in seconds (default: none).
+            May be overridden by inline-comment.
 
         task_signalwait (int, optional):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
+
+        ratelimit (int, optional):
+            Maximum allowed tasks per second per client (default: none).
+            There is no limit on task throughput unless specified.
+
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
 
     Example:
         >>> from hypershell.cluster import SSHCluster
@@ -182,8 +212,12 @@ class SSHCluster(Thread):
     def __init__(self: SSHCluster,
                  source: Iterable[str] = None,
                  nodelist: List[str] = None,
-                 num_tasks: int = 1,
+                 num_threads: int = 1,
                  template: str = DEFAULT_TEMPLATE,
+                 cores: int = None,
+                 memory: int = None,
+                 client_cores: int = None,
+                 client_memory: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  bind: Tuple[str, int] = ('0.0.0.0', DEFAULT_PORT),
@@ -193,6 +227,7 @@ class SSHCluster(Thread):
                  export_env: bool = False,
                  in_memory: bool = False,
                  no_confirm: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
                  max_retries: int = DEFAULT_ATTEMPTS,
@@ -200,41 +235,61 @@ class SSHCluster(Thread):
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,
                  capture: bool = False,
+                 monitor: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
-                 task_signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+                 task_signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: int = None,
+                 tls: Optional[TLSConfig] = None) -> None:
         """Initialize server and client threads."""
         if nodelist is None:
             raise AttributeError('Expected nodelist')
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
+                                   task_cores=cores,
+                                   task_memory=memory,
+                                   task_timeout=task_timeout,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    in_memory=in_memory,
                                    no_confirm=no_confirm,
+                                   poll=poll,
                                    address=bind,
                                    auth=auth,
                                    max_retries=max_retries,
                                    eager=eager,
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
-                                   redirect_failures=redirect_failures)
+                                   redirect_failures=redirect_failures,
+                                   tls=tls)
         launcher = shlex.split(launcher)
         launcher_env = shlex.split('' if not export_env else compile_env())
         if launcher_args is None:
             launcher_args = shlex.split(config.ssh.get('args', ''))
         client_args = []
-        if capture:
-            client_args.append('--capture')
         if no_confirm:
             client_args.append('--no-confirm')
+        if capture:
+            client_args.append('--capture')
+        if monitor:
+            client_args.append('--monitor')
+        if client_cores is not None:
+            client_args.extend(['-C', str(client_cores)])
+        if client_memory is not None:
+            client_args.extend(['-M', str(client_memory)])
         if client_timeout is not None:
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
             client_args.extend(['-W', str(task_timeout)])
+        if ratelimit is not None:
+            client_args.extend(['-R', str(ratelimit)])
+        if tls is None:
+            # TLS material is resolved by each client from its own site/config (identical to
+            # the server's on a shared filesystem); only the disabled state must be propagated.
+            client_args.append('--no-tls')
         self.client_argv = [
             [*launcher, *launcher_args, host, *launcher_env, remote_exe, 'client', '-H', HOSTNAME,
-             '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),
+             '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
              '-t', f'\'{template}\'', '-k', auth, '-d', str(delay_start),
              '-S', str(task_signalwait), *client_args]
             for host in nodelist
@@ -244,11 +299,9 @@ class SSHCluster(Thread):
     def run_with_exceptions(self: SSHCluster) -> None:
         """Start child threads, wait."""
         self.server.start()
-        while not self.server.queue.ready:
-            time.sleep(0.1)
         self.clients = []
         for argv in self.client_argv:
-            log.debug(f'Launching client: {argv}')
+            log.debug('Launching client: ' + redact_secrets(argv, ['-k']))
             self.clients.append(Popen(argv, stdout=sys.stdout, stderr=sys.stderr))
         for client in self.clients:
             client.wait()

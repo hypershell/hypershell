@@ -38,6 +38,17 @@ Classes
     .. automethod:: join
     .. automethod:: stop
 
+|
+
+.. admonition:: Important Note
+    :class: warning
+
+    While nothing prevents you from creating more than one :class:`~hypershell.client.ClientThread`
+    it should be considered an error to do so. The point of the thread is to provide for asynchronous
+    operations not to allow for multiple instances. There are several unavoidable process-wide global
+    considerations such as signal handling, resource tracking, and encryption key management that make
+    it an error to spawn multiple instances of the thread with differing parameters.
+
 -------------------
 
 Constants
@@ -45,11 +56,12 @@ Constants
 
 |
 
+.. autodata:: DEFAULT_NUM_THREADS
+.. autodata:: DEFAULT_TEMPLATE
 .. autodata:: DEFAULT_BUNDLESIZE
 .. autodata:: DEFAULT_BUNDLEWAIT
 .. autodata:: DEFAULT_SIGNALWAIT
 .. autodata:: DEFAULT_HEARTRATE
-.. autodata:: DEFAULT_NUM_TASKS
 .. autodata:: DEFAULT_DELAY
 .. autodata:: DEFAULT_HOST
 .. autodata:: DEFAULT_PORT

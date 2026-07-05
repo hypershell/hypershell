@@ -33,18 +33,21 @@ Release v\ |release| (:ref:`Getting Started <getting_started>`)
 
 Built on Python and tested on Linux, macOS, and Windows.
 
-Several tools offer similar functionality but not all together in a single tool with
-the user ergonomics we provide. Novel design elements include but are not limited to:
+Other tools may offer similar functionality in some places but not within a single tool and
+not with the flexibility, ergonomics, and scalability provided by HyperShell.
 
-* **Cross-platform:** run on any platform where Python runs. In fact, the server and
-  client can run on different platforms in the same cluster.
-* **Client-server:** workloads do not need to be monolithic. Run the server as a
-  stand-alone service with SQLite or Postgres as a persistent database and dynamically
-  scale clients as needed.
-* **Staggered launch:** At the largest scales (1000s of nodes, 100k+ of workers),
-  the launch process can be challenging. Come up gradually to balance the workload.
-* **Database in-the-loop:** run in-memory for quick, ad-hoc workloads. Otherwise,
-  include a database for persistence, recovery when restarting, and search.
+Design elements include but are not limited to:
+
+* **Client-server:** Run the server in stand-alone mode with SQLite or PostgreSQL. |br|
+  Scale clients elastically as needed (even down to zero).
+* **Cross-platform:** trivial to install, run on any platform where Python runs. |br|
+  Mix platforms within a running cluster (Server on Linux, Clients on Windows).
+* **Staggered launch:** Come up gradually to balance the workload. |br|
+  Scale to 1000+ nodes, 250k+ workers without crashing the server.
+* **Database in-the-loop:** persist task metadata across runs. |br|
+  Fault-tolerant by default. Automated retries. Task history.
+* **User-defined tags:** annotate tasks with `key`:`value` tags. |br|
+  Manage catalogs of large collections of tasks with ease.
 
 -------------------
 
@@ -54,7 +57,7 @@ Usage
 |
 
 *HyperShell* is primarily a :ref:`command-line <cli>` program.
-Most users will operate the ``hs cluster`` in a start-to-finish workflow scenario much
+Most users will operate the ``hs cluster`` command (``hsx`` for short) in a start-to-finish workflow scenario much
 like people tend to do with alternatives like ``xargs``, `GNU Parallel <https://gnu.org/software/parallel>`_,
 or HPC-specific tools like `ParaFly <https://parafly.sourceforge.net>`_ or
 `TaskFarmer <https://docs.nersc.gov/jobs/workflow/taskfarmer/>`_ (NERSC-only) or
@@ -72,7 +75,7 @@ See :ref:`getting started <getting_started>` for features and additional usage e
 Specific documentation is available for :ref:`configuration <config>` management,
 :ref:`database <database>` setup, :ref:`logging <logging>`, and using :ref:`templates <templates>`.
 
-The *HyperShell* :ref:`server <cli_server>` can operate in standalone mode along side the database.
+The *HyperShell* :ref:`server <cli_server>` can operate in standalone mode alongside the database.
 Zero or more :ref:`client <cli_client>` instances may come and go as available and process tasks.
 When deployed in this fashion, the cluster can scale out as necessary as well as scale down to zero.
 This strategy is appropriate for creating shared, autoscaling, high-throughput pipelines for
@@ -81,6 +84,59 @@ facilities with multiple users.
 *HyperShell* also provides a :ref:`library <library>` interface for Python applications to embed components.
 Developers can add *HyperShell* to their project to provide all of this functionality within their own
 applications or Python-based workflows.
+
+-------------------
+
+Domain Use Cases
+----------------
+
+|
+
+*HyperShell* is designed for embarrassingly parallel workloads across many scientific and
+engineering domains. Whether processing millions of files, running massive parameter sweeps,
+or executing independent computational tasks, *HyperShell* provides the infrastructure to
+scale and manage your workflow with confidence.
+
+Natural Sciences
+^^^^^^^^^^^^^^^^
+
+* **Genomics** / **Proteomics**: Sequence alignment, variant calling, genome assembly
+* **Bioinformatics**: Pipeline orchestration, batch analysis of biological datasets
+* **Pharmacy** / **Drug Discovery**: Molecular docking, virtual screening, clinical trial simulations
+* **Climate Science** / **Weather Modeling**: Ensemble forecasts, climate scenario analysis
+* **Materials Science**: Molecular dynamics simulations, high-throughput property screening
+* **Computational Chemistry**: Energy calculations, reaction pathway analysis
+* **Geoscience** / **Seismology**: Seismic data processing, geological survey analysis
+* **Neuroscience**: Brain imaging analysis, neural network simulations, connectome mapping
+* **High-Energy Physics**: Collider data processing, event reconstruction
+* **Astronomy** / **Physics**: Sky surveys, photon-transport simulations, particle physics analysis
+* **Cosmology**: gravitational wave analysis
+
+Engineering
+^^^^^^^^^^^
+
+* **Computational Fluid Dynamics (CFD)**: Parameter sweeps for design optimization
+* **Finite Element Analysis (FEA)**: Structural analysis, stress testing, mesh refinement studies
+* **Computer Vision** / **Image Processing**: Batch image analysis, object detection pipelines
+* **Rendering** / **Visual Effects (VFX)**: Distributed rendering, animation frame processing
+* **Network Simulation** / **Cybersecurity**: Traffic analysis, penetration testing, security audits
+* **Financial Modeling** / **Risk Analysis**: Monte Carlo simulations, portfolio optimization
+
+Computer Science & Data Science
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Artificial Intelligence**: inferencing, model evaluation, model training
+* **Machine Learning**: Hyperparameter tuning, feature engineering
+* **Data Science**: Benchmarking, data preprocessing, analysis
+* **Monte Carlo Simulations**: Statistical sampling, uncertainty quantification, stochastic modeling
+
+Mathematics & Optimization
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* **Numerical Methods**: Parameter sweeps, sensitivity analysis, convergence studies
+* **Optimization**: Grid search, genetic algorithms, multi-objective optimization
+* **Statistical Computing**: Bootstrap resampling, permutation tests, computational inference
+
 
 -------------------
 
@@ -107,7 +163,7 @@ License
 *HyperShell* is released under the
 `Apache Software License (v2) <https://www.apache.org/licenses/LICENSE-2.0>`_.
 
-    .. include:: _include/license.rst
+.. include:: _include/license.rst
 
 -------------------
 
@@ -118,7 +174,10 @@ Citation
 
 If this software has helped facilitate your research please consider citing us.
 
-.. include:: _include/citation.rst
+.. admonition:: BibTeX citation
+    :class: note
+
+    .. include:: _include/citation.rst
 
 
 |
@@ -129,6 +188,7 @@ If this software has helped facilitate your research please consider citing us.
 
     getting_started
     install
+    security
 
 .. toctree::
     :hidden:

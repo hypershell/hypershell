@@ -10,9 +10,9 @@ what is happening within your workflow. We want to know when events occur, like 
 starts, why something failed, or if a condition is met.
 
 The program emits messages with different *levels* of severity. Unless otherwise configured,
-the user will only see `WARNING`, `ERROR`, or `CRITICAL` messages. Setting the ``logging.level``
+the user will see `INFO`, `WARNING`, `ERROR`, or `CRITICAL` messages. Setting the ``logging.level``
 determines which messages are emitted; only messages with a severity equal to or greater than
-the current level will be shown. For example, by default the level is set to `WARNING` and so
+the current level will be shown. For example, by default the level is set to `INFO` and so
 only messages with a severity equal to *or higher* than that will be shown.
 
 See also the `logging` section in the :ref:`configuration <config>` parameter reference.
@@ -211,6 +211,168 @@ in the Python logging documentation.
     ``%(ansi_white)s``         ANSI escape sequence for `white`.
 
     =======================    ==========================================================
+
+-------------------
+
+File-based Logging
+------------------
+
+|
+
+By default *HyperShell* writes log messages only to the console (``stderr``). For
+long-running servers and clusters, and for unattended batch pipelines, it is often
+preferable to *also* persist messages to disk with automatic rotation and compression
+so the logs never grow without bound. File-based logging is opt-in and operates
+independently of the console: it has its own severity level and format, so you can keep
+a quiet, human-friendly console while retaining a verbose, machine-parsable record on disk.
+
+File-based logging is enabled the moment *any* ``logging.file`` parameter is set. The
+simplest form enables it with all defaults, writing to the default per-process file
+described below (rotation and compression disabled):
+
+.. admonition:: Enable file-based logging
+    :class: note
+
+    .. code-block:: toml
+
+        [logging]
+        file = "enabled"    # or true, or an explicit path such as "/var/log/hypershell/hs.log"
+
+For full control, define the ``[logging.file]`` section and set individual parameters:
+
+.. admonition:: Configuration file with rotating, compressed logs
+    :class: note
+
+    .. code-block:: toml
+
+        [logging.file]
+        level    = "debug"     # captured to disk independently of the console level
+        rotate   = "512MB"     # rotate once the active file reaches 512 MiB
+        compress = "gzip"      # compress each rotated file in the background
+        keep     = 2           # keep 2 uncompressed rotations alongside the archives
+
+|
+
+Per-process log files
+~~~~~~~~~~~~~~~~~~~~~~~
+
+|
+
+Every process writes to its *own* file, named for its role and host. This is essential
+in a distributed cluster: many clients — potentially on shared storage — would otherwise
+contend for a single rotating file, renaming, compressing, and pruning it out from under
+one another. The default file for each process is:
+
+.. table::
+    :widths: 40 60
+
+    ==============================   ==========================================
+    Process                          Default file
+    ==============================   ==========================================
+    ``hs server``                    ``server-<host>.log``
+    ``hs cluster`` / ``hsx``         ``cluster-<host>.log``
+    ``hs client``                    ``client-<host>.log``
+    ``hs submit``                    ``submit-<host>.log``
+    other commands, library use      ``main.log``
+    ==============================   ==========================================
+
+Here ``<host>`` is the short hostname. Files are written into the ``log`` directory of
+your :ref:`site <config>`. If two processes of the same role run on one host at once, the
+second claims a numbered slot (``client-<host>-2.log``, ``-3``, and so on); when a process
+exits — even by crashing — its slot is immediately reused by the next one, so the number of
+files tracks *peak concurrency on a host*, not the total number of processes ever launched
+(important under autoscaling). Because names never collide across roles or hosts, the entire
+log directory can be shipped or merged with ordinary tools — e.g. ``rsync`` to collect
+per-node logs, or ``sort -m`` to interleave them into a single timeline.
+
+If you set an explicit ``path`` it is honored verbatim, with one exception: for the
+``client`` role — which is launched en masse across a cluster — the hostname is appended so
+the mass-launched clients still never share a file.
+
+|
+
+Parameters
+~~~~~~~~~~~
+
+|
+
+``path``
+    Destination file path (default: the per-process file described above). A relative path
+    is resolved against the current working directory; parent directories are created as needed.
+
+``level``
+    Minimum severity written to the file (default: ``trace``). Accepts the same names as
+    ``logging.level``. This is independent of the console level, so the default captures
+    *everything* to disk while the console stays at ``info``.
+
+``style``
+    Message format preset for the file (default: ``system``). Accepts the same presets as
+    ``logging.style`` (``default``, ``detailed``, ``detailed-compact``, ``system``); a
+    ``format`` string may be given instead. ANSI color is always stripped from file output.
+    The default ``system`` style stamps every line with a timestamp, hostname, and instance
+    ``app_id``, which is what makes merged, multi-file logs sortable and traceable.
+
+``rotate``
+    Rotation policy (default: ``never``). See `Rotation`_ below.
+
+``compress``
+    Compression applied to rotated files (default: none). See `Compression and retention`_ below.
+
+``keep``
+    Number of *uncompressed* rotated files to retain on disk (default: ``0``). See
+    `Compression and retention`_ below.
+
+|
+
+Rotation
+~~~~~~~~~
+
+|
+
+The ``rotate`` policy accepts three kinds of value:
+
+``never``
+    No rotation (the default); the file grows indefinitely.
+
+*size-like*
+    A byte threshold such as ``512MB`` or ``2GB``: the active file is rotated once it
+    reaches that size. Accepted units are ``KB``, ``MB``, ``GB``, and ``TB`` — each a power
+    of 1024 — and a bare number is interpreted as bytes. Rotated files are numbered
+    (``name.1``, ``name.2``, …).
+
+*time-like*
+    A cron expression (requires the ``croniter`` package) such as ``@hourly``, ``@daily``,
+    ``@midnight``, or ``0 1 * * 0``: the file is rotated on that schedule. ``@daily`` and
+    ``@midnight`` name rotated files by date (``name.YYYYMMDD``); any other expression also
+    includes the time (``name.YYYYMMDD-HHMMSS``).
+
+Regardless of policy, sending ``SIGHUP`` to a process triggers an immediate rotation of its
+log file. This is the conventional way to rotate on demand — for example from an external
+scheduler or a ``logrotate``-style tool. See the :ref:`signals <config>` section.
+
+|
+
+Compression and retention
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+|
+
+When ``compress`` is set, each rotated file is compressed in the background. Accepted formats
+(and the extension applied) are ``gzip`` (``.gz``), ``bzip`` (``.bz2``), and ``lzma``
+(``.xz``) from the Python standard library, plus ``zstd`` (``.zstd``), which requires the
+optional ``zstandard`` package.
+
+The ``keep`` parameter sets how many *uncompressed* rotated files to leave on disk; older
+uncompressed rotations beyond this count are removed once they have been compressed. The
+compressed archives themselves are always retained.
+
+|
+
+.. note::
+
+    Rotated files are only ever deleted when compression is enabled. With ``compress`` unset,
+    rotated files accumulate and ``keep`` has no effect — enable compression, or prune the
+    directory yourself, to bound disk usage.
 
 -------------------
 

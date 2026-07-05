@@ -3,7 +3,7 @@
 
     ``.level``
         One of ``TRACE``, ``DEBUG``, ``INFO``, ``WARNING``,
-        ``ERROR``, or ``CRITICAL`` (default: ``WARNING``)
+        ``ERROR``, or ``CRITICAL`` (default: ``INFO``)
 
         ``INFO`` level messages are reserved for clients when tasks begin running.
         There are numerous WARNING events (e.g., non-zero exit status of a task).
@@ -37,12 +37,60 @@
 
     ``.style``
         Presets for ``logging.format`` which can be difficult to define correctly.
-        Options are `default`, `detailed`, `detailed-compact`, and `system`.
+        Options are `default`, `detailed`, `detailed-compact`, `system`, and `short`.
+
+    ``.color``
+        Enable ANSI color and formatting in console output (default: ``true``).
+
+        Colors are emitted only when `stderr` is a TTY and are always stripped from
+        file-based logs. See also the ``NO_COLOR`` and ``FORCE_COLOR`` environment variables.
+
+    ``[file]``
+        File-based logging (disabled unless at least one parameter is set).
+        See the :ref:`logging <logging>` section for full details on rotation and compression.
+
+        As a shorthand, ``logging.file`` may be set directly to ``"enabled"`` (or ``true``) to
+        log to the default per-process file, or to a path to log there; both forms disable
+        rotation and compression.
+
+        ``.path``
+            Destination file path. Defaults to a per-process, host-scoped file in the site
+            ``log`` directory (e.g. ``server-<host>.log``, ``client-<host>.log``, or
+            ``main.log``). Parent directories are created as needed.
+
+        ``.level``
+            Minimum severity written to the file (default: ``TRACE``).
+            Accepts the same names as ``logging.level``, independent of the console level.
+
+        ``.style``
+            Format preset for the file (default: ``system``). Accepts the same options as
+            ``logging.style``; a ``format`` may be given instead. ANSI color is always stripped.
+
+        ``.rotate``
+            Rotation policy (default: ``never``). Either a size threshold such as ``512MB``
+            (units ``KB``/``MB``/``GB``/``TB``, powers of 1024; a bare number is bytes) or a
+            cron expression such as ``@daily``, ``@midnight``, or ``0 1 * * 0`` (requires the
+            ``croniter`` package). Sending ``SIGHUP`` rotates on demand.
+
+        ``.compress``
+            Compression for rotated files (default: none). One of ``gzip``, ``bzip``,
+            ``lzma``, or ``zstd`` (the last requires the optional ``zstandard`` package).
+            Extensions ``.gz``, ``.bz2``, ``.xz``, and ``.zstd`` respectively.
+
+        ``.keep``
+            Number of *uncompressed* rotated files to retain (default: ``0``). Only applies
+            when compression is enabled; without compression, rotated files are never deleted.
 
 
 ``[database]``
     Database configuration and connection details.
     See also :ref:`database <database>` section.
+
+    ``.url``
+        Full database connection URL (default: none).
+
+        When provided, this takes precedence over and short-circuits the individual
+        ``.provider``/``.host``/``.port``/``.user``/``.password`` fields below.
 
     ``.provider``
         Database provider (default: 'sqlite'). Supported alternatives include
@@ -83,9 +131,9 @@
     ``.echo``
         Special parameter enables verbose logging of all database transactions.
 
-    ``[connection_args]``
+    ``[connect_args]``
         Specify additional connection details for the underlying SQL dialect provider,
-        e.g., ``sqlite3`` or ``psycopg2``.
+        e.g., ``sqlite3`` or ``psycopg``.
 
     ``[pragmas]``
         Specify one or more pragmas to apply to database connections (SQLite only).
@@ -104,6 +152,14 @@
         When running locally, the default is recommended. To allow remote *clients* to connect
         over the network, bind the server to *0.0.0.0*.
 
+    ``.host``
+        Host address that clients connect to (default: `localhost`).
+
+        Counterpart to ``.bind``: where ``.bind`` is the local address the server listens on,
+        ``.host`` is the address that `client` instances and queue-direct ``submit --queue``
+        dial to reach the server. Set this to the server's reachable hostname or address
+        when running clients on other machines.
+
     ``.port``
         Port number (default: `50001`).
 
@@ -111,7 +167,7 @@
         here is typically available on most platforms and is not expected by any known major software.
 
     ``.auth``
-        Cryptographic authentication key to connect with server (default: `<not secure>`).
+        Cryptographic authentication key to connect with server (default: `<not-secure>`).
 
         The default *KEY* used by the server and client is not secure and only a place holder.
         It is expected that the user choose a secure *KEY*. The `cluster` automatically generates
@@ -160,9 +216,15 @@
         failed tasks. By default, failed tasks will only be scheduled when there are no more
         remaining novel tasks.
 
-    ``.wait``
-        Polling interval in seconds for database queries during scheduling (default: `5`).
-        This waiting only occurs when no tasks are returned by the query.
+    ``.poll``
+        Maximum polling interval in seconds between database queries when no tasks are
+        available (default: `30`).
+
+        The scheduler backs off exponentially from a small floor, doubling the wait after
+        each empty query up to this ceiling. This waiting only occurs when no tasks are
+        returned by the query.
+
+        See also ``-Q``/``--poll`` command-line option.
 
     ``.evict``
         Eviction period in seconds for clients (default: `600`).
@@ -172,6 +234,63 @@
         disconnect request to all registered clients, and waits until a confirmation is
         returned for each. If a client is defunct, this will hang the shutdown process.
 
+    ``[tls]``
+        Transport-layer security for queue connections. Enabled by default; every key below
+        is also exposed as an environment variable (e.g., ``HYPERSHELL_SERVER_TLS_ENABLED``)
+        with the usual precedence. See the :ref:`built-in TLS <builtin-tls>` section for the
+        full model, including peer verification modes and limitations.
+
+        ``.enabled``
+            Use TLS on the queue interface (default: `true`).
+
+            Disabling (``enabled = false`` or the ``--no-tls`` option) sends task bundles and
+            results in the clear and is not recommended outside a trusted, isolated network.
+
+        ``.cert``
+            Path to the server certificate, or ``<auto>`` (default: `<auto>`).
+
+            With ``<auto>`` a self-signed certificate is generated once on first server start
+            and stored under the site ``lib`` directory (``<site>/lib/tls``).
+
+        ``.key``
+            Path to the server private key, or ``<auto>`` (default: `<auto>`).
+
+            Paired with ``.cert``. The auto-generated key is written owner-only (``0600``);
+            a user-provided key file should be protected the same way.
+
+        ``.cafile``
+            Trust anchor used by the client to verify the server (default: `<auto>`).
+
+            With ``<auto>`` the client trusts the server's own certificate directly, which
+            works out of the box only on a single host or a shared filesystem. Provide a PEM
+            bundle *PATH* (together with ``.servername``) to verify peers across hosts.
+
+        ``.fingerprint``
+            Pinned peer certificate fingerprint, e.g. ``SHA256:AB:CD:...`` (default: none).
+
+            When set, the client completes the handshake without CA validation and rejects the
+            connection unless the certificate fingerprint matches. Takes precedence over
+            ``.cafile``. Convenient for self-signed certificates and small clusters.
+
+        ``.insecure``
+            Disable peer verification entirely (default: `false`).
+
+            The transport is still encrypted, but the peer identity is not authenticated and a
+            warning is logged on every connection. Suitable only for transient local debugging
+            on a trusted host; never use it on an untrusted network.
+
+        ``.min_version``
+            Minimum TLS protocol version (default: `TLSv1.2`). Either ``TLSv1.2`` or ``TLSv1.3``.
+
+        ``.ciphers``
+            OpenSSL cipher string to restrict the negotiated ciphers (default: none).
+
+        ``.servername``
+            Expected server name for identity verification / SNI override (default: none).
+
+            Required alongside ``.cafile`` for true server-identity verification: with a trust
+            anchor set but no ``.servername``, the client checks only that the certificate
+            chains to the anchor, not which host presented it.
 
 ``[client]``
     Section for `client` workflow parameters.
@@ -209,6 +328,30 @@
 
         This feature allows for gracefully scaling down a cluster when task throughput subsides.
 
+    ``.cores``
+        Client-level limit on CPU cores available for running tasks (default: all available).
+
+        A value of ``0`` means unconstrained (use all detected cores). Set a lower value to
+        partition a node between multiple clients.
+
+        See also ``-C``/``--client-cores`` command-line option.
+
+    ``.memory``
+        Client-level limit on memory (in bytes) available for running tasks (default: all available).
+
+        A value of ``0`` means unconstrained. Set a lower value to partition a node's memory
+        between multiple clients.
+
+        See also ``-M``/``--client-memory`` command-line option.
+
+    ``.ratelimit``
+        Maximum number of tasks started per second (default: no limit).
+
+        A value of ``0`` disables rate limiting. Useful to throttle very short tasks so that
+        task launch does not overwhelm a shared resource.
+
+        See also ``-R``/``--ratelimit`` command-line option.
+
 ``[submit]``
     Section for `submit` workflow parameters.
 
@@ -236,6 +379,22 @@
     ``.cwd``
         Explicitly set the working directory for all tasks.
 
+    ``.cores``
+        Default cores required per task (default: unconstrained).
+
+        A value of ``0`` means unconstrained. Used with resource-aware scheduling and backfill;
+        individual tasks may override this inline (e.g., ``# HYPERSHELL: cores:8``).
+
+        See also ``-c``/``--cores`` command-line option.
+
+    ``.memory``
+        Default memory (in bytes) required per task (default: unconstrained).
+
+        A value of ``0`` means unconstrained. Used with resource-aware scheduling and backfill;
+        individual tasks may override this inline (e.g., ``# HYPERSHELL: memory:8GB``).
+
+        See also ``-m``/``--memory`` command-line option.
+
     ``.timeout``
         Task-level walltime limit (default: none).
 
@@ -249,6 +408,11 @@
 
 ``[ssh]``
     SSH configuration section.
+
+    ``.config``
+        Path to the SSH client configuration file (default: ``~/.ssh/config``).
+
+        Host entries defined there are honored when connecting to nodes in ``ssh.nodelist``.
 
     ``.args``
         SSH connection arguments; e.g., ``-i ~/.ssh/some.key``.
@@ -301,6 +465,13 @@
         A shorter period makes the scaling behavior more responsive but can effect database
         performance if checks happen too rapidly.
 
+    ``.launcher``
+        Command prefix used to launch each client as a scaling unit (default: none).
+
+        An empty value launches clients directly as ``hs client ...``. Set a launcher such as
+        an MPI or SLURM command (e.g., ``srun``) to bring up each client through your resource
+        manager. Counterpart to the cluster ``--launcher`` option used with ``--autoscaling``.
+
     ``[size]``
         ``.init``
             Initial size of cluster (default: 1).
@@ -317,7 +488,7 @@
             efficient use of computing resources in the absence of tasks.
 
         ``.max``
-            Maximum size of cluster (default: 2).
+            Maximum size of cluster (default: 1).
 
             For a *dynamic* autoscaling policy, this sets an upper limit on the number of launched
             clients. When this number is reached, scaling stops regardless of task pressure.
@@ -326,7 +497,8 @@
     Rich text display and output parameters.
 
     ``.theme``
-        Color scheme to use by default in output (such as with ``task info`` and ``task search``).
+        Color scheme to use by default in output (default: `monokai`), such as with
+        ``hs info`` and ``hs search``.
 
         This option is passed to the `rich <https://rich.readthedocs.io/en/latest/>`_ library.
 

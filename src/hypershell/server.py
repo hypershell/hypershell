@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """
@@ -60,14 +60,16 @@ from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import config, default, find_available_ports
+from hypershell.core.config import config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH
+from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
+from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread
-from hypershell.core.queue import QueueServer, QueueConfig
+from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
-from hypershell.data.model import Task, Client
+from hypershell.data.model import Task, Client, serialize_tasks, deserialize_tasks
 from hypershell.data import ensuredb, DATABASE_ENABLED
 from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT
 from hypershell.client import ClientInfo
@@ -75,7 +77,7 @@ from hypershell.client import ClientInfo
 # Public interface
 __all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
-           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_QUERY_PAUSE',
+           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
 
 # Initialize logger
@@ -101,8 +103,13 @@ DEFAULT_ATTEMPTS: Final[int] = default.server.attempts
 DEFAULT_EAGER_MODE: Final[bool] = default.server.eager
 """When enabled tasks are retried immediately ahead scheduling new tasks."""
 
-DEFAULT_QUERY_PAUSE: Final[int] = default.server.wait
-"""Default polling interval between database queries if no tasks are available."""
+DEFAULT_QUERY_PAUSE: Final[int] = default.server.poll  # Backwards compatibility
+DEFAULT_SERVER_POLL: Final[int] = default.server.poll
+"""Default polling interval in seconds between database queries if no tasks are available."""
+
+# Initial value and maximum value for exponential backoff on database queries
+SERVER_POLL_MIN: Final[float] = 0.5
+SERVER_POLL_MAX: Final[float] = 30.0
 
 
 class Scheduler(StateMachine):
@@ -110,33 +117,39 @@ class Scheduler(StateMachine):
 
     tasks: List[Task]
     queue: QueueServer
-    bundle: List[bytes]
+    bundle: Optional[bytes]
 
     bundlesize: int
     attempts: int
     eager: bool
     forever_mode: bool
     restart_mode: bool
+    poll: float
+    poll_max: float
+    startup_phase: bool
+    current_group: Optional[int]
 
     state = SchedulerState.START
     states = SchedulerState
 
-    startup_phase: bool = True
 
     def __init__(self: Scheduler, queue: QueueServer, bundlesize: int = DEFAULT_BUNDLESIZE,
                  attempts: int = DEFAULT_ATTEMPTS, eager: bool = DEFAULT_EAGER_MODE,
-                 forever_mode: bool = False, restart_mode: bool = False) -> None:
+                 forever_mode: bool = False, restart_mode: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL) -> None:
         """Initialize queue and parameters."""
         self.queue = queue
-        self.bundle = []
+        self.tasks = []
+        self.bundle = None
         self.bundlesize = bundlesize
         self.attempts = attempts
         self.eager = eager
         self.forever_mode = forever_mode
         self.restart_mode = restart_mode
-        if self.restart_mode:
-            # NOTE: Halt if everything in the database is already finished
-            self.startup_phase = False
+        self.poll = SERVER_POLL_MIN
+        self.poll_max = poll
+        self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
+        self.current_group = None
 
     @cached_property
     def actions(self: Scheduler) -> Dict[SchedulerState, Callable[[], SchedulerState]]:
@@ -153,17 +166,23 @@ class Scheduler(StateMachine):
         log.debug('Started (scheduler)')
         if self.forever_mode:
             log.info('Scheduler will run forever')
-        task_count = Task.count()
-        tasks_remaining = Task.count_remaining()
-        if task_count > 0:
-            log.warning(f'Database exists ({task_count} previous tasks)')
-            if tasks_remaining == 0:
-                log.warning(f'All tasks completed - did you mean to use the same database?')
+        if (total_tasks := Task.count()) > 0:
+            if (tasks_remaining := Task.count_remaining()) == 0:
+                if self.forever_mode:
+                    log.info(f'All previous tasks completed ({total_tasks:,}) - waiting for new tasks')
+                else:
+                    log.info(f'All previous tasks completed ({total_tasks:,}) - stopping')
+                    return SchedulerState.FINAL
             else:
                 tasks_interrupted = Task.count_interrupted()
-                log.info(f'Found {tasks_remaining} unfinished task(s)')
+                log.info(f'Found {tasks_remaining} unfinished tasks')
                 Task.revert_interrupted()
-                log.info(f'Reverted {tasks_interrupted} previously interrupted task(s)')
+                log.info(f'Reverted {tasks_interrupted} previously interrupted tasks')
+        else:
+            log.info('Empty database - waiting for initial tasks')
+        group_info = Task.current_group()
+        log.debug(f'Starting with task group {group_info.value} ({group_info.reason})')
+        self.current_group = group_info.value
         return SchedulerState.LOAD
 
     def load_bundle(self: Scheduler) -> SchedulerState:
@@ -171,29 +190,47 @@ class Scheduler(StateMachine):
         if check_signal() in (SIGUSR1, SIGUSR2):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
             return SchedulerState.FINAL
-        self.tasks = Task.next(limit=self.bundlesize, attempts=self.attempts, eager=self.eager)
+        self.tasks = Task.next(limit=self.bundlesize,
+                               attempts=self.attempts,
+                               eager=self.eager,
+                               group=self.current_group)
         if self.tasks:
             self.startup_phase = False
+            self.poll = SERVER_POLL_MIN
             return SchedulerState.PACK
-        # An empty database must wait for at least one task
         elif not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0 and not self.startup_phase:
             return SchedulerState.FINAL
         else:
-            time.sleep(DEFAULT_QUERY_PAUSE)
+            group_info = Task.increment_group(self.current_group, attempts=self.attempts)
+            if not group_info.viable:
+                if self.forever_mode:
+                    log.warning(f'Failed task group {group_info.value} ({group_info.reason})')
+                    group_info.reason = f'waiting on failed tasks to be cleared'
+                    # NOTE: Do not halt in this mode
+                else:
+                    log.critical(f'Failed task group {group_info.value} ({group_info.reason})')
+                    return SchedulerState.FINAL
+            elif group_info.value != self.current_group:
+                log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
+                self.current_group = group_info.value
+                return SchedulerState.LOAD
+            self.poll = min(self.poll_max, 2 * self.poll)
+            log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
+            time.sleep(self.poll)
             return SchedulerState.LOAD
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
         """Pack tasks into bundle (list)."""
-        self.bundle = [task.pack() for task in self.tasks]
+        self.bundle = serialize_tasks(self.tasks)
         return SchedulerState.POST
 
     def post_bundle(self: Scheduler) -> SchedulerState:
         """Put bundle on outbound queue."""
         try:
-            self.queue.scheduled.put(self.bundle, timeout=2)
+            self.queue.scheduled.put(self.bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
             log.debug(f'Scheduled {len(self.tasks)} tasks')
             for task in self.tasks:
-                log.debug(f'Scheduled task ({task.id})')
+                log.trace(f'Scheduled task ({task.id})')
             return SchedulerState.LOAD
         except QueueFull:
             return SchedulerState.POST
@@ -208,13 +245,18 @@ class Scheduler(StateMachine):
 class SchedulerThread(Thread):
     """Run scheduler within dedicated thread."""
 
-    def __init__(self: SchedulerThread, queue: QueueServer, bundlesize: int = DEFAULT_BUNDLESIZE,
-                 attempts: int = DEFAULT_ATTEMPTS, eager: bool = DEFAULT_EAGER_MODE,
-                 forever_mode: bool = False, restart_mode: bool = False) -> None:
+    def __init__(self: SchedulerThread,
+                 queue: QueueServer,
+                 bundlesize: int = DEFAULT_BUNDLESIZE,
+                 attempts: int = DEFAULT_ATTEMPTS,
+                 eager: bool = DEFAULT_EAGER_MODE,
+                 forever_mode: bool = False,
+                 restart_mode: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-scheduler')
         self.machine = Scheduler(queue=queue, bundlesize=bundlesize, attempts=attempts, eager=eager,
-                                 forever_mode=forever_mode, restart_mode=restart_mode)
+                                 forever_mode=forever_mode, restart_mode=restart_mode, poll=poll)
 
     def run_with_exceptions(self: SchedulerThread) -> None:
         """Run machine."""
@@ -274,18 +316,21 @@ class Confirm(StateMachine):
     def unload_info(self: Confirm) -> ConfirmState:
         """Get the next task bundle confirmation from shared queue."""
         try:
-            self.client_data = self.queue.confirmed.get(timeout=2)
+            self.client_data = self.queue.confirmed.get(timeout=DEFAULT_REMOTE_TIMEOUT)
             self.queue.confirmed.task_done()
-            return ConfirmState.UNPACK if self.client_data else ConfirmState.FINAL
+            return ConfirmState.UNPACK
         except QueueEmpty:
             return ConfirmState.UNLOAD
 
     def unpack_info(self: Confirm) -> ConfirmState:
         """Unpack received client info."""
-        self.client_info = ClientInfo.unpack(self.client_data)
-        log.debug(f'Confirmed {len(self.client_info.task_ids)} tasks '
-                  f'({self.client_info.client_host}: {self.client_info.client_id})')
-        return ConfirmState.UPDATE
+        self.client_info = ClientInfo.unpack_or_none(self.client_data)
+        if self.client_info is None:
+            return ConfirmState.FINAL
+        else:
+            log.debug(f'Confirmed {len(self.client_info.task_ids)} tasks '
+                      f'({self.client_info.client_host}: {self.client_info.client_id})')
+            return ConfirmState.UPDATE
 
     def update_info(self: Confirm) -> ConfirmState:
         """Update client info in database for confirmed task bundle."""
@@ -332,9 +377,9 @@ class ReceiverState(State, Enum):
 class Receiver(StateMachine):
     """Collect incoming finished task bundles and update database."""
 
-    tasks: List[Task]
     queue: QueueServer
-    bundle: List[bytes]
+    tasks: List[Task]
+    bundle: Optional[bytes]
 
     in_memory: bool
     redirect_failures: IO
@@ -345,7 +390,8 @@ class Receiver(StateMachine):
     def __init__(self: Receiver, queue: QueueServer, in_memory: bool = False, redirect_failures: IO = None) -> None:
         """Initialize receiver."""
         self.queue = queue
-        self.bundle = []
+        self.tasks = []
+        self.bundle = None
         self.in_memory = in_memory
         self.redirect_failures = redirect_failures
 
@@ -368,17 +414,21 @@ class Receiver(StateMachine):
     def unload_bundle(self: Receiver) -> ReceiverState:
         """Get the next bundle from the completed task queue."""
         try:
-            self.bundle = self.queue.completed.get(timeout=2)
+            self.bundle = self.queue.completed.get(timeout=DEFAULT_REMOTE_TIMEOUT)
             self.queue.completed.task_done()
-            return ReceiverState.UNPACK if self.bundle else ReceiverState.FINAL
+            return ReceiverState.UNPACK
         except QueueEmpty:
             log.trace('No completed tasks returned - waiting')
             return ReceiverState.UNLOAD
 
     def unpack_bundle(self: Receiver) -> ReceiverState:
         """Unpack previous bundle into list of tasks."""
-        self.tasks = [Task.unpack(data) for data in self.bundle]
-        return ReceiverState.UPDATE
+        data = deserialize_tasks(self.bundle)
+        if data is None:
+            return ReceiverState.FINAL
+        else:
+            self.tasks = data
+            return ReceiverState.UPDATE
 
     def update_tasks(self: Receiver) -> ReceiverState:
         """Update tasks in database with run details."""
@@ -491,13 +541,14 @@ class HeartMonitor(StateMachine):
     def get_next(self: HeartMonitor) -> HeartbeatState:
         """Get and stash heartbeat from clients."""
         try:
-            hb_data = self.queue.heartbeat.get(timeout=2)
+            hb_data = self.queue.heartbeat.get(timeout=DEFAULT_REMOTE_TIMEOUT)
             self.queue.heartbeat.task_done()
             self.startup_phase = False
-            if not hb_data:
+            hb = Heartbeat.unpack_or_none(hb_data)
+            if hb is None:
                 return HeartbeatState.FINAL
             else:
-                self.latest_heartbeat = Heartbeat.unpack(hb_data)
+                self.latest_heartbeat = hb
                 return HeartbeatState.UPDATE
         except QueueEmpty:
             return HeartbeatState.SWITCH
@@ -564,7 +615,7 @@ class HeartMonitor(StateMachine):
         """Send shutdown signal to all connected clients."""
         log.debug(f'Signaling clients ({len(self.beats)} connected)')
         for hb in self.beats.values():
-            self.queue.scheduled.put(None)
+            self.queue.scheduled.put(make_sentinel())
             log.debug(f'Disconnect requested ({hb.host}: {hb.uuid})')
         self.should_signal = False
         return HeartbeatState.SWITCH
@@ -625,6 +676,24 @@ class ServerThread(Thread):
             A new `source` results in a :class:`~hypershell.submit.SubmitThread` populating
             either the database or the queue directly depending on `in_memory`.
 
+        task_cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_timeout (int, optional):
+            Task-level walltime limit in seconds (default: none).
+
+        bundlesize (int, optional):
+            Size of task bundles. See :const:`DEFAULT_BUNDLESIZE`.
+
+        bundlewait (int, optional):
+            Waiting period before forcing task bundle push.
+            See :const:`~hypershell.submit.DEFAULT_BUNDLEWAIT`.
+
         restart_mode (bool, optional):
             If `source` is empty, this option allows for the server to continue
             with scheduling from the database until complete.
@@ -634,18 +703,15 @@ class ServerThread(Thread):
             Regardless of `source`, if enabled schedule forever.
             Conflicts with `restart_mode` and `in_memory`. Default is `False`.
 
-        bundlesize (int, optional):
-            Size of task bundles. See :const:`DEFAULT_BUNDLESIZE`.
-
-        bundlewait (int, optional):
-            Waiting period before forcing task bundle push.
-            See :const:`~hypershell.submit.DEFAULT_BUNDLEWAIT`.
-
         in_memory (bool, optional):
             If True, revert to basic in-memory queue.
 
         no_confirm (bool, optional):
             If True, do not check for client confirmation messages.
+
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
 
         address (tuple, optional):
             Bind address for server with port number.
@@ -668,6 +734,11 @@ class ServerThread(Thread):
             Period in seconds to wait before evicting clients that miss heartbeats.
             See :const:`DEFAULT_EVICT`.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.server import ServerThread
         >>> server = ServerThread.new(restart_mode=True, auth='my-secret-key')
@@ -680,7 +751,7 @@ class ServerThread(Thread):
     """
 
     queue: QueueServer
-    submitter: Optional[SubmitThread]
+    submitter: Optional[SubmitThread | LiveSubmitThread]
     scheduler: Optional[SchedulerThread]
     confirm: Optional[ConfirmThread]
     receiver: ReceiverThread
@@ -690,10 +761,14 @@ class ServerThread(Thread):
 
     def __init__(self: ServerThread,
                  source: Iterable[str] = None,
+                 task_cores: int = None,
+                 task_memory: int = None,
+                 task_timeout: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  in_memory: bool = False,
                  no_confirm: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
                  address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
@@ -701,7 +776,8 @@ class ServerThread(Thread):
                  max_retries: int = DEFAULT_ATTEMPTS - 1,
                  eager: bool = False,
                  redirect_failures: IO = None,
-                 evict_after: int = DEFAULT_EVICT) -> None:
+                 evict_after: int = DEFAULT_EVICT,
+                 tls: Optional[TLSConfig] = None) -> None:
         """Initialize queue manager and child threads."""
         self.in_memory = in_memory
         self.no_confirm = no_confirm
@@ -710,16 +786,20 @@ class ServerThread(Thread):
             self.in_memory = True
         if self.in_memory and max_retries > 0:
             log.warning('Retries disabled when database disabled')
-        queue_config = QueueConfig(host=address[0], port=address[1], auth=auth, size=config.server.queuesize)
+        queue_config = QueueConfig(host=address[0], port=address[1], auth=auth, size=config.server.queuesize, tls=tls)
         self.queue = QueueServer(config=queue_config)
         if self.in_memory:
             self.scheduler = None
             self.submitter = None if not source else LiveSubmitThread(
-                source, queue_config=queue_config, bundlesize=bundlesize, bundlewait=bundlewait)
+                source, cores=task_cores, memory=task_memory, timeout=task_timeout, queue_config=queue_config,
+                bundlesize=bundlesize, bundlewait=bundlewait)
         else:
-            self.submitter = None if not source else SubmitThread(source, bundlesize=bundlesize, bundlewait=bundlewait)
+            self.submitter = None if not source else SubmitThread(
+                source, cores=task_cores, memory=task_memory, timeout=task_timeout,
+                bundlesize=bundlesize, bundlewait=bundlewait)
             self.scheduler = SchedulerThread(queue=self.queue, bundlesize=bundlesize, attempts=max_retries + 1,
-                                             eager=eager, forever_mode=forever_mode, restart_mode=restart_mode)
+                                             eager=eager, forever_mode=forever_mode, restart_mode=restart_mode,
+                                             poll=poll)
         if self.no_confirm:
             self.confirm = None
         else:
@@ -727,6 +807,7 @@ class ServerThread(Thread):
         self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures)
         self.heartmonitor = HeartMonitorThread(queue=self.queue, evict_after=evict_after,
                                                in_memory=in_memory, no_confirm=no_confirm)
+        log.info(f'Server listening on {address[0]}:{address[1]}')
         super().__init__(name='hypershell-server')
 
     def run_with_exceptions(self: ServerThread) -> None:
@@ -741,13 +822,21 @@ class ServerThread(Thread):
             self.wait_confirm()
         log.debug('Done')
 
+    def start(self: ServerThread) -> None:
+        """Override default start method to wait for queue to be ready."""
+        super().start()
+        while not self.queue:  # None until initialized by __init__()
+            time.sleep(0.1)
+        while not self.queue.ready:
+            time.sleep(0.1)
+
     def start_threads(self: ServerThread) -> None:
         """Start child threads."""
         if self.submitter is not None:
             self.submitter.start()
         if self.scheduler is not None:
             self.scheduler.start()
-        if not self.no_confirm:
+        if self.confirm is not None:
             self.confirm.start()
         self.heartmonitor.start()
         self.receiver.start()
@@ -774,14 +863,14 @@ class ServerThread(Thread):
     def wait_receiver(self: ServerThread) -> None:
         """Wait for receiver to stop."""
         log.trace('Waiting (receiver)')
-        self.queue.completed.put(None)
+        self.queue.completed.put(make_sentinel())
         self.receiver.join()
 
     def wait_confirm(self: ServerThread) -> None:
         """Wait for confirm thread to stop."""
         if not self.no_confirm:
             log.trace('Waiting (confirm)')
-            self.queue.confirmed.put(None)
+            self.queue.confirmed.put(make_sentinel())
             self.confirm.join()
 
     def stop(self: ServerThread, wait: bool = False, timeout: int = None) -> None:
@@ -792,26 +881,31 @@ class ServerThread(Thread):
         if self.scheduler is not None:
             self.scheduler.stop(wait=wait, timeout=timeout)
         self.heartmonitor.stop(wait=wait, timeout=timeout)
-        self.queue.completed.put(None)
+        self.queue.completed.put(make_sentinel())
         self.receiver.stop(wait=wait, timeout=timeout)
         if not self.no_confirm:
-            self.queue.confirmed.put(None)
+            self.queue.confirmed.put(make_sentinel())
             self.confirm.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
 
 
 def serve_from(source: Iterable[str],
                restart_mode: bool = False,
+               task_cores: int = None,
+               task_memory: int = None,
+               task_timeout: int = None,
                bundlesize: int = DEFAULT_BUNDLESIZE,
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                in_memory: bool = False,
                no_confirm: bool = False,
+               poll: int = DEFAULT_SERVER_POLL,
                address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
                max_retries: int = DEFAULT_ATTEMPTS - 1,
                eager: bool = DEFAULT_EAGER_MODE,
                redirect_failures: IO = None,
-               evict_after: int = DEFAULT_EVICT) -> None:
+               evict_after: int = DEFAULT_EVICT,
+               tls: Optional[TLSConfig] = None) -> None:
     """
     Start server with given task `source`, run until complete.
 
@@ -819,10 +913,16 @@ def serve_from(source: Iterable[str],
         source (Iterable[str]):
             Any iterable of command-line tasks.
 
-        restart_mode (bool, optional):
-            If `source` is empty, this option allows for the server to continue
-            with scheduling from the database until complete.
-            Conflicts with `in_memory`. Default is `False`.
+        task_cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_timeout (int, optional):
+            Task-level walltime limit in seconds (default: none).
 
         bundlesize (int, optional):
             Size of task bundles. See :const:`DEFAULT_BUNDLESIZE`.
@@ -831,11 +931,20 @@ def serve_from(source: Iterable[str],
             Waiting period before forcing task bundle push.
             See :const:`~hypershell.submit.DEFAULT_BUNDLEWAIT`.
 
+        restart_mode (bool, optional):
+            If `source` is empty, this option allows for the server to continue
+            with scheduling from the database until complete.
+            Conflicts with `in_memory`. Default is `False`.
+
         in_memory (bool, optional):
             If True, revert to basic in-memory queue.
 
         no_confirm (bool, optional):
             If True, do not check for client confirmation messages.
+
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
 
         address (tuple, optional):
             Bind address for server with port number.
@@ -857,6 +966,11 @@ def serve_from(source: Iterable[str],
         evict_after (int, optional):
             Period in seconds to wait before evicting clients that miss heartbeats.
             See :const:`DEFAULT_EVICT`.
+
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
 
     Example:
         >>> from hypershell.server import serve_from
@@ -867,16 +981,22 @@ def serve_from(source: Iterable[str],
         - :meth:`serve_forever`
     """
     thread = ServerThread.new(source=source,
-                              restart_mode=restart_mode,
+                              task_cores=task_cores,
+                              task_memory=task_memory,
+                              task_timeout=task_timeout,
                               bundlesize=bundlesize,
                               bundlewait=bundlewait,
                               in_memory=in_memory,
                               no_confirm=no_confirm,
-                              address=address, auth=auth,
+                              poll=poll,
+                              address=address,
+                              auth=auth,
+                              restart_mode=restart_mode,
                               max_retries=max_retries,
                               eager=eager,
                               redirect_failures=redirect_failures,
-                              evict_after=evict_after)
+                              evict_after=evict_after,
+                              tls=tls)
     try:
         thread.join()
     except Exception:
@@ -885,16 +1005,21 @@ def serve_from(source: Iterable[str],
 
 
 def serve_file(path: str,
+               task_cores: Optional[int] = None,
+               task_memory: Optional[int] = None,
+               task_timeout: Optional[int] = None,
                bundlesize: int = DEFAULT_BUNDLESIZE,
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                in_memory: bool = False,
                no_confirm: bool = False,
+               poll: int = DEFAULT_SERVER_POLL,
                address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
                max_retries: int = DEFAULT_ATTEMPTS - 1,
                eager: bool = DEFAULT_EAGER_MODE,
-               redirect_failures: IO = None,
+               redirect_failures: Optional[IO] = None,
                evict_after: int = DEFAULT_EVICT,
+               tls: Optional[TLSConfig] = None,
                **file_options) -> None:
     """
     Run server with tasks from a local file `path`, run until complete.
@@ -902,6 +1027,17 @@ def serve_file(path: str,
     Args:
         path (str):
             Path to file containing command-line tasks.
+
+        task_cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        task_timeout (int, optional):
+            Task-level walltime limit in seconds (default: none).
 
         bundlesize (int, optional):
             Size of task bundles. See :const:`DEFAULT_BUNDLESIZE`.
@@ -915,6 +1051,10 @@ def serve_file(path: str,
 
         no_confirm (bool, optional):
             If True, do not check for client confirmation messages.
+
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
 
         address (tuple, optional):
             Bind address for server with port number.
@@ -936,6 +1076,11 @@ def serve_file(path: str,
         evict_after (int, optional):
             Period in seconds to wait before evicting clients that miss heartbeats.
             See :const:`DEFAULT_EVICT`.
+
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
 
     Keyword Args:
         file_options (Any, optional):
@@ -951,27 +1096,34 @@ def serve_file(path: str,
     """
     with open(path, mode='r', **file_options) as stream:
         serve_from(stream,
+                   task_cores=task_cores,
+                   task_memory=task_memory,
+                   task_timeout=task_timeout,
                    bundlesize=bundlesize,
                    bundlewait=bundlewait,
                    in_memory=in_memory,
                    no_confirm=no_confirm,
+                   poll=poll,
                    address=address,
                    auth=auth,
                    max_retries=max_retries,
                    eager=eager,
                    redirect_failures=redirect_failures,
-                   evict_after=evict_after)
+                   evict_after=evict_after,
+                   tls=tls)
 
 
 def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                   in_memory: bool = False,
                   no_confirm: bool = False,
+                  poll: int = DEFAULT_SERVER_POLL,
                   address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                   auth: str = DEFAULT_AUTH,
                   max_retries: int = DEFAULT_ATTEMPTS - 1,
                   eager: bool = DEFAULT_EAGER_MODE,
                   redirect_failures: IO = None,
-                  evict_after: int = DEFAULT_EVICT) -> None:
+                  evict_after: int = DEFAULT_EVICT,
+                  tls: Optional[TLSConfig] = None) -> None:
     """
     Run server forever.
 
@@ -995,6 +1147,10 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
         max_retries (int, optional):
             Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
             See :const:`DEFAULT_EAGER_MODE`.
@@ -1006,6 +1162,11 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
             Period in seconds to wait before evicting clients that miss heartbeats.
             See :const:`DEFAULT_EVICT`.
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.server import serve_forever
         >>> serve_forever(address=('0.0.0.0', 54321), auth='my-secret-key',
@@ -1015,17 +1176,18 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
         - :meth:`serve_from`
         - :meth:`serve_file`
     """
-    thread = ServerThread.new(source=None,
-                              bundlesize=bundlesize,
+    thread = ServerThread.new(bundlesize=bundlesize,
                               in_memory=in_memory,
                               no_confirm=no_confirm,
+                              poll=poll,
                               address=address,
                               auth=auth,
                               redirect_failures=redirect_failures,
                               forever_mode=True,
                               max_retries=max_retries,
                               eager=eager,
-                              evict_after=evict_after)
+                              evict_after=evict_after,
+                              tls=tls)
     try:
         thread.join()
     except Exception:
@@ -1037,7 +1199,9 @@ APP_NAME = 'hs server'
 APP_USAGE = f"""\
 Usage:
   hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]]
-            [-H ADDR] [-p PORT] [-k KEY] [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
+            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] [-Q NUM]
+            [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
+            [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
   Launch server, schedule directly or asynchronously from database.\
 """
@@ -1064,10 +1228,18 @@ Options:
   -H, --bind            ADDR  Bind address (default: {DEFAULT_BIND}).
   -p, --port            NUM   Port number (default: {DEFAULT_PORT}).
   -k, --auth            KEY   Cryptographic key to secure server.
+      --no-tls                Disable TLS for queue interface (not recommended).
+      --tls-key               Path to TLS private key file (default: <auto>).
+      --tls-cert              Path to TLS certificate file (default: <auto>).
+      --tls-ca                Path to TLS CA certificate file (default: <auto>).
       --forever               Schedule forever.
       --restart               Start scheduling from last completed task.
+  -c, --task-cores      NUM   Number of cores to assign each task (default: none).
+  -m, --task-memory     MEM   Memory in bytes to assign each task (default: none).
+  -W, --task-timeout    SEC   Task-level walltime limit in seconds (default: none).
   -b, --bundlesize      NUM   Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait      SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+  -Q, --poll            NUM   Polling interval between database queries if no tasks available.
   -r, --max-retries     NUM   Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
       --eager                 Schedule failed tasks before new tasks.
       --no-db                 Disable database (submit directly to clients).
@@ -1094,16 +1266,26 @@ class ServerApp(Application):
     bundlewait: int = config.submit.bundlewait
     interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
 
+    task_cores: Optional[int] = config.task.cores or None
+    task_memory: Optional[int] = config.task.memory or None
+    task_timeout: Optional[int] = config.task.timeout or None
+    interface.add_argument('-c', '--task-cores', type=int, default=task_cores)
+    interface.add_argument('-m', '--task-memory', type=parse_bytes, default=task_memory)
+    interface.add_argument('-W', '--task-timeout', type=int, default=task_timeout)
+
     eager_mode: bool = config.server.eager
     max_retries: int = config.server.attempts - 1
     interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
-    interface.add_argument('--eager', action='store_true')
+    interface.add_argument('--eager', action='store_true', dest='eager_mode')
 
     forever_mode: bool = False
     interface.add_argument('--forever', action='store_true', dest='forever_mode')
 
     restart_mode: bool = False
     interface.add_argument('--restart', action='store_true', dest='restart_mode')
+
+    poll: int = config.server.poll
+    interface.add_argument('-Q', '--poll', type=int, default=poll)
 
     host: str = config.server.bind
     interface.add_argument('-H', '--bind', default=host, dest='host')
@@ -1129,9 +1311,19 @@ class ServerApp(Application):
     output_interface.add_argument('--print', action='store_true', dest='print_mode')
     output_interface.add_argument('-f', '--failures', default=None, dest='failure_path')
 
+    tls: Optional[TLSConfig] = None
+    tls_enabled: bool = True
+    tls_cert: str = config.server.tls.cert
+    tls_key: str = config.server.tls.key
+    tls_ca: str = config.server.tls.cafile
+    interface.add_argument('--no-tls', action='store_false', dest='tls_enabled')
+    interface.add_argument('--tls-key', default=tls_key)
+    interface.add_argument('--tls-cert', default=tls_cert)
+    interface.add_argument('--tls-ca', default=tls_ca)
+
     # Hidden options used as helpers for shell completion
-    interface.add_argument('--available-ports', action='version',
-                           version='\n'.join(map(str, islice(find_available_ports(), 10))))
+    show_available_ports: bool = False
+    interface.add_argument('--available-ports', action='store_true', dest='show_available_ports')
 
     exceptions = {
         **get_shared_exception_mapping(__name__)
@@ -1139,43 +1331,83 @@ class ServerApp(Application):
 
     def run(self: ServerApp) -> None:
         """Run server."""
+        if self.special_options():
+            return
+        self.check_args()
+        self.enable_tls()
+        ensuredb()
         if self.forever_mode:
             serve_forever(bundlesize=self.bundlesize,
                           address=(self.host, self.port),
                           auth=self.auth,
                           in_memory=self.in_memory,
                           no_confirm=self.no_confirm,
+                          poll=self.poll,
                           max_retries=self.max_retries,
                           eager=self.eager_mode,
                           redirect_failures=self.failure_stream,
-                          evict_after=config.server.evict)
+                          evict_after=config.server.evict,
+                          tls=self.tls)
         else:
             serve_from(source=self.input_stream,
+                       task_cores=self.task_cores,
+                       task_memory=self.task_memory,
+                       task_timeout=self.task_timeout,
                        bundlesize=self.bundlesize,
                        bundlewait=self.bundlewait,
                        address=(self.host, self.port),
                        auth=self.auth,
                        in_memory=self.in_memory,
                        no_confirm=self.no_confirm,
+                       poll=self.poll,
                        restart_mode=self.restart_mode,
                        max_retries=self.max_retries,
                        eager=self.eager_mode,
                        redirect_failures=self.failure_stream,
-                       evict_after=config.server.evict)
+                       evict_after=config.server.evict,
+                       tls=self.tls)
 
-    def check_args(self: ServerApp):
+    def check_args(self: ServerApp) -> None:
         """Fail particular argument combinations."""
         if self.filepath and self.forever_mode:
             raise ArgumentError('Cannot specify both FILE and --forever')
-        if self.filepath is None and not self.forever_mode:
+        if self.filepath and self.restart_mode:
+            raise ArgumentError('Cannot specify both FILE and --restart')
+        if not self.filepath and not self.forever_mode:
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.forever_mode:
             raise ArgumentError('Using --forever with --restart is invalid')
+        if self.auth == DEFAULT_AUTH:
+            raise ArgumentError('Refusing to run server without authentication key')
+        if len(self.auth) < AUTH_MINIMUM_LENGTH:
+            raise ArgumentError(f'Authentication key must be at least {AUTH_MINIMUM_LENGTH} characters')
+        if not AUTH_ALLOWED_CHARS.fullmatch(self.auth):
+            raise ArgumentError(f'Authentication key must contain only "{AUTH_ALLOWED_CHARS.pattern}"')
+        if not self.tls_enabled:
+            log.warning('TLS is disabled - this is not recommended for production!')
+
+    def special_options(self: ServerApp) -> bool:
+        """Special terminating options print information lazily (not import time)."""
+        if self.show_available_ports:
+            print('\n'.join(map(str, islice(find_available_ports(), 10))))
+            return True
+        else:
+            return False
+
+    def enable_tls(self: ServerApp) -> None:
+        """Configure TLS if enabled."""
+        if self.tls_enabled:
+            self.tls = tls_from_namespace({
+                **config.server.tls,
+                'cert': self.tls_cert,
+                'key': self.tls_key,
+                'cafile': self.tls_ca,
+            })
 
     @cached_property
     def input_stream(self: ServerApp) -> Optional[IO]:
         """Input IO stream for task args."""
-        if self.forever_mode or self.restart_mode:
+        if self.forever_mode or self.restart_mode or not self.filepath:
             return None
         else:
             return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')
@@ -1192,8 +1424,6 @@ class ServerApp(Application):
 
     def __enter__(self: ServerApp) -> ServerApp:
         """Ensure context and database ready."""
-        self.check_args()
-        ensuredb()
         return self
 
     def __exit__(self: ServerApp,

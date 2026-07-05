@@ -1,10 +1,60 @@
-# Shell completion definitions (BASH/ZSH, POSIX/Linux)
+# Bash completion for HyperShell (hs, hsx).
+#
+# Dynamic value completion shells out to the `hs` console script
+# (e.g. `hs config get`, `hs list --fields`), so `hs` must be on PATH.
+# See the documentation for installation instructions.
 
+
+# Limit applied to task-id completion queries against the database.
+export _HS_TASK_SEARCH_LIMIT=100
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+# Candidate hostnames from known_hosts and /etc/hosts (plus loopback).
+function _hs_known_hosts() {
+	(
+		echo "localhost"
+		echo "127.0.0.1"
+		echo "0.0.0.0"
+		cat ~/.ssh/known_hosts
+		cat /etc/hosts
+	) 2>/dev/null \
+		| grep -E '^[0-9a-zA-Z]' \
+		| awk '{print $1}' \
+		| sort -u
+}
+
+
+# Complete `key:value` task tags for the given current word.
+# Completes tag keys until a `:` is present, then values for that key.
+function _hs_complete_tags() {
+	local current="$1"
+	case "${current}" in
+		*:*)
+			local key="${current%%:*}" value suggestions=""
+			for value in $(hs list --tag-values "${key}" 2>/dev/null); do
+				suggestions="${suggestions} ${key}:${value}"
+			done
+			COMPREPLY=($(compgen -W "${suggestions}" -- "${current}"))
+			;;
+		*)
+			COMPREPLY=($(compgen -W "$(hs list --tag-keys 2>/dev/null)" -- "${current}"))
+			;;
+	esac
+}
+
+
+# ---------------------------------------------------------------------------
+# Top-level dispatch
+# ---------------------------------------------------------------------------
 
 function _hs() {
 
 	local current="${COMP_WORDS[COMP_CWORD]}"
-	local all_opts="initdb config task submit client server cluster -h --help -v --version --citation"
+	local all_opts="cluster server client submit initdb info wait run list update config -h --help -v --version --citation"
 
 	local i=1 cmd=
 	while [[ "${i}" -lt "${COMP_CWORD}" ]]
@@ -29,7 +79,7 @@ function _hs() {
 	case "${cmd}" in
 		initdb)  _hs_initdb      ;;
 		config)  _hs_config      ;;
-		task)    _hs_task        ;;
+		task)    _hs_task        ;;  # hidden backwards-compatibility group
 		submit)  _hs_submit      ;;
 		server)  _hs_server      ;;
 		client)  _hs_client      ;;
@@ -43,15 +93,31 @@ function _hs() {
 	esac
 }
 
-function _hs_initdb ()
-{
+
+# ---------------------------------------------------------------------------
+# initdb
+# ---------------------------------------------------------------------------
+
+function _hs_initdb() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
-	COMPREPLY=($(compgen -W "-h --help -y --yes -t --truncate" -- "${current}"))
+	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
+
+	case "${previous}" in
+		-b | --backup)
+			COMPREPLY=($(compgen -f -- "${current}"))
+			return
+			;;
+	esac
+
+	COMPREPLY=($(compgen -W "-h --help -y --yes -t --truncate -v --vacuum -r --rotate -b --backup" -- "${current}"))
 }
 
 
-function _hs_config ()
-{
+# ---------------------------------------------------------------------------
+# config (get / set / edit / which)
+# ---------------------------------------------------------------------------
+
+function _hs_config() {
 	local all_opts="get set edit which -h --help --system --user --local"
 
 	local i=1 opt= subcmd_i=
@@ -68,22 +134,10 @@ function _hs_config ()
 
 	local cmd="${COMP_WORDS[subcmd_i]}"
 	case "${cmd}" in
-		get)
-			_hs_config_get
-			return
-			;;
-		set)
-			_hs_config_set
-			return
-			;;
-		edit)
-			_hs_config_edit
-			return
-			;;
-		which)
-			_hs_config_which
-			return
-			;;
+		get)   _hs_config_get   ; return ;;
+		set)   _hs_config_set   ; return ;;
+		edit)  _hs_config_edit  ; return ;;
+		which) _hs_config_which ; return ;;
 	esac
 
 	local current="${COMP_WORDS[COMP_CWORD]}"
@@ -91,14 +145,13 @@ function _hs_config ()
 }
 
 
-function _hs_config_get ()
-{
+function _hs_config_get() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local all_opts="-h --help -x --expand -r --raw --user --system --local --default"
 
 	case "${COMP_CWORD}" in
 		3)
-			COMPREPLY=($(compgen -W ". `hs config get --list-available` ${all_opts}" -- "${current}"))
+			COMPREPLY=($(compgen -W ". $(hs config get --list-available 2>/dev/null) ${all_opts}" -- "${current}"))
 			;;
 		*)
 			COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
@@ -107,14 +160,13 @@ function _hs_config_get ()
 }
 
 
-function _hs_config_set()
-{
+function _hs_config_set() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
 	case "${COMP_CWORD}" in
 		3)
-			COMPREPLY=($(compgen -W "`hs config get --list-available` -h --help" -- "${current}"))
+			COMPREPLY=($(compgen -W "$(hs config get --list-available 2>/dev/null) -h --help" -- "${current}"))
 			;;
 		4)
 			case "${previous}" in
@@ -130,25 +182,27 @@ function _hs_config_set()
 				server.bind)
 					COMPREPLY=($(compgen -W "localhost 127.0.0.1 0.0.0.0" -- "${current}"))
 					;;
-        server.auth)
-          # Generate random 16-digit key
-          local authkey=$(cat /dev/urandom | head -c 1024 | md5sum | head -c 16 | tr '[:lower:]' '[:upper:]')
-          COMPREPLY=($(compgen -W "${authkey}" -- "${current}"))
-          ;;
+				server.auth)
+					# Suggest a random 16-character key
+					local authkey
+					authkey=$(head -c 1024 /dev/urandom | md5sum | head -c 16 | tr '[:lower:]' '[:upper:]')
+					COMPREPLY=($(compgen -W "${authkey}" -- "${current}"))
+					;;
 				autoscale.policy)
 					COMPREPLY=($(compgen -W "fixed dynamic" -- "${current}"))
 					;;
 				console.theme)
-					COMPREPLY=($(compgen -W "`hs config get --list-console-themes`" -- "${current}"))
+					COMPREPLY=($(compgen -W "$(hs config get --list-console-themes 2>/dev/null)" -- "${current}"))
 					;;
 				*)
-					case "`hs config which ${previous} --scope`" in
+					# Fall back to the current value (and the site it comes from)
+					local scope=
+					case "$(hs config which "${previous}" --site 2>/dev/null)" in
 						user)   scope="--user"   ;;
 						system) scope="--system" ;;
-						local)  scope="--local" ;;
-						*)      scope=           ;;
+						local)  scope="--local"  ;;
 					esac
-					COMPREPLY=("'`hs config get ${previous} --raw 2>/dev/null`' ${scope}")
+					COMPREPLY=("'$(hs config get "${previous}" --raw 2>/dev/null)' ${scope}")
 					;;
 			esac
 			;;
@@ -159,14 +213,12 @@ function _hs_config_set()
 }
 
 
-function _hs_config_which ()
-{
+function _hs_config_which() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
-	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
 	case "${COMP_CWORD}" in
 		3)
-			COMPREPLY=($(compgen -W ". `hs config get --list-available` -h --help --site" -- "${current}"))
+			COMPREPLY=($(compgen -W ". $(hs config get --list-available 2>/dev/null) -h --help --site" -- "${current}"))
 			;;
 		*)
 			COMPREPLY=($(compgen -W "-h --help --site" -- "${current}"))
@@ -175,15 +227,17 @@ function _hs_config_which ()
 }
 
 
-function _hs_config_edit ()
-{
+function _hs_config_edit() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	COMPREPLY=($(compgen -W "-h --help --user --system --local" -- "${current}"))
 }
 
 
-function _hs_task ()
-{
+# ---------------------------------------------------------------------------
+# task (backwards-compatibility group: `hs task <sub>`)
+# ---------------------------------------------------------------------------
+
+function _hs_task() {
 	local i=1 opt= subcmd_i=
 	while [[ ${i} -lt ${COMP_CWORD} ]]; do
 		opt="${COMP_WORDS[i]}"
@@ -198,170 +252,116 @@ function _hs_task ()
 
 	local cmd="${COMP_WORDS[subcmd_i]}"
 	case "${cmd}" in
-		submit)
-			_hs_task_submit
-			return
-			;;
-		info)
-			_hs_task_info
-			return
-			;;
-		wait)
-			_hs_task_wait
-			return
-			;;
-		run)
-			_hs_task_run
-			return
-			;;
-		search)
-			_hs_task_search
-			return
-			;;
-		update)
-			_hs_task_update
-			return
-			;;
+		submit) _hs_task_submit ; return ;;
+		info)   _hs_task_info   ; return ;;
+		wait)   _hs_task_wait   ; return ;;
+		run)    _hs_task_run    ; return ;;
+		search) _hs_task_search ; return ;;
+		update) _hs_task_update ; return ;;
 	esac
 
 	local current="${COMP_WORDS[COMP_CWORD]}"
-	COMPREPLY=($(compgen -W "submit info wait run update search -h --help" -- "$current"))
+	COMPREPLY=($(compgen -W "submit info wait run search update -h --help" -- "$current"))
 }
 
 
-function _hs_task_submit ()
-{
+function _hs_task_submit() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
-	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
 	local i=1 opt= active_collector=none
-
 	while [[ ${i} -lt ${COMP_CWORD} ]]; do
 		opt="${COMP_WORDS[i]}"
 		case "${opt}" in
-			--)            active_collector=--   ; break;;
-			-t | --tag)    active_collector=tag         ;;
-			-*)            active_collector=none        ;;
+			--)         active_collector=-- ; break;;
+			-t | --tag) active_collector=tag       ;;
+			-*)         active_collector=none      ;;
 		esac
 		(( i++ ))
 	done
 
 	case "${active_collector}" in
-		--)
-			COMPREPLY=()
-			return
-			;;
-		tag)
-			case "${current}" in
-				*:)
-					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
-					;;
-				*)
-					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
-					;;
-			esac
-			return
-			;;
+		--)  COMPREPLY=(); return ;;
+		tag) _hs_complete_tags "${current}"; return ;;
 	esac
 
 	COMPREPLY=($(compgen -W "-h --help -t --tag --" -- "${current}"))
 }
 
 
-# Limit applied to completion search of database
-export _HS_TASK_SEARCH_LIMIT=100
-
-
-function _hs_task_info ()
-{
+function _hs_task_info() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
-	case "${COMP_CWORD}" in
-		3)
-			COMPREPLY=($(compgen -W "`hs list id -l ${_HS_TASK_SEARCH_LIMIT} 2>/dev/null`" -- "${current}"))
+	case "${previous}" in
+		-f | --format)
+			COMPREPLY=($(compgen -W "normal json yaml" -- "${current}"))
+			return
 			;;
-		*)
-			case "${previous}" in
-				-f | --format)
-					COMPREPLY=($(compgen -W "normal yaml json" -- "${current}"))
-					;;
-				-x | --extract)
-					COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
-					;;
-				*)
-					COMPREPLY=($(compgen -W "-h --help -f --format --yaml --json -x --extract --stdout --stderr" -- "${current}"))
-					;;
-			esac
+		-x | --extract)
+			COMPREPLY=($(compgen -W "$(hs list --fields 2>/dev/null)" -- "${current}"))
+			return
 			;;
 	esac
+
+	# First positional is the task UUID; keying on the subcommand word works for
+	# both `hs info <id>` and `hs task info <id>`. Options still win when typing '-'.
+	if [[ "${current}" != -* && "${previous}" == "info" ]]; then
+		COMPREPLY=($(compgen -W "$(hs list id -l ${_HS_TASK_SEARCH_LIMIT} 2>/dev/null)" -- "${current}"))
+		return
+	fi
+
+	COMPREPLY=($(compgen -W "-h --help -f --format --yaml --json -x --extract --stdout --stderr --perf -i --ignore-partitions" -- "${current}"))
 }
 
 
-function _hs_task_wait ()
-{
+function _hs_task_wait() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
-	case "${COMP_CWORD}" in
-		3)
-			COMPREPLY=($(compgen -W "`hs list id -l ${_HS_TASK_SEARCH_LIMIT} 2>/dev/null`" -- "${current}"))
+	case "${previous}" in
+		-n | --interval)
+			COMPREPLY=($(compgen -W "5 10 30 60" -- "${current}"))
+			return
 			;;
-		*)
-			case "${previous}" in
-				-n | --interval)
-					COMPREPLY=($(compgen -W "`seq 9`" -- "${current}"))
-					;;
-				-f | --format)
-					COMPREPLY=($(compgen -W "normal json yaml" -- "${current}"))
-					;;
-				*)
-					COMPREPLY=($(compgen -W "-h --help -f --format --yaml --json -s --status -r --return" -- "${current}"))
-					;;
-			esac
+		-f | --format)
+			COMPREPLY=($(compgen -W "normal json yaml" -- "${current}"))
+			return
 			;;
 	esac
+
+	# First positional is the task UUID (see _hs_task_info).
+	if [[ "${current}" != -* && "${previous}" == "wait" ]]; then
+		COMPREPLY=($(compgen -W "$(hs list id -l ${_HS_TASK_SEARCH_LIMIT} 2>/dev/null)" -- "${current}"))
+		return
+	fi
+
+	COMPREPLY=($(compgen -W "-h --help -n --interval -i --info -f --format --yaml --json -s --status -r --return" -- "${current}"))
 }
 
 
-function _hs_task_run ()
-{
+function _hs_task_run() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
 	local i=1 opt= active_collector=none
-
 	while [[ ${i} -lt ${COMP_CWORD} ]]; do
 		opt="${COMP_WORDS[i]}"
 		case "${opt}" in
-			--)            active_collector=--   ; break;;
-			-t | --tag)    active_collector=tag         ;;
-			-*)            active_collector=none        ;;
+			--)         active_collector=-- ; break;;
+			-t | --tag) active_collector=tag       ;;
+			-*)         active_collector=none      ;;
 		esac
 		(( i++ ))
 	done
 
 	case "${active_collector}" in
-		--)
-			COMPREPLY=()
-			return
-			;;
-		tag)
-			case "${current}" in
-				*:)
-					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
-					;;
-				*)
-					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
-					;;
-			esac
-			return
-			;;
+		--)  COMPREPLY=($(compgen -c -- "${current}")); return ;;
+		tag) _hs_complete_tags "${current}"; return ;;
 	esac
 
 	case "${previous}" in
 		-n | --interval)
-			COMPREPLY=($(compgen -W "10 30 60" -- "${current}"))
+			COMPREPLY=($(compgen -W "5 10 30 60" -- "${current}"))
 			return
 			;;
 	esac
@@ -370,51 +370,44 @@ function _hs_task_run ()
 }
 
 
-function _hs_task_search ()
-{
+function _hs_task_search() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
-	local i=1 opt= active_collector=none
+	local all_opts="-h --help -w --where -t --with-tag -g --group -s --order-by --desc
+	-F --failed -C --completed -S --succeeded -R --remaining --retries
+	-f --format --csv --json -d --delimiter -l --limit -c --count
+	-i --ignore-partitions --fields --tag-keys --tag-values"
 
+	local i=1 opt= active_collector=none
 	while [[ ${i} -lt ${COMP_CWORD} ]]; do
 		opt="${COMP_WORDS[i]}"
 		case "${opt}" in
-			--)            active_collector=--;   break;;
-			-t | --tag)    active_collector=tag   ;;
-			-w | --where)  active_collector=where ;;
-			-*)            active_collector=none  ;;
+			-t | --with-tag) active_collector=tag   ;;
+			-w | --where)    active_collector=where ;;
+			-*)              active_collector=none  ;;
 		esac
 		(( i++ ))
 	done
 
-	local all_opts="-h --help -w --where -t --with-tag -s --order-by --desc -F --failed -C
-	--completed -S --succeeded -R --remaining -f --format --csv --json -d --delimiter
-	-l --limit -c --count -i --ignore-partitions --fields --tag-keys --tag-values --"
-
 	case "${active_collector}" in
-		-- | where)
-			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
+		where)
+			COMPREPLY=($(compgen -W "$(hs list --fields 2>/dev/null)" -- "${current}"))
 			return
 			;;
 		tag)
-			case "${current}" in
-				*:)
-					#echo "`hs list --tag-values ${current::-1} 2>/dev/null`" 1>&2
-					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
-					return
-					;;
-				*)
-					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
-					return
-					;;
-			esac
+			_hs_complete_tags "${current}"
+			return
 			;;
 	esac
 
 	case "${previous}" in
 		-s | --order-by)
-			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "$(hs list --fields 2>/dev/null)" -- "${current}"))
+			return
+			;;
+		-g | --group)
+			COMPREPLY=($(compgen -W "0 1 2 3" -- "${current}"))
 			return
 			;;
 		-f | --format)
@@ -426,43 +419,32 @@ function _hs_task_search ()
 			return
 			;;
 		-l | --limit)
-			COMPREPLY=($(compgen -W "10 20 30 40 50 100" -- "${current}"))
+			COMPREPLY=($(compgen -W "10 20 50 100 500 1000" -- "${current}"))
+			return
+			;;
+		--tag-values)
+			COMPREPLY=($(compgen -W "$(hs list --tag-keys 2>/dev/null)" -- "${current}"))
 			return
 			;;
 	esac
 
-	COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null` ${all_opts}" -- "${current}"))
+	COMPREPLY=($(compgen -W "$(hs list --fields 2>/dev/null) ${all_opts}" -- "${current}"))
 }
 
 
-function _hs_task_update ()
-{
+function _hs_task_update() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
-	local i=1 opt= active_collector=none
+	local all_opts="-h --help -w --where -t --with-tag -g --group -s --order-by --desc
+	--cancel --revert --delete --remove-tag -F --failed -C --completed -S --succeeded
+	-R --remaining --retries -l --limit -f --no-confirm --"
 
-	while [[ ${i} -lt ${COMP_CWORD} ]]; do
-		opt="${COMP_WORDS[i]}"
-		case "${opt}" in
-			--)            active_collector=--;     break;;
-			-t | --tag)    active_collector=tag          ;;
-			--remove-tag)  active_collector=remove-tag   ;;
-			-w | --where)  active_collector=where        ;;
-			-*)            active_collector=none         ;;
-		esac
-		(( i++ ))
-	done
-
-	local all_opts="-h --help -w --where -t --with-tag -s --order-by --desc
-	--cancel --revert --delete --remove-tag -F --failed -C
-	--completed -S --succeeded -R --remaining -l --limit -f --no-confirm --"
-
-	local pos_args=
+	local pos_args= opt= tag=
 	for opt in $(hs list --fields 2>/dev/null)
 	do
 		case "${opt}" in
-			id) ;;  # We do not allow modifying the 'id' field
+			id) ;;  # the 'id' field cannot be modified
 			*) pos_args="${pos_args} ${opt}=";;
 		esac
 	done
@@ -471,33 +453,41 @@ function _hs_task_update ()
 		pos_args="${pos_args} ${tag}:"
 	done
 
+	local i=1 active_collector=none
+	while [[ ${i} -lt ${COMP_CWORD} ]]; do
+		opt="${COMP_WORDS[i]}"
+		case "${opt}" in
+			--)              active_collector=-- ; break;;
+			-t | --with-tag) active_collector=tag        ;;
+			--remove-tag)    active_collector=remove-tag ;;
+			-w | --where)    active_collector=where      ;;
+			-*)              active_collector=none       ;;
+		esac
+		(( i++ ))
+	done
+
 	case "${active_collector}" in
 		--)
-		    COMPREPLY=($(compgen -W "${pos_args}" -- "${current}"))
-		    return
-		    ;;
-
+			COMPREPLY=($(compgen -W "${pos_args}" -- "${current}"))
+			return
+			;;
 		where)
-			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "$(hs list --fields 2>/dev/null)" -- "${current}"))
 			return
 			;;
 		tag | remove-tag)
-			case "${current}" in
-				*:)
-					COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}"))
-					return
-					;;
-				*)
-					COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}"))
-					return
-					;;
-			esac
+			_hs_complete_tags "${current}"
+			return
 			;;
 	esac
 
 	case "${previous}" in
 		-s | --order-by)
-			COMPREPLY=($(compgen -W "`hs list --fields 2>/dev/null`" -- "${current}"))
+			COMPREPLY=($(compgen -W "$(hs list --fields 2>/dev/null)" -- "${current}"))
+			return
+			;;
+		-g | --group)
+			COMPREPLY=($(compgen -W "0 1 2 3" -- "${current}"))
 			return
 			;;
 		-l | --limit)
@@ -510,317 +500,236 @@ function _hs_task_update ()
 }
 
 
-function _hs_submit ()
-{
+# ---------------------------------------------------------------------------
+# submit
+# ---------------------------------------------------------------------------
+
+function _hs_submit() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -f --task-file -t --template --tag -b --bundlesize -w --bundlewait --init-db --"
+	local all_opts="-h --help -f --task-file -q --queue -H --host -p --port -k --auth
+	--no-tls --tls-key --tls-cert --tls-ca --template -t --tag -b --bundlesize -w --bundlewait
+	-c --cores -m --memory -W --timeout -g --group --initdb --"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
 		case "${current}" in
-			-*)
-				COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
-				;;
-			*)
-				COMPREPLY=($(compgen -f -- "${current}"))
-				;;
+			-*) COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"));;
+			*)  COMPREPLY=($(compgen -f -- "${current}"));;
 		esac
 		return
 	fi
 
 	local i=1 opt= active_collector=none
-
 	while [[ ${i} -lt ${COMP_CWORD} ]]; do
 		opt="${COMP_WORDS[i]}"
 		case "${opt}" in
-			--)            active_collector=--   ; break;;
-			-t | --tag)    active_collector=tag         ;;
-			-*)            active_collector=none        ;;
+			--)         active_collector=-- ; break;;
+			-t | --tag) active_collector=tag       ;;
+			-*)         active_collector=none      ;;
 		esac
 		(( i++ ))
 	done
 
 	case "${active_collector}" in
-		--)
-			COMPREPLY=($(compgen -f -- "${current}"))
-			return
-			;;
-		tag)
-			case "${current}" in
-				*:) COMPREPLY=($(compgen -W "`hs list --tag-values ${current::-1} 2>/dev/null`" -- "${current}")) ;;
-				*)  COMPREPLY=($(compgen -W "`hs list --tag-keys 2>/dev/null`" -- "${current}")) ;;
-			esac
-			return
-			;;
+		--)  COMPREPLY=($(compgen -f -- "${current}")); return ;;
+		tag) _hs_complete_tags "${current}"; return ;;
 	esac
 
 	case "${previous}" in
-		-b | --bundlesize)
-			COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}"))
-			return
-			;;
-		-w | --bundlewait)
-			COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}"))
-			return
-			;;
-		--template)
-			COMPREPLY=()  # No completion available for command templates
-			return
-			;;
-		-f | --task-file)
-		    COMPREPLY=($(compgen -f -- "${current}"))
-		    return
-		    ;;
+		-f | --task-file | --tls-key | --tls-cert | --tls-ca)
+			COMPREPLY=($(compgen -f -- "${current}")); return ;;
+		-b | --bundlesize) COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}")); return ;;
+		-w | --bundlewait) COMPREPLY=($(compgen -W "5 10 30 60 600" -- "${current}")); return ;;
+		-c | --cores)      COMPREPLY=($(compgen -W "1 2 4 8 16 32" -- "${current}")); return ;;
+		-m | --memory)     COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}")); return ;;
+		-W | --timeout)    COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}")); return ;;
+		-g | --group)      COMPREPLY=($(compgen -W "0 1 2 3" -- "${current}")); return ;;
+		--template)        COMPREPLY=(); return ;;
+		-H | --host)       COMPREPLY=($(compgen -W "$(_hs_known_hosts)" -- "${current}")); return ;;
+		-p | --port)       COMPREPLY=($(compgen -W "$(hs config get server.port --raw 2>/dev/null)" -- "${current}")); return ;;
+		-k | --auth)       COMPREPLY=($(compgen -W "$(hs config get server.auth --raw 2>/dev/null)" -- "${current}")); return ;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
 }
 
 
-function _hs_client ()
-{
+# ---------------------------------------------------------------------------
+# client
+# ---------------------------------------------------------------------------
+
+function _hs_client() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -N --num-tasks -t --template -b --bundlesize -w --bundlewait
-	-H --host -p --port -k --auth -d --delay-start --no-confirm -o --output -e --errors -c --capture
-	-T --timeout -W --task-timeout"
+	local all_opts="-h --help -N --num-threads -t --template -b --bundlesize -w --bundlewait
+	-H --host -p --port -k --auth --no-tls --tls-key --tls-cert --tls-ca
+	-d --delay-start --no-confirm -o --output -e --errors --capture
+	-C --client-cores -M --client-memory --monitor
+	-T --timeout -W --task-timeout -R --ratelimit -S --signalwait"
 
 	case "${previous}" in
-		-N | --num-tasks)
-			COMPREPLY=($(compgen -W "1 $(seq 2 2 `hs client --available-cores`)" -- "${current}"))
-			return
-			;;
-		-b | --bundlesize)
-			COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}"))
-			return
-			;;
-		-w | --bundlewait)
-			COMPREPLY=($(compgen -W "10 60 600" -- "${current}"))
-			return
-			;;
-		-t | --template)
-			COMPREPLY=()  # No completion available for command templates
-			return
-			;;
-		-H | --host)
-			COMPREPLY=($(compgen -W "`_hs_known_hosts`" -- "${current}"))
-			return
-			;;
-		-p | --port)
-			# Just populate using the config (default if not configured)
-			# Probably not what the client needs but at least it shows an integer
-			COMPREPLY=($(compgen -W "`hs config get server.port --raw 2>/dev/null`" -- "${current}"))
-			return
-			;;
-		-k | --auth)
-			# We cannot know what the server-side key is so just populate from configuration
-			COMPREPLY=($(compgen -W "`hs config get server.auth --raw 2>/dev/null`" -- "${current}"))
-			return
-			;;
-		-d | --delay-start)
-			COMPREPLY=($(compgen -W "30 60 600 -60 -600" -- "${current}"))
-			return
-			;;
-		-o | --output | -e | --errors)
-			COMPREPLY=($(compgen -f -- "${current}"))
-			return
-			;;
-		-T | --timeout | -W | --task-timeout)
-			COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}"))
-			return
-			;;
+		-o | --output | -e | --errors | --tls-key | --tls-cert | --tls-ca)
+			COMPREPLY=($(compgen -f -- "${current}")); return ;;
+		-N | --num-threads)
+			COMPREPLY=($(compgen -W "0 1 $(seq 2 2 "$(hs client --available-cores 2>/dev/null)" 2>/dev/null)" -- "${current}")); return ;;
+		-C | --client-cores)
+			COMPREPLY=($(compgen -W "1 $(seq 2 2 "$(hs client --available-cores 2>/dev/null)" 2>/dev/null)" -- "${current}")); return ;;
+		-M | --client-memory)
+			COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}")); return ;;
+		-b | --bundlesize)  COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}")); return ;;
+		-w | --bundlewait)  COMPREPLY=($(compgen -W "5 10 30 60 600" -- "${current}")); return ;;
+		-t | --template)    COMPREPLY=(); return ;;
+		-H | --host)        COMPREPLY=($(compgen -W "$(_hs_known_hosts)" -- "${current}")); return ;;
+		-p | --port)        COMPREPLY=($(compgen -W "$(hs config get server.port --raw 2>/dev/null)" -- "${current}")); return ;;
+		-k | --auth)        COMPREPLY=($(compgen -W "$(hs config get server.auth --raw 2>/dev/null)" -- "${current}")); return ;;
+		-d | --delay-start) COMPREPLY=($(compgen -W "30 60 600 -60 -600" -- "${current}")); return ;;
+		-T | --timeout)     COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}")); return ;;
+		-W | --task-timeout) COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}")); return ;;
+		-S | --signalwait)  COMPREPLY=($(compgen -W "1 5 10" -- "${current}")); return ;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
 }
 
 
-function _hs_known_hosts()
-{
-	(\
-		echo "localhost"; \
-		echo "127.0.0.1"; \
-		echo "0.0.0.0"; \
-		cat ~/.ssh/known_hosts; \
-		cat /etc/hosts \
-	) 2>/dev/null \
-		| grep -E '^[0-9a-zA-Z]' \
-		| awk '{print $1}' \
-		| sort -u
-}
+# ---------------------------------------------------------------------------
+# server
+# ---------------------------------------------------------------------------
 
-
-function _hs_server ()
-{
+function _hs_server() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 	local all_opts="-h --help --forever --restart -H --bind -p --port -k --auth
-	--no-db --no-confirm --initdb -f --failures --print
-	-b --bundlesize -w --bundlewait -r --max-retries --eager"
+	--no-tls --tls-key --tls-cert --tls-ca --no-db --no-confirm --initdb
+	-f --failures --print -b --bundlesize -w --bundlewait -r --max-retries --eager
+	-Q --poll -c --task-cores -m --task-memory -W --task-timeout"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
 		case "${current}" in
-			-*)
-				COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
-				;;
-			*)
-				COMPREPLY=($(compgen -f -- "${current}"))
-				;;
+			-*) COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"));;
+			*)  COMPREPLY=($(compgen -f -- "${current}"));;
 		esac
 		return
 	fi
 
 	case "${previous}" in
-		-b | --bundlesize)
-			COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}"))
-			return
-			;;
-		-w | --bundlewait)
-			COMPREPLY=($(compgen -W "10 60 600" -- "${current}"))
-			return
-			;;
-		-H | --bind)
-			COMPREPLY=($(compgen -W "localhost 127.0.0.1 0.0.0.0" -- "${current}"))
-			return
-			;;
-		-p | --port)
-			COMPREPLY=($(compgen -W "`hs server --available-ports 2>/dev/null`" -- "${current}"))
-			return
-			;;
+		-f | --failures | --tls-key | --tls-cert | --tls-ca)
+			COMPREPLY=($(compgen -f -- "${current}")); return ;;
+		-b | --bundlesize)   COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}")); return ;;
+		-w | --bundlewait)   COMPREPLY=($(compgen -W "5 10 30 60 600" -- "${current}")); return ;;
+		-H | --bind)         COMPREPLY=($(compgen -W "localhost 127.0.0.1 0.0.0.0" -- "${current}")); return ;;
+		-p | --port)         COMPREPLY=($(compgen -W "$(hs server --available-ports 2>/dev/null)" -- "${current}")); return ;;
 		-k | --auth)
-			# Generate random 16-digit key
-			local authkey=$(cat /dev/urandom | head -c 1024 | md5sum | head -c 16 | tr '[:lower:]' '[:upper:]')
-			COMPREPLY=($(compgen -W "${authkey}" -- "${current}"))
-			return
-			;;
-		-f | --failures)
-			COMPREPLY=($(compgen -f -- "${current}"))
-			return
-			;;
-		-r | --max-retries)
-			COMPREPLY=($(compgen -W "1 2 3 4 5 6" -- "${current}"))
-			return
-			;;
+			local authkey
+			authkey=$(head -c 1024 /dev/urandom | md5sum | head -c 16 | tr '[:lower:]' '[:upper:]')
+			COMPREPLY=($(compgen -W "${authkey}" -- "${current}")); return ;;
+		-r | --max-retries)  COMPREPLY=($(compgen -W "1 2 3 4 5 6" -- "${current}")); return ;;
+		-Q | --poll)         COMPREPLY=($(compgen -W "1 2 5 10" -- "${current}")); return ;;
+		-c | --task-cores)   COMPREPLY=($(compgen -W "1 2 4 8 16 32" -- "${current}")); return ;;
+		-m | --task-memory)  COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}")); return ;;
+		-W | --task-timeout) COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}")); return ;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
 }
 
 
-function _hs_cluster ()
-{
+# ---------------------------------------------------------------------------
+# cluster (also reached via `hsx`)
+# ---------------------------------------------------------------------------
+
+function _hs_cluster() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-N --num-tasks -t --template -p --port -b --bundlesize -w --bundlewait
-	-r --max-retries --eager --no-db --initdb --no-confirm --forever --restart --ssh-args --ssh-group
-	-E --env --remote-exe -d --delay-start -c --capture -o --output -e --errors -f --failures
-	-T --timeout -W --task-timeout -A --autoscaling -F --factor -P --period -I --init-size
-	-X --min-size -Y --max-size -h --help"
+	local all_opts="-h --help -N --num-threads -t --template -H --bind -p --port
+	--no-tls --tls-key --tls-cert --tls-ca -b --bundlesize -w --bundlewait
+	-r --max-retries --eager -Q --poll --no-db --initdb --no-confirm --forever --restart
+	--ssh --mpi --launcher --ssh-args --ssh-group -E --env --remote-exe
+	-d --delay-start --capture -o --output -e --errors -f --failures
+	-c --cores -m --memory -C --client-cores -M --client-memory --monitor
+	-T --timeout -W --task-timeout -R --ratelimit -S --signalwait
+	-A --autoscaling -F --factor -P --period -I --init-size -X --min-size -Y --max-size"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
 		case "${current}" in
-			-*)
-				COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
-				;;
-			*)
-				COMPREPLY=($(compgen -f -- "${current}"))
-				;;
+			-*) COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"));;
+			*)  COMPREPLY=($(compgen -f -- "${current}"));;
 		esac
 		return
 	fi
 
 	local i=1 opt= active_collector=none
-
 	while [[ ${i} -lt ${COMP_CWORD} ]]; do
 		opt="${COMP_WORDS[i]}"
 		case "${opt}" in
-			--)       active_collector=--   ; break;;
-			-*)       active_collector=none        ;;
+			--) active_collector=-- ; break;;
+			-*) active_collector=none      ;;
 		esac
 		(( i++ ))
 	done
 
-	case "${active_collector}" in
-		--)
-			COMPREPLY=($(compgen -f -- "${current}"))
-			return
-			;;
-	esac
+	if [[ "${active_collector}" == "--" ]]; then
+		COMPREPLY=($(compgen -f -- "${current}"))
+		return
+	fi
 
 	case "${previous}" in
-		-N | --num-tasks)
-			COMPREPLY=($(compgen -W "1 $(seq 2 2 `hs client --available-cores`)" -- "${current}"))
-			return
-			;;
-		-t | --template | --ssh-args | --remote-exe)
-			COMPREPLY=()  # No completion available for command templates or ssh options
-			return
-			;;
-		-p | --port)
-			COMPREPLY=($(compgen -W "`hs server --available-ports 2>/dev/null`" -- "${current}"))
-			return
-			;;
-		--ssh-group)
-			COMPREPLY=($(compgen -W "`hs client --available-ssh-groups 2>/dev/null`" -- "${current}"))
-			return
-			;;
-		-b | --bundlesize)
-			COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}"))
-			return
-			;;
-		-w | --bundlewait)
-			COMPREPLY=($(compgen -W "10 60 600" -- "${current}"))
-			return
-			;;
-		-r | --max-retries)
-			COMPREPLY=($(compgen -W "1 2 3 4 5 6" -- "${current}"))
-			return
-			;;
-		-d | --delay-start)
-			COMPREPLY=($(compgen -W "30 60 600 -60 -600" -- "${current}"))
-			return
-			;;
-		-o | --output | -e | --errors | -f | --failures)
-			COMPREPLY=($(compgen -f -- "${current}"))
-			return
-			;;
-		-T | --timeout | -W | --task-timeout)
-			COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}"))
-			return
-			;;
-		-A | --autoscaling)
-			COMPREPLY=($(compgen -W "fixed dynamic" -- "${current}"))
-			return
-			;;
-		-F | --factor)
-			COMPREPLY=($(compgen -W "1 2 3 4 5" -- "${current}"))
-			return
-			;;
-		-P | --period)
-			COMPREPLY=($(compgen -W "30 60 300 600" -- "${current}"))
-			return
-			;;
+		-o | --output | -e | --errors | -f | --failures | --tls-key | --tls-cert | --tls-ca)
+			COMPREPLY=($(compgen -f -- "${current}")); return ;;
+		-N | --num-threads)
+			COMPREPLY=($(compgen -W "0 1 $(seq 2 2 "$(hs client --available-cores 2>/dev/null)" 2>/dev/null)" -- "${current}")); return ;;
+		-c | --cores)        COMPREPLY=($(compgen -W "1 2 4 8 16 32" -- "${current}")); return ;;
+		-m | --memory)       COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}")); return ;;
+		-C | --client-cores)
+			COMPREPLY=($(compgen -W "1 $(seq 2 2 "$(hs client --available-cores 2>/dev/null)" 2>/dev/null)" -- "${current}")); return ;;
+		-M | --client-memory) COMPREPLY=($(compgen -W "1GB 2GB 4GB 8GB 16GB 32GB" -- "${current}")); return ;;
+		-t | --template | --ssh-args | --remote-exe | --launcher)
+			COMPREPLY=(); return ;;
+		-H | --bind)         COMPREPLY=($(compgen -W "localhost 127.0.0.1 0.0.0.0" -- "${current}")); return ;;
+		-p | --port)         COMPREPLY=($(compgen -W "$(hs server --available-ports 2>/dev/null)" -- "${current}")); return ;;
+		--ssh)               COMPREPLY=($(compgen -W "$(_hs_known_hosts)" -- "${current}")); return ;;
+		--ssh-group)         COMPREPLY=($(compgen -W "$(hs client --available-ssh-groups 2>/dev/null)" -- "${current}")); return ;;
+		-b | --bundlesize)   COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}")); return ;;
+		-w | --bundlewait)   COMPREPLY=($(compgen -W "5 10 30 60 600" -- "${current}")); return ;;
+		-r | --max-retries)  COMPREPLY=($(compgen -W "1 2 3 4 5 6" -- "${current}")); return ;;
+		-Q | --poll)         COMPREPLY=($(compgen -W "1 2 5 10" -- "${current}")); return ;;
+		-d | --delay-start)  COMPREPLY=($(compgen -W "30 60 600 -60 -600" -- "${current}")); return ;;
+		-T | --timeout)      COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}")); return ;;
+		-W | --task-timeout) COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}")); return ;;
+		-S | --signalwait)   COMPREPLY=($(compgen -W "1 5 10" -- "${current}")); return ;;
+		-A | --autoscaling)  COMPREPLY=($(compgen -W "fixed dynamic" -- "${current}")); return ;;
+		-F | --factor)       COMPREPLY=($(compgen -W "1 2 3 4 5" -- "${current}")); return ;;
+		-P | --period)       COMPREPLY=($(compgen -W "30 60 300 600" -- "${current}")); return ;;
 		-I | --init-size | -X | --min-size)
-			COMPREPLY=($(compgen -W "0 1" -- "${current}"))
-			return
-			;;
-		-Y | --max-size)
-			COMPREPLY=($(compgen -W "1 2 5" -- "${current}"))
-			return
-			;;
+			COMPREPLY=($(compgen -W "0 1" -- "${current}")); return ;;
+		-Y | --max-size)     COMPREPLY=($(compgen -W "1 2 5 10 20" -- "${current}")); return ;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
 }
 
+
+# hsx is shorthand for `hs cluster`. Splice the implied `cluster` word so the
+# indices line up with what _hs_cluster expects, then delegate.
+function _hsx() {
+	COMP_WORDS=("${COMP_WORDS[0]}" "cluster" "${COMP_WORDS[@]:1}")
+	(( COMP_CWORD++ ))
+	_hs_cluster
+}
+
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+
 if [[ "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 || "${BASH_VERSINFO[0]}" -gt 4 ]]
 then
-    complete -F _hs -o nosort -o bashdefault -o default hs
-    complete -F _hs -o nosort -o bashdefault -o default hyper-shell
+	complete -F _hs  -o nosort -o bashdefault -o default hs
+	complete -F _hsx -o nosort -o bashdefault -o default hsx
 else
-    complete -F _hs -o bashdefault -o default hs
-    complete -F _hs -o bashdefault -o default hyper-shell
+	complete -F _hs  -o bashdefault -o default hs
+	complete -F _hsx -o bashdefault -o default hsx
 fi

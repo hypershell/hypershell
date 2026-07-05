@@ -10,3 +10,8 @@
     in the previous release with regard to the ``task.timeout`` feature, we send
     ``SIGINT``, ``SIGTERM``, and ``SIGKILL`` in an escalating fashion to halt
     running tasks.
+
+``SIGHUP``
+    Sending the ``SIGHUP`` signal triggers an immediate rotation of the process's
+    log file, when file-based logging is enabled. This is the conventional way to
+    rotate logs on demand from an external tool. See the :ref:`logging <logging>` section.

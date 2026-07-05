@@ -110,7 +110,7 @@ useful additions to the system. Here are a few ideas that we already have the ba
     task-level telemetry.
 
 **Database Partitioning**
-    For extreme scale (10M+ task) clusters using a database (likely Postgres) there are
+    For extreme scale (10M+ task) clusters using a database (likely PostgreSQL) there are
     performance issues with task scheduling and updates. Postgres (and its extension ecosystem)
     already have robust tools for helping this situation. We could build some of this into
     the program itself to make it easier for novice users.

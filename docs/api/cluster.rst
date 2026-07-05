@@ -18,9 +18,13 @@ or :meth:`~hypershell.cluster.ssh.run_ssh`).
 All of the parameters used below are largely the same in each instance. Configuration files have
 no impact when using the library; i.e., default values are not overridden by configuration.
 
+|
+
 .. note::
 
     The database connection details are only specified via configuration (files or environment).
+    To control the database configuration programmatically inject environment variables before
+    importing ``hypershell``.
 
 
 -------------------
@@ -84,6 +88,16 @@ Classes
     .. automethod:: start
     .. automethod:: join
     .. automethod:: stop
+
+|
+
+.. warning::
+
+    While nothing prevents you from creating more than one of these cluster-mode thread instances
+    it should be considered an error to do so. The point of the thread is to provide for asynchronous
+    operations not to allow for multiple instances. There are several unavoidable process-wide global
+    considerations such as signal handling, resource tracking, and encryption key management that make
+    it an error to spawn multiple instances of the thread with differing parameters.
 
 -------------------
 

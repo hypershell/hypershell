@@ -41,7 +41,8 @@ def test_submit_help(opt: str) -> None:
 @mark.integration
 def test_submit_mixed_inputs() -> None:
     """Cannot use positional arguments with -f option."""
-    assert main_lines(['hs', 'submit', 'a', 'b', '-f', 'some_file']) == (
+    # NOTE: added -g0 to suppress INFO message from auto-selected group
+    assert main_lines(['hs', 'submit', 'a', 'b', '-f', 'some_file', '-g0']) == (
         exit_status.bad_argument, NO_OUTPUT, [
             'CRITICAL [hypershell] Cannot specify both -f/--task-file and positional arguments',
         ]
@@ -203,7 +204,7 @@ def test_submit_bundled(temp_site: Path) -> None:
     assert_output(r'DEBUG .* Done$', stderr, 1)
     assert_output(r'INFO .* Submitted 100 tasks$', stderr, 1)
 
-    # Now there are 4 tasks in the database
+    # Now there are 100 tasks in the database
     assert main_lines(['hs', 'list', '--count']) == (
         exit_status.success, ['100', ], NO_OUTPUT
     )

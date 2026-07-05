@@ -14,6 +14,8 @@ high-level functions, :meth:`serve_from`, :meth:`serve_file`, or :meth:`serve_fo
 All of the parameters used below are largely the same in each instance. Configuration files have
 no impact when using the library; i.e., default values are not overridden by configuration.
 
+|
+
 .. warning::
 
     While all parameters have reasonable defaults you should **always** provide your own
@@ -53,6 +55,16 @@ Classes
     .. automethod:: join
     .. automethod:: stop
 
+|
+
+.. warning::
+
+    While nothing prevents you from creating more than one :class:`~hypershell.server.ServerThread`
+    it should be considered an error to do so. The point of the thread is to provide for asynchronous
+    operations not to allow for multiple instances. There are several unavoidable process-wide global
+    considerations such as signal handling, resource tracking, and encryption key management that make
+    it an error to spawn multiple instances of the thread with differing parameters.
+
 -------------------
 
 Constants
@@ -64,7 +76,7 @@ Constants
 .. autodata:: DEFAULT_EVICT
 .. autodata:: DEFAULT_ATTEMPTS
 .. autodata:: DEFAULT_EAGER_MODE
-.. autodata:: DEFAULT_QUERY_PAUSE
+.. autodata:: DEFAULT_SERVER_POLL
 .. autodata:: DEFAULT_BIND
 .. autodata:: DEFAULT_PORT
 .. autodata:: DEFAULT_AUTH

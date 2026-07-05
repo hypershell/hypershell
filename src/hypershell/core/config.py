@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """Runtime configuration for HyperShell."""
@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator
+from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Dict
 
 # Standard libs
 import os
@@ -17,6 +17,7 @@ import tomlkit
 import logging
 import socket
 import functools
+import platform
 from datetime import datetime
 
 # External libs
@@ -24,22 +25,28 @@ from cmdkit.config import Namespace, Configuration, Environ, ConfigurationError
 from cmdkit.app import exit_status
 
 # Internal libs
-from hypershell.core.platform import path, home
+from hypershell.core.platform import path, home, default_path
 from hypershell.core.exceptions import write_traceback
 from hypershell.core.sys import PATH_SEP
 
 # Public interface
-__all__ = ['config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
-           'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
-           'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
-           'find_available_ports']
+__all__ = [
+    'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
+    'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
+    'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
+    'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
+    'AUTH_ALLOWED_CHARS', 'AUTH_MINIMUM_LENGTH', 'find_available_ports'
+]
 
-# partial logging (not yet configured - initialized afterward)
+
+# Partial logging (not yet configured - initialized afterward)
 log = logging.getLogger(__name__)
 
 
-DEFAULT_LOGGING_STYLE = 'default'
-LOGGING_STYLES = {
+DEFAULT_LOGGING_LEVEL: Final[str] = 'info'
+DEFAULT_LOGGING_STYLE: Final[str] = 'default'
+
+LOGGING_STYLES: Dict[str, Dict[str, str]] = {
     'default': {
         'format': ('%(ansi_bold)s%(ansi_level)s%(levelname)8s%(ansi_reset)s %(ansi_faint)s[%(name)s]%(ansi_reset)s'
                    ' %(message)s'),
@@ -56,12 +63,29 @@ LOGGING_STYLES = {
         'format': ('%(ansi_faint)s%(elapsed_hms)s [%(hostname_short)s] %(ansi_reset)s'
                    '%(ansi_level)s%(ansi_bold)s%(levelname)8s%(ansi_reset)s '
                    '%(ansi_faint)s[%(relative_name)s]%(ansi_reset)s %(message)s'),
+    },
+    'short': {
+        'format': '%(ansi_level)s[%(elapsed).3f]%(ansi_reset)s %(message)s',
     }
 }
 
 
-# environment variables and configuration files are automatically
-# depth-first merged with defaults
+# For TOML compatibility we cannot use an actual None
+PARAM_UNSET: Final[str] = '<none>'
+
+
+# Default secure key is not secure!
+DEFAULT_AUTH: Final[str] = '<not-secure>'
+
+# Basic security checks for user-provided auth keys.
+# The character set admits hex, URL-safe tokens, and standard Base64 (``+``, ``/``, ``=``)
+# so that common key generators (e.g. ``openssl rand -base64 48``) are accepted as-is.
+AUTH_ALLOWED_CHARS: re.Pattern = re.compile(r'^[A-Za-z0-9._+/=-]+$')
+AUTH_MINIMUM_LENGTH: Final[int] = 16
+
+
+# Environment variables and configuration files are automatically depth-first merged with defaults
+# A default value of 0 may mean "None" or "automatically chosen"
 default = Namespace({
 
     'database': {
@@ -70,41 +94,73 @@ default = Namespace({
 
     'logging': {
         'color': True,
-        'level': 'warning',
         'datefmt': '%Y-%m-%d %H:%M:%S',
+        'level': DEFAULT_LOGGING_LEVEL,
         'style': DEFAULT_LOGGING_STYLE,
         **LOGGING_STYLES.get(DEFAULT_LOGGING_STYLE),
+
+        # We allow logging.file = {<path> | 'enabled' | True} for default configuration.
+        # A <path> stands in for logging.file.path with otherwise default values for everything else.
+        # At least one parameter must be set to enable logging to file.
+        'file': {
+            'path': PARAM_UNSET,
+            'level': 'trace',
+            'style': 'system',
+            'rotate': 'never',       # Size-like ('512MB') or cron-like ('@midnight', '0 1 * * 0')
+            'compress': PARAM_UNSET, # Either 'gzip', 'bzip', 'lzma', or 'zstd' (requires 'zstandard' package)
+            'keep': 0,               # Number of uncompressed files to leave on disk (0 = none)
+        },
     },
 
     'task': {
         'cwd': os.getcwd(),
-        'timeout': None,    # seconds, period to wait before killing tasks
-        'signalwait': 10,   # seconds to wait between signal escalation (INT, TERM, KILL)
+        'cores': 0,          # Default cores allocated per task (default is unconstrained)
+        'memory': 0,         # Default memory in bytes allocated per task (default is unconstrained)
+        'timeout': 0,        # Default task-level walltime limit (default is unconstrained)
+        'signalwait': 10,    # Wait time in seconds between signal escalation (INT, TERM, KILL)
     },
 
     'submit': {
-        'bundlesize': 1,    # size of task bundle to accumulate before committing
-        'bundlewait': 5     # seconds to wait before committing regardless of size
+        'bundlesize': 1,    # Size of task bundle to accumulate before committing
+        'bundlewait': 5,    # Seconds to wait before committing regardless of size
     },
 
     'server': {
-        'bind': 'localhost',
+        'bind': 'localhost',   # Used by server
+        'host': 'localhost',   # Used by clients
         'port': 50_001,
-        'auth': '__HYPERSHELL__BAD__AUTHKEY__',
-        'queuesize': 1,     # only allow a single bundle (scheduler must wait)
+        'auth': DEFAULT_AUTH,  # Initializes to fixed default value (DO NOT USE THIS)
+        'queuesize': 1,        # Only allow a single bundle (scheduler must wait)
         'bundlesize': 1,
-        'bundlewait': 5,    # seconds
         'attempts': 1,
-        'eager': False,     # prefer failed tasks to new tasks
-        'wait': 5,          # seconds to wait between database queries
-        'evict': 600,       # assume client is gone if no heartbeat after this many seconds
+        'eager': False,        # Prefer failed tasks to new tasks
+        'poll': 30,            # Max polling interval in seconds between database queries if no tasks
+        'evict': 600,          # Seconds to wait before evicting client
+
+        # Transport-layer TLS for queue connections. Enabled by default; '<auto>' values
+        # for cert/key/cafile are resolved against the site lib dir on first server start
+        # (see hypershell.core.tls.ensure_default_materials).
+        'tls': {
+            'enabled': True,            # Use --no-tls or other mechanisms to disable (not recommended)
+            'cert': '<auto>',           # Path to server certificate or '<auto>'
+            'key': '<auto>',            # Path to server private key or '<auto>'
+            'cafile': '<auto>',         # Trust anchor for clients; '<auto>' mirrors the server cert
+            'fingerprint': PARAM_UNSET, # Pin peer fingerprint (e.g. 'SHA256:AB:CD:...')
+            'insecure': False,          # Disable peer verification (logs a warning)
+            'min_version': 'TLSv1.2',
+            'ciphers': PARAM_UNSET,     # OpenSSL cipher string
+            'servername': PARAM_UNSET,  # Override SNI / hostname check on client side
+        },
     },
 
     'client': {
-        'bundlesize': 1,    # size of task bundle to accumulate before returning
-        'bundlewait': 5,    # seconds to wait before returning regardless of size
-        'heartrate': 10,    # seconds to wait between heartbeats
-        'timeout': None,    # seconds to wait for bundle from server before shutting down
+        'bundlesize': 1,    # Size of task bundle to accumulate before returning
+        'bundlewait': 5,    # Seconds to wait before returning regardless of size
+        'heartrate': 10,    # Seconds to wait between heartbeats
+        'timeout': 0,       # Client-level timeout in seconds if no tasks available (never if 0/none)
+        'cores': 0,         # Client-level resource constraint (all available resources if 0/none)
+        'memory': 0,        # Client-level resource constraint (all available resources if 0/none)
+        'ratelimit': 0,     # Maximum allowed tasks per second (no limit by default)
     },
 
     'ssh': {
@@ -115,12 +171,12 @@ default = Namespace({
     'autoscale': {
         'policy': 'fixed',  # Either 'fixed' or 'dynamic'
         'factor': 1,
-        'period': 60,  # seconds to wait between checks
-        'launcher': '',  # empty means just 'hs client'
+        'period': 60,       # Seconds to wait between checks
+        'launcher': '',     # Empty means just 'hs client ...'
         'size': {
             'init': 1,
             'min': 0,
-            'max': 2,
+            'max': 1,       # Typically this would be the only thing to modify
         },
     },
 
@@ -214,9 +270,17 @@ def get_logging_style(base: Configuration) -> str:
         raise ConfigurationError(f'Unrecognized `logging.style` \'{style}\' ({label})')
 
 
+DEFAULT_DATABASE_NAME: Final[str] = 'Main.db' if platform.system() in ['Windows', 'Darwin'] else 'main.db'
+"""Either Main.db (Windows/macOS) or main.db on Linux/POSIX."""
+
+DEFAULT_DATABASE_FILE: Final[str] = os.path.join(default_path.lib, DEFAULT_DATABASE_NAME)
+"""Default local SQLite database file path if none is provided."""
+
+
 def build_preloads(base: Configuration) -> Namespace:
     """Build 'preload' namespace from base configuration."""
-    return Namespace({'logging': LOGGING_STYLES.get(get_logging_style(base))})
+    return Namespace({'logging': LOGGING_STYLES.get(get_logging_style(base)),
+                      'database': {'file': DEFAULT_DATABASE_FILE},})
 
 
 class LoaderImpl(Protocol):
@@ -275,21 +339,19 @@ except KeyError:
 
 
 def find_available_ports(start: int = default.server.port,
-                         end: int = default.server.port + 1_000) -> Iterator[int]:
+                         end: int = default.server.port + 1_000,
+                         bind: str = '0.0.0.0') -> Iterator[int]:
     """Yield available ports by testing each in turn."""
     for port in range(start, end + 1):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(1)
             try:
-                sock.bind(("0.0.0.0", port))
+                sock.bind((bind, port))
                 yield port
             except socket.error:
                 pass
-    else:
-        raise RuntimeError(f'Could not find available port in range {start}-{end}')
 
 
-DEFAULT_CONFIG_HEADERS = f"""\
+DEFAULT_CONFIG_HEADERS: Final[str] = f"""\
 # File automatically created on {datetime.now()}
 # Settings here are merged automatically with defaults and environment variables
 """

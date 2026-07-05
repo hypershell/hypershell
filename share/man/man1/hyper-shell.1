@@ -1,3 +1,4 @@
+'\" t
 .\" Man page generated from reStructuredText.
 .
 .
@@ -27,17 +28,20 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Jun 07, 2025" "2.7.2" "hypershell"
+.TH "HYPER-SHELL" "1" "Jul 05, 2026" "2.8.0" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
 .INDENT 0.0
 .TP
-.B hs [\-h] [\-v] [\-\-citation] ...
+.B hs [\-h] [\-v] [\-\-citation] <command> [<args>...]
 Top\-level command. Show help, version, or citation info.
 .TP
 .B hs cluster [\-h] FILE [\-\-ssh HOST... | \-\-mpi | \-\-launcher ARGS...] ...
 Run managed cluster.
+.TP
+.B hsx [<args>...]
+Alias for \(aqhs cluster\(aq.
 .TP
 .B hs server [\-h] FILE ...
 Run stand\-alone server.
@@ -46,7 +50,7 @@ Run stand\-alone server.
 Run stand\-alone client.
 .TP
 .B hs submit [\-h] [ARGS... | \-f FILE] ...
-Submit tasks from file.
+Submit one or more tasks.
 .TP
 .B hs initdb [\-h] [\-\-truncate | \-\-vacuum | \-\-rotate | \-\-backup PATH] [\-\-yes]
 Initialize database.
@@ -85,11 +89,13 @@ Stand up the \fBserver\fP on its own and scale \fBclients\fP as desired, and \fB
 .INDENT 0.0
 .TP
 .B \fBhs cluster [\-h]\fP \fB[FILE | \-\-restart | \-\-forever]\fP
-\fB[\-N NUM]\fP \fB[\-t CMD]\fP \fB[\-b SIZE]\fP \fB[\-w SEC]\fP
-\fB[\-p PORT]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-f PATH]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP
+\fB[\-N NUM]\fP \fB[\-t CMD]\fP \fB[\-b SIZE]\fP \fB[\-w SEC]\fP \fB[\-Q NUM]\fP
+\fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-f PATH]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP
 \fB[\-\-ssh [HOST... | \-\-ssh\-group NAME] [\-\-env] | \-\-mpi | \-\-launcher=ARGS...]\fP
-\fB[\-\-no\-db | \-\-initdb]\fP \fB[\-\-no\-confirm]\fP \fB[\-d SEC]\fP \fB[\-T SEC]\fP \fB[\-W SEC]\fP \fB[\-S SEC]\fP
+\fB[\-\-no\-db [\-\-no\-confirm] | \-\-initdb]\fP \fB[\-d SEC]\fP \fB[\-T SEC]\fP \fB[\-W SEC]\fP \fB[\-S SEC]\fP \fB[\-R NUM]\fP
+\fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP
 \fB[\-\-autoscaling [MODE] [\-P SEC] [\-F VALUE] [\-I NUM] [\-X NUM] [\-Y NUM]]\fP
+\fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
 Start cluster locally or with remote clients over \fIssh\fP or a custom \fIlauncher\fP\&.
@@ -136,8 +142,10 @@ but the full listing, e.g., \fB\-\-launcher=\(aqsrun \-\-mpi=pmi2\(aq\fP\&.
 .SS Options
 .INDENT 0.0
 .TP
-.B \fB\-N\fP, \fB\-\-num\-tasks\fP \fINUM\fP
-Number of task executors per client (default: 1).
+.B \fB\-N\fP, \fB\-\-num\-threads\fP \fINUM\fP
+Number of executor threads per client (default: 1).
+.sp
+Set to 0 to auto\-detect based on available CPU cores on each client.
 .sp
 For example, \fB\-N4\fP would create four workers, but \fB\-N4 \-\-ssh \(aqcluster\-a[00\-01].xyz\(aq\fP
 creates two clients and a total of eight workers.
@@ -152,7 +160,13 @@ arguments (e.g., file paths) to be transformed into some common form; such as
 .sp
 See section on \fItemplates\fP\&.
 .TP
-.B \fB\-p\fP, \fB\-\-port\fP \fINUM\fP
+.B \fB\-H\fP, \fB\-\-bind\fP \fIADDR\fP
+Bind address (default: localhost, or 0.0.0.0 for remote clients).
+.sp
+Sets the address the server binds to. When launching clients on remote hosts
+(\fB\-\-ssh\fP, \fB\-\-mpi\fP, or \fB\-\-launcher\fP), bind to \fI0.0.0.0\fP so they can connect.
+.TP
+.B \fB\-p\fP, \fB\-\-port\fP \fIPORT\fP
 Port number (default: 50001).
 .sp
 This is an arbitrary choice and simply must be an available port. The default option chosen
@@ -169,7 +183,7 @@ batches of this size.
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
 .sp
-See also \fB\-\-num\-tasks\fP and \fB\-\-bundlewait\fP\&.
+See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
 Seconds to wait before flushing tasks (default: 5).
@@ -179,6 +193,14 @@ thread that accumulates finished task bundles to return to the \fIserver\fP will
 after this period of time regardless of whether it has reached the preferred bundle size.
 .sp
 See also \fB\-\-bundlesize\fP\&.
+.TP
+.B \fB\-Q\fP, \fB\-\-poll\fP \fINUM\fP
+Polling interval in seconds between database queries if no tasks are available (default: 5).
+.sp
+This controls how frequently the scheduler checks the database for new tasks when idle.
+Lower values (e.g., 1\-2 seconds) provide faster responsiveness but may increase database
+query load. Higher values (e.g., 10\-30 seconds) reduce query frequency, useful for
+workflows with infrequent task submission.
 .TP
 .B \fB\-r\fP, \fB\-\-max\-retries\fP \fINUM\fP
 Auto\-retry failed tasks (default: 0).
@@ -205,7 +227,7 @@ bundles directly to the queue.
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
 .sp
-If a database is configured for use with the workflow (e.g., Postgres), auto\-initialize
+If a database is configured for use with the workflow (e.g., PostgreSQL), auto\-initialize
 tables if they don\(aqt already exist. This is a short\-hand for pre\-creating tables with the
 \fBhs initdb\fP command. This happens by default with SQLite databases.
 .sp
@@ -273,7 +295,7 @@ magnitude specified (e.g., \fB\-\-delay\-start=\-600\fP would delay the client u
 This also has the effect of staggering the workload. If your tasks take on the order of 30
 minutes and you have 1000 nodes, choose \fB\-\-delay\-start=\-1800\fP\&.
 .TP
-.B \fB\-c\fP, \fB\-\-capture\fP
+.B \fB\-\-capture\fP
 Capture individual task <stdout> and <stderr>.
 .sp
 By default, the \fIstdout\fP and \fIstderr\fP streams of all tasks are fused with that of the \fIclient\fP
@@ -281,8 +303,8 @@ thread, and in turn the \fIcluster\fP\&. If tasks are producing output that need
 tasks need to manage their own output, you can specify a redirect as part of a \fB\-\-template\fP,
 or use \fB\-\-capture\fP to capture these as \fB\&.out\fP and \fB\&.err\fP files.
 .sp
-These are stored local to the \fIclient\fP\&. Task outputs can be automatically retrieved via SFTP,
-see \fItask\fP usage.
+These are stored local to the \fIclient\fP under \fI<prefix>/lib/task/<uuid>.[out,err]\fP\&.
+Task outputs can be automatically retrieved via SFTP, see \fIinfo\fP\&.
 .TP
 .B \fB\-o\fP, \fB\-\-output\fP \fIPATH\fP
 File path for task outputs (default: <stdout>).
@@ -306,14 +328,55 @@ for you and if \fB\-\-failures\fP is enabled these task args will be sent to a l
 .B \fB\-T\fP, \fB\-\-timeout\fP \fISEC\fP
 Timeout in seconds for clients. Automatically shutdown if no tasks received (default: never).
 .sp
-This option is only valid for an \fB\-\-autoscaling\fP cluster. This feature allows for gracefully
-scaling down a cluster when task throughput subsides.
+This feature allows for gracefully scaling down a cluster when task throughput subsides.
 .TP
 .B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit (default: none).
 .sp
 Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
 If the process still persists the executor itself will shutdown.
+.TP
+.B \fB\-c\fP, \fB\-\-cores\fP \fINUM\fP
+Number of CPU cores required per task (default: none).
+.sp
+When specified, tasks will only be executed when the required number of cores
+is available. Used with resource\-aware scheduling and backfill.
+.TP
+.B \fB\-m\fP, \fB\-\-memory\fP \fIMEM\fP
+Amount of memory required per task (default: none).
+.sp
+Specify memory size with units (e.g., \(aq4GB\(aq, \(aq512MB\(aq). Tasks will only be
+executed when the required memory is available. Used with resource\-aware
+scheduling and backfill.
+.TP
+.B \fB\-C\fP, \fB\-\-client\-cores\fP \fINUM\fP
+Limit available cores per client (default: all cores).
+.sp
+Sets an upper bound on the number of CPU cores that each client can use.
+This allows running multiple clients on the same node by partitioning resources.
+Clients will not execute tasks if doing so would exceed this limit.
+.sp
+See also \fB\-\-num\-threads=0\fP\&.
+.TP
+.B \fB\-M\fP, \fB\-\-client\-memory\fP \fIMEM\fP
+Limit available memory per client (default: all memory).
+.sp
+Sets an upper bound on the amount of memory that each client can use.
+Specify memory size with units (e.g., \(aq16GB\(aq, \(aq4096MB\(aq). This allows running
+multiple clients on the same node by partitioning resources.
+.TP
+.B \fB\-\-monitor\fP
+Enable resource monitoring for tasks.
+.sp
+When enabled, clients will monitor CPU and memory usage of running tasks
+and their child processes, reporting peak usage back to the server.
+Time\-series data is stored in CSV format alongside task outputs.
+.sp
+See also \fB\-\-capture\fP\&.
+.TP
+.B \fB\-R\fP, \fB\-\-ratelimit\fP \fINUM\fP
+Maximum allowed tasks per second per client. (default: none).
+Individual tasks are throttled if exceeding this average limit.
 .TP
 .B \fB\-S\fP, \fB\-\-signalwait\fP \fISEC\fP
 Task\-level signal escalation wait period in seconds (default: 10).
@@ -351,10 +414,15 @@ A configurable, dimensionless quantity used by the \fB\-\-autoscaling=dynamic\fP
 This value expresses some multiple of the average task duration in seconds.
 .sp
 The autoscaler periodically checks \fBtoc / (factor x avg_duration)\fP, where
-\fBtoc\fP is the estimated time of completion for all remaining tasks given current
-throughput of active clients. This ratio is referred to as \fItask pressure\fP, and if
-it exceeds 1, the pressure is considered \fIhigh\fP and we will add another client if
-we are not already at the given \fB\-\-max\-size\fP of the cluster.
+\fBtoc\fP is the estimated time of completion for remaining tasks in the active
+\fItask group\fP given current throughput of active clients. This ratio is referred to
+as \fItask pressure\fP, and if it exceeds 1, the pressure is considered \fIhigh\fP and we
+will add another client if we are not already at the given \fB\-\-max\-size\fP of the
+cluster.
+.sp
+Task pressure is relative to the active task group; tasks waiting in later groups
+do not contribute. The scheduler only distributes tasks within the active group,
+so scaling out for a future backlog would only create idle clients.
 .sp
 For example, if the average task length is 30 minutes, and we set \fB\-\-factor=2\fP, then if
 the estimated time of completion of remaining tasks given currently connected executors
@@ -390,20 +458,53 @@ efficient use of computing resources in the absence of tasks.
 Only valid with \fB\-\-autoscaling\fP\&.
 .TP
 .B \fB\-Y\fP, \fB\-\-max\-size\fP \fISIZE\fP
-Maximum size of cluster (default: 2).
+Maximum size of cluster (default: 1).
 .sp
 For a \fIdynamic\fP autoscaling policy, this sets an upper limit on the number of launched
 clients. When this number is reached, scaling stops regardless of task pressure.
 .sp
 Only valid with \fB\-\-autoscaling\fP\&.
 .UNINDENT
+.INDENT 0.0
+.TP
+.B \fB\-\-no\-tls\fP
+Disable TLS on the queue interface (not recommended).
+.sp
+Transport\-layer security is enabled by default. When disabled, task bundles and
+results travel the queue connection unencrypted; only do this on a trusted, isolated
+network or when transport security is already provided by an external tunnel.
+.sp
+See the \fIsecurity\fP section.
+.TP
+.B \fB\-\-tls\-cert\fP \fIPATH\fP
+Path to the TLS certificate file (default: <auto>).
+.sp
+With the default \fB<auto>\fP a self\-signed certificate is generated once on first
+server start and stored under the site \fBlib\fP directory. Provide a \fIPATH\fP to use
+your own certificate instead.
+.TP
+.B \fB\-\-tls\-key\fP \fIPATH\fP
+Path to the TLS private key file (default: <auto>).
+.sp
+Paired with \fB\-\-tls\-cert\fP\&. With the default \fB<auto>\fP the auto\-generated key is
+used; a user\-provided key file should be readable only by its owner.
+.TP
+.B \fB\-\-tls\-ca\fP \fIPATH\fP
+Path to the TLS CA certificate file used to verify the peer (default: <auto>).
+.sp
+With the default \fB<auto>\fP the server certificate is trusted directly, which suits
+a single host or shared filesystem. Provide a \fIPATH\fP to a certificate authority to
+verify peers across multiple hosts.
+.sp
+See the \fIsecurity\fP section for peer verification modes.
+.UNINDENT
 .SH SERVER USAGE
 .INDENT 0.0
 .TP
 .B \fBhs\fP \fBserver\fP \fB[\-h]\fP \fB[FILE | \-\-forever | \-\-restart]\fP
-\fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-r NUM [\-\-eager]]\fP
-\fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-k KEY]\fP \fB[\-\-no\-db | \-\-initdb]\fP \fB[\-\-print | \-f PATH]\fP
-\fB[\-\-no\-confirm]\fP
+\fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-W SEC]\fP
+\fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-k KEY]\fP \fB[\-Q NUM]\fP \fB[\-\-no\-db [\-\-no\-confirm] | \-\-initdb]\fP \fB[\-\-print | \-f PATH]\fP
+\fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
 Launch server, schedule directly or asynchronously from database.
@@ -447,7 +548,7 @@ The default \fIKEY\fP used by the server and client is not secure and only a pla
 It is expected that the user choose a secure \fIKEY\fP\&. The \fIcluster\fP automatically generates
 a secure one\-time \fIKEY\fP\&.
 .TP
-.B \fB\-b\fP, \fB\-\-bundlesize\fP \fISIZE\fP
+.B \fB\-b\fP, \fB\-\-bundlesize\fP \fINUM\fP
 Size of task bundle (default: 1).
 .sp
 The default value allows for greater concurrency and responsiveness on small scales. This is
@@ -458,7 +559,7 @@ batches of this size.
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
 .sp
-See also \fB\-\-num\-tasks\fP and \fB\-\-bundlewait\fP\&.
+See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
 Seconds to wait before flushing tasks (default: 5).
@@ -468,6 +569,14 @@ thread that accumulates finished task bundles to return to the \fIserver\fP will
 after this period of time regardless of whether it has reached the preferred bundle size.
 .sp
 See also \fB\-\-bundlesize\fP\&.
+.TP
+.B \fB\-Q\fP, \fB\-\-poll\fP \fINUM\fP
+Polling interval in seconds between database queries if no tasks are available (default: 5).
+.sp
+This controls how frequently the scheduler checks the database for new tasks when idle.
+Lower values (e.g., 1\-2 seconds) provide faster responsiveness but may increase database
+query load. Higher values (e.g., 10\-30 seconds) reduce query frequency, useful for
+workflows with infrequent task submission.
 .TP
 .B \fB\-r\fP, \fB\-\-max\-retries\fP \fINUM\fP
 Auto\-retry failed tasks (default: 0).
@@ -484,6 +593,34 @@ Schedule failed tasks before new tasks. If \fB\-\-max\-retries\fP is greater tha
 defines the appetite for re\-submitting failed tasks. By default, failed tasks will only be
 scheduled when there are no more remaining novel tasks.
 .TP
+.B \fB\-c\fP, \fB\-\-task\-cores\fP \fINUM\fP
+Number of CPU cores required per task (default: none).
+.sp
+When an input \fIFILE\fP is provided, a \fIsubmit\fP thread is launched to read and submit tasks.
+This option sets the default core requirement for all submitted tasks.
+Individual tasks can override this with inline comments (e.g., \fB#HYPERSHELL: cores:8\fP).
+.sp
+See also \fB\-\-task\-memory\fP and \fB\-\-task\-timeout\fP\&.
+.TP
+.B \fB\-m\fP, \fB\-\-task\-memory\fP \fIMEM\fP
+Amount of memory required per task (default: none).
+.sp
+When an input \fIFILE\fP is provided, a \fIsubmit\fP thread is launched to read and submit tasks.
+This option sets the default memory requirement for all submitted tasks.
+Specify memory size with units (e.g., \(aq4GB\(aq, \(aq512MB\(aq). Individual tasks can override this
+with inline comments (e.g., \fB#HYPERSHELL: memory:8GB\fP).
+.sp
+See also \fB\-\-task\-cores\fP and \fB\-\-task\-timeout\fP\&.
+.TP
+.B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
+Task\-level walltime limit in seconds (default: none).
+.sp
+When an input \fIFILE\fP is provided, a \fIsubmit\fP thread is launched to read and submit tasks.
+This option sets the default timeout for all submitted tasks. Individual
+tasks can override this with inline comments (e.g., \fB#HYPERSHELL: timeout:3600\fP).
+.sp
+See also \fB\-\-task\-cores\fP and \fB\-\-task\-memory\fP\&.
+.TP
 .B \fB\-\-no\-db\fP
 Disable database (submit directly to clients).
 .sp
@@ -494,7 +631,7 @@ bundles directly to the queue.
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
 .sp
-If a database is configured for use with the workflow (e.g., Postgres), auto\-initialize
+If a database is configured for use with the workflow (e.g., PostgreSQL), auto\-initialize
 tables if they don\(aqt already exist. This is a short\-hand for pre\-creating tables with the
 \fBhs initdb\fP command. This happens by default with SQLite databases.
 .sp
@@ -542,13 +679,48 @@ stream. With \fB\-f\fP/\fB\-\-failures\fP, specify a local file \fIPATH\fP\&.
 .sp
 Mutually exclusive to \fB\-\-print\fP\&.
 .UNINDENT
+.INDENT 0.0
+.TP
+.B \fB\-\-no\-tls\fP
+Disable TLS on the queue interface (not recommended).
+.sp
+Transport\-layer security is enabled by default. When disabled, task bundles and
+results travel the queue connection unencrypted; only do this on a trusted, isolated
+network or when transport security is already provided by an external tunnel.
+.sp
+See the \fIsecurity\fP section.
+.TP
+.B \fB\-\-tls\-cert\fP \fIPATH\fP
+Path to the TLS certificate file (default: <auto>).
+.sp
+With the default \fB<auto>\fP a self\-signed certificate is generated once on first
+server start and stored under the site \fBlib\fP directory. Provide a \fIPATH\fP to use
+your own certificate instead.
+.TP
+.B \fB\-\-tls\-key\fP \fIPATH\fP
+Path to the TLS private key file (default: <auto>).
+.sp
+Paired with \fB\-\-tls\-cert\fP\&. With the default \fB<auto>\fP the auto\-generated key is
+used; a user\-provided key file should be readable only by its owner.
+.TP
+.B \fB\-\-tls\-ca\fP \fIPATH\fP
+Path to the TLS CA certificate file used to verify the peer (default: <auto>).
+.sp
+With the default \fB<auto>\fP the server certificate is trusted directly, which suits
+a single host or shared filesystem. Provide a \fIPATH\fP to a certificate authority to
+verify peers across multiple hosts.
+.sp
+See the \fIsecurity\fP section for peer verification modes.
+.UNINDENT
 .SH CLIENT USAGE
 .INDENT 0.0
 .TP
 .B \fBhs\fP \fBclient\fP \fB[\-h]\fP
 \fB[\-N NUM]\fP \fB[\-t TEMPLATE]\fP \fB[\-b SIZE]\fP \fB[\-w SEC]\fP \fB[\-H ADDR]\fP \fB[\-p PORT]\fP
 \fB[\-k KEY]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP \fB[\-\-no\-confirm]\fP
-\fB[\-d SEC]\fP \fB[\-T SEC]\fP \fB[\-W SEC]\fP \fB[\-S SEC]\fP
+\fB[\-d SEC]\fP \fB[\-T SEC]\fP \fB[\-W SEC]\fP \fB[\-S SEC]\fP \fB[\-R NUM]\fP
+\fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP
+\fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
 Launch client directly, run tasks in parallel.
@@ -562,8 +734,10 @@ these are directed to individual files for each task.
 .SS Options
 .INDENT 0.0
 .TP
-.B \fB\-N\fP, \fB\-\-num\-tasks\fP \fINUM\fP
-Number of task executors (default: 1).
+.B \fB\-N\fP, \fB\-\-num\-threads\fP \fINUM\fP
+Number of task executor threads (default: 1).
+.sp
+Set to 0 to auto\-detect based on available CPU cores.
 .TP
 .B \fB\-t\fP, \fB\-\-template\fP \fICMD\fP
 Command\-line template pattern (default: \(dq{}\(dq).
@@ -581,7 +755,7 @@ Size of task bundle (default: 1).
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
 .sp
-See also \fB\-\-num\-tasks\fP and \fB\-\-bundlewait\fP\&.
+See also \fB\-\-num\-threads\fP and \fB\-\-bundlewait\fP\&.
 .TP
 .B \fB\-w\fP, \fB\-\-bundlewait\fP \fISEC\fP
 Seconds to wait before flushing tasks (default: 5).
@@ -630,7 +804,7 @@ File path for task outputs (default: <stdout>).
 .B \fB\-e\fP, \fB\-\-errors\fP \fIPATH\fP
 File path for task errors (default: <stderr>).
 .TP
-.B \fB\-c\fP, \fB\-\-capture\fP
+.B \fB\-\-capture\fP
 Capture individual task <stdout> and <stderr>.
 .sp
 By default, the \fIstdout\fP and \fIstderr\fP streams of all tasks are fused with that of the \fIclient\fP
@@ -638,21 +812,50 @@ thread, and in turn the \fIcluster\fP\&. If tasks are producing output that need
 tasks need to manage their own output, you can specify a redirect as part of a \fB\-\-template\fP,
 or use \fB\-\-capture\fP to capture these as \fB\&.out\fP and \fB\&.err\fP files.
 .sp
-These are stored local to the \fIclient\fP under \fI<prefix>/lib/task/<uuid>.[out,err]\fP\&.
-Task outputs can be automatically retrieved via SFTP, see \fItask\fP usage.
+These are stored local to the \fIclient\fP under \fI<site>/lib/task/<uuid>.[out,err]\fP\&.
+Task outputs can be automatically retrieved via SFTP, see \fIhs info\fP\&.
 .sp
 Mutually exclusive with both \fB\-\-output\fP and \fB\-\-errors\fP\&.
 .TP
-.B \fB\-\-timeout\fP \fISEC\fP
+.B \fB\-T\fP, \fB\-\-timeout\fP \fISEC\fP
 Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 .sp
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
 .TP
-.B \fB\-\-task\-timeout\fP \fISEC\fP
+.B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit (default: none).
 .sp
 Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
 If the process still persists the executor itself will shutdown.
+.TP
+.B \fB\-C\fP, \fB\-\-client\-cores\fP \fINUM\fP
+Limit available cores for client (default: all cores).
+.sp
+Sets an upper bound on the number of CPU cores that the client can use.
+This allows running multiple clients on the same node by partitioning resources.
+The client will not execute tasks if doing so would exceed this limit.
+.sp
+See also \fB\-\-num\-threads=0\fP\&.
+.TP
+.B \fB\-M\fP, \fB\-\-client\-memory\fP \fISIZE\fP
+Limit available memory for client (default: all memory).
+.sp
+Sets an upper bound on the amount of memory that the client can use.
+Specify memory size with units (e.g., \(aq16GB\(aq, \(aq4096MB\(aq). This allows running
+multiple clients on the same node by partitioning resources.
+.TP
+.B \fB\-\-monitor\fP
+Enable resource monitoring for tasks.
+.sp
+When enabled, the client will monitor CPU and memory usage of running tasks
+and their child processes, reporting peak usage back to the server.
+Time\-series data is stored in CSV format alongside task outputs.
+.sp
+See also \fB\-\-capture\fP\&.
+.TP
+.B \fB\-R\fP, \fB\-\-ratelimit\fP \fINUM\fP
+Maximum allowed tasks per second per client. (default: none).
+Individual tasks are throttled if exceeding this average limit.
 .TP
 .B \fB\-S\fP, \fB\-\-signalwait\fP \fISEC\fP
 Task\-level signal escalation wait period in seconds (default: 10).
@@ -662,11 +865,47 @@ this interval in seconds before escalating to the next level of interrupt.
 .sp
 See also \fB\-\-task\-timeout\fP\&.
 .UNINDENT
+.INDENT 0.0
+.TP
+.B \fB\-\-no\-tls\fP
+Disable TLS on the queue interface (not recommended).
+.sp
+Transport\-layer security is enabled by default. When disabled, task bundles and
+results travel the queue connection unencrypted; only do this on a trusted, isolated
+network or when transport security is already provided by an external tunnel.
+.sp
+See the \fIsecurity\fP section.
+.TP
+.B \fB\-\-tls\-cert\fP \fIPATH\fP
+Path to the TLS certificate file (default: <auto>).
+.sp
+With the default \fB<auto>\fP a self\-signed certificate is generated once on first
+server start and stored under the site \fBlib\fP directory. Provide a \fIPATH\fP to use
+your own certificate instead.
+.TP
+.B \fB\-\-tls\-key\fP \fIPATH\fP
+Path to the TLS private key file (default: <auto>).
+.sp
+Paired with \fB\-\-tls\-cert\fP\&. With the default \fB<auto>\fP the auto\-generated key is
+used; a user\-provided key file should be readable only by its owner.
+.TP
+.B \fB\-\-tls\-ca\fP \fIPATH\fP
+Path to the TLS CA certificate file used to verify the peer (default: <auto>).
+.sp
+With the default \fB<auto>\fP the server certificate is trusted directly, which suits
+a single host or shared filesystem. Provide a \fIPATH\fP to a certificate authority to
+verify peers across multiple hosts.
+.sp
+See the \fIsecurity\fP section for peer verification modes.
+.UNINDENT
 .SH SUBMIT USAGE
 .INDENT 0.0
 .TP
 .B \fBhs\fP \fBsubmit\fP \fB[\-h]\fP \fB[ARGS... | \-f FILE]\fP
-\fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP \fB[\-\-initdb]\fP
+\fB[\-q [\-H ADDR] [\-p NUM] [\-k KEY] | \-\-initdb]\fP
+\fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-W SEC]\fP \fB[\-g NUM]\fP
+\fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP
+\fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
 Submit one or more tasks.
@@ -675,15 +914,16 @@ Submit one task as positional arguments.
 If a single positional argument refers to a non\-executable file path,
 tasks will be read from the file, one per line (use \fB\-f\fP/\fB\-\-task\-file\fP to be explicit).
 .sp
-Tasks are accumulated and published in bundles to the database.
+Tasks are accumulated and published in bundles to the database by default.
+With \fB\-q\fP/\fB\-\-queue\fP, tasks are submitted directly to a live queue, bypassing the database.
 The \fB\-b\fP/\fB\-\-bundlesize\fP and \fB\-w\fP/\fB\-\-bundlewait\fP options control the
 size of these bundles and how long to wait before flushing tasks regardless of
 how many have accumulated.
 .sp
-Pre\-format tasks at \fIsubmit\fP\-time with template expansion using \fB\-\-template\fP\&.
+Pre\-format tasks at submit time with template expansion using \fB\-\-template\fP\&.
 Any tags specified with \fB\-t\fP/\fB\-\-tag\fP are applied to all tasks submitted.
 .sp
-Use the special comment syntax, \fB# HYPERSHELL: ...\fP, to include tags inline.
+Use the special comment syntax, \fB# HYPERSHELL: ...\fP, to include resource limits or tags inline.
 If the comment is alone on the line it will be applied to all tasks that follow.
 .SS Arguments
 .INDENT 0.0
@@ -697,6 +937,30 @@ Command\-line task arguments (for single task submission).
 .B \fB\-f\fP, \fB\-\-task\-file\fP \fIFILE\fP
 Input file containing one task per line.
 .TP
+.B \fB\-q\fP, \fB\-\-queue\fP
+Submit directly to live queue instead of database.
+.sp
+When enabled, tasks are sent directly to a running server\(aqs queue for immediate
+scheduling. This bypasses the database entirely, which is useful for transient
+workflows or when a database is not configured.
+.sp
+Requires \fB\-H\fP, \fB\-p\fP, and \fB\-k\fP options to specify the server connection.
+.TP
+.B \fB\-H\fP, \fB\-\-host\fP \fIADDR\fP
+Hostname or IP address for server (default: localhost).
+.sp
+Only used with \fB\-\-queue\fP mode to specify the server to connect to.
+.TP
+.B \fB\-p\fP, \fB\-\-port\fP \fINUM\fP
+Port number for server (default: 50001).
+.sp
+Only used with \fB\-\-queue\fP mode to specify the server port.
+.TP
+.B \fB\-k\fP, \fB\-\-auth\fP \fIKEY\fP
+Cryptographic authentication key for server.
+.sp
+Only used with \fB\-\-queue\fP mode. The key must match the server\(aqs authentication key.
+.TP
 .B \fB\-\-template\fP \fICMD\fP
 Command\-line template pattern (default: \(dq{}\(dq).
 .sp
@@ -708,7 +972,7 @@ to be transformed into some common form; such as
 .sp
 See section on \fItemplates\fP\&.
 .TP
-.B \fB\-b\fP, \fB\-\-bundlesize\fP \fISIZE\fP
+.B \fB\-b\fP, \fB\-\-bundlesize\fP \fINUM\fP
 Size of task bundle (default: 1).
 .sp
 The default value allows for greater concurrency and responsiveness on small scales.
@@ -725,10 +989,39 @@ The current bundle will be pushed regardless of how many tasks have been accumul
 .sp
 See also \fB\-\-bundlesize\fP\&.
 .TP
+.B \fB\-c\fP, \fB\-\-cores\fP \fINUM\fP
+Number of CPU cores required per task (default: none).
+.sp
+Sets the default core requirement for all submitted tasks. Individual tasks can override
+this with inline comments (e.g., \fB#HYPERSHELL: cores:8\fP).
+.TP
+.B \fB\-m\fP, \fB\-\-memory\fP \fIMEM\fP
+Amount of memory required per task (default: none).
+.sp
+Sets the default memory requirement for all submitted tasks. Specify memory size with
+units (e.g., \(aq4GB\(aq, \(aq512MB\(aq). Individual tasks can override this with inline comments
+(e.g., \fB#HYPERSHELL: memory:8GB\fP).
+.TP
+.B \fB\-W\fP, \fB\-\-timeout\fP \fISEC\fP
+Task\-level walltime limit in seconds (default: none).
+.sp
+Sets the default timeout for all submitted tasks. Individual tasks can override this
+with inline comments (e.g., \fB#HYPERSHELL: timeout:3600\fP).
+.TP
+.B \fB\-g\fP, \fB\-\-group\fP \fINUM\fP
+Task group for dependency management (default: 0).
+.sp
+Assigns submitted tasks to a specific group. Tasks are executed in ascending group order,
+with all tasks in a group completing before the next group begins. This enables simple
+workflow management without requiring explicit DAG\-based definitions.
+.sp
+All tasks default to group 0 for backwards compatibility. Users can organize tasks into
+multiple groups (e.g., 0, 1, 2, ...) where lower\-numbered groups execute first.
+.TP
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
 .sp
-If a database is configured for use with the workflow (e.g., Postgres), auto\-initialize
+If a database is configured for use with the workflow (e.g., PostgreSQL), auto\-initialize
 tables if they don\(aqt already exist. This is a short\-hand for pre\-creating tables with the
 \fBhs initdb\fP command. This happens by default with SQLite databases.
 .sp
@@ -741,6 +1034,39 @@ Tags allow for user\-defined tracking of information related to individual tasks
 groups of tasks. They are defined with both a \fIkey\fP and \fIvalue\fP (e.g., \fB\-\-tag file:a\fP).
 The default \fIvalue\fP for tags is blank. When searching with tags, not specifying a \fIvalue\fP
 will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (including blank).
+.UNINDENT
+.INDENT 0.0
+.TP
+.B \fB\-\-no\-tls\fP
+Disable TLS on the queue interface (not recommended).
+.sp
+Transport\-layer security is enabled by default. When disabled, task bundles and
+results travel the queue connection unencrypted; only do this on a trusted, isolated
+network or when transport security is already provided by an external tunnel.
+.sp
+See the \fIsecurity\fP section.
+.TP
+.B \fB\-\-tls\-cert\fP \fIPATH\fP
+Path to the TLS certificate file (default: <auto>).
+.sp
+With the default \fB<auto>\fP a self\-signed certificate is generated once on first
+server start and stored under the site \fBlib\fP directory. Provide a \fIPATH\fP to use
+your own certificate instead.
+.TP
+.B \fB\-\-tls\-key\fP \fIPATH\fP
+Path to the TLS private key file (default: <auto>).
+.sp
+Paired with \fB\-\-tls\-cert\fP\&. With the default \fB<auto>\fP the auto\-generated key is
+used; a user\-provided key file should be readable only by its owner.
+.TP
+.B \fB\-\-tls\-ca\fP \fIPATH\fP
+Path to the TLS CA certificate file used to verify the peer (default: <auto>).
+.sp
+With the default \fB<auto>\fP the server certificate is trusted directly, which suits
+a single host or shared filesystem. Provide a \fIPATH\fP to a certificate authority to
+verify peers across multiple hosts.
+.sp
+See the \fIsecurity\fP section for peer verification modes.
 .UNINDENT
 .SH INITDB USAGE
 .sp
@@ -757,13 +1083,13 @@ and applies a special purpose \fBpart:N\fP tag to the new partition and remainin
 .SS Actions
 .INDENT 0.0
 .TP
-.B \fB\-\-vacuum\fP
+.B \fB\-v\fP, \fB\-\-vacuum\fP
 Vacuum an existing database.
 .TP
-.B \fB\-\-backup\fP \fIPATH\fP
+.B \fB\-b\fP, \fB\-\-backup\fP \fIPATH\fP
 Vacuum into backup file (SQLite only).
 .TP
-.B \fB\-\-rotate\fP
+.B \fB\-r\fP, \fB\-\-rotate\fP
 Rotate completed tasks to new database (SQLite only).
 .TP
 .B \fB\-t\fP, \fB\-\-truncate\fP
@@ -779,7 +1105,7 @@ Auto\-confirm action (default will prompt).
 .INDENT 0.0
 .TP
 .B \fBhs\fP \fBinfo\fP \fB[\-h]\fP
-\fBID\fP \fB[\-\-stdout | \-\-stderr | \-x FIELD]\fP \fB[\-f FORMAT]\fP
+\fBID\fP \fB[\-i]\fP \fB[\-\-stdout | \-\-stderr | \-\-perf | \-x FIELD]\fP \fB[\-f FORMAT]\fP
 .UNINDENT
 .sp
 Get metadata and/or task outputs.
@@ -816,6 +1142,19 @@ Print <stdout> of task if captured, fetch from client if necessary.
 .TP
 .B \fB\-\-stderr\fP
 Print <stderr> of task if captured, fetch from client if necessary.
+.TP
+.B \fB\-\-perf\fP
+Print captured resource metrics (CSV) from task.
+.sp
+Requires the task to have been run under \fB\-\-monitor\fP, which records per\-task
+CPU and memory usage as a time series alongside the task outputs.
+.TP
+.B \fB\-i\fP, \fB\-\-ignore\-partitions\fP
+Suppress auto\-union feature (SQLite only).
+.sp
+When using the \fIsqlite\fP provider, all databases matching the numbering pattern
+applied by \fBhs initdb \-\-rotate\fP are automatically attached as partitions and
+used within a temporary view, making full task history searchable.
 .UNINDENT
 .SH WAIT USAGE
 .INDENT 0.0
@@ -900,10 +1239,10 @@ will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (incl
 .INDENT 0.0
 .TP
 .B \fBhs\fP \fBlist\fP \fB[\-h]\fP
-\fB[FIELD [FIELD ...]]\fP \fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP
+\fB[FIELD [FIELD ...]]\fP \fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP \fB[\-g GROUP]\fP
 \fB[\-\-order\-by FIELD [\-\-desc]]\fP \fB[\-\-count | \-\-limit NUM]\fP
-\fB[\-f FORMAT | \-\-json | \-\-csv]\fP \fB[\-d CHAR]\fP
-\fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP
+\fB[\-f FORMAT | \-\-json | \-\-csv]\fP \fB[\-d CHAR]\fP \fB[\-i]\fP
+\fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP \fB[\-\-retries]\fP
 .UNINDENT
 .sp
 \fBhs\fP \fBlist\fP \fB\-\-fields\fP
@@ -941,6 +1280,9 @@ Filter on one or more tags. (e.g., \fB\-t special\fP or \fB\-t file:a\fP).
 Leaving the \fIvalue\fP unspecified will return any task for which the \fIkey\fP exists.
 Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
 .TP
+.B \fB\-g\fP, \fB\-\-group\fP \fIGROUP\fP
+Filter results to a single task group.
+.TP
 .B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
 Order results by field. Optionally, in descending order.
 .TP
@@ -957,6 +1299,9 @@ For backwards compatibility, \fB\-\-finished\fP is also valid.
 .TP
 .B \fB\-R\fP, \fB\-\-remaining\fP
 Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
+.TP
+.B \fB\-\-retries\fP
+Alias for \fB\-w \(aqattempt > 1\(aq\fP (tasks that have been retried).
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
 Specify output format (either \fBnormal\fP, \fBplain\fP, \fBtable\fP, \fBcsv\fP, \fBjson\fP).
@@ -982,6 +1327,12 @@ Limit the number of results.
 .B \fB\-c\fP, \fB\-\-count\fP
 Show count of results.
 .TP
+.B \fB\-\-tag\-keys\fP
+Show all distinct tag keys instead of tasks.
+.TP
+.B \fB\-\-tag\-values\fP \fIKEY\fP
+Show all distinct tag values for the given tag \fIKEY\fP\&.
+.TP
 .B \fB\-i\fP, \fB\-\-ignore\-partitions\fP
 Suppress auto\-union feature (SQLite only).
 .sp
@@ -996,10 +1347,10 @@ and used within a temporary view, making full task history searchable.
 .TP
 .B \fBhs\fP \fBupdate\fP
 \fB[ARG [ARG ...]]\fP
-\fB[\-\-cancel | \-\-revert | \-\-delete | \-\-remove\-tag KEY [KEY...]]\fP
-\fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP
+\fB[\-\-cancel | \-\-revert | \-\-delete]\fP \fB[\-\-remove\-tag TAG [TAG ...]]\fP
+\fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP \fB[\-g GROUP]\fP
 \fB[\-\-order\-by FIELD [\-\-desc] \-\-limit NUM]\fP
-\fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP
+\fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP \fB[\-\-retries]\fP
 \fB[\-\-no\-confirm]\fP
 .UNINDENT
 .sp
@@ -1060,6 +1411,9 @@ Filter on one or more tags. (e.g., \fB\-t special\fP or \fB\-t file:a\fP).
 Leaving the \fIvalue\fP unspecified will return any task for which the \fIkey\fP exists.
 Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
 .TP
+.B \fB\-g\fP, \fB\-\-group\fP \fIGROUP\fP
+Filter matches to a single task group.
+.TP
 .B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
 Order results by field. Optionally, in descending order.
 .sp
@@ -1081,6 +1435,9 @@ Alias for \fB\-w \(aqexit_status != null\(aq\fP\&.
 .TP
 .B \fB\-R\fP, \fB\-\-remaining\fP
 Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
+.TP
+.B \fB\-\-retries\fP
+Alias for \fB\-w \(aqattempt > 1\(aq\fP (tasks that have been retried).
 .TP
 .B \fB\-f\fP, \fB\-\-no\-confirm\fP
 Do not ask for confirmation.
@@ -1106,6 +1463,46 @@ New value.
 .sp
 Use \fBkey:value\fP notation for tags.
 Updating \fBtag\fP will add or update any pre\-existing tag with that \fBkey\fP\&.
+.UNINDENT
+.SH CONFIG USAGE
+.sp
+\fBhs\fP \fBconfig\fP \fB[\-h]\fP \fB[\-\-system | \-\-local | \-\-user]\fP
+.sp
+\fBhs\fP \fBconfig\fP \fBget\fP \fB[\-h]\fP \fBSECTION[...].VAR\fP \fB[\-x]\fP \fB[\-r]\fP \fB[\-\-system | \-\-user | \-\-local | \-\-default]\fP
+.sp
+\fBhs\fP \fBconfig\fP \fBset\fP \fB[\-h]\fP \fBSECTION[...].VAR\fP \fBVALUE\fP \fB[\-\-system | \-\-user | \-\-local]\fP
+.sp
+\fBhs\fP \fBconfig\fP \fBedit\fP \fB[\-h]\fP \fB[\-\-system | \-\-user | \-\-local]\fP
+.sp
+\fBhs\fP \fBconfig\fP \fBwhich\fP \fB[\-h]\fP \fBSECTION[...].VAR\fP \fB[\-\-site]\fP
+.sp
+Manage configuration.
+.SS Commands
+.INDENT 0.0
+.TP
+.B \fBget\fP
+Get configuration option.
+.TP
+.B \fBset\fP
+Set configuration option.
+.TP
+.B \fBedit\fP
+Edit configuration with default editor.
+.TP
+.B \fBwhich\fP
+Show origin of configuration option.
+.UNINDENT
+.SS Options
+.INDENT 0.0
+.TP
+.B \fB\-\-system\fP
+Show system\-level config path.
+.TP
+.B \fB\-\-user\fP
+Show user\-level config path.
+.TP
+.B \fB\-\-local\fP
+Show local\-level config path.
 .UNINDENT
 .SH CONFIG GET USAGE
 .INDENT 0.0
@@ -1351,6 +1748,32 @@ Multiply the incoming argument (expected to be a float) by Pi.
 .B \fB{= dt.datetime.fromtimestamp(x) =}\fP
 Convert incoming POSIX timestamp to ISO format.
 .UNINDENT
+.SH TASK GROUPS
+.sp
+Tasks may be assigned to an integer \fIgroup\fP for simple dependency management. Groups are
+scheduled in ascending order: every task in the active group must reach a terminal state before
+any task in the next group is scheduled. Within a group there is no ordering and all tasks may
+run concurrently. Tasks default to group \fB0\fP\&.
+.sp
+Assign a group at submit time with \fB\-g\fP/\fB\-\-group\fP, or per task with an inline directive:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.EX
+echo \(aqstage\-one.sh  # HYPERSHELL: group:0\(aq | hs submit
+echo \(aqstage\-two.sh  # HYPERSHELL: group:1\(aq | hs submit
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+The server advances through groups automatically as each one completes. If a group cannot be
+completed because it still holds failed tasks (after any \fB\-\-max\-retries\fP attempts are
+exhausted), scheduling halts with a critical message; under \fB\-\-forever\fP the scheduler instead
+warns and waits for those tasks to be cleared or reverted (see \fBhs update\fP). Use
+\fB\-\-max\-retries\fP and \fB\-\-eager\fP to tune retry behavior within a group.
+.sp
+Filter or update tasks by group with the \fB\-g\fP/\fB\-\-group\fP option of \fBhs list\fP and
+\fBhs update\fP\&.
 .SH CONFIGURATION
 .sp
 Most of the choices the program makes about timing, task bundling, coordination, logging,
@@ -1360,9 +1783,8 @@ and command\-line options.
 .sp
 In order of precedence (lowest to highest), three files are loaded:
 .TS
-center;
-|l|l|l|.
-_
+box center;
+l|l|l.
 T{
 Level
 T}	T{
@@ -1394,14 +1816,13 @@ T}	T{
 T}	T{
 \fB\&./.hypershell/config.toml\fP
 T}
-_
 .TE
 .nf
 
 .fi
 .sp
 .sp
-The \fI\%TOML\fP format is modern and minimal.
+The \X'tty: link https://toml.io'\fI\%TOML\fP\X'tty: link' format is modern and minimal.
 .sp
 Every configurable option can be set in one of these files. Further, every option can
 also be set by an environment variable, where the name aligns to the path
@@ -1411,11 +1832,9 @@ For example, set the logging level at the user level with a command:
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.nf
-.ft C
+.EX
 $ hs config set logging.level info \-\-user
-.ft P
-.fi
+.EE
 .UNINDENT
 .UNINDENT
 .sp
@@ -1423,15 +1842,13 @@ The file should now look something like this:
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.nf
-.ft C
+.EX
 # File automatically created on 2022\-07\-02 11:57:29.332993
 # Settings here are merged automatically with defaults and environment variables
 
 [logging]
 level = \(dqinfo\(dq
-.ft P
-.fi
+.EE
 .UNINDENT
 .UNINDENT
 .sp
@@ -1440,11 +1857,9 @@ would be equivalent:
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.nf
-.ft C
+.EX
 $ export HYPERSHELL_LOGGING_LEVEL=INFO
-.ft P
-.fi
+.EE
 .UNINDENT
 .UNINDENT
 .sp
@@ -1455,8 +1870,7 @@ obfuscate sensitive information, such as database connection details.
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.nf
-.ft C
+.EX
 # File automatically created on 2022\-07\-02 11:57:29.332993
 # Settings here are merged automatically with defaults and environment variables
 
@@ -1469,8 +1883,7 @@ database = \(dqhypershell\(dq
 host = \(dqmy.instance.university.edu\(dq
 user = \(dqme\(dq
 password_eval = \(dqpass hypershell/database/password\(dq  # Decrypt using GNU Pass
-.ft P
-.fi
+.EE
 .UNINDENT
 .UNINDENT
 .SS Parameter Reference
@@ -1482,7 +1895,7 @@ Logging configuration. See also \fI\%logging\fP section.
 .TP
 .B \fB\&.level\fP
 One of \fBTRACE\fP, \fBDEBUG\fP, \fBINFO\fP, \fBWARNING\fP,
-\fBERROR\fP, or \fBCRITICAL\fP (default: \fBWARNING\fP)
+\fBERROR\fP, or \fBCRITICAL\fP (default: \fBINFO\fP)
 .sp
 \fBINFO\fP level messages are reserved for clients when tasks begin running.
 There are numerous WARNING events (e.g., non\-zero exit status of a task).
@@ -1505,7 +1918,7 @@ Date/time format, standard codes apply (default: \fB\(aq%Y\-%m\-%d %H:%M:%S\(aq\
 Log message format.
 .sp
 Default set by the \(dqdefault\(dq \fBlogging.style\fP\&.
-See the \fI\%available attributes\fP
+See the \X'tty: link https://docs.python.org/3/library/logging.html#logrecord-attributes'\fI\%available attributes\fP\X'tty: link'
 defined by the underlying Python logging interface.
 .sp
 Additional attributes provided beyond the standard include \fIapp_id\fP, \fIhostname\fP, \fIhostname_short\fP,
@@ -1516,13 +1929,63 @@ as well as all ANSI colors and formats as \fIansi_x\fP where x is one of \fIrese
 .TP
 .B \fB\&.style\fP
 Presets for \fBlogging.format\fP which can be difficult to define correctly.
-Options are \fIdefault\fP, \fIdetailed\fP, \fIdetailed\-compact\fP, and \fIsystem\fP\&.
+Options are \fIdefault\fP, \fIdetailed\fP, \fIdetailed\-compact\fP, \fIsystem\fP, and \fIshort\fP\&.
+.TP
+.B \fB\&.color\fP
+Enable ANSI color and formatting in console output (default: \fBtrue\fP).
+.sp
+Colors are emitted only when \fIstderr\fP is a TTY and are always stripped from
+file\-based logs. See also the \fBNO_COLOR\fP and \fBFORCE_COLOR\fP environment variables.
+.TP
+.B \fB[file]\fP
+File\-based logging (disabled unless at least one parameter is set).
+See the \fI\%logging\fP section for full details on rotation and compression.
+.sp
+As a shorthand, \fBlogging.file\fP may be set directly to \fB\(dqenabled\(dq\fP (or \fBtrue\fP) to
+log to the default per\-process file, or to a path to log there; both forms disable
+rotation and compression.
+.INDENT 7.0
+.TP
+.B \fB\&.path\fP
+Destination file path. Defaults to a per\-process, host\-scoped file in the site
+\fBlog\fP directory (e.g. \fBserver\-<host>.log\fP, \fBclient\-<host>.log\fP, or
+\fBmain.log\fP). Parent directories are created as needed.
+.TP
+.B \fB\&.level\fP
+Minimum severity written to the file (default: \fBTRACE\fP).
+Accepts the same names as \fBlogging.level\fP, independent of the console level.
+.TP
+.B \fB\&.style\fP
+Format preset for the file (default: \fBsystem\fP). Accepts the same options as
+\fBlogging.style\fP; a \fBformat\fP may be given instead. ANSI color is always stripped.
+.TP
+.B \fB\&.rotate\fP
+Rotation policy (default: \fBnever\fP). Either a size threshold such as \fB512MB\fP
+(units \fBKB\fP/\fBMB\fP/\fBGB\fP/\fBTB\fP, powers of 1024; a bare number is bytes) or a
+cron expression such as \fB@daily\fP, \fB@midnight\fP, or \fB0 1 * * 0\fP (requires the
+\fBcroniter\fP package). Sending \fBSIGHUP\fP rotates on demand.
+.TP
+.B \fB\&.compress\fP
+Compression for rotated files (default: none). One of \fBgzip\fP, \fBbzip\fP,
+\fBlzma\fP, or \fBzstd\fP (the last requires the optional \fBzstandard\fP package).
+Extensions \fB\&.gz\fP, \fB\&.bz2\fP, \fB\&.xz\fP, and \fB\&.zstd\fP respectively.
+.TP
+.B \fB\&.keep\fP
+Number of \fIuncompressed\fP rotated files to retain (default: \fB0\fP). Only applies
+when compression is enabled; without compression, rotated files are never deleted.
+.UNINDENT
 .UNINDENT
 .TP
 .B \fB[database]\fP
 Database configuration and connection details.
 See also \fI\%database\fP section.
 .INDENT 7.0
+.TP
+.B \fB\&.url\fP
+Full database connection URL (default: none).
+.sp
+When provided, this takes precedence over and short\-circuits the individual
+\fB\&.provider\fP/\fB\&.host\fP/\fB\&.port\fP/\fB\&.user\fP/\fB\&.password\fP fields below.
 .TP
 .B \fB\&.provider\fP
 Database provider (default: \(aqsqlite\(aq). Supported alternatives include
@@ -1563,9 +2026,9 @@ See also note on \fB_env\fP and \fB_eval\fP\&.
 .B \fB\&.echo\fP
 Special parameter enables verbose logging of all database transactions.
 .TP
-.B \fB[connection_args]\fP
+.B \fB[connect_args]\fP
 Specify additional connection details for the underlying SQL dialect provider,
-e.g., \fBsqlite3\fP or \fBpsycopg2\fP\&.
+e.g., \fBsqlite3\fP or \fBpsycopg\fP\&.
 .TP
 .B \fB[pragmas]\fP
 Specify one or more pragmas to apply to database connections (SQLite only).
@@ -1585,6 +2048,14 @@ Bind address (default: \fIlocalhost\fP).
 When running locally, the default is recommended. To allow remote \fIclients\fP to connect
 over the network, bind the server to \fI0.0.0.0\fP\&.
 .TP
+.B \fB\&.host\fP
+Host address that clients connect to (default: \fIlocalhost\fP).
+.sp
+Counterpart to \fB\&.bind\fP: where \fB\&.bind\fP is the local address the server listens on,
+\fB\&.host\fP is the address that \fIclient\fP instances and queue\-direct \fBsubmit \-\-queue\fP
+dial to reach the server. Set this to the server\(aqs reachable hostname or address
+when running clients on other machines.
+.TP
 .B \fB\&.port\fP
 Port number (default: \fI50001\fP).
 .sp
@@ -1592,7 +2063,7 @@ This is an arbitrary choice and simply must be an available port. The default op
 here is typically available on most platforms and is not expected by any known major software.
 .TP
 .B \fB\&.auth\fP
-Cryptographic authentication key to connect with server (default: \fI<not secure>\fP).
+Cryptographic authentication key to connect with server (default: \fI<not\-secure>\fP).
 .sp
 The default \fIKEY\fP used by the server and client is not secure and only a place holder.
 It is expected that the user choose a secure \fIKEY\fP\&. The \fIcluster\fP automatically generates
@@ -1641,9 +2112,15 @@ If \fB\&.attempts\fP is greater than one, this option defines the appetite for r
 failed tasks. By default, failed tasks will only be scheduled when there are no more
 remaining novel tasks.
 .TP
-.B \fB\&.wait\fP
-Polling interval in seconds for database queries during scheduling (default: \fI5\fP).
-This waiting only occurs when no tasks are returned by the query.
+.B \fB\&.poll\fP
+Maximum polling interval in seconds between database queries when no tasks are
+available (default: \fI30\fP).
+.sp
+The scheduler backs off exponentially from a small floor, doubling the wait after
+each empty query up to this ceiling. This waiting only occurs when no tasks are
+returned by the query.
+.sp
+See also \fB\-Q\fP/\fB\-\-poll\fP command\-line option.
 .TP
 .B \fB\&.evict\fP
 Eviction period in seconds for clients (default: \fI600\fP).
@@ -1652,6 +2129,66 @@ If a client fails to register a heartbeat after this period of time it is consid
 defunct and is evicted. When there are no more tasks to schedule the server sends a
 disconnect request to all registered clients, and waits until a confirmation is
 returned for each. If a client is defunct, this will hang the shutdown process.
+.TP
+.B \fB[tls]\fP
+Transport\-layer security for queue connections. Enabled by default; every key below
+is also exposed as an environment variable (e.g., \fBHYPERSHELL_SERVER_TLS_ENABLED\fP)
+with the usual precedence. See the \fI\%built\-in TLS\fP section for the
+full model, including peer verification modes and limitations.
+.INDENT 7.0
+.TP
+.B \fB\&.enabled\fP
+Use TLS on the queue interface (default: \fItrue\fP).
+.sp
+Disabling (\fBenabled = false\fP or the \fB\-\-no\-tls\fP option) sends task bundles and
+results in the clear and is not recommended outside a trusted, isolated network.
+.TP
+.B \fB\&.cert\fP
+Path to the server certificate, or \fB<auto>\fP (default: \fI<auto>\fP).
+.sp
+With \fB<auto>\fP a self\-signed certificate is generated once on first server start
+and stored under the site \fBlib\fP directory (\fB<site>/lib/tls\fP).
+.TP
+.B \fB\&.key\fP
+Path to the server private key, or \fB<auto>\fP (default: \fI<auto>\fP).
+.sp
+Paired with \fB\&.cert\fP\&. The auto\-generated key is written owner\-only (\fB0600\fP);
+a user\-provided key file should be protected the same way.
+.TP
+.B \fB\&.cafile\fP
+Trust anchor used by the client to verify the server (default: \fI<auto>\fP).
+.sp
+With \fB<auto>\fP the client trusts the server\(aqs own certificate directly, which
+works out of the box only on a single host or a shared filesystem. Provide a PEM
+bundle \fIPATH\fP (together with \fB\&.servername\fP) to verify peers across hosts.
+.TP
+.B \fB\&.fingerprint\fP
+Pinned peer certificate fingerprint, e.g. \fBSHA256:AB:CD:...\fP (default: none).
+.sp
+When set, the client completes the handshake without CA validation and rejects the
+connection unless the certificate fingerprint matches. Takes precedence over
+\fB\&.cafile\fP\&. Convenient for self\-signed certificates and small clusters.
+.TP
+.B \fB\&.insecure\fP
+Disable peer verification entirely (default: \fIfalse\fP).
+.sp
+The transport is still encrypted, but the peer identity is not authenticated and a
+warning is logged on every connection. Suitable only for transient local debugging
+on a trusted host; never use it on an untrusted network.
+.TP
+.B \fB\&.min_version\fP
+Minimum TLS protocol version (default: \fITLSv1.2\fP). Either \fBTLSv1.2\fP or \fBTLSv1.3\fP\&.
+.TP
+.B \fB\&.ciphers\fP
+OpenSSL cipher string to restrict the negotiated ciphers (default: none).
+.TP
+.B \fB\&.servername\fP
+Expected server name for identity verification / SNI override (default: none).
+.sp
+Required alongside \fB\&.cafile\fP for true server\-identity verification: with a trust
+anchor set but no \fB\&.servername\fP, the client checks only that the certificate
+chains to the anchor, not which host presented it.
+.UNINDENT
 .UNINDENT
 .TP
 .B \fB[client]\fP
@@ -1690,6 +2227,30 @@ Even on the largest scales the default interval should be fine.
 Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 .sp
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
+.TP
+.B \fB\&.cores\fP
+Client\-level limit on CPU cores available for running tasks (default: all available).
+.sp
+A value of \fB0\fP means unconstrained (use all detected cores). Set a lower value to
+partition a node between multiple clients.
+.sp
+See also \fB\-C\fP/\fB\-\-client\-cores\fP command\-line option.
+.TP
+.B \fB\&.memory\fP
+Client\-level limit on memory (in bytes) available for running tasks (default: all available).
+.sp
+A value of \fB0\fP means unconstrained. Set a lower value to partition a node\(aqs memory
+between multiple clients.
+.sp
+See also \fB\-M\fP/\fB\-\-client\-memory\fP command\-line option.
+.TP
+.B \fB\&.ratelimit\fP
+Maximum number of tasks started per second (default: no limit).
+.sp
+A value of \fB0\fP disables rate limiting. Useful to throttle very short tasks so that
+task launch does not overwhelm a shared resource.
+.sp
+See also \fB\-R\fP/\fB\-\-ratelimit\fP command\-line option.
 .UNINDENT
 .TP
 .B \fB[submit]\fP
@@ -1721,6 +2282,22 @@ Section for task runtime settings.
 .B \fB\&.cwd\fP
 Explicitly set the working directory for all tasks.
 .TP
+.B \fB\&.cores\fP
+Default cores required per task (default: unconstrained).
+.sp
+A value of \fB0\fP means unconstrained. Used with resource\-aware scheduling and backfill;
+individual tasks may override this inline (e.g., \fB# HYPERSHELL: cores:8\fP).
+.sp
+See also \fB\-c\fP/\fB\-\-cores\fP command\-line option.
+.TP
+.B \fB\&.memory\fP
+Default memory (in bytes) required per task (default: unconstrained).
+.sp
+A value of \fB0\fP means unconstrained. Used with resource\-aware scheduling and backfill;
+individual tasks may override this inline (e.g., \fB# HYPERSHELL: memory:8GB\fP).
+.sp
+See also \fB\-m\fP/\fB\-\-memory\fP command\-line option.
+.TP
 .B \fB\&.timeout\fP
 Task\-level walltime limit (default: none).
 .sp
@@ -1736,6 +2313,11 @@ See also \fB\-S\fP, \fB\-\-signalwait\fP command\-line option.
 .B \fB[ssh]\fP
 SSH configuration section.
 .INDENT 7.0
+.TP
+.B \fB\&.config\fP
+Path to the SSH client configuration file (default: \fB~/.ssh/config\fP).
+.sp
+Host entries defined there are honored when connecting to nodes in \fBssh.nodelist\fP\&.
 .TP
 .B \fB\&.args\fP
 SSH connection arguments; e.g., \fB\-i ~/.ssh/some.key\fP\&.
@@ -1790,6 +2372,13 @@ The autoscaler waits for this period of time in between checks and scaling event
 A shorter period makes the scaling behavior more responsive but can effect database
 performance if checks happen too rapidly.
 .TP
+.B \fB\&.launcher\fP
+Command prefix used to launch each client as a scaling unit (default: none).
+.sp
+An empty value launches clients directly as \fBhs client ...\fP\&. Set a launcher such as
+an MPI or SLURM command (e.g., \fBsrun\fP) to bring up each client through your resource
+manager. Counterpart to the cluster \fB\-\-launcher\fP option used with \fB\-\-autoscaling\fP\&.
+.TP
 .B \fB[size]\fP
 .INDENT 7.0
 .TP
@@ -1808,7 +2397,7 @@ value we will scale up by one. Allowing \fBmin = 0\fP is an important feature fo
 efficient use of computing resources in the absence of tasks.
 .TP
 .B \fB\&.max\fP
-Maximum size of cluster (default: 2).
+Maximum size of cluster (default: 1).
 .sp
 For a \fIdynamic\fP autoscaling policy, this sets an upper limit on the number of launched
 clients. When this number is reached, scaling stops regardless of task pressure.
@@ -1820,9 +2409,10 @@ Rich text display and output parameters.
 .INDENT 7.0
 .TP
 .B \fB\&.theme\fP
-Color scheme to use by default in output (such as with \fBtask info\fP and \fBtask search\fP).
+Color scheme to use by default in output (default: \fImonokai\fP), such as with
+\fBhs info\fP and \fBhs search\fP\&.
 .sp
-This option is passed to the \fI\%rich\fP library.
+This option is passed to the \X'tty: link https://rich.readthedocs.io/en/latest/'\fI\%rich\fP\X'tty: link' library.
 .UNINDENT
 .TP
 .B \fB[export]\fP
@@ -1852,12 +2442,10 @@ SQLite only needs the local file path.
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.nf
-.ft C
+.EX
 [database]
 file = \(dq/var/lib/hypershell/main.db\(dq
-.ft P
-.fi
+.EE
 .UNINDENT
 .UNINDENT
 .sp
@@ -1868,13 +2456,11 @@ local account authentication simply needs to know the database name.
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.nf
-.ft C
+.EX
 [database]
 provider = \(dqpostgres\(dq
 database = \(dqhypershell\(dq
-.ft P
-.fi
+.EE
 .UNINDENT
 .UNINDENT
 .sp
@@ -1889,6 +2475,49 @@ expanded version.
 .sp
 The special \fB\&.echo\fP parameter can be set to \fBtrue\fP to enable verbose logging of all database
 transactions. These will be emitted as \fBINFO\fP level messages.
+.SH SECURITY
+.sp
+\fIHyperShell\fP runs arbitrary shell commands on every host that connects to its task queue, so the
+queue transport is security\-sensitive. Two controls are enabled by default: transport\-layer TLS
+and a shared authentication key. The full model, threat analysis, and deployment guides are in
+the \fI\%Security\fP section.
+.sp
+On a single host or a shared filesystem no action is required. The first time a server starts
+with TLS enabled it generates a self\-signed certificate and private key under \fB<site>/lib/tls\fP
+(private key mode \fB0600\fP) and reuses them thereafter. The managed \fBcluster\fP, the \fBssh\fP
+cluster, and autoscaling launchers each generate a fresh one\-time authentication key per
+invocation, which the operator never configures.
+.sp
+Standalone \fBhs server\fP and \fBhs client\fP instead require an explicit key, supplied with
+\fB\-k\fP/\fB\-\-auth\fP, the \fBHYPERSHELL_SERVER_AUTH\fP environment variable, or \fBserver.auth\fP in the
+configuration. The server refuses to start with the built\-in placeholder key and requires a key of
+at least 16 characters drawn from \fB[A\-Za\-z0\-9._+/=\-]\fP\&. The key is never transmitted over the
+queue socket; even so, treat every host that holds it as inside the trust boundary.
+.sp
+Disable TLS per invocation with \fB\-\-no\-tls\fP, or permanently with \fBserver.tls.enabled = false\fP
+(not recommended; a warning is logged). The client verifies the server certificate in one of four
+modes, in decreasing order of strength:
+.INDENT 0.0
+.IP \(bu 2
+\fBCA verification\fP — set \fBserver.tls.cafile\fP to a PEM trust anchor \fBand\fP
+\fBserver.tls.servername\fP to the expected hostname (recommended for multi\-host deployments).
+.IP \(bu 2
+\fBFingerprint pinning\fP — set \fBserver.tls.fingerprint\fP to the server\(aqs \fBSHA256:...\fP digest.
+.IP \(bu 2
+\fBSystem CA\fP — leave \fBcafile\fP, \fBfingerprint\fP, and \fBinsecure\fP unset to use the platform
+trust store with a public\-CA\-issued certificate.
+.IP \(bu 2
+\fBInsecure\fP — \fBserver.tls.insecure = true\fP encrypts the connection but does not authenticate
+the peer; suitable only for transient local debugging on a trusted host.
+.UNINDENT
+.sp
+Across multiple hosts without a shared filesystem, distribute the server\(aqs certificate — or its
+pinned fingerprint — to each client out of band, and never the private key.
+.sp
+\fIHyperShell\fP\(aqs built\-in TLS protects only the queue transport. Secure the task database connection
+independently (for example, PostgreSQL \fBsslmode\fP), and rely on SSH host\-key verification for
+\fBssh\fP clusters. See the \fI\%Security\fP section for database, internet\-facing, and Kubernetes
+deployment guides.
 .SH ENVIRONMENT VARIABLES
 .sp
 As stated for configuration, any environment variable prefixed as \fBHYPERSHELL_\fP
@@ -1997,8 +2626,7 @@ section of your configuration file(s); e.g.,
 .INDENT 0.0
 .INDENT 3.5
 .sp
-.nf
-.ft C
+.EX
 # File automatically created on 2022\-07\-02 11:57:29.332993
 # Settings here are merged automatically with defaults and environment variables
 
@@ -2010,8 +2638,7 @@ level = \(dqinfo\(dq
 [export]
 foo = \(dqvalue\(dq
 path = [\(dq/some/bin\(dq, \(dq/some/other/bin\(dq]
-.ft P
-.fi
+.EE
 .UNINDENT
 .UNINDENT
 .sp
@@ -2021,7 +2648,7 @@ the use of colors in all console output.
 .TP
 .B \fBNO_COLOR\fP
 If this variable is set to anything but a blank string, all colors are disabled.
-See \fI\%no\-color.org\fP for details.
+See \X'tty: link https://no-color.org'\fI\%no\-color.org\fP\X'tty: link' for details.
 .TP
 .B \fBFORCE_COLOR\fP
 If this variable is set to anything but a blank string, colors will be enabled
@@ -2044,6 +2671,11 @@ set a flag to send local interrupts to tasks to come down faster. As described
 in the previous release with regard to the \fBtask.timeout\fP feature, we send
 \fBSIGINT\fP, \fBSIGTERM\fP, and \fBSIGKILL\fP in an escalating fashion to halt
 running tasks.
+.TP
+.B \fBSIGHUP\fP
+Sending the \fBSIGHUP\fP signal triggers an immediate rotation of the process\(aqs
+log file, when file\-based logging is enabled. This is the conventional way to
+rotate logs on demand from an external tool. See the \fI\%logging\fP section.
 .UNINDENT
 .SH EXIT STATUS
 .INDENT 0.0
@@ -2075,6 +2707,6 @@ ssh(1), mpirun(1)
 .SH AUTHOR
 Geoffrey Lentner <glentner@purdue.edu>.
 .SH COPYRIGHT
-2019-2025 Geoffrey Lentner
+2019-2026 Geoffrey Lentner
 .\" Generated by docutils manpage writer.
 .

@@ -1,6 +1,6 @@
 [project]
 name = "hypershell"
-version = "2.7.2"
+version = "2.8.0"
 description = "A cross-platform, high-throughput computing utility for processing shell commands over a distributed, asynchronous queue."
 readme = "README.rst"
 license = "Apache-2.0"
@@ -20,8 +20,6 @@ keywords = [
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Topic :: Utilities",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -31,49 +29,71 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
     "License :: OSI Approved :: Apache Software License",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "cmdkit[toml]>=2.7.7",
     "pyyaml>=6.0.1", # Allow 6.0.1 for EPEL9 compatibility (2025-01-02)
     "tomlkit>=0.13.2",
-    "sqlalchemy>=2.0.29",
+    "sqlalchemy>=2.0.50",
     "rich>=13.7.1",
-    "paramiko>=3.4.0",
+    "paramiko>=3.4.0", # Lock bumped to 5.x (modern KEX); floor kept low for RHEL/EPEL parity
+    "psutil>=7.0.0",
+    "cryptography>=3.4", # Low floor for RHEL/EPEL (EL8-EL10); only legacy x509/rsa APIs used, pip resolves newest
 ]
 
 [project.optional-dependencies]
-postgres = [
-    "psycopg2>=2.9.9"
-]
-uuid7 = [
-    "uuid-utils>=0.10.0",
-]
+# Easy path (default): self-contained binary wheels bundling libpq+libssl. No compiler, no system
+# packages. Ideal for quickstart/dev; the bundled libs do NOT receive OS security updates.
+postgres = ["psycopg[binary]>=3.1"]
+# Production, no compiler: pure-python psycopg using the OS-patched system libpq (dnf install libpq /
+# apt install libpq5). This is the flavor EPEL RPMs map onto the distro python3-psycopg3.
+postgres-system = ["psycopg>=3.1"]
+# Production, max performance: compiles psycopg-c against the system libpq. Requires a build toolchain
+# and headers (dnf install gcc libpq-devel, which provides pg_config).
+postgres-c = ["psycopg[c]>=3.1"]
+uuid7 = ["uuid-utils>=0.16.0"]
+zstd = ["zstandard>=0.25.0"]
+cron = ["croniter>=6.2.2"]
+#TODO: turso = ["pyturso>=0.1.4", "sqlalchemy-turso>=0.2.0"]
 
 [dependency-groups]
 dev = [
-    "psycopg2>=2.9.9",
-    "uuid-utils>=0.10.0",
-    "pytest>=8.1.1",
-    "hypothesis>=6.100.0",
-    "sphinx-autobuild>=2024.2.4",
-    "pytest-xdist>=3.7.0",
+    "psycopg>=3.1",
+    "uuid-utils>=0.16.0",
+    "pytest>=9.0.3",
+    "hypothesis>=6.155.1",
+    "pytest-xdist>=3.8.0",
+    "ipython>=9.4.0",
+    "croniter>=6.2.2",
+    "zstandard>=0.25.0",
+    #TODO: "pyturso>=0.1.4",
+    #TODO: "sqlalchemy-turso>=0.2.0",
 ]
 docs = [
+    "docutils-stubs==0.0.22",
+    "types-docutils==0.22.0.20250822",
     "sphinx>=6.0,<8.0",
     "sphinx-sitemap>=2.5.1",
-    "sphinx-autobuild>=2024.2.4",
     "sphinx-copybutton>=0.5.2",
     "sphinxext-opengraph>=0.9.1",
     "sphinxcontrib-details-directive>=0.1.0",
     "sphinx-toolbox>=3.5.0",
     "sphinx-inline-tabs>=2023.4.21",
     "enum-tools[sphinx]>=0.12.0",
-    "furo>=2024.1.29",
-    "setuptools>=75.8.2",
+    "furo>=2025.12.19",
+    "setuptools<81",
+    #NOTE: Disabling autobuild to avoid PyO3 compatibility headache
+    #   "sphinx-autobuild>=2024.2.4",
 ]
 
 [tool.uv]
 default-groups = ["dev", "docs"]
+# Keep the resolved lock free of source-only builds on Python 3.14+: SQLAlchemy pulls greenlet on
+# x86_64/aarch64 even for sync-only use, and greenlet <3.5 ships no cp314/cp315 wheel (C++ build).
+constraint-dependencies = ["greenlet>=3.5.1"]
+
+#TODO: [tool.uv.sources]
+#TODO: sqlalchemy-turso = { git = "https://github.com/hypershell/sqlalchemy-turso" }
 
 [project.scripts]
 hyper-shell = "hypershell:main"  # NOTE: do not remove this
@@ -84,10 +104,38 @@ hsx = "hypershell:main_x"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/hypershell"]
+
+# Install shell completions and man pages into <prefix>/share so they are picked
+# up by bash-completion, zsh (fpath), and man. The bash file is installed under
+# each command name so `bash-completion` autoloads it for hs/hsx.
+[tool.hatch.build.targets.wheel.shared-data]
+"share/bash_completion.d/hs"          = "share/bash-completion/completions/hs"
+"share/bash_completion.d/hsx"         = "share/bash-completion/completions/hsx"
+"share/zsh/site-functions/_hs"        = "share/zsh/site-functions/_hs"
+"share/man/man1/hs.1"                 = "share/man/man1/hs.1"
+"share/man/man1/hsx.1"                = "share/man/man1/hsx.1"
+"share/man/man1/hyper-shell.1"        = "share/man/man1/hyper-shell.1"
+
+# Ensure completions, man pages, and docs ship in the source distribution too.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/share",
+    "/docs",
+    "/tests",
+    "/README.rst",
+    "/LICENSE",
+    "/CODE_OF_CONDUCT.md",
+    "/pyproject.toml",
+    "/uv.lock",
+]
+
 [tool.pytest.ini_options]
-addopts = ["--strict-markers", ]
+addopts = ["--strict-markers"]
 markers = [
-    'unit', # Unit tests are short, interface driven tests on discrete components.",
-    'integration', # Integration tests are often longer and deal with the interaction between systems.",
+    'unit',         # Unit tests are short, interface-driven tests on discrete components.",
+    'integration',  # Integration tests are often longer and deal with the interaction between systems.",
     'parameterize', # Placeholder for parameterized tests (not a real type).",
 ]

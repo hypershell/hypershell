@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """Tag interface and parsing."""
@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Type
 from dataclasses import dataclass
 
 # Internal libs
-from hypershell.core.types import JSONValue, smart_coerce
+from hypershell.core.types import JSONData, smart_coerce
 
 # Public interface
 __all__ = ['Tag', ]
@@ -23,9 +23,9 @@ class Tag:
     """Tag specification."""
 
     name: str
-    value: JSONValue = ''
+    value: JSONData = ''
 
-    def to_dict(self: Tag) -> Dict[str, JSONValue]:
+    def to_dict(self: Tag) -> Dict[str, JSONData]:
         """Format tag specification as dictionary."""
         return {self.name: self.value, }
 
@@ -41,7 +41,7 @@ class Tag:
             return cls(name, value)
 
     @classmethod
-    def parse_cmdline_list(cls: Type[Tag], args: List[str]) -> Dict[str, Optional[JSONValue]]:
+    def parse_cmdline_list(cls: Type[Tag], args: List[str]) -> Dict[str, Optional[JSONData]]:
         """Parse command-line list of tags."""
         return {tag.name: tag.value for tag in map(cls.from_cmdline, args)}
 

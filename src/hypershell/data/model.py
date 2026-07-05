@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """Database models."""
@@ -6,41 +6,48 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Dict, Tuple, Any, Type, TypeVar, Union, Optional
+from typing import List, Dict, Tuple, Any, Type, Optional, Final
 
 # Standard libs
 import re
 import json
 from datetime import datetime
+from dataclasses import dataclass
 
 # External libs
 from sqlalchemy import Column, Index, func
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.types import Integer, DateTime, Text, Boolean, JSON as JSON_TEXT
+from sqlalchemy.types import Integer, Float, DateTime, Text, Boolean, JSON as JSON_TEXT
 from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES
 
 # Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
-from hypershell.core.types import JSONValue, to_json_type, from_json_type
+from hypershell.core.types import JSONData, to_json_type, from_json_type, serialize, deserialize
 from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
 
 # Public interface
 __all__ = [
-    'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type',
+    'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
+    'DEFAULT_TASK_GROUP', 'TaskGroupInfo',
 ]
 
 # Initialize logger
 log = Logger.with_name(__name__)
 
 
+# Constants
+DEFAULT_TASK_GROUP: Final[int] = 0
+"""Default task group for backwards compatibility."""
+
+
 class DatabaseError(Exception):
-    """Generic database related exception."""
+    """Generic database-related exception."""
 
 
 class NotFound(DatabaseError):
@@ -60,6 +67,7 @@ UUID = Text().with_variant(POSTGRES_UUID(as_uuid=False), 'postgresql')
 TEXT = Text()
 INTEGER = Integer()
 SMALL_INTEGER = Integer().with_variant(SMALLINT, 'postgresql')
+FLOAT = Float()
 DATETIME = DateTime(timezone=True)
 BOOLEAN = Boolean()
 JSON = JSON_TEXT().with_variant(JSON_BYTES(), 'postgresql')
@@ -93,13 +101,9 @@ class Entity(DeclarativeBase):
         """Convert record to dictionary."""
         return dict(zip(self.columns, self.to_tuple()))
 
-    def to_json(self: Entity) -> Dict[str, JSONValue]:
+    def to_json(self: Entity) -> Dict[str, JSONData]:
         """Convert record to JSON-serializable dictionary."""
         return {key: to_json_type(value) for key, value in self.to_dict().items()}
-
-    def pack(self: Entity) -> bytes:
-        """Encode as raw JSON bytes."""
-        return json.dumps(self.to_json()).encode()
 
     @classmethod
     def from_dict(cls: Type[Entity], data: Dict[str, Any]) -> Entity:
@@ -107,14 +111,22 @@ class Entity(DeclarativeBase):
         return cls(**data)  # noqa: __init__ instrumented by declarative_base
 
     @classmethod
-    def from_json(cls: Type[Entity], data: Dict[str, JSONValue]) -> Entity:
+    def from_json(cls: Type[Entity], data: Dict[str, JSONData]) -> Entity:
         """Build from JSON `text` string."""
         return cls.from_dict({key: from_json_type(value) for key, value in data.items()})
 
+    # NOTE:
+    # The pack() and unpack() remaining available for backwards compatibility, but not recommended.
+    # We now use serialize_tasks() and deserialize_tasks() to serialize task bundles as one object.
+
+    def pack(self: Entity) -> bytes:
+        """Encrypt JSON bytes."""
+        return serialize(self.to_json())
+
     @classmethod
     def unpack(cls: Type[Entity], data: bytes) -> Entity:
-        """Unpack raw JSON byte string."""
-        return cls.from_json(json.loads(data.decode()))
+        """Unpack encrypted JSON byte string."""
+        return cls.from_json(deserialize(data))
 
     @classmethod
     def query(cls: Type[Entity], *fields: Column, caching: bool = True) -> Query:
@@ -194,15 +206,41 @@ class Entity(DeclarativeBase):
         raise NotImplementedError()  # NOTE: non-strict requirement of base
 
 
+def serialize_tasks(tasks: Optional[List[Task]]) -> bytes:
+    """Serialize list of tasks to encrypted JSON byte string."""
+    return serialize(None if tasks is None else [task.to_json() for task in tasks])
+
+
+def deserialize_tasks(data: bytes) -> Optional[List[Task]]:
+    """Deserialize list of tasks from encrypted JSON byte string."""
+    data = deserialize(data)
+    return None if data is None else [Task.from_json(task_data) for task_data in data]
+
+
+@dataclass
+class TaskGroupInfo:
+    """Information related to the active task group."""
+    value: int
+    reason: Optional[str] = None
+    viable: bool = True
+
+
 class Task(Entity):
     """Task entity within database implements task methods."""
 
     id: Mapped[str] = mapped_column(UUID, primary_key=True, nullable=False)
+    group: Mapped[int] = mapped_column(INTEGER, nullable=False, default=DEFAULT_TASK_GROUP, quote=True, name='group')
     args: Mapped[str] = mapped_column(TEXT, nullable=False)
 
     submit_id: Mapped[str] = mapped_column(UUID, nullable=False)
     submit_time: Mapped[datetime] = mapped_column(DATETIME, nullable=False)
     submit_host: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
+
+    cores: Mapped[int] = mapped_column(SMALL_INTEGER, nullable=True)  # NULL means untracked
+    memory: Mapped[int] = mapped_column(INTEGER, nullable=True)  # NULL means untracked
+    cores_max: Mapped[float] = mapped_column(FLOAT, nullable=True)
+    memory_max: Mapped[float] = mapped_column(FLOAT, nullable=True)
+    timeout: Mapped[int] = mapped_column(INTEGER, nullable=True)  # NULL means untracked
 
     server_id: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)
     server_host: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
@@ -218,6 +256,7 @@ class Task(Entity):
 
     outpath: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
     errpath: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
+    csvpath: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
 
     attempt: Mapped[int] = mapped_column(SMALL_INTEGER, nullable=False)
     retried: Mapped[bool] = mapped_column(BOOLEAN, nullable=False)
@@ -232,10 +271,16 @@ class Task(Entity):
 
     columns = {
         'id': str,
+        'group': int,
         'args': str,
         'submit_id': str,
         'submit_time': datetime,
         'submit_host': str,
+        'cores': int,
+        'memory': int,
+        'cores_max': float,
+        'memory_max': float,
+        'timeout': int,
         'server_id': str,
         'server_host': str,
         'schedule_time': datetime,
@@ -247,6 +292,7 @@ class Task(Entity):
         'exit_status': int,
         'outpath': str,
         'errpath': str,
+        'csvpath': str,
         'attempt': int,
         'retried': bool,
         'waited': int,
@@ -276,18 +322,27 @@ class Task(Entity):
             raise cls.NotDistinct(f'Multiple tasks with id={id}') from error
 
     @classmethod
-    def new(cls: Type[Task], args: str, attempt: int = 1, retried: bool = False,
-            tag: Dict[str, JSONValue] = None, **other) -> Task:
+    def new(cls: Type[Task],
+            args: str,
+            attempt: int = 1,
+            retried: bool = False,
+            tag: Dict[str, JSONData] = None,
+            group: int = DEFAULT_TASK_GROUP,
+            **other: Any) -> Task:
         """Create a new Task."""
         cls.ensure_valid_tag(tag)
         args, inline_tags = cls.split_argline(args)
         tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
+        other['group'] = tag.pop('group', group)
+        other['cores'] = tag.pop('cores', other.get('cores', None))
+        other['memory'] = tag.pop('memory', other.get('memory', None))
+        other['timeout'] = tag.pop('timeout', other.get('timeout', None))
         return Task(id=uuid(), args=args,
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
                     attempt=attempt, retried=retried, tag=tag, **other)
 
     @classmethod
-    def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONValue]]:
+    def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONData]]:
         """Separate input args from possible inline tag comment."""
         args = str(args).strip()
         if match := re.search(r'#\s*HYPERSHELL:?', args):
@@ -305,7 +360,7 @@ class Task(Entity):
             return args.strip(), {}
 
     @staticmethod
-    def ensure_valid_tag(tag: Optional[Dict[str, JSONValue]]) -> None:
+    def ensure_valid_tag(tag: Optional[Dict[str, JSONData]]) -> None:
         """Check tag dictionary and raise if invalid."""
         if tag is None:
             return
@@ -333,31 +388,108 @@ class Task(Entity):
                                      f'"{key}:{value}"')
 
     @classmethod
-    def select_new(cls: Type[Task], limit: int) -> List[Task]:
-        """Select unscheduled tasks up to some `limit` in order of submit_time."""
-        return (cls.query()
-                .order_by(cls.submit_time)
-                .filter(cls.schedule_time.is_(None))
-                .limit(limit).all())
+    def current_group(cls: Type[Task]) -> TaskGroupInfo:
+        """
+        This computes the currently active task group if we don't already have one.
+        The returned group value follows one of the following rules (in order):
+            1) The most recently scheduled task group (if there are any),
+            2) The default task group (see: DEFAULT_TASK_GROUP) if the database is empty,
+            3) The lowest group if nothing has been scheduled yet.
+        """
 
-    @classmethod
-    def select_failed(cls: Type[Task], attempts: int, limit: int) -> List[Task]:
-        """Select failed tasks for retry up to some `limit` under given number of `attempts`."""
-        return (cls.query()
-                .order_by(cls.completion_time)
-                .filter(cls.exit_status.isnot(None))
-                .filter(cls.exit_status != 0)
-                .filter(cls.attempt < attempts)
-                .filter(cls.retried.is_(False))
-                .limit(limit).all())
+        recent_task = (
+            Session.query(Task)
+            .order_by(Task.schedule_time.desc())
+            .filter(Task.schedule_time.isnot(None))
+            .first()
+        )
 
-    @classmethod
-    def next(cls: Type[Task], limit: int, attempts: int = 1, eager: bool = False) -> List[Task]:
-        """Select tasks for scheduling including failed tasks for re-scheduling."""
-        if eager:
-            tasks = cls.__next_eager(attempts=attempts, limit=limit)
+        if recent_task is not None:
+            return TaskGroupInfo(recent_task.group, f'most recently scheduled task: {recent_task.id}')
+
+        if Task.count() == 0:
+            return TaskGroupInfo(DEFAULT_TASK_GROUP, 'no tasks submitted')
+
         else:
-            tasks = cls.__next_not_eager(attempts, limit)
+            # NOTE: we cannot just naively go with first submitted task (even though that makes sense)
+            # because the groups might have been altered, and we get stuck in an infinite loop waiting on
+            # all tasks to be completed (lower task group never get scheduled) but there are no more groups.
+            submitted_task = Session.query(Task).order_by(Task.group).first()
+            return TaskGroupInfo(submitted_task.group, f'no tasks scheduled - defaulting to earliest group')
+
+    @classmethod
+    def increment_group(cls: Type[Task], previous_group: int, attempts: int) -> TaskGroupInfo:
+        """
+        This should only be called if no tasks are returned by Task.next().
+        Check the current group and increment if necessary with explanation.
+        We assume all tasks in `previous_group` have already been scheduled (see Task.next()).
+        """
+        remaining = (
+            Session.query(Task)
+            .filter(Task.group == previous_group)
+            .filter(Task.completion_time.is_(None))
+            .count()
+        )
+        if remaining > 0:
+            return TaskGroupInfo(previous_group, f'waiting on {remaining} tasks to complete')
+        failed_query = (
+            Session.query(Task)
+            .filter(Task.group == previous_group)
+            .filter(cls.exit_status.isnot(None))
+            .filter(cls.exit_status != 0)
+            .filter(cls.attempt >= attempts)
+            .filter(cls.retried.is_(False))
+        )
+        failed = failed_query.count()
+        if failed > 0:
+            example = failed_query.first()
+            return TaskGroupInfo(previous_group,
+                                 f'at least {failed} tasks exceeding allowed retries, example: {example.id}',
+                                 False)
+        next_group = (
+            Session.query(Task.group)
+            .order_by(Task.group)
+            .filter(Task.group > previous_group)
+            .first()
+        )
+        if not next_group:
+            return TaskGroupInfo(previous_group, f'no task groups remain')
+        else:
+            return TaskGroupInfo(next_group[0])
+
+    @classmethod
+    def select_new(cls: Type[Task], limit: int, group: int = None) -> List[Task]:
+        """Select unscheduled tasks up to some `limit` in order of submit_time."""
+        query = cls.query().order_by(cls.submit_time).filter(cls.schedule_time.is_(None))
+        if group is not None:
+            query = query.filter(cls.group == group)
+        return query.limit(limit).all()
+
+    @classmethod
+    def select_failed(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
+        """Select failed tasks for retry up to some `limit` under given number of `attempts`."""
+        query = (cls.query()
+                 .order_by(cls.completion_time)
+                 .filter(cls.exit_status.isnot(None))
+                 .filter(cls.exit_status != 0)
+                 .filter(cls.attempt < attempts)
+                 .filter(cls.retried.is_(False)))
+        if group is not None:
+            query = query.filter(cls.group == group)
+        return query.limit(limit).all()
+
+    @classmethod
+    def next(cls: Type[Task],
+             limit: int,
+             group: int = DEFAULT_TASK_GROUP,
+             attempts: int = 1,
+             eager: bool = False) -> List[Task]:
+        """Select tasks for scheduling including failed tasks for re-scheduling."""
+        group = group if group is not None else cls.current_group().value
+        if eager:
+            tasks = cls.__next_eager(attempts=attempts, limit=limit, group=group)
+        else:
+            tasks = cls.__next_not_eager(attempts, limit, group=group)
         for task in tasks:
             task.server_id = INSTANCE
             task.server_host = HOSTNAME
@@ -366,36 +498,37 @@ class Task(Entity):
         return tasks
 
     @classmethod
-    def __next_eager(cls: Type[Task], attempts: int, limit: int) -> List[Task]:
+    def __next_eager(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
         """Select next batch of tasks from database preferring previously failed tasks."""
-        tasks = cls.__schedule_next_failed_tasks(attempts, limit)
+        tasks = cls.__schedule_next_failed_tasks(attempts, limit, group=group)
         if len(tasks) < limit:
-            new_tasks = cls.select_new(limit=limit - len(tasks))
+            new_tasks = cls.select_new(limit=limit - len(tasks), group=group)
             tasks.extend(new_tasks)
             log.trace(f'Selected {len(new_tasks)} new tasks')
         return tasks
 
     @classmethod
-    def __next_not_eager(cls: Type[Task], attempts: int, limit: int) -> List[Task]:
+    def __next_not_eager(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
         """Select next batch of tasks for database preferring novel tasks to old failed ones."""
-        tasks = cls.select_new(limit=limit)
+        tasks = cls.select_new(limit=limit, group=group)
         log.trace(f'Selected {len(tasks)} new tasks')
         if len(tasks) < limit and attempts > 1:
-            failed_tasks = cls.__schedule_next_failed_tasks(attempts=attempts, limit=limit - len(tasks))
+            failed_tasks = cls.__schedule_next_failed_tasks(attempts=attempts, limit=limit - len(tasks), group=group)
             tasks.extend(failed_tasks)
         return tasks
 
     @classmethod
-    def __schedule_next_failed_tasks(cls: Type[Task], attempts: int, limit: int) -> List[Task]:
+    def __schedule_next_failed_tasks(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
         """Select previously failed tasks for scheduling."""
         tasks = []
-        failed_tasks = cls.select_failed(attempts=attempts, limit=limit)
+        failed_tasks = cls.select_failed(attempts=attempts, limit=limit, group=group)
         if failed_tasks:
             log.trace(f'Selected {len(failed_tasks)} previously failed tasks')
             new_tasks = [cls.new(args=task.args,
                                  attempt=task.attempt + 1,
                                  previous_id=task.id,
-                                 tag=task.tag)
+                                 tag=task.tag,
+                                 group=task.group)
                          for task in failed_tasks]
             tasks.extend(new_tasks)
             cls.add_all(tasks)
@@ -404,9 +537,12 @@ class Task(Entity):
         return tasks
 
     @classmethod
-    def count_remaining(cls: Type[Task]) -> int:
-        """Count of remaining unfinished tasks."""
-        return cls.query().filter(cls.completion_time.is_(None)).count()
+    def count_remaining(cls: Type[Task], group: int = None) -> int:
+        """Count of remaining unfinished tasks (all task groups unless `group` given)."""
+        query = cls.query().filter(cls.completion_time.is_(None))
+        if group is not None:
+            query = query.filter(cls.group == group)
+        return query.count()
 
     @classmethod
     def count_interrupted(cls: Type[Task]) -> int:
@@ -462,7 +598,7 @@ class Task(Entity):
 
     @classmethod
     def revert_interrupted(cls: Type[Task]) -> None:
-        """Revert scheduled but incomplete tasks to un-scheduled state."""
+        """Revert scheduled but incomplete tasks to unscheduled state."""
         while tasks := cls.select_interrupted(100):
             cls.revert_all([task.id for task in tasks])
 
@@ -500,15 +636,15 @@ class Task(Entity):
 
     @classmethod
     def revert_orphaned(cls: Type[Task], client_id: str) -> None:
-        """Revert orphaned tasks from an evicted client to un-scheduled state."""
+        """Revert orphaned tasks from an evicted client to unscheduled state."""
         while tasks := cls.select_orphaned(client_id, 100):
             cls.revert_all([task.id for task in tasks])
 
     @classmethod
-    def latest_server(cls: Type[Client]) -> Optional[str]:
+    def latest_server(cls: Type[Task]) -> Optional[str]:
         """Unique ID of most recent active server (if reusing database)."""
         if records := (
-                cls.query(cls.server_id)
+                Session.query(Task.server_id)
                 .filter(cls.schedule_time.isnot(None))
                 .order_by(func.max(cls.schedule_time).desc())
                 .group_by(cls.server_id)
@@ -568,18 +704,18 @@ class Task(Entity):
             return None
 
     @classmethod
-    def time_to_completion(cls: Type[Task]) -> Optional[float]:
+    def time_to_completion(cls: Type[Task], group: int = None) -> Optional[float]:
         """Estimated time in seconds until all unscheduled tasks are completed."""
         if rate := cls.effective_rate():
-            return cls.count_remaining() / rate
+            return cls.count_remaining(group=group) / rate
         else:
             return None
 
     @classmethod
-    def task_pressure(cls: Type[Task], factor: float) -> Optional[float]:
+    def task_pressure(cls: Type[Task], factor: float, group: int = None) -> Optional[float]:
         """Ratio of current ETC to relative `factor` of task duration."""
         if avg_duration := cls.avg_duration():
-            if toc := cls.time_to_completion():
+            if toc := cls.time_to_completion(group=group):
                 return toc / (factor * avg_duration)
             else:
                 return None
@@ -588,8 +724,8 @@ class Task(Entity):
 
 
 # Indices for efficient queries
-index_scheduled = Index('task_scheduled_index', Task.schedule_time)
-index_retried = Index('task_retries_index', Task.exit_status, Task.retried)
+index_tasks_unscheduled = Index('index_tasks_unscheduled', Task.group, Task.schedule_time)
+index_tasks_retries = Index('index_tasks_retries', Task.exit_status, Task.retried)
 
 
 class Client(Entity):

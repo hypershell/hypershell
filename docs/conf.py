@@ -115,6 +115,10 @@ html_static_path = ['_static']
 rst_epilog = f"""
 .. |release| replace:: {release}
 .. |copyright| replace:: {copyright}
+
+.. |br| raw:: html
+ 
+   <br />
 """
 
 

@@ -20,6 +20,9 @@ Options
     Leaving the `value` unspecified will return any task for which the `key` exists.
     Specifying a full `key`:`value` pair will match on both.
 
+``-g``, ``--group`` *GROUP*
+    Filter results to a single task group.
+
 ``-s``, ``--order-by`` *FIELD* ``[--desc]``
     Order results by field. Optionally, in descending order.
 
@@ -36,6 +39,9 @@ Options
 
 ``-R``, ``--remaining``
     Alias for ``-w 'exit_status == null'``.
+
+``--retries``
+    Alias for ``-w 'attempt > 1'`` (tasks that have been retried).
 
 ``-f``, ``--format`` *FORMAT*
     Specify output format (either ``normal``, ``plain``, ``table``, ``csv``, ``json``).
@@ -60,6 +66,12 @@ Options
 
 ``-c``, ``--count``
     Show count of results.
+
+``--tag-keys``
+    Show all distinct tag keys instead of tasks.
+
+``--tag-values`` *KEY*
+    Show all distinct tag values for the given tag *KEY*.
 
 ``-i``, ``--ignore-partitions``
     Suppress auto-union feature (SQLite only).

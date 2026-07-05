@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """Core interface for database engine and session manager."""
@@ -17,18 +17,17 @@ from urllib.parse import urlencode
 from cmdkit.app import exit_status
 from cmdkit.config import Namespace, ConfigurationError
 from sqlalchemy.engine import create_engine, Engine
-from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import ArgumentError
 from sqlalchemy import event
 
 # Internal libs
-from hypershell.core.config import config
-from hypershell.core.logging import handler
+from hypershell.core.config import config, DEFAULT_DATABASE_FILE
+from hypershell.core.logging import stream_handler
 from hypershell.core.exceptions import display_critical, write_traceback
 
 # Public interface
-__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', ]
+__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', 'providers']
 
 
 class DatabaseURL(dict):
@@ -75,7 +74,10 @@ class DatabaseURL(dict):
 
     def _validate(self: DatabaseURL) -> None:
         """Validate provided arguments."""
-        if self.provider == 'sqlite':
+        dialect = self.provider
+        if '+' in dialect:
+            dialect, impl = dialect.split('+')
+        if dialect == 'sqlite':
             self._validate_for_sqlite()
         else:
             self._validate_database()
@@ -169,14 +171,19 @@ class DatabaseURL(dict):
 # Mapping translates from name to library/implementation name
 # NOTE: mysql/mariadb and other providers not yet working
 providers = {
+    'turso': 'sqlite+turso',
     'sqlite': 'sqlite',
-    'postgres': 'postgresql',
-    'postgresql': 'postgresql',
+    'postgres': 'postgresql+psycopg',
+    'postgresql': 'postgresql+psycopg',
 }
 
 
-# Clone database-section for modification
-config = Namespace(config.database.copy())
+# Parse full configuration into local copy and allow for simple config
+full_config = config
+if isinstance(config.database, str):
+    config = Namespace(provider='sqlite', file=config.database)
+else:
+    config = Namespace(config.database.copy())
 
 # Pop special sections not forwarded to connection details
 schema = config.pop('schema', None)
@@ -191,20 +198,34 @@ engine_config = {}
 
 # Sqlite-specific configuration
 in_memory = False
-if config.provider == 'sqlite':
+if config.provider in ['sqlite', 'turso']:
     in_memory = (config.get('file', None) or config.get('database', None)) in ('', ':memory:', None)
-    if in_memory:
-        engine_config['poolclass'] = StaticPool
     if 'check_same_thread' not in connect_args:
         connect_args['check_same_thread'] = False
 
 
-def get_url() -> DatabaseURL:
+if config.provider == 'turso':
+    try:
+        import sqlalchemy_turso  # Enforce registration of implementation
+    except ImportError:
+        display_critical(f'Missing optional dependency "sqlalchemy-turso" needed for Turso', module=__name__)
+        sys.exit(exit_status.runtime_error)
+
+
+def get_url() -> DatabaseURL | str:
     """Wraps parsing within function."""
+    if 'url' in config:
+        url = str(config.url)
+        provider = url.split('://')[0]
+        if provider not in providers.values():
+            raise ConfigurationError(f'Unsupported provider in URL \'{provider}\'')
+        return str(config.url)
     if config.provider not in providers:
         raise ConfigurationError(f'Unsupported database \'{config.provider}\'')
     try:
         params = Namespace({**config, 'provider': providers[config.provider]})
+        if config.provider == 'postgres' and config.file == DEFAULT_DATABASE_FILE:
+            params.pop('file', None)  # Injected automatically from preload
         return DatabaseURL.from_namespace(params)
     except AttributeError as err:
         raise ConfigurationError(str(err)) from err
@@ -214,9 +235,9 @@ def get_engine() -> Engine:
     """Wraps engine creation."""
     try:
         if engine_echo:
-            logging.getLogger('sqlalchemy.engine').addHandler(handler)
+            logging.getLogger('sqlalchemy.engine').addHandler(stream_handler)
             logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
-        return create_engine(get_url().encode(), connect_args=connect_args, **engine_config)
+        return create_engine(str(get_url()), connect_args=connect_args, **engine_config)
     except ArgumentError as err:
         raise ConfigurationError(f'DatabaseURL: {err}') from err
 
@@ -225,9 +246,14 @@ try:
     engine = get_engine()
     factory = sessionmaker(bind=engine)
     Session = scoped_session(factory)
-except ModuleNotFoundError as error:
-    if 'psycopg2' in error.args[0]:
-        display_critical(f'Missing optional dependency "psycopg2" needed for PostgreSQL', module=__name__)
+except ImportError as error:
+    # psycopg (v3) is optional. A missing module raises ModuleNotFoundError; the pure-python build also
+    # loads a system libpq at import time, and a missing libpq raises ImportError ('no pq wrapper available').
+    # Catch both (ModuleNotFoundError is an ImportError) so either failure gives guidance, not a raw traceback.
+    message = error.args[0] if error.args else str(error)
+    if 'psycopg' in message or 'libpq' in message or 'pq wrapper' in message:
+        display_critical('Missing optional dependency "psycopg" (or its system "libpq") needed for PostgreSQL',
+                         module=__name__)
         sys.exit(exit_status.runtime_error)
     else:
         write_traceback(error, module=__name__)
@@ -238,9 +264,9 @@ except Exception as error:
 
 
 @event.listens_for(Engine, "connect")
-def set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+def set_sqlite_pragmas(dbapi_connection, connection_record) -> None:  # noqa: unused connection_record
     """Automatically inject pragmas into SQLite connection."""
-    if config.provider == 'sqlite':
+    if config.provider in ['sqlite', 'turso']:
         cursor = dbapi_connection.cursor()
         for name, value in pragmas.items():
             cursor.execute(f'PRAGMA {name}={value}')

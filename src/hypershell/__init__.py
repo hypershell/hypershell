@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """Initialization and entry-point for console application."""
@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import List
 
 # Path sanitizer must happen first
-import hypershell.core.sys
+import hypershell.core.sys  # noqa: unused import
 
 # Standard libs
 import sys
@@ -21,12 +21,12 @@ from cmdkit.app import Application, ApplicationGroup
 from cmdkit.cli import Interface
 
 # Internal libs
-from hypershell.core.logging import Logger, initialize_logging
+from hypershell.core.logging import Logger, initialize_logging, role_from_command
 from hypershell.core.signal import register_handlers
-from hypershell.submit import SubmitApp
-from hypershell.server import ServerApp
-from hypershell.client import ClientApp
-from hypershell.cluster import ClusterApp
+from hypershell.submit import SubmitApp, submit_from, submit_file
+from hypershell.server import ServerApp, serve_from, serve_file, serve_forever
+from hypershell.client import ClientApp, run_client
+from hypershell.cluster import ClusterApp, run_local, run_cluster, run_ssh
 from hypershell.task import TaskGroupApp, TaskInfoApp, TaskWaitApp, TaskRunApp, TaskSearchApp, TaskUpdateApp
 from hypershell.config import ConfigApp
 from hypershell.data import InitDBApp
@@ -35,7 +35,11 @@ from hypershell.data import InitDBApp
 __all__ = [
     'HyperShellApp', 'main', '__version__', '__citation__',
     'APP_VERSION', 'APP_USAGE', 'APP_HELP',
-    'SubmitApp', 'ServerApp', 'ClientApp', 'InitDBApp', 'ConfigApp',
+    'SubmitApp', 'submit_from', 'submit_file',
+    'ServerApp', 'serve_from', 'serve_file', 'serve_forever',
+    'ClientApp', 'run_client',
+    'ClusterApp', 'run_local', 'run_cluster', 'run_ssh',
+    'InitDBApp', 'ConfigApp',
     'TaskGroupApp', 'TaskInfoApp', 'TaskWaitApp', 'TaskRunApp', 'TaskSearchApp', 'TaskUpdateApp',
 ]
 
@@ -131,9 +135,10 @@ class HyperShellApp(ApplicationGroup):
 
 def main(argv: List[str] | None = None) -> int:
     """Entry-point for 'hs' console application."""
-    initialize_logging()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    initialize_logging(role=role_from_command(argv[0] if argv else None))
     register_handlers()
-    return HyperShellApp.main(argv or sys.argv[1:])
+    return HyperShellApp.main(argv)
 
 
 def main_x(argv: List[str] | None = None) -> int:

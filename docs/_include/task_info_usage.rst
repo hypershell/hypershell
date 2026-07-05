@@ -1,2 +1,2 @@
 ``hs`` ``info`` ``[-h]``
-    ``ID`` ``[--stdout | --stderr | -x FIELD]`` ``[-f FORMAT]``
+    ``ID`` ``[-i]`` ``[--stdout | --stderr | --perf | -x FIELD]`` ``[-f FORMAT]``

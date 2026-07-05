@@ -86,6 +86,7 @@ OPTION_PAIR: Final[Dict[str, str]] = {
     '-k': '-k/--auth', '--auth': '-k/--auth',
     '-b': '-b/--bundlesize', '--bundlesize': '-b/--bundlesize',
     '-w': '-w/--bundlewait', '--bundlewait': '-w/--bundlewait',
+    '-Q': '-Q/--poll', '--poll': '-Q/--poll',
     '-r': '-r/--max-retries', '--max-retries': '-r/--max-retries',
     '-f': '-f/--failures', '--failures': '-f/--failures',
 }

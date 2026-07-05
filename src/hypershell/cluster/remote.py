@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Geoffrey Lentner
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
 """Remote cluster implementation."""
@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Tuple, List, Dict, IO, Iterable, Callable, Type, Final
+from typing import Tuple, List, Dict, IO, Iterable, Callable, Type, Optional, Final
 
 # Standard libs
 import os
@@ -21,6 +21,7 @@ from subprocess import Popen
 
 # Internal libs
 from hypershell.core.fsm import State, StateMachine
+from hypershell.core.tls import TLSConfig
 from hypershell.core.config import default, load_task_env
 from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger, HOSTNAME
@@ -28,14 +29,15 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.data.model import Task, Client
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS
+from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
 
 # Public interface
 __all__ = ['run_cluster', 'RemoteCluster', 'AutoScalingCluster',
            'DEFAULT_REMOTE_EXE', 'DEFAULT_LAUNCHER',
            'DEFAULT_AUTOSCALE_POLICY', 'DEFAULT_AUTOSCALE_PERIOD', 'DEFAULT_AUTOSCALE_FACTOR',
            'DEFAULT_AUTOSCALE_INIT_SIZE', 'DEFAULT_AUTOSCALE_MIN_SIZE', 'DEFAULT_AUTOSCALE_MAX_SIZE',
-           'DEFAULT_AUTOSCALE_LAUNCHER', ]
+           'DEFAULT_AUTOSCALE_LAUNCHER',
+           'redact_secrets']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
@@ -49,7 +51,7 @@ DEFAULT_LAUNCHER: Final[str] = 'mpirun'
 """Default launcher program."""
 
 
-def run_cluster(autoscaling: bool = False, **options) -> None:
+def run_cluster(*args, autoscaling: bool = False, **kwargs) -> None:
     """
     Run cluster with remote clients until completion.
 
@@ -73,9 +75,9 @@ def run_cluster(autoscaling: bool = False, **options) -> None:
         - :class:`~hypershell.cluster.remote.AutoScalingCluster`
     """
     if autoscaling:
-        thread = AutoScalingCluster.new(**options)
+        thread = AutoScalingCluster.new(*args, **kwargs)
     else:
-        thread = RemoteCluster.new(**options)
+        thread = RemoteCluster.new(*args, **kwargs)
     try:
         thread.join()
     except Exception:
@@ -93,13 +95,27 @@ class RemoteCluster(Thread):
             A new `source` results in a :class:`~hypershell.submit.SubmitThread` populating
             either the database or the queue directly depending on `in_memory`.
 
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`~hypershell.client.DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection).
+            See :const:`~hypershell.client.DEFAULT_NUM_THREADS`.
 
         template (str, optional):
             Template command pattern.
             See :const:`~hypershell.client.DEFAULT_TEMPLATE`.
+
+        cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        client_cores (int, optional):
+            Set core limit for clients (default: all available cores).
+
+        client_memory (int, optional):
+            Set memory limit for clients (default: all available memory).
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -130,6 +146,10 @@ class RemoteCluster(Thread):
         no_confirm (bool, optional):
             Disable client confirmation of tasks received.
 
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
+
         forever_mode (bool, optional):
             Regardless of `source`, if enabled schedule forever.
             Conflicts with `restart_mode` and `in_memory`. Default is `False`.
@@ -155,20 +175,31 @@ class RemoteCluster(Thread):
             See :const:`~hypershell.client.DEFAULT_DELAY`.
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
 
         client_timeout (int, optional):
             Timeout in seconds before disconnecting from server.
             By default, the client waits for server tor request disconnect.
 
         task_timeout (int, optional):
-            Task-level walltime limit in seconds.
-            By default, the client waits indefinitely on tasks.
+            Task-level walltime limit in seconds (default: none).
+            May be overridden by inline-comment.
 
         task_signalwait (int, optional):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
+
+        ratelimit (int, optional):
+            Maximum allowed tasks per second per client (default: none).
+            There is no limit on task throughput unless specified.
+
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
 
     Example:
         >>> from hypershell.cluster import RemoteCluster
@@ -189,8 +220,12 @@ class RemoteCluster(Thread):
 
     def __init__(self: RemoteCluster,
                  source: Iterable[str] = None,
-                 num_tasks: int = 1,
+                 num_threads: int = 1,
                  template: str = DEFAULT_TEMPLATE,
+                 cores: int = None,
+                 memory: int = None,
+                 client_cores: int = None,
+                 client_memory: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  bind: Tuple[str, int] = ('0.0.0.0', DEFAULT_PORT),
@@ -199,6 +234,7 @@ class RemoteCluster(Thread):
                  remote_exe: str = DEFAULT_REMOTE_EXE,
                  in_memory: bool = False,
                  no_confirm: bool = False,
+                 poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
                  max_retries: int = DEFAULT_ATTEMPTS,
@@ -206,40 +242,61 @@ class RemoteCluster(Thread):
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,
                  capture: bool = False,
+                 monitor: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
-                 task_signalwait: int = DEFAULT_SIGNALWAIT) -> None:
+                 task_signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: int = None,
+                 tls: Optional[TLSConfig] = None) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         self.server = ServerThread(source=source,
+                                   task_cores=cores,
+                                   task_memory=memory,
+                                   task_timeout=task_timeout,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    in_memory=in_memory,
                                    no_confirm=no_confirm,
+                                   poll=poll,
                                    address=bind,
                                    auth=auth,
                                    max_retries=max_retries,
                                    eager=eager,
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
-                                   redirect_failures=redirect_failures)
+                                   redirect_failures=redirect_failures,
+                                   tls=tls)
         launcher = shlex.split(launcher)
         if launcher_args is None:
             launcher_args = []
         else:
             launcher_args = [arg for arg_group in launcher_args for arg in shlex.split(arg_group)]
         client_args = []
-        if capture is True:
-            client_args.append('--capture')
-        if no_confirm is True:
+        if no_confirm:
             client_args.append('--no-confirm')
+        if capture:
+            client_args.append('--capture')
+        if monitor:
+            client_args.append('--monitor')
+        if client_cores is not None:
+            client_args.extend(['-C', str(client_cores)])
+        if client_memory is not None:
+            client_args.extend(['-M', str(client_memory)])
         if client_timeout is not None:
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
             client_args.extend(['-W', str(task_timeout)])
+        if ratelimit is not None:
+            client_args.extend(['-R', str(ratelimit)])
+        if tls is None:
+            # TLS material is resolved by each client from its own site/config (identical to
+            # the server's on a shared filesystem); only the disabled state must be propagated.
+            client_args.append('--no-tls')
+        target = HOSTNAME if bind[0] == '0.0.0.0' else bind[0]
         self.client_argv = [
             *launcher, *launcher_args, remote_exe, 'client',
-            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),
+            '-H', target, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
             '-t', template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
         ]
         super().__init__(name='hypershell-cluster')
@@ -247,9 +304,7 @@ class RemoteCluster(Thread):
     def run_with_exceptions(self: RemoteCluster) -> None:
         """Start child threads, wait."""
         self.server.start()
-        while not self.server.queue.ready:
-            time.sleep(0.1)
-        log.debug(f'Launching clients: {self.client_argv}')
+        log.debug('Launching clients: ' + redact_secrets(self.client_argv, ['-k']))
         self.clients = Popen(self.client_argv,
                              stdout=sys.stdout, stderr=sys.stderr,
                              env={**os.environ, **load_task_env()})
@@ -377,7 +432,7 @@ class AutoScaler(StateMachine):
     def start(self: AutoScaler) -> AutoScalerState:
         """Jump to INIT state."""
         log.info(f'Autoscale start (policy: {self.policy.name.lower()}, init-size: {self.init_size})')
-        log.debug(f'Autoscale launcher: {self.launcher}')
+        log.debug('Autoscale launcher: ' + redact_secrets(self.launcher, ['-k']))
         return AutoScalerState.INIT
 
     def init(self: AutoScaler) -> AutoScalerState:
@@ -415,14 +470,17 @@ class AutoScaler(StateMachine):
         launched_size = len(self.clients)
         registered_size = Client.count_connected()
         task_count = Task.count_remaining()
-        log.debug(f'Autoscale check (clients: {registered_size}/{launched_size}, tasks: {task_count})')
+        group_info = Task.current_group()
+        group_task_count = Task.count_remaining(group=group_info.value)
+        log.debug(f'Autoscale check (clients: {registered_size}/{launched_size}, '
+                  f'tasks: {group_task_count} in group {group_info.value}, {task_count} total)')
         if launched_size < self.min_size:
             log.debug(f'Autoscale min-size reached ({launched_size} < {self.min_size})')
             return AutoScalerState.SCALE
-        if launched_size == 0 and task_count == 0:
+        if launched_size == 0 and group_task_count == 0:
             return AutoScalerState.WAIT
-        if launched_size == 0 and task_count > 0:
-            log.debug(f'Autoscale adding client ({task_count} tasks remaining)')
+        if launched_size == 0 and group_task_count > 0:
+            log.debug(f'Autoscale adding client ({group_task_count} tasks remaining in group {group_info.value})')
             return AutoScalerState.SCALE
         else:
             return AutoScalerState.WAIT
@@ -432,10 +490,13 @@ class AutoScaler(StateMachine):
         launched_size = len(self.clients)
         registered_size = Client.count_connected()
         task_count = Task.count_remaining()
-        pressure = Task.task_pressure(self.factor)
+        group_info = Task.current_group()
+        group_task_count = Task.count_remaining(group=group_info.value)
+        pressure = Task.task_pressure(self.factor, group=group_info.value)
         pressure_val = 'unknown' if pressure is None else f'{pressure:.2f}'
         log.debug(f'Autoscale check (pressure: {pressure_val}, '
-                  f'clients: {registered_size}/{launched_size}, tasks: {task_count})')
+                  f'clients: {registered_size}/{launched_size}, '
+                  f'tasks: {group_task_count} in group {group_info.value}, {task_count} total)')
         if launched_size < self.min_size:
             log.debug(f'Autoscale min-size reached ({launched_size} < {self.min_size})')
             return AutoScalerState.SCALE
@@ -451,11 +512,11 @@ class AutoScaler(StateMachine):
                 log.debug(f'Autoscale pressure low ({pressure:.2f})')
                 return AutoScalerState.WAIT
         else:
-            if launched_size == 0 and task_count == 0:
-                log.debug(f'Autoscale pause (no clients and no tasks)')
+            if launched_size == 0 and group_task_count == 0:
+                log.debug(f'Autoscale pause (no clients and no active tasks)')
                 return AutoScalerState.WAIT
-            if launched_size == 0 and task_count > 0:
-                log.debug(f'Autoscale adding client ({task_count} tasks remaining)')
+            if launched_size == 0 and group_task_count > 0:
+                log.debug(f'Autoscale adding client ({group_task_count} tasks remaining in group {group_info.value})')
                 return AutoScalerState.SCALE
             else:
                 log.debug('Autoscale pause (waiting on clients to complete initial tasks)')
@@ -465,7 +526,7 @@ class AutoScaler(StateMachine):
         """Launch new client."""
         proc = Popen(self.launcher, stdout=sys.stdout, stderr=sys.stderr,
                      bufsize=0, universal_newlines=True, env={**os.environ, **load_task_env()})
-        log.trace(f'Autoscale adding client ({proc.pid})')
+        log.info(f'Autoscale adding client ({proc.pid})')
         self.clients.append(proc)
         if self.phase is AutoScalerPhase.INIT:
             return AutoScalerState.INIT
@@ -483,7 +544,7 @@ class AutoScaler(StateMachine):
                 if status != 0:
                     log.warning(f'Autoscale client ({i+1}) exited with status {status}')
                 else:
-                    log.debug(f'Autoscale client disconnected ({client.pid})')
+                    log.info(f'Autoscale client disconnected ({client.pid})')
         self.clients = [client for i, client in enumerate(self.clients) if i not in marked]
 
     @staticmethod
@@ -531,13 +592,27 @@ class AutoScalingCluster(Thread):
             A new `source` results in a :class:`~hypershell.submit.SubmitThread` populating
             either the database or the queue directly depending on `in_memory`.
 
-        num_tasks (int, optional):
-            Number of parallel task executor threads.
-            See :const:`~hypershell.client.DEFAULT_NUM_TASKS`.
+        num_threads (int, optional):
+            Number of executor threads (use 0 for auto-detection).
+            See :const:`~hypershell.client.DEFAULT_NUM_THREADS`.
 
         template (str, optional):
             Template command pattern.
             See :const:`~hypershell.client.DEFAULT_TEMPLATE`.
+
+        cores (int, optional):
+            Default number of cores to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        memory (int, optional):
+            Default memory in bytes to use for each task (default: none).
+            May be overridden by inline-comment.
+
+        client_cores (int, optional):
+            Set core limit for clients (default: all available cores).
+
+        client_memory (int, optional):
+            Set memory limit for clients (default: all available memory).
 
         bundlesize (int optional):
             Size of task bundles returned to server.
@@ -593,20 +668,30 @@ class AutoScalingCluster(Thread):
             See :const:`~hypershell.client.DEFAULT_DELAY`.
 
         capture (bool, optional):
-            Isolate task <stdout> and <stderr> in discrete files.
-            Defaults to `False`.
+            Isolate task <stdout> and <stderr> in discrete files (default: False).
+
+        monitor (bool, optional):
+            Track CPU cores and memory usage of each task (default: False).
 
         client_timeout (int, optional):
             Timeout in seconds before disconnecting from server.
             By default, the client waits for server tor request disconnect.
 
         task_timeout (int, optional):
-            Task-level walltime limit in seconds.
-            By default, the client waits indefinitely on tasks.
+            Task-level walltime limit in seconds (default: none).
+            May be overridden by inline-comment.
 
         task_signalwait (int, optional):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
+
+        ratelimit (int, optional):
+            Maximum allowed tasks per second per client (default: none).
+            There is no limit on task throughput unless specified.
+
+        poll (int, optional):
+            Polling interval in seconds between database queries if no tasks are available.
+            See :const:`~hypershell.server.DEFAULT_SERVER_POLL`.
 
         policy (str, optional):
             Autoscaling policy (either 'fixed' or 'dynamic').
@@ -632,6 +717,11 @@ class AutoScalingCluster(Thread):
             Maximum size of cluster (number of clients).
             See :const:`~hypershell.cluster.remote.DEFAULT_AUTOSCALE_MAX_SIZE`
 
+        tls: (TLSConfig, optional):
+            TLS configuration for queue interface.
+            Clients must connect with compatible configuration.
+            See :ref:`security <security>` documentation for details.
+
     Example:
         >>> from hypershell.cluster import AutoScalingCluster
         >>> cluster = AutoScalingCluster.new(
@@ -652,8 +742,12 @@ class AutoScalingCluster(Thread):
 
     def __init__(self: AutoScalingCluster,
                  source: Iterable[str] = None,
-                 num_tasks: int = 1,
+                 num_threads: int = 1,
                  template: str = DEFAULT_TEMPLATE,
+                 cores: int = None,
+                 memory: int = None,
+                 client_cores: int = None,
+                 client_memory: int = None,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  bind: Tuple[str, int] = ('0.0.0.0', DEFAULT_PORT),
@@ -669,21 +763,36 @@ class AutoScalingCluster(Thread):
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,
                  capture: bool = False,
+                 monitor: bool = False,
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
+                 ratelimit: int = None,
+                 poll: int = DEFAULT_SERVER_POLL,
                  policy: str = DEFAULT_AUTOSCALE_POLICY,
                  period: int = DEFAULT_AUTOSCALE_PERIOD,
                  factor: float = DEFAULT_AUTOSCALE_FACTOR,
                  init_size: int = DEFAULT_AUTOSCALE_INIT_SIZE,
                  min_size: int = DEFAULT_AUTOSCALE_MIN_SIZE,
                  max_size: int = DEFAULT_AUTOSCALE_MAX_SIZE,
+                 tls: Optional[TLSConfig] = None,
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
-        self.server = ServerThread(source=source, auth=auth, bundlesize=bundlesize, bundlewait=bundlewait,
-                                   max_retries=max_retries, eager=eager, address=bind, forever_mode=True,
-                                   redirect_failures=redirect_failures)
+        self.server = ServerThread(source=source,
+                                   auth=auth,
+                                   address=bind,
+                                   task_cores=cores,
+                                   task_memory=memory,
+                                   task_timeout=task_timeout,
+                                   bundlesize=bundlesize,
+                                   bundlewait=bundlewait,
+                                   poll=poll,
+                                   max_retries=max_retries,
+                                   eager=eager,
+                                   forever_mode=True,
+                                   redirect_failures=redirect_failures,
+                                   tls=tls)
         launcher = shlex.split(launcher)
         if launcher_args is None:
             launcher_args = []
@@ -692,13 +801,25 @@ class AutoScalingCluster(Thread):
         client_args = []
         if capture:
             client_args.append('--capture')
+        if monitor:
+            client_args.append('--monitor')
+        if client_cores is not None:
+            client_args.extend(['-C', str(client_cores)])
+        if client_memory is not None:
+            client_args.extend(['-M', str(client_memory)])
         if client_timeout is not None:
             client_args.extend(['-T', str(client_timeout)])
         if task_timeout is not None:
             client_args.extend(['-W', str(task_timeout)])
+        if ratelimit is not None:
+            client_args.extend(['-R', str(ratelimit)])
+        if tls is None:
+            # TLS material is resolved by each client from its own site/config (identical to
+            # the server's on a shared filesystem); only the disabled state must be propagated.
+            client_args.append('--no-tls')
         launcher.extend([
             *launcher_args, remote_exe, 'client',
-            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_tasks), '-b', str(bundlesize), '-w', str(bundlewait),
+            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
             '-t', template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
         ])
         self.autoscaler = AutoScalerThread(launcher, policy=policy, factor=factor, period=period,
@@ -708,8 +829,6 @@ class AutoScalingCluster(Thread):
     def run_with_exceptions(self: AutoScalingCluster) -> None:
         """Start child threads, wait."""
         self.server.start()
-        while not self.server.queue.ready:
-            time.sleep(0.1)
         self.autoscaler.start()
         self.autoscaler.join()
         self.server.join()
@@ -719,3 +838,27 @@ class AutoScalingCluster(Thread):
         self.server.stop(wait=wait, timeout=timeout)
         self.autoscaler.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
+
+
+def redact_secrets(argv: List[str], options: Iterable[str], *, redaction: str = '***') -> str:
+    """
+    Return a shell-quoted command-line string with the *values* following
+    any of the specified options redacted.
+
+    Example:
+        >>> redact_secrets(['client', '-k', 'supersecret', '--verbose', '--auth', 'another'],
+        ...                ['-k', '--auth'])
+        "client -k '***' --verbose --auth '***'"
+    """
+    redact_set = set(options)
+    it = iter(argv)
+    redacted: List[str] = []
+    for arg in it:
+        redacted.append(arg)
+        if arg in redact_set:
+            try:
+                next(it) # Consume the secret value
+                redacted.append(redaction)
+            except StopIteration:
+                pass     # Option had no following value
+    return ' '.join(shlex.quote(x) for x in redacted)

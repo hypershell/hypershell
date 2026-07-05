@@ -7,6 +7,27 @@ A place for announcements, release notes, thoughts and ideas for the project.
 
 -----
 
+:ref:`Release Notes (v2.8.0) <20260705_2_8_0_release>`
+------------------------------------------------------
+
+`July 5, 2026`
+
+The v2.8.0 release includes major features and improvements.
+
+- Built-in TLS encryption (enabled by default)
+- Resource-aware task scheduling
+- Resource monitoring
+- Task groups for dependency management
+- Queue-only task submission
+- Rate limiting task execution
+- File-based logging
+- Functional (Python) API
+- Bash and Zsh shell completions
+- Python 3.11–3.14 support (PostgreSQL via psycopg v3)
+- Major bug fixes and improvements
+
+-----
+
 :ref:`Release Notes (v2.7.0) <20250504_2_7_0_release>`
 ------------------------------------------------------
 
@@ -153,6 +174,7 @@ a few quality of life improvements, and a fix for SSH-mode.
     :hidden:
     :maxdepth: 1
 
+    20260705_2_8_0_release
     20250504_2_7_0_release
     20250405_2_6_6_release
     20250215_2_6_5_release
