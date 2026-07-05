@@ -257,11 +257,9 @@ managed by some `module` system.
 
 Here we will create an isolated prefix for the installation with version number included
 and only expose the entry-point scripts to users, along with shell completions and the
-manual page. Some desired runtime, ``python3.13``, is already loaded.
-
-If there is not already a preferred Python module it might be easier to use
-`conda-forge <https://conda-forge.org>`_ (or `mamba <https://mamba.readthedocs.io>`_)
-or ``uv`` directly to create a virtual environment.
+manual page. We can either use an existing Python runtime installed externally, otherwise
+`conda-forge <https://conda-forge.org>`_ has the added benefit of complete isolation and
+the ``psycopg-c`` dependencies for maximum security and performance.
 
 .. admonition:: Create installation manually on a shared system
     :class: note
@@ -271,15 +269,16 @@ or ``uv`` directly to create a virtual environment.
         mkdir -p /apps/x86_64-any/hypershell/$VERSION
         cd /apps/x86_64-any/hypershell/$VERSION
 
-        git clone --depth=1 --branch=$VERSION https://github.com/hypershell/hypershell src
+        PKG='hypershell[postgres-system,uuid7,cron,zstd]'
+        URL='https://github.com/hypershell/hypershell'
 
-        python3.13 -m venv libexec
-        libexec/bin/pip install './src[postgres]'
+        python3.14 -m venv libexec
+        libexec/bin/pip install "$PKG @ git+$URL@$VERSION"
 
         mkdir -p bin
-        ln -sf ../libexec/bin/hs bin/hs
-        ln -sf ../libexec/bin/hsx bin/hsx
-        ln -sf src/share
+        cd bin
+        ln -sf ../libexec/bin/hs
+        ln -sf ../libexec/bin/hsx
 
 |
 
@@ -303,10 +302,13 @@ configuration file might then be:
 
         prepend_path("PATH", pathJoin(modroot, "bin"))
         prepend_path("MANPATH", pathJoin(modroot, "share", "man"))
-        prepend_path("FPATH", pathJoin(modroot, "share", "zsh", "site-functions"))  -- Zsh completions
 
-        -- Raw source b/c `complete -F _hs hs` does not persist with source_sh
-        execute { cmd="source " .. pathJoin(modroot, "share", "bash_completion.d", "hs"), modeA={"load"} }
+        if myShellName() == "bash" then
+                source_sh("bash", pathJoin(modroot, "libexec", "share", "bash-completion", "completions", "hs"))
+        elseif myShellName() == "zsh" then
+                prepend_path("FPATH", pathJoin(modroot, "libexec", "share", "zsh", "site-functions"))
+                execute({ cmd = "autoload -Uz compinit && compinit", modeA = { "load" } })
+        end
 
 Presumably, users would then be able to activate the software by loading the module as such.
 
@@ -344,9 +346,9 @@ And we can include the following paths in our frozen set.
 
     .. code-block:: shell
 
-        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.13
-        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.13/lib-dynload
-        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.13/site-packages
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.14
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.14/lib-dynload
+        /apps/x86_64-any/hypershell/<version>/libexec/lib/python3.14/site-packages
 
 
 ------
