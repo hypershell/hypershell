@@ -4,9 +4,6 @@ version = "2.8.0"
 description = "A cross-platform, high-throughput computing utility for processing shell commands over a distributed, asynchronous queue."
 readme = "README.rst"
 license = "Apache-2.0"
-homepage = "https://hypershell.org"
-documentation = "https://hypershell.readthedocs.io"
-repository = "https://github.com/hypershell/hypershell"
 authors = [
     { name = "Geoffrey Lentner", email = "glentner@purdue.edu" }
 ]
@@ -40,6 +37,14 @@ dependencies = [
     "psutil>=7.0.0",
     "cryptography>=3.4", # Low floor for RHEL/EPEL (EL8-EL10); only legacy x509/rsa APIs used, pip resolves newest
 ]
+
+# PEP 621 URLs. These MUST live under [project.urls]; top-level homepage/documentation/repository
+# keys are not valid [project] fields and are silently dropped (PyPI sidebar links go missing).
+[project.urls]
+Homepage = "https://hypershell.org"
+Documentation = "https://hypershell.readthedocs.io"
+Repository = "https://github.com/hypershell/hypershell"
+Issues = "https://github.com/hypershell/hypershell/issues"
 
 [project.optional-dependencies]
 # Easy path (default): self-contained binary wheels bundling libpq+libssl. No compiler, no system

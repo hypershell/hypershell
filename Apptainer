@@ -1,9 +1,9 @@
 Bootstrap: docker
-From: python:3.13-slim
+From: python:3.14-slim
 Stage: final
 
 %labels
-  Version="2.7.2"
+  Version="2.8.0"
   Author="glentner@purdue.edu"
 
 %files
@@ -27,7 +27,7 @@ Stage: final
   export UV_PROJECT_ENVIRONMENT=/opt/hypershell
 
   cd /app
-  /bin/uv sync --frozen --all-packages --python 3.13
+  /bin/uv sync --frozen --all-packages --python 3.14
   ln -sf /opt/hypershell/bin/hs /bin/hs
 
 %environment

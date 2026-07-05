@@ -1,21 +1,35 @@
 name: Tests
+
 on:
   push:
     branches: [ master, develop ]
   pull_request:
     branches: [ develop ]
 
+# Restrict the default GITHUB_TOKEN: nothing here needs more than repository read.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR) to save CI minutes.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
+      fail-fast: false          # run the whole matrix so every Python version's result is visible
       matrix:
         python-version: [ '3.11', '3.12', '3.13', '3.14' ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -29,19 +43,72 @@ jobs:
   install:
     name: Zero-build install (wheels only)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         python-version: [ '3.11', '3.12', '3.13', '3.14' ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
 
       - name: Build wheel
-        run: uv build --wheel --out-dir dist
+        run: uv build --wheel --no-sources --out-dir dist
 
       - name: Assert full install needs no compiler
         run: |
           uv venv --python ${{ matrix.python-version }}
           uv pip install --only-binary=:all: "$(echo dist/*.whl)[postgres,uuid7,zstd,cron]"
+
+  # Catches the class of bug that broke the 2.8.0 PyPI upload (README failed to render) plus other
+  # packaging-metadata regressions, before they reach a release. Python-independent, so no matrix.
+  metadata:
+    name: Package metadata & README render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Build sdist + wheel
+        run: uv build --no-sources
+
+      # PEP 621 schema + trove-classifier validation (catches e.g. URL keys in the wrong table).
+      - name: Validate pyproject.toml metadata
+        run: uvx --from 'validate-pyproject[all]' validate-pyproject pyproject.toml
+
+      # Renders README.rst exactly as PyPI does; --strict also fails on warnings.
+      - name: Verify README renders on PyPI (RST)
+        run: uvx twine check --strict dist/*
+
+      # Regression guard: shell completions + man pages must ship in the wheel's shared-data.
+      - name: Assert completions & man pages ship in the wheel
+        run: |
+          python3 - <<'PY'
+          import zipfile, glob, sys
+          whl = glob.glob("dist/*.whl")[0]
+          names = set(zipfile.ZipFile(whl).namelist())
+          required = [
+              "share/bash-completion/completions/hs",
+              "share/bash-completion/completions/hsx",
+              "share/zsh/site-functions/_hs",
+              "share/man/man1/hs.1",
+              "share/man/man1/hsx.1",
+              "share/man/man1/hyper-shell.1",
+          ]
+          missing = [r for r in required if not any(n.endswith(r) for n in names)]
+          if missing:
+              sys.exit("MISSING from wheel shared-data: " + ", ".join(missing))
+          print("OK: all shell completions and man pages present in wheel")
+          PY
