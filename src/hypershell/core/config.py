@@ -138,9 +138,9 @@ default = Namespace({
         'poll': 30,            # Max polling interval in seconds between database queries if no tasks
         'evict': 600,          # Seconds to wait before evicting client
 
-        # Transport-layer TLS for queue connections. Disabled by default; when enabled,
-        # '<auto>' values for cert/key/cafile are resolved against the site lib dir on
-        # first server start (see hypershell.core.tls.ensure_default_materials).
+        # Transport-layer TLS for queue connections. Enabled by default; '<auto>' values
+        # for cert/key/cafile are resolved against the site lib dir on first server start
+        # (see hypershell.core.tls.ensure_default_materials).
         'tls': {
             'enabled': True,            # Use --no-tls or other mechanisms to disable (not recommended)
             'cert': '<auto>',           # Path to server certificate or '<auto>'

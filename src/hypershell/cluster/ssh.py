@@ -283,10 +283,10 @@ class SSHCluster(Thread):
             client_args.extend(['-W', str(task_timeout)])
         if ratelimit is not None:
             client_args.extend(['-R', str(ratelimit)])
-        if tls is not None:
-            client_args.extend(['--tls-ca', tls.cafile,
-                                '--tls-key', tls.key,
-                                '--tls-cert', tls.cert])
+        if tls is None:
+            # TLS material is resolved by each client from its own site/config (identical to
+            # the server's on a shared filesystem); only the disabled state must be propagated.
+            client_args.append('--no-tls')
         self.client_argv = [
             [*launcher, *launcher_args, host, *launcher_env, remote_exe, 'client', '-H', HOSTNAME,
              '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),

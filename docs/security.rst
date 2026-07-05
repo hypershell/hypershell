@@ -453,9 +453,14 @@ the same path.
 .. admonition:: When the shared filesystem assumption breaks
     :class: note
 
-    If your cluster does not share ``$HOME/.hypershell/lib`` across nodes, either pin the
-    server fingerprint on the clients (see below) or copy the certificate file to each
-    node's site library directory before launching clients.
+    Each client resolves its TLS trust from its *own* configuration and environment — the
+    launchers do not ship certificate material to clients. On a shared filesystem this
+    resolves to the same server-generated certificate automatically; without one, give each
+    client the server's trust anchor out of band. The simplest option is to pin the server
+    fingerprint (``HYPERSHELL_SERVER_TLS_FINGERPRINT=SHA256:...``, logged by the server at
+    ``INFO`` on first start); alternatively distribute the certificate to each node and set
+    ``HYPERSHELL_SERVER_TLS_CAFILE`` (with ``HYPERSHELL_SERVER_TLS_SERVERNAME``). Never
+    distribute the private key.
 
 |
 
