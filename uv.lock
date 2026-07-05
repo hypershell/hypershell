@@ -604,7 +604,7 @@ wheels = [
 
 [[package]]
 name = "hypershell"
-version = "2.8.0a1"
+version = "2.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "cmdkit", extra = ["toml"] },
