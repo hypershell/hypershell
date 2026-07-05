@@ -1,0 +1,602 @@
+#compdef hs hsx
+# Zsh completion for HyperShell (hs, hsx).
+#
+# Dynamic value completion shells out to the `hs` console script
+# (e.g. `hs config get`, `hs list --fields`), so `hs` must be on PATH.
+# Install this file into a directory on $fpath (e.g. share/zsh/site-functions)
+# and it is loaded automatically by compinit. See the documentation.
+
+# Limit applied to task-id completion queries against the database.
+typeset -g _HS_TASK_SEARCH_LIMIT=100
+
+# ---------------------------------------------------------------------------
+# Session cache
+#
+# Every helper that calls `hs` routes through _hs_cached, which memoizes the
+# result for _HS_CACHE_TTL seconds (default 5) so repeated TAB presses do not
+# spawn a new Python process / hit the database each time.
+# ---------------------------------------------------------------------------
+
+zmodload -F zsh/datetime +p:EPOCHSECONDS 2>/dev/null
+typeset -gA _hs_cache_val _hs_cache_at
+
+_hs_cached() {
+    local key=$1; shift
+    if [[ -n ${EPOCHSECONDS-} ]]; then
+        local now=$EPOCHSECONDS ttl=${_HS_CACHE_TTL:-5}
+        if [[ -z ${_hs_cache_at[$key]-} || $(( now - ${_hs_cache_at[$key]} )) -ge ttl ]]; then
+            _hs_cache_val[$key]="$("$@" 2>/dev/null)"
+            _hs_cache_at[$key]=$now
+        fi
+        print -r -- "${_hs_cache_val[$key]}"
+    else
+        "$@" 2>/dev/null
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Dynamic completion helpers
+# ---------------------------------------------------------------------------
+
+# Task metadata field names (single space-separated line from `hs list --fields`).
+(( $+functions[_hs_fields] )) || _hs_fields() {
+    local -a f; f=( ${=$(_hs_cached fields hs list --fields)} )
+    _describe -t fields 'task field' f
+}
+
+# Configuration keys (one per line).
+(( $+functions[_hs_config_keys] )) || _hs_config_keys() {
+    local -a k; k=( ${(f)"$(_hs_cached cfgkeys hs config get --list-available)"} )
+    _describe -t configkeys 'configuration key' k
+}
+
+# Console theme names.
+(( $+functions[_hs_themes] )) || _hs_themes() {
+    local -a t; t=( ${=$(_hs_cached themes hs config get --list-console-themes)} )
+    _describe -t themes 'console theme' t
+}
+
+# Recent task UUIDs.
+(( $+functions[_hs_task_ids] )) || _hs_task_ids() {
+    local -a ids; ids=( ${(f)"$(_hs_cached ids hs list id -l ${_HS_TASK_SEARCH_LIMIT})"} )
+    _describe -t taskids 'task UUID' ids
+}
+
+# SSH nodelist group names from configuration.
+(( $+functions[_hs_ssh_groups] )) || _hs_ssh_groups() {
+    local -a g; g=( ${(f)"$(_hs_cached sshgroups hs client --available-ssh-groups)"} )
+    _describe -t sshgroups 'ssh group' g
+}
+
+# Free server ports.
+(( $+functions[_hs_ports] )) || _hs_ports() {
+    local -a p; p=( ${(f)"$(_hs_cached ports hs server --available-ports)"} )
+    _describe -t ports 'port' p
+}
+
+# Executor thread counts (0/1 plus even numbers up to available cores).
+# $1 optionally sets the starting value (default 0).
+(( $+functions[_hs_thread_counts] )) || _hs_thread_counts() {
+    local start=${1:-0} cores
+    cores=$(_hs_cached cores hs client --available-cores)
+    local -a n; n=( )
+    (( start <= 0 )) && n+=( 0 )
+    n+=( 1 ${(f)"$(seq 2 2 ${cores:-8} 2>/dev/null)"} )
+    _describe -t threads 'threads' n
+}
+
+# Candidate hostnames (loopback + known_hosts + /etc/hosts).
+(( $+functions[_hs_gather_hosts] )) || _hs_gather_hosts() {
+    { cat ~/.ssh/known_hosts; cat /etc/hosts; } 2>/dev/null \
+        | grep -E '^[0-9a-zA-Z]' | awk '{print $1}' | sort -u
+}
+(( $+functions[_hs_known_hosts] )) || _hs_known_hosts() {
+    local -a hosts
+    hosts=( localhost 127.0.0.1 0.0.0.0 ${(f)"$(_hs_cached hosts _hs_gather_hosts)"} )
+    _describe -t hosts 'host' hosts
+}
+
+# Random 16-character key suggestion for authentication values.
+(( $+functions[_hs_authkey] )) || _hs_authkey() {
+    local key; key=$(head -c 1024 /dev/urandom 2>/dev/null | md5sum | head -c 16 | tr '[:lower:]' '[:upper:]')
+    [[ -n $key ]] && compadd -X 'suggested key' -- "$key"
+    _message -e authkey 'authentication key'
+}
+
+# Task tags: complete `key` first, then `value` after the colon.
+(( $+functions[_hs_tags] )) || _hs_tags() {
+    if compset -P '*:'; then
+        local key="${IPREFIX%:}"
+        local -a vals; vals=( ${(f)"$(_hs_cached "tagval:$key" hs list --tag-values "$key")"} )
+        _describe -t tagvalues "value for ${key}" vals
+    else
+        local -a keys; keys=( ${(f)"$(_hs_cached tagkeys hs list --tag-keys)"} )
+        _describe -t tagkeys 'tag key' keys -S ':' -q
+    fi
+}
+
+# `hs update` positional assignments: FIELD= and tag KEY: tokens.
+(( $+functions[_hs_update_args] )) || _hs_update_args() {
+    local -a assigns f k
+    f=( ${=$(_hs_cached fields hs list --fields)} )
+    for k in $f; do [[ $k != id ]] && assigns+=( "${k}=" ); done
+    k=( ${(f)"$(_hs_cached tagkeys hs list --tag-keys)"} )
+    local key; for key in $k; do assigns+=( "${key}:" ); done
+    compadd -S '' -- $assigns
+}
+
+# ---------------------------------------------------------------------------
+# Top-level dispatch
+# ---------------------------------------------------------------------------
+
+function _hs() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    # `hsx` is shorthand for `hs cluster`; the #compdef tag routes it here.
+    if [[ ${service} == hsx ]]; then
+        _hs_cluster
+        return
+    fi
+
+    local -a subcommands
+    subcommands=(
+        'cluster:Run managed cluster'
+        'server:Run server in stand-alone mode'
+        'client:Run individual client directly'
+        'submit:Submit tasks to the database'
+        'initdb:Initialize database'
+        'info:Get metadata/status/outputs of task'
+        'wait:Wait for task to complete'
+        'run:Submit task and wait for completion'
+        'list:Search for tasks in database'
+        'update:Update task metadata'
+        'config:Manage configuration'
+    )
+
+    _arguments -C \
+        '(- : *)'{-h,--help}'[Show this message and exit]' \
+        '(- : *)'{-v,--version}'[Show the version and exit]' \
+        '(- : *)--citation[Show citation info and exit]' \
+        '1:command:->subcmd' \
+        '*:: :->args'
+
+    case "$state" in
+        subcmd)
+            _describe -t commands 'hs command' subcommands
+            ;;
+        args)
+            case "${line[1]}" in
+                cluster) _hs_cluster ;;
+                server)  _hs_server ;;
+                client)  _hs_client ;;
+                submit)  _hs_submit ;;
+                initdb)  _hs_initdb ;;
+                config)  _hs_config ;;
+                info)    _hs_info ;;
+                wait)    _hs_wait ;;
+                run)     _hs_run ;;
+                list)    _hs_list ;;
+                update)  _hs_update ;;
+                task)    _hs_task ;;  # hidden backwards-compatibility group
+            esac
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# initdb
+# ---------------------------------------------------------------------------
+
+function _hs_initdb() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-y --yes)'{-y,--yes}'[Auto-confirm action (default will prompt)]' \
+        '(-t --truncate -v --vacuum -r --rotate -b --backup)'{-t,--truncate}'[Truncate database (task metadata will be lost)]' \
+        '(-t --truncate -v --vacuum -r --rotate -b --backup)'{-v,--vacuum}'[Vacuum an existing database]' \
+        '(-t --truncate -v --vacuum -r --rotate -b --backup)'{-r,--rotate}'[Rotate completed tasks to new database (SQLite only)]' \
+        '(-t --truncate -v --vacuum -r --rotate -b --backup)'{-b,--backup}'[Vacuum into backup file (SQLite only)]:backup file:_files'
+}
+
+# ---------------------------------------------------------------------------
+# config (get / set / edit / which)
+# ---------------------------------------------------------------------------
+
+function _hs_config() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    local -a config_subcommands
+    config_subcommands=(
+        'get:Get a configuration value'
+        'set:Set a configuration value'
+        'edit:Open configuration file in editor'
+        'which:Show origin of a configuration option'
+    )
+
+    _arguments -C \
+        '(- : *)'{-h,--help}'[Show this message and exit]' \
+        '(- : *)--system[Show system-level config path]' \
+        '(- : *)--user[Show user-level config path]' \
+        '(- : *)--local[Show local-level config path]' \
+        '1:command:->subcmd' \
+        '*:: :->args'
+
+    case "$state" in
+        subcmd)
+            _describe -t commands 'config command' config_subcommands
+            ;;
+        args)
+            case "${line[1]}" in
+                get)   _hs_config_get ;;
+                set)   _hs_config_set ;;
+                edit)  _hs_config_edit ;;
+                which) _hs_config_which ;;
+            esac
+            ;;
+    esac
+}
+
+function _hs_config_get() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-x --expand)'{-x,--expand}'[Expand variable interpolations]' \
+        '(-r --raw)'{-r,--raw}'[Print raw value (no formatting)]' \
+        '(--user --system --local --default)--user[Read user configuration]' \
+        '(--user --system --local --default)--system[Read system configuration]' \
+        '(--user --system --local --default)--local[Read local configuration]' \
+        '(--user --system --local --default)--default[Read default value]' \
+        '1:configuration key:_hs_config_keys'
+}
+
+function _hs_config_set() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(--user --system --local)--user[Write user configuration]' \
+        '(--user --system --local)--system[Write system configuration]' \
+        '(--user --system --local)--local[Write local configuration]' \
+        '1:configuration key:_hs_config_keys' \
+        '2:value:->value'
+
+    case "$state" in
+        value)
+            case "${line[1]}" in
+                logging.level)     _values 'log level' trace debug info warning error critical ;;
+                logging.style)     _values 'log style' default detailed detailed-compact system ;;
+                database.provider) _values 'database provider' sqlite postgres ;;
+                server.bind)       _values 'bind address' localhost 127.0.0.1 0.0.0.0 ;;
+                server.auth)       _hs_authkey ;;
+                autoscale.policy)  _values 'autoscale policy' fixed dynamic ;;
+                console.theme)     _hs_themes ;;
+                *)
+                    local current_value
+                    current_value=$(_hs_cached "val:${line[1]}" hs config get "${line[1]}" --raw)
+                    _message -e value "value${current_value:+ (current: ${current_value})}"
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+function _hs_config_which() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '--site[Output originating site name only]' \
+        '1:configuration key:_hs_config_keys'
+}
+
+function _hs_config_edit() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(--user --system --local)--user[Edit user configuration]' \
+        '(--user --system --local)--system[Edit system configuration]' \
+        '(--user --system --local)--local[Edit local configuration]'
+}
+
+# ---------------------------------------------------------------------------
+# task (backwards-compatibility group: `hs task <sub>`)
+# ---------------------------------------------------------------------------
+
+function _hs_task() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    local -a task_subcommands
+    task_subcommands=(
+        'submit:Submit task to database'
+        'info:Get metadata/status/outputs of task'
+        'wait:Wait for task to complete'
+        'run:Submit task and wait for completion'
+        'search:Search for tasks in database'
+        'update:Update task metadata'
+    )
+
+    _arguments -C \
+        '(- : *)'{-h,--help}'[Show this message and exit]' \
+        '1:command:->subcmd' \
+        '*:: :->args'
+
+    case "$state" in
+        subcmd)
+            _describe -t commands 'task command' task_subcommands
+            ;;
+        args)
+            case "${line[1]}" in
+                submit) _hs_task_submit ;;
+                info)   _hs_info ;;
+                wait)   _hs_wait ;;
+                run)    _hs_run ;;
+                search) _hs_list ;;
+                update) _hs_update ;;
+            esac
+            ;;
+    esac
+}
+
+# `hs task submit` (minimal interface; distinct from top-level `hs submit`).
+function _hs_task_submit() {
+    _arguments -s -S \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
+        '(-)--[End of options; task arguments follow]' \
+        '*::task arguments:_normal'
+}
+
+# ---------------------------------------------------------------------------
+# info
+# ---------------------------------------------------------------------------
+
+function _hs_info() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal json yaml)' \
+        '(-f --format --json --yaml)--json[Format task metadata as JSON]' \
+        '(-f --format --json --yaml)--yaml[Format task metadata as YAML]' \
+        '(--stdout --stderr --perf -x --extract)'{-x,--extract}'[Print a single field]:field:_hs_fields' \
+        '(--stdout --stderr --perf -x --extract)--stdout[Print <stdout> from task]' \
+        '(--stdout --stderr --perf -x --extract)--stderr[Print <stderr> from task]' \
+        '(--stdout --stderr --perf -x --extract)--perf[Print performance metrics from task]' \
+        '(-i --ignore-partitions)'{-i,--ignore-partitions}'[Suppress auto-union feature (SQLite only)]' \
+        '1:task UUID:_hs_task_ids'
+}
+
+# ---------------------------------------------------------------------------
+# wait
+# ---------------------------------------------------------------------------
+
+function _hs_wait() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-n --interval)'{-n,--interval}'[Seconds between polling (default: 5)]:seconds:(5 10 30 60)' \
+        '(-i --info -s --status -r --return)'{-i,--info}'[Print info on task]' \
+        '(-i --info -s --status -r --return)'{-s,--status}'[Print exit status for task]' \
+        '(-i --info -s --status -r --return)'{-r,--return}'[Use exit status from task]' \
+        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal json yaml)' \
+        '(-f --format --json --yaml)--json[Format info as JSON]' \
+        '(-f --format --json --yaml)--yaml[Format info as YAML]' \
+        '1:task UUID:_hs_task_ids'
+}
+
+# ---------------------------------------------------------------------------
+# run
+# ---------------------------------------------------------------------------
+
+function _hs_run() {
+    _arguments -s -S \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-n --interval)'{-n,--interval}'[Seconds between polling (default: 5)]:seconds:(5 10 30 60)' \
+        '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
+        '(-)--[End of options; task command follows]' \
+        '*::task command:_normal'
+}
+
+# ---------------------------------------------------------------------------
+# list (search)
+# ---------------------------------------------------------------------------
+
+function _hs_list() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '*'{-w,--where}'[Filter on conditional expression]:condition:_hs_fields' \
+        '*'{-t,--with-tag}'[Filter by tag]:tag:_hs_tags' \
+        '(-g --group)'{-g,--group}'[Filter by group]:group:' \
+        '(-s --order-by)'{-s,--order-by}'[Order output by field]:field:_hs_fields' \
+        '--desc[Descending order (requires --order-by)]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '--retries[Alias for -w "attempt > 1"]' \
+        '(-f --format --json --csv)'{-f,--format}'[Format output]:format:(normal plain table csv json)' \
+        '(-f --format --json --csv)--json[Format output as JSON]' \
+        '(-f --format --json --csv)--csv[Format output as CSV]' \
+        '(-d --delimiter)'{-d,--delimiter}'[Field separator for plain/csv formats]:delimiter:(, \; \|)' \
+        '(-l --limit -c --count)'{-l,--limit}'[Limit the number of results]:limit:(10 20 50 100 500 1000)' \
+        '(-l --limit -c --count)'{-c,--count}'[Show count of results]' \
+        '(-i --ignore-partitions)'{-i,--ignore-partitions}'[Suppress auto-union feature (SQLite only)]' \
+        '(--tag-keys --tag-values)--tag-keys[Show all distinct tag keys]' \
+        '(--tag-keys --tag-values)--tag-values[Show all distinct values for a tag key]:tag key:_hs_tags' \
+        '--fields[List available field names]' \
+        '*:field:_hs_fields'
+}
+
+# ---------------------------------------------------------------------------
+# update
+# ---------------------------------------------------------------------------
+
+function _hs_update() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '*'{-w,--where}'[Filter on conditional expression]:condition:_hs_fields' \
+        '*'{-t,--with-tag}'[Filter by tag]:tag:_hs_tags' \
+        '(-g --group)'{-g,--group}'[Filter by group]:group:' \
+        '(-s --order-by)'{-s,--order-by}'[Order matches by field]:field:_hs_fields' \
+        '--desc[Descending order (requires --order-by)]' \
+        '(--revert --cancel --delete)--revert[Revert specified tasks]' \
+        '(--revert --cancel --delete)--cancel[Cancel specified tasks]' \
+        '(--revert --cancel --delete)--delete[Delete specified tasks]' \
+        '*--remove-tag[Remove specified tags by name]:tag:_hs_tags' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '--retries[Alias for -w "attempt > 1"]' \
+        '(-l --limit)'{-l,--limit}'[Limit matches]:limit:(1 10 100 1000)' \
+        '(-f --no-confirm)'{-f,--no-confirm}'[Do not ask for confirmation]' \
+        '*:update argument:_hs_update_args'
+}
+
+# ---------------------------------------------------------------------------
+# submit
+# ---------------------------------------------------------------------------
+
+function _hs_submit() {
+    _arguments -s -S \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-f --task-file)'{-f,--task-file}'[Path to task file ("-" for <stdin>)]:task file:_files' \
+        '(-q --queue)'{-q,--queue}'[Submit to live queue instead of database]' \
+        '(-H --host)'{-H,--host}'[Hostname for server (used with --queue)]:host:_hs_known_hosts' \
+        '(-p --port)'{-p,--port}'[Port number for server (used with --queue)]:port:_hs_ports' \
+        '(-k --auth)'{-k,--auth}'[Cryptographic key to connect to server]:auth key:_hs_authkey' \
+        '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
+        '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
+        '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
+        '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
+        '--template[Submit-time template expansion (default "{}")]:template:' \
+        '(-c --cores)'{-c,--cores}'[Required cores per task]:cores:(1 2 4 8 16 32)' \
+        '(-m --memory)'{-m,--memory}'[Required memory per task]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
+        '(-W --timeout)'{-W,--timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
+        '(-g --group)'{-g,--group}'[Task group for dependency management]:group:' \
+        '(-b --bundlesize)'{-b,--bundlesize}'[Number of lines to buffer]:size:(1 10 100 1000)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '--initdb[Auto-initialize database]' \
+        '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
+        '(-)--[End of options; task arguments follow]' \
+        '*::task arguments:_normal'
+}
+
+# ---------------------------------------------------------------------------
+# client
+# ---------------------------------------------------------------------------
+
+function _hs_client() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-N --num-threads)'{-N,--num-threads}'[Number executor threads, 0=auto (default: 1)]:threads:_hs_thread_counts' \
+        '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
+        '(-b --bundlesize)'{-b,--bundlesize}'[Bundle size for finished tasks]:size:(1 10 100 1000)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(-H --host)'{-H,--host}'[Hostname for server (default: localhost)]:host:_hs_known_hosts' \
+        '(-p --port)'{-p,--port}'[Port number for server (default: 50001)]:port:_hs_ports' \
+        '(-k --auth)'{-k,--auth}'[Cryptographic key to connect to server]:auth key:_hs_authkey' \
+        '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
+        '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
+        '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
+        '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
+        '(-d --delay-start)'{-d,--delay-start}'[Seconds to wait before start-up]:seconds:(30 60 600 -60 -600)' \
+        '--no-confirm[Disable confirmation of task bundle received]' \
+        '(--capture)'{-o,--output}'[Redirect task output (default <stdout>)]:output file:_files' \
+        '(--capture)'{-e,--errors}'[Redirect task errors (default <stderr>)]:error file:_files' \
+        '(-o --output -e --errors)--capture[Capture individual task <stdout> and <stderr>]' \
+        '--monitor[Capture cores and memory used by tasks]' \
+        '(-C --client-cores)'{-C,--client-cores}'[Limit available cores for client]:cores:_hs_thread_counts 1' \
+        '(-M --client-memory)'{-M,--client-memory}'[Limit available memory for client]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
+        '(-T --timeout)'{-T,--timeout}'[Shutdown if no tasks received (default: never)]:seconds:(10 30 60 600)' \
+        '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
+        '(-R --ratelimit)'{-R,--ratelimit}'[Maximum allowed tasks per second]:rate:' \
+        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait (default: 10)]:seconds:(1 5 10)'
+}
+
+# ---------------------------------------------------------------------------
+# server
+# ---------------------------------------------------------------------------
+
+function _hs_server() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-H --bind)'{-H,--bind}'[Bind address (default: localhost)]:address:(localhost 127.0.0.1 0.0.0.0)' \
+        '(-p --port)'{-p,--port}'[Port number (default: 50001)]:port:_hs_ports' \
+        '(-k --auth)'{-k,--auth}'[Cryptographic key to secure server]:auth key:_hs_authkey' \
+        '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
+        '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
+        '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
+        '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
+        '--forever[Schedule forever]' \
+        '--restart[Start scheduling from last completed task]' \
+        '(-c --task-cores)'{-c,--task-cores}'[Number of cores to assign each task]:cores:(1 2 4 8 16 32)' \
+        '(-m --task-memory)'{-m,--task-memory}'[Memory in bytes to assign each task]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
+        '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit in seconds]:seconds:(60 300 600 1800 3600)' \
+        '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries]:seconds:(1 2 5 10)' \
+        '(-r --max-retries)'{-r,--max-retries}'[Auto-retry failed tasks (default: 0)]:retries:(1 2 3 4 5 6)' \
+        '--eager[Schedule failed tasks before new tasks]' \
+        '(--no-db --initdb)--no-db[Disable database (submit directly to clients)]' \
+        '(--no-db --initdb)--initdb[Auto-initialize database]' \
+        '--no-confirm[Disable client confirmation of task bundle received]' \
+        '(--print -f --failures)--print[Print failed task args to <stdout>]' \
+        '(--print -f --failures)'{-f,--failures}'[File path to redirect failed task args]:failure file:_files' \
+        '1:input file:_files'
+}
+
+# ---------------------------------------------------------------------------
+# cluster (also reached via `hsx`)
+# ---------------------------------------------------------------------------
+
+function _hs_cluster() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-N --num-threads)'{-N,--num-threads}'[Executor threads per client, 0=auto (default: 1)]:threads:_hs_thread_counts' \
+        '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
+        '(-H --bind)'{-H,--bind}'[Special bind address (default localhost/0.0.0.0)]:address:(localhost 127.0.0.1 0.0.0.0)' \
+        '(-p --port)'{-p,--port}'[Port number (default: 50001)]:port:_hs_ports' \
+        '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
+        '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
+        '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
+        '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
+        '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(-r --max-retries)'{-r,--max-retries}'[Auto-retry failed tasks (default: 0)]:retries:(1 2 3 4 5 6)' \
+        '--eager[Schedule failed tasks before new tasks]' \
+        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries (default: 30)]:seconds:(1 2 5 10 30)' \
+        '(--no-db --initdb)--no-db[Disable database (submit directly to clients)]' \
+        '(--no-db --initdb)--initdb[Auto-initialize database]' \
+        '--no-confirm[Disable client confirmation of task bundle received]' \
+        '--forever[Schedule forever]' \
+        '--restart[Start scheduling from last completed task]' \
+        '(--mpi --launcher)--ssh[Launch directly with SSH host(s)]::host:_hs_known_hosts' \
+        '(--ssh --launcher)--mpi[Same as --launcher=mpirun]' \
+        '(--ssh --mpi)--launcher[Use specific launch interface]:launcher:_command_names -e' \
+        '--ssh-args[Command-line arguments for SSH]:ssh args:' \
+        '--ssh-group[SSH nodelist group in config]:ssh group:_hs_ssh_groups' \
+        '(-E --env)'{-E,--env}'[Send environment variables]' \
+        '--remote-exe[Path to executable on remote hosts]:remote exe:_files' \
+        '(-d --delay-start)'{-d,--delay-start}'[Delay time for launching clients]:seconds:(30 60 600 -60 -600)' \
+        '(--capture)'{-o,--output}'[File path for task outputs (default <stdout>)]:output file:_files' \
+        '(--capture)'{-e,--errors}'[File path for task errors (default <stderr>)]:error file:_files' \
+        '(-o --output -e --errors)--capture[Capture individual task <stdout> and <stderr>]' \
+        '--monitor[Capture cores and memory used by tasks]' \
+        '(-c --cores)'{-c,--cores}'[Required cores per task]:cores:(1 2 4 8 16 32)' \
+        '(-m --memory)'{-m,--memory}'[Required memory per task]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
+        '(-C --client-cores)'{-C,--client-cores}'[Limit available cores for client]:cores:_hs_thread_counts 1' \
+        '(-M --client-memory)'{-M,--client-memory}'[Limit available memory for client]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
+        '(-f --failures)'{-f,--failures}'[File path to write failed task args]:failure file:_files' \
+        '(-T --timeout)'{-T,--timeout}'[Shutdown clients if no tasks received (default: never)]:seconds:(10 30 60 600)' \
+        '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
+        '(-R --ratelimit)'{-R,--ratelimit}'[Maximum allowed tasks per second per client]:rate:' \
+        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait (default: 10)]:seconds:(1 5 10)' \
+        '(-A --autoscaling)'{-A,--autoscaling}'[Enable autoscaling (used with --launcher)]::mode:(fixed dynamic)' \
+        '(-F --factor)'{-F,--factor}'[Scaling factor (default: 1)]:factor:(1 2 3 4 5)' \
+        '(-P --period)'{-P,--period}'[Scaling period in seconds (default: 60)]:seconds:(30 60 300 600)' \
+        '(-I --init-size)'{-I,--init-size}'[Initial size of cluster (default: 1)]:size:(0 1 2 5)' \
+        '(-X --min-size)'{-X,--min-size}'[Minimum size of cluster (default: 0)]:size:(0 1)' \
+        '(-Y --max-size)'{-Y,--max-size}'[Maximum size of cluster (default: 1)]:size:(1 2 5 10 20)' \
+        '1:input file:_files'
+}
+
+# Autoloaded via the #compdef tag: the file body defines the helpers and
+# subcommand functions above, then dispatches through _hs for this invocation.
+_hs "$@"

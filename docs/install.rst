@@ -303,6 +303,7 @@ configuration file might then be:
 
         prepend_path("PATH", pathJoin(modroot, "bin"))
         prepend_path("MANPATH", pathJoin(modroot, "share", "man"))
+        prepend_path("FPATH", pathJoin(modroot, "share", "zsh", "site-functions"))  -- Zsh completions
 
         -- Raw source b/c `complete -F _hs hs` does not persist with source_sh
         execute { cmd="source " .. pathJoin(modroot, "share", "bash_completion.d", "hs"), modeA={"load"} }
@@ -355,26 +356,92 @@ Shell Completions
 
 |
 
-On `Linux` and `macOS` platforms we provide shell completion definitions for Bash-like
-environments (specialized ZShell completions coming-soon). As suggested by the LMOD
-definition file included above, sourcing the ``/share/bash_completion.d/hs`` file enables
-completions for the entire command-line interface.
+On `Linux` and `macOS` platforms we provide tab-completion definitions for both **Bash** and
+**Zsh**, covering the entire command-line interface for the ``hs`` and ``hsx`` commands.
 
-Some completions are simple, like what options are available for the given subcommand.
-Some completions are basic, such as ``--bind <tab>`` returning either ``localhost`` or ``0.0.0.0``.
-Some are more sophisticated.
+When installing from the package index (``pip`` / ``uv``), the completion files are placed under
+the environment prefix automatically:
 
-Some examples (but not everything):
+* Bash — ``<prefix>/share/bash-completion/completions/{hs,hsx}``
+* Zsh  — ``<prefix>/share/zsh/site-functions/_hs``
 
-* ``hs config get <tab>`` will autocomplete all options.
-* ``hs config set OPT <tab>`` will autocomplete the current value for OPT.
-* ``hs client ... --host <tab>`` will parse your host file and return possible known hosts.
-* ``hs server ... --auth <tab>`` will auto-generate secure keys at random.
-* ``hs server ... --port <tab>`` will select an available port on your machine.
-* ``hs list <tab>`` will complete known fields.
-* ``hs list ... -t <tab>`` will complete known tags in the database.
-* ``hs list ... -t key:<tab>`` will complete known values for that key in the database.
-* ``hsx ... --ssh-group <tab>`` will autocomplete known groups in your config.
+The completions call the ``hs`` program to compute dynamic values (available fields, tags, ports,
+configuration values, and so on), so the ``hs`` entry-point script must be on your ``PATH`` for
+completion to work.
+
+.. admonition:: The completion scripts require ``hs`` on ``PATH``
+    :class: warning
+
+    Dynamic completions shell out to ``hs`` (e.g. ``hs list --fields``). In a development
+    checkout where only ``uv run hs`` works, completion produces nothing until the package is
+    installed such that ``hs`` resolves on ``PATH``.
+
+|
+
+Bash
+^^^^
+
+Completion requires the `bash-completion <https://github.com/scop/bash-completion>`_ package
+(version 2.x), which most distributions install and enable from your shell startup files by
+default. With the file at the standard location above it is loaded automatically the first time
+you complete an ``hs`` command. To enable it from an arbitrary location, drop it into your user
+completions directory or source it directly.
+
+.. admonition:: Enable Bash completions manually
+    :class: note
+
+    .. code-block:: shell
+
+        # user-level (bash-completion autoloads by command name)
+        install -Dm644 share/bash_completion.d/hs ~/.local/share/bash-completion/completions/hs
+
+        # ... or source it directly from ~/.bashrc
+        source /path/to/share/bash_completion.d/hs
+
+|
+
+Zsh
+^^^
+
+The Zsh completion is an autoloaded ``#compdef`` function. Place the directory containing
+``_hs`` on your ``fpath`` before ``compinit`` runs. When installed from the package index this
+is ``<prefix>/share/zsh/site-functions`` (already on ``fpath`` for a system install; for a
+virtual-environment or ``uv tool`` prefix, add it explicitly). Do not ``source`` the file — Zsh
+loads it on demand from ``fpath``.
+
+.. admonition:: Enable Zsh completions
+    :class: note
+
+    .. code-block:: shell
+
+        # in ~/.zshrc, before `compinit`
+        fpath=(/path/to/prefix/share/zsh/site-functions $fpath)
+        autoload -Uz compinit && compinit
+
+|
+
+Examples
+^^^^^^^^
+
+Both shells surface the same information. Completion ranges from the simple (which options a
+subcommand accepts, e.g. ``--bind <tab>`` offering ``localhost`` or ``0.0.0.0``) to the dynamic:
+
+* ``hs config get <tab>`` completes configuration keys.
+* ``hs config set OPT <tab>`` suggests the current value for ``OPT``.
+* ``hs client ... --host <tab>`` parses your host files for known hosts.
+* ``hs server ... --auth <tab>`` generates a secure random key.
+* ``hs server ... --port <tab>`` selects an available port on your machine.
+* ``hs list <tab>`` completes known task fields.
+* ``hs list ... -t <tab>`` completes tag keys present in the database.
+* ``hs list ... -t key:<tab>`` completes known values for that tag key.
+* ``hsx ... --ssh-group <tab>`` completes SSH nodelist groups from your config.
+
+.. admonition:: Completions that query the database
+    :class: note
+
+    A few completions (tags, task IDs, available ports) run a live ``hs`` query on each key
+    press. Against a large database or a remote PostgreSQL backend these add a small latency to
+    completion; the Zsh definitions cache results briefly per session to reduce repeat queries.
 
 
 -------------------
