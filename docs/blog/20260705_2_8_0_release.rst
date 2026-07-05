@@ -1,23 +1,119 @@
-.. _20251101_2_8_0_release:
+.. _20260705_2_8_0_release:
 
 Release Notes (v2.8.0)
 ======================
 
-`November 1, 2025`
+`July 5, 2026`
 
 The v2.8.0 release includes major features and improvements.
 
+- Built-in TLS encryption (enabled by default)
 - Resource-aware task scheduling
 - Resource monitoring
+- Task groups for dependency management
 - Queue-only task submission
 - Rate limiting task execution
-- Task groups for dependency management
+- File-based logging
+- Functional (Python) API
+- Bash and Zsh shell completions
+- Python 3.11–3.14 support (PostgreSQL via psycopg v3)
 - Major bug fixes and improvements
 
 -----
 
 Features
 --------
+
+|
+
+Secure queue transport (TLS enabled by default)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The most consequential change in this release is that queue traffic between the server and its
+clients is now encrypted with TLS **by default**. In previous releases the distributed queue
+communicated in the clear, protected only by a shared authentication key; HyperShell now wraps
+that same queue in a TLS channel with no configuration required.
+
+.. note::
+
+    On single-host clusters (``hs cluster`` / ``hsx``) and on any deployment sharing a filesystem
+    this is completely transparent — there are no certificates to generate and nothing to change.
+
+**Automatic self-signed certificates**
+
+The first time a server starts with TLS enabled it generates a self-signed certificate and private
+key (RSA-3072, SHA-256, ten-year validity) under the site TLS directory — ``server.crt`` and
+``server.key`` in ``<site>/lib/tls`` (``~/.hypershell/lib/tls`` on Linux). The private key is
+written owner-only (``0600``). These materials are reused on subsequent starts, so generation
+happens exactly once.
+
+**Command-line Options**
+
+The ``--no-tls``, ``--tls-cert``, ``--tls-key``, and ``--tls-ca`` options are available on the
+``server``, ``client``, ``submit``, and ``cluster`` commands:
+
+.. list-table:: TLS Options
+   :header-rows: 1
+   :widths: 20 60 20
+
+   * - Option
+     - Purpose
+     - Config Source
+   * - ``--no-tls``
+     - Disable TLS entirely (encryption off — not recommended)
+     - ``server.tls.enabled``
+   * - ``--tls-cert``
+     - Path to the certificate file
+     - ``server.tls.cert``
+   * - ``--tls-key``
+     - Path to the private key file
+     - ``server.tls.key``
+   * - ``--tls-ca``
+     - CA bundle used to verify the peer certificate
+     - ``server.tls.cafile``
+
+**Configuration**
+
+TLS can also be controlled entirely through the ``[server.tls]`` configuration namespace (or the
+matching ``HYPERSHELL_SERVER_TLS_*`` environment variables), following the usual precedence:
+
+.. code-block:: toml
+
+    [server.tls]
+    enabled     = true              # default; queue traffic is encrypted out of the box
+    cert        = "<auto>"          # path to server cert, or '<auto>' to self-sign
+    key         = "<auto>"          # path to server key, or '<auto>' to self-sign
+    cafile      = "<auto>"          # trust anchor; '<auto>' = server's own cert
+    fingerprint = "<none>"          # 'SHA256:AB:CD:...' pin (overrides cafile verification)
+    insecure    = false             # encrypt but skip peer verification (logs a warning)
+    min_version = "TLSv1.2"         # or 'TLSv1.3'
+    ciphers     = "<none>"          # OpenSSL cipher string
+    servername  = "<none>"          # SNI / hostname check override
+
+**Peer Verification**
+
+The client side of every connection decides how to validate the server certificate. Four modes are
+supported, in decreasing strength: full **CA verification** (``cafile`` plus ``servername``);
+certificate **fingerprint pinning** (set ``fingerprint`` to the ``SHA256:...`` value logged when
+the certificate is generated — the recommended choice for self-signed certificates); the
+**system CA bundle** (for real, publicly-issued certificates); and an **insecure** mode that
+encrypts traffic but does not authenticate the peer.
+
+**Multi-host Clusters**
+
+For distributed clusters (SSH, MPI, SLURM, autoscaling) the launcher no longer copies the server's
+certificate material onto each client command line. Instead every client resolves its own TLS
+material from its own configuration and site directory — identical to the server's on a shared
+filesystem, so no operator action is needed there. When the filesystem is *not* shared, either pin
+the server's fingerprint (``HYPERSHELL_SERVER_TLS_FINGERPRINT``) or distribute the certificate and
+set ``HYPERSHELL_SERVER_TLS_CAFILE`` / ``HYPERSHELL_SERVER_TLS_SERVERNAME`` on the clients. Only
+the disabled state (``--no-tls``) is propagated automatically.
+
+.. tip::
+
+    A new :ref:`Security guide <security>` documents the full threat model, the built-in TLS
+    architecture, all four verification modes, known limitations, and deployment recipes for
+    single-host, internet-exposed, and Kubernetes environments.
 
 |
 
@@ -59,7 +155,7 @@ The following options control resource management across the CLI:
      - Memory required per task
      - ``task.memory``
    * - ``-W``
-     - ``--task-timeout``
+     - ``--task-timeout`` (``--timeout`` on ``submit``)
      - Walltime limit per task (seconds)
      - ``task.timeout``
    * - ``-C``
@@ -149,7 +245,7 @@ On a client with 8 cores and 3 executor threads:
 5. Task ``n:4`` backfills ahead of ``n:3`` because:
 
    * Task ``n:4`` has a shorter timeout of 15s
-   * Task ``n:2`` will a worst case timeout of 60s (~55s from now)
+   * Task ``n:2`` will have a worst case timeout of 60s (~55s from now)
 
 6. Task ``n:3`` starts when both ``n:2`` and ``n:4`` complete
 
@@ -160,7 +256,7 @@ mixed resource requirements and execution times.
 
 When multiple tasks are waiting for resources, HyperShell uses an adaptive sleep mechanism
 to ensure tasks wake up and check for availability in priority order. Instead of all waiting
-tasks checking simultaneously (which would create a worst-case n-factorial wait period),
+tasks checking simultaneously (by having equal sleep periods),
 each task sleeps for a duration proportional to its priority ratio:
 
 * High-priority tasks (ratio=1.0) sleep ~0.5 seconds
@@ -171,14 +267,22 @@ This creates a natural "wake-up cascade" where the highest-priority task checks 
 followed by progressively lower-priority tasks. This minimizes lock contention on the
 resource scheduler while ensuring fair, priority-based access. As tasks complete and
 resources become available, waiting tasks are efficiently promoted and scheduled without
-unnecessary polling overhead.
+unnecessary polling overhead. Without this mechanism we would experience O(n^2) waiting
+times each time a large task (all slots) completed, instead of the O(1) produced here.
 
-.. admonition:: Warning - Rename command-line option names
+.. admonition:: Warning - Rename command-line option
     :class: warning
 
     The ``--num-tasks`` option has been renamed to ``--num-threads`` to better reflect
     its purpose as the number of executor threads per client. The old ``--num-tasks``
     name is maintained for backwards compatibility but may be deprecated in future releases.
+
+.. admonition:: Warning - Reassigned short option ``-c``
+    :class: warning
+
+    The ``-c`` short option now means ``--cores`` (``--task-cores`` on ``hs server``). It was
+    previously the short form of ``--capture``, which is now available only in its long form.
+    Existing scripts that used ``-c`` to enable output capture must be updated to ``--capture``.
 
 |
 
@@ -198,7 +302,7 @@ Add the ``--monitor`` flag to the ``cluster`` (``hsx``) or ``client`` commands:
 
     .. code-block:: shell
 
-        hsx tasks.in --monitor -c 4 -m 2G
+        hsx tasks.in --monitor -c 4 -m 2GB
 
 When monitoring is enabled, HyperShell continuously tracks CPU core utilization and memory
 consumption for each task and all its child processes using the ``psutil`` library.
@@ -213,6 +317,10 @@ the executor thread is waiting for task completion.
   ``.out`` and ``.err`` files (see ``--capture``). These are stored in the ``$HYPERSHELL_SITE``
   library (``~/.hypershell/lib`` by default on Linux).
   There are only three columns: ``time``, ``cores``, ``memory``.
+
+The recorded time-series for a task can be viewed with ``hs info <id> --perf`` (its location is
+also reported as the ``csvpath`` field), mirroring ``--stdout`` / ``--stderr`` for captured output.
+Monitoring is built on ``psutil`` (>= 7.0.0), which is now a required dependency.
 
 **Resource Limit Warnings**
 
@@ -268,15 +376,25 @@ Use the ``-q``/``--queue`` option along with ``-H``/``--host``, ``-p``/``--port`
 
     .. code-block:: shell
 
-        # Start a server
-        hs server --forever --auth mykey &
+        # Generate a strong authentication key (the server now requires >= 16 characters)
+        KEY="$(openssl rand -base64 24)"
 
-        # Submit tasks directly to the queue
-        hs submit tasks.in -q -H localhost -p 50001 -k mykey
+        # Start a server
+        hs server --forever --auth "$KEY" &
+
+        # Submit tasks directly to the queue (use -H <host> to reach a remote server)
+        hs submit tasks.in -q -H localhost -p 50001 -k "$KEY"
 
 When using queue mode, tasks are sent directly to the server's in-memory queue for
 immediate scheduling by connected clients. Without ``--queue``, the traditional
 database-backed workflow is used, providing persistence, recovery, and search capabilities.
+
+.. note::
+
+    Because TLS is enabled by default, submitting to a *remote* server requires the client to
+    trust the server's certificate — on a shared filesystem this is automatic; otherwise pin the
+    server's fingerprint or distribute its certificate (see :ref:`security`), or pass ``--no-tls``
+    on both ends. The ``--auth`` key must be at least 16 characters.
 
 .. note::
 
@@ -288,8 +406,8 @@ database-backed workflow is used, providing persistence, recovery, and search ca
 
 |
 
-Rate limit task execution
-^^^^^^^^^^^^^^^^^^^^^^^^^
+Rate limiting task execution
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The concept of rate limiting has been added (available as ``-R``, ``--ratelimit``) for both
 cluster and client commands as a per-client limit on tasks executed per second. For example,
@@ -363,7 +481,22 @@ Task groups are exposed through a new ``-g``/ ``--group`` option in the ``hs sub
         # Submit batch of tasks with group 1
         hs submit tasks-1.in -g 1
 
-The default task group is 0 (see :const:`~hypershell.submit.DEFAULT_TASK_GROUP`).
+Groups may also be assigned per task inline with the ``#HYPERSHELL:`` comment directive, which
+overrides the command-line ``-g`` for that task:
+
+.. admonition:: Assign task groups inline
+    :class: note
+
+    .. code-block:: shell
+
+        preprocess.sh   #HYPERSHELL: group:0
+        analyze.sh      #HYPERSHELL: group:1
+
+The same ``-g``/``--group`` filter — along with a new ``--retries`` filter for tasks that have been
+retried — is also available on ``hs list`` and ``hs update`` (e.g. ``hs list -g 1`` or
+``hs list --retries``).
+
+The default task group is 0 for a fresh database (see :const:`~hypershell.submit.DEFAULT_TASK_GROUP`).
 When no task groups are given the software essentially behaves in a manner indistinguishable
 from previous releases. The scheduler pre-selects the active task group prior to selecting tasks
 from the database using one of following rules (in order):
@@ -382,6 +515,82 @@ if task groups have previously been used and submitting new tasks without specif
     of an already submitted task using ``hs update``. Depending on the severity of the changes it
     might be necessary to restart the cluster.
 
+.. note::
+
+    Autoscaling is task-group aware. Scale-out pressure is computed only from tasks in the
+    currently active group, so a backlog waiting in later groups will not spin up clients that
+    would sit idle until the active group completes.
+
+|
+
+File-based logging
+^^^^^^^^^^^^^^^^^^
+
+In addition to the console, HyperShell can now persist log messages to disk with automatic
+rotation and compression — useful for long-running servers and clusters and for unattended batch
+pipelines. File-based logging is **opt-in** and operates independently of the console: it has its
+own severity level and format, so you can keep a quiet console while retaining a verbose,
+machine-parsable record on disk.
+
+It is enabled the moment any ``logging.file`` parameter is set. The simplest form uses all
+defaults:
+
+.. admonition:: Enable file-based logging
+    :class: note
+
+    .. code-block:: toml
+
+        [logging]
+        file = "enabled"    # or true, or an explicit path
+
+For full control, define the ``[logging.file]`` table:
+
+.. admonition:: Rotating, compressed logs
+    :class: note
+
+    .. code-block:: toml
+
+        [logging.file]
+        level    = "debug"     # captured to disk independently of the console level
+        rotate   = "512MB"     # size-like ('512MB'), cron-like ('@daily'), or 'never'
+        compress = "gzip"      # gzip / bzip / lzma / zstd
+        keep     = 2           # uncompressed rotations retained on disk
+
+Rotation accepts a size threshold (``512MB``, ``2GB``; units are powers of 1024), a cron
+expression (``@daily``, ``@midnight``, ``0 1 * * 0`` — requires the optional ``cron`` extra), or
+``never`` (the default). Sending ``SIGHUP`` to a process triggers an immediate rotation on demand.
+Compression to ``gzip``/``bzip``/``lzma``/``zstd`` runs in the background (``zstd`` requires the
+optional ``zstd`` extra).
+
+**Per-process files.** In a distributed cluster many clients — potentially on shared storage —
+would otherwise contend for a single file. Each process therefore writes to its own role- and
+host-scoped file by default (``server-<host>.log``, ``cluster-<host>.log``, ``client-<host>.log``,
+``submit-<host>.log``, or ``main.log``); concurrent same-role processes on a host claim numbered
+slots that are reclaimed when a process exits or crashes. Because names never collide, the whole
+log directory can be collected with ``rsync`` or merged into a single timeline. See the
+:ref:`logging guide <logging>` for the full reference.
+
+|
+
+Functional (Python) API
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+HyperShell's functional API is now exposed directly at the top level of the package, so the common
+entry points can be used without reaching into submodules:
+
+.. admonition:: Drive HyperShell from Python
+    :class: note
+
+    .. code-block:: python
+
+        import hypershell as hs
+
+        # Run an in-process cluster over a collection of commands
+        hs.run_local(['echo one', 'echo two', 'echo three'], num_threads=4)
+
+The top-level namespace now includes ``run_local``, ``run_cluster``, ``run_ssh``, ``run_client``,
+``submit_from``, ``submit_file``, ``serve_from``, ``serve_file``, and ``serve_forever``.
+
 -----
 
 Improvements
@@ -399,7 +608,7 @@ get for running the software out-of-the-box. With this change we have a smart pr
 configuration that injects ``main.db`` as the database file name within the default *site* library.
 Use of the ``HYPERSHELL_SITE`` environment variable alters this location.
 
-On Linux this would be ``~/.hypershell/lib/main.db``.
+On Linux this would be ``~/.hypershell/lib/main.db`` (the file is named ``Main.db`` on macOS and Windows).
 
 The motivation here is to more seamlessly enable the beneficial features without new users running
 the software for the first time from needing to grapple with this behavior. So instead of getting a
@@ -413,12 +622,113 @@ Default logging level set to INFO
 
 Similar to the above change with the database enabled by default we have also updated the default
 logging level to ``INFO`` instead of ``WARNING``. It is probably never the case that users (particularly
-in a research workflow context) to want zero messages from HyperShell. Even with ``INFO`` level messages
+in a research workflow context) want zero messages from HyperShell. Even with ``INFO`` level messages
 enabled there are relatively few messages emitted. These messages are predominantly emitted by the
-client as task start. A few messages at the start of operations about the state of the database are
-typically emitted as well.
+client when tasks are started. A few messages at the start of operations about the state of the database
+are typically emitted as well.
+
+New users can of course forever change the logging level by setting their global user configuration:
+
+.. admonition:: Set logging level
+    :class: note
+
+    .. code-block:: shell
+
+        hs config set logging.level debug --user
+
+Relatedly, starting a server against a database whose tasks are already complete no longer emits a
+warning: in ``--forever`` mode the server reports at ``INFO`` that it is waiting for new tasks, and
+otherwise it reports completion and shuts down cleanly.
 
 |
+
+Authentication key requirements
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The shared authentication key that gates the distributed queue is now subject to minimum
+requirements. ``hs server`` **refuses to start** with the built-in placeholder key (previously
+this was only a warning) and requires a key of at least 16 characters drawn from an allowed
+character set. That set includes the full Base64 alphabet (``+``, ``/``, ``=``), so keys from
+common generators such as ``openssl rand -base64 48`` — as well as hex and URL-safe tokens — can
+be used directly. Clients and ``hs submit`` also warn when run with the default key or with
+``--no-tls``.
+
+In addition, the authentication key is now redacted from debug logs across *all* cluster launch
+paths — the custom launcher, MPI, autoscaling, and SSH — so ``hsx --ssh`` debug output no longer
+exposes the key.
+
+|
+
+Host and port binding
+^^^^^^^^^^^^^^^^^^^^^
+
+The ``cluster`` command (``hsx``) gains a ``-H``/``--bind`` option controlling the address the
+server binds to — ``localhost`` for local clusters and ``0.0.0.0`` for remote/managed launchers by
+default (from ``server.bind``); a local cluster refuses to bind a non-local address. Local
+clusters now correctly honor the requested or configured port; previously the port selection was
+silently ignored and a fixed default was always used. When no port is given, managed clusters now
+probe for a free port starting at the default (50001), and the ``hs server --available-ports``
+helper is evaluated lazily at run time rather than scanning at import.
+
+|
+
+Shell completions
+^^^^^^^^^^^^^^^^^
+
+HyperShell now ships first-class **Zsh** completions alongside a rewritten **Bash** implementation,
+both covering ``hs`` and ``hsx`` across the modern CLI — the top-level subcommands
+(``info``/``wait``/``run``/``list``/``update``) and the new options (``--no-tls``/``--tls-*``,
+``-Q``/``--poll``, ``-g``/``--group``, ``-R``/``--ratelimit``, ``--monitor``,
+``-N``/``--num-threads``) — with dynamic completion of fields, tags, ports, hosts, and SSH groups.
+
+These completions and the manual pages are now installed automatically into the environment's
+``share`` prefix when installing from PyPI or ``uv``; previously they were omitted from the wheel.
+See the :ref:`installation guide <install>` for activation instructions. Completions shell out to
+``hs``, which must be on your ``PATH``.
+
+|
+
+Dependencies and Python support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The minimum supported Python is now **3.11** (3.9 and 3.10 have been dropped); the supported range
+is 3.11 through 3.14. Installation is wheel-only on all supported versions (no compiler required).
+
+PostgreSQL support has migrated from ``psycopg2`` to **psycopg v3** (the SQLAlchemy dialect is now
+``postgresql+psycopg``), so users of PostgreSQL must reinstall the extra. It is offered in three
+flavors so you can match your environment:
+
+.. list-table:: PostgreSQL extras
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Extra
+     - Use when
+   * - ``postgres``
+     - Self-contained binary wheels (``psycopg[binary]``) — the simplest choice.
+   * - ``postgres-system``
+     - Pure-Python ``psycopg`` against your operating system's ``libpq``.
+   * - ``postgres-c``
+     - Compiled ``psycopg[c]`` for maximum performance (requires a build toolchain).
+
+A missing PostgreSQL driver or system ``libpq`` now produces a clear message pointing to the
+``postgres`` extra rather than a raw traceback. Two further optional extras were added: ``zstd``
+(for zstd log compression) and ``cron`` (for cron-based log rotation).
+
+The database can also be configured as a single connection string: ``database.url`` (or
+``HYPERSHELL_DATABASE_URL``) accepts a full SQLAlchemy URL, and setting ``database`` to a bare
+string treats it as a local SQLite file path.
+
+|
+
+Other improvements
+^^^^^^^^^^^^^^^^^^
+
+- The default ``autoscale.size.max`` has been reduced from 2 to 1 for a more conservative
+  out-of-the-box scale-out; raise it with ``hs config set autoscale.size.max N``.
+- Task bundles are now serialized as a single JSON object per bundle, reducing per-task
+  encode/decode overhead. The queue wire format changed as a result, so servers and clients must
+  run matching versions of HyperShell.
 
 -----
 
@@ -451,24 +761,20 @@ This parameter can now be configured via the command-line (``-Q``/``--poll``), c
 
 Previously, this configuration option was defined but not actually used by the server implementation,
 meaning the hardcoded default always persisted regardless of user settings. This release fixes the
-implementation to properly respect the user's configuration.
+implementation to properly respect the user's configuration. Given that this setting has not until this
+point been functional we do not consider this an API change.
 
-The default value remains at 5 seconds, which provides a good balance between responsiveness and database
-load for most use cases. This conservative default is appropriate for new users who may not initially be
-aware of this parameter, while still allowing for customization based on workflow requirements:
-
-- **Lower values** (e.g., 1-2 seconds): More responsive to newly submitted tasks, better for interactive
-  workflows, but may increase database query load when idle
-- **Higher values** (e.g., 10-30 seconds): Reduces database query frequency when idle, useful for
-  large-scale deployments with infrequent task submission or extended idle periods
+The scheduler now polls with exponential backoff. When no tasks are available it starts at a fixed
+0.5 second floor and doubles the wait after each empty poll, up to a maximum of ``-Q``/``--poll``
+seconds (default 30); after any successful query the interval resets back to the 0.5 second floor.
+The ``server.poll`` value therefore sets the *upper* bound (the cap) of the backoff, not the base
+interval.
 
 .. note::
 
-    This was previously defined as ``server.wait`` in the configuration (``HYPERSHELL_SERVER_WAIT``
-    environment variable), and somewhat confusingly ``DEFAULT_QUERY_PAUSE`` in the code. This code
-    variable has been preserved for backwards compatibility. However the configuration parameter
-    name is only now ``server.poll`` as there is no point in maintaining the old name because it
-    was never actually used until now.
+    While this configuration parameter has been fixed in this release,
+    it is not something users should concern themselves with in practice.
+
 |
 
 Fix config command path check bug
@@ -492,3 +798,58 @@ it did not correctly check for `MacOS` and would output the `Linux` path instead
 
 This release does the more sensible thing of directly returning the path object
 actually used in the code.
+
+|
+
+Eager mode now honored by the cluster command
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``--eager`` flag (and the ``server.eager`` configuration default) is now correctly forwarded by
+``hs cluster`` / ``hsx``. Previously the cluster command accepted ``--eager`` but never passed it
+to the scheduler, so failed tasks were not preferentially retried ahead of new tasks as documented.
+
+|
+
+``hs info`` searches across database partitions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``hs info <id>`` now automatically searches across SQLite database partitions, consistent with
+``hs list``, so it works against rotated or partitioned databases. Pass
+``-i``/``--ignore-partitions`` to disable this.
+
+|
+
+Clients return completed tasks on idle-timeout shutdown
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A client that shut down on idle timeout with a partially filled result bundle could fail to return
+its finished tasks, which under autoscaling caused launch thrashing (outstanding tasks in the
+database with none eligible to schedule). Clients now flush all completed tasks before shutting down.
+
+|
+
+Client heartbeat no longer crashes when its queue is full
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The client heartbeat thread caught the wrong exception (``QueueEmpty`` instead of ``QueueFull``),
+so a momentarily full heartbeat queue could crash the thread and make the server consider an
+otherwise healthy client dead. Heartbeats are now retried instead.
+
+|
+
+Reject ``FILE`` together with ``--restart`` on the server
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``hs server`` now raises a clear error when an input ``FILE`` is given together with ``--restart``,
+mirroring the existing guard for ``FILE`` with ``--forever``; previously the combination was
+silently accepted.
+
+|
+
+Miscellaneous fixes
+^^^^^^^^^^^^^^^^^^^
+
+- ``-M``/``--client-memory`` now accepts human-readable sizes (e.g. ``8G``, ``512MB``) via the same
+  parser as ``-m``/``--memory``; previously it required a raw integer byte count.
+- Multivalue options (``-t``/``--tag``, ``-w``/``--where``, ``--with-tag``, ``--remove-tag``) now
+  require at least one value instead of silently accepting a bare flag.
