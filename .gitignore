@@ -139,3 +139,7 @@ dmypy.json
 
 # Local-only security review notes (not for publication)
 .security/
+
+# Agent memory not committed to project
+AGENTS.md
+CLAUDE.md
