@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [ '3.9', '3.10', '3.11', '3.12', '3.13' ]
+        python-version: [ '3.11', '3.12', '3.13', '3.14' ]
     steps:
       - uses: actions/checkout@v4
 
@@ -22,3 +22,26 @@ jobs:
 
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest -v
+
+  # Guards zero-conflict installability: a full install of the default extras must succeed using
+  # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g. greenlet, pyyaml) that
+  # would force a source build on a minimal host like Rocky 8 — failures a local macOS build masks.
+  install:
+    name: Zero-build install (wheels only)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.11', '3.12', '3.13', '3.14' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build wheel
+        run: uv build --wheel --out-dir dist
+
+      - name: Assert full install needs no compiler
+        run: |
+          uv venv --python ${{ matrix.python-version }}
+          uv pip install --only-binary=:all: "$(echo dist/*.whl)[postgres,uuid7,zstd,cron]"

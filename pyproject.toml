@@ -24,7 +24,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "Programming Language :: Python :: 3.15",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
@@ -37,16 +36,22 @@ dependencies = [
     "tomlkit>=0.13.2",
     "sqlalchemy>=2.0.50",
     "rich>=13.7.1",
-    "paramiko>=3.4.0",
+    "paramiko>=3.4.0", # Lock bumped to 5.x (modern KEX); floor kept low for RHEL/EPEL parity
     "psutil>=7.0.0",
-    "cryptography>=48.0.0",
-    "msgpack>=1.1.2",
-    "uuid-utils>=0.10.0",
+    "cryptography>=3.4", # Low floor for RHEL/EPEL (EL8-EL10); only legacy x509/rsa APIs used, pip resolves newest
 ]
 
 [project.optional-dependencies]
-postgres = ["psycopg>=3.1"]
-uuid7 = ["uuid-utils>=0.10.0"]
+# Easy path (default): self-contained binary wheels bundling libpq+libssl. No compiler, no system
+# packages. Ideal for quickstart/dev; the bundled libs do NOT receive OS security updates.
+postgres = ["psycopg[binary]>=3.1"]
+# Production, no compiler: pure-python psycopg using the OS-patched system libpq (dnf install libpq /
+# apt install libpq5). This is the flavor EPEL RPMs map onto the distro python3-psycopg3.
+postgres-system = ["psycopg>=3.1"]
+# Production, max performance: compiles psycopg-c against the system libpq. Requires a build toolchain
+# and headers (dnf install gcc libpq-devel, which provides pg_config).
+postgres-c = ["psycopg[c]>=3.1"]
+uuid7 = ["uuid-utils>=0.16.0"]
 zstd = ["zstandard>=0.25.0"]
 cron = ["croniter>=6.2.2"]
 #TODO: turso = ["pyturso>=0.1.4", "sqlalchemy-turso>=0.2.0"]
@@ -83,6 +88,9 @@ docs = [
 
 [tool.uv]
 default-groups = ["dev", "docs"]
+# Keep the resolved lock free of source-only builds on Python 3.14+: SQLAlchemy pulls greenlet on
+# x86_64/aarch64 even for sync-only use, and greenlet <3.5 ships no cp314/cp315 wheel (C++ build).
+constraint-dependencies = ["greenlet>=3.5.1"]
 
 #TODO: [tool.uv.sources]
 #TODO: sqlalchemy-turso = { git = "https://github.com/hypershell/sqlalchemy-turso" }

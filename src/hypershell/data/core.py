@@ -246,9 +246,14 @@ try:
     engine = get_engine()
     factory = sessionmaker(bind=engine)
     Session = scoped_session(factory)
-except ModuleNotFoundError as error:
-    if 'psycopg' in error.args[0]:
-        display_critical(f'Missing optional dependency "psycopg" needed for PostgreSQL', module=__name__)
+except ImportError as error:
+    # psycopg (v3) is optional. A missing module raises ModuleNotFoundError; the pure-python build also
+    # loads a system libpq at import time, and a missing libpq raises ImportError ('no pq wrapper available').
+    # Catch both (ModuleNotFoundError is an ImportError) so either failure gives guidance, not a raw traceback.
+    message = error.args[0] if error.args else str(error)
+    if 'psycopg' in message or 'libpq' in message or 'pq wrapper' in message:
+        display_critical('Missing optional dependency "psycopg" (or its system "libpq") needed for PostgreSQL',
+                         module=__name__)
         sys.exit(exit_status.runtime_error)
     else:
         write_traceback(error, module=__name__)

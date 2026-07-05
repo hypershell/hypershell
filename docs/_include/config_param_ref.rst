@@ -125,9 +125,9 @@
     ``.echo``
         Special parameter enables verbose logging of all database transactions.
 
-    ``[connection_args]``
+    ``[connect_args]``
         Specify additional connection details for the underlying SQL dialect provider,
-        e.g., ``sqlite3`` or ``psycopg2``.
+        e.g., ``sqlite3`` or ``psycopg``.
 
     ``[pragmas]``
         Specify one or more pragmas to apply to database connections (SQLite only).

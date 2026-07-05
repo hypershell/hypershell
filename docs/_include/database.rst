@@ -27,8 +27,9 @@ SQLite only needs the local file path.
 
 Or via a single environment variable, ``HYPERSHELL_DATABASE_FILE=/tmp/pipeline/task.db``.
 
-The default `provider` is SQLite; Postgres must be enabled. A local database with
-local account authentication simply needs to know the database name.
+The default `provider` is SQLite; Postgres must be enabled and requires the ``postgres``
+extra (or a production variant — see :ref:`install`). A local database with local account
+authentication simply needs to know the database name.
 
 .. admonition:: Configuration file with basic Postgres
     :class: note

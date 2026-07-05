@@ -1,15 +1,18 @@
-FROM python:3.13-slim
+FROM python:3.14-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-LABEL version="2.7.2"
+LABEL version="2.8.0"
 LABEL authors="glentner@purdue.edu"
 LABEL org.opencontainers.image.source="https://github.com/hypershell/hypershell"
 LABEL org.opencontainers.image.description="HyperShell Base Image"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
+# All dependencies resolve to wheels on Python 3.14 (see uv.lock), so no build toolchain is needed.
+# libpq5 supplies the runtime shared library for the pure-python psycopg used by the dev group.
 RUN DEBIAN_FRONTEND=noninteractive \
-    apt-get -yqq update && apt-get -yqq upgrade && \
-    apt-get -yqq install build-essential postgresql libpq-dev && \
+    apt-get -yqq update && \
+    apt-get -yqq upgrade && \
+    apt-get -yqq install libpq5 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --gid 1001 --system hypershell && \
@@ -22,12 +25,14 @@ ENV UV_CACHE_DIR=/opt/uv-cache \
     UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/hypershell \
     HYPERSHELL_LOGGING_LEVEL=TRACE \
-    HYPERSHELL_LOGGING_STYLE=SYSTEM
+    HYPERSHELL_LOGGING_STYLE=SYSTEM \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 COPY . .
 RUN /bin/rm -rf .venv .git
-RUN uv sync --frozen --all-packages --python 3.13
+RUN uv sync --frozen --all-packages --python 3.14
 
 USER hypershell
 ENTRYPOINT ["/opt/hypershell/bin/hs", "server"]

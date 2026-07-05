@@ -45,12 +45,22 @@ This formula essentially does the same thing but managed by ``brew`` instead.
 
 The `macOS` Homebrew installation method automatically includes the package extras needed
 for using PostgreSQL as a backend but does not include the UUIDv7 extra. When installing
-the package directly from the package index, the following extras are available
+the package directly from the package index, the following optional `extras` are available:
 
-* ``postgres``: includes ``psycopg2`` for using PostgreSQL
-* ``uuid7``: includes ``uuid-utils`` and to auto-enable use of UUIDv7 for task IDs.
+* ``postgres``: PostgreSQL support via `psycopg (v3) <https://www.psycopg.org>`_, using
+  self-contained binary wheels (no compiler or system libraries needed). See
+  `PostgreSQL Support`_ below for the ``postgres-system`` and ``postgres-c`` variants
+  intended for production deployments.
+* ``uuid7``: install `uuid-utils <https://pypi.org/project/uuid-utils/>`_ to auto-enable
+  UUIDv7 task identifiers. Without this extra, task IDs use the standard-library UUIDv4.
+* ``zstd``: enable `Zstandard <https://facebook.github.io/zstd/>`_ as a log-rotation
+  compression option (``logging.compress = "zstd"``).
+* ``cron``: enable cron-style, time-based log-rotation schedules via
+  `croniter <https://pypi.org/project/croniter/>`_ (e.g., ``logging.rotate = "@midnight"``).
 
-For example, you could install HyperShell with the following:
+Extras can be combined, e.g. ``'hypershell[postgres,uuid7]'``.
+
+For example, you could install HyperShell with PostgreSQL support using the following:
 
 .. admonition:: Install HyperShell with PostgreSQL support
     :class: note
@@ -59,6 +69,90 @@ For example, you could install HyperShell with the following:
 
         uv tool install 'hypershell[postgres]' --python 3.13
 
+
+-------------------
+
+Python Versions and Dependencies
+--------------------------------
+
+|
+
+*HyperShell* supports CPython 3.11 through 3.14 on Linux, macOS, and Windows. Installing from
+the Python Package Index uses pre-built binary `wheels` for every dependency, so a normal
+install requires **no C compiler or Rust toolchain** on any supported version. On Linux the
+wheels target ``manylinux_2_28`` (glibc ≥ 2.28), which covers current enterprise
+distributions including Rocky, Alma, and RHEL 8 and newer.
+
+The dependency version floors declared by *HyperShell* are intentionally conservative so the
+package stays installable from system packages on long-term-support distributions (such as
+RHEL and EPEL); ``pip`` and ``uv`` still resolve to the newest compatible releases when
+installing from the package index.
+
+.. admonition:: Python 3.15
+    :class: warning
+
+    Python 3.15 is not yet supported. It remains a pre-release, and several native
+    dependencies do not yet publish 3.15 wheels — installing there would fall back to
+    building from source. Support will be added once those wheels are available upstream.
+
+-------------------
+
+PostgreSQL Support
+------------------
+
+|
+
+By default *HyperShell* uses SQLite and needs no additional packages. PostgreSQL support is
+provided through `psycopg (v3) <https://www.psycopg.org>`_ (the ``postgresql+psycopg``
+SQLAlchemy dialect). Three `extras` install the same functionality but differ in where the C
+``libpq`` client library — and the TLS/OpenSSL stack it links against — comes from. Choose
+based on whether you are optimizing for ease of installation or for production hardening.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 22 12 22 44
+
+    * - Extra
+      - Compiler
+      - ``libpq`` source
+      - Use when
+    * - ``postgres``
+      - not needed
+      - bundled in the wheel
+      - Quickstart and development. Fully self-contained binary wheels; nothing to install at
+        the system level. The bundled ``libpq`` and OpenSSL do **not** receive operating-system
+        security updates.
+    * - ``postgres-system``
+      - not needed
+      - system ``libpq``
+      - Production and long-lived servers. Uses the operating-system ``libpq`` so that ``libpq``
+        and OpenSSL are patched by your OS. Requires ``libpq`` to be installed
+        (``dnf install libpq`` or ``apt install libpq5``). This is the flavor the EPEL/RPM
+        package maps onto the distribution ``python3-psycopg3``.
+    * - ``postgres-c``
+      - required
+      - system ``libpq``
+      - Maximum performance. Compiles the psycopg C extension against the system ``libpq``.
+        Requires a build toolchain and headers (``dnf install gcc libpq-devel``, which provides
+        ``pg_config``).
+
+.. admonition:: Easy install — self-contained, no system dependencies
+    :class: note
+
+    .. code-block:: shell
+
+        uv tool install 'hypershell[postgres]'
+
+.. admonition:: Production install — OS-patched libpq
+    :class: note
+
+    .. code-block:: shell
+
+        sudo dnf install libpq          # or: sudo apt install libpq5
+        uv tool install 'hypershell[postgres-system]'
+
+Connection details, and TLS options such as ``sslmode`` and ``sslrootcert``, are covered on
+the :ref:`database <database>` page.
 
 -------------------
 
@@ -180,8 +274,7 @@ or ``uv`` directly to create a virtual environment.
         git clone --depth=1 --branch=$VERSION https://github.com/hypershell/hypershell src
 
         python3.13 -m venv libexec
-        libexec/bin/pip install ./src
-        libexec/bin/pip install psycopg2
+        libexec/bin/pip install './src[postgres]'
 
         mkdir -p bin
         ln -sf ../libexec/bin/hs bin/hs
@@ -307,7 +400,7 @@ your virtual environment.
 
 
 Unit and integration tests can be run using `pytest <https://pytest.org>`_.
-Tests should pass for Python 3.9 and beyond.
+Tests should pass for Python 3.11 through 3.14.
 These are largely lightweight tests in isolated ``HYPERSHELL_SITE`` directories
 but can be slow because of the time to launch processes.
 Use ``-n`` to parallelize tests.
