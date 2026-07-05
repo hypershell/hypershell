@@ -933,11 +933,11 @@ class SubmitApp(Application):
 
     queue: Optional[QueueConfig]
     queue_mode: bool = False
-    queue_server: str = QueueConfig.host
-    queue_port: int = QueueConfig.port
-    queue_auth: str = QueueConfig.auth
+    queue_server: str = config.server.host
+    queue_port: int = config.server.port
+    queue_auth: str = config.server.auth
     interface.add_argument('-q', '--queue', action='store_true', dest='queue_mode')
-    interface.add_argument('-H', '--host', default=queue_server, dest='queue_host')
+    interface.add_argument('-H', '--host', default=queue_server, dest='queue_server')
     interface.add_argument('-p', '--port', type=int, default=queue_port, dest='queue_port')
     interface.add_argument('-k', '--auth', default=queue_auth, dest='queue_auth')
 
