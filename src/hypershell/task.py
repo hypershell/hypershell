@@ -121,7 +121,7 @@ def check_uuid(value: str) -> None:
 
 
 INFO_PROGRAM = 'hs info'
-INFO_SYNOPSIS = f'{INFO_PROGRAM} [-h] ID [-i] [--stdout | --stderr | -x FIELD] [-f FORMAT]'
+INFO_SYNOPSIS = f'{INFO_PROGRAM} [-h] ID [-i] [--stdout | --stderr | --perf | -x FIELD] [-f FORMAT]'
 INFO_USAGE = f"""\
 Usage: 
   {INFO_SYNOPSIS}
@@ -141,6 +141,7 @@ Options:
   -x, --extract    FIELD    Print single field.
       --stdout              Print <stdout> from task.
       --stderr              Print <stderr> from task.
+      --perf                Print captured resource metrics (CSV) from task.
   -i, --ignore-partitions   Suppress auto-union feature (SQLite only).
   -h, --help                Show this message and exit.\
 """
