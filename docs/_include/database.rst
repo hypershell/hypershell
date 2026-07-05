@@ -56,6 +56,47 @@ See also the *database* section in the :ref:`configuration <config>` parameter r
 
 -------------------
 
+SQLite Pragmas
+--------------
+
+|
+
+When using SQLite you can tune the underlying database connection with `pragmas
+<https://sqlite.org/pragma.html>`_. Because pragmas apply per-connection and do not persist,
+*HyperShell* re-applies them automatically every time it opens a connection. Specify them as a
+``pragmas`` table within the ``[database]`` section:
+
+.. admonition:: Configuration with SQLite pragmas
+    :class: note
+
+    .. code-block:: toml
+
+        [database]
+        file = "/var/lib/hypershell/main.db"
+        pragmas = {journal_mode = "wal", cache_size = 10000, busy_timeout = 5000}
+
+Each entry is issued verbatim as ``PRAGMA <name>=<value>`` on connect. The example above is a good
+general-purpose starting point for concurrent workflows: WAL journaling improves reader/writer
+concurrency, a larger page cache reduces I/O, and a busy timeout lets writers wait briefly rather
+than failing immediately when the database is momentarily locked.
+
+Individual pragmas can also be set from the command line:
+
+.. admonition:: Set a single pragma
+    :class: note
+
+    .. code-block:: shell
+
+        hs config set database.pragmas.journal_mode wal
+
+.. note::
+
+    Running ``hs initdb`` (or launching with ``--initdb``) additionally performs a
+    ``PRAGMA optimize``. This is safe to run routinely and helps SQLite keep its query-planner
+    statistics current. See `optimize <https://sqlite.org/pragma.html#pragma_optimize>`_ for details.
+
+-------------------
+
 Initialization
 --------------
 
