@@ -24,7 +24,7 @@ jobs:
         run: uv run --python ${{ matrix.python-version }} pytest -v
 
   # Guards zero-conflict installability: a full install of the default extras must succeed using
-  # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g. greenlet, pyyaml) that
+  # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g., greenlet, pyyaml) that
   # would force a source build on a minimal host like Rocky 8 — failures a local macOS build masks.
   install:
     name: Zero-build install (wheels only)
