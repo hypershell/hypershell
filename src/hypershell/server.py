@@ -1198,7 +1198,7 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
 APP_NAME = 'hs server'
 APP_USAGE = f"""\
 Usage:
-  hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]] [-t SEC]
+  hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]]
             [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] [-Q NUM]
             [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
             [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
