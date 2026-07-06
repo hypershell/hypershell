@@ -195,4 +195,20 @@ Add arbitrary tags to one or whole collections of tasks to track additional cont
 
             INFO [hypershell.submit] Submitted 20 tasks
 
+Tasks can also come from a structured JSON plan. With ``--from-json`` each task object's
+keys become named ``{key}`` template fields (and task tags), so a plan produced by another
+tool can be executed directly without an intermediate flat task file.
+
+.. admonition:: Submit from a JSON plan
+    :class: note
+
+    .. code-block:: shell
+
+        hsx --from-json plan.json@chunks -N8 \
+            -t 'process_data --region {seqid}:{start}-{end} --id {chunk_id} -o out/{chunk_id}.tsv'
+
+    Where ``plan.json`` contains a ``chunks`` list of task objects, e.g.
+    ``{"chunk_id": "chunk_001", "seqid": "Chr1", "start": 1, "end": 5000000}``. The value is
+    ``FILE[@path]``; the optional dotted ``path`` locates the list within the document.
+
 |

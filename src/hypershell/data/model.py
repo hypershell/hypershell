@@ -328,10 +328,20 @@ class Task(Entity):
             retried: bool = False,
             tag: Dict[str, JSONData] = None,
             group: int = DEFAULT_TASK_GROUP,
+            strict_tag: bool = True,
+            parse_inline: bool = True,
             **other: Any) -> Task:
-        """Create a new Task."""
-        cls.ensure_valid_tag(tag)
-        args, inline_tags = cls.split_argline(args)
+        """Create a new Task.
+
+        With ``strict_tag=False`` the tag character-set/length checks are relaxed
+        (for JSON-sourced tags). With ``parse_inline=False`` the inline
+        ``# HYPERSHELL:`` tag comment is not parsed and `args` is taken verbatim.
+        """
+        cls.ensure_valid_tag(tag, strict=strict_tag)
+        if parse_inline:
+            args, inline_tags = cls.split_argline(args)
+        else:
+            args, inline_tags = str(args).strip(), {}
         tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
         other['group'] = tag.pop('group', group)
         other['cores'] = tag.pop('cores', other.get('cores', None))
@@ -360,8 +370,13 @@ class Task(Entity):
             return args.strip(), {}
 
     @staticmethod
-    def ensure_valid_tag(tag: Optional[Dict[str, JSONData]]) -> None:
-        """Check tag dictionary and raise if invalid."""
+    def ensure_valid_tag(tag: Optional[Dict[str, JSONData]], *, strict: bool = True) -> None:
+        """Check tag dictionary and raise if invalid.
+
+        With ``strict=False`` (used for JSON-sourced tags) the character-set and
+        length restrictions on keys and values are relaxed; only the structural
+        type checks (key is a non-empty string, value is a scalar) are enforced.
+        """
         if tag is None:
             return
         if not isinstance(tag, dict):
@@ -371,13 +386,15 @@ class Task(Entity):
                 raise TypeError(f'Tag key, {key} ({type(key)}) is not string')
             if len(key.strip()) == 0:
                 raise ValueError(f'Tag key was empty, "{key}:{value}"')
+            if not isinstance(value, (str, int, float, bool, type(None))):
+                raise TypeError(f'Invalid type for tag value, {type(value)})')
+            if not strict:
+                continue
             if len(key.strip()) > 120:
                 raise ValueError(f'Tag key size ({len(value)}) exceeds 120 characters ({key}:{value})')
             if not re.match(r'^[A-Za-z0-9_.+-]+$', key):
                 raise ValueError(f'Tag key must only contain alphanumerics and basic symbols [+._-]: '
                                  f'"{key}:{value}"')
-            if not isinstance(value, (str, int, float, bool, type(None))):
-                raise TypeError(f'Invalid type for tag value, {type(value)})')
             if isinstance(value, str):
                 if not value.strip():
                     return  # Empty value is a naked tag (no value).

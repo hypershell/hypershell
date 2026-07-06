@@ -71,7 +71,7 @@ from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.data.model import Task, Client, serialize_tasks, deserialize_tasks
 from hypershell.data import ensuredb, DATABASE_ENABLED
-from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT
+from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE
 from hypershell.client import ClientInfo
 
 # Public interface
@@ -777,6 +777,8 @@ class ServerThread(Thread):
                  eager: bool = False,
                  redirect_failures: IO = None,
                  evict_after: int = DEFAULT_EVICT,
+                 template: str = DEFAULT_TEMPLATE,
+                 from_json: bool = False,
                  tls: Optional[TLSConfig] = None) -> None:
         """Initialize queue manager and child threads."""
         self.in_memory = in_memory
@@ -788,15 +790,19 @@ class ServerThread(Thread):
             log.warning('Retries disabled when database disabled')
         queue_config = QueueConfig(host=address[0], port=address[1], auth=auth, size=config.server.queuesize, tls=tls)
         self.queue = QueueServer(config=queue_config)
+        # NOTE: In JSON mode the template is expanded submit-side (here) against each
+        # record's context; otherwise the flat source is passed through verbatim and the
+        # client applies the template. See hypershell.submit.Loader.
+        submit_template = template if from_json else DEFAULT_TEMPLATE
         if self.in_memory:
             self.scheduler = None
             self.submitter = None if not source else LiveSubmitThread(
                 source, cores=task_cores, memory=task_memory, timeout=task_timeout, queue_config=queue_config,
-                bundlesize=bundlesize, bundlewait=bundlewait)
+                bundlesize=bundlesize, bundlewait=bundlewait, template=submit_template)
         else:
             self.submitter = None if not source else SubmitThread(
                 source, cores=task_cores, memory=task_memory, timeout=task_timeout,
-                bundlesize=bundlesize, bundlewait=bundlewait)
+                bundlesize=bundlesize, bundlewait=bundlewait, template=submit_template)
             self.scheduler = SchedulerThread(queue=self.queue, bundlesize=bundlesize, attempts=max_retries + 1,
                                              eager=eager, forever_mode=forever_mode, restart_mode=restart_mode,
                                              poll=poll)

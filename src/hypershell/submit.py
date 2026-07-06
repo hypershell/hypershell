@@ -47,6 +47,7 @@ import os
 import re
 import io
 import sys
+import json
 import functools
 from enum import Enum
 from datetime import datetime
@@ -75,7 +76,8 @@ from hypershell.data.model import Task, DEFAULT_TASK_GROUP, serialize_tasks
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT
 
 # Public interface
-__all__ = ['submit_from', 'submit_file', 'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
+__all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'validate_json_expansion',
+           'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
 # Initialize logger
@@ -100,7 +102,7 @@ class Loader(StateMachine):
     """Enqueue tasks from iterable source."""
 
     task: Task
-    source: Iterator[str]
+    source: Iterator[str | dict]
     queue: Queue[Optional[Task]]
     cores: Optional[int]
     memory: Optional[int]
@@ -114,7 +116,7 @@ class Loader(StateMachine):
     states = LoaderState
 
     def __init__(self: Loader,
-                 source: Iterable[str],
+                 source: Iterable[str | dict],
                  queue: Queue[Optional[Task]],
                  cores: int = None,
                  memory: int = None,
@@ -124,7 +126,7 @@ class Loader(StateMachine):
                  tags: Dict[str, str] = None) -> None:
         """Initialize source to read tasks and submit to database."""
         self.template = Template(template)
-        self.source = map(self.template.expand, map(str.strip, map(str, source)))
+        self.source = iter(source)
         self.queue = queue
         self.cores = cores
         self.memory = memory
@@ -149,28 +151,51 @@ class Loader(StateMachine):
         return LoaderState.GET
 
     def get_task(self: Loader) -> LoaderState:
-        """Get the next task from the source."""
+        """Get the next item from the source and dispatch by its kind."""
         try:
-            args = next(self.source)
-            self.task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
-                                 group=self.group, tag=self.tags)
-            if self.task.args:
-                log.trace(f'Loaded task ({self.task.args})')
-                return LoaderState.PUT
-            else:
-                # NOTE: group, cores, memory, etc. are processed as "tags" here,
-                # Though passed as 'tag' they are re-extracted in Task.new()
-                _, inline_tags = Task.split_argline(args)  # Simpler to just reprocess
-                if inline_tags:
-                    tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
-                    log.debug(f'Setting global attribute or tag: {tagline}')
-                    for k, v in inline_tags.items():
-                        self.tags[k] = v
-                else:
-                    log.trace(f'Skipping empty line')
-                return LoaderState.GET
+            item = next(self.source)
         except StopIteration:
             return LoaderState.FINAL
+        if isinstance(item, dict):
+            return self.load_json_task(item)
+        else:
+            return self.load_line_task(item)
+
+    def load_line_task(self: Loader, line: str) -> LoaderState:
+        """Build the next task from a command-line string in the text source."""
+        args = self.template.expand(str(line).strip())
+        self.task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
+                             group=self.group, tag=self.tags)
+        if self.task.args:
+            log.trace(f'Loaded task ({self.task.args})')
+            return LoaderState.PUT
+        else:
+            # NOTE: group, cores, memory, etc. are processed as "tags" here,
+            # Though passed as 'tag' they are re-extracted in Task.new()
+            _, inline_tags = Task.split_argline(args)  # Simpler to just reprocess
+            if inline_tags:
+                tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
+                log.debug(f'Setting global attribute or tag: {tagline}')
+                for k, v in inline_tags.items():
+                    self.tags[k] = v
+            else:
+                log.trace(f'Skipping empty line')
+            return LoaderState.GET
+
+    def load_json_task(self: Loader, record: dict) -> LoaderState:
+        """Build the next task from a JSON record (named `{key}` expansion + tags)."""
+        # The optional `args` key is the base command; the template ({} -> base)
+        # is expanded against the record as named context. All other keys become
+        # tags (nested values are JSON-serialized; scalars are kept as-is).
+        base = str(record.get('args', ''))
+        args = self.template.expand(base, context=record)
+        record_tags = {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
+                       for key, value in record.items() if key != 'args'}
+        tags = {**(self.tags or {}), **record_tags}
+        self.task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
+                             group=self.group, tag=tags, strict_tag=False, parse_inline=False)
+        log.trace(f'Loaded task ({self.task.args})')
+        return LoaderState.PUT
 
     def put_task(self: Loader) -> LoaderState:
         """Enqueue loaded task."""
@@ -192,7 +217,7 @@ class LoaderThread(Thread):
     """Run loader within dedicated thread."""
 
     def __init__(self: LoaderThread,
-                 source: Iterable[str],
+                 source: Iterable[str | dict],
                  queue: Queue[Optional[Task]],
                  template: str = DEFAULT_TEMPLATE,
                  cores: int = None,
@@ -372,13 +397,13 @@ class SubmitThread(Thread):
         - :meth:`submit_file`
     """
 
-    source: Iterable[str]
+    source: Iterable[str | dict]
     queue: Queue[Optional[Task]]
     loader: LoaderThread
     committer: DatabaseCommitterThread
 
     def __init__(self: SubmitThread,
-                 source: Iterable[str],
+                 source: Iterable[str | dict],
                  cores: int = None,
                  memory: int = None,
                  timeout: int = None,
@@ -605,14 +630,14 @@ class LiveSubmitThread(Thread):
         - :meth:`submit_file`
     """
 
-    source: Iterable[str]
+    source: Iterable[str | dict]
     local: Queue[Optional[Task]]
     client: QueueClient
     loader: LoaderThread
     committer: QueueCommitterThread
 
     def __init__(self: LiveSubmitThread,
-                 source: Iterable[str],
+                 source: Iterable[str | dict],
                  queue_config: QueueConfig,
                  template: str = DEFAULT_TEMPLATE,
                  cores: int = None,
@@ -669,7 +694,7 @@ class LiveSubmitThread(Thread):
         return self.loader.machine.count
 
 
-def submit_from(source: Iterable[str],
+def submit_from(source: Iterable[str | dict],
                 queue_config: QueueConfig = None,
                 bundlesize: int = DEFAULT_BUNDLESIZE,
                 bundlewait: int = DEFAULT_BUNDLEWAIT,
@@ -842,6 +867,72 @@ def submit_file(path: str,
                            template=template, cores=cores, memory=memory, timeout=timeout, group=group, tags=tags)
 
 
+def load_json_tasks(spec: str) -> List[dict]:
+    """
+    Load a list of task records from a JSON file `spec`.
+
+    The `spec` is ``FILE[@dotted.path]``: split on the first ``@``, the remainder
+    is a dotted path of object keys locating the task list inside the document
+    (e.g. ``plan.json@results.tasks``). With no ``@`` the file's top level must
+    itself be the list. A `FILE` of ``-`` reads from ``<stdin>``.
+
+    The located node must be a non-empty list of objects; each object's key/values
+    become both a task's tags and its ``{key}`` template-expansion context.
+
+    Returns:
+        records (List[dict]): The list of task record objects.
+    """
+    filepath, _, path = spec.partition('@')
+    if not filepath:
+        raise ArgumentError(f'Missing filename in --from-json spec: "{spec}"')
+    try:
+        if filepath == '-':
+            data = json.load(sys.stdin)
+        else:
+            with open(filepath, mode='r') as stream:
+                data = json.load(stream)
+    except FileNotFoundError as error:
+        raise ArgumentError(f'File not found: {filepath}') from error
+    except json.JSONDecodeError as error:
+        raise ArgumentError(f'Invalid JSON in {filepath}: {error}') from error
+    node = data
+    if path:
+        for segment in path.split('.'):
+            if not isinstance(node, dict) or segment not in node:
+                raise ArgumentError(f'Path "{path}" not found in {filepath} (no key "{segment}")')
+            node = node[segment]
+    location = f'"{path}"' if path else 'top level'
+    if not isinstance(node, list):
+        raise ArgumentError(f'Expected a list of task objects at {location} in {filepath}, '
+                            f'found {type(node).__name__}')
+    if not node:
+        raise ArgumentError(f'Task list at {location} in {filepath} is empty')
+    for index, record in enumerate(node):
+        if not isinstance(record, dict):
+            raise ArgumentError(f'Task {index} at {location} in {filepath} is not an object '
+                                f'(found {type(record).__name__})')
+    return node
+
+
+def validate_json_expansion(records: List[dict], template: str = DEFAULT_TEMPLATE) -> None:
+    """
+    Fail-fast pre-flight: ensure every record in `records` fully expands against
+    `template` (all ``{key}`` present, resulting command non-empty). Raises
+    :class:`~cmdkit.cli.ArgumentError` naming the offending record on the first
+    failure, before any task is committed.
+    """
+    engine = Template(template)
+    for index, record in enumerate(records):
+        base = str(record.get('args', ''))
+        try:
+            command = engine.expand(base, context=record)
+        except Template.Error as error:
+            raise ArgumentError(f'record {index}: {error}') from error
+        if not command.strip():
+            raise ArgumentError(f'record {index}: expands to an empty command '
+                                f'(provide an "args" field or a --template with fields)')
+
+
 DEFAULT_HOST: Final[str] = QueueConfig.host
 """Default host for server connection."""
 
@@ -856,7 +947,7 @@ APP_NAME: Final[str] = 'hs submit'
 PAD_NAME: Final[str] = ' ' * len(APP_NAME)
 APP_USAGE: Final[str] = f"""\
 Usage:
-  {APP_NAME} [-h] [ARGS... | -f FILE] [-q [-H ADDR] [-p NUM] [-k KEY] | --initdb]
+  {APP_NAME} [-h] [ARGS... | -f FILE | --from-json SPEC] [-q [-H ADDR] [-p NUM] [-k KEY] | --initdb]
   {PAD_NAME} [-b NUM] [-w SEC] [-c NUM] [-m MEM] [-W SEC] [-g NUM] [--template CMD] [-t TAG...]
   {PAD_NAME} [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
@@ -868,6 +959,8 @@ APP_HELP: Final[str] = f"""\
 
   Submit a single command using positional arguments.
   If a filepath is provided, read many tasks from the file instead.
+  With --from-json, read tasks from a JSON file and expand named "{{key}}"
+  fields in the template from each task object (keys also become tags).
   Submit directly to a live queue with --queue.
 
 Arguments:
@@ -875,6 +968,7 @@ Arguments:
 
 Options:
   -f, --task-file    FILE    Path to task file ("-" for <stdin>).
+      --from-json    SPEC    Read tasks from a JSON file ("FILE[@path]").
   -q, --queue                Submit to live queue instead of database.
   -H, --host         ADDR    Hostname for server (default: {DEFAULT_HOST}). Used with --queue.
   -p, --port         NUM     Port number for server (default: {DEFAULT_PORT}). Used with --queue.
@@ -905,8 +999,10 @@ class SubmitApp(Application):
     source: IO | List[str] | None = None
     task_args: List[str] = []
     task_file: str = None
+    from_json: str = None
     interface.add_argument('task_args', nargs='*')
     interface.add_argument('-f', '--task-file', default=task_file)
+    interface.add_argument('--from-json', default=from_json, dest='from_json')
 
     bundlesize: int = config.submit.bundlesize
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
@@ -1027,6 +1123,14 @@ class SubmitApp(Application):
 
     def check_source(self: SubmitApp) -> None:
         """Determine task submission mode."""
+        if self.from_json:
+            if self.task_args or self.task_file:
+                raise ArgumentError('Cannot combine --from-json with -f/--task-file or positional arguments')
+            records = load_json_tasks(self.from_json)
+            validate_json_expansion(records, self.template)
+            log.debug(f'Loaded {len(records)} tasks from JSON ({self.from_json})')
+            self.source = records
+            return
         if self.task_args and self.task_file:
             raise ArgumentError(f'Cannot specify both -f/--task-file and positional arguments')
         if self.task_file == '-':
@@ -1084,5 +1188,5 @@ class SubmitApp(Application):
                  exc_val: Optional[Exception],
                  exc_tb: Optional[TracebackType]) -> None:
         """Close file if not stdin."""
-        if self.source is not None and self.source is not sys.stdin:
+        if self.source is not None and self.source is not sys.stdin and hasattr(self.source, 'close'):
             self.source.close()

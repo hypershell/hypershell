@@ -6,12 +6,13 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, Callable, Final
+from typing import Any, Dict, Callable, Final, Optional
 from types import ModuleType
 
 # Standard libs
 import os
 import re
+import json
 import math
 import datetime
 import subprocess
@@ -21,7 +22,7 @@ import functools
 from hypershell.core.types import smart_coerce
 
 # Public interface
-__all__ = ['Template', 'DEFAULT_TEMPLATE', ]
+__all__ = ['Template', 'DEFAULT_TEMPLATE', 'render_value', ]
 
 
 # Matched in template and expanded accordingly
@@ -31,6 +32,19 @@ PATTERN: re.Pattern = re.compile(r'{(.*?)}')
 # A plain {} is replaced verbatim with the input arguments
 DEFAULT_TEMPLATE: Final[str] = '{}'
 """Default command pattern for template expansion."""
+
+
+def render_value(value: Any) -> str:
+    """Render a (JSON) `value` as a string for named ``{key}`` template expansion."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if value is None:
+        return ''
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, separators=(',', ':'))
+    return str(value)
 
 
 # Exposed modules for lambda expressions in templates
@@ -73,24 +87,27 @@ class Template:
     class FailedExpansion(Error):
         """Failure to successfully expand a pattern given input arguments."""
 
-    def expand(self: Template, args: str) -> str:
-        """Expand template against input `args`."""
+    def expand(self: Template, args: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """Expand template against input `args` and optional named `context`."""
         index = 0
         expansion = ''
         if not PATTERN.search(self.template):
             return self.template
         for match in PATTERN.finditer(self.template):
             (key, ), start, end = match.groups(), match.start(), match.end()
-            expansion += self.template[index:start] + self._expand(args, key, start)
+            expansion += self.template[index:start] + self._expand(args, key, start, context)
             index = end
         else:
             return expansion + self.template[index:]
 
-    def _expand(self: Template, args: str, key: str, start: int) -> str:
-        """Determine simple vs complex pattern expansion."""
+    def _expand(self: Template, args: str, key: str, start: int,
+                context: Optional[Dict[str, Any]] = None) -> str:
+        """Determine simple vs named vs complex pattern expansion."""
         key = key.strip()  # allow whitespace (likely in shell and lambda patterns)
         if key in self.simple_patterns:
             return self.simple_patterns[key](args)
+        elif context is not None and key in context:
+            return render_value(context[key])
         else:
             return self._expand_complex(args, key, start)
 

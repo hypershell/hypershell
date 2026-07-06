@@ -28,7 +28,7 @@ from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
-from hypershell.submit import DEFAULT_BUNDLEWAIT
+from hypershell.submit import DEFAULT_BUNDLEWAIT, load_json_tasks, validate_json_expansion
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
 from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster,
@@ -50,7 +50,7 @@ log = Logger.with_name(__name__)
 APP_NAME = 'hs cluster'
 APP_USAGE = """\
 Usage:
-  hs cluster [-h] [FILE | --restart | --forever] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-c NUM] [-m MEM] [-W SEC]  
+  hs cluster [-h] [FILE | --from-json SPEC | --restart | --forever] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-c NUM] [-m MEM] [-W SEC]
              [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
              [-H ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
@@ -74,6 +74,7 @@ Modes:
 Options:
   -N, --num-threads    NUM      Number of executor threads per client, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template       CMD      Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
+      --from-json      SPEC     Read tasks from a JSON file ("FILE[@path]").
   -H, --bind           ADDR     Special bind address (default: "localhost" or "0.0.0.0" remote).
   -p, --port           PORT     Port number (default: {DEFAULT_PORT}).
   -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
@@ -126,6 +127,9 @@ class ClusterApp(Application):
 
     filepath: str
     interface.add_argument('filepath', nargs='?', default=None)
+
+    from_json: str = None
+    interface.add_argument('--from-json', default=from_json, dest='from_json')
 
     num_threads: int = DEFAULT_NUM_THREADS
     interface.add_argument('-N', '--num-threads', '--num-tasks', type=int, default=num_threads, dest='num_threads')
@@ -266,7 +270,8 @@ class ClusterApp(Application):
                  capture=self.capture, monitor=self.monitor, client_timeout=self.client_timeout,
                  task_timeout=self.task_timeout, task_signalwait=self.task_signalwait,
                  cores=self.cores, memory=self.memory, client_cores=self.client_cores,
-                 client_memory=self.client_memory, ratelimit=self.ratelimit, tls=self.tls)
+                 client_memory=self.client_memory, ratelimit=self.ratelimit,
+                 from_json=bool(self.from_json), tls=self.tls)
 
     def run_local(self: ClusterApp, **options) -> None:
         """Run local cluster."""
@@ -330,7 +335,13 @@ class ClusterApp(Application):
     def check_arguments(self: ClusterApp) -> None:
         """Various checks on input arguments."""
         given_filepath = self.filepath is not None
-        if self.filepath is None and not self.restart_mode:
+        if self.from_json:
+            if given_filepath:
+                raise ArgumentError('Cannot combine --from-json with a positional task file')
+            if self.restart_mode:
+                raise ArgumentError('Cannot combine --from-json with --restart')
+            validate_json_expansion(self.json_records, self.template)
+        elif self.filepath is None and not self.restart_mode:
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.in_memory:
             raise ArgumentError('Cannot restart without database (given --no-db)')
@@ -410,15 +421,24 @@ class ClusterApp(Application):
     @cached_property
     def input_stream(self: ClusterApp) -> Optional[IO]:
         """IO stream to read task command-line args."""
-        if self.restart_mode:
+        if self.restart_mode or self.from_json:
             return None
         else:
             return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')
 
     @cached_property
-    def source(self: ClusterApp) -> Iterable[str]:
-        """Input source for task command-line args."""
-        return [] if self.restart_mode else self.input_stream
+    def json_records(self: ClusterApp) -> list:
+        """Task records loaded from the --from-json spec (read once)."""
+        return load_json_tasks(self.from_json)
+
+    @cached_property
+    def source(self: ClusterApp) -> Iterable[str | dict]:
+        """Input source for task command-line args (or JSON records with --from-json)."""
+        if self.restart_mode:
+            return []
+        if self.from_json:
+            return self.json_records
+        return self.input_stream
 
     def __enter__(self: ClusterApp) -> ClusterApp:
         """Set up resources and attributes."""
