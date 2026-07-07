@@ -40,8 +40,19 @@ Options
 ``-R``, ``--remaining``
     Alias for ``-w 'exit_status == null'``.
 
+``-X``, ``--cancelled``
+    Alias for ``-w 'exit_status == -1'`` (tasks that were cancelled).
+
 ``--retries``
     Alias for ``-w 'attempt > 1'`` (tasks that have been retried).
+
+``--signal`` *NAME*
+    Match tasks whose process was terminated by signal *NAME* (e.g. ``TERM``, ``KILL``, ``HUP``).
+
+    A task killed by signal *N* is recorded with ``exit_status = -N`` (the convention used by
+    Python's subprocess module). The ``SIG`` prefix is optional and the name is case-insensitive.
+    A task terminated by ``HUP`` lands on -1 and is therefore treated as cancelled
+    (see ``--cancelled``).
 
 ``-f``, ``--format`` *FORMAT*
     Specify output format (either ``normal``, ``plain``, ``table``, ``csv``, ``json``).

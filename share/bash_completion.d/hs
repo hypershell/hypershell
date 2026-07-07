@@ -376,6 +376,7 @@ function _hs_task_search() {
 
 	local all_opts="-h --help -w --where -t --with-tag -g --group -s --order-by --desc
 	-F --failed -C --completed -S --succeeded -R --remaining --retries
+	-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled --retries --signal
 	-f --format --csv --json -d --delimiter -l --limit -c --count
 	-i --ignore-partitions --fields --tag-keys --tag-values"
 
@@ -422,6 +423,10 @@ function _hs_task_search() {
 			COMPREPLY=($(compgen -W "10 20 50 100 500 1000" -- "${current}"))
 			return
 			;;
+		--signal)
+			COMPREPLY=($(compgen -W "HUP INT QUIT ABRT KILL TERM" -- "${current}"))
+			return
+			;;
 		--tag-values)
 			COMPREPLY=($(compgen -W "$(hs list --tag-keys 2>/dev/null)" -- "${current}"))
 			return
@@ -438,7 +443,7 @@ function _hs_task_update() {
 
 	local all_opts="-h --help -w --where -t --with-tag -g --group -s --order-by --desc
 	--cancel --revert --delete --remove-tag -F --failed -C --completed -S --succeeded
-	-R --remaining --retries -l --limit -f --no-confirm --"
+	-R --remaining -X --cancelled --retries --signal -l --limit -f --no-confirm --"
 
 	local pos_args= opt= tag=
 	for opt in $(hs list --fields 2>/dev/null)
@@ -492,6 +497,10 @@ function _hs_task_update() {
 			;;
 		-l | --limit)
 			COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}"))
+			return
+			;;
+		--signal)
+			COMPREPLY=($(compgen -W "HUP INT QUIT ABRT KILL TERM" -- "${current}"))
 			return
 			;;
 	esac

@@ -405,11 +405,13 @@ function _hs_list() {
         '(-g --group)'{-g,--group}'[Filter by group]:group:' \
         '(-s --order-by)'{-s,--order-by}'[Order output by field]:field:_hs_fields' \
         '--desc[Descending order (requires --order-by)]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-X,--cancelled}'[Alias for -w "exit_status == -1"]' \
         '--retries[Alias for -w "attempt > 1"]' \
+        '--signal[Match tasks killed by signal NAME]:signal:(HUP INT QUIT ABRT KILL TERM)' \
         '(-f --format --json --csv)'{-f,--format}'[Format output]:format:(normal plain table csv json)' \
         '(-f --format --json --csv)--json[Format output as JSON]' \
         '(-f --format --json --csv)--csv[Format output as CSV]' \
@@ -439,11 +441,13 @@ function _hs_update() {
         '(--revert --cancel --delete)--cancel[Cancel specified tasks]' \
         '(--revert --cancel --delete)--delete[Delete specified tasks]' \
         '*--remove-tag[Remove specified tags by name]:tag:_hs_tags' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
-        '(-F --failed -C --completed -S --succeeded -R --remaining)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-S,--succeeded}'[Alias for -w "exit_status == 0"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-C,--completed}'[Alias for -w "exit_status != null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-R,--remaining}'[Alias for -w "exit_status == null"]' \
+        '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-X,--cancelled}'[Alias for -w "exit_status == -1"]' \
         '--retries[Alias for -w "attempt > 1"]' \
+        '--signal[Match tasks killed by signal NAME]:signal:(HUP INT QUIT ABRT KILL TERM)' \
         '(-l --limit)'{-l,--limit}'[Limit matches]:limit:(1 10 100 1000)' \
         '(-f --no-confirm)'{-f,--no-confirm}'[Do not ask for confirmation]' \
         '*:update argument:_hs_update_args'

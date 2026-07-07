@@ -15,6 +15,12 @@ Options
     becomes terminal: it will not be scheduled, retried, or reverted on ``--restart``.
     A task cannot be cancelled after it is sent to remote clients.
 
+    A running task can also be cancelled *in flight* on the client by terminating its
+    process with ``SIGHUP`` (e.g. ``kill -HUP``). Because a process killed by signal *N* is
+    recorded with ``exit_status = -N``, a ``SIGHUP`` (signal 1) death lands on -1 - the same
+    cancelled state - so such a task is likewise not retried. See ``hs list --cancelled`` and
+    ``hs list --signal HUP``.
+
 ``--revert``
     Revert specified tasks.
 
@@ -68,8 +74,19 @@ Options
 ``-R``, ``--remaining``
     Alias for ``-w 'exit_status == null'``.
 
+``-X``, ``--cancelled``
+    Alias for ``-w 'exit_status == -1'`` (tasks that were cancelled).
+
 ``--retries``
     Alias for ``-w 'attempt > 1'`` (tasks that have been retried).
+
+``--signal`` *NAME*
+    Match tasks whose process was terminated by signal *NAME* (e.g. ``TERM``, ``KILL``, ``HUP``).
+
+    A task killed by signal *N* is recorded with ``exit_status = -N`` (the convention used by
+    Python's subprocess module). The ``SIG`` prefix is optional and the name is case-insensitive.
+    A task terminated by ``HUP`` lands on -1 and is therefore treated as cancelled
+    (see ``--cancelled``).
 
 ``-f``, ``--no-confirm``
     Do not ask for confirmation.

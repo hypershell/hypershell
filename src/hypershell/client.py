@@ -604,9 +604,13 @@ class TaskState(State, Enum):
     HALT = 13
 
 
-# Special exit status indicates cancellation
-TASK_TEMPLATE_ERROR: Final[int] = -2
-TASK_RESOURCE_ERROR: Final[int] = -3
+# Internal `exit_status` sentinels for tasks that never actually ran.
+# NOTE: A task terminated by signal N is recorded with exit_status = -N (subprocess convention),
+# so the range -1..-64 can collide with real signal deaths (e.g. SIGHUP=-1, SIGINT=-2, SIGTERM=-15).
+# We reserve codes below -1000 for HyperShell-internal conditions to stay clear of that range.
+# (The cancel sentinel -1 is an intentional exception - see model.CANCEL_STATUS / SIGHUP cancel.)
+TASK_TEMPLATE_ERROR: Final[int] = -1001  # Template expansion failed (task never ran)
+TASK_RESOURCE_ERROR: Final[int] = -1002  # Insufficient local resources (task never ran)
 
 
 class TaskExecutor(StateMachine):

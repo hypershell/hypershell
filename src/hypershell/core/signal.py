@@ -12,12 +12,13 @@ from types import FrameType
 # Standard libs
 import platform
 import logging  # Use standard library to lazily acquire logger
-from signal import signal as register
+from signal import signal as register, Signals
 
 
 # Public interface
 __all__ = ['check_signal', 'reset_signal',
            'handler', 'register_handlers', 'register', 'SIGNAL_MAP',
+           'SIGNAL_EXIT_STATUS', 'exit_status_for_signal',
            'SIGUSR1', 'SIGUSR2', 'SIGINT', 'SIGTERM', 'SIGKILL', 'SIGHUP']
 
 
@@ -60,6 +61,36 @@ SIGNAL_MAP: Final[Dict[int, str]] = {
     SIGKILL: 'SIGKILL',
     SIGHUP:  'SIGHUP',
 }
+
+
+SIGNAL_EXIT_STATUS: Final[Dict[str, int]] = {
+    name: -int(member) for name, member in Signals.__members__.items()
+}
+"""
+Map of signal name (e.g. ``SIGTERM``) to the `exit_status` recorded for a task killed by it.
+
+When a task's process is terminated by signal N, Python's `subprocess` reports a return code of
+``-N`` (negative), which HyperShell stores verbatim as ``exit_status``. This is why the cancel
+sentinel (-1) coincides with a SIGHUP death and internal sentinels must stay clear of ``-1..-64``.
+"""
+
+
+def exit_status_for_signal(name: str) -> int:
+    """
+    Resolve a signal `name` (case-insensitive, optional ``SIG`` prefix) to its `exit_status`.
+
+    Example:
+        >>> exit_status_for_signal('TERM')
+        -15
+        >>> exit_status_for_signal('sigkill')
+        -9
+    """
+    key = name.strip().upper()
+    key = key if key.startswith('SIG') else f'SIG{key}'
+    try:
+        return SIGNAL_EXIT_STATUS[key]
+    except KeyError:
+        raise ValueError(f'Unknown signal name: {name!r}') from None
 
 
 def handler(signum: int, frame: Optional[FrameType]) -> None:  # noqa: unused frame

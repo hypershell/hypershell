@@ -40,6 +40,7 @@ from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, handle_exception_silently, get_shared_exception_mapping
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
+from hypershell.core.signal import exit_status_for_signal
 from hypershell.core.types import smart_coerce, JSONData, to_json_type
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes
 from hypershell.core.tag import Tag
@@ -450,9 +451,11 @@ class SearchableMixin:
     show_completed: bool = False
     show_succeeded: bool = False
     show_remaining: bool = False
+    show_cancelled: bool = False
 
     group_filter: Optional[int] = None
     retry_filter: bool = False
+    signal_filter: Optional[str] = None
 
     def build_query(self: SearchableMixin) -> Query:
         """Build original query interface."""
@@ -508,6 +511,14 @@ class SearchableMixin:
             self.where_clauses.append('exit_status != null')
         if self.show_remaining:
             self.where_clauses.append('exit_status == null')
+        if self.show_cancelled:
+            self.where_clauses.append(f'exit_status == {CANCEL_STATUS}')
+        if self.signal_filter is not None:
+            try:
+                signal_status = exit_status_for_signal(self.signal_filter)
+            except ValueError as error:
+                raise ArgumentError(str(error)) from error
+            self.where_clauses.append(f'exit_status == {signal_status}')
         if self.group_filter is not None:
             self.where_clauses.append(f'group == {self.group_filter}')
         if self.retry_filter:
@@ -534,10 +545,10 @@ SEARCH_SYNOPSIS = f'{SEARCH_PROGRAM} [-h] [FIELD [FIELD ...]] [-w COND [COND ...
 SEARCH_USAGE = f"""\
 Usage:
   hs list [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] [-g GROUP]
-          [--failed | --succeeded | --completed | --remaining] [--retries]
-          [--order-by FIELD [--desc]] [--count | --limit LIMIT]
+          [--failed | --succeeded | --completed | --remaining | --cancelled] [--retries]
+          [--signal NAME] [--order-by FIELD [--desc]] [--all | --count | --limit LIMIT]
           [-f FORMAT | --json | --csv]  [-d CHAR] [-i]
-  
+
   hs list --fields
   hs list --tag-keys
   hs list --tag-values KEY
@@ -561,7 +572,9 @@ Options:
   -S, --succeeded            Alias for `-w exit_status == 0`.
   -C, --completed            Alias for `-w exit_status != null`.
   -R, --remaining            Alias for `-w exit_status == null`.
+  -X, --cancelled            Alias for `-w exit_status == {CANCEL_STATUS}`.
       --retries              Alias for `-w attempt > 1`.
+      --signal      NAME     Match tasks killed by signal NAME (e.g. TERM, KILL, HUP).
   -f, --format      FORMAT   Format output (normal, plain, table, csv, json).
       --json                 Format output as JSON (alias for `--format=json`).
       --csv                  Format output as CSV (alias for `--format=csv`).
@@ -605,11 +618,13 @@ class TaskSearchApp(Application, SearchableMixin):
     show_completed: bool = False
     show_succeeded: bool = False
     show_remaining: bool = False
+    show_cancelled: bool = False
     search_alias_interface = interface.add_mutually_exclusive_group()
     search_alias_interface.add_argument('-F', '--failed', action='store_true', dest='show_failed')
     search_alias_interface.add_argument('-C', '--completed', action='store_true', dest='show_completed')
     search_alias_interface.add_argument('-S', '--succeeded', action='store_true', dest='show_succeeded')
     search_alias_interface.add_argument('-R', '--remaining', action='store_true', dest='show_remaining')
+    search_alias_interface.add_argument('-X', '--cancelled', action='store_true', dest='show_cancelled')
     search_alias_interface.add_argument('--finished', action='store_true', dest='show_completed')
     # NOTE: --finished retained for backwards compatibility
 
@@ -618,6 +633,9 @@ class TaskSearchApp(Application, SearchableMixin):
 
     retry_filter: bool = False
     interface.add_argument('--retries', action='store_true', dest='retry_filter')
+
+    signal_filter: Optional[str] = None
+    interface.add_argument('--signal', default=None, dest='signal_filter')
 
     output_format: str = '<default>'  # 'plain' if field_names else 'normal'
     output_formats: List[str] = ['normal', 'plain', 'table', 'json', 'csv']
@@ -794,10 +812,6 @@ select * from main.task
 """
 
 
-# Special exit status indicates cancellation
-CANCEL_STATUS: Final[int] = -1
-
-
 # Iterative update batch size for updates with a limit
 UPDATE_BATCH_SIZE: Final[int] = 100
 
@@ -808,8 +822,8 @@ UPDATE_USAGE = f"""\
 Usage:
   hs update [-h] ARG [ARG...] [--cancel | --revert | --delete] [--remove-tag TAG [TAG ...]]
             [-w COND [COND ...]] [-t TAG [TAG...]] [-g GROUP] [--order-by FIELD [--desc]]
-            [-l LIMIT] [--failed | --succeeded | --completed | --remaining] [--retries] 
-            [--no-confirm]
+            [-l LIMIT] [--failed | --succeeded | --completed | --remaining | --cancelled]
+            [--retries] [--signal NAME] [--no-confirm]
   
   Update task metadata.\
 """
@@ -846,7 +860,9 @@ Options:
   -S, --succeeded            Alias for `-w exit_status == 0`.
   -C, --completed            Alias for `-w exit_status != null`.
   -R, --remaining            Alias for `-w exit_status == null`.
+  -X, --cancelled            Alias for `-w exit_status == {CANCEL_STATUS}`.
       --retries              Alias for `-w attempt > 1`.
+      --signal      NAME     Match tasks killed by signal NAME (e.g. TERM, KILL, HUP).
   -f, --no-confirm           Do not ask for confirmation.
   -h, --help                 Show this message and exit.\
 """
@@ -882,17 +898,22 @@ class TaskUpdateApp(Application, SearchableMixin):
     show_completed: bool = False
     show_succeeded: bool = False
     show_remaining: bool = False
+    show_cancelled: bool = False
     search_alias_interface = interface.add_mutually_exclusive_group()
     search_alias_interface.add_argument('-F', '--failed', action='store_true', dest='show_failed')
     search_alias_interface.add_argument('-C', '--completed', action='store_true', dest='show_completed')
     search_alias_interface.add_argument('-S', '--succeeded', action='store_true', dest='show_succeeded')
     search_alias_interface.add_argument('-R', '--remaining', action='store_true', dest='show_remaining')
+    search_alias_interface.add_argument('-X', '--cancelled', action='store_true', dest='show_cancelled')
 
     group_filter: Optional[int] = None
     interface.add_argument('-g', '--group', type=int, default=None, dest='group_filter')
 
     retry_filter: bool = False
     interface.add_argument('--retries', action='store_true', dest='retry_filter')
+
+    signal_filter: Optional[str] = None
+    interface.add_argument('--signal', default=None, dest='signal_filter')
 
     revert_mode: bool = False
     cancel_mode: bool = False
