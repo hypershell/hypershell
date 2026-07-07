@@ -44,7 +44,7 @@ from hypershell.core.types import smart_coerce, JSONData, to_json_type
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, JSON
+from hypershell.data.model import Task, JSON, CANCEL_STATUS
 from hypershell.data import ensuredb, DATABASE_DIALECT
 
 # Public interface
@@ -820,7 +820,8 @@ UPDATE_HELP = f"""\
   Include any number of FIELD=VALUE or tag KEY:VALUE positional arguments.
   The -w/--where and -t/--with-tag operate just as in the search command.
 
-  Using --cancel sets schedule_time to now and exit_status to {CANCEL_STATUS}. 
+  Using --cancel marks tasks terminal (schedule_time and completion_time to now,
+  exit_status to {CANCEL_STATUS}); they will not be scheduled, retried, or reverted.
   Using --revert reverts everything as if the task was new again.
   Using --delete drops the row from the database entirely.
 
@@ -980,7 +981,11 @@ class TaskUpdateApp(Application, SearchableMixin):
                 prev_count = query.filter(Task.schedule_time.isnot(None)).count()
             if prev_count > 0:
                 log.warning(f'{prev_count} cancelled tasks already scheduled')
-            field_updates['schedule_time'] = datetime.now().astimezone()
+            # NOTE: completion_time is set so the task is terminal - otherwise it reads as
+            # "interrupted" (scheduled but incomplete) and gets reverted/re-run on restart.
+            now = datetime.now().astimezone()
+            field_updates['schedule_time'] = now
+            field_updates['completion_time'] = now
             field_updates['exit_status'] = CANCEL_STATUS
 
         if self.revert_mode:

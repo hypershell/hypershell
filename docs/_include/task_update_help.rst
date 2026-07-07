@@ -10,8 +10,9 @@ Options
 ``--cancel``
     Cancel specified tasks.
 
-    Cancelling a task means it will no longer be scheduled.
-    This is done by setting the `schedule_time` to `now` and the `exit_status` to -1.
+    Cancelling a task means it will no longer be scheduled. This is done by setting the
+    `schedule_time` and `completion_time` to `now` and the `exit_status` to -1. The task
+    becomes terminal: it will not be scheduled, retried, or reverted on ``--restart``.
     A task cannot be cancelled after it is sent to remote clients.
 
 ``--revert``
