@@ -34,7 +34,7 @@ from hypershell.data.core import schema, Session
 __all__ = [
     'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
-    'DEFAULT_TASK_GROUP', 'TaskGroupInfo',
+    'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'TaskGroupInfo',
 ]
 
 # Initialize logger
@@ -44,6 +44,15 @@ log = Logger.with_name(__name__)
 # Constants
 DEFAULT_TASK_GROUP: Final[int] = 0
 """Default task group for backwards compatibility."""
+
+CANCEL_STATUS: Final[int] = -1
+"""Sentinel `exit_status` marking a cancelled task.
+
+A cancelled task is terminal: it must never be scheduled, retried, or counted as an
+unrecoverable failure. It is distinguished from a genuine failure (positive exit codes,
+or the negative template/resource sentinels in `client.py`) solely by this value, so the
+scheduler's failure and retry queries filter it out explicitly.
+"""
 
 
 class DatabaseError(Exception):
@@ -437,6 +446,7 @@ class Task(Entity):
             .filter(Task.group == previous_group)
             .filter(cls.exit_status.isnot(None))
             .filter(cls.exit_status != 0)
+            .filter(cls.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
             .filter(cls.attempt >= attempts)
             .filter(cls.retried.is_(False))
         )
@@ -472,6 +482,7 @@ class Task(Entity):
                  .order_by(cls.completion_time)
                  .filter(cls.exit_status.isnot(None))
                  .filter(cls.exit_status != 0)
+                 .filter(cls.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
                  .filter(cls.attempt < attempts)
                  .filter(cls.retried.is_(False)))
         if group is not None:
@@ -605,11 +616,15 @@ class Task(Entity):
     @classmethod
     def cancel_all(cls: Type[Task], ids: List[str]) -> None:
         """Cancel all tasks identified by `ids`."""
+        # NOTE: completion_time is set so the task is terminal - otherwise it reads as
+        # "interrupted" (scheduled but incomplete) and gets reverted/re-run on restart.
+        now = datetime.now().astimezone()
         cls.update_all([
             {
                 'id': id,
-                'schedule_time': datetime.now().astimezone(),
-                'exit_status': -1,
+                'schedule_time': now,
+                'completion_time': now,
+                'exit_status': CANCEL_STATUS,
              }
             for id in ids
         ])
