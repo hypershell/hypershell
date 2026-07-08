@@ -400,6 +400,7 @@ function _hs_run() {
 function _hs_list() {
     _arguments -s \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(--all -l --limit -c --count)--all[Dump all results (required past 1000 tasks)]' \
         '*'{-w,--where}'[Filter on conditional expression]:condition:_hs_fields' \
         '*'{-t,--with-tag}'[Filter by tag]:tag:_hs_tags' \
         '(-g --group)'{-g,--group}'[Filter by group]:group:' \
@@ -416,8 +417,8 @@ function _hs_list() {
         '(-f --format --json --csv)--json[Format output as JSON]' \
         '(-f --format --json --csv)--csv[Format output as CSV]' \
         '(-d --delimiter)'{-d,--delimiter}'[Field separator for plain/csv formats]:delimiter:(, \; \|)' \
-        '(-l --limit -c --count)'{-l,--limit}'[Limit the number of results]:limit:(10 20 50 100 500 1000)' \
-        '(-l --limit -c --count)'{-c,--count}'[Show count of results]' \
+        '(-l --limit -c --count --all)'{-l,--limit}'[Limit the number of results]:limit:(10 20 50 100 500 1000)' \
+        '(-l --limit -c --count --all)'{-c,--count}'[Show count of results]' \
         '(-i --ignore-partitions)'{-i,--ignore-partitions}'[Suppress auto-union feature (SQLite only)]' \
         '(--tag-keys --tag-values)--tag-keys[Show all distinct tag keys]' \
         '(--tag-keys --tag-values)--tag-values[Show all distinct values for a tag key]:tag key:_hs_tags' \

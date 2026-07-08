@@ -8,6 +8,14 @@ FIELD
 Options
 ^^^^^^^
 
+``--all``
+    Dump all matching tasks, imposing no limit.
+
+    As a guard against accidentally dumping an entire database, ``hs list`` refuses to return
+    more than 1,000 results unless the intent is made explicit. ``--all`` dumps them all,
+    ``--limit`` *N* bounds the result, and ``--count`` only counts them; the three are mutually
+    exclusive (e.g. ``hs list --all`` or ``hs list --all --csv``).
+
 ``-w``, ``--where`` *COND...*
     List of conditional statements to filter results (e.g., ``-w 'duration >= 600'``).
 

@@ -435,6 +435,12 @@ ALL_FIELDS: Final[List[str]] = list(Task.columns)
 DELIMITER_MAX_SIZE: Final[int] = 100
 
 
+# A result set larger than this is refused by `hs list` unless the intent is made explicit
+# (--all to dump it, --limit to bound it, or --count to just count it). This guards against
+# accidentally dumping an entire production database.
+DATABASE_TOO_BIG: Final[int] = 1_000
+
+
 class SearchableMixin:
     """Mixin class implements task search for multiple commands."""
 
@@ -579,6 +585,7 @@ Options:
       --json                 Format output as JSON (alias for `--format=json`).
       --csv                  Format output as CSV (alias for `--format=csv`).
   -d, --delimiter   CHAR     Field seperator for plain/csv formats.
+      --all                  Dump all results (required past {DATABASE_TOO_BIG:,} tasks).
   -l, --limit       NUM      Limit the number of results.
   -c, --count                Show count of results.
       --tag-keys             Show all distinct tag keys.
@@ -608,11 +615,16 @@ class TaskSearchApp(Application, SearchableMixin):
     interface.add_argument('-s', '--order-by', default=None, choices=field_names)
     interface.add_argument('--desc', action='store_true', dest='order_desc')
 
+    # NOTE: --all pre-authorizes a large dump, --limit bounds it, --count is cheap; each is a
+    # distinct answer to "this could be a lot of data", so they are mutually exclusive. Without
+    # one of them a result set over DATABASE_TOO_BIG is refused (see run()).
+    show_all: bool = False
     limit: int = None
-    interface.add_argument('-l', '--limit', type=int, default=None)
-
     show_count: bool = False
-    interface.add_argument('-c', '--count', action='store_true', dest='show_count')
+    guard_interface = interface.add_mutually_exclusive_group()
+    guard_interface.add_argument('--all', action='store_true', dest='show_all')
+    guard_interface.add_argument('-l', '--limit', type=int, default=None)
+    guard_interface.add_argument('-c', '--count', action='store_true', dest='show_count')
 
     show_failed: bool = False
     show_completed: bool = False
@@ -675,10 +687,17 @@ class TaskSearchApp(Application, SearchableMixin):
             return
         self.check_field_names()
         self.check_output_format()
+        query = self.build_query()
         if self.show_count:
-            print(self.build_query().count())
-        else:
-            self.print_output(self.build_query().all())
+            print(query.count())
+            return
+        if not self.show_all and self.limit is None:
+            matched = query.count()
+            if matched > DATABASE_TOO_BIG:
+                raise ArgumentError(
+                    f'Refusing to list {matched:,} tasks (over {DATABASE_TOO_BIG:,}); pass --all to '
+                    f'dump everything, --limit N to bound the result, or --count to count them')
+        self.print_output(query.all())
 
     @staticmethod
     def print_tag_keys() -> None:
