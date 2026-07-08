@@ -37,7 +37,8 @@ from sqlalchemy.sql.elements import BinaryExpression
 # Internal libs
 from hypershell.core.platform import default_path
 from hypershell.core.config import config
-from hypershell.core.exceptions import handle_exception, handle_exception_silently, get_shared_exception_mapping
+from hypershell.core.exceptions import (handle_exception, handle_exception_silently, handle_broken_pipe,
+                                        get_shared_exception_mapping)
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
@@ -178,6 +179,7 @@ class TaskInfoApp(Application):
 
     exceptions = {
         Task.NotFound: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
+        BrokenPipeError: handle_broken_pipe,  # e.g. `hs info UUID --stdout | head`
         **get_shared_exception_mapping(__name__)
     }
 
@@ -671,6 +673,7 @@ class TaskSearchApp(Application, SearchableMixin):
 
     exceptions = {
         StatementError: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
+        BrokenPipeError: handle_broken_pipe,  # e.g. `hs list --all --csv | head`
         **get_shared_exception_mapping(__name__)
     }
 
