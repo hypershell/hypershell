@@ -10,3 +10,9 @@ more than 1,000 tasks unless the intent is made explicit with ``--all`` (dump ev
 a bulk change before applying it. A bare ``hs list`` with no arguments prints the usage statement.
 
 This command maps directly to underlying SQL queries.
+
+When printing to a terminal, task records are colorized by `exit_status`: successful tasks
+(0) are green, cancelled tasks (-1, including those terminated by ``SIGHUP``) are shown faint,
+tasks that terminated abnormally (killed by a signal, or that never ran - any other negative
+status) are yellow, and tasks that ran and returned a non-zero code are red. Tasks that have
+not yet run are left uncolored.

@@ -28,6 +28,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from cmdkit.app import Application, ApplicationGroup, exit_status
 from cmdkit.cli import Interface, ArgumentError
+from cmdkit.ansi import red, green, yellow, faint, COLOR_STDOUT
 from sqlalchemy import Column, type_coerce, text, func, distinct
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Query
@@ -736,13 +737,40 @@ class TaskSearchApp(Application, SearchableMixin):
         """The requested output formatter."""
         return getattr(self, f'print_{self.output_format}')
 
+    @functools.cached_property
+    def colorize_rows(self: TaskSearchApp) -> bool:
+        """Whether exit status should colorize plain/table rows."""
+        return not self.show_count and self.output_format in ('plain', 'table') and COLOR_STDOUT
+
+    @functools.cached_property
+    def status_injected(self: TaskSearchApp) -> bool:
+        """True when `exit_status` was added to the query solely to colorize output."""
+        return self.colorize_rows and 'exit_status' not in self.field_names
+
+    @functools.cached_property
+    def status_index(self: TaskSearchApp) -> Optional[int]:
+        """Index of `exit_status` within each record when colorizing (else None)."""
+        if not self.colorize_rows:
+            return None
+        return len(self.field_names) if self.status_injected else self.field_names.index('exit_status')
+
+    @functools.cached_property
+    def fields(self: TaskSearchApp) -> List[Column]:
+        """Query columns: the requested display fields, plus `exit_status` if injected for color."""
+        columns = [getattr(Task, name) for name in self.field_names]
+        if self.status_injected:
+            columns.append(Task.exit_status)
+        return columns
+
     def print_table(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print in table format."""
         table = Table(title=None)
         for name in self.field_names:
             table.add_column(name)
         for record in results:
-            table.add_row(*[format_json(value) for value in record])
+            row = [format_json(value) for value in record[:len(self.field_names)]]
+            style = select_style(record[self.status_index]) if self.colorize_rows else None
+            table.add_row(*row, style=style)
         Console().print(table)
 
     @staticmethod
@@ -755,8 +783,11 @@ class TaskSearchApp(Application, SearchableMixin):
     def print_plain(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print plain text output with given field names, one task per line."""
         for record in results:
-            data = [format_json(value) for value in record]
-            print(self.output_delimiter.join(map(str, data)))
+            data = [format_json(value) for value in record[:len(self.field_names)]]
+            line = self.output_delimiter.join(map(str, data))
+            if self.colorize_rows:
+                line = select_color(record[self.status_index])(line)
+            print(line)
 
     def print_json(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print in output in JSON format."""
@@ -1251,37 +1282,83 @@ class WhereClause:
             raise ArgumentError(f'Where clause not understood ({argument})')
 
 
+NORMAL_MODE_TEMPLATE: Final[str] = """\
+          id: {id}
+       group: {group}
+        args: {args}
+     command: {command}
+       cores: {cores} (used: {cores_max})
+      memory: {memory} (used: {memory_max})
+     timeout: {timeout}
+ exit_status: {exit_status}
+   submitted: {submit_time}
+   scheduled: {schedule_time}
+     started: {start_time} (waited: {waited})
+   completed: {completion_time} (duration: {duration})
+ submit_host: {submit_host} ({submit_id})
+ server_host: {server_host} ({server_id})
+ client_host: {client_host} ({client_id})
+     attempt: {attempt}
+     retried: {retried}
+     outpath: {outpath}
+     errpath: {errpath}
+     csvpath: {csvpath}
+ previous_id: {previous_id}
+     next_id: {next_id}
+        tags: {tag}
+"""
+
+
+def no_color(_text: str) -> str:
+    """No-op colorization for task output."""
+    return _text
+
+
+SPECIAL_TASK_COLORS: Final[Dict[Optional[int], Callable[[str], str]]] = {
+    None: no_color,
+    0: green,
+    CANCEL_STATUS: faint,
+}
+
+
+def select_color(status: Optional[int]) -> Callable[[str], str]:
+    """Delegate function for colorization based on task exit status.
+
+    Remaining (unrun) tasks are uncolored, successful tasks are green, and cancelled tasks
+    (exit_status == CANCEL_STATUS, including those terminated by SIGHUP) are faint. Any other
+    negative status - a signal death or internal sentinel (e.g., template/resource error) - is
+    an abnormal termination shown yellow, while a genuine non-zero exit code is red.
+    """
+    # NOTE: dict.get evaluates its default eagerly, so guard against None (a remaining task,
+    # and a key here) before comparing - `None < 0` would raise before the lookup returns.
+    return SPECIAL_TASK_COLORS.get(status, yellow if status is not None and status < 0 else red)
+
+
+# Rich style names parallel to SPECIAL_TASK_COLORS, used to colorize table rows.
+# (Table cells render through `rich`, which won't consume raw ANSI from cmdkit.ansi; `dim`
+# is the same SGR as `faint`, so table and plain/normal stay visually consistent.)
+SPECIAL_TASK_STYLES: Final[Dict[Optional[int], Optional[str]]] = {
+    None: None,
+    0: 'green',
+    CANCEL_STATUS: 'dim',
+}
+
+
+def select_style(status: Optional[int]) -> Optional[str]:
+    """Rich style name for a task exit status (table analog of `select_color`)."""
+    return SPECIAL_TASK_STYLES.get(status, 'yellow' if status is not None and status < 0 else 'red')
+
+
 def print_normal(task: Task) -> None:
     """Print semi-structured task metadata with all field names."""
     task_data = {k: format_json(v) for k, v in task.to_dict().items()}
     task_data['waited'] = 'null' if task.waited is None else timedelta(seconds=int(task_data['waited']))
     task_data['duration'] = 'null' if task.duration is None else timedelta(seconds=int(task_data['duration']))
     task_data['tag'] = ', '.join(format_tag(k, v) for k, v in task.tag.items())
-    cores = int(task.cores or 0)
-    cores_max = 'null' if not task.cores_max else f'{task.cores_max:.2f}'
-    memory = format_bytes(int(task.memory or 0))
-    memory_max = 'null' if not task.memory_max else format_bytes(int(task.memory_max))
-    timeout = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
-    print(f'          id: {task_data["id"]}')
-    print(f'       group: {task_data["group"]}')
-    print(f'        args: {task_data["args"]}')
-    print(f'     command: {task_data["command"]}')
-    print(f'       cores: {cores} (used: {cores_max})')
-    print(f'      memory: {memory} (used: {memory_max})')
-    print(f'     timeout: {timeout}')
-    print(f' exit_status: {task_data["exit_status"]}')
-    print(f'   submitted: {task_data["submit_time"]}')
-    print(f'   scheduled: {task_data["schedule_time"]}')
-    print(f'     started: {task_data["start_time"]} (waited: {task_data["waited"]})')
-    print(f'   completed: {task_data["completion_time"]} (duration: {task_data["duration"]})')
-    print(f' submit_host: {task_data["submit_host"]} ({task_data["submit_id"]})')
-    print(f' server_host: {task_data["server_host"]} ({task_data["server_id"]})')
-    print(f' client_host: {task_data["client_host"]} ({task_data["client_id"]})')
-    print(f'     attempt: {task_data["attempt"]}')
-    print(f'     retried: {task_data["retried"]}')
-    print(f'     outpath: {task_data["outpath"]}')
-    print(f'     errpath: {task_data["errpath"]}')
-    print(f'     csvpath: {task_data["csvpath"]}')
-    print(f' previous_id: {task_data["previous_id"]}')
-    print(f'     next_id: {task_data["next_id"]}')
-    print(f'        tags: {task_data["tag"]}')
+    task_data['cores'] = int(task.cores or 0)
+    task_data['cores_max'] = 'null' if not task.cores_max else f'{task.cores_max:.2f}'
+    task_data['memory'] = format_bytes(int(task.memory or 0))
+    task_data['memory_max'] = 'null' if not task.memory_max else format_bytes(int(task.memory_max))
+    task_data['timeout'] = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
+    color = select_color(task.exit_status)
+    print(color(NORMAL_MODE_TEMPLATE.format(**task_data)))
