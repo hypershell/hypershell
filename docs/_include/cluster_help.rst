@@ -43,6 +43,15 @@ Options
 
     See section on `templates`.
 
+``--from-json`` *SPEC*
+    Read tasks from a JSON file (``FILE[@path]``).
+
+    The optional dotted ``path`` after ``@`` locates the list of task objects inside the
+    document (e.g. ``plan.json@chunks``); with no ``@`` the file's top level must be the
+    list. Each task object's keys become named ``{key}`` fields in the ``--template`` and
+    task tags. In this mode the template is expanded when tasks are ingested (submit-side),
+    not by the clients.
+
 ``-H``, ``--bind`` *ADDR*
     Bind address (default: localhost, or 0.0.0.0 for remote clients).
 

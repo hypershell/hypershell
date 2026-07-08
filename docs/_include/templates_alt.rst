@@ -13,6 +13,23 @@ argument to all clients.
 In some situations it may be useful to expand a template with the ``submit`` command.
 These are expanded `prior` to scheduling as the actual `args` for the task.
 
+Named Fields
+^^^^^^^^^^^^
+
+When tasks are submitted from a JSON file with ``--from-json`` (see the ``submit``
+command), each task object's keys become available as named template fields. A
+``{key}`` pattern expands to that key's value for the given task, and the keys also
+become task tags.
+
+For a task object ``{"seqid": "Chr1", "start": 1, "end": 5000000}`` the template
+``process --region {seqid}:{start}-{end}`` expands to
+``process --region Chr1:1-5000000``.
+
+Values are stringified: booleans render as ``true``/``false``, ``null`` as an empty
+string, and nested objects/arrays as compact JSON. A built-in pattern (below) takes
+precedence over a task key of the same name. Named fields are resolved at submit time,
+and every ``{key}`` must be present in each task object or the submission is rejected.
+
 Filepath Operations
 ^^^^^^^^^^^^^^^^^^^
 

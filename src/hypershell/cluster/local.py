@@ -205,9 +205,13 @@ class LocalCluster(Thread):
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: int = None,
+                 from_json: bool = False,
                  tls: Optional[TLSConfig] = None) -> None:
         """Initialize with server and single client thread."""
         auth = secrets.token_hex(64)
+        # In JSON mode the server expands the template submit-side; the client
+        # runs the fully resolved commands verbatim (avoids double expansion).
+        client_template = DEFAULT_TEMPLATE if from_json else template
         self.server = ServerThread(source=source,
                                    task_cores=cores,
                                    task_memory=memory,
@@ -224,9 +228,11 @@ class LocalCluster(Thread):
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
                                    redirect_failures=redirect_failures,
+                                   template=template,
+                                   from_json=from_json,
                                    tls=tls)
         self.client = ClientThread(num_threads=num_threads,
-                                   template=template,
+                                   template=client_template,
                                    bundlesize=bundlesize,
                                    bundlewait=bundlewait,
                                    auth=auth,

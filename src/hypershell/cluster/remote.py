@@ -247,9 +247,13 @@ class RemoteCluster(Thread):
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: int = None,
+                 from_json: bool = False,
                  tls: Optional[TLSConfig] = None) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
+        # In JSON mode the template is expanded submit-side by the server; remote clients
+        # run the fully-resolved commands verbatim (avoids double expansion).
+        client_template = DEFAULT_TEMPLATE if from_json else template
         self.server = ServerThread(source=source,
                                    task_cores=cores,
                                    task_memory=memory,
@@ -266,6 +270,8 @@ class RemoteCluster(Thread):
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
                                    redirect_failures=redirect_failures,
+                                   template=template,
+                                   from_json=from_json,
                                    tls=tls)
         launcher = shlex.split(launcher)
         if launcher_args is None:
@@ -297,7 +303,7 @@ class RemoteCluster(Thread):
         self.client_argv = [
             *launcher, *launcher_args, remote_exe, 'client',
             '-H', target, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-            '-t', template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
+            '-t', client_template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
         ]
         super().__init__(name='hypershell-cluster')
 
@@ -775,10 +781,14 @@ class AutoScalingCluster(Thread):
                  init_size: int = DEFAULT_AUTOSCALE_INIT_SIZE,
                  min_size: int = DEFAULT_AUTOSCALE_MIN_SIZE,
                  max_size: int = DEFAULT_AUTOSCALE_MAX_SIZE,
+                 from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
+        # In JSON mode the template is expanded submit-side by the server; remote clients
+        # run the fully-resolved commands verbatim (avoids double expansion).
+        client_template = DEFAULT_TEMPLATE if from_json else template
         self.server = ServerThread(source=source,
                                    auth=auth,
                                    address=bind,
@@ -792,6 +802,8 @@ class AutoScalingCluster(Thread):
                                    eager=eager,
                                    forever_mode=True,
                                    redirect_failures=redirect_failures,
+                                   template=template,
+                                   from_json=from_json,
                                    tls=tls)
         launcher = shlex.split(launcher)
         if launcher_args is None:
@@ -820,7 +832,7 @@ class AutoScalingCluster(Thread):
         launcher.extend([
             *launcher_args, remote_exe, 'client',
             '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-            '-t', template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
+            '-t', client_template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
         ])
         self.autoscaler = AutoScalerThread(launcher, policy=policy, factor=factor, period=period,
                                            init_size=init_size, min_size=min_size, max_size=max_size)

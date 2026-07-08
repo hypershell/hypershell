@@ -10,6 +10,16 @@ Options
 ``-f``, ``--task-file`` *FILE*
     Input file containing one task per line.
 
+``--from-json`` *SPEC*
+    Read tasks from a JSON file (``FILE[@path]``).
+
+    The optional dotted ``path`` after ``@`` locates the list of task objects inside
+    the document (e.g. ``plan.json@chunks``); with no ``@`` the file's top level must
+    be the list, and a ``FILE`` of ``-`` reads from ``<stdin>``. Each task object's keys
+    become named ``{key}`` template fields and task tags; an optional ``args`` key is the
+    base command (reachable as ``{}``). Every ``{key}`` is validated against all task
+    objects before anything is submitted.
+
 ``-q``, ``--queue``
     Submit directly to live queue instead of database.
 

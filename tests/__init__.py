@@ -11,12 +11,13 @@ from typing import Final, List, Tuple, Dict, Any
 # Standard libs
 import os
 import re
+import json
 from pathlib import Path
 from subprocess import run, PIPE
 
 # Public interface
 __all__ = ['NO_OUTPUT', 'main', 'main_lines', 'assert_output',
-           'create_taskfile', 'create_taskfile_echo',
+           'create_taskfile', 'create_taskfile_echo', 'create_json_taskfile',
            'UUID_PATTERN']
 
 
@@ -68,6 +69,14 @@ def create_taskfile_echo(temp_site: Path, count: int, tags: Dict[str, Any] = Non
     """Produce task input file with 'echo {}' lines, return path."""
     tagline = ' '.join([f'{k}:{v}' for k, v in (tags or {}).items()])
     return create_taskfile(temp_site, lines=[f'echo {n}  # HYPERSHELL: {tagline} n:{n}' for n in range(count)])
+
+
+def create_json_taskfile(temp_site: Path, data: Any, filename: str = 'plan.json') -> Path:
+    """Produce a JSON task plan file for test, return path."""
+    taskfile = temp_site / filename
+    with open(taskfile, mode='w', encoding='utf-8') as stream:
+        json.dump(data, stream)
+    return taskfile
 
 
 UUID_PATTERN: re.Pattern = re.compile(

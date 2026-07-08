@@ -240,11 +240,15 @@ class SSHCluster(Thread):
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: int = None,
+                 from_json: bool = False,
                  tls: Optional[TLSConfig] = None) -> None:
         """Initialize server and client threads."""
         if nodelist is None:
             raise AttributeError('Expected nodelist')
         auth = secrets.token_hex(64)
+        # In JSON mode the template is expanded submit-side by the server; SSH clients
+        # run the fully-resolved commands verbatim (avoids double expansion).
+        client_template = DEFAULT_TEMPLATE if from_json else template
         self.server = ServerThread(source=source,
                                    task_cores=cores,
                                    task_memory=memory,
@@ -261,6 +265,8 @@ class SSHCluster(Thread):
                                    forever_mode=forever_mode,
                                    restart_mode=restart_mode,
                                    redirect_failures=redirect_failures,
+                                   template=template,
+                                   from_json=from_json,
                                    tls=tls)
         launcher = shlex.split(launcher)
         launcher_env = shlex.split('' if not export_env else compile_env())
@@ -290,7 +296,7 @@ class SSHCluster(Thread):
         self.client_argv = [
             [*launcher, *launcher_args, host, *launcher_env, remote_exe, 'client', '-H', HOSTNAME,
              '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-             '-t', f'\'{template}\'', '-k', auth, '-d', str(delay_start),
+             '-t', f'\'{client_template}\'', '-k', auth, '-d', str(delay_start),
              '-S', str(task_signalwait), *client_args]
             for host in nodelist
         ]
