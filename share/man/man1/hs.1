@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HS" "1" "Jul 05, 2026" "2.8.0" "hypershell"
+.TH "HS" "1" "Jul 08, 2026" "2.8.1" "hypershell"
 .SH NAME
 hs \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -1360,7 +1360,9 @@ Include any number of \fIFIELD=VALUE\fP or tag \fIKEY:VALUE\fP positional argume
 .sp
 The \fB\-w\fP/\fB\-\-where\fP and \fB\-t\fP/\fB\-\-with\-tag\fP operate just as in the search command.
 .sp
-Using \fB\-\-cancel\fP sets \fIschedule_time\fP to now and \fIexit_status\fP to \-1.
+Using \fB\-\-cancel\fP marks tasks as cancelled: \fIschedule_time\fP and \fIcompletion_time\fP
+are set to now and \fIexit_status\fP to \-1. A cancelled task is terminal \- it will not be
+scheduled, retried, or reverted on \fB\-\-restart\fP\&.
 .sp
 Using \fB\-\-revert\fP reverts everything as if the task was new again.
 .sp
@@ -1380,8 +1382,9 @@ Assignment pairs for update.
 .B \fB\-\-cancel\fP
 Cancel specified tasks.
 .sp
-Cancelling a task means it will no longer be scheduled.
-This is done by setting the \fIschedule_time\fP to \fInow\fP and the \fIexit_status\fP to \-1.
+Cancelling a task means it will no longer be scheduled. This is done by setting the
+\fIschedule_time\fP and \fIcompletion_time\fP to \fInow\fP and the \fIexit_status\fP to \-1. The task
+becomes terminal: it will not be scheduled, retried, or reverted on \fB\-\-restart\fP\&.
 A task cannot be cancelled after it is sent to remote clients.
 .TP
 .B \fB\-\-revert\fP
