@@ -28,7 +28,7 @@ from hypershell.core.platform import default_path
 # Public interface
 __all__ = ['display_warning', 'display_error', 'display_critical', 'traceback_filepath', 'write_traceback',
            'handle_exception', 'handle_exception_silently', 'handle_disconnect', 'handle_address_unknown',
-           'HostAddressInfo', 'DatabaseUninitialized',
+           'handle_broken_pipe', 'HostAddressInfo', 'DatabaseUninitialized',
            'get_shared_exception_mapping', ]
 
 
@@ -94,6 +94,24 @@ def handle_exception_silently(exc: Exception) -> int:
     """Return status held by `exc.args` without logging."""
     status, = exc.args
     return status
+
+
+def handle_broken_pipe(exc: Exception) -> int:  # noqa: unused exc
+    """Handle a downstream reader closing the pipe early (e.g. `hs list | head`).
+
+    Python replaces the POSIX ``SIGPIPE`` with a `BrokenPipeError` rather than terminating the
+    process, so we catch it here instead of dumping a traceback - the consumer simply stopped
+    reading, which is not an error. A bare exit would raise a *second* `BrokenPipeError` when the
+    interpreter flushes ``stdout`` at shutdown, so we redirect the ``stdout`` file descriptor to
+    the null device to discard that final flush. Cross-platform: no reliance on ``SIGPIPE``
+    (absent on Windows), and the process signal disposition is left untouched.
+    """
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+    except (OSError, ValueError):
+        pass  # stdout may lack a real file descriptor (already closed or replaced)
+    return exit_status.success
 
 
 def handle_address_unknown(exc: Exception,  # noqa: unused
