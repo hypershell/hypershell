@@ -225,7 +225,7 @@ def partial_load(system: Optional[str] = path.system.config,
         'default': default, **preload,
         'system': {} if not system else load_file(system),
         'user': {} if not user else load_file(user),
-        'local': {} if not user else load_file(local),
+        'local': {} if not local else load_file(local),
         'env': load_env(),
     })
 
