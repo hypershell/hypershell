@@ -69,7 +69,7 @@ channel:
 2. **Data exposure.** Task definitions, exit status, timing, and heartbeat data travel
    through the queue. Task ``stdout`` and ``stderr`` do *not* — they are written to disk
    on the client (locally, or on a shared filesystem if one is configured) and retrieved
-   on demand over SFTP via :class:`~hypershell.cluster.ssh.SSHConnection` when the
+   on demand over SFTP via :class:`~hypershell.core.remote.SSHConnection` when the
    operator runs ``hs task info --stdout`` or similar. Without transport encryption, the
    metadata that *does* flow over the queue (including the authentication handshake) is
    readable on the wire.
@@ -409,10 +409,11 @@ SSH for Cluster Distribution and Output Retrieval
 Two *HyperShell* features rely on SSH:
 
 * :class:`~hypershell.cluster.ssh.SSHCluster` distributes client processes to remote hosts
-  via ``paramiko``. The host list, key material, and remote shell are all configured
-  through the user's standard ``~/.ssh/config``.
+  by invoking the system ``ssh`` binary (one ``subprocess`` per host); the host list, key
+  material, and remote shell are configured through the user's standard ``~/.ssh/config``.
 * ``hs info <task> --stdout`` / ``--stderr`` fetches the captured task output from the
-  client host via SFTP (also ``paramiko``), since output is *not* sent through the queue.
+  client host over SFTP — via ``paramiko`` (:class:`~hypershell.core.remote.SSHConnection`) —
+  since output is *not* sent through the queue.
 
 Security for these paths is provided entirely by SSH itself — host key verification, key
 rotation, ``authorized_keys`` policy, ``StrictHostKeyChecking``, and so on. *HyperShell*
