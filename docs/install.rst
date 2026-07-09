@@ -242,6 +242,34 @@ with much better throughput and responsiveness.
 The fact that your configuration can be entirely defined in terms of environment variables
 makes it easy to setup your deployment without needing to embed the configuration.
 
+Container images for tagged releases are published to the
+`GitHub Container Registry <https://github.com/hypershell/hypershell/pkgs/container/hypershell>`_
+as a multi-architecture image (``linux/amd64`` and ``linux/arm64``), so the correct variant is
+selected automatically for your host.
+
+.. admonition:: Pull the published image
+    :class: note
+
+    .. code-block:: shell
+
+        docker pull ghcr.io/hypershell/hypershell:latest
+
+Each image is signed with `cosign <https://docs.sigstore.dev>`_ and carries a signed
+`SLSA <https://slsa.dev>`_ build-provenance attestation. Both are keyless (bound to the
+release workflow's identity, with no long-lived signing key) and can be verified before use.
+
+.. admonition:: Verify signature and provenance
+    :class: note
+
+    .. code-block:: shell
+
+        gh attestation verify oci://ghcr.io/hypershell/hypershell:latest -R hypershell/hypershell
+
+        cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp 'https://github.com/hypershell/hypershell/.*' \
+            ghcr.io/hypershell/hypershell:latest
+
 
 -------------------
 
