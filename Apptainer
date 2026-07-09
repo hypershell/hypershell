@@ -1,10 +1,29 @@
+# Kept in sync with ./Dockerfile: a wheels-only build (no compiler). uv is lifted from the
+# Astral image via a multi-stage `%files from` (the def-file analog of `COPY --from`), and
+# only libpq5 — the runtime shared library for the pure-python psycopg used by the dev group —
+# is installed. Apptainer runs containers AS THE INVOKING USER, so there is deliberately no
+# non-root user setup (unlike the Dockerfile); a `USER` step would have no effect here.
+
+Bootstrap: docker
+From: ghcr.io/astral-sh/uv:latest
+Stage: uv
+
 Bootstrap: docker
 From: python:3.14-slim
 Stage: final
 
+%arguments
+  # Overridden in a build with `apptainer build --build-arg VERSION=$(...)`; defaults to a
+  # placeholder so the version is never hardcoded (it is single-sourced from pyproject.toml).
+  VERSION=dev
+
 %labels
-  Version="2.8.0"
-  Author="glentner@purdue.edu"
+  org.opencontainers.image.title HyperShell
+  org.opencontainers.image.version {{ VERSION }}
+  org.opencontainers.image.description HyperShell Base Image
+  org.opencontainers.image.source https://github.com/hypershell/hypershell
+  org.opencontainers.image.licenses Apache-2.0
+  org.opencontainers.image.authors glentner@purdue.edu
 
 %files
   ./src            /app/src
@@ -13,13 +32,15 @@ Stage: final
   ./README.rst     /app/README.rst
   ./pyproject.toml /app/pyproject.toml
 
+%files from uv
+  /uv  /usr/local/bin/uv
+  /uvx /usr/local/bin/uvx
+
 %post
   export DEBIAN_FRONTEND=noninteractive
   apt-get -yqq update && apt-get -yqq upgrade
-  apt-get -yqq install curl build-essential postgresql libpq-dev
+  apt-get -yqq install libpq5
   rm -rf /var/lib/apt/lists/*
-
-  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/bin" sh
 
   export UV_LINK_MODE=hardlink
   export UV_CACHE_DIR=/opt/uv-cache
@@ -27,12 +48,13 @@ Stage: final
   export UV_PROJECT_ENVIRONMENT=/opt/hypershell
 
   cd /app
-  /bin/uv sync --frozen --all-packages --python 3.14
+  uv sync --frozen --all-packages --python 3.14
   ln -sf /opt/hypershell/bin/hs /bin/hs
 
 %environment
   export HYPERSHELL_LOGGING_LEVEL=TRACE
   export HYPERSHELL_LOGGING_STYLE=SYSTEM
+  export PYTHONUNBUFFERED=1
 
 %runscript
   exec /bin/hs "$@"

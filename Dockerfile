@@ -1,7 +1,8 @@
 FROM python:3.14-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-LABEL version="2.8.0"
+# NOTE: no static version label — the version is single-sourced from pyproject.toml, and CI
+# (docker/metadata-action) stamps org.opencontainers.image.version from the release tag.
 LABEL authors="glentner@purdue.edu"
 LABEL org.opencontainers.image.source="https://github.com/hypershell/hypershell"
 LABEL org.opencontainers.image.description="HyperShell Base Image"
@@ -31,7 +32,6 @@ ENV UV_CACHE_DIR=/opt/uv-cache \
 
 WORKDIR /app
 COPY . .
-RUN /bin/rm -rf .venv .git
 RUN uv sync --frozen --all-packages --python 3.14
 
 USER hypershell
