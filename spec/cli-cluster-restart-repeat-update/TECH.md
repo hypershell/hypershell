@@ -3,7 +3,7 @@ slug: cli-cluster-restart-repeat-update
 title: 'Safe re-submission: --restart / --repeat / --update source gating'
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
 current_phase: done
@@ -98,9 +98,10 @@ phases:
   hill: uphill
   verify: uv run pytest -v && uv run sphinx-build docs docs/_build
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
+  last_reviewed_commit: 93476f1
+  verdict: changes-requested
+  blocked_reason: 'R17: count/dedup full-scan in data/model.py (partial-index predicate
+    mismatch); R7: false-positive incomplete warning after dedup in submit.py'
 ---
 # TECH.md — Safe re-submission: `--restart` / `--repeat` / `--update` source gating
 
