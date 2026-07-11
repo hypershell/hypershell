@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-07-11'
 phases:
 - id: P1
@@ -25,7 +25,7 @@ phases:
 - id: P2
   name: Submit-flow stamping seam (GatedSource, Loader stamp+dedup mechanism, upfront
     read/count)
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -172,25 +172,31 @@ source/raw_args is supplied).
 `fingerprint`, via a seam that also supports de-dup — without threading kwargs through the cluster core.
 Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/update decisions yet.
 
-- [ ] Add **`GatedSource(iterable, source_id, skip_fingerprints=None, name=None)`** in `submit.py`
+- [x] Add **`GatedSource(iterable, source_id, skip_fingerprints=None, name=None)`** in `submit.py`
   (`__iter__` delegates; exposes `.source_id`/`.skip_fingerprints`/`.name`).
-- [ ] `Loader.__init__` unwraps `GatedSource` (store `source_id`/`skip`, then `iter(inner)`). In
+- [x] `Loader.__init__` unwraps `GatedSource` (store `source_id`/`skip`, then `iter(inner)`). In
   `load_line_task`/`load_json_task` pass `raw_args`; set `task.source = self.source_id`; after build, if
   `self.skip and task.fingerprint in self.skip` → skip (`GET`, no `put_task`, no `count++`), logging the
-  running present/new tally. `SubmitThread`/`LiveSubmitThread.source_name` surface `GatedSource.name`.
-- [ ] `source_fingerprint_and_count(path, template) -> (md5_hex, count)`: one streaming pass —
-  `hashlib.md5` over raw bytes + count via a **shared task-or-not predicate**
-  (`bool(split_argline(template.expand(line.strip()))[0])`) reused by the `Loader`.
-- [ ] `SubmitApp.check_source`: capture `os.path.abspath(filepath)` for named files. For stdin /
+  running present/new tally (`Loader.skip_task`; tally logged in `finalize` when de-dup is active).
+  `SubmitThread`/`LiveSubmitThread.source_name` surface `GatedSource.name`.
+- [x] `source_fingerprint_and_count(path, template) -> (md5_hex, count)`. **Amended (review):** *two*
+  streaming reads, not one — `hashlib.md5` over raw bytes **plus** a separate **text-mode** count read so
+  the count uses the Loader's own universal-newline decoding (a single binary pass split only on `\n` and
+  mis-counted CR-only / mixed-newline files → wrong `task_count`). Count uses the shared `line_is_task`
+  predicate. Non-seekable named inputs (process substitution / FIFO / piped `/dev/stdin`) are **not**
+  routed here (a re-read would drain them) — `prepare_source` streams them as `<stdin>` instead.
+- [x] `SubmitApp.check_source`: capture `os.path.abspath(filepath)` for named files. For stdin /
   single-command, resolve the reserved source id via `Source.reserved(STDIN_SOURCE_ID)` /
   `Source.reserved(DIRECT_SOURCE_ID)` (get-or-create). `submit_one` stamps
-  `source=Source.reserved(DIRECT_SOURCE_ID)`.
-- [ ] Minimal wiring so a plain `hs submit -f FILE` (no new flags) creates a `Source` row (expected
+  `source=Source.reserved(DIRECT_SOURCE_ID)`. **Amended (review):** the seekable/non-seekable split lives
+  in the new `prepare_source` (non-seekable named input → reserved `<stdin>`, exempt & streamed).
+- [x] Minimal wiring so a plain `hs submit -f FILE` (no new flags) creates a `Source` row (expected
   count written **before** tasks; guarded by DB-mode) and hands a `GatedSource(source_id=<uuid>)` to
   `submit_from`. `<stdin>` → `GatedSource(source_id=Source.reserved(STDIN_SOURCE_ID))`.
-- [ ] Integration test (`test_submit.py` or `test_source.py`): after `hs submit -f f.in`, tasks carry
+- [x] Integration test (`test_submit.py` or `test_source.py`): after `hs submit -f f.in`, tasks carry
   a non-null `source`/`fingerprint`; a `source` row exists with `task_count` == parsed task count;
-  blank/comment/inline-tag-only lines excluded from the count.
+  blank/comment/inline-tag-only lines excluded from the count. Plus two review-driven regression tests:
+  non-seekable input streams all tasks (not drained); CR-only newline count matches submitted tasks.
 - **Verify:** `uv run pytest -v -m integration -k source_stamp`.
 - **Touches:** `src/hypershell/submit.py`, `src/hypershell/data/model.py` (helpers if needed),
   `tests/test_submit.py`.

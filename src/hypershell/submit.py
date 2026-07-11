@@ -39,7 +39,7 @@ Warning:
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Iterable, Iterator, IO, Optional, Dict, Callable, Type, Optional, Final
+from typing import List, Iterable, Iterator, IO, Optional, Dict, Tuple, Callable, Type, Final
 from types import TracebackType
 
 # Standard libs
@@ -48,6 +48,7 @@ import re
 import io
 import sys
 import json
+import hashlib
 import functools
 from enum import Enum
 from datetime import datetime
@@ -72,11 +73,12 @@ from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
-from hypershell.data.model import Task, DEFAULT_TASK_GROUP, serialize_tasks
-from hypershell.data import initdb, checkdb, DATABASE_DIALECT
+from hypershell.data.model import Task, Source, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP, serialize_tasks
+from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'validate_json_expansion',
+           'GatedSource', 'source_fingerprint_and_count',
            'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
@@ -87,6 +89,73 @@ log = Logger.with_name(__name__)
 # Redefined for docs
 DEFAULT_TASK_GROUP: Final[int] = DEFAULT_TASK_GROUP
 """Default task group for backwards compatibility."""
+
+
+class GatedSource:
+    """Wrap a task source with gate context that rides *inside* the source iterable.
+
+    Carries the resolved ``source_id`` (stamped onto every task by the :class:`Loader`)
+    and an optional ``skip_fingerprints`` set — task identities already present in a prior
+    same-path source lineage, which the Loader drops for ``--update``/``--restart`` de-dup.
+    Threading this inside ``source`` (rather than as kwargs) confines the gate plumbing to
+    the single ``Loader``/``Task.new`` stamping chokepoint instead of the ~10 coupled-core
+    constructors (submit_from / SubmitThread / ServerThread / cluster launchers).
+
+    ``__iter__`` delegates to the wrapped iterable, so every existing consumer that only
+    iterates ``source`` keeps working unchanged.
+    """
+
+    def __init__(self: GatedSource,
+                 iterable: Iterable[str | dict],
+                 source_id: str,
+                 skip_fingerprints: Optional[set] = None,
+                 name: Optional[str] = None) -> None:
+        """Initialize wrapper around `iterable` with gate context."""
+        self.iterable = iterable
+        self.source_id = source_id
+        self.skip_fingerprints = skip_fingerprints
+        self.name = name
+
+    def __iter__(self: GatedSource) -> Iterator[str | dict]:
+        """Delegate iteration to the wrapped source."""
+        return iter(self.iterable)
+
+
+def line_is_task(line: str, template: Template) -> bool:
+    """True if `line` yields a task under `template`.
+
+    A raw text line becomes a task iff, after template expansion and inline-comment
+    stripping, the command is non-empty. This mirrors the :class:`Loader`'s own
+    task/non-task split (blank, comment-only, and inline-tag-only lines are *not* tasks),
+    so an upfront count matches exactly what the Loader will submit.
+    """
+    args, _ = Task.split_argline(template.expand(str(line).strip()))
+    return bool(args)
+
+
+def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) -> Tuple[str, int]:
+    """Read a named file upfront: content md5 (raw bytes) + task count (R4).
+
+    The md5 is over the raw file bytes (parsing-independent). The count is taken over a
+    *text-mode* read — the same universal-newline decoding the Loader uses — replaying the
+    shared :func:`line_is_task` predicate, so blank/comment/inline-tag-only lines are
+    excluded and the recorded count matches exactly what the Loader will submit, for any
+    newline convention (LF, CRLF, or bare CR). Both reads stream (no whole-file buffering).
+    Callers must route only seekable, re-readable files here; non-seekable inputs (pipes,
+    FIFOs, piped ``/dev/stdin``) are handled upstream (streamed like ``<stdin>``), because a
+    second independent read would drain them.
+    """
+    engine = Template(template)
+    digest = hashlib.md5()
+    with open(path, mode='rb') as raw_stream:
+        for chunk in iter(lambda: raw_stream.read(1 << 20), b''):
+            digest.update(chunk)
+    count = 0
+    with open(path, mode='r') as text_stream:  # text mode == the Loader's universal-newline split
+        for line in text_stream:
+            if line_is_task(line, engine):
+                count += 1
+    return digest.hexdigest(), count
 
 
 class LoaderState(State, Enum):
@@ -103,6 +172,8 @@ class Loader(StateMachine):
 
     task: Task
     source: Iterator[str | dict]
+    source_id: Optional[str]
+    skip_fingerprints: Optional[set]
     queue: Queue[Optional[Task]]
     cores: Optional[int]
     memory: Optional[int]
@@ -110,6 +181,7 @@ class Loader(StateMachine):
     template: Template
     group: int
     count: int
+    present: int
     tags: Dict[str, str]
 
     state = LoaderState.START
@@ -124,7 +196,18 @@ class Loader(StateMachine):
                  template: str = DEFAULT_TEMPLATE,
                  group: int = DEFAULT_TASK_GROUP,
                  tags: Dict[str, str] = None) -> None:
-        """Initialize source to read tasks and submit to database."""
+        """Initialize source to read tasks and submit to database.
+
+        A :class:`GatedSource` is unwrapped here: its ``source_id`` is stamped onto every
+        task and its ``skip_fingerprints`` (if any) drive de-dup. A plain iterable leaves
+        both unset (no stamping, no de-dup) — unchanged behavior for every legacy caller.
+        """
+        if isinstance(source, GatedSource):
+            self.source_id = source.source_id
+            self.skip_fingerprints = source.skip_fingerprints
+        else:
+            self.source_id = None
+            self.skip_fingerprints = None
         self.template = Template(template)
         self.source = iter(source)
         self.queue = queue
@@ -134,6 +217,7 @@ class Loader(StateMachine):
         self.group = group
         self.tags = tags
         self.count = 0
+        self.present = 0
 
     @functools.cached_property
     def actions(self: Loader) -> Dict[LoaderState, Callable[[], LoaderState]]:
@@ -163,10 +247,14 @@ class Loader(StateMachine):
 
     def load_line_task(self: Loader, line: str) -> LoaderState:
         """Build the next task from a command-line string in the text source."""
-        args = self.template.expand(str(line).strip())
-        self.task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
+        raw = str(line).strip()
+        args = self.template.expand(raw)
+        self.task = Task.new(args=args, raw_args=raw, source=self.source_id,
+                             cores=self.cores, memory=self.memory, timeout=self.timeout,
                              group=self.group, tag=self.tags)
         if self.task.args:
+            if self.skip_task():
+                return LoaderState.GET
             log.trace(f'Loaded task ({self.task.args})')
             return LoaderState.PUT
         else:
@@ -192,10 +280,26 @@ class Loader(StateMachine):
         record_tags = {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
                        for key, value in record.items() if key != 'args'}
         tags = {**(self.tags or {}), **record_tags}
-        self.task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
+        self.task = Task.new(args=args, raw_args=base, source=self.source_id,
+                             cores=self.cores, memory=self.memory, timeout=self.timeout,
                              group=self.group, tag=tags, strict_tag=False, parse_inline=False)
+        if self.skip_task():
+            return LoaderState.GET
         log.trace(f'Loaded task ({self.task.args})')
         return LoaderState.PUT
+
+    def skip_task(self: Loader) -> bool:
+        """True if the loaded task's identity is already present in the prior lineage (de-dup).
+
+        Used by ``--update``/``--restart``: a task whose fingerprint is in the skip-set is
+        counted as *present* and not enqueued (no ``count`` increment). Without a skip-set
+        (the common case) this is always False.
+        """
+        if self.skip_fingerprints and self.task.fingerprint in self.skip_fingerprints:
+            self.present += 1
+            log.trace(f'Skipping already-present task ({self.task.args})')
+            return True
+        return False
 
     def put_task(self: Loader) -> LoaderState:
         """Enqueue loaded task."""
@@ -206,9 +310,10 @@ class Loader(StateMachine):
         except QueueFull:
             return LoaderState.PUT
 
-    @staticmethod
-    def finalize() -> LoaderState:
-        """Return HALT."""
+    def finalize(self: Loader) -> LoaderState:
+        """Log the de-dup tally (when active) and return HALT."""
+        if self.skip_fingerprints is not None:
+            log.info(f'{self.present} tasks already present; submitting {self.count} new tasks')
         log.debug('Done (loader)')
         return LoaderState.HALT
 
@@ -434,7 +539,9 @@ class SubmitThread(Thread):
     @functools.cached_property
     def source_name(self: SubmitThread) -> str:
         """Log details of source."""
-        if self.source is sys.stdin:
+        if isinstance(self.source, GatedSource):
+            return self.source.name or '<iterable>'
+        elif self.source is sys.stdin:
             return '<stdin>'
         elif isinstance(self.source, io.TextIOWrapper):
             return self.source.name
@@ -673,7 +780,9 @@ class LiveSubmitThread(Thread):
     @functools.cached_property
     def source_name(self: LiveSubmitThread) -> str:
         """Log details of source."""
-        if self.source is sys.stdin:
+        if isinstance(self.source, GatedSource):
+            return self.source.name or '<iterable>'
+        elif self.source is sys.stdin:
             return '<stdin>'
         elif isinstance(self.source, io.TextIOWrapper):
             return self.source.name
@@ -997,6 +1106,8 @@ class SubmitApp(Application):
     interface = Interface(APP_NAME, APP_USAGE, APP_HELP)
 
     source: IO | List[str] | None = None
+    source_path: Optional[str] = None       # absolute path of a named task file (else None)
+    source_id: Optional[str] = None         # resolved Source.id stamped onto submitted tasks
     task_args: List[str] = []
     task_file: str = None
     from_json: str = None
@@ -1078,6 +1189,7 @@ class SubmitApp(Application):
                 group = Task.current_group()
                 self.group = group.value
                 log.info(f'Auto-selected task group {group.value} ({group.reason})')
+            self.prepare_source()
         if self.source is not None:
             self.submit_all()
         else:
@@ -1098,8 +1210,8 @@ class SubmitApp(Application):
                         cores=self.cores, memory=self.memory, timeout=self.timeout, group=self.group,
                         tags=self.tags)
         else:
-            task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout, 
-                            group=self.group, tag=self.tags)
+            task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
+                            group=self.group, tag=self.tags, source=self.source_id)
             Task.add(task)
             log.info(f'Submitted task ({task.id})')
 
@@ -1139,6 +1251,7 @@ class SubmitApp(Application):
         elif self.task_file is not None:
             log.debug(f'Submitted from {self.task_file} (explicit)')
             self.source = open(self.task_file, mode='r')
+            self.source_path = os.path.abspath(self.task_file)
         elif len(self.task_args) == 0:
             log.debug(f'Submitted from <stdin> (implicit)')
             self.source = sys.stdin
@@ -1151,6 +1264,7 @@ class SubmitApp(Application):
                 if not os.access(filepath, os.X_OK):
                     log.debug(f'Submitted from {filepath} (implicit - not executable)')
                     self.source = open(filepath, mode='r')
+                    self.source_path = os.path.abspath(filepath)
                 else:
                     log.debug(f'Submitted single task (implicit - executable)')
                     self.source = None
@@ -1160,6 +1274,38 @@ class SubmitApp(Application):
         else:
             log.debug(f'Submitted single task (explicit)')
             self.source = None
+
+    def prepare_source(self: SubmitApp) -> None:
+        """Resolve the task Source and wrap the stream so tasks are stamped (DB mode only).
+
+        A named file gets a fresh :class:`Source` row whose recorded ``task_count`` is the
+        upfront-counted expectation, committed *before* any task so an incomplete prior
+        submission stays detectable (R1/R7). ``<stdin>`` and single-command ``<direct>``
+        submissions resolve their reserved fixed-id rows and are exempt from gating (R3).
+        ``--from-json`` gating is deferred to a later phase. No refuse/repeat/update
+        decisions happen here — only stamping (that gate matrix lands in P3).
+        """
+        if not DATABASE_ENABLED:
+            return  # non-persistent DB: nothing to record against (invariant §4)
+        if self.from_json:
+            return  # JSON source gating handled in a later phase
+        if self.source is None:
+            self.source_id = Source.reserved(DIRECT_SOURCE_ID).id
+        elif self.source is sys.stdin or not self.source.seekable():
+            # Real <stdin> and non-seekable named inputs (process substitution, FIFOs, a
+            # piped /dev/stdin) have no stable identity and cannot be re-read for an upfront
+            # count — stream them under the reserved <stdin> source, exempt from gating. A
+            # second read would drain the pipe and silently drop every task.
+            self.source_id = Source.reserved(STDIN_SOURCE_ID).id
+            name = '<stdin>' if self.source is sys.stdin else self.source_path
+            self.source = GatedSource(self.source, self.source_id, name=name)
+        else:
+            fingerprint, count = source_fingerprint_and_count(self.source_path, self.template)
+            log.info(f'Found {count} tasks in {self.source_path} (md5={fingerprint})')
+            source = Source.new(path=self.source_path, fingerprint=fingerprint, task_count=count)
+            Source.add(source)
+            self.source_id = source.id
+            self.source = GatedSource(self.source, self.source_id, name=self.source_path)
 
     @staticmethod
     def quote_arg(arg: str) -> str:
@@ -1188,5 +1334,6 @@ class SubmitApp(Application):
                  exc_val: Optional[Exception],
                  exc_tb: Optional[TracebackType]) -> None:
         """Close file if not stdin."""
-        if self.source is not None and self.source is not sys.stdin and hasattr(self.source, 'close'):
-            self.source.close()
+        source = self.source.iterable if isinstance(self.source, GatedSource) else self.source
+        if source is not None and source is not sys.stdin and hasattr(source, 'close'):
+            source.close()

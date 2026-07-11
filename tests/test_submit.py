@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Final, Dict
 
 # Standard libs
+import sys
 from pathlib import Path
 
 # External libs
@@ -16,7 +17,7 @@ from pytest import mark
 from cmdkit.app import exit_status
 
 # Internal libs
-from tests import main, main_lines, NO_OUTPUT, create_taskfile_echo, assert_output, UUID_PATTERN
+from tests import main, main_lines, NO_OUTPUT, create_taskfile, create_taskfile_echo, assert_output, UUID_PATTERN
 from hypershell.submit import SubmitApp
 from hypershell.data.model import Task
 
@@ -235,3 +236,133 @@ def test_inline_memory_tag_parses_units_to_bytes() -> None:
     assert Task.new(args='echo', tag={'memory': '2000'}).memory == 2000
     assert Task.new(args='echo', tag={'memory': 4096}).memory == 4096
     assert Task.new(args='echo').memory is None
+
+
+# Small script run in a subprocess so the engine binds to the temp-site environment.
+_STAMP_QUERY: Final[str] = """
+from hypershell.data.model import Task, Source, DIRECT_SOURCE_ID, STDIN_SOURCE_ID
+tasks = Task.query().all()
+named = [s for s in Source.query().all() if s.path not in ('<direct>', '<stdin>')]
+assert len(tasks) == 3, f'tasks={len(tasks)}'
+assert len(named) == 1, f'named sources={len(named)}'
+src = named[0]
+assert src.task_count == 3, f'recorded count={src.task_count}'
+assert src.fingerprint and len(src.fingerprint) == 32, f'md5={src.fingerprint!r}'
+assert src.path.startswith('/'), f'path not absolute: {src.path}'
+assert all(t.source == src.id for t in tasks), [t.source for t in tasks]
+assert all(t.fingerprint for t in tasks), 'unstamped fingerprint'
+assert len({t.fingerprint for t in tasks}) == 3, 'expected distinct fingerprints'
+print('OK', src.task_count)
+"""
+
+
+@mark.integration
+def test_source_stamp_named_file(temp_site: Path) -> None:
+    """A named-file submit records one Source row and stamps every task (R1, R3, R4)."""
+
+    # Real tasks: echo a/b/c. Non-tasks (excluded from the count): blank, comment-only,
+    # and an inline-tag-only line (sets a global tag, produces no task).
+    taskfile = create_taskfile(temp_site, [
+        'echo a',
+        '',
+        '# just a comment',
+        '# HYPERSHELL: phase:1',
+        'echo b',
+        'echo c',
+    ])
+
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile)])
+    assert rc == exit_status.success, stderr
+    # R18 upfront-ingest log: found N + md5, and the excluded lines are not counted.
+    assert_output(r'INFO .* Found 3 tasks in .* \(md5=[0-9a-f]{32}\)$', stderr, 1)
+    assert_output(r'INFO .* Submitted 3 tasks$', stderr, 1)
+
+    rc, stdout, stderr = main([sys.executable, '-c', _STAMP_QUERY])
+    assert rc == 0, stderr
+    assert stdout == 'OK 3'
+
+
+@mark.integration
+def test_source_stamp_reserved_direct_and_stdin(temp_site: Path) -> None:
+    """Single-command and stdin submissions stamp the reserved <direct>/<stdin> rows (R3)."""
+    import os
+    from subprocess import run, PIPE
+
+    # <direct>: a single positional command needs no stdin.
+    rc, _, stderr = main(['hs', 'submit', 'echo', 'solo'])
+    assert rc == exit_status.success, stderr
+
+    # <stdin>: pipe two commands in; `main` does not feed stdin, so drive it directly.
+    proc = run(['hs', 'submit', '-f', '-'], input=b'echo pipe1\necho pipe2\n',
+               stdout=PIPE, stderr=PIPE, env=os.environ)
+    assert proc.returncode == exit_status.success, proc.stderr.decode()
+
+    query = """
+from hypershell.data.model import Task, Source, DIRECT_SOURCE_ID, STDIN_SOURCE_ID
+by_source = {}
+for t in Task.query().all():
+    by_source.setdefault(t.source, []).append(t.args)
+assert sorted(by_source.get(DIRECT_SOURCE_ID, [])) == ['echo solo'], by_source
+assert sorted(by_source.get(STDIN_SOURCE_ID, [])) == ['echo pipe1', 'echo pipe2'], by_source
+reserved = Source.query().filter(Source.id.in_([DIRECT_SOURCE_ID, STDIN_SOURCE_ID])).all()
+assert {s.path for s in reserved} == {'<direct>', '<stdin>'}, reserved
+print('OK')
+"""
+    rc, stdout, stderr = main([sys.executable, '-c', query])
+    assert rc == 0, stderr
+    assert stdout == 'OK'
+
+
+@mark.integration
+def test_source_stamp_non_seekable_input_streams_all(temp_site: Path) -> None:
+    """A non-seekable named input (piped /dev/stdin) streams every task instead of being
+    drained by the upfront read; it is stamped with the reserved <stdin> source (R3, R4)."""
+    import os
+    from subprocess import run, PIPE
+    if not os.path.exists('/dev/stdin'):
+        from pytest import skip
+        skip('no /dev/stdin on this platform')
+
+    # stdin is a pipe here, so /dev/stdin is non-seekable — the upfront count MUST NOT
+    # re-read (and drain) it. Before the fix this submitted 0 tasks with a bogus Source row.
+    proc = run(['hs', 'submit', '-f', '/dev/stdin'], input=b'echo one\necho two\necho three\n',
+               stdout=PIPE, stderr=PIPE, env=os.environ)
+    assert proc.returncode == exit_status.success, proc.stderr.decode()
+
+    query = """
+from hypershell.data.model import Task, Source, STDIN_SOURCE_ID
+tasks = Task.query().all()
+assert len(tasks) == 3, f'expected 3 tasks, got {len(tasks)}'
+assert all(t.source == STDIN_SOURCE_ID for t in tasks), [t.source for t in tasks]
+named = [s for s in Source.query().all() if s.path not in ('<direct>', '<stdin>')]
+assert named == [], named  # no bogus named source for the ephemeral /dev/stdin path
+print('OK')
+"""
+    rc, stdout, stderr = main([sys.executable, '-c', query])
+    assert rc == 0, stderr
+    assert stdout == 'OK'
+
+
+@mark.integration
+def test_source_stamp_count_matches_cr_only_newlines(temp_site: Path) -> None:
+    """The recorded task_count matches the tasks actually submitted regardless of newline
+    convention — the count read uses the Loader's own universal-newline decoding (R1, R4)."""
+    taskfile = temp_site / 'cr.in'
+    with open(str(taskfile), mode='wb') as stream:
+        stream.write(b'echo a\recho b\recho c\r')  # classic-Mac CR-only line endings
+
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile)])
+    assert rc == exit_status.success, stderr
+    assert_output(r'INFO .* Found 3 tasks in .*', stderr, 1)
+
+    query = """
+from hypershell.data.model import Task, Source
+tasks = Task.query().all()
+named = [s for s in Source.query().all() if s.path not in ('<direct>', '<stdin>')]
+assert len(named) == 1, named
+assert named[0].task_count == len(tasks) == 3, (named[0].task_count, len(tasks))
+print('OK')
+"""
+    rc, stdout, stderr = main([sys.executable, '-c', query])
+    assert rc == 0, stderr
+    assert stdout == 'OK'
