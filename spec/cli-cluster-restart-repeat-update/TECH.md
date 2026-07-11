@@ -291,6 +291,13 @@ Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/u
   cross-tool CLI drive confirmed (same md5 via `hs submit` and `hsx`; restart deduped to 0 new).
 - **Touches:** `src/hypershell/submit.py`, `src/hypershell/cluster/__init__.py`,
   `docs/_include/*_desc.rst`, `tests/`.
+- **Ridealong fix (post-P5, separate `[fix]` commit):** `--from-json` was **never** listed in the
+  shell completions — a pre-existing gap (the flag predates this feature; P3/P4 added `--repeat`/
+  `--update` but not the already-missing `--from-json`), surfaced while closing the P5 surface. Fixed
+  now, riding along with the feature: `--from-json` added to `_hs_submit` and `_hs_cluster` in both
+  `share/bash_completion.d/hs` and `share/zsh/site-functions/_hs` (offered in the option list, completes
+  a file path/SPEC, mutually exclusive with `-f`/positional FILE per the CLI). Verified `bash -n`/`zsh -n`
+  clean + functional bash-completion drive. **The man-page instance of the same gap is folded into P6.**
 
 ## Phase P6 — Presentation + man pages + full build + full sweep
 **Satisfies:** R18 · **Depends on:** P4, P5
@@ -303,10 +310,13 @@ Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/u
   `Source.paths_for_ids` per page via a new optional `source_map` arg — avoid N+1). **Keep `fingerprint`
   out** of the normal template (reachable via `-x`/json/csv). Machine formats keep the raw UUID.
 - [ ] Update man pages `share/man/man1/hs.1`, `share/man/man1/hsx.1` for `--repeat`/`--update` and the
-  revised `--restart`. (CI list `tests.yml:95-112` + `pyproject.toml` mapping unchanged — no new files.)
+  revised `--restart`, **and add the pre-existing-missing `--from-json`** (same gap the ridealong `[fix]`
+  closed for completions — man pages carry no `--from-json` entry either). (CI list `tests.yml:95-112` +
+  `pyproject.toml` mapping unchanged — no new files.)
 - [ ] `uv run sphinx-build docs docs/_build` — confirm **no new** warnings vs. the pre-existing
   `task_submit.rst`/`manual.rst` toctree warnings.
-- [ ] `bash -n share/bash_completion.d/hs`; `zsh -n share/zsh/site-functions/_hs`.
+- [ ] `bash -n share/bash_completion.d/hs`; `zsh -n share/zsh/site-functions/_hs` (both already carry
+  `--from-json` after the ridealong `[fix]` — re-confirm nothing regressed).
 - [ ] Full `uv run pytest -v` green; add any missing edge cases surfaced during the sweep (e.g. R7
   determinism, `--update` on unseen path == submit-all).
 - **Verify:** `uv run pytest -v && uv run sphinx-build docs docs/_build`.
