@@ -1,74 +1,107 @@
 ---
 slug: cli-cluster-restart-repeat-update
-title: "Safe re-submission: --restart / --repeat / --update source gating"
+title: 'Safe re-submission: --restart / --repeat / --update source gating'
 kind: feature
 appetite: big
 status: in_progress
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
-current_phase: P1
-last_updated: "2026-07-11"
+current_phase: P2
+last_updated: '2026-07-11'
 phases:
-  - id: P1
-    name: "Schema + fingerprint core (Source entity, Task.source/fingerprint, timescale groundwork, indices)"
-    status: pending
-    satisfies: [R1, R2, R17]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v -m unit tests/test_source.py"
-  - id: P2
-    name: "Submit-flow stamping seam (GatedSource, Loader stamp+dedup mechanism, upfront read/count)"
-    status: pending
-    satisfies: [R3, R4]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v -m integration -k source_stamp"
-  - id: P3
-    name: "hs submit gate matrix (R5-R10) + count-warn + logging + submit docs/completions"
-    status: pending
-    satisfies: [R5, R6, R7, R8, R9, R10, R18]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_submit.py -k gate"
-  - id: P4
-    name: "hsx gate matrix + file-aware restart (R11-R16) + cluster docs/completions"
-    status: pending
-    satisfies: [R11, R12, R13, R14, R15, R16]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_restart.py"
-  - id: P5
-    name: "Gate --from-json in both apps (human decision) + remove --from-json/--restart incompat"
-    status: pending
-    satisfies: [R4, R5, R8, R9]
-    depends_on: [P3, P4]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v -k from_json_gate"
-  - id: P6
-    name: "Presentation (source display) + man pages + full sphinx build + full pytest sweep"
-    status: pending
-    satisfies: [R18]
-    depends_on: [P4, P5]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v && uv run sphinx-build docs docs/_build"
+- id: P1
+  name: Schema + fingerprint core (Source entity, Task.source/fingerprint, timescale
+    groundwork, indices)
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R17
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v -m unit tests/test_source.py
+- id: P2
+  name: Submit-flow stamping seam (GatedSource, Loader stamp+dedup mechanism, upfront
+    read/count)
+  status: pending
+  satisfies:
+  - R3
+  - R4
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v -m integration -k source_stamp
+- id: P3
+  name: hs submit gate matrix (R5-R10) + count-warn + logging + submit docs/completions
+  status: pending
+  satisfies:
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  - R10
+  - R18
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_submit.py -k gate
+- id: P4
+  name: hsx gate matrix + file-aware restart (R11-R16) + cluster docs/completions
+  status: pending
+  satisfies:
+  - R11
+  - R12
+  - R13
+  - R14
+  - R15
+  - R16
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_restart.py
+- id: P5
+  name: Gate --from-json in both apps (human decision) + remove --from-json/--restart
+    incompat
+  status: pending
+  satisfies:
+  - R4
+  - R5
+  - R8
+  - R9
+  depends_on:
+  - P3
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v -k from_json_gate
+- id: P6
+  name: Presentation (source display) + man pages + full sphinx build + full pytest
+    sweep
+  status: pending
+  satisfies:
+  - R18
+  depends_on:
+  - P4
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v && uv run sphinx-build docs docs/_build
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
 ---
-
 # TECH.md — Safe re-submission: `--restart` / `--repeat` / `--update` source gating
 
 The **context engine and finite-state machine** for building this feature. Frontmatter above is the
@@ -100,34 +133,34 @@ fingerprint computation, and the `timescale` provider alias/gate — landing on 
 unit-tested fingerprint semantics. No submit behavior change yet (columns populate only when a
 source/raw_args is supplied).
 
-- [ ] **Timescale groundwork (`data/core.py`):** add `'timescale'`/`'timescaledb'` → `'postgresql+psycopg'`
+- [x] **Timescale groundwork (`data/core.py`):** add `'timescale'`/`'timescaledb'` → `'postgresql+psycopg'`
   to `providers` (`:173`); accept the aliases wherever `config.provider == 'postgres'` is special-cased
   (`get_url` file-pop, `:227`). Add a **`uuid7`-extra gate** (mirror the turso gate `:207-212`): if
   provider ∈ timescale aliases and `import uuid_utils` fails → `display_critical(...)` +
   `sys.exit(exit_status.runtime_error)`. Emit a one-line groundwork warning that Timescale hypertable
   management (post-`create_all` hook) is not yet implemented. **Do not touch `core/uuid.py`.**
-- [ ] Module constants `DIRECT_SOURCE_ID` / `STDIN_SOURCE_ID` (fixed well-known UUIDs) in `data/model.py`.
-- [ ] Add **`Source`** entity (mirror `Client`): `id` `UUID` pk (value from `uuid()`), `path` `TEXT`,
+- [x] Module constants `DIRECT_SOURCE_ID` / `STDIN_SOURCE_ID` (fixed well-known UUIDs) in `data/model.py`.
+- [x] Add **`Source`** entity (mirror `Client`): `id` `UUID` pk (value from `uuid()`), `path` `TEXT`,
   `fingerprint` `TEXT`, `task_count` `INTEGER`, `created` `DATETIME`; `columns` dict; inner
   `NotFound/NotDistinct/AlreadyExists`; `from_id`; `new(path, fingerprint, task_count)` →
   `id=uuid()`, `created=datetime.now().astimezone()`. No lineage-pointer column (lineage = same `path`).
-- [ ] Add `Task.source` (shared **`UUID`** type, nullable — native on postgres, holds a real
+- [x] Add `Task.source` (shared **`UUID`** type, nullable — native on postgres, holds a real
   `Source.id`/reserved-const id) and `Task.fingerprint` (`TEXT`, nullable); append both to `Task.columns`
   (`model.py:281`) for wire round-trip. (Accept raw UUID/md5 auto-appearing in `hs list --json/csv` /
   `-x`; human-readable resolution is P6.)
-- [ ] `Task.compute_fingerprint(raw_command, group, tags) -> str` (md5 of canonical JSON of
+- [x] `Task.compute_fingerprint(raw_command, group, tags) -> str` (md5 of canonical JSON of
   `{'args','group','tags'}` with `sort_keys`, `part` dropped from tags). Add `raw_args`, `fingerprint`,
   `source` kwargs to `Task.new`; derive `raw_command` (`split_argline(raw_args)[0]` for line,
   `raw_args` for JSON, fallback `args`); compute+set `fingerprint` when not supplied; pass `source`.
-- [ ] Propagate on retry: `__schedule_next_failed_tasks` (`model.py:555`) passes
+- [x] Propagate on retry: `__schedule_next_failed_tasks` (`model.py:555`) passes
   `fingerprint=task.fingerprint` **and** `source=task.source`.
-- [ ] Classmethods: `Source.lookup(path)`, `Source.matching(path, fingerprint)`,
+- [x] Classmethods: `Source.lookup(path)`, `Source.matching(path, fingerprint)`,
   `Source.reserved(const_id)` (lazy get-or-create by PK; `path` = sentinel), `Source.paths_for_ids(ids)`
   (presentation), `Task.count_for_source(id)`, `Task.fingerprints_for_sources(ids) -> set[str]`.
-- [ ] Indices: `index_source_lookup(Source.path, Source.fingerprint)`;
+- [x] Indices: `index_source_lookup(Source.path, Source.fingerprint)`;
   `index_tasks_source(Task.source, Task.fingerprint)` — **partial excluding** `DIRECT_SOURCE_ID`/
   `STDIN_SOURCE_ID` (`postgresql_where`/`sqlite_where`). **No BRIN** (lean on Timescale compression).
-- [ ] New `tests/test_source.py` (unit): fingerprint order-independent over tag order; stable across
+- [x] New `tests/test_source.py` (unit): fingerprint order-independent over tag order; stable across
   template change + differing uuid/attempt; differs on args/group/tag change; `part`/resource knobs
   excluded; fresh `initdb` yields the `source` table + indices (SQLAlchemy inspect).
 - **Verify:** `uv run pytest -v -m unit tests/test_source.py`.
