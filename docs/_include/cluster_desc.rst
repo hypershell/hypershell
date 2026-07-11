@@ -8,7 +8,10 @@ given. The command-line tasks are pulled in and either directly published to a d
 
 Alternatively, use ``--from-json`` to read tasks from a JSON file (``FILE[@path]``); each task
 object's keys become named ``{key}`` fields in the ``--template`` (and task tags). In this mode the
-template is expanded when tasks are ingested rather than by the clients.
+template is expanded when tasks are ingested rather than by the clients. A JSON source participates
+in the same re-submission gating as a plain *FILE* — ``--restart`` (idempotent requeue),
+``--repeat``, and ``--update --restart`` all apply — keyed by the file's absolute path together
+with any ``@path`` selector.
 
 For large, long running workflows, it might be a good idea to configure a database and run an
 initial ``submit`` job to populate the database, and then run the cluster with ``--restart`` and no

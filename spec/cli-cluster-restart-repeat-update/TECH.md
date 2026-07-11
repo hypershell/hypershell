@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-07-11'
 phases:
 - id: P1
@@ -71,7 +71,7 @@ phases:
 - id: P5
   name: Gate --from-json in both apps (human decision) + remove --from-json/--restart
     incompat
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -273,18 +273,22 @@ Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/u
 **Satisfies:** R4, R5, R8, R9 (as applied to `--from-json`) · **Depends on:** P3, P4
 **Goal:** extend the source gate to `--from-json` in both apps and remove its `--restart` incompatibility.
 
-- [ ] `--from-json` source key: `path = abspath(FILE)[+ '@' + node]`, `fingerprint = md5(FILE bytes)`,
-  `count = len(records)`. Capture md5 in/around `load_json_tasks` (records already in memory → no 2nd
-  pass). `--from-json -` (stdin JSON) stays exempt (`<stdin>`-like).
-- [ ] Feed the JSON source through `apply_source_gate` in both `SubmitApp` and `ClusterApp`; wrap the
-  records list in a `GatedSource` (dedup filters records by fingerprint — JSON fingerprint uses `base`
-  args, `parse_inline=False`, per research/01).
-- [ ] Remove the `--from-json`+`--restart` refusal (`cluster/__init__.py:341`); allow
-  `hsx --from-json … --restart` / `--update --restart` under the same matrix.
-- [ ] Docs: note `--from-json` participates in gating (submit + cluster desc snippets).
-- [ ] Integration tests: `hs submit --from-json spec.json` twice → refuse; edited spec + `--update` →
-  novel-only; `hsx --from-json spec.json --restart` idempotent.
-- **Verify:** `uv run pytest -v -k from_json_gate`.
+- [x] `--from-json` source key: `path = abspath(FILE)[+ '@' + node]` (new `json_source_key`),
+  `fingerprint = md5(FILE bytes)`, `count = len(records)`. **Amended (build):** md5 captured in a new
+  `load_json_source(spec) -> (records, md5)` (one byte read → md5 + `json.loads`, no 2nd pass);
+  `load_json_tasks` kept as a thin wrapper. `--from-json -` (stdin JSON) → `json_source_key`=None, exempt.
+- [x] Feed the JSON source through `apply_source_gate` in `SubmitApp.prepare_json_source` and
+  `ClusterApp.prepare_json_source`; wrap the records list in a `GatedSource` (dedup filters records by
+  fingerprint — JSON fingerprint uses `base` args, `parse_inline=False`, per research/01). Stdin JSON and
+  `--no-db`/non-persistent runs bypass the gate (reserved `<stdin>` source stamped where applicable).
+- [x] Remove the `--from-json`+`--restart` refusal (was `cluster/__init__.py:352-353`); `hsx --from-json …
+  --restart` / `--update --restart` / `--repeat` now flow through the same matrix (R11-R15).
+- [x] Docs: note `--from-json` participates in gating (`submit_desc.rst` + `cluster_desc.rst`).
+- [x] Integration tests (`tests/test_submit_json.py`): `hs submit --from-json` twice → refuse (R5);
+  `--repeat` → doubles (R8); edited spec + `--update` → novel-only (R9); `hsx --from-json … --restart`
+  idempotent (R12, also proves the removed incompat).
+- **Verify:** `uv run pytest -v -k from_json_gate` — 4 passed. JSON+restart+submit suites 73 passed;
+  cross-tool CLI drive confirmed (same md5 via `hs submit` and `hsx`; restart deduped to 0 new).
 - **Touches:** `src/hypershell/submit.py`, `src/hypershell/cluster/__init__.py`,
   `docs/_include/*_desc.rst`, `tests/`.
 

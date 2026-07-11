@@ -30,5 +30,7 @@ named file is recorded as a *source* (its absolute path, a content fingerprint, 
 task count); submitting the same file again with no flag is refused, and if the path was
 seen but the content changed the refusal suggests ``--update``. Pass ``--repeat`` to
 deliberately submit all tasks again as a new source, or ``--update`` to submit only tasks
-not already present from earlier versions of the same file. Single-command and ``<stdin>``
-submissions are treated as explicit intent and are exempt from these checks.
+not already present from earlier versions of the same file. JSON task files (``--from-json``)
+are gated the same way, keyed by their absolute path together with any ``@path`` selector.
+Single-command and ``<stdin>`` submissions (including ``--from-json -``) are treated as
+explicit intent and are exempt from these checks.

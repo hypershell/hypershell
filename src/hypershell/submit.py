@@ -77,7 +77,8 @@ from hypershell.data.model import Task, Source, DIRECT_SOURCE_ID, STDIN_SOURCE_I
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
-__all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'validate_json_expansion',
+__all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 'json_source_key',
+           'validate_json_expansion',
            'GatedSource', 'source_fingerprint_and_count', 'apply_source_gate',
            'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
@@ -1065,30 +1066,32 @@ def submit_file(path: str,
                            template=template, cores=cores, memory=memory, timeout=timeout, group=group, tags=tags)
 
 
-def load_json_tasks(spec: str) -> List[dict]:
+def load_json_source(spec: str) -> Tuple[List[dict], Optional[str]]:
     """
-    Load a list of task records from a JSON file `spec`.
+    Load task records from a JSON `spec` together with its content fingerprint.
 
-    The `spec` is ``FILE[@dotted.path]``: split on the first ``@``, the remainder
-    is a dotted path of object keys locating the task list inside the document
-    (e.g. ``plan.json@results.tasks``). With no ``@`` the file's top level must
-    itself be the list. A `FILE` of ``-`` reads from ``<stdin>``.
-
-    The located node must be a non-empty list of objects; each object's key/values
-    become both a task's tags and its ``{key}`` template-expansion context.
+    Behaves exactly like :func:`load_json_tasks` (same ``FILE[@dotted.path]`` spec and
+    validation) but reads the file bytes once and also returns their md5 hex digest — the
+    content fingerprint the re-submission gate keys on, matching the md5 an ``hs submit``
+    line file records. A `FILE` of ``-`` reads from ``<stdin>`` and yields a ``None``
+    fingerprint (stdin JSON has no stable identity and stays gating-exempt).
 
     Returns:
         records (List[dict]): The list of task record objects.
+        fingerprint (Optional[str]): md5 hex of the file bytes, or None for ``<stdin>``.
     """
     filepath, _, path = spec.partition('@')
     if not filepath:
         raise ArgumentError(f'Missing filename in --from-json spec: "{spec}"')
+    fingerprint = None
     try:
         if filepath == '-':
             data = json.load(sys.stdin)
         else:
-            with open(filepath, mode='r') as stream:
-                data = json.load(stream)
+            with open(filepath, mode='rb') as stream:
+                content = stream.read()
+            fingerprint = hashlib.md5(content).hexdigest()
+            data = json.loads(content)
     except FileNotFoundError as error:
         raise ArgumentError(f'File not found: {filepath}') from error
     except json.JSONDecodeError as error:
@@ -1109,7 +1112,40 @@ def load_json_tasks(spec: str) -> List[dict]:
         if not isinstance(record, dict):
             raise ArgumentError(f'Task {index} at {location} in {filepath} is not an object '
                                 f'(found {type(record).__name__})')
-    return node
+    return node, fingerprint
+
+
+def load_json_tasks(spec: str) -> List[dict]:
+    """
+    Load a list of task records from a JSON file `spec`.
+
+    The `spec` is ``FILE[@dotted.path]``: split on the first ``@``, the remainder
+    is a dotted path of object keys locating the task list inside the document
+    (e.g. ``plan.json@results.tasks``). With no ``@`` the file's top level must
+    itself be the list. A `FILE` of ``-`` reads from ``<stdin>``.
+
+    The located node must be a non-empty list of objects; each object's key/values
+    become both a task's tags and its ``{key}`` template-expansion context.
+
+    Returns:
+        records (List[dict]): The list of task record objects.
+    """
+    return load_json_source(spec)[0]
+
+
+def json_source_key(spec: str) -> Optional[str]:
+    """
+    Absolute source key for a ``--from-json`` `spec`, or None for stdin (``-``).
+
+    The key is ``abspath(FILE)`` with any ``@dotted.path`` selector preserved, so distinct
+    node selections of one document are distinct sources (no false duplicate match) and it
+    lines up with the absolute path an ``hs submit`` line file records. A `FILE` of ``-``
+    (stdin JSON) has no stable path and returns None — gating-exempt, like ``<stdin>``.
+    """
+    filepath, _, _ = spec.partition('@')
+    if filepath == '-':
+        return None
+    return os.path.abspath(filepath) + spec[len(filepath):]
 
 
 def validate_json_expansion(records: List[dict], template: str = DEFAULT_TEMPLATE) -> None:
@@ -1200,6 +1236,7 @@ class SubmitApp(Application):
     source: IO | List[str] | None = None
     source_path: Optional[str] = None       # absolute path of a named task file (else None)
     source_id: Optional[str] = None         # resolved Source.id stamped onto submitted tasks
+    json_fingerprint: Optional[str] = None  # content md5 of a --from-json file (else None)
     task_args: List[str] = []
     task_file: str = None
     from_json: str = None
@@ -1342,7 +1379,7 @@ class SubmitApp(Application):
         if self.from_json:
             if self.task_args or self.task_file:
                 raise ArgumentError('Cannot combine --from-json with -f/--task-file or positional arguments')
-            records = load_json_tasks(self.from_json)
+            records, self.json_fingerprint = load_json_source(self.from_json)
             validate_json_expansion(records, self.template)
             log.debug(f'Loaded {len(records)} tasks from JSON ({self.from_json})')
             self.source = records
@@ -1388,12 +1425,13 @@ class SubmitApp(Application):
         expectation, committed *before* any task so an incomplete prior stays detectable
         (R1/R7). ``<stdin>`` and single-command ``<direct>`` submissions resolve their
         reserved fixed-id rows and are exempt from gating (R3) — a gating flag there is a
-        no-op and says so. ``--from-json`` gating is deferred to a later phase.
+        no-op and says so. A ``--from-json`` source is gated too (see :meth:`prepare_json_source`).
         """
         if not DATABASE_ENABLED:
             return  # non-persistent DB: nothing to record against (invariant §4)
         if self.from_json:
-            return  # JSON source gating handled in a later phase
+            self.prepare_json_source()
+            return
         if self.source is None:
             self.warn_gating_no_effect('<direct>')
             self.source_id = Source.reserved(DIRECT_SOURCE_ID).id
@@ -1413,6 +1451,28 @@ class SubmitApp(Application):
                                                      repeat=self.repeat_mode, update=self.update_mode)
             self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip,
                                       name=self.source_path)
+
+    def prepare_json_source(self: SubmitApp) -> None:
+        """Apply the re-submission gate to a ``--from-json`` source (R4/R5/R8/R9).
+
+        The JSON file's content md5 (captured in :meth:`check_source`, no second read) and
+        record count feed the same :func:`apply_source_gate` as a line file, keyed by
+        ``abspath(FILE)[@node]``. The per-task fingerprint keys off the pre-template ``args``
+        and tags (R2), so ``--update`` de-dup matches whether the tasks were first ingested
+        here or from a line file. ``--from-json -`` (stdin JSON) has no stable path and is
+        exempt, carrying the reserved ``<stdin>`` source (R3). Called in DB mode only.
+        """
+        key = json_source_key(self.from_json)
+        if key is None:
+            self.warn_gating_no_effect('<stdin>')
+            self.source_id = Source.reserved(STDIN_SOURCE_ID).id
+            self.source = GatedSource(self.source, self.source_id, name='<stdin>')
+            return
+        count = len(self.source)
+        log.info(f'Found {count} tasks in {key} (md5={self.json_fingerprint})')
+        self.source_id, skip = apply_source_gate(key, self.json_fingerprint, count,
+                                                 repeat=self.repeat_mode, update=self.update_mode)
+        self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip, name=key)
 
     def warn_gating_no_effect(self: SubmitApp, kind: str) -> None:
         """Note that re-submission gating flags are inert for exempt sources (R3)."""
