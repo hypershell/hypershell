@@ -15,6 +15,12 @@ initial ``submit`` job to populate the database, and then run the cluster with `
 input *FILE*. If the cluster is interrupted for whatever reason it can gracefully restart where it
 left off.
 
+Alternatively, pass the *FILE* directly with ``--restart``: the submission is detected, only tasks
+that never landed are submitted, and interrupted tasks are re-run — so a requeued
+``hsx <FILE> --restart`` job is safe to run repeatedly. Use ``--repeat`` to deliberately submit a
+known file's tasks again as a new source, or ``--update --restart`` to add only the tasks that are
+new since the file was last seen.
+
 Use ``--autoscaling`` with either *fixed* or *dynamic* to run a persistent, elastically scalable
 cluster using an external ``--launcher`` to bring up clients as needed.
 

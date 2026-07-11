@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-07-11'
 phases:
 - id: P1
@@ -54,7 +54,7 @@ phases:
   verify: uv run pytest -v tests/test_submit.py -k gate
 - id: P4
   name: hsx gate matrix + file-aware restart (R11-R16) + cluster docs/completions
-  status: pending
+  status: done
   satisfies:
   - R11
   - R12
@@ -234,25 +234,40 @@ Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/u
 **Satisfies:** R11, R12, R13, R14, R15, R16 · **Depends on:** P3
 **Goal:** `hsx`/`hs cluster` enforces the full matrix; `--restart` becomes file-aware and idempotent.
 
-- [ ] Add `--repeat`/`--update` to `ClusterApp`. `check_arguments`: `--update` without
+- [x] Add `--repeat`/`--update` to `ClusterApp`. `check_arguments`: `--update` without
   (`--restart`|`--repeat`) → R13; `--update`+`--repeat` → R16; **`--restart`+`--repeat` → contradictory**
   (human decision); `--update` with `--no-db` → refuse. Keep `--forever`+`--restart`,
   `--no-db`+`--restart` refusals.
-- [ ] Make `ClusterApp.source`/`input_stream` (`cluster/__init__.py:422-441`) file-aware: bare
+- [x] Make `ClusterApp.source`/`input_stream` (`cluster/__init__.py:422-441`) file-aware: bare
   `--restart` (no filepath) → `source==[]` (legacy DB resume, unchanged); with a filepath under
   restart/update/repeat → read+fingerprint and yield a `GatedSource` per `apply_source_gate` (restart
   semantics: fp match → `skip=lineage fingerprints` (R12) relying on `revert_interrupted`; fp differs →
   refuse suggest `--update`; `--update --restart` → new source + novel-only (R14); `--repeat` → new
-  source, all (R15)). No-flag hsx file reuses R5–R7 (R11).
-- [ ] Confirm new flags are **not** added to any client argv builder (`remote.py`, `ssh.py`).
-- [ ] Docs + completions (cluster): `docs/_include/cluster_{help,usage,desc}.rst`; `_hs_cluster` in
+  source, all (R15)). No-flag hsx file reuses R5–R7 (R11). New `ClusterApp.prepare_source` mirrors
+  `SubmitApp.prepare_source`; the upfront count uses `DEFAULT_TEMPLATE` (the server ingests raw lines —
+  it expands the user `--template` client-side, so the count must mirror that split, not `--template`).
+- [x] **Amendment (build): fix a pre-existing scheduler start-race in `server.py`** (see build note).
+- [x] Confirm new flags are **not** added to any client argv builder (`remote.py`, `ssh.py`) — verified
+  clean (only the existing server-side `restart_mode` plumbing is present).
+- [x] Docs + completions (cluster): `docs/_include/cluster_{help,usage,desc}.rst`; `_hs_cluster` in
   bash + zsh completions. Revise the `--restart` narrative (detection/dedup semantics).
-- [ ] New `tests/test_restart.py` (integration): R11 refuse; R12 idempotent restart (run twice; changed
+- [x] New `tests/test_restart.py` (integration): R11 refuse; R12 idempotent restart (run twice; changed
   fp → refuse); R13 ambiguous; R14 update+restart adds novel + runs; R15 repeat resubmits all;
-  `--restart --repeat` non-zero. Reuse `test_cluster.py` patterns (`hs list --count`).
-- **Verify:** `uv run pytest -v tests/test_restart.py`.
-- **Touches:** `src/hypershell/cluster/__init__.py`, `docs/_include/cluster_*.rst`,
-  `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`, `tests/test_restart.py`.
+  `--restart --repeat` non-zero; + a scheduler-race regression (new file runs against an all-completed DB).
+- **Verify:** `uv run pytest -v tests/test_restart.py` — 9 passed. Full suite 343 passed; docs build clean.
+- **Touches:** `src/hypershell/cluster/__init__.py`, `src/hypershell/server.py`,
+  `docs/_include/cluster_*.rst`, `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`,
+  `tests/test_restart.py`.
+- **Build note (amendment):** wiring a file-aware `--restart`/`--repeat`/`--update` into the cluster
+  gives the `ServerThread` **both** a live submitter *and* `restart_mode` — a combination the prior code
+  never produced (bare `--restart` had `source==[]`, no submitter). This exposed a pre-existing race:
+  `Scheduler.start()`/`load_bundle()` finalize as soon as the DB shows `total>0, remaining==0`, which is
+  exactly how a database of prior **completed** tasks reads right up until the submitter commits its
+  first novel row — so the scheduler could stop before R12/R14/R15 (and even a plain new-file `hsx`)
+  ever ran their tasks (confirmed by CLI: 4 novel tasks submitted, 0 run). Fix: `Scheduler` now takes a
+  `submitter` reference and a `submission_complete()` guard (`submitter is None or not is_alive()`); both
+  early-exit points defer while ingestion is in flight. Bounded, additive, and covered by the new
+  regression test; no lifecycle-predicate or retry change (invariants §1/§3 intact).
 
 ## Phase P5 — Gate `--from-json` (human decision)
 **Satisfies:** R4, R5, R8, R9 (as applied to `--from-json`) · **Depends on:** P3, P4

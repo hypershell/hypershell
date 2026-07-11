@@ -128,6 +128,7 @@ class Scheduler(StateMachine):
     poll_max: float
     startup_phase: bool
     current_group: Optional[int]
+    submitter: Optional[SubmitThread]
 
     state = SchedulerState.START
     states = SchedulerState
@@ -136,7 +137,7 @@ class Scheduler(StateMachine):
     def __init__(self: Scheduler, queue: QueueServer, bundlesize: int = DEFAULT_BUNDLESIZE,
                  attempts: int = DEFAULT_ATTEMPTS, eager: bool = DEFAULT_EAGER_MODE,
                  forever_mode: bool = False, restart_mode: bool = False,
-                 poll: int = DEFAULT_SERVER_POLL) -> None:
+                 poll: int = DEFAULT_SERVER_POLL, submitter: Optional[SubmitThread] = None) -> None:
         """Initialize queue and parameters."""
         self.queue = queue
         self.tasks = []
@@ -150,6 +151,19 @@ class Scheduler(StateMachine):
         self.poll_max = poll
         self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
         self.current_group = None
+        self.submitter = submitter
+
+    def submission_complete(self: Scheduler) -> bool:
+        """True once no more tasks can arrive from a co-running submitter.
+
+        The scheduler shares a process with an optional :class:`~hypershell.submit.SubmitThread`
+        (the cluster/server file-ingest path). It must not conclude "all tasks completed —
+        stop" while that submitter is still committing rows: a database holding only prior
+        *completed* tasks reads as ``remaining == 0`` right up until the first novel row lands,
+        so an unguarded early-exit would halt before the new work is ever scheduled. When there
+        is no submitter (bare ``--restart`` DB resume) submission is trivially complete.
+        """
+        return self.submitter is None or not self.submitter.is_alive()
 
     @cached_property
     def actions(self: Scheduler) -> Dict[SchedulerState, Callable[[], SchedulerState]]:
@@ -170,6 +184,10 @@ class Scheduler(StateMachine):
             if (tasks_remaining := Task.count_remaining()) == 0:
                 if self.forever_mode:
                     log.info(f'All previous tasks completed ({total_tasks:,}) - waiting for new tasks')
+                elif not self.submission_complete():
+                    # A submitter is still ingesting (e.g. `hsx FILE --restart`): the DB looks
+                    # done only because its novel rows have not landed yet. Wait in LOAD.
+                    log.info(f'All previous tasks completed ({total_tasks:,}) - waiting for incoming tasks')
                 else:
                     log.info(f'All previous tasks completed ({total_tasks:,}) - stopping')
                     return SchedulerState.FINAL
@@ -198,7 +216,10 @@ class Scheduler(StateMachine):
             self.startup_phase = False
             self.poll = SERVER_POLL_MIN
             return SchedulerState.PACK
-        elif not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0 and not self.startup_phase:
+        elif (not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0
+              and (not self.startup_phase or self.submission_complete())):
+            # Nothing left to schedule, and either real work has already been seen this run
+            # or the submitter has finished — safe to stop (won't fire mid-ingest).
             return SchedulerState.FINAL
         else:
             group_info = Task.increment_group(self.current_group, attempts=self.attempts)
@@ -252,11 +273,13 @@ class SchedulerThread(Thread):
                  eager: bool = DEFAULT_EAGER_MODE,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
-                 poll: int = DEFAULT_SERVER_POLL) -> None:
+                 poll: int = DEFAULT_SERVER_POLL,
+                 submitter: Optional[SubmitThread] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-scheduler')
         self.machine = Scheduler(queue=queue, bundlesize=bundlesize, attempts=attempts, eager=eager,
-                                 forever_mode=forever_mode, restart_mode=restart_mode, poll=poll)
+                                 forever_mode=forever_mode, restart_mode=restart_mode, poll=poll,
+                                 submitter=submitter)
 
     def run_with_exceptions(self: SchedulerThread) -> None:
         """Run machine."""
@@ -805,7 +828,7 @@ class ServerThread(Thread):
                 bundlesize=bundlesize, bundlewait=bundlewait, template=submit_template)
             self.scheduler = SchedulerThread(queue=self.queue, bundlesize=bundlesize, attempts=max_retries + 1,
                                              eager=eager, forever_mode=forever_mode, restart_mode=restart_mode,
-                                             poll=poll)
+                                             poll=poll, submitter=self.submitter)
         if self.no_confirm:
             self.confirm = None
         else:

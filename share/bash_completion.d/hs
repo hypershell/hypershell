@@ -653,7 +653,7 @@ function _hs_cluster() {
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 	local all_opts="-h --help -N --num-threads -t --template -H --bind -p --port
 	--no-tls --tls-key --tls-cert --tls-ca -b --bundlesize -w --bundlewait
-	-r --max-retries --eager -Q --poll --no-db --initdb --no-confirm --forever --restart
+	-r --max-retries --eager -Q --poll --no-db --initdb --no-confirm --forever --restart --repeat --update
 	--ssh --mpi --launcher --ssh-args --ssh-group -E --env --remote-exe
 	-d --delay-start --capture -o --output -e --errors -f --failures
 	-c --cores -m --memory -C --client-cores -M --client-memory --monitor

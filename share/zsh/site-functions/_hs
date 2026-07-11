@@ -573,7 +573,9 @@ function _hs_cluster() {
         '(--no-db --initdb)--initdb[Auto-initialize database]' \
         '--no-confirm[Disable client confirmation of task bundle received]' \
         '--forever[Schedule forever]' \
-        '--restart[Start scheduling from last completed task]' \
+        '(--repeat)--restart[Resume a prior run; with FILE submit only tasks not already present]' \
+        '(--update --restart)--repeat[Re-submit a known file again as a new source]' \
+        '(--repeat)--update[Submit only new tasks from a known file (use with --restart)]' \
         '(--mpi --launcher)--ssh[Launch directly with SSH host(s)]::host:_hs_known_hosts' \
         '(--ssh --launcher)--mpi[Same as --launcher=mpirun]' \
         '(--ssh --mpi)--launcher[Use specific launch interface]:launcher:_command_names -e' \
