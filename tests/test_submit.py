@@ -18,6 +18,7 @@ from cmdkit.app import exit_status
 # Internal libs
 from tests import main, main_lines, NO_OUTPUT, create_taskfile_echo, assert_output, UUID_PATTERN
 from hypershell.submit import SubmitApp
+from hypershell.data.model import Task
 
 
 @mark.integration
@@ -213,3 +214,24 @@ def test_submit_bundled(temp_site: Path) -> None:
     assert main_lines(['hs', 'list', 'args', '-f', 'plain', '-s', 'submit_time']) == (
         exit_status.success, [f'echo {n}' for n in range(100)], NO_OUTPUT
     )
+
+
+@mark.unit
+def test_inline_memory_tag_parses_units_to_bytes() -> None:
+    """An inline ``memory:<size>`` resource tag is parsed to integer bytes — like the ``--memory``
+    flag (parse_bytes) — not stored as a raw string.
+
+    smart_coerce (used for inline tag values) leaves unit-bearing strings like ``2GB`` untouched, so
+    without explicit parsing ``Task.memory`` would be a string and client-side resource accounting
+    (``memory_total < task.memory``, an int vs str comparison) crashes.
+    """
+    # The reported form: an inline HYPERSHELL comment carrying a unit suffix.
+    task = Task.new(args='echo AAA #HYPERSHELL: cores:1 memory:2GB timeout:10')
+    assert task.memory == 2147483648            # 2 * 1024**3
+    assert task.cores == 1 and task.timeout == 10
+    # The tag= kwarg form resolves identically.
+    assert Task.new(args='echo', tag={'memory': '512MB'}).memory == 536870912
+    # Unit-less, already-integer, and absent values are unaffected (no regression).
+    assert Task.new(args='echo', tag={'memory': '2000'}).memory == 2000
+    assert Task.new(args='echo', tag={'memory': 4096}).memory == 4096
+    assert Task.new(args='echo').memory is None
