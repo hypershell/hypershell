@@ -25,7 +25,7 @@ from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSON
 # Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
-from hypershell.core.types import JSONData, to_json_type, from_json_type, serialize, deserialize
+from hypershell.core.types import JSONData, to_json_type, from_json_type, serialize, deserialize, parse_bytes
 from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
@@ -354,7 +354,11 @@ class Task(Entity):
         tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
         other['group'] = tag.pop('group', group)
         other['cores'] = tag.pop('cores', other.get('cores', None))
-        other['memory'] = tag.pop('memory', other.get('memory', None))
+        # A memory value may arrive as a unit-bearing string ('2GB') from an inline
+        # `memory:` tag (parsed by smart_coerce, which leaves units alone) — parse it to
+        # integer bytes as the `--memory` flag does, so resource accounting stays numeric.
+        memory = tag.pop('memory', other.get('memory', None))
+        other['memory'] = parse_bytes(memory) if isinstance(memory, str) else memory
         other['timeout'] = tag.pop('timeout', other.get('timeout', None))
         return Task(id=uuid(), args=args,
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
