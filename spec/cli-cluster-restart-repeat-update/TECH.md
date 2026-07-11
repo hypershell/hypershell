@@ -1,0 +1,266 @@
+---
+slug: cli-cluster-restart-repeat-update
+title: "Safe re-submission: --restart / --repeat / --update source gating"
+kind: feature
+appetite: big
+status: in_progress
+branch: feature/cli-cluster-restart-repeat-update
+base: develop
+current_phase: P1
+last_updated: "2026-07-11"
+phases:
+  - id: P1
+    name: "Schema + fingerprint core (Source entity, Task.source/fingerprint, timescale groundwork, indices)"
+    status: pending
+    satisfies: [R1, R2, R17]
+    depends_on: []
+    parallel: false
+    hammerable: false
+    hill: uphill
+    verify: "uv run pytest -v -m unit tests/test_source.py"
+  - id: P2
+    name: "Submit-flow stamping seam (GatedSource, Loader stamp+dedup mechanism, upfront read/count)"
+    status: pending
+    satisfies: [R3, R4]
+    depends_on: [P1]
+    parallel: false
+    hammerable: false
+    hill: uphill
+    verify: "uv run pytest -v -m integration -k source_stamp"
+  - id: P3
+    name: "hs submit gate matrix (R5-R10) + count-warn + logging + submit docs/completions"
+    status: pending
+    satisfies: [R5, R6, R7, R8, R9, R10, R18]
+    depends_on: [P2]
+    parallel: false
+    hammerable: false
+    hill: uphill
+    verify: "uv run pytest -v tests/test_submit.py -k gate"
+  - id: P4
+    name: "hsx gate matrix + file-aware restart (R11-R16) + cluster docs/completions"
+    status: pending
+    satisfies: [R11, R12, R13, R14, R15, R16]
+    depends_on: [P3]
+    parallel: false
+    hammerable: false
+    hill: uphill
+    verify: "uv run pytest -v tests/test_restart.py"
+  - id: P5
+    name: "Gate --from-json in both apps (human decision) + remove --from-json/--restart incompat"
+    status: pending
+    satisfies: [R4, R5, R8, R9]
+    depends_on: [P3, P4]
+    parallel: false
+    hammerable: false
+    hill: uphill
+    verify: "uv run pytest -v -k from_json_gate"
+  - id: P6
+    name: "Presentation (source display) + man pages + full sphinx build + full pytest sweep"
+    status: pending
+    satisfies: [R18]
+    depends_on: [P4, P5]
+    parallel: false
+    hammerable: false
+    hill: uphill
+    verify: "uv run pytest -v && uv run sphinx-build docs docs/_build"
+review:
+  last_reviewed_commit: ""
+  verdict: none
+  blocked_reason: ""
+---
+
+# TECH.md — Safe re-submission: `--restart` / `--repeat` / `--update` source gating
+
+The **context engine and finite-state machine** for building this feature. Frontmatter above is the
+resume ground-truth (`uv run python .agents/factory/bin/next_phase.py
+spec/cli-cluster-restart-repeat-update/TECH.md`); the per-phase checklists are the work.
+
+- **Vision / requirements (locked):** [`GOAL.md`](GOAL.md) — R-IDs are the contract.
+- **Authoritative design:** [`PLAN.md`](PLAN.md).
+- **Backing research:** [`research/00-digest.md`](research/00-digest.md) + briefs `01`–`09`.
+
+## Conventions (apply to every phase)
+
+- Invariants + commit/style rules come from [`AGENTS.md`](../../AGENTS.md); footgun checklist in
+  [`.agents/factory/invariants.md`](../../.agents/factory/invariants.md).
+- One phase per `hs-build` invocation; one atomic commit with **both** code and the `TECH.md` state
+  change; branch subjects `WIP: P<n> — …` (squashed at `hs-publish`, where the same-commit docs rule
+  resolves). **No `Co-Authored-By` trailer.**
+- Guard every source write / gate with `queue_config is None and not in_memory` (invariant §4).
+- Refusals raise `cmdkit.cli.ArgumentError` → `exit_status.bad_argument` (2); never invent literals.
+- The task fingerprint column is **`Task.fingerprint`** (not `identity` — too close to `id`), matching
+  `Source.fingerprint`. All new tests tagged `@mark.unit` or `@mark.integration`.
+
+---
+
+## Phase P1 — Schema + fingerprint core + Timescale groundwork
+**Satisfies:** R1, R2, R17 · **Depends on:** —
+**Goal:** the DB substrate — a `Source` entity, `Task.source`/`Task.fingerprint` columns, indices, the
+fingerprint computation, and the `timescale` provider alias/gate — landing on a fresh `hs initdb`, with
+unit-tested fingerprint semantics. No submit behavior change yet (columns populate only when a
+source/raw_args is supplied).
+
+- [ ] **Timescale groundwork (`data/core.py`):** add `'timescale'`/`'timescaledb'` → `'postgresql+psycopg'`
+  to `providers` (`:173`); accept the aliases wherever `config.provider == 'postgres'` is special-cased
+  (`get_url` file-pop, `:227`). Add a **`uuid7`-extra gate** (mirror the turso gate `:207-212`): if
+  provider ∈ timescale aliases and `import uuid_utils` fails → `display_critical(...)` +
+  `sys.exit(exit_status.runtime_error)`. Emit a one-line groundwork warning that Timescale hypertable
+  management (post-`create_all` hook) is not yet implemented. **Do not touch `core/uuid.py`.**
+- [ ] Module constants `DIRECT_SOURCE_ID` / `STDIN_SOURCE_ID` (fixed well-known UUIDs) in `data/model.py`.
+- [ ] Add **`Source`** entity (mirror `Client`): `id` `UUID` pk (value from `uuid()`), `path` `TEXT`,
+  `fingerprint` `TEXT`, `task_count` `INTEGER`, `created` `DATETIME`; `columns` dict; inner
+  `NotFound/NotDistinct/AlreadyExists`; `from_id`; `new(path, fingerprint, task_count)` →
+  `id=uuid()`, `created=datetime.now().astimezone()`. No lineage-pointer column (lineage = same `path`).
+- [ ] Add `Task.source` (shared **`UUID`** type, nullable — native on postgres, holds a real
+  `Source.id`/reserved-const id) and `Task.fingerprint` (`TEXT`, nullable); append both to `Task.columns`
+  (`model.py:281`) for wire round-trip. (Accept raw UUID/md5 auto-appearing in `hs list --json/csv` /
+  `-x`; human-readable resolution is P6.)
+- [ ] `Task.compute_fingerprint(raw_command, group, tags) -> str` (md5 of canonical JSON of
+  `{'args','group','tags'}` with `sort_keys`, `part` dropped from tags). Add `raw_args`, `fingerprint`,
+  `source` kwargs to `Task.new`; derive `raw_command` (`split_argline(raw_args)[0]` for line,
+  `raw_args` for JSON, fallback `args`); compute+set `fingerprint` when not supplied; pass `source`.
+- [ ] Propagate on retry: `__schedule_next_failed_tasks` (`model.py:555`) passes
+  `fingerprint=task.fingerprint` **and** `source=task.source`.
+- [ ] Classmethods: `Source.lookup(path)`, `Source.matching(path, fingerprint)`,
+  `Source.reserved(const_id)` (lazy get-or-create by PK; `path` = sentinel), `Source.paths_for_ids(ids)`
+  (presentation), `Task.count_for_source(id)`, `Task.fingerprints_for_sources(ids) -> set[str]`.
+- [ ] Indices: `index_source_lookup(Source.path, Source.fingerprint)`;
+  `index_tasks_source(Task.source, Task.fingerprint)` — **partial excluding** `DIRECT_SOURCE_ID`/
+  `STDIN_SOURCE_ID` (`postgresql_where`/`sqlite_where`). **No BRIN** (lean on Timescale compression).
+- [ ] New `tests/test_source.py` (unit): fingerprint order-independent over tag order; stable across
+  template change + differing uuid/attempt; differs on args/group/tag change; `part`/resource knobs
+  excluded; fresh `initdb` yields the `source` table + indices (SQLAlchemy inspect).
+- **Verify:** `uv run pytest -v -m unit tests/test_source.py`.
+- **Touches:** `src/hypershell/data/core.py`, `src/hypershell/data/model.py`, `tests/test_source.py`.
+
+## Phase P2 — Submit-flow stamping seam
+**Satisfies:** R3, R4 · **Depends on:** P1
+**Goal:** named-file submissions create a `Source` row and stamp every task with `source` +
+`fingerprint`, via a seam that also supports de-dup — without threading kwargs through the cluster core.
+Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/update decisions yet.
+
+- [ ] Add **`GatedSource(iterable, source_id, skip_fingerprints=None, name=None)`** in `submit.py`
+  (`__iter__` delegates; exposes `.source_id`/`.skip_fingerprints`/`.name`).
+- [ ] `Loader.__init__` unwraps `GatedSource` (store `source_id`/`skip`, then `iter(inner)`). In
+  `load_line_task`/`load_json_task` pass `raw_args`; set `task.source = self.source_id`; after build, if
+  `self.skip and task.fingerprint in self.skip` → skip (`GET`, no `put_task`, no `count++`), logging the
+  running present/new tally. `SubmitThread`/`LiveSubmitThread.source_name` surface `GatedSource.name`.
+- [ ] `source_fingerprint_and_count(path, template) -> (md5_hex, count)`: one streaming pass —
+  `hashlib.md5` over raw bytes + count via a **shared task-or-not predicate**
+  (`bool(split_argline(template.expand(line.strip()))[0])`) reused by the `Loader`.
+- [ ] `SubmitApp.check_source`: capture `os.path.abspath(filepath)` for named files. For stdin /
+  single-command, resolve the reserved source id via `Source.reserved(STDIN_SOURCE_ID)` /
+  `Source.reserved(DIRECT_SOURCE_ID)` (get-or-create). `submit_one` stamps
+  `source=Source.reserved(DIRECT_SOURCE_ID)`.
+- [ ] Minimal wiring so a plain `hs submit -f FILE` (no new flags) creates a `Source` row (expected
+  count written **before** tasks; guarded by DB-mode) and hands a `GatedSource(source_id=<uuid>)` to
+  `submit_from`. `<stdin>` → `GatedSource(source_id=Source.reserved(STDIN_SOURCE_ID))`.
+- [ ] Integration test (`test_submit.py` or `test_source.py`): after `hs submit -f f.in`, tasks carry
+  a non-null `source`/`fingerprint`; a `source` row exists with `task_count` == parsed task count;
+  blank/comment/inline-tag-only lines excluded from the count.
+- **Verify:** `uv run pytest -v -m integration -k source_stamp`.
+- **Touches:** `src/hypershell/submit.py`, `src/hypershell/data/model.py` (helpers if needed),
+  `tests/test_submit.py`.
+
+## Phase P3 — `hs submit` gate matrix
+**Satisfies:** R5, R6, R7, R8, R9, R10, R18 · **Depends on:** P2
+**Goal:** `hs submit` enforces the plain-file matrix and logs its reasoning.
+
+- [ ] Add `--repeat`/`--update` (`store_true`) to `SubmitApp`; add `check_arguments` rejecting
+  `--update`+`--repeat` (R10). Register in usage/help interface strings.
+- [ ] Implement shared **`apply_source_gate(path, fingerprint, count, *, repeat, update, restart=False)`**
+  in `submit.py`: returns `(source_id, skip_fingerprints)` and raises `ArgumentError` on refusal.
+  Decisions: no-flag + match → refuse naming prior (R5); no-flag + path-seen-fp-differs → refuse suggest
+  `--update` (R6); count-warn when `Task.count_for_source(prior) < prior.task_count` (R7); `--repeat` →
+  new source, `skip=None` (R8); `--update` → new source,
+  `skip=Task.fingerprints_for_sources(Source.lookup(path))` (R9). Create the `Source` row (expected count
+  first). Emit R18 logs (found N + md5, prior source, present/new, refusal reason).
+- [ ] `SubmitApp.run` calls `apply_source_gate` for named files (DB path only), wraps source in
+  `GatedSource`. Exempt: `-q`, `--no-db`/in-memory sqlite, `<stdin>`, `<direct>`.
+- [ ] Docs + completions (submit): `docs/_include/submit_{help,usage,desc}.rst`;
+  `share/bash_completion.d/hs` (`_hs_submit`), `share/zsh/site-functions/_hs` (`_hs_submit`) —
+  add `--repeat`/`--update` (+ zsh mutual-exclusion pair). Keep interface strings + snippets in lockstep.
+- [ ] Integration tests (`test_submit.py`): R5 refuse, R6 suggest-update, R7 count-warn (mechanism:
+  cancel/delete a subset then re-detect), R8 doubles, R9 novel-only, R10 non-zero; `assert_output` on
+  the R18 logs; R3 exempt (`hs submit 'echo x'` twice both succeed; `seq 4 | hs submit -f -` twice both
+  succeed).
+- **Verify:** `uv run pytest -v tests/test_submit.py -k gate`.
+- **Touches:** `src/hypershell/submit.py`, `docs/_include/submit_*.rst`,
+  `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`, `tests/test_submit.py`.
+
+## Phase P4 — `hsx` gate matrix + file-aware restart
+**Satisfies:** R11, R12, R13, R14, R15, R16 · **Depends on:** P3
+**Goal:** `hsx`/`hs cluster` enforces the full matrix; `--restart` becomes file-aware and idempotent.
+
+- [ ] Add `--repeat`/`--update` to `ClusterApp`. `check_arguments`: `--update` without
+  (`--restart`|`--repeat`) → R13; `--update`+`--repeat` → R16; **`--restart`+`--repeat` → contradictory**
+  (human decision); `--update` with `--no-db` → refuse. Keep `--forever`+`--restart`,
+  `--no-db`+`--restart` refusals.
+- [ ] Make `ClusterApp.source`/`input_stream` (`cluster/__init__.py:422-441`) file-aware: bare
+  `--restart` (no filepath) → `source==[]` (legacy DB resume, unchanged); with a filepath under
+  restart/update/repeat → read+fingerprint and yield a `GatedSource` per `apply_source_gate` (restart
+  semantics: fp match → `skip=lineage fingerprints` (R12) relying on `revert_interrupted`; fp differs →
+  refuse suggest `--update`; `--update --restart` → new source + novel-only (R14); `--repeat` → new
+  source, all (R15)). No-flag hsx file reuses R5–R7 (R11).
+- [ ] Confirm new flags are **not** added to any client argv builder (`remote.py`, `ssh.py`).
+- [ ] Docs + completions (cluster): `docs/_include/cluster_{help,usage,desc}.rst`; `_hs_cluster` in
+  bash + zsh completions. Revise the `--restart` narrative (detection/dedup semantics).
+- [ ] New `tests/test_restart.py` (integration): R11 refuse; R12 idempotent restart (run twice; changed
+  fp → refuse); R13 ambiguous; R14 update+restart adds novel + runs; R15 repeat resubmits all;
+  `--restart --repeat` non-zero. Reuse `test_cluster.py` patterns (`hs list --count`).
+- **Verify:** `uv run pytest -v tests/test_restart.py`.
+- **Touches:** `src/hypershell/cluster/__init__.py`, `docs/_include/cluster_*.rst`,
+  `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`, `tests/test_restart.py`.
+
+## Phase P5 — Gate `--from-json` (human decision)
+**Satisfies:** R4, R5, R8, R9 (as applied to `--from-json`) · **Depends on:** P3, P4
+**Goal:** extend the source gate to `--from-json` in both apps and remove its `--restart` incompatibility.
+
+- [ ] `--from-json` source key: `path = abspath(FILE)[+ '@' + node]`, `fingerprint = md5(FILE bytes)`,
+  `count = len(records)`. Capture md5 in/around `load_json_tasks` (records already in memory → no 2nd
+  pass). `--from-json -` (stdin JSON) stays exempt (`<stdin>`-like).
+- [ ] Feed the JSON source through `apply_source_gate` in both `SubmitApp` and `ClusterApp`; wrap the
+  records list in a `GatedSource` (dedup filters records by fingerprint — JSON fingerprint uses `base`
+  args, `parse_inline=False`, per research/01).
+- [ ] Remove the `--from-json`+`--restart` refusal (`cluster/__init__.py:341`); allow
+  `hsx --from-json … --restart` / `--update --restart` under the same matrix.
+- [ ] Docs: note `--from-json` participates in gating (submit + cluster desc snippets).
+- [ ] Integration tests: `hs submit --from-json spec.json` twice → refuse; edited spec + `--update` →
+  novel-only; `hsx --from-json spec.json --restart` idempotent.
+- **Verify:** `uv run pytest -v -k from_json_gate`.
+- **Touches:** `src/hypershell/submit.py`, `src/hypershell/cluster/__init__.py`,
+  `docs/_include/*_desc.rst`, `tests/`.
+
+## Phase P6 — Presentation + man pages + full build + full sweep
+**Satisfies:** R18 · **Depends on:** P4, P5
+**Goal:** resolve `source` for humans, finish the same-commit surface, prove the whole feature green.
+
+- [ ] Presentation: `format_source(path, *, relative=False)` in `core/pretty_print.py` (sentinels
+  `^<.*>$` pass through; real paths absolute; `@node` json specs opaque — never relativize); add a
+  resolved `source:` line to `NORMAL_MODE_TEMPLATE` (`task.py:1285`); resolve in module `print_normal`
+  (`task.py:1352`, single `Source.from_id`) and `TaskSearchApp.print_normal` (`task.py:777`, one batched
+  `Source.paths_for_ids` per page via a new optional `source_map` arg — avoid N+1). **Keep `fingerprint`
+  out** of the normal template (reachable via `-x`/json/csv). Machine formats keep the raw UUID.
+- [ ] Update man pages `share/man/man1/hs.1`, `share/man/man1/hsx.1` for `--repeat`/`--update` and the
+  revised `--restart`. (CI list `tests.yml:95-112` + `pyproject.toml` mapping unchanged — no new files.)
+- [ ] `uv run sphinx-build docs docs/_build` — confirm **no new** warnings vs. the pre-existing
+  `task_submit.rst`/`manual.rst` toctree warnings.
+- [ ] `bash -n share/bash_completion.d/hs`; `zsh -n share/zsh/site-functions/_hs`.
+- [ ] Full `uv run pytest -v` green; add any missing edge cases surfaced during the sweep (e.g. R7
+  determinism, `--update` on unseen path == submit-all).
+- **Verify:** `uv run pytest -v && uv run sphinx-build docs docs/_build`.
+- **Touches:** `src/hypershell/core/pretty_print.py`, `src/hypershell/task.py`,
+  `share/man/man1/hs.1`, `share/man/man1/hsx.1`, `docs/_include/*.rst`, `tests/`.
+
+---
+
+## How `hs-build` drives this
+
+1. `next_phase.py` prints the next actionable phase (statuses authoritative; `current_phase`
+   reconciled).
+2. Pre-flight: clean tree, on `branch`, `base` reachable.
+3. Execute every `[ ]`; consult `PLAN.md` / `research/` for detail.
+4. Run the phase `verify:` — never advance on a checkbox alone.
+5. Amend this file if reality diverges (`set_phase.py`; note in commit body). STOP + escalate only on a
+   **`GOAL.md` contradiction**.
+6. Mark phase `done`, advance `current_phase`, `--touch`; one `WIP:` commit; stop and report.
