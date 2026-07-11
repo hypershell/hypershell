@@ -477,6 +477,8 @@ function _hs_submit() {
         '(-g --group)'{-g,--group}'[Task group for dependency management]:group:' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Number of lines to buffer]:size:(1 10 100 1000)' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(--update)--repeat[Re-submit a known file again as a new source]' \
+        '(--repeat)--update[Submit only tasks not already present from a known file]' \
         '--initdb[Auto-initialize database]' \
         '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
         '(-)--[End of options; task arguments follow]' \

@@ -78,7 +78,7 @@ from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'validate_json_expansion',
-           'GatedSource', 'source_fingerprint_and_count',
+           'GatedSource', 'source_fingerprint_and_count', 'apply_source_gate',
            'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
@@ -156,6 +156,95 @@ def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) ->
             if line_is_task(line, engine):
                 count += 1
     return digest.hexdigest(), count
+
+
+def _new_source_id(path: str, fingerprint: str, count: int) -> str:
+    """Persist a fresh :class:`Source` row and return its id (R1).
+
+    The expected ``count`` is recorded *before* any task is committed, so an interrupted
+    ingest leaves a source whose recorded count exceeds the tasks that actually landed —
+    exactly the signal :func:`_warn_if_incomplete` reports on a later re-submission (R7).
+    """
+    source = Source.new(path=path, fingerprint=fingerprint, task_count=count)
+    Source.add(source)
+    log.debug(f'Recorded source {source.id} for {path} ({count} tasks)')
+    return source.id
+
+
+def _warn_if_incomplete(source: Source) -> None:
+    """R7: warn when fewer tasks landed for `source` than its recorded count."""
+    if source.task_count is None:
+        return
+    landed = Task.count_for_source(source.id)
+    if landed < source.task_count:
+        log.warning(f'Prior submission of {source.path} appears incomplete: '
+                    f'{landed} of {source.task_count} tasks present (source {source.id})')
+
+
+def apply_source_gate(path: str, fingerprint: str, count: int, *,
+                      repeat: bool, update: bool, restart: bool = False) -> Tuple[str, Optional[set]]:
+    """Decide whether to submit, de-dup, or refuse a named-file submission.
+
+    Consults the :class:`Source` table for the file's ``(path, fingerprint)`` and returns
+    the ``source_id`` to stamp onto tasks plus an optional ``skip_fingerprints`` set — task
+    identities already present in the same-path lineage, which the :class:`Loader` drops for
+    de-dup. Raises :class:`~cmdkit.cli.ArgumentError` (→ ``exit_status.bad_argument``) on a
+    refusal, with an actionable message. Emits the R18 detection logging (prior source,
+    incomplete-prior warning, submit/de-dup intent, refusal reason).
+
+    This is the shared gate for both entry points: ``hs submit`` calls it with
+    ``restart=False`` (matrix R5-R10); ``hsx``/``hs cluster`` also passes ``restart`` (matrix
+    R11-R16). Callers guarantee a *valid* flag combination — contradictory/ambiguous combos
+    are rejected upstream in each app's ``check_arguments`` (``--update``+``--repeat`` R10/R16;
+    ``hsx --update`` without ``--restart``/``--repeat`` R13; ``hsx --restart``+``--repeat``).
+
+    Decision table (prior state of `path` P with fingerprint F):
+
+    ==============  ==================  ============================  ============================
+    flags           none                match (P,F seen)              differs (P seen, F changed)
+    ==============  ==================  ============================  ============================
+    (no flag)       new source, all     REFUSE, name prior (R5)       REFUSE, suggest --update (R6)
+    --repeat        new source, all     new source, all (R8/R15)      new source, all (R8/R15)
+    --update        new source, all     new source, novel-only (R9)   new source, novel-only (R9/R14)
+    --restart       new source, all     reuse source, novel-only(R12) REFUSE, suggest --update (R12)
+    ==============  ==================  ============================  ============================
+    """
+    match = Source.matching(path, fingerprint)
+    lineage = Source.lookup(path)
+    if lineage:
+        _warn_if_incomplete(match or lineage[0])  # R7 — orthogonal to the submit/refuse decision
+    if repeat:
+        # R8 / R15 — brand-new source, submit everything even on an identical match.
+        log.info(f'Submitting all {count} tasks from {path} as a new source (--repeat)')
+        return _new_source_id(path, fingerprint, count), None
+    if update:
+        # R9 / R14 — new source version; submit only identities absent from the same-path lineage.
+        skip = Task.fingerprints_for_sources([source.id for source in lineage])
+        log.info(f'Updating {path}: {len(skip)} task identity(ies) already present; submitting only new tasks')
+        return _new_source_id(path, fingerprint, count), skip
+    if restart:
+        # R12 — file-aware restart (cluster). Reusing the matched source keeps requeues
+        # idempotent (no row/count drift); the server's revert-interrupted flow re-runs any
+        # mid-flight task, so novel-only here submits exactly what never landed.
+        if match:
+            skip = Task.fingerprints_for_sources([source.id for source in lineage])
+            log.info(f'Restarting {path} (source {match.id}): {len(skip)} present; submitting only new tasks')
+            return match.id, skip
+        if lineage:
+            raise ArgumentError(f'File {path} differs from its prior submission (content changed); '
+                                f'pass --update --restart to submit only the new tasks')
+        log.info(f'Submitting all {count} tasks from {path} as a new source (--restart)')
+        return _new_source_id(path, fingerprint, count), None
+    # No gating flag — R5 / R6 / R11.
+    if match:
+        raise ArgumentError(f'File {path} was already submitted as source {match.id} '
+                            f'({match.task_count} tasks, {match.created}); '
+                            f'pass --repeat to submit it again, or --update to add only new tasks')
+    if lineage:
+        raise ArgumentError(f'A file at {path} was previously submitted with different content; '
+                            f'pass --update to submit only new tasks, or --repeat to submit all again')
+    log.info(f'Submitting all {count} tasks from {path} as a new source')
+    return _new_source_id(path, fingerprint, count), None
 
 
 class LoaderState(State, Enum):
@@ -1057,7 +1146,8 @@ PAD_NAME: Final[str] = ' ' * len(APP_NAME)
 APP_USAGE: Final[str] = f"""\
 Usage:
   {APP_NAME} [-h] [ARGS... | -f FILE | --from-json SPEC] [-q [-H ADDR] [-p NUM] [-k KEY] | --initdb]
-  {PAD_NAME} [-b NUM] [-w SEC] [-c NUM] [-m MEM] [-W SEC] [-g NUM] [--template CMD] [-t TAG...]
+  {PAD_NAME} [-b NUM] [-w SEC] [-c NUM] [-m MEM] [-W SEC] [-g NUM] [--repeat | --update]
+  {PAD_NAME} [--template CMD] [-t TAG...]
   {PAD_NAME} [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
   Submit one or more tasks.\
@@ -1078,6 +1168,8 @@ Arguments:
 Options:
   -f, --task-file    FILE    Path to task file ("-" for <stdin>).
       --from-json    SPEC    Read tasks from a JSON file ("FILE[@path]").
+      --repeat               Re-submit a known file's tasks again as a new source.
+      --update               Submit only tasks not already present from a known file.
   -q, --queue                Submit to live queue instead of database.
   -H, --host         ADDR    Hostname for server (default: {DEFAULT_HOST}). Used with --queue.
   -p, --port         NUM     Port number for server (default: {DEFAULT_PORT}). Used with --queue.
@@ -1135,6 +1227,12 @@ class SubmitApp(Application):
     group: Optional[int] = None
     interface.add_argument('-g', '--group', type=int, default=group)
 
+    repeat_mode: bool = False
+    interface.add_argument('--repeat', action='store_true', dest='repeat_mode')
+
+    update_mode: bool = False
+    interface.add_argument('--update', action='store_true', dest='update_mode')
+
     auto_initdb: bool = False
     interface.add_argument('--initdb', action='store_true', dest='auto_initdb')
 
@@ -1171,8 +1269,14 @@ class SubmitApp(Application):
         **get_shared_exception_mapping(__name__)
     }
 
+    def check_arguments(self: SubmitApp) -> None:
+        """Reject contradictory re-submission flags before doing any work (R10)."""
+        if self.update_mode and self.repeat_mode:
+            raise ArgumentError('Cannot combine --update with --repeat')
+
     def run(self: SubmitApp) -> None:
         """Run submit thread."""
+        self.check_arguments()
         self.check_source()
         self.queue = None
         if self.queue_mode:
@@ -1276,36 +1380,44 @@ class SubmitApp(Application):
             self.source = None
 
     def prepare_source(self: SubmitApp) -> None:
-        """Resolve the task Source and wrap the stream so tasks are stamped (DB mode only).
+        """Resolve the task Source, apply the re-submission gate, and wrap the stream (DB mode only).
 
-        A named file gets a fresh :class:`Source` row whose recorded ``task_count`` is the
-        upfront-counted expectation, committed *before* any task so an incomplete prior
-        submission stays detectable (R1/R7). ``<stdin>`` and single-command ``<direct>``
-        submissions resolve their reserved fixed-id rows and are exempt from gating (R3).
-        ``--from-json`` gating is deferred to a later phase. No refuse/repeat/update
-        decisions happen here — only stamping (that gate matrix lands in P3).
+        A named file passes through :func:`apply_source_gate` (R5-R10): a duplicate or
+        changed-content re-submission is refused unless ``--repeat``/``--update`` relaxes it,
+        and the resolved :class:`Source` row's ``task_count`` is the upfront-counted
+        expectation, committed *before* any task so an incomplete prior stays detectable
+        (R1/R7). ``<stdin>`` and single-command ``<direct>`` submissions resolve their
+        reserved fixed-id rows and are exempt from gating (R3) — a gating flag there is a
+        no-op and says so. ``--from-json`` gating is deferred to a later phase.
         """
         if not DATABASE_ENABLED:
             return  # non-persistent DB: nothing to record against (invariant §4)
         if self.from_json:
             return  # JSON source gating handled in a later phase
         if self.source is None:
+            self.warn_gating_no_effect('<direct>')
             self.source_id = Source.reserved(DIRECT_SOURCE_ID).id
         elif self.source is sys.stdin or not self.source.seekable():
             # Real <stdin> and non-seekable named inputs (process substitution, FIFOs, a
             # piped /dev/stdin) have no stable identity and cannot be re-read for an upfront
             # count — stream them under the reserved <stdin> source, exempt from gating. A
             # second read would drain the pipe and silently drop every task.
+            self.warn_gating_no_effect('<stdin>')
             self.source_id = Source.reserved(STDIN_SOURCE_ID).id
             name = '<stdin>' if self.source is sys.stdin else self.source_path
             self.source = GatedSource(self.source, self.source_id, name=name)
         else:
             fingerprint, count = source_fingerprint_and_count(self.source_path, self.template)
             log.info(f'Found {count} tasks in {self.source_path} (md5={fingerprint})')
-            source = Source.new(path=self.source_path, fingerprint=fingerprint, task_count=count)
-            Source.add(source)
-            self.source_id = source.id
-            self.source = GatedSource(self.source, self.source_id, name=self.source_path)
+            self.source_id, skip = apply_source_gate(self.source_path, fingerprint, count,
+                                                     repeat=self.repeat_mode, update=self.update_mode)
+            self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip,
+                                      name=self.source_path)
+
+    def warn_gating_no_effect(self: SubmitApp, kind: str) -> None:
+        """Note that re-submission gating flags are inert for exempt sources (R3)."""
+        if self.repeat_mode or self.update_mode:
+            log.warning(f'--repeat/--update have no effect for {kind} submissions')
 
     @staticmethod
     def quote_arg(arg: str) -> str:

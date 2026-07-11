@@ -366,3 +366,109 @@ print('OK')
     rc, stdout, stderr = main([sys.executable, '-c', query])
     assert rc == 0, stderr
     assert stdout == 'OK'
+
+
+# --- Re-submission source gate: hs submit matrix (R3 exempt, R5-R10) --------------------------------
+
+@mark.integration
+def test_gate_refuse_resubmit_identical(temp_site: Path) -> None:
+    """Re-submitting an identical named file with no flag is refused, naming the prior (R5)."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.success, stderr
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['4'], NO_OUTPUT)
+
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.bad_argument
+    assert stdout == ''
+    assert_output(r'CRITICAL .* was already submitted as source .*', stderr, 1)
+    # Refused before any new task is written — the count is unchanged.
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['4'], NO_OUTPUT)
+
+
+@mark.integration
+def test_gate_refuse_changed_suggests_update(temp_site: Path) -> None:
+    """A changed file at a seen path with no flag is refused, suggesting --update (R6)."""
+    taskfile = create_taskfile_echo(temp_site, count=2)
+    rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.success, stderr
+
+    # Same path, different content -> different source fingerprint.
+    create_taskfile_echo(temp_site, count=3)  # overwrites task.in at the same path
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.bad_argument
+    assert_output(r'CRITICAL .* previously submitted with different content.*--update', stderr, 1)
+
+
+@mark.integration
+def test_gate_warns_incomplete_prior(temp_site: Path) -> None:
+    """When fewer tasks landed than recorded, detection warns of an incomplete prior (R7)."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.success, stderr
+
+    # Delete two task rows so the DB count for the source drops below its recorded count.
+    prune = """
+from hypershell.data.model import Task
+Task.delete_all(Task.query().limit(2).all())
+print('OK')
+"""
+    rc, stdout, stderr = main([sys.executable, '-c', prune])
+    assert rc == 0, stderr
+    assert stdout == 'OK'
+
+    # Re-detect: no flag still refuses (R5), and now also warns about the incomplete prior (R7).
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.bad_argument
+    assert_output(r'WARNING .* appears incomplete: 2 of 4 tasks present.*', stderr, 1)
+
+
+@mark.integration
+def test_gate_repeat_submits_all_again(temp_site: Path) -> None:
+    """--repeat ingests a new source and submits all tasks again, even on an identical match (R8)."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    assert main(['hs', 'submit', '-f', str(taskfile), '-g0'])[0] == exit_status.success
+
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0', '--repeat'])
+    assert rc == exit_status.success, stderr
+    assert_output(r'INFO .* Submitted 4 tasks$', stderr, 1)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['8'], NO_OUTPUT)
+
+
+@mark.integration
+def test_gate_update_submits_only_novel(temp_site: Path) -> None:
+    """--update creates a new source but submits only task identities not already present (R9)."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    assert main(['hs', 'submit', '-f', str(taskfile), '-g0'])[0] == exit_status.success
+
+    # Extend the same file: the first four lines are byte-identical, two are new.
+    create_taskfile_echo(temp_site, count=6)  # overwrites task.in at the same path
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])
+    assert rc == exit_status.success, stderr
+    # Loader de-dup tally (R18): four already present, two submitted.
+    assert_output(r'INFO .* 4 tasks already present; submitting 2 new tasks$', stderr, 1)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['6'], NO_OUTPUT)
+
+
+@mark.integration
+def test_gate_update_repeat_contradictory() -> None:
+    """--update and --repeat together are contradictory and rejected before any work (R10)."""
+    assert main_lines(['hs', 'submit', '-f', 'x.in', '-g0', '--update', '--repeat']) == (
+        exit_status.bad_argument, NO_OUTPUT, ['CRITICAL [hypershell] Cannot combine --update with --repeat']
+    )
+
+
+@mark.integration
+def test_gate_direct_and_stdin_exempt(temp_site: Path) -> None:
+    """Single-command <direct> and streamed <stdin> submissions are exempt from gating (R3)."""
+    import os
+    from subprocess import run, PIPE
+    # <direct>: an identical single command submitted twice — both succeed, no refusal.
+    for _ in range(2):
+        rc, _, stderr = main(['hs', 'submit', 'echo', 'solo', '-g0'])
+        assert rc == exit_status.success, stderr
+    # <stdin>: identical piped input submitted twice — both succeed (main() does not feed stdin).
+    for _ in range(2):
+        proc = run(['hs', 'submit', '-f', '-', '-g0'], input=b'echo a\necho b\n',
+                   stdout=PIPE, stderr=PIPE, env=os.environ)
+        assert proc.returncode == exit_status.success, proc.stderr.decode()

@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-07-11'
 phases:
 - id: P1
@@ -37,7 +37,7 @@ phases:
   verify: uv run pytest -v -m integration -k source_stamp
 - id: P3
   name: hs submit gate matrix (R5-R10) + count-warn + logging + submit docs/completions
-  status: pending
+  status: done
   satisfies:
   - R5
   - R6
@@ -205,27 +205,30 @@ Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/u
 **Satisfies:** R5, R6, R7, R8, R9, R10, R18 · **Depends on:** P2
 **Goal:** `hs submit` enforces the plain-file matrix and logs its reasoning.
 
-- [ ] Add `--repeat`/`--update` (`store_true`) to `SubmitApp`; add `check_arguments` rejecting
+- [x] Add `--repeat`/`--update` (`store_true`) to `SubmitApp`; add `check_arguments` rejecting
   `--update`+`--repeat` (R10). Register in usage/help interface strings.
-- [ ] Implement shared **`apply_source_gate(path, fingerprint, count, *, repeat, update, restart=False)`**
+- [x] Implement shared **`apply_source_gate(path, fingerprint, count, *, repeat, update, restart=False)`**
   in `submit.py`: returns `(source_id, skip_fingerprints)` and raises `ArgumentError` on refusal.
   Decisions: no-flag + match → refuse naming prior (R5); no-flag + path-seen-fp-differs → refuse suggest
   `--update` (R6); count-warn when `Task.count_for_source(prior) < prior.task_count` (R7); `--repeat` →
   new source, `skip=None` (R8); `--update` → new source,
   `skip=Task.fingerprints_for_sources(Source.lookup(path))` (R9). Create the `Source` row (expected count
   first). Emit R18 logs (found N + md5, prior source, present/new, refusal reason).
-- [ ] `SubmitApp.run` calls `apply_source_gate` for named files (DB path only), wraps source in
+- [x] `SubmitApp.run` calls `apply_source_gate` for named files (DB path only), wraps source in
   `GatedSource`. Exempt: `-q`, `--no-db`/in-memory sqlite, `<stdin>`, `<direct>`.
-- [ ] Docs + completions (submit): `docs/_include/submit_{help,usage,desc}.rst`;
+- [x] Docs + completions (submit): `docs/_include/submit_{help,usage,desc}.rst`;
   `share/bash_completion.d/hs` (`_hs_submit`), `share/zsh/site-functions/_hs` (`_hs_submit`) —
   add `--repeat`/`--update` (+ zsh mutual-exclusion pair). Keep interface strings + snippets in lockstep.
-- [ ] Integration tests (`test_submit.py`): R5 refuse, R6 suggest-update, R7 count-warn (mechanism:
+- [x] Integration tests (`test_submit.py`): R5 refuse, R6 suggest-update, R7 count-warn (mechanism:
   cancel/delete a subset then re-detect), R8 doubles, R9 novel-only, R10 non-zero; `assert_output` on
   the R18 logs; R3 exempt (`hs submit 'echo x'` twice both succeed; `seq 4 | hs submit -f -` twice both
   succeed).
 - **Verify:** `uv run pytest -v tests/test_submit.py -k gate`.
 - **Touches:** `src/hypershell/submit.py`, `docs/_include/submit_*.rst`,
-  `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`, `tests/test_submit.py`.
+  `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`, `tests/test_submit.py`,
+  `tests/test_groups.py` (R6 now refuses re-submitting changed content at a seen path — two batches
+  given distinct source filenames). **Build note:** `apply_source_gate` implements the full shared
+  matrix now, including the `restart` branches (R12/R14) that P4 wires into `ClusterApp`.
 
 ## Phase P4 — `hsx` gate matrix + file-aware restart
 **Satisfies:** R11, R12, R13, R14, R15, R16 · **Depends on:** P3

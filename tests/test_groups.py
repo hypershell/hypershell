@@ -215,7 +215,9 @@ def test_group_starts_based_on_previous_scheduled_tasks(temp_site: Path) -> None
         'echo 3  #HYPERSHELL: n:3 group:5',
     ]
 
-    taskfile = create_taskfile(temp_site, tasks)
+    # Distinct source paths: the two batches are genuinely different files, so re-submission
+    # gating (R6 refuses changed content at a seen path with no flag) does not apply between them.
+    taskfile = create_taskfile(temp_site, tasks, filename='batch1.in')
     main(['hs', 'submit', '-f', str(taskfile)])
     rc, stdout, stderr = main(['hs', 'cluster', '--restart'])
     assert rc == exit_status.success
@@ -231,7 +233,7 @@ def test_group_starts_based_on_previous_scheduled_tasks(temp_site: Path) -> None
         'echo 13  #HYPERSHELL: n:13 group:50',
     ]
 
-    taskfile = create_taskfile(temp_site, tasks)
+    taskfile = create_taskfile(temp_site, tasks, filename='batch2.in')
     main(['hs', 'submit', '-f', str(taskfile)])
     rc, stdout, stderr = main(['hs', 'cluster', '--restart'])
     assert rc == exit_status.success

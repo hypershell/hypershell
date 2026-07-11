@@ -20,6 +20,23 @@ Options
     base command (reachable as ``{}``). Every ``{key}`` is validated against all task
     objects before anything is submitted.
 
+``--repeat``
+    Re-submit a known file's tasks again as a brand-new source.
+
+    By default, submitting a named file whose path and content match a prior submission is
+    refused to guard against accidental double submission. ``--repeat`` overrides that: the
+    file is ingested as a new source and all of its tasks are submitted again, even if
+    identical tasks already exist. May be combined with new ``-t``/``--tag`` values to mark
+    a new phase or trial.
+
+``--update``
+    Submit only the tasks in a known file that are not already present.
+
+    Creates a new source record and submits only tasks whose identity (a stable hash of the
+    pre-template arguments, group, and tags) is absent from the prior same-path submissions;
+    tasks already submitted are skipped. Use this after editing a task file to add only the
+    new work. Cannot be combined with ``--repeat``.
+
 ``-q``, ``--queue``
     Submit directly to live queue instead of database.
 

@@ -517,7 +517,7 @@ function _hs_submit() {
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 	local all_opts="-h --help -f --task-file -q --queue -H --host -p --port -k --auth
 	--no-tls --tls-key --tls-cert --tls-ca --template -t --tag -b --bundlesize -w --bundlewait
-	-c --cores -m --memory -W --timeout -g --group --initdb --"
+	-c --cores -m --memory -W --timeout -g --group --repeat --update --initdb --"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
