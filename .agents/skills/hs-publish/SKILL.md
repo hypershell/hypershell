@@ -25,7 +25,7 @@ Additional instructions provided with the invocation: $ARGUMENTS
 ## Current state (injected at load)
 
 - Branch: !`git branch --show-current`
-- Verdict / kind / slug (from TECH.md): !`b=$(git branch --show-current); s=${b#*/}; f="spec/$s/TECH.md"; echo "slug=$s"; awk '/^kind:/{print}' "$f" 2>/dev/null; awk '/verdict:/{print "verdict:",$2}' "$f" 2>/dev/null`
+- Verdict / kind / slug: resolved in **Step 1** from `spec/{slug}/TECH.md` (a load-time injection can't strip the branch prefix to form `{slug}`).
 - Commits vs develop: !`git log --oneline develop..HEAD 2>/dev/null | head -n 30`
 - Default remote branch: !`gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || echo "(gh unavailable)"`
 
@@ -55,8 +55,8 @@ Additional instructions provided with the invocation: $ARGUMENTS
 Report the verdict, commits vs `develop`, and whether a PR already exists (`gh pr status`). Stop.
 
 ### Step 1 — Pre-flight
-1. On a feature/fix branch, clean tree; resolve `{slug}`, `kind`, and the review `verdict` (injection).
-   STOP if verdict ≠ `approved` (unless the human overrides).
+1. On a feature/fix branch, clean tree; resolve `{slug}` from the branch, then read `kind` and the
+   review `verdict` from `spec/{slug}/TECH.md`. STOP if verdict ≠ `approved` (unless the human overrides).
 2. `git fetch origin`. Confirm `develop` is reachable and note if the branch is behind `develop`
    (squash-merge tolerates it, but flag a large drift).
 

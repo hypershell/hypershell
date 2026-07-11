@@ -31,8 +31,8 @@ Additional instructions provided with the invocation: $ARGUMENTS
 ## Current state (injected at load)
 
 - Branch: !`git branch --show-current`
-- Base (from TECH.md): !`b=$(git branch --show-current); s=${b#*/}; awk '/^base:/{print $2; exit}' "spec/$s/TECH.md" 2>/dev/null || echo develop`
-- Diffstat vs base: !`b=$(git branch --show-current); s=${b#*/}; base=$(awk '/^base:/{print $2; exit}' "spec/$s/TECH.md" 2>/dev/null || echo develop); git diff --stat "$base"...HEAD 2>/dev/null | tail -n 20`
+- Base: `develop` (feature/fix branch base; confirm from `base:` in TECH.md during Step 1).
+- Diffstat vs develop: !`git diff --stat develop...HEAD 2>/dev/null | tail -n 20`
 
 ## Argument Parsing
 
@@ -63,9 +63,9 @@ Additional instructions provided with the invocation: $ARGUMENTS
 ## Procedure
 
 ### Step 1 — Pre-flight
-Confirm a feature/fix branch; resolve `{slug}` and `base` (from the injection). Capture the head SHA
-(`git rev-parse HEAD`). If `TECH.md` `status` is not `in_review`/`done`, note it (the build may be
-incomplete) and ask whether to proceed.
+Confirm a feature/fix branch; resolve `{slug}` from the branch and confirm `base` from TECH.md
+`base:` (defaults to `develop`). Capture the head SHA (`git rev-parse HEAD`). If `TECH.md` `status`
+is not `in_review`/`done`, note it (the build may be incomplete) and ask whether to proceed.
 
 ### Step 2 — Delegate the correctness pass (fresh subagent)
 Launch a fresh `general-purpose` reviewer via the `Agent` tool. Give it, inline, **only**:

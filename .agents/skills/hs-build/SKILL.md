@@ -32,14 +32,14 @@ Additional instructions provided with the invocation: $ARGUMENTS
 
 - Branch: !`git branch --show-current`
 - Tree: !`git status --porcelain | head -n 20`
-- Commits on branch: !`b=$(git branch --show-current); s=${b#*/}; base=$(awk '/^base:/{print $2; exit}' "spec/$s/TECH.md" 2>/dev/null || echo develop); git log --oneline "$base"..HEAD 2>/dev/null | head -n 15`
-- FSM (next_phase.py): !`b=$(git branch --show-current); s=${b#*/}; uv run python .agents/factory/bin/next_phase.py "spec/$s/TECH.md" 2>&1`
+- Commits on branch (vs develop): !`git log --oneline develop..HEAD 2>/dev/null | head -n 15`
+- FSM: resolved in **Step 1** by running `uv run python .agents/factory/bin/next_phase.py spec/{slug}/TECH.md` (a load-time injection can't strip the branch prefix to form `{slug}`).
 
 ## Argument Parsing
 
 Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
 
-- `status` / `report` → summarize FSM state (from the injection) + last commit; no work.
+- `status` / `report` → summarize FSM state (via `next_phase.py`, Step 1) + last commit; no work.
 - `dry run` / `plan only` / `preview` → identify the target phase and load context, but make **no**
   edits/commits — report the plan (checklist items, files, verify command, expected commit). 
 - `phase P<n>` / `at P<n>` → execute that phase regardless of `current_phase`.
@@ -51,9 +51,9 @@ Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
 
 ## Safety Principles
 
-- **`next_phase.py` is the resume ground-truth**, re-read fresh every invocation (the injection
-  above). If it reports the FSM invalid or emits a `warnings` about pointer/status drift, **reconcile
-  before acting** — do not guess.
+- **`next_phase.py` is the resume ground-truth**, re-run fresh every invocation (in Step 1). If it
+  reports the FSM invalid or emits a `warnings` about pointer/status drift, **reconcile before
+  acting** — do not guess.
 - **On a feature/fix branch only** — never `develop`/`master`. Clean tree required (non-empty →
   STOP: commit, stash, or discard first).
 - **A phase is the unit of work.** Execute every `[ ]` item in the target phase, not just the first.
@@ -78,13 +78,15 @@ Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
 ## Procedure
 
 ### Step 0 — status / dry-run (when requested)
-`status`: report the injected FSM + last commit and stop. `dry run`: do Steps 1–2, then report the
-plan that *would* run and stop (no edits/commits).
+`status`: run `next_phase.py` (Step 1), report the FSM + last commit, and stop. `dry run`: do
+Steps 1–2, then report the plan that *would* run and stop (no edits/commits).
 
 ### Step 1 — Pre-flight
 1. Clean tree on a feature/fix branch (from the injection). STOP otherwise.
-2. Read the injected `next_phase.py` output. If it errored or warned of drift, reconcile
-   (`set_phase.py --current …`) or STOP and report. `uv sync --quiet` if deps may have changed.
+2. Resolve `{slug}` from the branch, then run
+   `uv run python .agents/factory/bin/next_phase.py spec/{slug}/TECH.md` and read its output. If it
+   errored or warned of drift, reconcile (`set_phase.py --current …`) or STOP and report.
+   `uv sync --quiet` if deps may have changed.
 3. **Remediation mode.** If the FSM shows `top_status: blocked` or `review.verdict:
    changes-requested`, a prior `/hs-review` requested changes: read `spec/{slug}/REVIEW.md`, then make
    the fixes actionable by amending `TECH.md` — **prefer reopening** the existing phase(s) whose
@@ -94,8 +96,8 @@ plan that *would* run and stop (no edits/commits).
    contradicts a `GOAL.md` R-ID (not just the plan), STOP and escalate instead.
 
 ### Step 2 — Identify target phase + load context
-1. Target = the injected `next_phase` (or the argument-selected phase). Confirm its `depends_on` are
-   `done`; if not, STOP.
+1. Target = the `next_phase` output from Step 1 (or the argument-selected phase). Confirm its
+   `depends_on` are `done`; if not, STOP.
 2. Read `spec/{slug}/PLAN.md` and the relevant `research/` for the detail behind the phase's
    checklist. Read the actual files the phase will touch **before** editing them.
 

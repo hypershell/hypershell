@@ -30,7 +30,7 @@ Additional instructions provided with the invocation: $ARGUMENTS
 
 - Branch: !`git branch --show-current`
 - Tree: !`git status --porcelain | head -n 20`
-- Spec dir: !`git branch --show-current | sed 's#^[a-z]*/##' | xargs -I{} sh -c 'ls -1 spec/{}/ 2>/dev/null'`
+- Spec artifacts: !`ls -1 spec/*/ 2>/dev/null | head -n 40`
 
 ## Argument Parsing
 
