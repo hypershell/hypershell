@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>The Software Factory — a getting-started guide · HyperShell</title>
+<meta name="description" content="An onboarding guide to agentic software engineering and the HyperShell .agents/factory: what agents are, how a harness turns context into action, how Shape Up-style methodology becomes a repeatable, auditable software factory.">
+<!-- No-flash theme init -->
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('hs-theme');
+      if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches)
+        document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) {}
+  })();
+</script>
+<style>
+  /* ---- HyperShell brand tokens (authoritative: docs/conf.py) ---------------- */
+  :root {
+    --brand: #ee0d7e;                 /* signature pink — display only (fails AA for body text) */
+    --accent: #e7529d;                /* AA-safe functional accent on dark (5.01:1) */
+    --accent-hover: #ff5fa8;
+    --bg: #161B23;                    /* docs dark canvas */
+    --bg-deep: #11151b;
+    --surface: #1b2029;
+    --surface-2: #20262f;
+    --border: #2b323d;
+    --text: #e6edf3;
+    --text-2: #c9d1d9;
+    --muted: #8b949e;
+    --link: #e7529d;
+    /* Dracula code palette (docs pygments_style = dracula) */
+    --code-bg: #282a36; --code-fg: #f8f8f2; --code-comment: #6272a4;
+    --code-pink: #ff79c6; --code-purple: #bd93f9; --code-green: #50fa7b;
+    --code-cyan: #8be9fd; --code-orange: #ffb86c; --code-yellow: #f1fa8c;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    --radius: 12px;
+    --maxw: 880px;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    --mono: "Berkeley Mono", ui-monospace, "JetBrains Mono", "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  html[data-theme="light"] {
+    --brand: #ee0d7e;
+    --accent: #c40668;               /* AA-safe on white (5.88:1) */
+    --accent-hover: #a80559;
+    --bg: #ffffff;
+    --bg-deep: #f6f8fa;
+    --surface: #ffffff;
+    --surface-2: #f6f8fa;
+    --border: #d8dee4;
+    --text: #1c2128;
+    --text-2: #3d444d;
+    --muted: #57606a;
+    --link: #c40668;
+    --shadow: 0 1px 2px rgba(140,149,159,.15), 0 8px 24px rgba(140,149,159,.18);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 17px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { animation: none !important; } }
+
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+  /* ---- Skip link + top bar ------------------------------------------------- */
+  .skip { position: absolute; left: -999px; top: 0; background: var(--accent); color: #fff; padding: 8px 14px; border-radius: 6px; z-index: 100; }
+  .skip:focus { left: 12px; top: 12px; }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 50; backdrop-filter: saturate(140%) blur(8px);
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar .wrap { display: flex; align-items: center; gap: 16px; height: 56px; }
+  .brandmark { font-family: var(--mono); font-weight: 700; letter-spacing: -.02em; color: var(--brand); font-size: 16px; }
+  .topnav { margin-left: auto; display: flex; gap: 18px; align-items: center; font-size: 14px; }
+  .topnav a { color: var(--muted); }
+  .topnav a:hover { color: var(--accent); text-decoration: none; }
+  @media (max-width: 720px) { .topnav .hide-sm { display: none; } }
+  .toggle {
+    font: inherit; font-size: 13px; cursor: pointer; color: var(--text-2);
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
+    padding: 6px 12px; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- Hero ---------------------------------------------------------------- */
+  .hero { padding: 72px 0 40px; border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(1100px 380px at 12% -8%, color-mix(in srgb, var(--brand) 16%, transparent), transparent 60%),
+      radial-gradient(900px 320px at 96% 4%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%);
+  }
+  .eyebrow { font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
+  h1.title { font-size: clamp(30px, 5vw, 46px); line-height: 1.08; letter-spacing: -.02em; margin: 0 0 16px; }
+  h1.title .accent { color: var(--brand); }
+  .lede { font-size: clamp(18px, 2.4vw, 21px); color: var(--text-2); max-width: 62ch; margin: 0 0 22px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; color: var(--muted); font-family: var(--mono); }
+  .chip { border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px; background: var(--surface-2); }
+
+  /* ---- Sections & headings ------------------------------------------------- */
+  main { padding: 8px 0 40px; }
+  section { padding: 40px 0; border-bottom: 1px solid var(--border); }
+  section:last-of-type { border-bottom: 0; }
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px; }
+  h2 { font-size: clamp(23px, 3.4vw, 30px); letter-spacing: -.015em; margin: 4px 0 12px; scroll-margin-top: 72px; }
+  h3 { font-size: 20px; margin: 30px 0 8px; letter-spacing: -.01em; scroll-margin-top: 72px; }
+  h4 { font-size: 16px; margin: 22px 0 6px; color: var(--text); }
+  p { margin: 0 0 16px; }
+  ul, ol { margin: 0 0 16px; padding-left: 1.3em; }
+  li { margin: 6px 0; }
+  strong { color: var(--text); font-weight: 650; }
+  .lead { font-size: 19px; color: var(--text-2); }
+
+  /* ---- Callouts (docs .admonition.note styling) ---------------------------- */
+  .note, .warn, .tip {
+    border: 1px solid var(--border); border-left: 4px solid var(--brand);
+    background: color-mix(in srgb, var(--brand) 7%, var(--surface));
+    border-radius: 10px; padding: 14px 18px; margin: 20px 0; font-size: 15.5px;
+  }
+  .note .h, .warn .h, .tip .h { font-family: var(--mono); font-size: 12px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--brand); margin: 0 0 6px; font-weight: 700; }
+  .tip { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+  .tip .h { color: var(--accent); }
+  .warn { border-left-color: var(--code-orange); background: color-mix(in srgb, var(--code-orange) 9%, var(--surface)); }
+  .warn .h { color: var(--code-orange); }
+  .note p:last-child, .tip p:last-child, .warn p:last-child { margin-bottom: 0; }
+
+  /* ---- Code --------------------------------------------------------------- */
+  code { font-family: var(--mono); font-size: .9em; background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--text); padding: .12em .38em; border-radius: 5px; }
+  html[data-theme="light"] code { background: color-mix(in srgb, var(--accent) 10%, var(--surface-2)); }
+  pre { background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px; overflow-x: auto; font-family: var(--mono);
+    font-size: 14px; line-height: 1.55; margin: 16px 0; box-shadow: var(--shadow); }
+  pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+  pre .c { color: var(--code-comment); }   /* comment */
+  pre .k { color: var(--code-pink); }       /* keyword/command */
+  pre .s { color: var(--code-yellow); }     /* string */
+  pre .n { color: var(--code-purple); }     /* number/const */
+  pre .f { color: var(--code-green); }       /* function/path */
+  pre .v { color: var(--code-cyan); }        /* var/flag */
+  .term-title { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 16px 0 -8px; }
+
+  /* ---- Tables ------------------------------------------------------------- */
+  .tablewrap { overflow-x: auto; margin: 18px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; font-weight: 650; }
+  tbody tr:hover { background: var(--surface-2); }
+  td code { white-space: nowrap; }
+
+  /* ---- Cards & grids ------------------------------------------------------ */
+  .grid { display: grid; gap: 16px; margin: 20px 0; }
+  .grid.two { grid-template-columns: repeat(2, 1fr); }
+  .grid.four { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 640px) { .grid.two, .grid.four { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px; box-shadow: var(--shadow); }
+  .card h4 { margin-top: 0; }
+  .card .tag { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; }
+
+  /* ---- Skill card --------------------------------------------------------- */
+  .skill { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+    border-radius: var(--radius); padding: 18px 20px; margin: 16px 0; box-shadow: var(--shadow); }
+  .skill .cmd { font-family: var(--mono); font-size: 15px; color: var(--brand); font-weight: 700; }
+  .skill .io { font-size: 14px; color: var(--muted); font-family: var(--mono); margin-top: 8px; }
+  .skill .io b { color: var(--text-2); font-weight: 600; }
+
+  /* ---- Flow / pipeline diagram (CSS, theme-aware, responsive) -------------- */
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 22px 0; }
+  .flow .step { flex: 1 1 130px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 12px; text-align: center; position: relative; min-width: 120px; }
+  .flow .step .n { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: .1em; }
+  .flow .step .t { font-weight: 650; font-size: 14.5px; margin-top: 2px; }
+  .flow .step .d { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .flow .arrow { align-self: center; color: var(--accent); font-size: 20px; flex: 0 0 auto; }
+  @media (max-width: 640px) { .flow .arrow { transform: rotate(90deg); } .flow .step { flex-basis: 100%; } }
+
+  /* two-column concept compare */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; }
+  @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+  .compare .col { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; background: var(--surface); }
+  .compare .col.bad { border-top: 3px solid var(--muted); }
+  .compare .col.good { border-top: 3px solid var(--accent); }
+  .compare h4 { margin-top: 0; }
+
+  /* stat / at-a-glance tiles */
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin: 20px 0; }
+  @media (max-width: 640px) { .tiles { grid-template-columns: 1fr; } }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+  .tile .h { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 6px; }
+  .tile .h .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+  .tile p { font-size: 14.5px; margin: 0; color: var(--text-2); }
+
+  /* on-this-page mini toc */
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin: 8px 0 0; }
+  .toc h4 { margin: 0 0 8px; font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .toc ol { columns: 2; column-gap: 28px; margin: 0; padding-left: 1.1em; font-size: 14.5px; }
+  @media (max-width: 640px) { .toc ol { columns: 1; } }
+
+  /* footer */
+  footer { padding: 34px 0 60px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--accent); }
+
+  .anchor { color: var(--muted); text-decoration: none; font-weight: 400; opacity: 0; margin-left: 8px; }
+  h2:hover .anchor, h3:hover .anchor { opacity: 1; }
+
+  hr.rule { border: 0; border-top: 1px solid var(--border); margin: 28px 0; }
+
+  @media print {
+    .topbar, .toggle, .toc, footer .toggle { display: none; }
+    body { font-size: 12pt; color: #000; background: #fff; }
+    a { color: #000; text-decoration: underline; }
+    pre { box-shadow: none; }
+    section { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#exec">Skip to content</a>
+
+<div class="topbar">
+  <div class="wrap">
+    <span class="brandmark">hypershell</span>
+    <nav class="topnav" aria-label="Section">
+      <a class="hide-sm" href="#exec">Overview</a>
+      <a class="hide-sm" href="#agents">Agents</a>
+      <a class="hide-sm" href="#harness">Harness</a>
+      <a class="hide-sm" href="#factory">Factory</a>
+      <a class="hide-sm" href="#skills">Skills</a>
+      <a class="hide-sm" href="#leadership">Leadership</a>
+      <a href="#reference">Reference</a>
+      <button class="toggle" id="themeBtn" type="button" aria-label="Toggle light/dark theme">
+        <span id="themeIcon">◐</span><span id="themeLbl">Theme</span>
+      </button>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">HyperShell · Agentic Engineering · Getting Started</p>
+    <h1 class="title">From chatbots to a <span class="accent">software factory</span></h1>
+    <p class="lede">A guide to agentic software engineering for research software engineers — what an
+      agent really is, how a <em>harness</em> turns context into action, and how a lightweight,
+      auditable methodology (the <code>.agents/factory</code>) makes that power repeatable, reviewable,
+      and safe.</p>
+    <div class="meta-row">
+      <span class="chip">~20 min read</span>
+      <span class="chip">Executive orientation ~5 min</span>
+      <span class="chip">Audience: RSEs &amp; leadership</span>
+      <span class="chip">Self-contained · works offline</span>
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+<!-- =================== EXECUTIVE ORIENTATION =================== -->
+<section id="exec">
+  <p class="kicker">Executive orientation</p>
+  <h2>Why this, why now <a class="anchor" href="#exec">#</a></h2>
+  <p class="lead">For a decade our tools have <em>answered questions</em>. In the last two years they
+    began to <em>do work</em>. That is the whole story — and it changes how research software gets
+    built.</p>
+
+  <p>A chatbot produces text. An <strong>agent</strong> is given a goal, a set of tools, and the
+    latitude to use them in a loop: it reads your code, runs your tests, edits files, drives the CLI,
+    inspects the result, and tries again — narrating and course-correcting as it goes. The thing that
+    made this leap possible is not a bigger model alone; it is the <strong>harness</strong> — the
+    software (Claude&nbsp;Code, Warp, Cursor, and others) that assembles a critical mass of
+    <em>context</em> and grants the model the ability to <em>act</em>. Context plus action, in a loop,
+    is where the wellspring of productivity comes from.</p>
+
+  <p>That power needs a channel. Left unstructured, an agent will happily build the wrong thing
+    quickly, or the right thing in a way you cannot review. The discipline that channels it is
+    <strong>method</strong> — and it turns out the good parts of agile practice (especially
+    37signals' <em>Shape Up</em>) map cleanly onto agent work. HyperShell packages that method as a
+    small, transparent toolkit in <code><a href="../">.agents/</a></code>: five skills and a set of
+    reference documents that carry a change from a shaped goal, through a researched plan, through
+    execution, through an adversarial review, to a pull request — with a durable, committed record at
+    every step.</p>
+
+  <h3>What changes for RSE teams <a class="anchor" href="#exec">#</a></h3>
+  <p>The level of abstraction rises. People spend less time typing boilerplate and more time doing
+    the things only people can do well: <strong>shaping</strong> what is worth building,
+    <strong>judging</strong> whether what came back is correct, and <strong>owning</strong> the
+    result. The agent executes; the human sets direction and holds the bar.</p>
+
+  <div class="compare">
+    <div class="col good">
+      <h4>What the factory <em>is</em></h4>
+      <ul>
+        <li>A repeatable lifecycle: shape → plan → build → review → ship.</li>
+        <li>Plain Markdown + git + skills — no new platform, no lock-in.</li>
+        <li>An <strong>auditable trail</strong>: intent, design, and code, committed together.</li>
+        <li>Human judgement at every gate that matters.</li>
+      </ul>
+    </div>
+    <div class="col bad">
+      <h4>What it is <em>not</em></h4>
+      <ul>
+        <li>Not "the AI writes everything and we hope." Every step is reviewable.</li>
+        <li>Not a replacement for engineers — it raises what they work on.</li>
+        <li>Not a heavyweight process forced onto one-line fixes (it scales down).</li>
+        <li>Not a frozen spec: the plan is a living artifact, the goal is the contract.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>For institutional leadership, at a glance <a class="anchor" href="#exec">#</a></h3>
+  <p>The four questions leaders ask most, answered in one line each — with a fuller treatment in
+    <a href="#leadership">Notes for institutional leadership</a>.</p>
+  <div class="tiles">
+    <div class="tile">
+      <div class="h"><span class="dot"></span>Governance &amp; guardrails</div>
+      <p>Human sign-off gates, blast-radius controls, and an independent adversarial review step are
+        engineered into the lifecycle — not bolted on.</p>
+    </div>
+    <div class="tile">
+      <div class="h"><span class="dot"></span>Cost &amp; effort economics</div>
+      <p>Ceremony scales to the size of the change (an <em>appetite</em>), so a bug fix does not pay
+        for a feature's process. You spend rigor where it earns its keep.</p>
+    </div>
+    <div class="tile">
+      <div class="h"><span class="dot"></span>Reproducibility &amp; auditability</div>
+      <p>Every feature leaves a committed record — goal, design, and code, traceable requirement →
+        commit. A research-grade paper trail for how software came to be.</p>
+    </div>
+    <div class="tile">
+      <div class="h"><span class="dot"></span>Workforce</div>
+      <p>This augments RSEs. Humans shape, judge, and own; agents execute. The scarce skill becomes
+        <em>good judgement about software</em>, which your people already have.</p>
+    </div>
+  </div>
+
+  <div class="toc" role="navigation" aria-label="On this page">
+    <h4>The practitioner guide</h4>
+    <ol>
+      <li><a href="#agents">Agents, not chatbots</a></li>
+      <li><a href="#harness">The harness: context + action</a></li>
+      <li><a href="#methodology">Method: Shape Up meets agents</a></li>
+      <li><a href="#factory">The <code>.agents/factory</code> lifecycle</a></li>
+      <li><a href="#skills">Hands-on: the five skills</a></li>
+      <li><a href="#reference">Reference: every material, linked</a></li>
+    </ol>
+  </div>
+</section>
+
+<!-- =================== 1. AGENTS =================== -->
+<section id="agents">
+  <p class="kicker">Practitioner guide · 1</p>
+  <h2>Agents, not chatbots <a class="anchor" href="#agents">#</a></h2>
+  <p>A chatbot is a function from prompt to text. You ask; it answers; the transaction ends. Useful,
+    but it does nothing — <em>you</em> still copy the snippet, run it, read the error, and come back.</p>
+
+  <p>An <strong>agent</strong> closes that loop itself. Given a goal and a set of <em>tools</em>, it
+    runs a cycle:</p>
+
+  <div class="flow" aria-label="The agent loop">
+    <div class="step"><div class="n">01</div><div class="t">Perceive</div><div class="d">read files, run a command, inspect state</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">02</div><div class="t">Reason</div><div class="d">decide the next concrete action</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">03</div><div class="t">Act</div><div class="d">edit code, run tests, call a tool</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">04</div><div class="t">Observe</div><div class="d">read the result, then loop</div></div>
+  </div>
+
+  <p>The difference is not eloquence; it is <strong>agency</strong>. Because it observes the outcome of
+    each action, an agent can recover from a failing test, chase down a stack trace, or notice that
+    the thing it just built doesn't actually run. This is why "it wrote code" (2022) and "it shipped a
+    reviewed change" (2026) are different eras.</p>
+
+  <div class="compare">
+    <div class="col bad">
+      <h4>Chatbot</h4>
+      <pre style="margin:0"><code><span class="c"># one shot, no hands</span>
+you   ❯ how do I add a flag?
+bot   ❯ here's some code…
+you   ❯ <span class="c"># you run it, it breaks,</span>
+        <span class="c"># you paste the error back…</span></code></pre>
+    </div>
+    <div class="col good">
+      <h4>Agent</h4>
+      <pre style="margin:0"><code><span class="k">agent</span> ❯ read src/…/submit.py
+<span class="k">agent</span> ❯ edit: add <span class="v">--dry-run</span>
+<span class="k">agent</span> ❯ run: <span class="f">uv run pytest -k submit</span>
+<span class="k">agent</span> ❯ <span class="c"># red → fix → green → commit</span></code></pre>
+    </div>
+  </div>
+
+  <div class="note">
+    <div class="h">The catch</div>
+    <p>Agency cuts both ways. An agent can build the wrong thing, or the right thing unreviewably,
+      just as fast as the right thing well. Everything after this section is about <em>channelling</em>
+      that agency — giving it the right context, the right method, and the right gates.</p>
+  </div>
+</section>
+
+<!-- =================== 2. HARNESS =================== -->
+<section id="harness">
+  <p class="kicker">Practitioner guide · 2</p>
+  <h2>The harness: where context becomes action <a class="anchor" href="#harness">#</a></h2>
+  <p>The model is the engine; the <strong>harness</strong> is the vehicle. A coding harness
+    (Claude&nbsp;Code, Warp, Cursor, Aider, and peers) does two jobs at once, and their combination is
+    the productivity unlock:</p>
+
+  <div class="grid two">
+    <div class="card">
+      <span class="tag">Context in</span>
+      <h4>A critical mass of context</h4>
+      <p>The harness feeds the model far more than your prompt:</p>
+      <ul>
+        <li><strong>The repository</strong> — read on demand, searched, navigated.</li>
+        <li><strong>Project memory</strong> — an <code><a href="../../AGENTS.md">AGENTS.md</a></code>
+          that states the conventions and invariants of <em>this</em> codebase.</li>
+        <li><strong>Tools</strong> — the shell, tests, git, the web, databases.</li>
+        <li><strong>Skills</strong> — packaged procedures the agent can invoke by name.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <span class="tag">Action out</span>
+      <h4>The ability to act</h4>
+      <p>And it lets the model <em>do things</em>, under permission control:</p>
+      <ul>
+        <li>Edit and create files across the project.</li>
+        <li>Run commands — tests, builds, the CLI itself.</li>
+        <li>Use git; open pull requests; call external services.</li>
+        <li>Spawn <strong>sub-agents</strong> to research in parallel.</li>
+      </ul>
+    </div>
+  </div>
+
+  <p>Put a loop around those two and you have the whole machine: <em>gather context → decide → act →
+    observe → repeat</em>. The art — "context engineering" — is getting the <em>right</em> context in
+    front of the model at the right moment, because a model's attention is finite and its session
+    memory is not durable across restarts.</p>
+
+  <div class="tip">
+    <div class="h">The load-bearing idea</div>
+    <p>Because a fresh session starts blank, <strong>durable state must live in files and git, not in
+      the chat.</strong> That single fact is why the factory writes everything down — the goal, the
+      plan, the roadmap, the review — and reads it back fresh each time. It is what lets a build resume
+      next week on another machine, and lets a reviewer start with no memory of how the code was
+      written.</p>
+  </div>
+
+  <h3>Skills: procedures the agent can run <a class="anchor" href="#harness">#</a></h3>
+  <p>A <strong>skill</strong> is a Markdown file (<code>SKILL.md</code>) with a little front-matter and
+    a body of instructions. When you type its name as a slash command — say <code>/hs-build</code> —
+    the harness loads those instructions, injects live facts (the current branch, the git status), and
+    the agent follows the procedure. Skills are how you capture "the way we do X here" once, so nobody
+    re-explains it every time. The five skills in this guide are exactly that: the HyperShell way to
+    take a change from idea to merge.</p>
+</section>
+
+<!-- =================== 3. METHODOLOGY =================== -->
+<section id="methodology">
+  <p class="kicker">Practitioner guide · 3</p>
+  <h2>Method: Shape Up meets agents <a class="anchor" href="#methodology">#</a></h2>
+  <p>Give a capable agent no method and you get motion without direction. The good news: much of what
+    software teams already learned about <em>directing</em> work applies — you just keep the thinking
+    tools and drop the calendar rituals.</p>
+
+  <p>The sharpest fit is <strong>Shape Up</strong> (Ryan Singer / 37signals). Its core ideas translate
+    almost directly to a solo-engineer-plus-agent pipeline:</p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Shape Up idea</th><th>In the factory</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Appetite</strong> — fix the time, vary the scope ("start with a number, end with a design").</td>
+          <td>An <code>appetite: small|big</code> field sizes how much research and how many phases a change gets. The plan fits the appetite, not the reverse.</td></tr>
+      <tr><td><strong>Shaping</strong> — rough, solved, and bounded, at the right altitude.</td>
+          <td>The <code>GOAL.md</code> is shaped: concrete enough to de-risk, abstract enough to leave design freedom.</td></tr>
+      <tr><td><strong>No-gos</strong> — say what you will <em>not</em> do.</td>
+          <td>An explicit non-goals list keeps scope from creeping.</td></tr>
+      <tr><td><strong>Rabbit holes</strong> — name the scary unknowns and settle them before committing.</td>
+          <td>Each research brief investigates one unknown that could blow the appetite.</td></tr>
+      <tr><td><strong>Hill</strong> — uphill (figuring out) vs downhill (just doing).</td>
+          <td>Each phase carries a <code>hill</code> signal; a phase stuck "uphill" across builds is a raised hand.</td></tr>
+      <tr><td><strong>Circuit breaker</strong> — don't extend indefinitely; stop and re-shape.</td>
+          <td>Build iterations and review bounce-backs are capped; on trip, stop and re-plan.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>What we deliberately <strong>discard</strong>: the betting table, six-week cycles, cool-down, and
+    separate shaper/builder/QA roles — those exist to synchronize a human <em>team</em> and dissolve
+    for a serial solo-plus-agent flow.</p>
+
+  <div class="warn">
+    <div class="h">One place Shape Up must not be followed</div>
+    <p>Shape Up assumes scope is always cuttable and most bugs can wait. That is <strong>false</strong>
+      for a distributed execution engine: a silent double-run or a resurrected task is not a
+      deferrable bug. The factory marks correctness- and security-critical work as
+      <code>hammerable: false</code> — the reviewer may never trim it to "fit the appetite."</p>
+  </div>
+
+  <p class="lead">The broader movement this belongs to — committing a <em>specification</em> alongside
+    the code and letting the spec drive the work — is often called <strong>spec-driven
+    development</strong>. Tools like GitHub Spec Kit and AWS Kiro converge on the same
+    <em>what/why → how → ordered-work</em> spine the factory uses. HyperShell's version is deliberately
+    lightweight: Markdown, git, and skills, anchored on the project's own <code>AGENTS.md</code>.</p>
+</section>
+
+<!-- =================== 4. FACTORY =================== -->
+<section id="factory">
+  <p class="kicker">Practitioner guide · 4</p>
+  <h2>The <code>.agents/factory</code> lifecycle <a class="anchor" href="#factory">#</a></h2>
+  <p>One change flows through five skills, on its own git branch, leaving a committed trail under
+    <code>spec/&lt;slug&gt;/</code>. The whole pipeline:</p>
+
+  <div class="flow" aria-label="The factory lifecycle">
+    <div class="step"><div class="n">/hs-feature</div><div class="t">Shape</div><div class="d">GOAL.md — what &amp; why</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">/hs-plan</div><div class="t">Design</div><div class="d">research → PLAN → TECH</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">/hs-build</div><div class="t">Execute</div><div class="d">one phase at a time ⟲</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">/hs-review</div><div class="t">Judge</div><div class="d">adversarial QA ⟲</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">/hs-publish</div><div class="t">Ship</div><div class="d">PR → develop</div></div>
+  </div>
+  <p style="font-size:14px;color:var(--muted);margin-top:-6px">The ⟲ steps loop: review sends confirmed
+    problems back to build until the change is clean, then publish opens the pull request.</p>
+
+  <h3>The artifact spine <a class="anchor" href="#factory">#</a></h3>
+  <p>Each stage reads the previous stage's committed files and writes its own. This is the durable
+    substrate from §2 in practice:</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>File</th><th>Written by</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code><a href="templates/GOAL.md">GOAL.md</a></code></td><td>/hs-feature</td>
+          <td>The <strong>locked contract</strong>: problem, appetite, non-goals, and testable
+              acceptance criteria with stable IDs (<code>R1</code>, <code>R2</code>…).</td></tr>
+      <tr><td><code><a href="templates/PLAN.md">PLAN.md</a></code></td><td>/hs-plan</td>
+          <td>The authoritative <strong>design</strong>: how it will be built, mapped back to each
+              requirement ID.</td></tr>
+      <tr><td><code>research/*.md</code></td><td>/hs-plan</td>
+          <td>Briefs from parallel read-only sub-agents — one per rabbit hole (big appetite only).</td></tr>
+      <tr><td><code><a href="templates/TECH.md">TECH.md</a></code></td><td>/hs-plan</td>
+          <td>The <strong>phased roadmap</strong> — a small state machine (see below) the build resumes from.</td></tr>
+      <tr><td><code><a href="templates/REVIEW.md">REVIEW.md</a></code></td><td>/hs-review</td>
+          <td>Severity-ranked findings + a requirement→evidence matrix.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>TECH.md is a finite-state machine <a class="anchor" href="#factory">#</a></h3>
+  <p>The roadmap's YAML front-matter <em>is</em> the resume point. It lists phases (vertical slices of
+    work), each with the requirements it satisfies, a verify command, and honesty signals. The build
+    skill reads it fresh every time, does the next actionable phase, and writes the state back — so a
+    build is fully resumable and git history becomes the checkpoint log.</p>
+  <div class="term-title">spec/&lt;slug&gt;/TECH.md — front-matter (excerpt)</div>
+  <pre><code><span class="v">appetite</span>: big              <span class="c"># small|big → caps phases &amp; iterations</span>
+<span class="v">status</span>: in_progress
+<span class="v">current_phase</span>: P2
+<span class="v">phases</span>:
+  - <span class="v">id</span>: P1
+    <span class="v">name</span>: <span class="s">"Source table + task fingerprints"</span>
+    <span class="v">satisfies</span>: [R1, R3]        <span class="c"># traces back to GOAL requirement IDs</span>
+    <span class="v">hammerable</span>: <span class="n">false</span>          <span class="c"># correctness — review may not cut this</span>
+    <span class="v">hill</span>: downhill            <span class="c"># uphill=figuring out · downhill=executing</span>
+    <span class="v">status</span>: done
+    <span class="v">verify</span>: <span class="s">"uv run pytest -m unit -k source"</span></code></pre>
+  <p>A pair of small helper scripts (<code><a href="bin/next_phase.py">next_phase.py</a></code> /
+    <code><a href="bin/set_phase.py">set_phase.py</a></code>) read and update this block, so the agent
+    never hand-edits fragile YAML.</p>
+
+  <h3>Build in the open <a class="anchor" href="#factory">#</a></h3>
+  <p>All of this — the skills, the reference docs, the per-feature <code>spec/</code> folders — is
+    committed to the repository. The methodology is not a hidden prompt; it is version-controlled,
+    reviewable, and improvable like any other part of the codebase. The full rationale lives in
+    <code><a href="methodology.md">methodology.md</a></code>.</p>
+</section>
+
+<!-- =================== 5. SKILLS =================== -->
+<section id="skills">
+  <p class="kicker">Practitioner guide · 5</p>
+  <h2>Hands-on: the five skills <a class="anchor" href="#skills">#</a></h2>
+  <p>Each is a slash command you invoke deliberately (none fire on their own). They guard their own
+    preconditions — a wrong branch or a dirty tree stops them cold — so the process is hard to run out
+    of order.</p>
+
+  <div class="skill">
+    <div class="cmd">/hs-feature <span style="color:var(--muted);font-weight:400">— shape the goal</span></div>
+    <p>From a clean <code>develop</code>, creates a <code>feature/&lt;slug&gt;</code> or
+      <code>fix/&lt;slug&gt;</code> branch and refines your idea (or a hand-written GOAL) into a shaped
+      <code>GOAL.md</code>: appetite, non-goals, and testable criteria. Shaping only — no research, no
+      code. Asks you when something is ambiguous rather than guessing.</p>
+    <div class="io"><b>reads</b> your prompt / an untracked GOAL.md · <b>writes</b> spec/&lt;slug&gt;/GOAL.md ·
+      <b>skill</b> <a href="../skills/hs-feature/SKILL.md">hs-feature/SKILL.md</a></div>
+  </div>
+
+  <div class="skill">
+    <div class="cmd">/hs-plan <span style="color:var(--muted);font-weight:400">— research &amp; design</span></div>
+    <p>Checks the idea against the project's invariants, fans out read-only research sub-agents (scaled
+      to appetite; codebase-first), then writes the <code>PLAN.md</code> design and the
+      <code>TECH.md</code> phased roadmap. A small fix can skip the research entirely.</p>
+    <div class="io"><b>reads</b> GOAL.md, AGENTS.md, the codebase · <b>writes</b> research/, PLAN.md, TECH.md ·
+      <b>skill</b> <a href="../skills/hs-plan/SKILL.md">hs-plan/SKILL.md</a></div>
+  </div>
+
+  <div class="skill">
+    <div class="cmd">/hs-build <span style="color:var(--muted);font-weight:400">— execute the roadmap</span></div>
+    <p>The resume-and-implement driver. Reads the FSM, does the next phase, runs that phase's verify
+      command (it proves work by <em>driving the CLI</em>, not by ticking a box), and makes one atomic
+      commit of code + state. It may revise the plan as reality demands, but a contradiction with the
+      locked GOAL stops it for you.</p>
+    <div class="io"><b>reads</b> TECH.md, PLAN.md, the code · <b>writes</b> source, docs, TECH.md state ·
+      <b>skill</b> <a href="../skills/hs-build/SKILL.md">hs-build/SKILL.md</a></div>
+  </div>
+
+  <div class="skill">
+    <div class="cmd">/hs-review <span style="color:var(--muted);font-weight:400">— adversarial QA</span></div>
+    <p>Independent quality assurance. It delegates to a <strong>fresh reviewer with no memory of how
+      the code was written</strong>, who sees only the goal, the diff, and the project's invariant
+      checklist — <em>not</em> the author's own plan. It must reproduce each problem with a real
+      command before reporting it. Confirmed issues loop back to build; changes to the risky core
+      always require a human sign-off.</p>
+    <div class="io"><b>reads</b> GOAL.md + diff + invariants (blind to PLAN/TECH) · <b>writes</b> REVIEW.md, findings ·
+      <b>skill</b> <a href="../skills/hs-review/SKILL.md">hs-review/SKILL.md</a></div>
+  </div>
+
+  <div class="skill">
+    <div class="cmd">/hs-publish <span style="color:var(--muted);font-weight:400">— ship it</span></div>
+    <p>Opens a pull request to <code>develop</code> with a rich, artifact-linked description (or does a
+      local squash-merge). This is the one irreversible step, so it always confirms with you first and
+      never targets the release branch.</p>
+    <div class="io"><b>reads</b> all artifacts + git log · <b>writes</b> a PR (or a local merge) ·
+      <b>skill</b> <a href="../skills/hs-publish/SKILL.md">hs-publish/SKILL.md</a></div>
+  </div>
+
+  <h3>A day in the life <a class="anchor" href="#skills">#</a></h3>
+  <div class="term-title">a small feature, start to finish</div>
+  <pre><code><span class="k">/hs-feature</span> add a <span class="v">--dry-run</span> flag to hs submit that prints the plan
+<span class="c"># → branch feature/submit-dry-run, spec/submit-dry-run/GOAL.md — you review it</span>
+
+<span class="k">/hs-plan</span>
+<span class="c"># → research/, PLAN.md, TECH.md — you approve the design</span>
+
+<span class="k">/hs-build</span>            <span class="c"># phase P1 … commit</span>
+<span class="k">/hs-build</span>            <span class="c"># phase P2 … commit  (repeat until done)</span>
+
+<span class="k">/hs-review</span>           <span class="c"># fresh, blind QA → REVIEW.md (approved / changes-requested)</span>
+
+<span class="k">/hs-publish</span>          <span class="c"># opens the PR to develop, links every artifact</span></code></pre>
+  <div class="tip">
+    <div class="h">Scales down</div>
+    <p>A one-line fix does not need all of this. Set <code>appetite: small</code> (the default for
+      <code>fix/</code> branches) and <code>/hs-plan</code> collapses to a lean plan with no research
+      fan-out. A truly trivial change can skip the lifecycle altogether. Rigor is a dial, not a toll.</p>
+  </div>
+</section>
+
+<!-- =================== LEADERSHIP =================== -->
+<section id="leadership">
+  <p class="kicker">For institutional leadership</p>
+  <h2>Notes for institutional leadership <a class="anchor" href="#leadership">#</a></h2>
+  <p class="lead">The at-a-glance panel above, expanded. These are the concerns that decide whether a
+    department can adopt agentic engineering responsibly.</p>
+
+  <h3>Governance &amp; guardrails <a class="anchor" href="#leadership">#</a></h3>
+  <p>Autonomy is bounded by design, not by hope:</p>
+  <ul>
+    <li><strong>Human gates at the decisions that matter.</strong> A human approves the goal before
+      the expensive planning, the design before code is written, and the review before anything ships.</li>
+    <li><strong>Independent review.</strong> The QA step runs in a fresh context, blind to the
+      author's reasoning, and must <em>reproduce</em> a defect before flagging it — a direct
+      countermeasure to a model rubber-stamping its own work.</li>
+    <li><strong>Blast-radius controls.</strong> Any confirmed problem touching the fault-tolerant
+      core (the task database, the scheduler, the network queue, the concurrency machinery) forces a
+      mandatory human sign-off, regardless of anything else.</li>
+    <li><strong>Encoded invariants.</strong> The non-negotiable correctness and security rules of the
+      codebase live in <code><a href="invariants.md">invariants.md</a></code> and are checked at both
+      planning and review; violating one is an automatic top-severity finding.</li>
+  </ul>
+
+  <h3>Cost &amp; effort economics <a class="anchor" href="#leadership">#</a></h3>
+  <p>Agent work consumes tokens (and therefore money and time), most of all during broad research
+    fan-out. The factory treats spend as a dial:</p>
+  <ul>
+    <li><strong>Appetite scaling.</strong> Small changes skip research and collapse the paperwork;
+      only genuinely large features pay for parallel investigation. You do not fund a feature's
+      ceremony for a typo.</li>
+    <li><strong>Parallel where it pays, serial where it must.</strong> Research fans out (large,
+      well-understood gains); building stays single-threaded (parallel builders make conflicting
+      decisions). The expensive move is used only where it is safe and worthwhile.</li>
+    <li><strong>Circuit breakers.</strong> A stuck phase or a review that keeps bouncing trips a stop,
+      rather than burning budget in a loop — a spend ceiling with a human off-ramp.</li>
+  </ul>
+
+  <h3>Reproducibility &amp; auditability <a class="anchor" href="#leadership">#</a></h3>
+  <p>This is where a research context benefits most. Every feature leaves a committed, dated record:</p>
+  <ul>
+    <li><strong>A traceable chain</strong> from requirement ID → design element → implementing commit →
+      review evidence. You can answer "why does this code exist, and who decided?" from the repository
+      alone.</li>
+    <li><strong>An ADR-style trail.</strong> The <code>spec/&lt;slug&gt;/</code> folder is retained on
+      merge as a point-in-time record of intent and design — not a living doc to maintain forever, but
+      a durable account of how the software came to be.</li>
+    <li><strong>The code remains ground truth.</strong> Specs record intent; the code and
+      <code>AGENTS.md</code> are authoritative. This avoids the classic trap of stale documentation
+      pretending to be the source of truth.</li>
+  </ul>
+
+  <h3>Workforce <a class="anchor" href="#leadership">#</a></h3>
+  <p>The honest framing: this <strong>raises the level of abstraction</strong> at which your engineers
+    work. The routine typing is increasingly automated; the durable, human contributions become more
+    valuable, not less:</p>
+  <ul>
+    <li><strong>Shaping</strong> — deciding what is worth building and bounding it well.</li>
+    <li><strong>Judgement</strong> — knowing whether a result is correct, safe, and maintainable.</li>
+    <li><strong>Ownership</strong> — standing behind what ships.</li>
+  </ul>
+  <p>These are exactly the skills experienced RSEs already have. The change is that they spend more of
+    their day exercising them and less on boilerplate. It is a force multiplier for a small research
+    software team, not a substitute for one.</p>
+</section>
+
+<!-- =================== 6. REFERENCE =================== -->
+<section id="reference">
+  <p class="kicker">Practitioner guide · 6</p>
+  <h2>Reference: every material, linked <a class="anchor" href="#reference">#</a></h2>
+  <p>Everything the factory is made of, with what it is and how it is used. All paths are relative to
+    <code>.agents/factory/</code> (this file's home).</p>
+
+  <h3>The constitution <a class="anchor" href="#reference">#</a></h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Material</th><th>What it is / how it's used</th></tr></thead>
+    <tbody>
+      <tr><td><code><a href="../../AGENTS.md">AGENTS.md</a></code> <span style="color:var(--muted)">(repo root)</span></td>
+          <td>The project's operating manual and the factory's <strong>constitution</strong>:
+              architecture, the task-lifecycle contract, security rules, conventions. Skills reference
+              it; they never duplicate it. (<code>CLAUDE.md</code> is a symlink to it.)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The five skills <a class="anchor" href="#reference">#</a></h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Skill</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr><td><code><a href="../skills/hs-feature/SKILL.md">hs-feature</a></code></td><td>Shape a goal on a fresh branch.</td></tr>
+      <tr><td><code><a href="../skills/hs-plan/SKILL.md">hs-plan</a></code></td><td>Research, design, and lay out the phased roadmap.</td></tr>
+      <tr><td><code><a href="../skills/hs-build/SKILL.md">hs-build</a></code></td><td>Execute the roadmap, one verified phase at a time.</td></tr>
+      <tr><td><code><a href="../skills/hs-review/SKILL.md">hs-review</a></code></td><td>Independent, blind, evidence-based QA.</td></tr>
+      <tr><td><code><a href="../skills/hs-publish/SKILL.md">hs-publish</a></code></td><td>Open the pull request (or merge locally).</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Reference documents <a class="anchor" href="#reference">#</a></h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Document</th><th>What it is / how it's used</th></tr></thead>
+    <tbody>
+      <tr><td><code><a href="methodology.md">methodology.md</a></code></td>
+          <td>The full lifecycle rationale — the "why" behind the skills, and the Shape Up mapping.
+              Read this to understand the flow.</td></tr>
+      <tr><td><code><a href="invariants.md">invariants.md</a></code></td>
+          <td>The curated checklist of load-bearing correctness/security rules, drawn from
+              <code>AGENTS.md</code>. Used as the planning gate and the review footgun list.</td></tr>
+      <tr><td><code><a href="ears.md">ears.md</a></code></td>
+          <td>Templates for writing testable acceptance criteria (the EARS convention). Used by
+              <code>/hs-feature</code> to shape requirements.</td></tr>
+      <tr><td><code><a href="review-rubric.md">review-rubric.md</a></code></td>
+          <td>The reviewer's operating manual — what it may see, severity levels, the refutation
+              protocol, and when a human must sign off.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Templates &amp; state scripts <a class="anchor" href="#reference">#</a></h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>File</th><th>What it is / how it's used</th></tr></thead>
+    <tbody>
+      <tr><td><code><a href="templates/GOAL.md">templates/GOAL.md</a></code></td><td>Skeleton for the shaped goal.</td></tr>
+      <tr><td><code><a href="templates/PLAN.md">templates/PLAN.md</a></code></td><td>Skeleton for the technical design.</td></tr>
+      <tr><td><code><a href="templates/TECH.md">templates/TECH.md</a></code></td><td>Skeleton for the phased FSM roadmap (with the field reference).</td></tr>
+      <tr><td><code><a href="templates/REVIEW.md">templates/REVIEW.md</a></code></td><td>Skeleton for the review report.</td></tr>
+      <tr><td><code><a href="bin/next_phase.py">bin/next_phase.py</a></code></td><td>Reads &amp; validates a TECH.md; prints the next actionable phase as JSON.</td></tr>
+      <tr><td><code><a href="bin/set_phase.py">bin/set_phase.py</a></code></td><td>Advances FSM state by regenerating the front-matter (no fragile hand-edits).</td></tr>
+      <tr><td><code><a href="bin/_fsm.py">bin/_fsm.py</a></code></td><td>Shared parse / validate / serialize helpers for the two scripts above.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Further reading <a class="anchor" href="#reference">#</a></h3>
+  <ul>
+    <li><a href="https://basecamp.com/shapeup" rel="noopener">Shape Up</a> — Ryan Singer / 37signals (the methodology this borrows from).</li>
+    <li><a href="https://www.anthropic.com/engineering/claude-code-best-practices" rel="noopener">Claude Code best practices</a> — the Explore → Plan → Code → Commit loop.</li>
+    <li><a href="https://github.com/github/spec-kit" rel="noopener">GitHub Spec Kit</a> and <a href="https://kiro.dev" rel="noopener">AWS Kiro</a> — other spec-driven toolchains, for comparison.</li>
+    <li><a href="https://alistairmavin.com/ears/" rel="noopener">EARS</a> — the requirements-syntax convention used in <code>GOAL.md</code>.</li>
+  </ul>
+</section>
+
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span><span class="brandmark">hypershell</span> · the software factory ·
+      built in the open under <code style="background:none;color:inherit">.agents/</code></span>
+    <span><a href="methodology.md">methodology.md</a> · <a href="../../AGENTS.md">AGENTS.md</a> ·
+      <a href="https://github.com/hypershell/hypershell" rel="noopener">github</a></span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('themeBtn');
+    var icon = document.getElementById('themeIcon');
+    var lbl = document.getElementById('themeLbl');
+    function sync() {
+      var dark = document.documentElement.getAttribute('data-theme') !== 'light';
+      icon.textContent = dark ? '☀' : '☾';
+      lbl.textContent = dark ? 'Light' : 'Dark';
+    }
+    btn.addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('hs-theme', next); } catch (e) {}
+      sync();
+    });
+    sync();
+  })();
+</script>
+</body>
+</html>
