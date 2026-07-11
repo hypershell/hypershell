@@ -3,10 +3,10 @@ slug: cli-cluster-restart-repeat-update
 title: 'Safe re-submission: --restart / --repeat / --update source gating'
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-07-11'
 phases:
 - id: P1
@@ -87,7 +87,7 @@ phases:
 - id: P6
   name: Presentation (source display) + man pages + full sphinx build + full pytest
     sweep
-  status: pending
+  status: done
   satisfies:
   - R18
   depends_on:
@@ -303,25 +303,40 @@ Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/u
 **Satisfies:** R18 · **Depends on:** P4, P5
 **Goal:** resolve `source` for humans, finish the same-commit surface, prove the whole feature green.
 
-- [ ] Presentation: `format_source(path, *, relative=False)` in `core/pretty_print.py` (sentinels
-  `^<.*>$` pass through; real paths absolute; `@node` json specs opaque — never relativize); add a
-  resolved `source:` line to `NORMAL_MODE_TEMPLATE` (`task.py:1285`); resolve in module `print_normal`
-  (`task.py:1352`, single `Source.from_id`) and `TaskSearchApp.print_normal` (`task.py:777`, one batched
-  `Source.paths_for_ids` per page via a new optional `source_map` arg — avoid N+1). **Keep `fingerprint`
-  out** of the normal template (reachable via `-x`/json/csv). Machine formats keep the raw UUID.
-- [ ] Update man pages `share/man/man1/hs.1`, `share/man/man1/hsx.1` for `--repeat`/`--update` and the
-  revised `--restart`, **and add the pre-existing-missing `--from-json`** (same gap the ridealong `[fix]`
-  closed for completions — man pages carry no `--from-json` entry either). (CI list `tests.yml:95-112` +
-  `pyproject.toml` mapping unchanged — no new files.)
-- [ ] `uv run sphinx-build docs docs/_build` — confirm **no new** warnings vs. the pre-existing
-  `task_submit.rst`/`manual.rst` toctree warnings.
-- [ ] `bash -n share/bash_completion.d/hs`; `zsh -n share/zsh/site-functions/_hs` (both already carry
-  `--from-json` after the ridealong `[fix]` — re-confirm nothing regressed).
-- [ ] Full `uv run pytest -v` green; add any missing edge cases surfaced during the sweep (e.g. R7
-  determinism, `--update` on unseen path == submit-all).
-- **Verify:** `uv run pytest -v && uv run sphinx-build docs docs/_build`.
+- [x] Presentation: `format_source(path, *, relative=False)` in `core/pretty_print.py` (sentinels
+  `^<.*>$` pass through; real paths absolute; `@node` json specs opaque — never relativize); added a
+  resolved `source:` line to `NORMAL_MODE_TEMPLATE` (after `group`); resolve via a new module helper
+  `resolve_source(source, source_map=None)` used by module `print_normal` (single `Source.from_id`,
+  degrades to raw id on `NotFound`) and `TaskSearchApp.print_normal` (one batched `Source.paths_for_ids`
+  per page via the `source_map` arg — avoids N+1). **`fingerprint` kept out** of the normal template
+  (reachable via `-x`/json/csv). Machine formats keep the raw UUID. CLI-verified: named file → abspath,
+  `<direct>`/`<stdin>` sentinels pass through, `-x source`/explicit-field stay raw.
+- [x] Regenerated man pages from source via the Sphinx **man builder** (`sphinx-build -b man`, from
+  `docs/manual.rst` → the P3–P5-updated `_include` snippets) rather than hand-editing roff — the
+  committed pages were stale (zero mentions of `--repeat`/`--update`/`--from-json`). All three shipped +
+  CI-asserted pages regenerated (`hs.1`, `hyper-shell.1`; `hsx.1` kept a byte-copy of `hs.1` per the
+  existing convention — no `hsx` entry in `conf.py`). New flags + revised `--restart` narrative + the
+  pre-existing-missing `--from-json` now present. CI list + `pyproject.toml` mapping unchanged (no new
+  files); mandoc lint clean (only pre-existing >80-byte STYLE notes).
+- [x] `uv run sphinx-build docs docs/_build` — build succeeded; **only** the pre-existing
+  `task_submit.rst`/`manual.rst` toctree warnings (no new warnings).
+- [x] `bash -n share/bash_completion.d/hs`; `zsh -n share/zsh/site-functions/_hs` — both clean;
+  `--from-json`/`--repeat`/`--update` still present (ridealong + P3/P4), nothing regressed.
+- [x] Full `uv run pytest -v` green; added edge cases: `format_source` unit test + two presentation
+  integration tests (normal-view resolves single+batched, machine formats stay raw, `<direct>` sentinel)
+  in `test_source.py`, and `--update` on an unseen path == submit-all (R9 edge) in `test_submit.py`.
+- **Verify:** `uv run pytest -v && uv run sphinx-build docs docs/_build` — 351 passed; docs build clean
+  (2 pre-existing warnings only).
 - **Touches:** `src/hypershell/core/pretty_print.py`, `src/hypershell/task.py`,
-  `share/man/man1/hs.1`, `share/man/man1/hsx.1`, `docs/_include/*.rst`, `tests/`.
+  `share/man/man1/hs.1`, `share/man/man1/hsx.1`, `share/man/man1/hyper-shell.1`,
+  `tests/test_source.py`, `tests/test_submit.py`.
+- **Build note (amendment):** man pages are **generated artifacts** (Sphinx man builder, mapped in
+  `docs/conf.py:126`), not hand-maintained roff — the correct P6 action was to regenerate from the RST
+  source that P3–P5 already updated. Extended the checklist's `hs.1`/`hsx.1` to also cover the equally-
+  stale, equally-shipped `hyper-shell.1` (leaving it would ship an inconsistent legacy man page).
+  Research 08's "update `_include` normal-output examples" had **no applicable target**: no `_include`
+  snippet renders an `hs info` normal block (only dated blog release posts do, which are historical
+  records and must not be retro-edited).
 
 ---
 

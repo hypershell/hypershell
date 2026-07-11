@@ -44,10 +44,10 @@ from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
 from hypershell.core.types import smart_coerce, JSONData, to_json_type
-from hypershell.core.pretty_print import format_tag, format_json, format_bytes
+from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, JSON, CANCEL_STATUS
+from hypershell.data.model import Task, Source, JSON, CANCEL_STATUS
 from hypershell.data import ensuredb, DATABASE_DIALECT
 
 # Public interface
@@ -776,9 +776,11 @@ class TaskSearchApp(Application, SearchableMixin):
     @staticmethod
     def print_normal(results: List[Tuple]) -> None:
         """Print semi-structured output with all field names."""
-        for record in results:
+        tasks = [Task.from_dict(dict(zip(Task.columns, record))) for record in results]
+        source_map = Source.paths_for_ids([task.source for task in tasks if task.source])
+        for task in tasks:
             print('---')
-            print_normal(Task.from_dict(dict(zip(Task.columns, record))))
+            print_normal(task, source_map=source_map)
 
     def print_plain(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print plain text output with given field names, one task per line."""
@@ -1285,6 +1287,7 @@ class WhereClause:
 NORMAL_MODE_TEMPLATE: Final[str] = """\
           id: {id}
        group: {group}
+      source: {source}
         args: {args}
      command: {command}
        cores: {cores} (used: {cores_max})
@@ -1349,8 +1352,31 @@ def select_style(status: Optional[int]) -> Optional[str]:
     return SPECIAL_TASK_STYLES.get(status, 'yellow' if status is not None and status < 0 else 'red')
 
 
-def print_normal(task: Task) -> None:
-    """Print semi-structured task metadata with all field names."""
+def resolve_source(source: Optional[str], source_map: Optional[Dict[str, str]] = None) -> str:
+    """Resolve a task's `source` UUID to a display path/sentinel for the normal view.
+
+    NULL (historical rows) renders as ``null``. A batched `source_map` (id -> path) is
+    consulted first to avoid an N+1 lookup; otherwise a single `Source.from_id` resolves
+    it. An id with no matching source row degrades to the raw id rather than raising.
+    """
+    if not source:
+        return 'null'
+    if source_map is not None:
+        path = source_map.get(source)
+    else:
+        try:
+            path = Source.from_id(source).path
+        except Source.NotFound:
+            path = None
+    return format_source(path) if path else source
+
+
+def print_normal(task: Task, source_map: Optional[Dict[str, str]] = None) -> None:
+    """Print semi-structured task metadata with all field names.
+
+    `source_map` (id -> path) lets a multi-task caller batch-resolve sources up front and
+    avoid an N+1 lookup; when omitted (e.g. `hs info`), the single source is resolved directly.
+    """
     task_data = {k: format_json(v) for k, v in task.to_dict().items()}
     task_data['waited'] = 'null' if task.waited is None else timedelta(seconds=int(task_data['waited']))
     task_data['duration'] = 'null' if task.duration is None else timedelta(seconds=int(task_data['duration']))
@@ -1360,5 +1386,6 @@ def print_normal(task: Task) -> None:
     task_data['memory'] = format_bytes(int(task.memory or 0))
     task_data['memory_max'] = 'null' if not task.memory_max else format_bytes(int(task.memory_max))
     task_data['timeout'] = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
+    task_data['source'] = resolve_source(task.source, source_map)
     color = select_color(task.exit_status)
     print(color(NORMAL_MODE_TEMPLATE.format(**task_data)))

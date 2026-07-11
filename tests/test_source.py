@@ -6,15 +6,22 @@
 
 # Type annotations
 from __future__ import annotations
+from pathlib import Path
+
+# Standard libs
+import os
+import re
 
 # External libs
 from pytest import mark
 from sqlalchemy import create_engine, inspect
 
 # Internal libs
+from hypershell.core.pretty_print import format_source
 from hypershell.data.model import (
     Task, Source, Entity, DIRECT_SOURCE_ID, STDIN_SOURCE_ID,
 )
+from tests import main, main_lines, assert_output, create_taskfile_echo, UUID_PATTERN
 
 
 # --- Identity fingerprint semantics (R2) -----------------------------------------------------------
@@ -119,3 +126,60 @@ def test_tasks_source_index_is_partial_excluding_reserved() -> None:
     predicate = str(entry.get('dialect_options', {}).get('sqlite_where'))
     assert DIRECT_SOURCE_ID in predicate
     assert STDIN_SOURCE_ID in predicate
+
+
+# --- Presentation: source resolution for humans (R18-adjacent) -------------------------------------
+
+@mark.unit
+def test_format_source_passes_sentinels_shows_paths_and_keeps_specs_opaque() -> None:
+    """Sentinels pass through; real paths are absolute by default / relative on request; @node opaque."""
+    # reserved sentinels pass through unchanged in both modes
+    assert format_source('<direct>') == '<direct>'
+    assert format_source('<stdin>') == '<stdin>'
+    assert format_source('<stdin>', relative=True) == '<stdin>'
+    # a real path shows as-stored (absolute) by default, relativized only on request
+    assert format_source('/data/tasks/run.in') == '/data/tasks/run.in'
+    assert format_source(os.path.abspath('run.in'), relative=True) == 'run.in'
+    # a --from-json spec carrying an @node suffix is opaque and never relativized
+    spec = '/data/plan.json@chunks'
+    assert format_source(spec) == spec
+    assert format_source(spec, relative=True) == spec
+
+
+@mark.integration
+def test_normal_view_resolves_source_while_machine_formats_stay_raw(temp_site: Path) -> None:
+    """The human `normal` view resolves `source` UUID -> path (single + batched); machine surfaces keep
+    the raw UUID and `fingerprint` never leaks into the normal template."""
+    taskfile = create_taskfile_echo(temp_site, count=3)
+    assert main(['hs', 'submit', str(taskfile)])[0] == 0
+
+    rc, ids, _ = main_lines(['hs', 'list', 'id', '-f', 'plain'])
+    assert rc == 0
+    task_id = ids[0]
+
+    # `hs info` (single-task normal view) resolves source to the absolute file path...
+    rc, stdout, _ = main(['hs', 'info', task_id])
+    assert rc == 0
+    assert_output(rf'source: {re.escape(str(taskfile))}$', stdout, 1)
+    assert 'fingerprint:' not in stdout            # fingerprint stays out of the normal template
+
+    # ...and the many-task normal view resolves every row via the batched source_map (no N+1)
+    rc, listing, _ = main(['hs', 'list', '--all'])
+    assert rc == 0
+    assert_output(rf'source: {re.escape(str(taskfile))}$', listing, 3)
+
+    # machine surfaces keep the raw source UUID (stable, scriptable)
+    rc, raw, _ = main(['hs', 'info', task_id, '-x', 'source'])
+    assert rc == 0
+    assert UUID_PATTERN.match(raw.strip('"'))
+
+
+@mark.integration
+def test_normal_view_resolves_reserved_sentinels(temp_site: Path) -> None:
+    """Single-command (`<direct>`) submissions resolve to the reserved sentinel in the normal view."""
+    assert main(['hs', 'submit', 'echo direct-presentation'])[0] == 0
+    rc, ids, _ = main_lines(['hs', 'list', 'id', '-f', 'plain'])
+    assert rc == 0
+    rc, stdout, _ = main(['hs', 'info', ids[0]])
+    assert rc == 0
+    assert_output(r'source: <direct>$', stdout, 1)

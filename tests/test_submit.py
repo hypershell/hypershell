@@ -451,6 +451,17 @@ def test_gate_update_submits_only_novel(temp_site: Path) -> None:
 
 
 @mark.integration
+def test_gate_update_on_unseen_path_submits_all(temp_site: Path) -> None:
+    """--update on a never-before-seen path has an empty lineage, so nothing is skipped and all
+    tasks are submitted — `--update` degrades to a plain submit when there is no prior source (R9 edge)."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])
+    assert rc == exit_status.success, stderr
+    assert_output(r'INFO .* 0 tasks already present; submitting 4 new tasks$', stderr, 1)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['4'], NO_OUTPUT)
+
+
+@mark.integration
 def test_gate_update_repeat_contradictory() -> None:
     """--update and --repeat together are contradictory and rejected before any work (R10)."""
     assert main_lines(['hs', 'submit', '-f', 'x.in', '-g0', '--update', '--repeat']) == (
