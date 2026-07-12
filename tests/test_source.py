@@ -117,15 +117,52 @@ def test_fresh_schema_creates_source_table_columns_and_indices() -> None:
 
 
 @mark.unit
-def test_tasks_source_index_is_partial_excluding_reserved() -> None:
-    """The de-dup index excludes the reserved <direct>/<stdin> source ids (partial predicate)."""
+def test_tasks_source_index_is_full_covering_not_partial() -> None:
+    """The de-dup/detection index covers (source, fingerprint) and is NOT partial (R17).
+
+    A partial ``WHERE source NOT IN (reserved)`` predicate is only honored when the query
+    repeats it with matching literals; the parameterized ``count_for_source`` /
+    ``fingerprints_for_sources`` lookups bind ``source`` instead, which no engine can prove
+    satisfies a literal partial predicate — so a partial index silently degrades them to a
+    full table scan. A full index is used with plain bound parameters everywhere.
+    """
     engine = create_engine('sqlite://')
     Entity.metadata.create_all(engine)
     insp = inspect(engine)
     (entry,) = [ix for ix in insp.get_indexes('task') if ix['name'] == 'index_tasks_source']
-    predicate = str(entry.get('dialect_options', {}).get('sqlite_where'))
-    assert DIRECT_SOURCE_ID in predicate
-    assert STDIN_SOURCE_ID in predicate
+    assert entry['column_names'] == ['source', 'fingerprint']         # covering (source, fingerprint)
+    assert not entry.get('dialect_options', {}).get('sqlite_where')   # no partial predicate
+
+
+@mark.unit
+def test_source_lookups_use_the_index_not_a_full_scan() -> None:
+    """R17: the count + lineage de-dup lookups are index-backed, not full table scans.
+
+    Mirrors the ``WHERE`` clauses of :meth:`Task.count_for_source` and
+    :meth:`Task.fingerprints_for_sources` on a populated throwaway table and asserts the
+    planner reaches for ``index_tasks_source`` instead of scanning ``task`` (the linear cost
+    R17 forbids at billions–trillions of rows). A partial index would ``SCAN`` here.
+    """
+    engine = create_engine('sqlite://')
+    Entity.metadata.create_all(engine)
+    real = 'aaaaaaaa-0000-7000-8000-000000000000'
+    columns = ('id', '"group"', 'args', 'submit_id', 'submit_time', 'attempt', 'retried', 'tag',
+               'source', 'fingerprint')
+    rows = ([(f'{i:036d}', 1, 'echo', 'sub', '2026-01-01', 1, 0, '{}', real, f'fp{i % 5}')
+             for i in range(30)] +
+            [(f'r{i:035d}', 1, 'echo', 'sub', '2026-01-01', 1, 0, '{}', DIRECT_SOURCE_ID, None)
+             for i in range(2000)])   # bulk reserved rows -> a scan would be far costlier than the index
+    with engine.begin() as conn:
+        conn.exec_driver_sql(f'INSERT INTO task ({", ".join(columns)}) VALUES ({", ".join(["?"] * len(columns))})', rows)
+        conn.exec_driver_sql('ANALYZE')
+    with engine.connect() as conn:
+        count_plan = ' | '.join(r[-1] for r in conn.exec_driver_sql(
+            'EXPLAIN QUERY PLAN SELECT count(*) FROM task WHERE source = ?', (real,)))
+        fp_plan = ' | '.join(r[-1] for r in conn.exec_driver_sql(
+            'EXPLAIN QUERY PLAN SELECT DISTINCT fingerprint FROM task WHERE source IN (?) '
+            'AND fingerprint IS NOT NULL', (real,)))
+    assert 'index_tasks_source' in count_plan and 'SCAN task' not in count_plan, count_plan
+    assert 'index_tasks_source' in fp_plan and 'SCAN task' not in fp_plan, fp_plan
 
 
 # --- Presentation: source resolution for humans (R18-adjacent) -------------------------------------

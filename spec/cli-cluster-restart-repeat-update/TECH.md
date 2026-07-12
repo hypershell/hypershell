@@ -3,10 +3,10 @@ slug: cli-cluster-restart-repeat-update
 title: 'Safe re-submission: --restart / --repeat / --update source gating'
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
-current_phase: done
+current_phase: P3
 last_updated: '2026-07-11'
 phases:
 - id: P1
@@ -159,13 +159,23 @@ source/raw_args is supplied).
   `Source.reserved(const_id)` (lazy get-or-create by PK; `path` = sentinel), `Source.paths_for_ids(ids)`
   (presentation), `Task.count_for_source(id)`, `Task.fingerprints_for_sources(ids) -> set[str]`.
 - [x] Indices: `index_source_lookup(Source.path, Source.fingerprint)`;
-  `index_tasks_source(Task.source, Task.fingerprint)` — **partial excluding** `DIRECT_SOURCE_ID`/
-  `STDIN_SOURCE_ID` (`postgresql_where`/`sqlite_where`). **No BRIN** (lean on Timescale compression).
+  `index_tasks_source(Task.source, Task.fingerprint)` — **full covering, non-partial** (revised in F1
+  remediation: a partial predicate can't be honored for parameter-bound `source` lookups → silent full
+  scan). **No BRIN** (lean on Timescale compression).
 - [x] New `tests/test_source.py` (unit): fingerprint order-independent over tag order; stable across
   template change + differing uuid/attempt; differs on args/group/tag change; `part`/resource knobs
   excluded; fresh `initdb` yields the `source` table + indices (SQLAlchemy inspect).
 - **Verify:** `uv run pytest -v -m unit tests/test_source.py`.
 - **Touches:** `src/hypershell/data/core.py`, `src/hypershell/data/model.py`, `tests/test_source.py`.
+- **Remediation (review cycle 1 — F1, R17):** `index_tasks_source` was made **non-partial**. The
+  partial `WHERE source NOT IN (<direct>,<stdin>)` predicate is only honored when a query repeats it
+  with literals, but `count_for_source`/`fingerprints_for_sources` bind `source` as a parameter — which
+  neither SQLite nor PostgreSQL can prove satisfies a literal partial predicate, so the lookups
+  silently degraded to a full table `SCAN` (verified via `EXPLAIN QUERY PLAN` at 300k rows). A full
+  covering `(source, fingerprint)` index is used with plain bound parameters on every engine (the
+  reserved-source rows it also carries are a marginal cost — named-file sources dominate the target
+  workload). Added a structural test (index is full, not partial) + a query-plan regression test that
+  asserts the lookups reach the index, not a scan.
 
 ## Phase P2 — Submit-flow stamping seam
 **Satisfies:** R3, R4 · **Depends on:** P1

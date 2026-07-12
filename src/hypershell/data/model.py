@@ -823,7 +823,11 @@ class Task(Entity):
 
     @classmethod
     def count_for_source(cls: Type[Task], source_id: str) -> int:
-        """Count tasks stamped with the given `source_id` (R7 completeness check)."""
+        """Count tasks stamped with the given `source_id` (R7 completeness check).
+
+        Served by the leading column of `index_tasks_source`; a bound `source_id` seeks the
+        B-tree (no full table `SCAN`), so the check stays sub-linear at scale (R17).
+        """
         return cls.query().filter(cls.source == source_id).count()
 
     @classmethod
@@ -831,8 +835,8 @@ class Task(Entity):
         """Set of task identity fingerprints across the given `source_ids` (de-dup skip-set).
 
         The de-dup scope is a same-path source lineage (R9/R12/R14) — a small set of
-        sources — so this is a bounded, index-backed scan (`index_tasks_source`), not a
-        walk of the whole task table.
+        sources — so, backed by the covering `index_tasks_source` on `(source, fingerprint)`,
+        this is a bounded index-only scan, not a walk of the whole task table (R17).
         """
         if not source_ids:
             return set()
@@ -847,11 +851,14 @@ class Task(Entity):
 # Indices for efficient queries
 index_tasks_unscheduled = Index('index_tasks_unscheduled', Task.group, Task.schedule_time)
 index_tasks_retries = Index('index_tasks_retries', Task.exit_status, Task.retried)
-index_tasks_source = Index(
-    'index_tasks_source', Task.source, Task.fingerprint,
-    postgresql_where=Task.source.not_in([DIRECT_SOURCE_ID, STDIN_SOURCE_ID]),
-    sqlite_where=Task.source.not_in([DIRECT_SOURCE_ID, STDIN_SOURCE_ID]),
-)
+# Covering index for source detection / lineage de-dup (R17). Deliberately *not* partial:
+# a partial `WHERE source NOT IN (<direct>, <stdin>)` predicate is only honored when the query
+# repeats it with matching literals, but `count_for_source`/`fingerprints_for_sources` bind the
+# source as a parameter — which neither SQLite nor PostgreSQL can prove satisfies a literal
+# partial predicate, so a partial index silently degrades those lookups to a full table SCAN.
+# A full index is used with plain bound parameters on every engine; the reserved-source rows it
+# also carries are a marginal cost (real named-file sources dominate the target workload).
+index_tasks_source = Index('index_tasks_source', Task.source, Task.fingerprint)
 
 
 class Client(Entity):
