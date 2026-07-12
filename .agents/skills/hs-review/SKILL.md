@@ -45,7 +45,7 @@ Additional instructions provided with the invocation: $ARGUMENTS
 - **Blindness is the point.** The correctness reviewer subagent is given `GOAL.md`, the diff, the
   runnable repo, `invariants.md`, and `review-rubric.md` — and is **explicitly told NOT to read
   `PLAN.md`, `TECH.md`, or `research/`**. Only this skill (the orchestrator) reads `TECH.md`, and only
-  for the `base`/`slug` metadata — it must not pass PLAN/TECH *content* into the reviewer prompt.
+  for the `base`/`slug`/`kind` metadata — it must not pass PLAN/TECH *content* into the reviewer prompt.
 - **External verification is the spine.** Every finding must cite an executed command
   (`uv run pytest`, real CLI in a `temp_site`, docs build when touched). No assertion-only findings.
 - **Refute before reporting.** Try to disprove each candidate; classify `CONFIRMED` (reproduced) vs
@@ -63,8 +63,8 @@ Additional instructions provided with the invocation: $ARGUMENTS
 ## Procedure
 
 ### Step 1 — Pre-flight
-Confirm a feature/fix branch; resolve `{slug}` from the branch and confirm `base` from TECH.md
-`base:` (defaults to `develop`). Capture the head SHA (`git rev-parse HEAD`). If `TECH.md` `status`
+Confirm a feature/fix branch; resolve `{slug}` from the branch, confirm `base` (defaults to `develop`),
+and read `kind` (the commit `{category}`) from TECH.md. Capture the head SHA (`git rev-parse HEAD`). If `TECH.md` `status`
 is not `in_review`/`done`, note it (the build may be incomplete) and ask whether to proceed.
 
 ### Step 2 — Delegate the correctness pass (fresh subagent)
@@ -103,7 +103,7 @@ backed by cited evidence). Then:
 Then **commit the review artifacts** so the tree stays clean for the loop:
 ```
 git add spec/{slug}/REVIEW.md spec/{slug}/TECH.md
-git commit -m "WIP: review cycle {n} — {verdict}"
+git commit -m "[{category}] Review {slug}: cycle {n} — {verdict}"
 ```
 **No `Co-Authored-By` trailer.** Do not push.
 

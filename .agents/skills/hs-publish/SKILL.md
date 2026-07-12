@@ -83,7 +83,13 @@ choice.
 git push -u origin {branch}
 gh pr create --base develop --head {branch} --title "{title}" --body-file <(...)
 ```
-Report the PR URL. If `merge` was requested and confirmed: `gh pr merge --squash --delete-branch`.
+Report the PR URL. If `merge` was requested and confirmed, squash with an **explicit** subject/body so
+none of the intermediate branch commit subjects leak into the `develop` commit — a bare
+`gh pr merge --squash` concatenates every branch commit message into the squash body:
+```
+gh pr merge {N} --squash --subject "{title}" --body "{one-line summary, or empty}" --delete-branch
+```
+The `{title}` is the PR title (`[{category}] …`), which becomes the sole squash-commit subject on `develop`.
 
 ### Step 4b — local (`local`)
 ```

@@ -67,7 +67,8 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
   [`.agents/factory/invariants.md`](../../.agents/factory/invariants.md) for the curated footgun
   checklist relevant to this change.
 - One phase per `hs-build` invocation by default; one atomic commit containing **both** the code and
-  the `TECH.md` state change. Branch commit subjects are `WIP: P<n> — …` (squashed at `hs-publish`).
+  the `TECH.md` state change. Branch commit subjects follow the house style `[{category}] Build {slug}
+  P<n>: …` (no `WIP:` prefix) — squashed into the single PR-title commit at `hs-publish`.
 - **No `Co-Authored-By` trailer** (repo convention; overrides the AGENTS.md default).
 - A CLI/feature change updates `docs/_include/*.rst` help snippets and `share/` completions **in the
   same commit**.
@@ -102,4 +103,4 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 4. Run the phase's `verify:` command — never advance on a checkbox alone.
 5. Amend this file freely if reality diverges (regenerate frontmatter with `set_phase.py`; note the
    amendment in the commit body). STOP and escalate only on a **`GOAL.md` contradiction**.
-6. Mark the phase `done`, advance `current_phase`, `--touch`; one `WIP:` commit; stop and report.
+6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[{category}]` commit; stop and report.

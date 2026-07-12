@@ -4,7 +4,7 @@ description: >-
   Resume and execute a HyperShell feature's phased roadmap. Discovers spec/{slug}/TECH.md from the
   current feature/fix branch, reads the FSM via next_phase.py, implements the next phase (default one
   at a time), runs that phase's verify command, updates state via set_phase.py, and makes one atomic
-  code+state WIP commit. May amend TECH.md freely as reality dictates; only a GOAL.md contradiction
+  code+state commit. May amend TECH.md freely as reality dictates; only a GOAL.md contradiction
   forces a stop. The /continue-style driver of the software factory (see .agents/factory/methodology.md).
 disable-model-invocation: true
 argument-hint: "[status | dry run | phase P3 | through P5 | next 2 | bundle | skip review]"
@@ -124,10 +124,15 @@ or advance state; consider the circuit breaker.
 ### Step 6 — Commit (atomic code + state)
 ```
 git add -A
-git commit -m "WIP: {id} — {phase name}"
+git commit -m "[{category}] Build {slug} {id}: {phase name}"
 ```
-Body only for non-obvious decisions or to record a `TECH.md` amendment (what changed and why). **No
-co-author trailer.** Do not push. `bundle` → one commit for the whole run.
+`{category}` is the `TECH.md` `kind` (feature|fix|refactor), available from the Step 1 `next_phase.py`
+output — the same house style as `hs-feature`/`hs-plan`. There is **no `WIP:` prefix**: every branch
+commit is squashed into the single PR-title commit at `hs-publish`, so subjects only need to read well
+in the PR's commits tab. For a remediation commit (a phase reopened by `hs-review`), keep the `{id}`
+and describe the fix, e.g. `[feature] Build {slug} P1: F1 — full covering index (R17)`. Body only for
+non-obvious decisions or to record a `TECH.md` amendment. **No co-author trailer.** Do not push.
+`bundle` → one commit for the whole run.
 
 ### Step 7 — Continue or stop
 Default / at a phase boundary: stop and report. `through`/`next`/multi: loop to Step 2 with the next
@@ -140,7 +145,7 @@ the FSM is fully `done` (`status: in_review`), recommend a **clean-session** `/h
 
 ## Examples
 
-- `/hs-build` — next incomplete phase, run its verify, one `WIP:` commit, stop + report.
+- `/hs-build` — next incomplete phase, run its verify, one clean `[category]` commit, stop + report.
 - `/hs-build status` — FSM state + last commit; no work.
 - `/hs-build dry run phase P4` — report what P4 would do (items, files, verify, commit); no edits.
 - `/hs-build through P3` — run each incomplete phase up to P3, one commit each, stopping at boundaries.
