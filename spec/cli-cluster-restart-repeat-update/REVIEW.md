@@ -140,3 +140,27 @@ remediation.
 Not run (plain `/hs-review` invocation). Available via `/hs-review completeness` if desired — but the
 requirement→evidence matrix above already shows all 18 R-IDs implemented, with R17 partial (F1) and
 R7 partial (F2).
+
+## Review cycle 2 — remediation + human sign-off (2026-07-11)
+
+Both CONFIRMED cycle-1 findings were remediated on this branch (each its own commit):
+
+- **F1 (R17)** — `f876000`: `index_tasks_source` made **full covering, non-partial**. A partial
+  `WHERE source NOT IN (reserved)` predicate can't be honored for parameter-bound `source` lookups, so
+  `count_for_source`/`fingerprints_for_sources` were full-scanning; a full index is used with plain
+  bound params on every engine. Verified via `EXPLAIN QUERY PLAN` at 300k rows (`SCAN task` →
+  `SEARCH … USING COVERING INDEX`) + a structural and a query-plan regression test.
+- **F2 (R7)** — `698580a`: `_warn_if_incomplete` now measures completeness across the whole same-path
+  **lineage**, not a single source, so a de-duplicated `--update`/`--restart` is no longer misreported
+  as incomplete. Verified via CLI (false "1 of 4" gone; genuine "2 of 3" still warns) + an integration
+  regression test.
+
+Full suite **354 passed** (was 352; net +2 regression guards). The mandatory coupled-core human-gate
+(F1 touched `data/model.py`) is satisfied by the **maintainer's explicit sign-off** to publish, with
+the two judgment calls flagged and acknowledged: the F1 partial→full index **design change**, and the
+F2 refinement of R7's per-source wording to **lineage-scoped** (serves R7's intent under the dedup that
+R9/R12/R14 mandate; not a `GOAL` R-ID change). Scale validation (10M+ rows on Anvil/HPC, and the
+PostgreSQL/TimescaleDB query plans that SQLite-only plan checks can't cover) is being performed by the
+maintainer out-of-band.
+
+**Verdict: approved (human sign-off).**

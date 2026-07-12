@@ -98,8 +98,8 @@ phases:
   hill: uphill
   verify: uv run pytest -v && uv run sphinx-build docs docs/_build
 review:
-  last_reviewed_commit: 93476f1
-  verdict: none
+  last_reviewed_commit: 698580a
+  verdict: approved
   blocked_reason: ''
 ---
 # TECH.md — Safe re-submission: `--restart` / `--repeat` / `--update` source gating
