@@ -3,10 +3,10 @@ slug: cli-cluster-restart-repeat-update
 title: 'Safe re-submission: --restart / --repeat / --update source gating'
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-07-11'
 phases:
 - id: P1
@@ -99,9 +99,8 @@ phases:
   verify: uv run pytest -v && uv run sphinx-build docs docs/_build
 review:
   last_reviewed_commit: 93476f1
-  verdict: changes-requested
-  blocked_reason: 'R17: count/dedup full-scan in data/model.py (partial-index predicate
-    mismatch); R7: false-positive incomplete warning after dedup in submit.py'
+  verdict: none
+  blocked_reason: ''
 ---
 # TECH.md — Safe re-submission: `--restart` / `--repeat` / `--update` source gating
 
@@ -240,6 +239,17 @@ Reserved `<direct>`/`<stdin>` stamped (real rows) and exempt. No refuse/repeat/u
   `tests/test_groups.py` (R6 now refuses re-submitting changed content at a seen path — two batches
   given distinct source filenames). **Build note:** `apply_source_gate` implements the full shared
   matrix now, including the `restart` branches (R12/R14) that P4 wires into `ClusterApp`.
+- **Remediation (review cycle 1 — F2, R7):** `_warn_if_incomplete` now measures completeness across
+  the whole same-path **lineage** (sum of `count_for_source` over `Source.lookup(path)`), not the
+  single checked source. De-dup (R9/R12/R14) deliberately stamps a file version's tasks across the
+  lineage — the novel ones onto the newest source, the rest already present under earlier sources — so
+  the recorded full-file `task_count` on a de-dup source always exceeded the tasks stamped on *it*,
+  producing a false "appears incomplete" warning on the next detection (reproduced: `--update` twice →
+  "1 of 4"). The lineage sum is complete for a de-duplicated re-submission (no false positive) yet
+  still catches a genuinely interrupted ingest (single-source lineage is unchanged). This keeps R7's
+  intent — warn on incomplete prior submission — correct under the dedup that R9/R12/R14 mandate;
+  it refines R7's per-source wording (a locked-plan detail, not a `GOAL` R-ID change). Added an
+  integration regression test; `count_for_source` stays index-backed per F1, lineages are small.
 
 ## Phase P4 — `hsx` gate matrix + file-aware restart
 **Satisfies:** R11, R12, R13, R14, R15, R16 · **Depends on:** P3

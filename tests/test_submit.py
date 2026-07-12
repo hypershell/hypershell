@@ -424,6 +424,27 @@ print('OK')
 
 
 @mark.integration
+def test_gate_dedup_update_not_reported_incomplete(temp_site: Path) -> None:
+    """A de-duplicated --update is not later misreported as an incomplete prior (R7 regression).
+
+    --update records the new source's expected count as the *full* file count but stamps only the
+    novel tasks onto it — the deduped ones stay under earlier same-path sources. Completeness is
+    therefore measured across the lineage; a subsequent detection of the (complete) version must
+    not cry wolf. Before the fix this warned a spurious 'appears incomplete: 2 of 6'.
+    """
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    assert main(['hs', 'submit', '-f', str(taskfile), '-g0'])[0] == exit_status.success
+    create_taskfile_echo(temp_site, count=6)  # same path, two new lines
+    assert main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])[0] == exit_status.success
+
+    # Re-detect the now-complete v2: no flag refuses it as a duplicate (R5) but must NOT warn.
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.bad_argument, stderr
+    assert_output(r'appears incomplete', stderr, 0)   # the F2 false-positive is gone
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['6'], NO_OUTPUT)
+
+
+@mark.integration
 def test_gate_repeat_submits_all_again(temp_site: Path) -> None:
     """--repeat ingests a new source and submits all tasks again, even on an identical match (R8)."""
     taskfile = create_taskfile_echo(temp_site, count=4)

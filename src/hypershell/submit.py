@@ -162,9 +162,10 @@ def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) ->
 def _new_source_id(path: str, fingerprint: str, count: int) -> str:
     """Persist a fresh :class:`Source` row and return its id (R1).
 
-    The expected ``count`` is recorded *before* any task is committed, so an interrupted
-    ingest leaves a source whose recorded count exceeds the tasks that actually landed —
-    exactly the signal :func:`_warn_if_incomplete` reports on a later re-submission (R7).
+    The expected ``count`` (the file's full task count) is recorded *before* any task is
+    committed, so an interrupted ingest leaves the same-path lineage holding fewer tasks than
+    expected — the signal :func:`_warn_if_incomplete` reports on a later re-submission (R7),
+    measured across the lineage so a de-duplicated submission does not read as incomplete.
     """
     source = Source.new(path=path, fingerprint=fingerprint, task_count=count)
     Source.add(source)
@@ -172,11 +173,19 @@ def _new_source_id(path: str, fingerprint: str, count: int) -> str:
     return source.id
 
 
-def _warn_if_incomplete(source: Source) -> None:
-    """R7: warn when fewer tasks landed for `source` than its recorded count."""
+def _warn_if_incomplete(source: Source, lineage: List[Source]) -> None:
+    """R7: warn when fewer tasks landed across the same-path `lineage` than `source` expects.
+
+    Completeness is measured against the *whole* same-path lineage, not ``source`` alone.
+    De-dup (R9/R12/R14) deliberately distributes a file version's tasks across the lineage —
+    the novel ones onto the newest source, the rest already present under earlier same-path
+    sources — so a per-source count structurally under-counts a de-duplicated submission and
+    would cry wolf on a re-submission that is in fact complete. Each ``count_for_source`` is
+    index-backed, and a lineage is small (re-submissions of one path), so the sum stays cheap.
+    """
     if source.task_count is None:
         return
-    landed = Task.count_for_source(source.id)
+    landed = sum(Task.count_for_source(prior.id) for prior in lineage)
     if landed < source.task_count:
         log.warning(f'Prior submission of {source.path} appears incomplete: '
                     f'{landed} of {source.task_count} tasks present (source {source.id})')
@@ -213,7 +222,7 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
     match = Source.matching(path, fingerprint)
     lineage = Source.lookup(path)
     if lineage:
-        _warn_if_incomplete(match or lineage[0])  # R7 — orthogonal to the submit/refuse decision
+        _warn_if_incomplete(match or lineage[0], lineage)  # R7 — orthogonal to the submit/refuse decision
     if repeat:
         # R8 / R15 — brand-new source, submit everything even on an identical match.
         log.info(f'Submitting all {count} tasks from {path} as a new source (--repeat)')
