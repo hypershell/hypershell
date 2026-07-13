@@ -113,3 +113,8 @@ repo-relative path.
 `GOAL.md` R-IDs → `PLAN.md` requirement→design map → `TECH.md` phase `satisfies:` → commits →
 `REVIEW.md` requirement→evidence matrix → PR body. Because the repo is squash-only (per-commit
 history is destroyed on merge), the committed `spec/{slug}/` folder *is* the retained trace.
+
+Provenance lives in that chain, **not in source comments**: comments explain the invariant/*why* on
+their own terms and never embed R-IDs or phase ids — those restart per feature and collide across
+branches, and mean nothing to a later reader of the merged tree. `git blame → commit → PR →
+spec/{slug}/` recovers the requirement behind any line when you need it.

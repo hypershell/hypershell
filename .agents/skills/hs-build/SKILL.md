@@ -66,7 +66,8 @@ Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
   `set_phase.py`, edit phase bodies as needed — and **note the amendment in the commit body**. But if
   the work contradicts a `GOAL.md` requirement (an R-ID), **STOP and escalate to the human** — never
   silently drift the contract.
-- **Honor `AGENTS.md`**: code conventions, `exit_status` ranges, the task-lifecycle predicates, the
+- **Honor `AGENTS.md`**: code conventions (incl. declarative comments — no spec `R#`/`P#` ids in
+  source), `exit_status` ranges, the task-lifecycle predicates, the
   same-commit rule (a CLI/feature change updates `docs/_include/*.rst` + `share/` completions), and
   the `cmdkit.app.exit_status` constants. Consult `invariants.md` for the footguns the phase touches.
 - **Circuit breaker.** If a phase fails its verify gate across repeated attempts, or stays

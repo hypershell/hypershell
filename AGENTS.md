@@ -322,6 +322,14 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
   of these can `sys.exit(3)`. Keep `import hypershell.core.sys` first in `__init__.py`.
 - **Prefer idiomatic, concise Python** (the maintainer refactors toward it), but verify real
   equivalence — e.g. `dict.get(k, default)` evaluates `default` eagerly.
+- **Comments are declarative statements, not spec pointers.** Write each comment/docstring as a
+  capitalized statement of the invariant or the *why* (`# Reserved id, exempt from gating.`) — not a
+  lowercase fragment and not a `label:`-prefixed form. **Never embed feature-scoped spec ids** (`R#`,
+  `P#`) in source: they restart per feature, live in `spec/{slug}/`, and collide across branches, so a
+  reader of the merged tree can't tell what `R7` means. Requirement provenance lives in the commit, the
+  PR, and the retained `spec/{slug}/` (the traceability chain in `.agents/factory/methodology.md`).
+  Referencing *stable* things is fine — real symbols (`CANCEL_STATUS`), documented invariants, the
+  `exit_status` ranges.
 - **Parallelizing agent work:** the subsystems safe to touch independently are the leaf apps in
   `task.py`, docs, and tests. The coupled core — `data/model.py`, `server.py`, `client.py`,
   `core/queue.py|fsm.py|thread.py|signal.py` — shares the invariants above and should be
