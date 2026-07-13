@@ -1,7 +1,9 @@
 # AGENTS.md
 
 Guidance for coding agents (Claude Code and others) working in this repository.
-`CLAUDE.md` is a symlink to this file — edit `AGENTS.md`, never a separate copy.
+`CLAUDE.md` is a symlink to this file — edit `AGENTS.md`, never a separate copy. (`.claude`
+is likewise a symlink to `.agents`, so Claude Code discovers the factory skills and settings
+through it.)
 
 This document is the operating manual: the architecture, the load-bearing invariants, and
 the process rules an autonomous agent needs to make correct, safe changes here without
@@ -32,9 +34,13 @@ Console entry points (`pyproject.toml [project.scripts]`): **`hs`** → `hypersh
   git-flow repo: `develop` is the working branch, `master` is release). Never commit straight
   to `master`.
 - **Squash-only merges** (`gh pr merge --squash`; merge-commit and rebase are disabled,
-  branch auto-deletes). Commit subjects follow `[category] Imperative summary` where category
-  ∈ `feature|fix|docs|ci|refactor|test` (see `git log`). End commit messages with the
-  `Co-Authored-By:` trailer; end PR bodies with the Claude Code generation line.
+  branch auto-deletes). Commit subjects follow `[category] Imperative summary`. Common
+  categories (see `git log`): `feature`, `fix`, `docs`, `ci`, `refactor`, `test`, `release`
+  (version bumps or rebuilt assets like man pages), and `harness` (the `.agents/` factory).
+  This set is **not closed** — coin a new lowercase category when one genuinely fits. **Do not
+  add a `Co-Authored-By:` trailer** — a deliberate repo convention (we don't want the authoring
+  model recorded on every line of the commit log). End PR **bodies** with the Claude Code
+  generation line.
 - **Version is single-sourced from `pyproject.toml`** (`hypershell.__version__` reads it).
   Never hardcode a version elsewhere.
 - A feature/CLI change is expected to update, in the **same commit**, the affected
@@ -68,13 +74,13 @@ Top-level package `src/hypershell/`:
 | Path | Responsibility |
 |------|----------------|
 | `__init__.py` | `HyperShellApp` (cmdkit `ApplicationGroup`) + the `commands` dict that wires every subcommand; `main()`/`main_x()`. **All CLI wiring lives here — there is no `cli/` package.** |
-| `submit.py` | `SubmitApp` / `SubmitThread` / `LiveSubmitThread` — ingest commands from stdin/files, assign UUIDs, parse `# HYPERSHELL:` tags, write task rows. |
+| `submit.py` | `SubmitApp` / `SubmitThread` / `LiveSubmitThread` — ingest commands from stdin/files, assign UUIDs, parse `# HYPERSHELL:` tags, write task rows. Also the source-gating for safe re-submission (`--restart`/`--repeat`/`--update`): `GatedSource`, `source_fingerprint_and_count`, `apply_source_gate`. |
 | `server.py` | `ServerThread`, the `Scheduler` FSM (load/pack/post bundles), and `HeartMonitor` (client eviction + task revert). |
 | `client.py` | `ClientThread`, `ClientScheduler` + `TaskExecutor` FSMs — pull bundles, run subprocesses, emit heartbeats, return results. |
 | `task.py` | The `task` CLI group and top-level `submit`/`info`/`wait`/`run`/`list`/`search`/`update` apps, incl. exit-status-colorized `hs list`. |
 | `core/` | Shared infrastructure (see below). |
 | `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection, `InitDBApp` (`hs initdb`). |
-| `data/model.py` | `Entity` base + `Task` and `Client` ORM models. **Most query/state logic lives as `Task` classmethods here.** |
+| `data/model.py` | `Entity` base + `Task`, `Client`, and `Source` ORM models (`Source` records submission provenance for re-submission gating; `DIRECT_SOURCE_ID`/`STDIN_SOURCE_ID` are reserved source ids). **Most query/state logic lives as `Task` classmethods here.** |
 | `cluster/` | `__init__.py` (`ClusterApp`/`hsx`), `local.py` (`LocalCluster`), `remote.py` (`RemoteCluster`, `AutoScalingCluster`), `ssh.py` (`SSHCluster`). |
 
 `core/` modules: `sys` (import-time `sys.path` sanitizer), `config`, `logging`, `signal`,
@@ -84,6 +90,15 @@ TLS-aware manager), `tls` (`TLSConfig`, cert generation), `heartbeat`, `template
 `remote` (paramiko SFTP for task-output retrieval), `platform` (site paths), `pretty_print`,
 `uuid`. **There is no `core/cipher.py`** — TLS is entirely `core/tls.py` + `core/queue.py`
 (`ciphers` is just an OpenSSL-string field on `TLSConfig`).
+
+Two repo-level trees sit outside the package: **`.agents/`** — the spec-driven "software
+factory" (the `hs-feature|plan|build|review|publish` skills plus `factory/` methodology,
+invariants, EARS/templates, and the `bin/` FSM scripts; `.claude` symlinks here); and
+**`spec/{slug}/`** — the committed, dated per-feature design records
+(`GOAL.md`/`PLAN.md`/`TECH.md`/`REVIEW.md`) the factory produces and **retains on merge**.
+`AGENTS.md` remains ground truth; `spec/{slug}/` is a point-in-time record of intent. See
+`.agents/factory/methodology.md` and the lifecycle note under "Working on this codebase as an
+agent."
 
 ## Architecture & data flow
 
@@ -110,7 +125,7 @@ There is **no status enum** — task state is a function of nullable columns:
 - **unscheduled**: `schedule_time IS NULL`
 - **in-flight / interrupted**: `schedule_time` set, `completion_time IS NULL`
 - **done (terminal)**: `completion_time` set
-- **cancelled (terminal)**: `exit_status == CANCEL_STATUS` (`-1`, `data/model.py:48`) **and**
+- **cancelled (terminal)**: `exit_status == CANCEL_STATUS` (`-1`, `data/model.py:49`) **and**
   `completion_time` set
 
 Every new query must reproduce these predicates exactly. Setting `schedule_time` without
@@ -307,6 +322,14 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
 
 ## Working on this codebase as an agent
 
+- **Use the factory for non-trivial work.** A feature/fix/refactor flows through the `.agents/`
+  spec-driven lifecycle — `/hs-feature` (shape `GOAL.md`) → `/hs-plan` (research +
+  `PLAN.md`/`TECH.md`) → `/hs-build` (execute phases) → `/hs-review` (blind, externally-verified
+  QA) → `/hs-publish` (squash PR to `develop`), each on a `feature/`|`fix/` branch with artifacts
+  committed under `spec/{slug}/`. `.agents/factory/methodology.md` is the *why*;
+  `.agents/factory/invariants.md` is the curated footgun checklist derived from this file (kept in
+  lockstep — if it drifts, this file wins). Ceremony scales to appetite: a one-sentence change may
+  skip the lifecycle entirely.
 - **Verify by driving the CLI, not just tests.** After a change, exercise the real flow in a
   `temp_site`: e.g. `seq 100 | uv run hsx -t 'echo {}' -N4` and inspect `uv run hs list` /
   `hs info`. The concurrency and DB behavior are where bugs hide, and integration tests need

@@ -42,7 +42,7 @@ context, so lean on *executed evidence*, not opinion.
 
 | Severity | Meaning |
 |---|---|
-| **CRITICAL** | Data loss/corruption, security/auth weakening, or **any** AGENTS.md invariant violation (§1–§11 of `invariants.md`). |
+| **CRITICAL** | Data loss/corruption, security/auth weakening, or **any** AGENTS.md invariant violation (`invariants.md` §1–§11; a §12 project-conventions violation is **HIGH**, not auto-CRITICAL). |
 | **HIGH** | A GOAL R-ID unmet or wrong; a real bug on a common path. |
 | **MEDIUM** | A bug on an edge path; a partial/again-fragile requirement. |
 | **LOW** | Minor correctness risk; missing-but-non-blocking test coverage of an R-ID. |
