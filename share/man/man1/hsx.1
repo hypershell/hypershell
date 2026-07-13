@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HS" "1" "Jul 11, 2026" "2.8.1" "hypershell"
+.TH "HS" "1" "Jul 12, 2026" "2.8.1" "hypershell"
 .SH NAME
 hs \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -123,6 +123,10 @@ that never landed are submitted, and interrupted tasks are re\-run — so a requ
 \fBhsx <FILE> \-\-restart\fP job is safe to run repeatedly. Use \fB\-\-repeat\fP to deliberately submit a
 known file\(aqs tasks again as a new source, or \fB\-\-update \-\-restart\fP to add only the tasks that are
 new since the file was last seen.
+.sp
+De\-dup cost scales with the file\(aqs own source lineage rather than the whole database, so requeues stay
+fast at scale; for very large workflows, a one\-time \fBsubmit\fP followed by a bare \fBhsx \-\-restart\fP (no
+file re\-read) is cheaper than re\-feeding the \fIFILE\fP each run.
 .sp
 Use \fB\-\-autoscaling\fP with either \fIfixed\fP or \fIdynamic\fP to run a persistent, elastically scalable
 cluster using an external \fB\-\-launcher\fP to bring up clients as needed.
@@ -988,6 +992,11 @@ not already present from earlier versions of the same file. JSON task files (\fB
 are gated the same way, keyed by their absolute path together with any \fB@path\fP selector.
 Single\-command and \fB<stdin>\fP submissions (including \fB\-\-from\-json \-\fP) are treated as
 explicit intent and are exempt from these checks.
+.sp
+Detection and \fB\-\-update\fP de\-dup are index\-backed on the source lineage, so their cost scales with
+that file\(aqs own size, not the size of the database: re\-submitting a normal file stays fast even against
+a very large database, while \fB\-\-update\fP on a source of millions of tasks pays to re\-read and
+fingerprint the entire file to find what is new.
 .SS Arguments
 .INDENT 0.0
 .TP

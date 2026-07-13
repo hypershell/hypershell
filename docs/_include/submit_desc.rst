@@ -34,3 +34,8 @@ not already present from earlier versions of the same file. JSON task files (``-
 are gated the same way, keyed by their absolute path together with any ``@path`` selector.
 Single-command and ``<stdin>`` submissions (including ``--from-json -``) are treated as
 explicit intent and are exempt from these checks.
+
+Detection and ``--update`` de-dup are index-backed on the source lineage, so their cost scales with
+that file's own size, not the size of the database: re-submitting a normal file stays fast even against
+a very large database, while ``--update`` on a source of millions of tasks pays to re-read and
+fingerprint the entire file to find what is new.

@@ -24,6 +24,10 @@ that never landed are submitted, and interrupted tasks are re-run — so a reque
 known file's tasks again as a new source, or ``--update --restart`` to add only the tasks that are
 new since the file was last seen.
 
+De-dup cost scales with the file's own source lineage rather than the whole database, so requeues stay
+fast at scale; for very large workflows, a one-time ``submit`` followed by a bare ``hsx --restart`` (no
+file re-read) is cheaper than re-feeding the *FILE* each run.
+
 Use ``--autoscaling`` with either *fixed* or *dynamic* to run a persistent, elastically scalable
 cluster using an external ``--launcher`` to bring up clients as needed.
 
