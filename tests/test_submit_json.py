@@ -288,7 +288,7 @@ def test_cluster_from_json(temp_site: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# `--from-json` re-submission gate (submit R5/R8/R9; cluster R12)
+# `--from-json` re-submission gate (same matrix as a plain FILE)
 # ---------------------------------------------------------------------------
 # A JSON source keys on abspath(FILE)[@node] + the file's content md5, exactly like a
 # line file, so the shared apply_source_gate covers it unchanged. Group 0 is pinned so
@@ -296,7 +296,7 @@ def test_cluster_from_json(temp_site: Path) -> None:
 
 @mark.integration
 def test_from_json_gate_refuses_resubmit(temp_site: Path) -> None:
-    """Submitting the same JSON plan twice with no flag is refused (R5)."""
+    """Submitting the same JSON plan twice with no flag is refused."""
     plan = create_json_taskfile(temp_site, {'chunks': [{'seqid': 'Chr1'}, {'seqid': 'Chr2'}]})
     argv = ['hs', 'submit', f'--from-json={plan}@chunks', '-g', '0', '--template', 'echo {seqid}']
     rc, _, stderr = main(argv)
@@ -313,7 +313,7 @@ def test_from_json_gate_refuses_resubmit(temp_site: Path) -> None:
 
 @mark.integration
 def test_from_json_gate_repeat_resubmits_all(temp_site: Path) -> None:
-    """--repeat ingests the JSON plan as a new source and submits every task again (R8)."""
+    """--repeat ingests the JSON plan as a new source and submits every task again."""
     plan = create_json_taskfile(temp_site, {'chunks': [{'seqid': 'Chr1'}, {'seqid': 'Chr2'}]})
     argv = ['hs', 'submit', f'--from-json={plan}@chunks', '-g', '0', '--template', 'echo {seqid}']
     assert main(argv)[0] == exit_status.success
@@ -324,7 +324,7 @@ def test_from_json_gate_repeat_resubmits_all(temp_site: Path) -> None:
 
 @mark.integration
 def test_from_json_gate_update_adds_novel_only(temp_site: Path) -> None:
-    """--update on an edited JSON plan submits only records not already present (R9)."""
+    """--update on an edited JSON plan submits only records not already present."""
     plan = create_json_taskfile(temp_site, {'chunks': [{'seqid': 'Chr1'}, {'seqid': 'Chr2'}]})
     argv = ['hs', 'submit', f'--from-json={plan}@chunks', '-g', '0', '--template', 'echo {seqid}']
     assert main(argv)[0] == exit_status.success
@@ -341,7 +341,7 @@ def test_from_json_gate_update_adds_novel_only(temp_site: Path) -> None:
 
 @mark.integration
 def test_from_json_gate_cluster_restart_idempotent(temp_site: Path) -> None:
-    """hsx --from-json ... --restart runs the plan and is idempotent on requeue (R12).
+    """hsx --from-json ... --restart runs the plan and is idempotent on requeue.
 
     Also exercises the removed --from-json + --restart incompatibility (this run no longer
     errors) and the co-running-submitter scheduler guard (novel tasks against a DB of prior

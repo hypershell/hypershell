@@ -216,7 +216,7 @@ def test_group_starts_based_on_previous_scheduled_tasks(temp_site: Path) -> None
     ]
 
     # Distinct source paths: the two batches are genuinely different files, so re-submission
-    # gating (R6 refuses changed content at a seen path with no flag) does not apply between them.
+    # gating (which refuses changed content at a seen path with no flag) does not apply between them.
     taskfile = create_taskfile(temp_site, tasks, filename='batch1.in')
     main(['hs', 'submit', '-f', str(taskfile)])
     rc, stdout, stderr = main(['hs', 'cluster', '--restart'])

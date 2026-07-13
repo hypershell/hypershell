@@ -258,7 +258,7 @@ print('OK', src.task_count)
 
 @mark.integration
 def test_source_stamp_named_file(temp_site: Path) -> None:
-    """A named-file submit records one Source row and stamps every task (R1, R3, R4)."""
+    """A named-file submit records one Source row and stamps every task."""
 
     # Real tasks: echo a/b/c. Non-tasks (excluded from the count): blank, comment-only,
     # and an inline-tag-only line (sets a global tag, produces no task).
@@ -273,7 +273,7 @@ def test_source_stamp_named_file(temp_site: Path) -> None:
 
     rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile)])
     assert rc == exit_status.success, stderr
-    # R18 upfront-ingest log: found N + md5, and the excluded lines are not counted.
+    # Upfront-ingest log: found N + md5, and the excluded lines are not counted.
     assert_output(r'INFO .* Found 3 tasks in .* \(md5=[0-9a-f]{32}\)$', stderr, 1)
     assert_output(r'INFO .* Submitted 3 tasks$', stderr, 1)
 
@@ -284,7 +284,7 @@ def test_source_stamp_named_file(temp_site: Path) -> None:
 
 @mark.integration
 def test_source_stamp_reserved_direct_and_stdin(temp_site: Path) -> None:
-    """Single-command and stdin submissions stamp the reserved <direct>/<stdin> rows (R3)."""
+    """Single-command and stdin submissions stamp the reserved <direct>/<stdin> rows."""
     import os
     from subprocess import run, PIPE
 
@@ -316,7 +316,7 @@ print('OK')
 @mark.integration
 def test_source_stamp_non_seekable_input_streams_all(temp_site: Path) -> None:
     """A non-seekable named input (piped /dev/stdin) streams every task instead of being
-    drained by the upfront read; it is stamped with the reserved <stdin> source (R3, R4)."""
+    drained by the upfront read; it is stamped with the reserved <stdin> source."""
     import os
     from subprocess import run, PIPE
     if not os.path.exists('/dev/stdin'):
@@ -346,7 +346,7 @@ print('OK')
 @mark.integration
 def test_source_stamp_count_matches_cr_only_newlines(temp_site: Path) -> None:
     """The recorded task_count matches the tasks actually submitted regardless of newline
-    convention — the count read uses the Loader's own universal-newline decoding (R1, R4)."""
+    convention — the count read uses the Loader's own universal-newline decoding."""
     taskfile = temp_site / 'cr.in'
     with open(str(taskfile), mode='wb') as stream:
         stream.write(b'echo a\recho b\recho c\r')  # classic-Mac CR-only line endings
@@ -368,11 +368,11 @@ print('OK')
     assert stdout == 'OK'
 
 
-# --- Re-submission source gate: hs submit matrix (R3 exempt, R5-R10) --------------------------------
+# --- Re-submission source gate: hs submit matrix ---------------------------------------------------
 
 @mark.integration
 def test_gate_refuse_resubmit_identical(temp_site: Path) -> None:
-    """Re-submitting an identical named file with no flag is refused, naming the prior (R5)."""
+    """Re-submitting an identical named file with no flag is refused, naming the prior."""
     taskfile = create_taskfile_echo(temp_site, count=4)
     rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
     assert rc == exit_status.success, stderr
@@ -388,7 +388,7 @@ def test_gate_refuse_resubmit_identical(temp_site: Path) -> None:
 
 @mark.integration
 def test_gate_refuse_changed_suggests_update(temp_site: Path) -> None:
-    """A changed file at a seen path with no flag is refused, suggesting --update (R6)."""
+    """A changed file at a seen path with no flag is refused, suggesting --update."""
     taskfile = create_taskfile_echo(temp_site, count=2)
     rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
     assert rc == exit_status.success, stderr
@@ -402,7 +402,7 @@ def test_gate_refuse_changed_suggests_update(temp_site: Path) -> None:
 
 @mark.integration
 def test_gate_warns_incomplete_prior(temp_site: Path) -> None:
-    """When fewer tasks landed than recorded, detection warns of an incomplete prior (R7)."""
+    """When fewer tasks landed than recorded, detection warns of an incomplete prior."""
     taskfile = create_taskfile_echo(temp_site, count=4)
     rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
     assert rc == exit_status.success, stderr
@@ -417,7 +417,7 @@ print('OK')
     assert rc == 0, stderr
     assert stdout == 'OK'
 
-    # Re-detect: no flag still refuses (R5), and now also warns about the incomplete prior (R7).
+    # Re-detect: no flag still refuses, and now also warns about the incomplete prior.
     rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
     assert rc == exit_status.bad_argument
     assert_output(r'WARNING .* appears incomplete: 2 of 4 tasks present.*', stderr, 1)
@@ -425,7 +425,7 @@ print('OK')
 
 @mark.integration
 def test_gate_dedup_update_not_reported_incomplete(temp_site: Path) -> None:
-    """A de-duplicated --update is not later misreported as an incomplete prior (R7 regression).
+    """A de-duplicated --update is not later misreported as an incomplete prior (regression).
 
     --update records the new source's expected count as the *full* file count but stamps only the
     novel tasks onto it — the deduped ones stay under earlier same-path sources. Completeness is
@@ -437,7 +437,7 @@ def test_gate_dedup_update_not_reported_incomplete(temp_site: Path) -> None:
     create_taskfile_echo(temp_site, count=6)  # same path, two new lines
     assert main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])[0] == exit_status.success
 
-    # Re-detect the now-complete v2: no flag refuses it as a duplicate (R5) but must NOT warn.
+    # Re-detect the now-complete v2: no flag refuses it as a duplicate but must NOT warn.
     rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
     assert rc == exit_status.bad_argument, stderr
     assert_output(r'appears incomplete', stderr, 0)   # the F2 false-positive is gone
@@ -446,7 +446,7 @@ def test_gate_dedup_update_not_reported_incomplete(temp_site: Path) -> None:
 
 @mark.integration
 def test_gate_repeat_submits_all_again(temp_site: Path) -> None:
-    """--repeat ingests a new source and submits all tasks again, even on an identical match (R8)."""
+    """--repeat ingests a new source and submits all tasks again, even on an identical match."""
     taskfile = create_taskfile_echo(temp_site, count=4)
     assert main(['hs', 'submit', '-f', str(taskfile), '-g0'])[0] == exit_status.success
 
@@ -458,7 +458,7 @@ def test_gate_repeat_submits_all_again(temp_site: Path) -> None:
 
 @mark.integration
 def test_gate_update_submits_only_novel(temp_site: Path) -> None:
-    """--update creates a new source but submits only task identities not already present (R9)."""
+    """--update creates a new source but submits only task identities not already present."""
     taskfile = create_taskfile_echo(temp_site, count=4)
     assert main(['hs', 'submit', '-f', str(taskfile), '-g0'])[0] == exit_status.success
 
@@ -466,7 +466,7 @@ def test_gate_update_submits_only_novel(temp_site: Path) -> None:
     create_taskfile_echo(temp_site, count=6)  # overwrites task.in at the same path
     rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])
     assert rc == exit_status.success, stderr
-    # Loader de-dup tally (R18): four already present, two submitted.
+    # Loader de-dup tally: four already present, two submitted.
     assert_output(r'INFO .* 4 tasks already present; submitting 2 new tasks$', stderr, 1)
     assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['6'], NO_OUTPUT)
 
@@ -474,7 +474,7 @@ def test_gate_update_submits_only_novel(temp_site: Path) -> None:
 @mark.integration
 def test_gate_update_on_unseen_path_submits_all(temp_site: Path) -> None:
     """--update on a never-before-seen path has an empty lineage, so nothing is skipped and all
-    tasks are submitted — `--update` degrades to a plain submit when there is no prior source (R9 edge)."""
+    tasks are submitted — `--update` degrades to a plain submit when there is no prior source (edge case)."""
     taskfile = create_taskfile_echo(temp_site, count=4)
     rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])
     assert rc == exit_status.success, stderr
@@ -484,7 +484,7 @@ def test_gate_update_on_unseen_path_submits_all(temp_site: Path) -> None:
 
 @mark.integration
 def test_gate_update_repeat_contradictory() -> None:
-    """--update and --repeat together are contradictory and rejected before any work (R10)."""
+    """--update and --repeat together are contradictory and rejected before any work."""
     assert main_lines(['hs', 'submit', '-f', 'x.in', '-g0', '--update', '--repeat']) == (
         exit_status.bad_argument, NO_OUTPUT, ['CRITICAL [hypershell] Cannot combine --update with --repeat']
     )
@@ -492,7 +492,7 @@ def test_gate_update_repeat_contradictory() -> None:
 
 @mark.integration
 def test_gate_direct_and_stdin_exempt(temp_site: Path) -> None:
-    """Single-command <direct> and streamed <stdin> submissions are exempt from gating (R3)."""
+    """Single-command <direct> and streamed <stdin> submissions are exempt from gating."""
     import os
     from subprocess import run, PIPE
     # <direct>: an identical single command submitted twice — both succeed, no refusal.

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests for the ``hsx`` / ``hs cluster`` re-submission gate (R11-R16).
+"""Integration tests for the ``hsx`` / ``hs cluster`` re-submission gate.
 
 These drive the real cluster (embedded server + local client) so that de-duplicated and
 novel tasks are not merely *submitted* but actually *run* — the scheduler must not stop a
@@ -26,7 +26,7 @@ from tests import main, main_lines, NO_OUTPUT, create_taskfile, create_taskfile_
 
 @mark.integration
 def test_restart_no_flag_refuses_seen_file(temp_site: Path) -> None:
-    """hsx with no gating flag detects and refuses a file already submitted (R11 == R5)."""
+    """hsx with no gating flag detects and refuses a file already submitted."""
     taskfile = create_taskfile_echo(temp_site, count=4)
 
     # First run: a new file — submit all and run to completion.
@@ -46,7 +46,7 @@ def test_restart_no_flag_refuses_seen_file(temp_site: Path) -> None:
 
 @mark.integration
 def test_restart_idempotent_across_requeues(temp_site: Path) -> None:
-    """hsx FILE --restart is idempotent — requeuing the same job submits nothing new (R12)."""
+    """hsx FILE --restart is idempotent — requeuing the same job submits nothing new."""
     taskfile = create_taskfile_echo(temp_site, count=4)
 
     rc, stdout, stderr = main(['hsx', str(taskfile), '--restart'])
@@ -63,7 +63,7 @@ def test_restart_idempotent_across_requeues(temp_site: Path) -> None:
 
 @mark.integration
 def test_restart_refuses_changed_file(temp_site: Path) -> None:
-    """hsx FILE --restart refuses a changed file at a seen path, suggesting --update (R12)."""
+    """hsx FILE --restart refuses a changed file at a seen path, suggesting --update."""
     taskfile = create_taskfile_echo(temp_site, count=4)
     rc, _, stderr = main(['hsx', str(taskfile), '--restart'])
     assert rc == exit_status.success, stderr
@@ -79,7 +79,7 @@ def test_restart_refuses_changed_file(temp_site: Path) -> None:
 
 @mark.integration
 def test_restart_update_alone_is_ambiguous(temp_site: Path) -> None:
-    """hsx --update without --restart (or --repeat) is ambiguous and rejected (R13)."""
+    """hsx --update without --restart (or --repeat) is ambiguous and rejected."""
     taskfile = create_taskfile_echo(temp_site, count=2)
     assert main_lines(['hsx', str(taskfile), '--update']) == (
         exit_status.bad_argument, NO_OUTPUT, ['CRITICAL [hypershell] Using --update requires --restart']
@@ -88,7 +88,7 @@ def test_restart_update_alone_is_ambiguous(temp_site: Path) -> None:
 
 @mark.integration
 def test_restart_update_adds_novel_and_runs(temp_site: Path) -> None:
-    """hsx --update --restart records a new source and runs only the novel tasks (R14)."""
+    """hsx --update --restart records a new source and runs only the novel tasks."""
     taskfile = create_taskfile_echo(temp_site, count=4)
     rc, _, stderr = main(['hsx', str(taskfile), '--restart'])
     assert rc == exit_status.success, stderr
@@ -98,7 +98,7 @@ def test_restart_update_adds_novel_and_runs(temp_site: Path) -> None:
     create_taskfile_echo(temp_site, count=6)  # overwrites task.in at the same path
     rc, stdout, stderr = main(['hsx', str(taskfile), '--update', '--restart'])
     assert rc == exit_status.success, stderr
-    # Only the two novel tasks run; the four already-present tasks are skipped (R18 tally).
+    # Only the two novel tasks run; the four already-present tasks are skipped (de-dup tally).
     assert sorted(stdout.split('\n')) == ['4', '5']
     assert_output(r'INFO .* 4 tasks already present; submitting 2 new tasks$', stderr, 1)
     assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['6'], NO_OUTPUT)
@@ -106,7 +106,7 @@ def test_restart_update_adds_novel_and_runs(temp_site: Path) -> None:
 
 @mark.integration
 def test_restart_repeat_resubmits_all(temp_site: Path) -> None:
-    """hsx --repeat records a new source and resubmits all tasks even on a match (R15)."""
+    """hsx --repeat records a new source and resubmits all tasks even on a match."""
     taskfile = create_taskfile_echo(temp_site, count=4)
     rc, _, stderr = main(['hsx', str(taskfile), '--restart'])
     assert rc == exit_status.success, stderr
@@ -121,7 +121,7 @@ def test_restart_repeat_resubmits_all(temp_site: Path) -> None:
 
 @mark.integration
 def test_restart_update_repeat_contradictory(temp_site: Path) -> None:
-    """hsx --update --repeat is contradictory and rejected before any work (R16)."""
+    """hsx --update --repeat is contradictory and rejected before any work."""
     taskfile = create_taskfile_echo(temp_site, count=2)
     assert main_lines(['hsx', str(taskfile), '--update', '--repeat']) == (
         exit_status.bad_argument, NO_OUTPUT, ['CRITICAL [hypershell] Cannot combine --update with --repeat']

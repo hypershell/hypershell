@@ -24,7 +24,7 @@ from hypershell.data.model import (
 from tests import main, main_lines, assert_output, create_taskfile_echo, UUID_PATTERN
 
 
-# --- Identity fingerprint semantics (R2) -----------------------------------------------------------
+# --- Identity fingerprint semantics ----------------------------------------------------------------
 
 @mark.unit
 def test_fingerprint_is_order_independent_over_tags() -> None:
@@ -94,7 +94,7 @@ def test_supplied_fingerprint_is_not_recomputed() -> None:
     assert child.fingerprint == parent_fp
 
 
-# --- Schema groundwork (R1, R17) -------------------------------------------------------------------
+# --- Schema groundwork -----------------------------------------------------------------------------
 
 @mark.unit
 def test_fresh_schema_creates_source_table_columns_and_indices() -> None:
@@ -118,7 +118,7 @@ def test_fresh_schema_creates_source_table_columns_and_indices() -> None:
 
 @mark.unit
 def test_tasks_source_index_is_full_covering_not_partial() -> None:
-    """The de-dup/detection index covers (source, fingerprint) and is NOT partial (R17).
+    """The de-dup/detection index covers (source, fingerprint) and is NOT partial.
 
     A partial ``WHERE source NOT IN (reserved)`` predicate is only honored when the query
     repeats it with matching literals; the parameterized ``count_for_source`` /
@@ -136,12 +136,12 @@ def test_tasks_source_index_is_full_covering_not_partial() -> None:
 
 @mark.unit
 def test_source_lookups_use_the_index_not_a_full_scan() -> None:
-    """R17: the count + lineage de-dup lookups are index-backed, not full table scans.
+    """The count + lineage de-dup lookups are index-backed, not full table scans.
 
     Mirrors the ``WHERE`` clauses of :meth:`Task.count_for_source` and
     :meth:`Task.fingerprints_for_sources` on a populated throwaway table and asserts the
     planner reaches for ``index_tasks_source`` instead of scanning ``task`` (the linear cost
-    R17 forbids at billions–trillions of rows). A partial index would ``SCAN`` here.
+    forbidden at billions–trillions of rows). A partial index would ``SCAN`` here.
     """
     engine = create_engine('sqlite://')
     Entity.metadata.create_all(engine)
@@ -165,7 +165,7 @@ def test_source_lookups_use_the_index_not_a_full_scan() -> None:
     assert 'index_tasks_source' in fp_plan and 'SCAN task' not in fp_plan, fp_plan
 
 
-# --- Presentation: source resolution for humans (R18-adjacent) -------------------------------------
+# --- Presentation: source resolution for humans ---------------------------------------------------
 
 @mark.unit
 def test_format_source_passes_sentinels_shows_paths_and_keeps_specs_opaque() -> None:
