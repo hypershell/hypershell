@@ -369,13 +369,13 @@ class ClusterApp(Application):
         if self.forever_mode and self.restart_mode:
             raise ArgumentError('Using --forever with --restart is invalid')
         if self.update_mode and self.repeat_mode:
-            raise ArgumentError('Cannot combine --update with --repeat')  # R16
+            raise ArgumentError('Cannot combine --update with --repeat')
         if self.restart_mode and self.repeat_mode:
             raise ArgumentError('Cannot combine --restart with --repeat')  # resume vs. fresh full run
         if self.update_mode and self.in_memory:
             raise ArgumentError('Using --update with --no-db is invalid')
         if self.update_mode and not (self.restart_mode or self.repeat_mode):
-            raise ArgumentError('Using --update requires --restart')  # R13 (ambiguous on its own)
+            raise ArgumentError('Using --update requires --restart')  # --update alone is ambiguous.
         if self.ssh_args and not self.ssh_mode:
             raise ArgumentError('Unexpected --ssh-args when not in --ssh mode')
         if self.ssh_group and self.ssh_mode != '<default>':
@@ -477,17 +477,17 @@ class ClusterApp(Application):
         """Resolve the task Source, apply the re-submission gate, and wrap the stream.
 
         Mirrors :meth:`hypershell.submit.SubmitApp.prepare_source` for the cluster entry
-        point. A named file passes through :func:`~hypershell.submit.apply_source_gate`
-        (matrix R11-R15): a duplicate or changed-content re-submission is refused unless
+        point. A named file passes through :func:`~hypershell.submit.apply_source_gate`:
+        a duplicate or changed-content re-submission is refused unless
         ``--restart``/``--repeat``/``--update`` relaxes it, and the resolved :class:`Source`
-        records the upfront-counted expectation *before* any task is scheduled (R1/R7).
+        records the upfront-counted expectation *before* any task is scheduled.
         Explicit ``<stdin>`` and non-seekable inputs carry the reserved ``<stdin>`` source and
-        are exempt (R3); ``--no-db``/non-persistent runs gate nothing (invariant §4).
+        are exempt; ``--no-db``/non-persistent runs gate nothing (invariant §4).
 
         The upfront count uses ``DEFAULT_TEMPLATE`` (not ``--template``): the cluster expands
         the user template client-side, so the server ingests raw lines verbatim and the
         count must mirror that split (see :class:`~hypershell.server.ServerThread`). The
-        stable per-task fingerprint is template-independent by construction (R2), so the
+        stable per-task fingerprint is template-independent by construction, so the
         de-dup set matches whether tasks were first ingested by ``hs submit`` or ``hsx``.
         """
         if self.in_memory or not DATABASE_ENABLED:
@@ -495,7 +495,7 @@ class ClusterApp(Application):
         if stream is sys.stdin or not stream.seekable():
             # Explicit <stdin> and non-seekable named inputs (process substitution, FIFOs,
             # a piped /dev/stdin) cannot be re-read for an upfront count — stream them under
-            # the reserved <stdin> source, exempt from gating (R3). A re-read would drain them.
+            # the reserved <stdin> source, exempt from gating. A re-read would drain them.
             self.warn_gating_no_effect('<stdin>')
             source_id = Source.reserved(STDIN_SOURCE_ID).id
             name = '<stdin>' if stream is sys.stdin else os.path.abspath(self.filepath)
@@ -510,12 +510,12 @@ class ClusterApp(Application):
     def prepare_json_source(self: ClusterApp) -> Iterable[dict]:
         """Resolve the Source and apply the re-submission gate to a ``--from-json`` source.
 
-        The JSON analogue of :meth:`prepare_source` (matrix R11-R15): the file's content md5
+        The JSON analogue of :meth:`prepare_source`: the file's content md5
         and record count feed :func:`~hypershell.submit.apply_source_gate`, keyed by
         ``abspath(FILE)[@node]`` so distinct node selections are distinct sources. The
-        per-task fingerprint keys off the pre-template ``args``/tags (R2), so de-dup matches
+        per-task fingerprint keys off the pre-template ``args``/tags, so de-dup matches
         whether the tasks were first ingested by ``hs submit`` or ``hsx``. ``--from-json -``
-        (stdin JSON) carries the reserved ``<stdin>`` source and is exempt (R3);
+        (stdin JSON) carries the reserved ``<stdin>`` source and is exempt;
         ``--no-db``/non-persistent runs gate nothing (invariant §4).
         """
         records, fingerprint = self.json_source
@@ -532,7 +532,7 @@ class ClusterApp(Application):
         return GatedSource(records, source_id, skip_fingerprints=skip, name=key)
 
     def warn_gating_no_effect(self: ClusterApp, kind: str) -> None:
-        """Note that re-submission gating flags are inert for exempt sources (R3)."""
+        """Note that re-submission gating flags are inert for exempt sources."""
         if self.repeat_mode or self.update_mode:
             log.warning(f'--repeat/--update have no effect for {kind} submissions')
 

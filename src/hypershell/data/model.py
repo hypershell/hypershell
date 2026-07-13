@@ -296,7 +296,7 @@ class Task(Entity):
     next_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
 
     source: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)  # Source.id or reserved-const id
-    fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)  # stable identity (R2)
+    fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)  # Stable identity hash (args + group + tags).
 
     tag: Mapped[dict] = mapped_column(JSON, nullable=False, default={})  # kept last (export/print order)
 
@@ -373,11 +373,11 @@ class Task(Entity):
         (for JSON-sourced tags). With ``parse_inline=False`` the inline
         ``# HYPERSHELL:`` tag comment is not parsed and `args` is taken verbatim.
 
-        The stable identity ``fingerprint`` (R2) is computed from the pre-template
-        ``raw_args`` (falling back to the expanded ``args`` when not supplied) plus the
-        resolved group and tags, unless ``fingerprint`` is passed directly (retries copy
-        the parent's). ``source`` links the task to its ingested file's ``Source`` record
-        (R3); both columns are NULL only for historical/ungated rows.
+        The stable identity ``fingerprint`` is computed from the pre-template ``raw_args``
+        (falling back to the expanded ``args`` when not supplied) plus the resolved group and
+        tags, unless ``fingerprint`` is passed directly (retries copy the parent's). ``source``
+        links the task to its ingested file's ``Source`` record; both columns are NULL only for
+        historical/ungated rows.
         """
         cls.ensure_valid_tag(tag, strict=strict_tag)
         if parse_inline:
@@ -408,7 +408,7 @@ class Task(Entity):
     @classmethod
     def compute_fingerprint(cls: Type[Task], raw_command: str, group: int,
                             tags: Optional[Dict[str, JSONData]]) -> str:
-        """Stable, order-independent identity fingerprint (R2).
+        """Stable, order-independent identity fingerprint.
 
         An md5 over canonical JSON of the pre-template ``raw_command``, the task
         ``group``, and user ``tags`` (the bookkeeping ``part`` tag excluded; resource
@@ -622,8 +622,8 @@ class Task(Entity):
                                  previous_id=task.id,
                                  tag=task.tag,
                                  group=task.group,
-                                 fingerprint=task.fingerprint,  # a retry is the same logical task (R2)
-                                 source=task.source)            # keep the chain linked to its source (R3)
+                                 fingerprint=task.fingerprint,  # A retry is the same logical task.
+                                 source=task.source)            # Keep the retry chain linked to its source.
                          for task in failed_tasks]
             tasks.extend(new_tasks)
             cls.add_all(tasks)
@@ -823,10 +823,10 @@ class Task(Entity):
 
     @classmethod
     def count_for_source(cls: Type[Task], source_id: str) -> int:
-        """Count tasks stamped with the given `source_id` (R7 completeness check).
+        """Count tasks stamped with the given `source_id`, for the incomplete-prior-submission check.
 
         Served by the leading column of `index_tasks_source`; a bound `source_id` seeks the
-        B-tree (no full table `SCAN`), so the check stays sub-linear at scale (R17).
+        B-tree (no full table `SCAN`), so the check stays sub-linear even on a huge table.
         """
         return cls.query().filter(cls.source == source_id).count()
 
@@ -834,9 +834,9 @@ class Task(Entity):
     def fingerprints_for_sources(cls: Type[Task], source_ids: List[str]) -> set[str]:
         """Set of task identity fingerprints across the given `source_ids` (de-dup skip-set).
 
-        The de-dup scope is a same-path source lineage (R9/R12/R14) — a small set of
-        sources — so, backed by the covering `index_tasks_source` on `(source, fingerprint)`,
-        this is a bounded index-only scan, not a walk of the whole task table (R17).
+        The de-dup scope is a same-path source lineage — a small set of sources — so, backed by
+        the covering `index_tasks_source` on `(source, fingerprint)`, this is a bounded index-only
+        scan, not a walk of the whole task table.
         """
         if not source_ids:
             return set()
@@ -851,7 +851,7 @@ class Task(Entity):
 # Indices for efficient queries
 index_tasks_unscheduled = Index('index_tasks_unscheduled', Task.group, Task.schedule_time)
 index_tasks_retries = Index('index_tasks_retries', Task.exit_status, Task.retried)
-# Covering index for source detection / lineage de-dup (R17). Deliberately *not* partial:
+# Covering index for source detection / lineage de-dup. Deliberately *not* partial:
 # a partial `WHERE source NOT IN (<direct>, <stdin>)` predicate is only honored when the query
 # repeats it with matching literals, but `count_for_source`/`fingerprints_for_sources` bind the
 # source as a parameter — which neither SQLite nor PostgreSQL can prove satisfies a literal
@@ -935,10 +935,10 @@ index_client_disconnect = Index('client_disconnected_at', Client.disconnected_at
 class Source(Entity):
     """Source entity: provenance record for a batch of ingested tasks.
 
-    One row per ingested named task file (R1), capturing the absolute path, a
+    One row per ingested named task file, capturing the absolute path, a
     file-content fingerprint (md5), the expected task count, and a creation time.
-    Re-submission consults these to detect a prior ingest, warn on an incomplete one
-    (R7), de-dup novel tasks, or refuse. The reserved ``<direct>`` and ``<stdin>``
+    Re-submission consults these to detect a prior ingest, warn on an incomplete one,
+    de-dup novel tasks, or refuse. The reserved ``<direct>`` and ``<stdin>``
     submission modes are real rows with fixed ids (see `Source.reserved`,
     `DIRECT_SOURCE_ID`, `STDIN_SOURCE_ID`) and are exempt from gating. Lineage is
     *all sources sharing a `path`* — there is deliberately no lineage-pointer column.

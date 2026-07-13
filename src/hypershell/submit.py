@@ -135,7 +135,7 @@ def line_is_task(line: str, template: Template) -> bool:
 
 
 def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) -> Tuple[str, int]:
-    """Read a named file upfront: content md5 (raw bytes) + task count (R4).
+    """Read a named file upfront: content md5 (raw bytes) + task count.
 
     The md5 is over the raw file bytes (parsing-independent). The count is taken over a
     *text-mode* read — the same universal-newline decoding the Loader uses — replaying the
@@ -160,11 +160,11 @@ def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) ->
 
 
 def _new_source_id(path: str, fingerprint: str, count: int) -> str:
-    """Persist a fresh :class:`Source` row and return its id (R1).
+    """Persist a fresh :class:`Source` row and return its id.
 
     The expected ``count`` (the file's full task count) is recorded *before* any task is
     committed, so an interrupted ingest leaves the same-path lineage holding fewer tasks than
-    expected — the signal :func:`_warn_if_incomplete` reports on a later re-submission (R7),
+    expected — the signal :func:`_warn_if_incomplete` reports on a later re-submission,
     measured across the lineage so a de-duplicated submission does not read as incomplete.
     """
     source = Source.new(path=path, fingerprint=fingerprint, task_count=count)
@@ -174,10 +174,10 @@ def _new_source_id(path: str, fingerprint: str, count: int) -> str:
 
 
 def _warn_if_incomplete(source: Source, lineage: List[Source]) -> None:
-    """R7: warn when fewer tasks landed across the same-path `lineage` than `source` expects.
+    """Warn when fewer tasks landed across the same-path `lineage` than `source` expects.
 
     Completeness is measured against the *whole* same-path lineage, not ``source`` alone.
-    De-dup (R9/R12/R14) deliberately distributes a file version's tasks across the lineage —
+    De-dup deliberately distributes a file version's tasks across the lineage —
     the novel ones onto the newest source, the rest already present under earlier same-path
     sources — so a per-source count structurally under-counts a de-duplicated submission and
     would cry wolf on a re-submission that is in fact complete. Each ``count_for_source`` is
@@ -199,41 +199,41 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
     the ``source_id`` to stamp onto tasks plus an optional ``skip_fingerprints`` set — task
     identities already present in the same-path lineage, which the :class:`Loader` drops for
     de-dup. Raises :class:`~cmdkit.cli.ArgumentError` (→ ``exit_status.bad_argument``) on a
-    refusal, with an actionable message. Emits the R18 detection logging (prior source,
+    refusal, with an actionable message. Emits detection logging (prior source,
     incomplete-prior warning, submit/de-dup intent, refusal reason).
 
     This is the shared gate for both entry points: ``hs submit`` calls it with
-    ``restart=False`` (matrix R5-R10); ``hsx``/``hs cluster`` also passes ``restart`` (matrix
-    R11-R16). Callers guarantee a *valid* flag combination — contradictory/ambiguous combos
-    are rejected upstream in each app's ``check_arguments`` (``--update``+``--repeat`` R10/R16;
-    ``hsx --update`` without ``--restart``/``--repeat`` R13; ``hsx --restart``+``--repeat``).
+    ``restart=False``; ``hsx``/``hs cluster`` also passes ``restart``. Callers guarantee a
+    *valid* flag combination — contradictory/ambiguous combos are rejected upstream in each
+    app's ``check_arguments`` (``--update``+``--repeat``; ``hsx --update`` without
+    ``--restart``/``--repeat``; ``hsx --restart``+``--repeat``).
 
     Decision table (prior state of `path` P with fingerprint F):
 
     ==============  ==================  ============================  ============================
     flags           none                match (P,F seen)              differs (P seen, F changed)
     ==============  ==================  ============================  ============================
-    (no flag)       new source, all     REFUSE, name prior (R5)       REFUSE, suggest --update (R6)
-    --repeat        new source, all     new source, all (R8/R15)      new source, all (R8/R15)
-    --update        new source, all     new source, novel-only (R9)   new source, novel-only (R9/R14)
-    --restart       new source, all     reuse source, novel-only(R12) REFUSE, suggest --update (R12)
+    (no flag)       new source, all     REFUSE, name prior            REFUSE, suggest --update
+    --repeat        new source, all     new source, all               new source, all
+    --update        new source, all     new source, novel-only        new source, novel-only
+    --restart       new source, all     reuse source, novel-only      REFUSE, suggest --update
     ==============  ==================  ============================  ============================
     """
     match = Source.matching(path, fingerprint)
     lineage = Source.lookup(path)
     if lineage:
-        _warn_if_incomplete(match or lineage[0], lineage)  # R7 — orthogonal to the submit/refuse decision
+        _warn_if_incomplete(match or lineage[0], lineage)  # Orthogonal to the submit/refuse decision.
     if repeat:
-        # R8 / R15 — brand-new source, submit everything even on an identical match.
+        # Brand-new source; submit everything even on an identical match.
         log.info(f'Submitting all {count} tasks from {path} as a new source (--repeat)')
         return _new_source_id(path, fingerprint, count), None
     if update:
-        # R9 / R14 — new source version; submit only identities absent from the same-path lineage.
+        # New source version; submit only identities absent from the same-path lineage.
         skip = Task.fingerprints_for_sources([source.id for source in lineage])
         log.info(f'Updating {path}: {len(skip)} task identity(ies) already present; submitting only new tasks')
         return _new_source_id(path, fingerprint, count), skip
     if restart:
-        # R12 — file-aware restart (cluster). Reusing the matched source keeps requeues
+        # File-aware restart (cluster). Reusing the matched source keeps requeues
         # idempotent (no row/count drift); the server's revert-interrupted flow re-runs any
         # mid-flight task, so novel-only here submits exactly what never landed.
         if match:
@@ -245,7 +245,7 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
                                 f'pass --update --restart to submit only the new tasks')
         log.info(f'Submitting all {count} tasks from {path} as a new source (--restart)')
         return _new_source_id(path, fingerprint, count), None
-    # No gating flag — R5 / R6 / R11.
+    # No gating flag: refuse a known (path, fingerprint), else submit as a new source.
     if match:
         raise ArgumentError(f'File {path} was already submitted as source {match.id} '
                             f'({match.task_count} tasks, {match.created}); '
@@ -1316,7 +1316,7 @@ class SubmitApp(Application):
     }
 
     def check_arguments(self: SubmitApp) -> None:
-        """Reject contradictory re-submission flags before doing any work (R10)."""
+        """Reject contradictory re-submission flags before doing any work."""
         if self.update_mode and self.repeat_mode:
             raise ArgumentError('Cannot combine --update with --repeat')
 
@@ -1428,12 +1428,12 @@ class SubmitApp(Application):
     def prepare_source(self: SubmitApp) -> None:
         """Resolve the task Source, apply the re-submission gate, and wrap the stream (DB mode only).
 
-        A named file passes through :func:`apply_source_gate` (R5-R10): a duplicate or
+        A named file passes through :func:`apply_source_gate`: a duplicate or
         changed-content re-submission is refused unless ``--repeat``/``--update`` relaxes it,
         and the resolved :class:`Source` row's ``task_count`` is the upfront-counted
-        expectation, committed *before* any task so an incomplete prior stays detectable
-        (R1/R7). ``<stdin>`` and single-command ``<direct>`` submissions resolve their
-        reserved fixed-id rows and are exempt from gating (R3) — a gating flag there is a
+        expectation, committed *before* any task so an incomplete prior stays detectable.
+        ``<stdin>`` and single-command ``<direct>`` submissions resolve their
+        reserved fixed-id rows and are exempt from gating — a gating flag there is a
         no-op and says so. A ``--from-json`` source is gated too (see :meth:`prepare_json_source`).
         """
         if not DATABASE_ENABLED:
@@ -1462,14 +1462,14 @@ class SubmitApp(Application):
                                       name=self.source_path)
 
     def prepare_json_source(self: SubmitApp) -> None:
-        """Apply the re-submission gate to a ``--from-json`` source (R4/R5/R8/R9).
+        """Apply the re-submission gate to a ``--from-json`` source.
 
         The JSON file's content md5 (captured in :meth:`check_source`, no second read) and
         record count feed the same :func:`apply_source_gate` as a line file, keyed by
         ``abspath(FILE)[@node]``. The per-task fingerprint keys off the pre-template ``args``
-        and tags (R2), so ``--update`` de-dup matches whether the tasks were first ingested
+        and tags, so ``--update`` de-dup matches whether the tasks were first ingested
         here or from a line file. ``--from-json -`` (stdin JSON) has no stable path and is
-        exempt, carrying the reserved ``<stdin>`` source (R3). Called in DB mode only.
+        exempt, carrying the reserved ``<stdin>`` source. Called in DB mode only.
         """
         key = json_source_key(self.from_json)
         if key is None:
@@ -1484,7 +1484,7 @@ class SubmitApp(Application):
         self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip, name=key)
 
     def warn_gating_no_effect(self: SubmitApp, kind: str) -> None:
-        """Note that re-submission gating flags are inert for exempt sources (R3)."""
+        """Note that re-submission gating flags are inert for exempt sources."""
         if self.repeat_mode or self.update_mode:
             log.warning(f'--repeat/--update have no effect for {kind} submissions')
 
