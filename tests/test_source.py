@@ -185,8 +185,8 @@ def test_format_source_passes_sentinels_shows_paths_and_keeps_specs_opaque() -> 
 
 @mark.integration
 def test_normal_view_resolves_source_while_machine_formats_stay_raw(temp_site: Path) -> None:
-    """The human `normal` view resolves `source` UUID -> path (single + batched); machine surfaces keep
-    the raw UUID and `fingerprint` never leaks into the normal template."""
+    """The human `normal` view resolves `source` UUID -> path (single + batched) with the raw Source.id
+    in parens, and shows the identity fingerprint in parens on the id; machine surfaces keep raw values."""
     taskfile = create_taskfile_echo(temp_site, count=3)
     assert main(['hs', 'submit', str(taskfile)])[0] == 0
 
@@ -194,16 +194,18 @@ def test_normal_view_resolves_source_while_machine_formats_stay_raw(temp_site: P
     assert rc == 0
     task_id = ids[0]
 
-    # `hs info` (single-task normal view) resolves source to the absolute file path...
+    # `hs info` (single-task normal view) resolves source -> abspath with the Source.id in parens, and
+    # shows the identity fingerprint (md5) in parens on the id line.
     rc, stdout, _ = main(['hs', 'info', task_id])
     assert rc == 0
-    assert_output(rf'source: {re.escape(str(taskfile))}$', stdout, 1)
-    assert 'fingerprint:' not in stdout            # fingerprint stays out of the normal template
+    assert_output(rf'source: {re.escape(str(taskfile))} \([0-9a-f-]+\)$', stdout, 1)
+    assert_output(r'id: [0-9a-f-]+ \([0-9a-f]{32}\)$', stdout, 1)   # fingerprint (md5) in parens on the id
+    assert 'fingerprint:' not in stdout            # shown inline on `id`, not as a separate labeled field
 
     # ...and the many-task normal view resolves every row via the batched source_map (no N+1)
     rc, listing, _ = main(['hs', 'list', '--all'])
     assert rc == 0
-    assert_output(rf'source: {re.escape(str(taskfile))}$', listing, 3)
+    assert_output(rf'source: {re.escape(str(taskfile))} \([0-9a-f-]+\)$', listing, 3)
 
     # machine surfaces keep the raw source UUID (stable, scriptable)
     rc, raw, _ = main(['hs', 'info', task_id, '-x', 'source'])
@@ -219,4 +221,4 @@ def test_normal_view_resolves_reserved_sentinels(temp_site: Path) -> None:
     assert rc == 0
     rc, stdout, _ = main(['hs', 'info', ids[0]])
     assert rc == 0
-    assert_output(r'source: <direct>$', stdout, 1)
+    assert_output(rf'source: <direct> \({re.escape(DIRECT_SOURCE_ID)}\)$', stdout, 1)

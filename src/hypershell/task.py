@@ -1285,9 +1285,9 @@ class WhereClause:
 
 
 NORMAL_MODE_TEMPLATE: Final[str] = """\
-          id: {id}
+          id: {id} ({fingerprint})
        group: {group}
-      source: {source}
+      source: {source} ({source_id})
         args: {args}
      command: {command}
        cores: {cores} (used: {cores_max})
@@ -1386,6 +1386,7 @@ def print_normal(task: Task, source_map: Optional[Dict[str, str]] = None) -> Non
     task_data['memory'] = format_bytes(int(task.memory or 0))
     task_data['memory_max'] = 'null' if not task.memory_max else format_bytes(int(task.memory_max))
     task_data['timeout'] = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
+    task_data['source_id'] = format_json(task.source)          # raw Source.id, shown in parens on `source`
     task_data['source'] = resolve_source(task.source, source_map)
     color = select_color(task.exit_status)
     print(color(NORMAL_MODE_TEMPLATE.format(**task_data)))
