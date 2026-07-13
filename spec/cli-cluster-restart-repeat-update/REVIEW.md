@@ -159,8 +159,16 @@ Full suite **354 passed** (was 352; net +2 regression guards). The mandatory cou
 (F1 touched `data/model.py`) is satisfied by the **maintainer's explicit sign-off** to publish, with
 the two judgment calls flagged and acknowledged: the F1 partial→full index **design change**, and the
 F2 refinement of R7's per-source wording to **lineage-scoped** (serves R7's intent under the dedup that
-R9/R12/R14 mandate; not a `GOAL` R-ID change). Scale validation (10M+ rows on Anvil/HPC, and the
-PostgreSQL/TimescaleDB query plans that SQLite-only plan checks can't cover) is being performed by the
-maintainer out-of-band.
+R9/R12/R14 mandate; not a `GOAL` R-ID change).
+
+**Scale validation — PASSED on Anvil (HPC), 2026-07-12:** every submission gate exercised end-to-end,
+plus DB performance at scale. On SQLite, `--update` against a **1M-task source** (one novel task
+appended) resolves in **~37s** — O(the same-path lineage): the unavoidable cost of loading that
+source's ~1M fingerprints and re-fingerprinting the file, *not* a function of total DB size. A
+**1k-task source resolves instantly with 1M unrelated rows already in the database**, confirming
+detection cost scales with the specific source lineage, not the whole table (R17 — the F1 full-index
+win; the pre-F1 partial index would have full-scanned even that case). The full covering index uses
+plain bound parameters on every engine, so the lineage-scoped behavior is engine-agnostic by
+construction (PostgreSQL/TimescaleDB).
 
 **Verdict: approved (human sign-off).**
