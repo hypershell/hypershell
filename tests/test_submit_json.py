@@ -285,3 +285,81 @@ def test_cluster_from_json(temp_site: Path) -> None:
     )
     rc, stdout, _ = main(['hs', 'list', 'id', '-t', 'seqid:Chr1', '-f', 'plain'])
     assert rc == exit_status.success and len(stdout.splitlines()) == 1
+
+
+# ---------------------------------------------------------------------------
+# `--from-json` re-submission gate (same matrix as a plain FILE)
+# ---------------------------------------------------------------------------
+# A JSON source keys on abspath(FILE)[@node] + the file's content md5, exactly like a
+# line file, so the shared apply_source_gate covers it unchanged. Group 0 is pinned so
+# the per-task fingerprint (which includes group) is stable across the two submits.
+
+@mark.integration
+def test_from_json_gate_refuses_resubmit(temp_site: Path) -> None:
+    """Submitting the same JSON plan twice with no flag is refused."""
+    plan = create_json_taskfile(temp_site, {'chunks': [{'seqid': 'Chr1'}, {'seqid': 'Chr2'}]})
+    argv = ['hs', 'submit', f'--from-json={plan}@chunks', '-g', '0', '--template', 'echo {seqid}']
+    rc, _, stderr = main(argv)
+    assert rc == exit_status.success, stderr
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['2'], NO_OUTPUT)
+
+    # Same path, same content -> refused, naming the prior source; nothing new committed.
+    rc, stdout, stderr = main(argv)
+    assert rc == exit_status.bad_argument
+    assert stdout == ''
+    assert_output(r'CRITICAL .* was already submitted as source .*', stderr, 1)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['2'], NO_OUTPUT)
+
+
+@mark.integration
+def test_from_json_gate_repeat_resubmits_all(temp_site: Path) -> None:
+    """--repeat ingests the JSON plan as a new source and submits every task again."""
+    plan = create_json_taskfile(temp_site, {'chunks': [{'seqid': 'Chr1'}, {'seqid': 'Chr2'}]})
+    argv = ['hs', 'submit', f'--from-json={plan}@chunks', '-g', '0', '--template', 'echo {seqid}']
+    assert main(argv)[0] == exit_status.success
+    rc, _, stderr = main(argv + ['--repeat'])
+    assert rc == exit_status.success, stderr
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['4'], NO_OUTPUT)
+
+
+@mark.integration
+def test_from_json_gate_update_adds_novel_only(temp_site: Path) -> None:
+    """--update on an edited JSON plan submits only records not already present."""
+    plan = create_json_taskfile(temp_site, {'chunks': [{'seqid': 'Chr1'}, {'seqid': 'Chr2'}]})
+    argv = ['hs', 'submit', f'--from-json={plan}@chunks', '-g', '0', '--template', 'echo {seqid}']
+    assert main(argv)[0] == exit_status.success
+
+    # Rewrite the same path with one extra record; --update adds only the novel one.
+    create_json_taskfile(temp_site, {'chunks': [{'seqid': 'Chr1'}, {'seqid': 'Chr2'}, {'seqid': 'Chr3'}]})
+    rc, _, stderr = main(argv + ['--update'])
+    assert rc == exit_status.success, stderr
+    assert_output(r'submitting 1 new tasks', stderr, 1)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['3'], NO_OUTPUT)
+    _, args, _ = main_lines(['hs', 'list', 'args', '-f', 'plain'])
+    assert sorted(args) == ['echo Chr1', 'echo Chr2', 'echo Chr3']
+
+
+@mark.integration
+def test_from_json_gate_cluster_restart_idempotent(temp_site: Path) -> None:
+    """hsx --from-json ... --restart runs the plan and is idempotent on requeue.
+
+    Also exercises the removed --from-json + --restart incompatibility (this run no longer
+    errors) and the co-running-submitter scheduler guard (novel tasks against a DB of prior
+    completed tasks).
+    """
+    plan = create_json_taskfile(temp_site, {'chunks': [
+        {'seqid': 'Chr1', 'chunk_id': 'c1'},
+        {'seqid': 'Chr2', 'chunk_id': 'c2'},
+    ]})
+    argv = ['hsx', f'--from-json={plan}@chunks', '--template', 'echo {seqid} {chunk_id}',
+            '-N', '2', '--restart']
+    rc, stdout, stderr = main(argv)
+    assert rc == exit_status.success, stderr
+    assert sorted(stdout.splitlines()) == ['Chr1 c1', 'Chr2 c2']
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['2'], NO_OUTPUT)
+
+    # Requeue: fingerprint matches, every task already present -> nothing new submitted or run.
+    rc, stdout, stderr = main(argv)
+    assert rc == exit_status.success, stderr
+    assert stdout == ''
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['2'], NO_OUTPUT)

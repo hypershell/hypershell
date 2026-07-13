@@ -461,7 +461,8 @@ function _hs_update() {
 function _hs_submit() {
     _arguments -s -S \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
-        '(-f --task-file)'{-f,--task-file}'[Path to task file ("-" for <stdin>)]:task file:_files' \
+        '(-f --task-file --from-json)'{-f,--task-file}'[Path to task file ("-" for <stdin>)]:task file:_files' \
+        '(-f --task-file --from-json)--from-json[Read tasks from a JSON file ("FILE[@path]")]:json spec:_files' \
         '(-q --queue)'{-q,--queue}'[Submit to live queue instead of database]' \
         '(-H --host)'{-H,--host}'[Hostname for server (used with --queue)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (used with --queue)]:port:_hs_ports' \
@@ -477,6 +478,8 @@ function _hs_submit() {
         '(-g --group)'{-g,--group}'[Task group for dependency management]:group:' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Number of lines to buffer]:size:(1 10 100 1000)' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(--update)--repeat[Re-submit a known file again as a new source]' \
+        '(--repeat)--update[Submit only tasks not already present from a known file]' \
         '--initdb[Auto-initialize database]' \
         '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
         '(-)--[End of options; task arguments follow]' \
@@ -556,6 +559,7 @@ function _hs_cluster() {
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
         '(-N --num-threads)'{-N,--num-threads}'[Executor threads per client, 0=auto (default: 1)]:threads:_hs_thread_counts' \
         '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
+        '(1)--from-json[Read tasks from a JSON file ("FILE[@path]")]:json spec:_files' \
         '(-H --bind)'{-H,--bind}'[Special bind address (default localhost/0.0.0.0)]:address:(localhost 127.0.0.1 0.0.0.0)' \
         '(-p --port)'{-p,--port}'[Port number (default: 50001)]:port:_hs_ports' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
@@ -571,7 +575,9 @@ function _hs_cluster() {
         '(--no-db --initdb)--initdb[Auto-initialize database]' \
         '--no-confirm[Disable client confirmation of task bundle received]' \
         '--forever[Schedule forever]' \
-        '--restart[Start scheduling from last completed task]' \
+        '(--repeat)--restart[Resume a prior run; with FILE submit only tasks not already present]' \
+        '(--update --restart)--repeat[Re-submit a known file again as a new source]' \
+        '(--repeat)--update[Submit only new tasks from a known file (use with --restart)]' \
         '(--mpi --launcher)--ssh[Launch directly with SSH host(s)]::host:_hs_known_hosts' \
         '(--ssh --launcher)--mpi[Same as --launcher=mpirun]' \
         '(--ssh --mpi)--launcher[Use specific launch interface]:launcher:_command_names -e' \
@@ -599,7 +605,7 @@ function _hs_cluster() {
         '(-I --init-size)'{-I,--init-size}'[Initial size of cluster (default: 1)]:size:(0 1 2 5)' \
         '(-X --min-size)'{-X,--min-size}'[Minimum size of cluster (default: 0)]:size:(0 1)' \
         '(-Y --max-size)'{-Y,--max-size}'[Maximum size of cluster (default: 1)]:size:(1 2 5 10 20)' \
-        '1:input file:_files'
+        '(--from-json)1:input file:_files'
 }
 
 # Autoloaded via the #compdef tag: the file body defines the helpers and

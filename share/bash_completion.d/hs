@@ -515,9 +515,9 @@ function _hs_task_update() {
 function _hs_submit() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -f --task-file -q --queue -H --host -p --port -k --auth
+	local all_opts="-h --help -f --task-file --from-json -q --queue -H --host -p --port -k --auth
 	--no-tls --tls-key --tls-cert --tls-ca --template -t --tag -b --bundlesize -w --bundlewait
-	-c --cores -m --memory -W --timeout -g --group --initdb --"
+	-c --cores -m --memory -W --timeout -g --group --repeat --update --initdb --"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
@@ -545,7 +545,7 @@ function _hs_submit() {
 	esac
 
 	case "${previous}" in
-		-f | --task-file | --tls-key | --tls-cert | --tls-ca)
+		-f | --task-file | --from-json | --tls-key | --tls-cert | --tls-ca)
 			COMPREPLY=($(compgen -f -- "${current}")); return ;;
 		-b | --bundlesize) COMPREPLY=($(compgen -W "1 10 100 1000" -- "${current}")); return ;;
 		-w | --bundlewait) COMPREPLY=($(compgen -W "5 10 30 60 600" -- "${current}")); return ;;
@@ -651,9 +651,9 @@ function _hs_server() {
 function _hs_cluster() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -N --num-threads -t --template -H --bind -p --port
+	local all_opts="-h --help -N --num-threads -t --template --from-json -H --bind -p --port
 	--no-tls --tls-key --tls-cert --tls-ca -b --bundlesize -w --bundlewait
-	-r --max-retries --eager -Q --poll --no-db --initdb --no-confirm --forever --restart
+	-r --max-retries --eager -Q --poll --no-db --initdb --no-confirm --forever --restart --repeat --update
 	--ssh --mpi --launcher --ssh-args --ssh-group -E --env --remote-exe
 	-d --delay-start --capture -o --output -e --errors -f --failures
 	-c --cores -m --memory -C --client-cores -M --client-memory --monitor
@@ -685,7 +685,7 @@ function _hs_cluster() {
 	fi
 
 	case "${previous}" in
-		-o | --output | -e | --errors | -f | --failures | --tls-key | --tls-cert | --tls-ca)
+		-o | --output | -e | --errors | -f | --failures | --from-json | --tls-key | --tls-cert | --tls-ca)
 			COMPREPLY=($(compgen -f -- "${current}")); return ;;
 		-N | --num-threads)
 			COMPREPLY=($(compgen -W "0 1 $(seq 2 2 "$(hs client --available-cores 2>/dev/null)" 2>/dev/null)" -- "${current}")); return ;;

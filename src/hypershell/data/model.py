@@ -11,6 +11,7 @@ from typing import List, Dict, Tuple, Any, Type, Optional, Final
 # Standard libs
 import re
 import json
+import hashlib
 from datetime import datetime
 from dataclasses import dataclass
 
@@ -32,9 +33,9 @@ from hypershell.data.core import schema, Session
 
 # Public interface
 __all__ = [
-    'Task', 'Client', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
+    'Task', 'Client', 'Source', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
-    'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'TaskGroupInfo',
+    'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo',
 ]
 
 # Initialize logger
@@ -52,6 +53,24 @@ A cancelled task is terminal: it must never be scheduled, retried, or counted as
 unrecoverable failure. It is distinguished from a genuine failure (positive exit codes,
 or the negative template/resource sentinels in `client.py`) solely by this value, so the
 scheduler's failure and retry queries filter it out explicitly.
+"""
+
+DIRECT_SOURCE_ID: Final[str] = '00000000-0000-7000-8000-000000000000'
+"""Reserved `Source` id for single command-line submissions (`hs submit '<cmd>'`)."""
+
+STDIN_SOURCE_ID: Final[str] = '00000000-0000-7000-8000-000000000001'
+"""Reserved `Source` id for streamed/stdin submissions."""
+
+RESERVED_SOURCE_PATHS: Final[Dict[str, str]] = {
+    DIRECT_SOURCE_ID: '<direct>',
+    STDIN_SOURCE_ID: '<stdin>',
+}
+"""Sentinel `path` values for the reserved source rows (see `Source.reserved`).
+
+The reserved sources are real rows with fixed, well-known UUIDv7 ids (zero timestamp,
+so they sort low and never raise a chunk's max) — this keeps `Task.source` a native UUID
+and lets them be statically excluded from the de-dup index. Both represent explicit user
+intent and are exempt from all re-submission gating.
 """
 
 
@@ -276,7 +295,10 @@ class Task(Entity):
     previous_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
     next_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
 
-    tag: Mapped[dict] = mapped_column(JSON, nullable=False, default={})
+    source: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)  # Source.id or reserved-const id
+    fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)  # Stable identity hash (args + group + tags).
+
+    tag: Mapped[dict] = mapped_column(JSON, nullable=False, default={})  # kept last (export/print order)
 
     columns = {
         'id': str,
@@ -308,6 +330,8 @@ class Task(Entity):
         'duration': int,
         'previous_id': str,
         'next_id': str,
+        'source': str,
+        'fingerprint': str,
         'tag': dict,
     }
 
@@ -339,12 +363,21 @@ class Task(Entity):
             group: int = DEFAULT_TASK_GROUP,
             strict_tag: bool = True,
             parse_inline: bool = True,
+            raw_args: str = None,
+            fingerprint: str = None,
+            source: str = None,
             **other: Any) -> Task:
         """Create a new Task.
 
         With ``strict_tag=False`` the tag character-set/length checks are relaxed
         (for JSON-sourced tags). With ``parse_inline=False`` the inline
         ``# HYPERSHELL:`` tag comment is not parsed and `args` is taken verbatim.
+
+        The stable identity ``fingerprint`` is computed from the pre-template ``raw_args``
+        (falling back to the expanded ``args`` when not supplied) plus the resolved group and
+        tags, unless ``fingerprint`` is passed directly (retries copy the parent's). ``source``
+        links the task to its ingested file's ``Source`` record; both columns are NULL only for
+        historical/ungated rows.
         """
         cls.ensure_valid_tag(tag, strict=strict_tag)
         if parse_inline:
@@ -360,9 +393,37 @@ class Task(Entity):
         memory = tag.pop('memory', other.get('memory', None))
         other['memory'] = parse_bytes(memory) if isinstance(memory, str) else memory
         other['timeout'] = tag.pop('timeout', other.get('timeout', None))
-        return Task(id=uuid(), args=args,
+        if fingerprint is None:
+            if raw_args is None:
+                raw_command = args
+            elif parse_inline:
+                raw_command = cls.split_argline(raw_args)[0]
+            else:
+                raw_command = str(raw_args).strip()
+            fingerprint = cls.compute_fingerprint(raw_command, other['group'], tag)
+        return Task(id=uuid(), args=args, source=source, fingerprint=fingerprint,
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
                     attempt=attempt, retried=retried, tag=tag, **other)
+
+    @classmethod
+    def compute_fingerprint(cls: Type[Task], raw_command: str, group: int,
+                            tags: Optional[Dict[str, JSONData]]) -> str:
+        """Stable, order-independent identity fingerprint.
+
+        An md5 over canonical JSON of the pre-template ``raw_command``, the task
+        ``group``, and user ``tags`` (the bookkeeping ``part`` tag excluded; resource
+        knobs are already popped from the tag dict before this is called). The uuid,
+        attempt/retry counters, timing, exit status, and execution template deliberately
+        do not participate — re-running the same work under a different template yields
+        the same fingerprint. MD5 matches the SOURCE content fingerprint and is stdlib.
+        """
+        payload = json.dumps(
+            {'args': raw_command,
+             'group': group,
+             'tags': {key: value for key, value in (tags or {}).items() if key != 'part'}},
+            sort_keys=True, separators=(',', ':'), ensure_ascii=False,
+        )
+        return hashlib.md5(payload.encode()).hexdigest()
 
     @classmethod
     def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONData]]:
@@ -560,7 +621,9 @@ class Task(Entity):
                                  attempt=task.attempt + 1,
                                  previous_id=task.id,
                                  tag=task.tag,
-                                 group=task.group)
+                                 group=task.group,
+                                 fingerprint=task.fingerprint,  # A retry is the same logical task.
+                                 source=task.source)            # Keep the retry chain linked to its source.
                          for task in failed_tasks]
             tasks.extend(new_tasks)
             cls.add_all(tasks)
@@ -758,10 +821,44 @@ class Task(Entity):
         else:
             return None
 
+    @classmethod
+    def count_for_source(cls: Type[Task], source_id: str) -> int:
+        """Count tasks stamped with the given `source_id`, for the incomplete-prior-submission check.
+
+        Served by the leading column of `index_tasks_source`; a bound `source_id` seeks the
+        B-tree (no full table `SCAN`), so the check stays sub-linear even on a huge table.
+        """
+        return cls.query().filter(cls.source == source_id).count()
+
+    @classmethod
+    def fingerprints_for_sources(cls: Type[Task], source_ids: List[str]) -> set[str]:
+        """Set of task identity fingerprints across the given `source_ids` (de-dup skip-set).
+
+        The de-dup scope is a same-path source lineage — a small set of sources — so, backed by
+        the covering `index_tasks_source` on `(source, fingerprint)`, this is a bounded index-only
+        scan, not a walk of the whole task table.
+        """
+        if not source_ids:
+            return set()
+        rows = (cls.query(cls.fingerprint)
+                .filter(cls.source.in_(set(source_ids)))
+                .filter(cls.fingerprint.isnot(None))
+                .distinct()
+                .all())
+        return {row[0] for row in rows}
+
 
 # Indices for efficient queries
 index_tasks_unscheduled = Index('index_tasks_unscheduled', Task.group, Task.schedule_time)
 index_tasks_retries = Index('index_tasks_retries', Task.exit_status, Task.retried)
+# Covering index for source detection / lineage de-dup. Deliberately *not* partial:
+# a partial `WHERE source NOT IN (<direct>, <stdin>)` predicate is only honored when the query
+# repeats it with matching literals, but `count_for_source`/`fingerprints_for_sources` bind the
+# source as a parameter — which neither SQLite nor PostgreSQL can prove satisfies a literal
+# partial predicate, so a partial index silently degrades those lookups to a full table SCAN.
+# A full index is used with plain bound parameters on every engine; the reserved-source rows it
+# also carries are a marginal cost (real named-file sources dominate the target workload).
+index_tasks_source = Index('index_tasks_source', Task.source, Task.fingerprint)
 
 
 class Client(Entity):
@@ -833,3 +930,98 @@ class Client(Entity):
 
 # Indices for efficient queries
 index_client_disconnect = Index('client_disconnected_at', Client.disconnected_at)
+
+
+class Source(Entity):
+    """Source entity: provenance record for a batch of ingested tasks.
+
+    One row per ingested named task file, capturing the absolute path, a
+    file-content fingerprint (md5), the expected task count, and a creation time.
+    Re-submission consults these to detect a prior ingest, warn on an incomplete one,
+    de-dup novel tasks, or refuse. The reserved ``<direct>`` and ``<stdin>``
+    submission modes are real rows with fixed ids (see `Source.reserved`,
+    `DIRECT_SOURCE_ID`, `STDIN_SOURCE_ID`) and are exempt from gating. Lineage is
+    *all sources sharing a `path`* — there is deliberately no lineage-pointer column.
+    """
+
+    id: Mapped[str] = mapped_column(UUID, primary_key=True, nullable=False)
+    path: Mapped[str] = mapped_column(TEXT, nullable=False)
+    fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
+    task_count: Mapped[Optional[int]] = mapped_column(INTEGER, nullable=True)
+    created: Mapped[datetime] = mapped_column(DATETIME, nullable=False)
+
+    columns = {
+        'id': str,
+        'path': str,
+        'fingerprint': str,
+        'task_count': int,
+        'created': datetime,
+    }
+
+    class NotFound(NotFound):
+        pass
+
+    class NotDistinct(NotDistinct):
+        pass
+
+    class AlreadyExists(AlreadyExists):
+        pass
+
+    @classmethod
+    def from_id(cls: Type[Source], id: str, caching: bool = True) -> Source:
+        """Look up source by unique `id`."""
+        try:
+            return cls.query(caching=caching).filter_by(id=id).one()
+        except NoResultFound as error:
+            raise cls.NotFound(f'No source with id={id}') from error
+        except MultipleResultsFound as error:
+            raise cls.NotDistinct(f'Multiple sources with id={id}') from error
+
+    @classmethod
+    def new(cls: Type[Source], path: str, fingerprint: str = None, task_count: int = None, **other) -> Source:
+        """Create a new source record (id minted via `uuid()`)."""
+        return cls(id=uuid(), path=path, fingerprint=fingerprint, task_count=task_count,
+                   created=datetime.now().astimezone(), **other)
+
+    @classmethod
+    def reserved(cls: Type[Source], const_id: str) -> Source:
+        """Lazily get-or-create the reserved source row identified by `const_id`.
+
+        Idempotent: the fixed-id row (`<direct>`/`<stdin>`) is created once on first use
+        and reused thereafter, so `Task.source` can point at a real native-UUID row.
+        """
+        try:
+            return cls.from_id(const_id, caching=False)
+        except cls.NotFound:
+            source = cls(id=const_id, path=RESERVED_SOURCE_PATHS[const_id],
+                         created=datetime.now().astimezone())
+            cls.add(source)
+            return source
+
+    @classmethod
+    def lookup(cls: Type[Source], path: str) -> List[Source]:
+        """All sources sharing `path` (the same-path lineage), newest first."""
+        return (cls.query()
+                .filter(cls.path == path)
+                .order_by(cls.created.desc())
+                .all())
+
+    @classmethod
+    def matching(cls: Type[Source], path: str, fingerprint: str) -> Optional[Source]:
+        """Most recent source with identical `path` and `fingerprint`, else None."""
+        return (cls.query()
+                .filter(cls.path == path)
+                .filter(cls.fingerprint == fingerprint)
+                .order_by(cls.created.desc())
+                .first())
+
+    @classmethod
+    def paths_for_ids(cls: Type[Source], ids: List[str]) -> Dict[str, str]:
+        """Map of source id -> path for the given `ids` (batched presentation lookup)."""
+        if not ids:
+            return {}
+        return dict(cls.query(cls.id, cls.path).filter(cls.id.in_(set(ids))).all())
+
+
+# Indices for efficient queries
+index_source_lookup = Index('index_source_lookup', Source.path, Source.fingerprint)

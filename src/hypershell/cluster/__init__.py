@@ -6,10 +6,11 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, IO, Optional, Iterable, Callable, Type
+from typing import Dict, IO, Optional, Iterable, Callable, Type, Tuple
 from types import TracebackType
 
 # Standard libs
+import os
 import sys
 import shlex
 from functools import cached_property
@@ -25,10 +26,12 @@ from hypershell.core.types import parse_bytes
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.data import initdb, checkdb, DATABASE_DIALECT
+from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
+from hypershell.data.model import Source, STDIN_SOURCE_ID
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
-from hypershell.submit import DEFAULT_BUNDLEWAIT, load_json_tasks, validate_json_expansion
+from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
+                               GatedSource, source_fingerprint_and_count, apply_source_gate)
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
 from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster,
@@ -50,8 +53,8 @@ log = Logger.with_name(__name__)
 APP_NAME = 'hs cluster'
 APP_USAGE = """\
 Usage:
-  hs cluster [-h] [FILE | --from-json SPEC | --restart | --forever] [-N NUM] [-t CMD] [-b SIZE] [-w SEC] [-c NUM] [-m MEM] [-W SEC]
-             [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
+  hs cluster [-h] [FILE | --from-json SPEC | --restart | --forever] [--repeat | --update] [-N NUM] [-t CMD] [-b SIZE] [-w SEC]
+             [-c NUM] [-m MEM] [-W SEC] [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
              [-H ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
              [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]
@@ -86,6 +89,8 @@ Options:
       --no-confirm              Disable client confirmation of task bundle received.
       --forever                 Schedule forever.
       --restart                 Start scheduling from last completed task.
+      --repeat                  Re-submit a known file's tasks again as a new source.
+      --update                  Submit only tasks not already present from a known file.
       --ssh-args       ARGS     Command-line arguments for SSH.
       --ssh-group      NAME     SSH nodelist group in config.
   -E, --env                     Send environment variables.
@@ -169,6 +174,12 @@ class ClusterApp(Application):
 
     restart_mode: bool = False
     interface.add_argument('--restart', action='store_true', dest='restart_mode')
+
+    repeat_mode: bool = False
+    interface.add_argument('--repeat', action='store_true', dest='repeat_mode')
+
+    update_mode: bool = False
+    interface.add_argument('--update', action='store_true', dest='update_mode')
 
     ssh_mode: str = None
     mpi_mode: bool = False
@@ -338,8 +349,6 @@ class ClusterApp(Application):
         if self.from_json:
             if given_filepath:
                 raise ArgumentError('Cannot combine --from-json with a positional task file')
-            if self.restart_mode:
-                raise ArgumentError('Cannot combine --from-json with --restart')
             validate_json_expansion(self.json_records, self.template)
         elif self.filepath is None and not self.restart_mode:
             self.filepath = '-'  # NOTE: assume STDIN
@@ -359,6 +368,14 @@ class ClusterApp(Application):
             raise ArgumentError('Using --restart with --no-db is invalid')
         if self.forever_mode and self.restart_mode:
             raise ArgumentError('Using --forever with --restart is invalid')
+        if self.update_mode and self.repeat_mode:
+            raise ArgumentError('Cannot combine --update with --repeat')
+        if self.restart_mode and self.repeat_mode:
+            raise ArgumentError('Cannot combine --restart with --repeat')  # resume vs. fresh full run
+        if self.update_mode and self.in_memory:
+            raise ArgumentError('Using --update with --no-db is invalid')
+        if self.update_mode and not (self.restart_mode or self.repeat_mode):
+            raise ArgumentError('Using --update requires --restart')  # --update alone is ambiguous.
         if self.ssh_args and not self.ssh_mode:
             raise ArgumentError('Unexpected --ssh-args when not in --ssh mode')
         if self.ssh_group and self.ssh_mode != '<default>':
@@ -420,25 +437,104 @@ class ClusterApp(Application):
 
     @cached_property
     def input_stream(self: ClusterApp) -> Optional[IO]:
-        """IO stream to read task command-line args."""
-        if self.restart_mode or self.from_json:
+        """IO stream to read task command-line args.
+
+        ``None`` for ``--from-json`` (records are read separately) and for a bare
+        ``--restart`` with no file (a pure database resume). A named file is opened here
+        even under ``--restart``/``--repeat``/``--update`` — the file becomes the gated task
+        source (see :meth:`source`).
+        """
+        if self.from_json or self.filepath is None:
             return None
-        else:
-            return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')
+        return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')
+
+    @cached_property
+    def json_source(self: ClusterApp) -> Tuple[list, Optional[str]]:
+        """Task records and content md5 from the --from-json spec (file read once)."""
+        return load_json_source(self.from_json)
 
     @cached_property
     def json_records(self: ClusterApp) -> list:
         """Task records loaded from the --from-json spec (read once)."""
-        return load_json_tasks(self.from_json)
+        return self.json_source[0]
 
     @cached_property
     def source(self: ClusterApp) -> Iterable[str | dict]:
-        """Input source for task command-line args (or JSON records with --from-json)."""
-        if self.restart_mode:
-            return []
+        """Input source for task command-line args (or JSON records with --from-json).
+
+        A bare ``--restart`` (no file) yields an empty source — a pure database resume
+        driven by the server's revert-interrupted flow. A named file or ``--from-json``
+        source (with or without ``--restart``/``--repeat``/``--update``) is run through the
+        re-submission gate and wrapped as a :class:`~hypershell.submit.GatedSource`.
+        """
         if self.from_json:
-            return self.json_records
-        return self.input_stream
+            return self.prepare_json_source()
+        if self.filepath is None:
+            return []  # bare --restart: resume scheduling from the database
+        return self.prepare_source(self.input_stream)
+
+    def prepare_source(self: ClusterApp, stream: IO) -> Iterable[str | dict]:
+        """Resolve the task Source, apply the re-submission gate, and wrap the stream.
+
+        Mirrors :meth:`hypershell.submit.SubmitApp.prepare_source` for the cluster entry
+        point. A named file passes through :func:`~hypershell.submit.apply_source_gate`:
+        a duplicate or changed-content re-submission is refused unless
+        ``--restart``/``--repeat``/``--update`` relaxes it, and the resolved :class:`Source`
+        records the upfront-counted expectation *before* any task is scheduled.
+        Explicit ``<stdin>`` and non-seekable inputs carry the reserved ``<stdin>`` source and
+        are exempt; ``--no-db``/non-persistent runs gate nothing (invariant §4).
+
+        The upfront count uses ``DEFAULT_TEMPLATE`` (not ``--template``): the cluster expands
+        the user template client-side, so the server ingests raw lines verbatim and the
+        count must mirror that split (see :class:`~hypershell.server.ServerThread`). The
+        stable per-task fingerprint is template-independent by construction, so the
+        de-dup set matches whether tasks were first ingested by ``hs submit`` or ``hsx``.
+        """
+        if self.in_memory or not DATABASE_ENABLED:
+            return stream  # no persistent database to gate against (invariant §4)
+        if stream is sys.stdin or not stream.seekable():
+            # Explicit <stdin> and non-seekable named inputs (process substitution, FIFOs,
+            # a piped /dev/stdin) cannot be re-read for an upfront count — stream them under
+            # the reserved <stdin> source, exempt from gating. A re-read would drain them.
+            self.warn_gating_no_effect('<stdin>')
+            source_id = Source.reserved(STDIN_SOURCE_ID).id
+            name = '<stdin>' if stream is sys.stdin else os.path.abspath(self.filepath)
+            return GatedSource(stream, source_id, name=name)
+        path = os.path.abspath(self.filepath)
+        fingerprint, count = source_fingerprint_and_count(path)  # DEFAULT_TEMPLATE (raw-line split)
+        log.info(f'Found {count} tasks in {path} (md5={fingerprint})')
+        source_id, skip = apply_source_gate(path, fingerprint, count, repeat=self.repeat_mode,
+                                            update=self.update_mode, restart=self.restart_mode)
+        return GatedSource(stream, source_id, skip_fingerprints=skip, name=path)
+
+    def prepare_json_source(self: ClusterApp) -> Iterable[dict]:
+        """Resolve the Source and apply the re-submission gate to a ``--from-json`` source.
+
+        The JSON analogue of :meth:`prepare_source`: the file's content md5
+        and record count feed :func:`~hypershell.submit.apply_source_gate`, keyed by
+        ``abspath(FILE)[@node]`` so distinct node selections are distinct sources. The
+        per-task fingerprint keys off the pre-template ``args``/tags, so de-dup matches
+        whether the tasks were first ingested by ``hs submit`` or ``hsx``. ``--from-json -``
+        (stdin JSON) carries the reserved ``<stdin>`` source and is exempt;
+        ``--no-db``/non-persistent runs gate nothing (invariant §4).
+        """
+        records, fingerprint = self.json_source
+        if self.in_memory or not DATABASE_ENABLED:
+            return records  # no persistent database to gate against (invariant §4)
+        key = json_source_key(self.from_json)
+        if key is None:
+            self.warn_gating_no_effect('<stdin>')
+            source_id = Source.reserved(STDIN_SOURCE_ID).id
+            return GatedSource(records, source_id, name='<stdin>')
+        log.info(f'Found {len(records)} tasks in {key} (md5={fingerprint})')
+        source_id, skip = apply_source_gate(key, fingerprint, len(records), repeat=self.repeat_mode,
+                                            update=self.update_mode, restart=self.restart_mode)
+        return GatedSource(records, source_id, skip_fingerprints=skip, name=key)
+
+    def warn_gating_no_effect(self: ClusterApp, kind: str) -> None:
+        """Note that re-submission gating flags are inert for exempt sources."""
+        if self.repeat_mode or self.update_mode:
+            log.warning(f'--repeat/--update have no effect for {kind} submissions')
 
     def __enter__(self: ClusterApp) -> ClusterApp:
         """Set up resources and attributes."""

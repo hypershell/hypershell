@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Final, Dict
 
 # Standard libs
+import sys
 from pathlib import Path
 
 # External libs
@@ -16,7 +17,7 @@ from pytest import mark
 from cmdkit.app import exit_status
 
 # Internal libs
-from tests import main, main_lines, NO_OUTPUT, create_taskfile_echo, assert_output, UUID_PATTERN
+from tests import main, main_lines, NO_OUTPUT, create_taskfile, create_taskfile_echo, assert_output, UUID_PATTERN
 from hypershell.submit import SubmitApp
 from hypershell.data.model import Task
 
@@ -235,3 +236,271 @@ def test_inline_memory_tag_parses_units_to_bytes() -> None:
     assert Task.new(args='echo', tag={'memory': '2000'}).memory == 2000
     assert Task.new(args='echo', tag={'memory': 4096}).memory == 4096
     assert Task.new(args='echo').memory is None
+
+
+# Small script run in a subprocess so the engine binds to the temp-site environment.
+_STAMP_QUERY: Final[str] = """
+from hypershell.data.model import Task, Source, DIRECT_SOURCE_ID, STDIN_SOURCE_ID
+tasks = Task.query().all()
+named = [s for s in Source.query().all() if s.path not in ('<direct>', '<stdin>')]
+assert len(tasks) == 3, f'tasks={len(tasks)}'
+assert len(named) == 1, f'named sources={len(named)}'
+src = named[0]
+assert src.task_count == 3, f'recorded count={src.task_count}'
+assert src.fingerprint and len(src.fingerprint) == 32, f'md5={src.fingerprint!r}'
+assert src.path.startswith('/'), f'path not absolute: {src.path}'
+assert all(t.source == src.id for t in tasks), [t.source for t in tasks]
+assert all(t.fingerprint for t in tasks), 'unstamped fingerprint'
+assert len({t.fingerprint for t in tasks}) == 3, 'expected distinct fingerprints'
+print('OK', src.task_count)
+"""
+
+
+@mark.integration
+def test_source_stamp_named_file(temp_site: Path) -> None:
+    """A named-file submit records one Source row and stamps every task."""
+
+    # Real tasks: echo a/b/c. Non-tasks (excluded from the count): blank, comment-only,
+    # and an inline-tag-only line (sets a global tag, produces no task).
+    taskfile = create_taskfile(temp_site, [
+        'echo a',
+        '',
+        '# just a comment',
+        '# HYPERSHELL: phase:1',
+        'echo b',
+        'echo c',
+    ])
+
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile)])
+    assert rc == exit_status.success, stderr
+    # Upfront-ingest log: found N + md5, and the excluded lines are not counted.
+    assert_output(r'INFO .* Found 3 tasks in .* \(md5=[0-9a-f]{32}\)$', stderr, 1)
+    assert_output(r'INFO .* Submitted 3 tasks$', stderr, 1)
+
+    rc, stdout, stderr = main([sys.executable, '-c', _STAMP_QUERY])
+    assert rc == 0, stderr
+    assert stdout == 'OK 3'
+
+
+@mark.integration
+def test_source_stamp_reserved_direct_and_stdin(temp_site: Path) -> None:
+    """Single-command and stdin submissions stamp the reserved <direct>/<stdin> rows."""
+    import os
+    from subprocess import run, PIPE
+
+    # <direct>: a single positional command needs no stdin.
+    rc, _, stderr = main(['hs', 'submit', 'echo', 'solo'])
+    assert rc == exit_status.success, stderr
+
+    # <stdin>: pipe two commands in; `main` does not feed stdin, so drive it directly.
+    proc = run(['hs', 'submit', '-f', '-'], input=b'echo pipe1\necho pipe2\n',
+               stdout=PIPE, stderr=PIPE, env=os.environ)
+    assert proc.returncode == exit_status.success, proc.stderr.decode()
+
+    query = """
+from hypershell.data.model import Task, Source, DIRECT_SOURCE_ID, STDIN_SOURCE_ID
+by_source = {}
+for t in Task.query().all():
+    by_source.setdefault(t.source, []).append(t.args)
+assert sorted(by_source.get(DIRECT_SOURCE_ID, [])) == ['echo solo'], by_source
+assert sorted(by_source.get(STDIN_SOURCE_ID, [])) == ['echo pipe1', 'echo pipe2'], by_source
+reserved = Source.query().filter(Source.id.in_([DIRECT_SOURCE_ID, STDIN_SOURCE_ID])).all()
+assert {s.path for s in reserved} == {'<direct>', '<stdin>'}, reserved
+print('OK')
+"""
+    rc, stdout, stderr = main([sys.executable, '-c', query])
+    assert rc == 0, stderr
+    assert stdout == 'OK'
+
+
+@mark.integration
+def test_source_stamp_non_seekable_input_streams_all(temp_site: Path) -> None:
+    """A non-seekable named input (piped /dev/stdin) streams every task instead of being
+    drained by the upfront read; it is stamped with the reserved <stdin> source."""
+    import os
+    from subprocess import run, PIPE
+    if not os.path.exists('/dev/stdin'):
+        from pytest import skip
+        skip('no /dev/stdin on this platform')
+
+    # stdin is a pipe here, so /dev/stdin is non-seekable — the upfront count MUST NOT
+    # re-read (and drain) it. Before the fix this submitted 0 tasks with a bogus Source row.
+    proc = run(['hs', 'submit', '-f', '/dev/stdin'], input=b'echo one\necho two\necho three\n',
+               stdout=PIPE, stderr=PIPE, env=os.environ)
+    assert proc.returncode == exit_status.success, proc.stderr.decode()
+
+    query = """
+from hypershell.data.model import Task, Source, STDIN_SOURCE_ID
+tasks = Task.query().all()
+assert len(tasks) == 3, f'expected 3 tasks, got {len(tasks)}'
+assert all(t.source == STDIN_SOURCE_ID for t in tasks), [t.source for t in tasks]
+named = [s for s in Source.query().all() if s.path not in ('<direct>', '<stdin>')]
+assert named == [], named  # no bogus named source for the ephemeral /dev/stdin path
+print('OK')
+"""
+    rc, stdout, stderr = main([sys.executable, '-c', query])
+    assert rc == 0, stderr
+    assert stdout == 'OK'
+
+
+@mark.integration
+def test_source_stamp_count_matches_cr_only_newlines(temp_site: Path) -> None:
+    """The recorded task_count matches the tasks actually submitted regardless of newline
+    convention — the count read uses the Loader's own universal-newline decoding."""
+    taskfile = temp_site / 'cr.in'
+    with open(str(taskfile), mode='wb') as stream:
+        stream.write(b'echo a\recho b\recho c\r')  # classic-Mac CR-only line endings
+
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile)])
+    assert rc == exit_status.success, stderr
+    assert_output(r'INFO .* Found 3 tasks in .*', stderr, 1)
+
+    query = """
+from hypershell.data.model import Task, Source
+tasks = Task.query().all()
+named = [s for s in Source.query().all() if s.path not in ('<direct>', '<stdin>')]
+assert len(named) == 1, named
+assert named[0].task_count == len(tasks) == 3, (named[0].task_count, len(tasks))
+print('OK')
+"""
+    rc, stdout, stderr = main([sys.executable, '-c', query])
+    assert rc == 0, stderr
+    assert stdout == 'OK'
+
+
+# --- Re-submission source gate: hs submit matrix ---------------------------------------------------
+
+@mark.integration
+def test_gate_refuse_resubmit_identical(temp_site: Path) -> None:
+    """Re-submitting an identical named file with no flag is refused, naming the prior."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.success, stderr
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['4'], NO_OUTPUT)
+
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.bad_argument
+    assert stdout == ''
+    assert_output(r'CRITICAL .* was already submitted as source .*', stderr, 1)
+    # Refused before any new task is written — the count is unchanged.
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['4'], NO_OUTPUT)
+
+
+@mark.integration
+def test_gate_refuse_changed_suggests_update(temp_site: Path) -> None:
+    """A changed file at a seen path with no flag is refused, suggesting --update."""
+    taskfile = create_taskfile_echo(temp_site, count=2)
+    rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.success, stderr
+
+    # Same path, different content -> different source fingerprint.
+    create_taskfile_echo(temp_site, count=3)  # overwrites task.in at the same path
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.bad_argument
+    assert_output(r'CRITICAL .* previously submitted with different content.*--update', stderr, 1)
+
+
+@mark.integration
+def test_gate_warns_incomplete_prior(temp_site: Path) -> None:
+    """When fewer tasks landed than recorded, detection warns of an incomplete prior."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    rc, _, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.success, stderr
+
+    # Delete two task rows so the DB count for the source drops below its recorded count.
+    prune = """
+from hypershell.data.model import Task
+Task.delete_all(Task.query().limit(2).all())
+print('OK')
+"""
+    rc, stdout, stderr = main([sys.executable, '-c', prune])
+    assert rc == 0, stderr
+    assert stdout == 'OK'
+
+    # Re-detect: no flag still refuses, and now also warns about the incomplete prior.
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.bad_argument
+    assert_output(r'WARNING .* appears incomplete: 2 of 4 tasks present.*', stderr, 1)
+
+
+@mark.integration
+def test_gate_dedup_update_not_reported_incomplete(temp_site: Path) -> None:
+    """A de-duplicated --update is not later misreported as an incomplete prior (regression).
+
+    --update records the new source's expected count as the *full* file count but stamps only the
+    novel tasks onto it — the deduped ones stay under earlier same-path sources. Completeness is
+    therefore measured across the lineage; a subsequent detection of the (complete) version must
+    not cry wolf. Before the fix this warned a spurious 'appears incomplete: 2 of 6'.
+    """
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    assert main(['hs', 'submit', '-f', str(taskfile), '-g0'])[0] == exit_status.success
+    create_taskfile_echo(temp_site, count=6)  # same path, two new lines
+    assert main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])[0] == exit_status.success
+
+    # Re-detect the now-complete v2: no flag refuses it as a duplicate but must NOT warn.
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0'])
+    assert rc == exit_status.bad_argument, stderr
+    assert_output(r'appears incomplete', stderr, 0)   # the F2 false-positive is gone
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['6'], NO_OUTPUT)
+
+
+@mark.integration
+def test_gate_repeat_submits_all_again(temp_site: Path) -> None:
+    """--repeat ingests a new source and submits all tasks again, even on an identical match."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    assert main(['hs', 'submit', '-f', str(taskfile), '-g0'])[0] == exit_status.success
+
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0', '--repeat'])
+    assert rc == exit_status.success, stderr
+    assert_output(r'INFO .* Submitted 4 tasks$', stderr, 1)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['8'], NO_OUTPUT)
+
+
+@mark.integration
+def test_gate_update_submits_only_novel(temp_site: Path) -> None:
+    """--update creates a new source but submits only task identities not already present."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    assert main(['hs', 'submit', '-f', str(taskfile), '-g0'])[0] == exit_status.success
+
+    # Extend the same file: the first four lines are byte-identical, two are new.
+    create_taskfile_echo(temp_site, count=6)  # overwrites task.in at the same path
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])
+    assert rc == exit_status.success, stderr
+    # Loader de-dup tally: four already present, two submitted.
+    assert_output(r'INFO .* 4 tasks already present; submitting 2 new tasks$', stderr, 1)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['6'], NO_OUTPUT)
+
+
+@mark.integration
+def test_gate_update_on_unseen_path_submits_all(temp_site: Path) -> None:
+    """--update on a never-before-seen path has an empty lineage, so nothing is skipped and all
+    tasks are submitted — `--update` degrades to a plain submit when there is no prior source (edge case)."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    rc, stdout, stderr = main(['hs', 'submit', '-f', str(taskfile), '-g0', '--update'])
+    assert rc == exit_status.success, stderr
+    assert_output(r'INFO .* 0 tasks already present; submitting 4 new tasks$', stderr, 1)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['4'], NO_OUTPUT)
+
+
+@mark.integration
+def test_gate_update_repeat_contradictory() -> None:
+    """--update and --repeat together are contradictory and rejected before any work."""
+    assert main_lines(['hs', 'submit', '-f', 'x.in', '-g0', '--update', '--repeat']) == (
+        exit_status.bad_argument, NO_OUTPUT, ['CRITICAL [hypershell] Cannot combine --update with --repeat']
+    )
+
+
+@mark.integration
+def test_gate_direct_and_stdin_exempt(temp_site: Path) -> None:
+    """Single-command <direct> and streamed <stdin> submissions are exempt from gating."""
+    import os
+    from subprocess import run, PIPE
+    # <direct>: an identical single command submitted twice — both succeed, no refusal.
+    for _ in range(2):
+        rc, _, stderr = main(['hs', 'submit', 'echo', 'solo', '-g0'])
+        assert rc == exit_status.success, stderr
+    # <stdin>: identical piped input submitted twice — both succeed (main() does not feed stdin).
+    for _ in range(2):
+        proc = run(['hs', 'submit', '-f', '-', '-g0'], input=b'echo a\necho b\n',
+                   stdout=PIPE, stderr=PIPE, env=os.environ)
+        assert proc.returncode == exit_status.success, proc.stderr.decode()

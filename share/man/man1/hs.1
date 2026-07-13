@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HS" "1" "Jul 08, 2026" "2.8.1" "hypershell"
+.TH "HS" "1" "Jul 12, 2026" "2.8.1" "hypershell"
 .SH NAME
 hs \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -88,7 +88,7 @@ Stand up the \fBserver\fP on its own and scale \fBclients\fP as desired, and \fB
 .SH CLUSTER USAGE
 .INDENT 0.0
 .TP
-.B \fBhs cluster [\-h]\fP \fB[FILE | \-\-restart | \-\-forever]\fP
+.B \fBhs cluster [\-h]\fP \fB[FILE | \-\-from\-json SPEC | \-\-restart | \-\-forever]\fP \fB[\-\-repeat | \-\-update]\fP
 \fB[\-N NUM]\fP \fB[\-t CMD]\fP \fB[\-b SIZE]\fP \fB[\-w SEC]\fP \fB[\-Q NUM]\fP
 \fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-f PATH]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP
 \fB[\-\-ssh [HOST... | \-\-ssh\-group NAME] [\-\-env] | \-\-mpi | \-\-launcher=ARGS...]\fP
@@ -106,10 +106,27 @@ The input source for tasks is file\-like, either a local path, or from \fIstdin\
 given. The command\-line tasks are pulled in and either directly published to a distributed queue
 (see \fB\-\-no\-db\fP) or committed to a database first before being scheduled later.
 .sp
+Alternatively, use \fB\-\-from\-json\fP to read tasks from a JSON file (\fBFILE[@path]\fP); each task
+object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP (and task tags). In this mode the
+template is expanded when tasks are ingested rather than by the clients. A JSON source participates
+in the same re\-submission gating as a plain \fIFILE\fP — \fB\-\-restart\fP (idempotent requeue),
+\fB\-\-repeat\fP, and \fB\-\-update \-\-restart\fP all apply — keyed by the file\(aqs absolute path together
+with any \fB@path\fP selector.
+.sp
 For large, long running workflows, it might be a good idea to configure a database and run an
 initial \fBsubmit\fP job to populate the database, and then run the cluster with \fB\-\-restart\fP and no
 input \fIFILE\fP\&. If the cluster is interrupted for whatever reason it can gracefully restart where it
 left off.
+.sp
+Alternatively, pass the \fIFILE\fP directly with \fB\-\-restart\fP: the submission is detected, only tasks
+that never landed are submitted, and interrupted tasks are re\-run — so a requeued
+\fBhsx <FILE> \-\-restart\fP job is safe to run repeatedly. Use \fB\-\-repeat\fP to deliberately submit a
+known file\(aqs tasks again as a new source, or \fB\-\-update \-\-restart\fP to add only the tasks that are
+new since the file was last seen.
+.sp
+De\-dup cost scales with the file\(aqs own source lineage rather than the whole database, so requeues stay
+fast at scale; for very large workflows, a one\-time \fBsubmit\fP followed by a bare \fBhsx \-\-restart\fP (no
+file re\-read) is cheaper than re\-feeding the \fIFILE\fP each run.
 .sp
 Use \fB\-\-autoscaling\fP with either \fIfixed\fP or \fIdynamic\fP to run a persistent, elastically scalable
 cluster using an external \fB\-\-launcher\fP to bring up clients as needed.
@@ -159,6 +176,15 @@ arguments (e.g., file paths) to be transformed into some common form; such as
 \fB\-t \(aq./some_command.py {} >outputs/{/\-}.out\(aq\fP\&.
 .sp
 See section on \fItemplates\fP\&.
+.TP
+.B \fB\-\-from\-json\fP \fISPEC\fP
+Read tasks from a JSON file (\fBFILE[@path]\fP).
+.sp
+The optional dotted \fBpath\fP after \fB@\fP locates the list of task objects inside the
+document (e.g. \fBplan.json@chunks\fP); with no \fB@\fP the file\(aqs top level must be the
+list. Each task object\(aqs keys become named \fB{key}\fP fields in the \fB\-\-template\fP and
+task tags. In this mode the template is expanded when tasks are ingested (submit\-side),
+not by the clients.
 .TP
 .B \fB\-H\fP, \fB\-\-bind\fP \fIADDR\fP
 Bind address (default: localhost, or 0.0.0.0 for remote clients).
@@ -249,17 +275,39 @@ no more tasks left to schedule, the \fIcluster\fP will begin its shutdown proced
 Conflicts with \fB\-\-no\-db\fP and mutually exclusive to \fB\-\-restart\fP\&.
 .TP
 .B \fB\-\-restart\fP
-Start scheduling from last completed task.
+Start scheduling from where a prior run left off.
 .sp
-Instead of pulling a new list of tasks from some input \fIFILE\fP, with \fB\-\-restart\fP enabled the
-\fIcluster\fP will restart scheduling tasks where it left off. Any task in the database that was
-previously scheduled but not completed will be reverted.
+With no \fIFILE\fP, \fB\-\-restart\fP resumes purely from the database: any task previously
+scheduled but not completed is reverted, scheduling continues, and the \fIcluster\fP halts when
+nothing is left to do. This is the classic \(dqpopulate with \fBsubmit\fP, then requeue\(dq strategy
+for very large workflows — if the \fIcluster\fP is interrupted it can gracefully continue where
+it left off.
 .sp
-For very large workflows, an effective strategy is to first use the \fBsubmit\fP workflow to
-populate the database, and then to use \fB\-\-restart\fP so that if the \fIcluster\fP is interrupted,
-it can easily continue where it left off, halting if nothing to be done.
+When a \fIFILE\fP is given, \fB\-\-restart\fP becomes file\-aware and idempotent. The file is read
+upfront (a content fingerprint and task count), and only tasks whose identity is not already
+present from a prior submission of that same path are submitted; the revert\-interrupted flow
+re\-runs anything that was mid\-flight. Requeuing the same \fBhsx <FILE> \-\-restart\fP job as many
+times as needed therefore never double\-submits work. If the file\(aqs content has changed since
+it was last seen, the run is refused with a suggestion to use \fB\-\-update \-\-restart\fP\&.
 .sp
-Conflicts with \fB\-\-no\-db\fP and mutually exclusive to \fB\-\-forever\fP\&.
+Conflicts with \fB\-\-no\-db\fP and \fB\-\-repeat\fP, and mutually exclusive to \fB\-\-forever\fP\&.
+.TP
+.B \fB\-\-repeat\fP
+Re\-submit a known file\(aqs tasks again as a new source.
+.sp
+Re\-submitting a file that has already been ingested is normally refused. \fB\-\-repeat\fP
+overrides that: the file is recorded as a brand\-new source and \fIall\fP of its tasks are
+submitted again, even if an identical prior submission exists. Combine with \fB\-t\fP/tags to
+represent a new phase or trial of the same work.
+.TP
+.B \fB\-\-update\fP
+Submit only the tasks that are new since a file was last seen.
+.sp
+Used together with \fB\-\-restart\fP (\fBhsx <FILE> \-\-update \-\-restart\fP): the file is recorded as
+a new source and only tasks whose identity is not already present in the prior same\-path
+lineage are submitted — novel tasks run while previously\-submitted tasks are skipped. On its
+own (without \fB\-\-restart\fP) it is ambiguous and refused; it also cannot be combined with
+\fB\-\-repeat\fP\&.
 .TP
 .B \fB\-\-ssh\-args\fP \fIARGS\fP\&...
 Command\-line arguments for SSH. For example, \fB\-\-ssh\-args \(aq\-i ~/.ssh/my_key\(aq\fP\&.
@@ -901,10 +949,10 @@ See the \fIsecurity\fP section for peer verification modes.
 .SH SUBMIT USAGE
 .INDENT 0.0
 .TP
-.B \fBhs\fP \fBsubmit\fP \fB[\-h]\fP \fB[ARGS... | \-f FILE]\fP
+.B \fBhs\fP \fBsubmit\fP \fB[\-h]\fP \fB[ARGS... | \-f FILE | \-\-from\-json SPEC]\fP
 \fB[\-q [\-H ADDR] [\-p NUM] [\-k KEY] | \-\-initdb]\fP
 \fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-W SEC]\fP \fB[\-g NUM]\fP
-\fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP
+\fB[\-\-repeat | \-\-update]\fP \fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
@@ -925,6 +973,30 @@ Any tags specified with \fB\-t\fP/\fB\-\-tag\fP are applied to all tasks submitt
 .sp
 Use the special comment syntax, \fB# HYPERSHELL: ...\fP, to include resource limits or tags inline.
 If the comment is alone on the line it will be applied to all tasks that follow.
+.sp
+With \fB\-\-from\-json\fP, read tasks from a JSON file instead. The value is
+\fBFILE[@path]\fP where the optional dotted \fBpath\fP locates the list of task objects
+within the document (e.g. \fBplan.json@chunks\fP); with no \fB@\fP the file\(aqs top level
+must itself be the list, and a \fBFILE\fP of \fB\-\fP reads from \fB<stdin>\fP\&. Each task
+object\(aqs keys become named \fB{key}\fP template fields (and task tags), and an optional
+\fBargs\fP key provides the base command (reachable as \fB{}\fP). All \fB{key}\fP fields are
+validated against every task object up front, so submission is rejected before any task
+is committed if a field is missing.
+.sp
+Re\-submitting a named task file is guarded to prevent accidental double submission. Each
+named file is recorded as a \fIsource\fP (its absolute path, a content fingerprint, and the
+task count); submitting the same file again with no flag is refused, and if the path was
+seen but the content changed the refusal suggests \fB\-\-update\fP\&. Pass \fB\-\-repeat\fP to
+deliberately submit all tasks again as a new source, or \fB\-\-update\fP to submit only tasks
+not already present from earlier versions of the same file. JSON task files (\fB\-\-from\-json\fP)
+are gated the same way, keyed by their absolute path together with any \fB@path\fP selector.
+Single\-command and \fB<stdin>\fP submissions (including \fB\-\-from\-json \-\fP) are treated as
+explicit intent and are exempt from these checks.
+.sp
+Detection and \fB\-\-update\fP de\-dup are index\-backed on the source lineage, so their cost scales with
+that file\(aqs own size, not the size of the database: re\-submitting a normal file stays fast even against
+a very large database, while \fB\-\-update\fP on a source of millions of tasks pays to re\-read and
+fingerprint the entire file to find what is new.
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -936,6 +1008,33 @@ Command\-line task arguments (for single task submission).
 .TP
 .B \fB\-f\fP, \fB\-\-task\-file\fP \fIFILE\fP
 Input file containing one task per line.
+.TP
+.B \fB\-\-from\-json\fP \fISPEC\fP
+Read tasks from a JSON file (\fBFILE[@path]\fP).
+.sp
+The optional dotted \fBpath\fP after \fB@\fP locates the list of task objects inside
+the document (e.g. \fBplan.json@chunks\fP); with no \fB@\fP the file\(aqs top level must
+be the list, and a \fBFILE\fP of \fB\-\fP reads from \fB<stdin>\fP\&. Each task object\(aqs keys
+become named \fB{key}\fP template fields and task tags; an optional \fBargs\fP key is the
+base command (reachable as \fB{}\fP). Every \fB{key}\fP is validated against all task
+objects before anything is submitted.
+.TP
+.B \fB\-\-repeat\fP
+Re\-submit a known file\(aqs tasks again as a brand\-new source.
+.sp
+By default, submitting a named file whose path and content match a prior submission is
+refused to guard against accidental double submission. \fB\-\-repeat\fP overrides that: the
+file is ingested as a new source and all of its tasks are submitted again, even if
+identical tasks already exist. May be combined with new \fB\-t\fP/\fB\-\-tag\fP values to mark
+a new phase or trial.
+.TP
+.B \fB\-\-update\fP
+Submit only the tasks in a known file that are not already present.
+.sp
+Creates a new source record and submits only tasks whose identity (a stable hash of the
+pre\-template arguments, group, and tags) is absent from the prior same\-path submissions;
+tasks already submitted are skipped. Use this after editing a task file to add only the
+new work. Cannot be combined with \fB\-\-repeat\fP\&.
 .TP
 .B \fB\-q\fP, \fB\-\-queue\fP
 Submit directly to live queue instead of database.
@@ -1257,7 +1356,18 @@ A database must be configured.
 Specifying \fIFIELD\fP names defines what is included in the output
 (by default all fields are included).
 .sp
+As a safeguard against accidentally dumping an entire database, \fBhs list\fP refuses to return
+more than 1,000 tasks unless the intent is made explicit with \fB\-\-all\fP (dump everything),
+\fB\-\-limit\fP \fIN\fP (bound the result), or \fB\-\-count\fP (count only) \- much as \fBhs update\fP confirms
+a bulk change before applying it. A bare \fBhs list\fP with no arguments prints the usage statement.
+.sp
 This command maps directly to underlying SQL queries.
+.sp
+When printing to a terminal, task records are colorized by \fIexit_status\fP: successful tasks
+(0) are green, cancelled tasks (\-1, including those terminated by \fBSIGHUP\fP) are shown faint,
+tasks that terminated abnormally (killed by a signal, or that never ran \- any other negative
+status) are yellow, and tasks that ran and returned a non\-zero code are red. Tasks that have
+not yet run are left uncolored.
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -1267,6 +1377,14 @@ Default is to include all fields.
 .UNINDENT
 .SS Options
 .INDENT 0.0
+.TP
+.B \fB\-\-all\fP
+Dump all matching tasks, imposing no limit.
+.sp
+As a guard against accidentally dumping an entire database, \fBhs list\fP refuses to return
+more than 1,000 results unless the intent is made explicit. \fB\-\-all\fP dumps them all,
+\fB\-\-limit\fP \fIN\fP bounds the result, and \fB\-\-count\fP only counts them; the three are mutually
+exclusive (e.g. \fBhs list \-\-all\fP or \fBhs list \-\-all \-\-csv\fP).
 .TP
 .B \fB\-w\fP, \fB\-\-where\fP \fICOND...\fP
 List of conditional statements to filter results (e.g., \fB\-w \(aqduration >= 600\(aq\fP).
@@ -1300,8 +1418,19 @@ For backwards compatibility, \fB\-\-finished\fP is also valid.
 .B \fB\-R\fP, \fB\-\-remaining\fP
 Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
 .TP
+.B \fB\-X\fP, \fB\-\-cancelled\fP
+Alias for \fB\-w \(aqexit_status == \-1\(aq\fP (tasks that were cancelled).
+.TP
 .B \fB\-\-retries\fP
 Alias for \fB\-w \(aqattempt > 1\(aq\fP (tasks that have been retried).
+.TP
+.B \fB\-\-signal\fP \fINAME\fP
+Match tasks whose process was terminated by signal \fINAME\fP (e.g. \fBTERM\fP, \fBKILL\fP, \fBHUP\fP).
+.sp
+A task killed by signal \fIN\fP is recorded with \fBexit_status = \-N\fP (the convention used by
+Python\(aqs subprocess module). The \fBSIG\fP prefix is optional and the name is case\-insensitive.
+A task terminated by \fBHUP\fP lands on \-1 and is therefore treated as cancelled
+(see \fB\-\-cancelled\fP).
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
 Specify output format (either \fBnormal\fP, \fBplain\fP, \fBtable\fP, \fBcsv\fP, \fBjson\fP).
@@ -1386,6 +1515,12 @@ Cancelling a task means it will no longer be scheduled. This is done by setting 
 \fIschedule_time\fP and \fIcompletion_time\fP to \fInow\fP and the \fIexit_status\fP to \-1. The task
 becomes terminal: it will not be scheduled, retried, or reverted on \fB\-\-restart\fP\&.
 A task cannot be cancelled after it is sent to remote clients.
+.sp
+A running task can also be cancelled \fIin flight\fP on the client by terminating its
+process with \fBSIGHUP\fP (e.g. \fBkill \-HUP\fP). Because a process killed by signal \fIN\fP is
+recorded with \fBexit_status = \-N\fP, a \fBSIGHUP\fP (signal 1) death lands on \-1 \- the same
+cancelled state \- so such a task is likewise not retried. See \fBhs list \-\-cancelled\fP and
+\fBhs list \-\-signal HUP\fP\&.
 .TP
 .B \fB\-\-revert\fP
 Revert specified tasks.
@@ -1439,8 +1574,19 @@ Alias for \fB\-w \(aqexit_status != null\(aq\fP\&.
 .B \fB\-R\fP, \fB\-\-remaining\fP
 Alias for \fB\-w \(aqexit_status == null\(aq\fP\&.
 .TP
+.B \fB\-X\fP, \fB\-\-cancelled\fP
+Alias for \fB\-w \(aqexit_status == \-1\(aq\fP (tasks that were cancelled).
+.TP
 .B \fB\-\-retries\fP
 Alias for \fB\-w \(aqattempt > 1\(aq\fP (tasks that have been retried).
+.TP
+.B \fB\-\-signal\fP \fINAME\fP
+Match tasks whose process was terminated by signal \fINAME\fP (e.g. \fBTERM\fP, \fBKILL\fP, \fBHUP\fP).
+.sp
+A task killed by signal \fIN\fP is recorded with \fBexit_status = \-N\fP (the convention used by
+Python\(aqs subprocess module). The \fBSIG\fP prefix is optional and the name is case\-insensitive.
+A task terminated by \fBHUP\fP lands on \-1 and is therefore treated as cancelled
+(see \fB\-\-cancelled\fP).
 .TP
 .B \fB\-f\fP, \fB\-\-no\-confirm\fP
 Do not ask for confirmation.
@@ -1640,6 +1786,21 @@ argument to all clients.
 .sp
 In some situations it may be useful to expand a template with the \fBsubmit\fP command.
 These are expanded \fIprior\fP to scheduling as the actual \fIargs\fP for the task.
+.SS Named Fields
+.sp
+When tasks are submitted from a JSON file with \fB\-\-from\-json\fP (see the \fBsubmit\fP
+command), each task object\(aqs keys become available as named template fields. A
+\fB{key}\fP pattern expands to that key\(aqs value for the given task, and the keys also
+become task tags.
+.sp
+For a task object \fB{\(dqseqid\(dq: \(dqChr1\(dq, \(dqstart\(dq: 1, \(dqend\(dq: 5000000}\fP the template
+\fBprocess \-\-region {seqid}:{start}\-{end}\fP expands to
+\fBprocess \-\-region Chr1:1\-5000000\fP\&.
+.sp
+Values are stringified: booleans render as \fBtrue\fP/\fBfalse\fP, \fBnull\fP as an empty
+string, and nested objects/arrays as compact JSON. A built\-in pattern (below) takes
+precedence over a task key of the same name. Named fields are resolved at submit time,
+and every \fB{key}\fP must be present in each task object or the submission is rejected.
 .SS Filepath Operations
 .sp
 Shell commands often operate on filepaths. In such cases, it may be useful to manipulate

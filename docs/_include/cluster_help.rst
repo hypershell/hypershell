@@ -141,17 +141,39 @@ Options
     Conflicts with ``--no-db`` and mutually exclusive to ``--restart``.
 
 ``--restart``
-    Start scheduling from last completed task.
+    Start scheduling from where a prior run left off.
 
-    Instead of pulling a new list of tasks from some input `FILE`, with ``--restart`` enabled the
-    `cluster` will restart scheduling tasks where it left off. Any task in the database that was
-    previously scheduled but not completed will be reverted.
+    With no *FILE*, ``--restart`` resumes purely from the database: any task previously
+    scheduled but not completed is reverted, scheduling continues, and the `cluster` halts when
+    nothing is left to do. This is the classic "populate with ``submit``, then requeue" strategy
+    for very large workflows — if the `cluster` is interrupted it can gracefully continue where
+    it left off.
 
-    For very large workflows, an effective strategy is to first use the ``submit`` workflow to
-    populate the database, and then to use ``--restart`` so that if the `cluster` is interrupted,
-    it can easily continue where it left off, halting if nothing to be done.
+    When a *FILE* is given, ``--restart`` becomes file-aware and idempotent. The file is read
+    upfront (a content fingerprint and task count), and only tasks whose identity is not already
+    present from a prior submission of that same path are submitted; the revert-interrupted flow
+    re-runs anything that was mid-flight. Requeuing the same ``hsx <FILE> --restart`` job as many
+    times as needed therefore never double-submits work. If the file's content has changed since
+    it was last seen, the run is refused with a suggestion to use ``--update --restart``.
 
-    Conflicts with ``--no-db`` and mutually exclusive to ``--forever``.
+    Conflicts with ``--no-db`` and ``--repeat``, and mutually exclusive to ``--forever``.
+
+``--repeat``
+    Re-submit a known file's tasks again as a new source.
+
+    Re-submitting a file that has already been ingested is normally refused. ``--repeat``
+    overrides that: the file is recorded as a brand-new source and *all* of its tasks are
+    submitted again, even if an identical prior submission exists. Combine with ``-t``/tags to
+    represent a new phase or trial of the same work.
+
+``--update``
+    Submit only the tasks that are new since a file was last seen.
+
+    Used together with ``--restart`` (``hsx <FILE> --update --restart``): the file is recorded as
+    a new source and only tasks whose identity is not already present in the prior same-path
+    lineage are submitted — novel tasks run while previously-submitted tasks are skipped. On its
+    own (without ``--restart``) it is ambiguous and refused; it also cannot be combined with
+    ``--repeat``.
 
 ``--ssh-args`` *ARGS*...
     Command-line arguments for SSH. For example, ``--ssh-args '-i ~/.ssh/my_key'``.

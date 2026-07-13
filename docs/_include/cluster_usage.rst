@@ -1,4 +1,4 @@
-``hs cluster [-h]`` ``[FILE | --from-json SPEC | --restart | --forever]``
+``hs cluster [-h]`` ``[FILE | --from-json SPEC | --restart | --forever]`` ``[--repeat | --update]``
     ``[-N NUM]`` ``[-t CMD]`` ``[-b SIZE]`` ``[-w SEC]`` ``[-Q NUM]``
     ``[-H ADDR]`` ``[-p PORT]`` ``[-r NUM [--eager]]`` ``[-f PATH]`` ``[--capture | [-o PATH] [-e PATH]]``
     ``[--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]``
