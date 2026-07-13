@@ -295,10 +295,10 @@ class Task(Entity):
     previous_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
     next_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
 
-    tag: Mapped[dict] = mapped_column(JSON, nullable=False, default={})
-
     source: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)  # Source.id or reserved-const id
     fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)  # stable identity (R2)
+
+    tag: Mapped[dict] = mapped_column(JSON, nullable=False, default={})  # kept last (export/print order)
 
     columns = {
         'id': str,
@@ -330,9 +330,9 @@ class Task(Entity):
         'duration': int,
         'previous_id': str,
         'next_id': str,
-        'tag': dict,
         'source': str,
         'fingerprint': str,
+        'tag': dict,
     }
 
     class NotFound(NotFound):
