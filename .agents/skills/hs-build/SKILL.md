@@ -60,7 +60,9 @@ Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
   A phase is `done` only when all items are satisfied **and** its `verify:` command passes.
 - **Verify by driving the CLI, not just tests.** Run the phase's `verify:` command; for behavior,
   exercise the real flow (e.g. `seq 100 | uv run hsx -t 'echo {}' -N4` then inspect `uv run hs list`
-  / `hs info`). A red gate is a STOP condition — do not mark the phase done or advance state.
+  / `hs info`). **Exit 0 is necessary but not sufficient** — assert a concrete post-condition (task
+  count / final states / a known stdout token); a run that "completed" but left wrong task state is a
+  FAIL. A red gate is a STOP condition — do not mark the phase done or advance state.
 - **Amend `TECH.md` freely; GOAL is locked.** When reality diverges from the plan (a phase is wrong,
   needs splitting, or a new phase is required), rewrite `TECH.md` — regenerate frontmatter with
   `set_phase.py`, edit phase bodies as needed — and **note the amendment in the commit body**. But if
@@ -109,8 +111,10 @@ real correction to `TECH.md`/`PLAN.md`, amend `TECH.md` (Step 5 rules); if it re
 contradiction, STOP and escalate.
 
 ### Step 4 — Verify gate
-Run the phase's `verify:` command (plus any CLI drive). Green → proceed. Red → STOP; do not mark done
-or advance state; consider the circuit breaker.
+Run the phase's `verify:` command (plus any CLI drive). "Green" means the **asserted post-condition
+held** — the observed output (task counts, final states, a known token) is correct — not merely that the
+command exited 0. Green → proceed. Red → STOP; do not mark done or advance state; consider the circuit
+breaker.
 
 ### Step 5 — Update `TECH.md` (the resume contract)
 1. Check off the phase's `[ ]` items in the body.
