@@ -538,6 +538,12 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
   </div>
   <p style="font-size:14px;color:var(--muted);margin-top:-6px">The ⟲ steps loop: review sends confirmed
     problems back to build until the change is clean, then publish opens the pull request.</p>
+  <p style="font-size:14px;color:var(--muted);margin-top:10px"><strong>+1 · the self-improvement loop.</strong>
+    As those five skills run, each quietly notes any <em>harness</em> friction — where the skillset itself
+    got in the way — into an optional <code><a href="templates/META.md">META.md</a></code> (alongside what
+    worked well). Separately, and only as needed, the lead developer runs <code>/hs-harness</code> to fold
+    those lessons back into the factory. It sits deliberately <strong>outside</strong> the feature
+    lifecycle — it is how the factory improves <em>itself</em>.</p>
 
   <h3>The artifact spine <a class="anchor" href="#factory">#</a></h3>
   <p>Each stage reads the previous stage's committed files and writes its own. This is the durable
@@ -558,6 +564,9 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
           <td>The <strong>phased roadmap</strong> — a small state machine (see below) the build resumes from.</td></tr>
       <tr><td><code><a href="templates/REVIEW.md">REVIEW.md</a></code></td><td>/hs-review</td>
           <td>Severity-ranked findings + a requirement→evidence matrix.</td></tr>
+      <tr><td><code><a href="templates/META.md">META.md</a></code></td><td>the lifecycle skills</td>
+          <td>Optional <strong>harness-feedback log</strong>: what worked well, and where the skillset
+              itself caused friction. Feeds the self-improvement loop (the +1 below), not the change.</td></tr>
     </tbody>
   </table>
   </div>
@@ -754,7 +763,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
   </table>
   </div>
 
-  <h3>The five skills <a class="anchor" href="#reference">#</a></h3>
+  <h3>The five lifecycle skills (+1 meta) <a class="anchor" href="#reference">#</a></h3>
   <div class="tablewrap">
   <table>
     <thead><tr><th>Skill</th><th>Role</th></tr></thead>
@@ -764,6 +773,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
       <tr><td><code><a href="../skills/hs-build/SKILL.md">hs-build</a></code></td><td>Execute the roadmap, one verified phase at a time.</td></tr>
       <tr><td><code><a href="../skills/hs-review/SKILL.md">hs-review</a></code></td><td>Independent, blind, evidence-based QA.</td></tr>
       <tr><td><code><a href="../skills/hs-publish/SKILL.md">hs-publish</a></code></td><td>Open the pull request (or merge locally).</td></tr>
+      <tr><td><code><a href="../skills/hs-harness/SKILL.md">hs-harness</a></code> <span style="color:var(--muted)">(+1 · meta)</span></td><td>Fold the self-improvement loop's findings back into the factory — human-gated, run by the lead developer as needed. <strong>Not</strong> a feature-lifecycle step.</td></tr>
     </tbody>
   </table>
   </div>
@@ -785,6 +795,12 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
       <tr><td><code><a href="review-rubric.md">review-rubric.md</a></code></td>
           <td>The reviewer's operating manual — what it may see, severity levels, the refutation
               protocol, and when a human must sign off.</td></tr>
+      <tr><td><code><a href="portability.md">portability.md</a></code></td>
+          <td>How to run the skills on another harness (Warp, OpenCode, open-weight models): each
+              Claude-specific affordance and its graceful fallback.</td></tr>
+      <tr><td><code><a href="harness-log.md">harness-log.md</a></code></td>
+          <td>The cross-job ledger of applied/rejected harness changes — anti-thrash memory read by
+              <code>/hs-harness</code> before it applies a fix.</td></tr>
     </tbody>
   </table>
   </div>
@@ -798,9 +814,11 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
       <tr><td><code><a href="templates/PLAN.md">templates/PLAN.md</a></code></td><td>Skeleton for the technical design.</td></tr>
       <tr><td><code><a href="templates/TECH.md">templates/TECH.md</a></code></td><td>Skeleton for the phased FSM roadmap (with the field reference).</td></tr>
       <tr><td><code><a href="templates/REVIEW.md">templates/REVIEW.md</a></code></td><td>Skeleton for the review report.</td></tr>
+      <tr><td><code><a href="templates/META.md">templates/META.md</a></code></td><td>Skeleton for the harness-feedback log (what worked well + friction findings).</td></tr>
       <tr><td><code><a href="bin/next_phase.py">bin/next_phase.py</a></code></td><td>Reads &amp; validates a TECH.md; prints the next actionable phase as JSON.</td></tr>
       <tr><td><code><a href="bin/set_phase.py">bin/set_phase.py</a></code></td><td>Advances FSM state by regenerating the front-matter (no fragile hand-edits).</td></tr>
       <tr><td><code><a href="bin/_fsm.py">bin/_fsm.py</a></code></td><td>Shared parse / validate / serialize helpers for the two scripts above.</td></tr>
+      <tr><td><code><a href="bin/meta_status.py">bin/meta_status.py</a></code></td><td>Reads a META.md; prints its findings as JSON (used by hs-publish and /hs-harness).</td></tr>
     </tbody>
   </table>
   </div>
