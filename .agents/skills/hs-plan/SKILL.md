@@ -91,7 +91,9 @@ CRITICAL-invariant conflict.
 
 ### Step 6 — Generate `TECH.md` (the FSM)
 Copy the template; author phases as **vertical slices, not horizontal layers** — each independently
-verifiable end-to-end, ordered **core + small + novel first**. For each phase set: `id`, `name`,
+verifiable end-to-end, ordered **core + small + novel first**. **Size circuit-breaker (soft):** if the
+roadmap needs **>~8 phases**, the scope is probably too big for one unit of work — pause and reconsider
+with the human (split into a pilot + follow-ups, or trim to the appetite) before committing a mega-plan. For each phase set: `id`, `name`,
 `satisfies` (R-IDs), `depends_on`, `parallel` (**false** for coupled-core files — `data/model.py`,
 `server.py`, `client.py`, `core/*`; `true` only for independent `task.py`/docs/tests work),
 `hammerable` (**false** for correctness/security phases), `hill: uphill`, and a real `verify:`

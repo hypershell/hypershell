@@ -63,6 +63,9 @@ Parse `$ARGUMENTS` case-insensitively. If self-contradictory, STOP and ask.
   section. Do not invent behavior.
 - **Shaping only.** No research fan-out, no broad code exploration, no implementation. If you feel
   the urge to research, that is `/hs-plan`'s job.
+- **Size circuit-breaker (soft).** If shaping produces **>~8–10 acceptance criteria** or several
+  distinct deliverables, the appetite is probably too big — pause and offer the human a **pilot +
+  follow-ups** split (record the deferred scope in Non-goals). A prompt, not a hard limit.
 - **No `Co-Authored-By` trailer** on the commit (repo convention).
 
 ## Procedure
