@@ -74,6 +74,9 @@ escalate.
     number `01`, `02`, … with distinct paths so there are no write conflicts). Prefer
     codebase-exploration; reserve `WebSearch`/`WebFetch` for external unknowns.
   - Scale count to appetite (a few for medium features; more for large). Log what you fan out.
+  - **Consume each agent's returned summary; never read its `.output` transcript sidecar** — it can
+    flood your context. **No subagents in your harness?** Do the research yourself, sequentially,
+    writing the same `spec/{slug}/research/NN-topic.md` files — identical output, only parallelism lost.
 - Read the returned briefs and synthesize **`spec/{slug}/research/00-digest.md`** — the consolidated
   decisions that resolve any cross-brief contradictions with a single recommendation each.
 
