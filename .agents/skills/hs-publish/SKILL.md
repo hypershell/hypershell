@@ -7,7 +7,7 @@ description: >-
   irreversible/outward step; never targets master. Final step of the software factory.
 disable-model-invocation: true
 argument-hint: "[pr (default) | local] [merge]"
-allowed-tools: Read, Grep, Glob, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git log *), Bash(git diff *), Bash(git rev-parse *), Bash(git fetch *), Bash(git push *), Bash(git switch *), Bash(git checkout *), Bash(git merge *), Bash(git add *), Bash(git commit *), Bash(gh pr *), Bash(gh repo *)
+allowed-tools: Read, Grep, Glob, AskUserQuestion, Bash(uv run *), Bash(git status *), Bash(git branch *), Bash(git log *), Bash(git diff *), Bash(git rev-parse *), Bash(git fetch *), Bash(git push *), Bash(git switch *), Bash(git checkout *), Bash(git merge *), Bash(git add *), Bash(git commit *), Bash(gh pr *), Bash(gh repo *)
 ---
 
 # hs-publish — ship the branch to develop
@@ -71,8 +71,23 @@ Report the verdict, commits vs `develop`, and whether a PR already exists (`gh p
   - **Phases completed** → rendered from the `TECH.md` FSM (id · name · satisfies).
   - **Verification** → the CLI flows / tests actually run (from `REVIEW.md`).
   - **Docs & completions** → confirm the same-commit rule was honored (`docs/_include/*.rst`, `share/`).
+  - **🔧 Harness feedback** — surface the self-improvement loop *only when substantial* (see the
+    surfacing rule below); omit the section entirely otherwise.
   - Issue: `Refs #NN` (see the auto-close note below).
   - Trailing line: `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+
+**Harness-feedback surfacing rule.** Before finalizing the body, read this feature's harness notes:
+```
+uv run python .agents/factory/bin/meta_status.py spec/{slug}/META.md --status open
+```
+Add a terse, factual, **toolchain-only** "🔧 Harness feedback" section when there is something
+substantial: `counts.open > 0` (list each open finding as a one-liner `F# · {severity} · {title}`) **or**
+`spec/{slug}/META.md` has a non-empty "What worked well" section (read the file directly — the parser
+only enumerates `F#` findings; list those bullets). Keep it short and process-focused; it is reviewed
+alongside the code, so it must not editorialize about the feature. If there are no open findings and
+nothing worked-well of note — or the file is absent (`exists: false`) — **omit the section**.
+`hs-publish` never *writes* `META.md` findings; it is the loop's **surfacer**, and `/hs-harness` is
+where fixes get applied.
 
 ### Step 3 — Confirm with the human
 Present the mode (PR vs local), the title, and the body via AskUserQuestion. Do not proceed without a

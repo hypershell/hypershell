@@ -44,7 +44,8 @@ Additional instructions provided with the invocation: $ARGUMENTS
 
 - **Blindness is the point.** The correctness reviewer subagent is given `GOAL.md`, the diff, the
   runnable repo, `invariants.md`, and `review-rubric.md` — and is **explicitly told NOT to read
-  `PLAN.md`, `TECH.md`, or `research/`**. Only this skill (the orchestrator) reads `TECH.md`, and only
+  `PLAN.md`, `TECH.md`, `research/`, or `META.md`** (the last leaks author intent / harness notes, same
+  reason as PLAN/TECH). Only this skill (the orchestrator) reads `TECH.md`, and only
   for the `base`/`slug`/`kind` metadata — it must not pass PLAN/TECH *content* into the reviewer prompt.
 - **External verification is the spine.** Every finding must cite an executed command
   (`uv run pytest`, real CLI in a `temp_site`, docs build when touched). No assertion-only findings.
@@ -73,7 +74,9 @@ Launch a fresh `general-purpose` reviewer via the `Agent` tool. Give it, inline,
 - the command to produce the diff: `git diff {base}...HEAD` (and `git log --oneline {base}..HEAD`);
 - the full text of `invariants.md` and `review-rubric.md`;
 - the instruction: work in the runnable repo, follow the refutation protocol, **run** the relevant
-  `verify` commands / drive the CLI in a `temp_site`, and **do NOT read `PLAN.md`/`TECH.md`/`research/`**.
+  `verify` commands / drive the CLI in a `temp_site`, and **do NOT read `PLAN.md`/`TECH.md`/`research/`
+  or `META.md`** (`META.md` is the harness self-improvement log — it leaks author intent, same reason
+  as PLAN/TECH).
 - required return: a structured findings list (severity, CONFIRMED/PLAUSIBLE, file:line, failure
   scenario, the executed evidence) + a requirement→evidence matrix (every R-ID: implemented? verified
   how?) + any unmapped (scope-creep) changes.
@@ -100,9 +103,28 @@ backed by cited evidence). Then:
   **STOP and require explicit human sign-off** before any further step.
 - **PLAUSIBLE only:** surface to the human for triage; do not auto-block.
 
+**Meta-note (orchestrator only · silence by default).** Reflect on the **review skillset itself** — not
+the diff, not the code. *You (the orchestrator)* may record a finding; the blind reviewer never does,
+and content/correctness issues belong in `REVIEW.md`, not here. You may also add a one-line
+**What worked well** note when a part of the review skillset materially helped. The bar for a *finding*
+is the one test: *was this the skill's fault — not mine, not the task's?* (an ambiguous rubric step, a curated-input/allowed-tools
+mismatch, guidance that made the delegation misfire). If met, record it in `spec/{slug}/META.md` (create
+from [`templates/META.md`](../../factory/templates/META.md) if absent, else append) — ≤3 terse findings,
+next unused `F#`, always `status=open`, "· seen again" instead of duplicating; a fix that would weaken a
+non-negotiable gate (blind-review integrity, executed-evidence spine, the human gate, an `invariants.md`
+item) is `severity=high` and must say so. **Records only** — `/hs-harness` applies fixes later:
+```markdown
+## F<n> — <one-line title>
+`origin=hs-review:<step> severity=<high|medium|low> category=<instruction|steering|tooling|template|missing-guidance> status=open target=<best-guess file>`
+- **What happened:** <what the skill made you do, or fail to do>.
+- **Skill cause:** <why it's the instructions' fault — not yours, not the task's>.
+- **Recommended fix:** <the change to the skill/template/script>.
+- **Confidence:** <high|med|low> · **Effort:** <small|medium|large>
+```
+
 Then **commit the review artifacts** so the tree stays clean for the loop:
 ```
-git add spec/{slug}/REVIEW.md spec/{slug}/TECH.md
+git add spec/{slug}/REVIEW.md spec/{slug}/TECH.md   # + spec/{slug}/META.md if you recorded a meta-note
 git commit -m "[{category}] Review {slug}: cycle {n} — {verdict}"
 ```
 **No `Co-Authored-By` trailer.** Do not push.

@@ -100,14 +100,44 @@ phases. Set top `status: in_progress`, `current_phase` to the first phase, `last
 Then **validate**: `uv run python .agents/factory/bin/next_phase.py spec/{slug}/TECH.md` must exit 0
 and report the first phase.
 
-### Step 7 — Commit
+### Step 7 — Meta-note (self-improvement loop · silence by default)
+Before committing, reflect on the **skillset itself** — not the task, not the code. Write nothing
+unless the bar is met.
+
+**The bar (one test):** *was this the skill's fault — not mine, not the task's?* **Qualifies:** you
+hand-fixed a command this skill gave (wrong flag/path, unquoted `verify:` YAML); a genuinely ambiguous
+instruction; a `[NEEDS CLARIFICATION]` that better guidance could have pre-empted; an
+allowed-tools/step mismatch; a gate that passed or failed misleadingly. **Stay silent for:** a merely
+hard task; your own error against clear guidance; a one-off content/code issue (→ `PLAN.md`/`GOAL.md`,
+not here); a vague preference.
+
+If (and only if) the bar is met, record it in `spec/{slug}/META.md` (create from
+[`templates/META.md`](../../factory/templates/META.md) if absent, else append). You may also add a
+one-line **What worked well** note when a part of this skill materially helped. Caps: **≤3 findings**,
+terse; if an equivalent finding already exists, append "· seen again" rather than duplicating; a fix
+that would weaken a non-negotiable gate (the invariant gate, the `verify:` design, an `invariants.md`
+item) is `severity=high` and must say so. **Records only** — `/hs-harness` applies fixes later,
+human-reviewed. Use the next unused `F#`; always write `status=open`; append the finding as a section
+**outside** any code fence:
+```markdown
+## F<n> — <one-line title>
+`origin=hs-plan:<step> severity=<high|medium|low> category=<instruction|steering|tooling|template|missing-guidance> status=open target=<best-guess file>`
+- **What happened:** <what the skill made you do, or fail to do>.
+- **Skill cause:** <why it's the instructions' fault — not yours, not the task's>.
+- **Recommended fix:** <the change to the skill/template/script>.
+- **Confidence:** <high|med|low> · **Effort:** <small|medium|large>
 ```
-git add spec/{slug}/research spec/{slug}/PLAN.md spec/{slug}/TECH.md
+Likely sources here: the research fan-out mechanics (Step 3), the invariant-gate steps, or
+`TECH.md`/YAML authoring.
+
+### Step 8 — Commit
+```
+git add -A spec/{slug}      # PLAN.md + TECH.md, plus research/ and META.md when present (research/ is omitted on the lean path)
 git commit -m "[{category}] Plan {slug}: design + phased roadmap"
 ```
 `{category}` = `fix`|`feature`. **No `Co-Authored-By` trailer.** Do not push.
 
-### Step 8 — Report & hand off
+### Step 9 — Report & hand off
 Report the design summary, the phase list (id · name · satisfies · verify), any deviations recorded,
 and open risks. Sign-off gate: the human reviews `PLAN.md`/`TECH.md`; then `/hs-build` executes phase
 one. Stop.

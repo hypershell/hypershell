@@ -95,14 +95,44 @@ R-IDs/appetite/non-goals. Do not expand scope.
 Re-read the GOAL: is it solved, bounded to the appetite, and free of unresolved markers? Every
 requirement testable and observable? If not, iterate (ask the human) before committing.
 
-### Step 6 — Commit
+### Step 6 — Meta-note (self-improvement loop · silence by default)
+Before committing, reflect on the **skillset itself** — not the task, not the code. Write nothing
+unless the bar is met.
+
+**The bar (one test):** *was this the skill's fault — not mine, not the task's?* **Qualifies:** you
+hand-fixed a command this skill gave (wrong flag/path, unquoted YAML); a genuinely ambiguous
+instruction; a `[NEEDS CLARIFICATION]` that better guidance could have pre-empted; an
+allowed-tools/step mismatch; a gate that passed or failed misleadingly. **Stay silent for:** a merely
+hard task; your own error against clear guidance; a one-off content/code issue (→ `GOAL.md`, not here);
+a vague preference.
+
+If (and only if) the bar is met, record it in `spec/{slug}/META.md` (create from
+[`templates/META.md`](../../factory/templates/META.md) if absent, else append). You may also add a
+one-line **What worked well** note when a part of this skill materially helped. Caps: **≤3 findings**,
+terse; if an equivalent finding already exists, append "· seen again" rather than duplicating; a fix
+that would weaken a non-negotiable gate (tests, the CLI-drive verify, an `invariants.md` item) is
+`severity=high` and must say so. **Records only** — `/hs-harness` applies fixes later, human-reviewed.
+Use the next unused `F#`; always write `status=open`; append the finding as a section **outside** any
+code fence:
+```markdown
+## F<n> — <one-line title>
+`origin=hs-feature:<step> severity=<high|medium|low> category=<instruction|steering|tooling|template|missing-guidance> status=open target=<best-guess file>`
+- **What happened:** <what the skill made you do, or fail to do>.
+- **Skill cause:** <why it's the instructions' fault — not yours, not the task's>.
+- **Recommended fix:** <the change to the skill/template/script>.
+- **Confidence:** <high|med|low> · **Effort:** <small|medium|large>
 ```
-git add spec/{slug}/GOAL.md
+`hs-feature` is shaping-only, so findings here are usually about ambiguous shaping guidance or the
+`GOAL.md` template.
+
+### Step 7 — Commit
+```
+git add spec/{slug}/GOAL.md          # add spec/{slug}/META.md too if you recorded a meta-note
 git commit -m "[{category}] Shape {slug} goal"
 ```
 `{category}` = `fix` for `kind: fix`, else `feature`. **No co-author trailer.** Do not push.
 
-### Step 7 — Report & hand off
+### Step 8 — Report & hand off
 Report: branch, slug, kind, appetite, the R-ID list, any open clarifications. Tell the human the
 sign-off gate: review `spec/{slug}/GOAL.md`, then run **`/hs-plan`** to research + design. Stop.
 

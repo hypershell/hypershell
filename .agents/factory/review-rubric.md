@@ -11,7 +11,8 @@ assertion.
 - ✅ `GOAL.md` (the locked contract — R-IDs)
 - ✅ the branch diff (`git diff <base>...HEAD`) and the full runnable repo
 - ✅ [`invariants.md`](invariants.md) (the footgun checklist) and `AGENTS.md`
-- ❌ **NOT** `PLAN.md`, `TECH.md`, or `research/` (for the correctness pass)
+- ❌ **NOT** `PLAN.md`, `TECH.md`, `research/`, or `META.md` (for the correctness pass — `META.md` is
+  the harness self-improvement log and leaks author intent, same as PLAN/TECH)
 - A **separate, later** completeness sub-pass *may* read `TECH.md` to ask "was every planned phase
   shipped? did scope balloon?" — kept isolated so the plan never contaminates the correctness verdict.
 

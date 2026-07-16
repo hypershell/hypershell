@@ -57,6 +57,10 @@ point-in-time record of intent and design.**
    skips the lifecycle entirely.
 6. **Never guess.** Ambiguity gets a `[NEEDS CLARIFICATION: …]` marker and a question to the human,
    recorded into `GOAL.md`. Mirrors AGENTS.md's "the code is ground truth."
+7. **Observe cheaply, act deliberately.** The factory improves *itself* through an asymmetric loop:
+   every lifecycle skill records harness friction into `spec/{slug}/META.md` for near-zero cost
+   (silence by default), but fixes are applied only by the human-gated `hs-harness`, with fresh eyes
+   and guardrails that forbid quietly weakening a gate. See "The self-improvement loop" below.
 
 ## What we borrow from Shape Up (and what we discard)
 
@@ -93,20 +97,64 @@ phase to "fit the appetite."
 ```
 .agents/
   skills/hs-{feature,plan,build,review,publish}/SKILL.md   # the five lifecycle skills
+  skills/hs-harness/SKILL.md                               # meta/maintenance: apply the self-improvement loop
   factory/
     methodology.md        # this file
     invariants.md         # curated AGENTS.md footgun checklist (plan gate + review rubric)
     ears.md               # EARS requirement templates
     review-rubric.md      # severity scale, refutation protocol, human-gate triggers
-    templates/            # GOAL.md PLAN.md TECH.md REVIEW.md skeletons
-    bin/                  # next_phase.py, set_phase.py, _fsm.py (stdlib+PyYAML FSM helpers)
-spec/{slug}/              # per-feature artifacts (committed, retained on merge)
+    templates/            # GOAL.md PLAN.md TECH.md REVIEW.md META.md skeletons
+    bin/                  # next_phase.py, set_phase.py, _fsm.py (FSM); meta_status.py (META.md reader)
+    harness-log.md        # hs-harness decision ledger (cross-job anti-thrash memory)
+spec/{slug}/              # per-feature artifacts incl. META.md (committed, retained on merge)
 AGENTS.md                 # the constitution (CLAUDE.md is a symlink to it)
 ```
 
 `.claude` is a symlink to `.agents`, so Claude Code discovers the skills and reads settings through
 it. The skills reference bundled scripts via `${CLAUDE_SKILL_DIR}` and shared reference material by
 repo-relative path.
+
+## The self-improvement loop (META.md + `hs-harness`)
+
+The five lifecycle skills improve the *product*; this loop improves the *factory* itself. Skill
+friction is otherwise invisible and forgotten between sessions — so each lifecycle skill ends with a
+**silence-by-default meta-note step** that appends a finding to the feature's `spec/{slug}/META.md`
+**only** when the *skillset itself* cost something. The single load-bearing gate is one test: *"was
+this the skill's fault — not mine, not the task's?"* (a merely-hard task, a self-inflicted error, or a
+one-off content/code issue that belongs in `GOAL.md`/`REVIEW.md` is **not** a finding).
+
+```
+hs-feature ─┐
+hs-plan     ├─ meta-note (silence by default) ─► spec/{slug}/META.md   (What worked well + F# findings)
+hs-build    │                                          │  (kept OUT of the blind reviewer's context)
+hs-review  ─┘  (orchestrator only)                     │
+                                                       ▼
+hs-publish ──► reads open findings (meta_status.py) ─► "🔧 Harness feedback" block in the PR
+                                                       ▼
+hs-harness ──► human-gated: shape → preview → apply to .agents/ ─► flip status + log harness-log.md
+```
+
+The design is deliberately **asymmetric — cheap to observe, deliberate to act** — so it cannot become a
+token-sink or quietly loosen its own guardrails:
+
+- **Producers** (`hs-feature`/`hs-plan`/`hs-build`/`hs-review`) only *record* (≤3 terse findings each),
+  never fix. `hs-build` is the richest source (per-phase, across separate invocations — appending to a
+  file preserves signal a context reset erases). `hs-review`'s finding is written by the *orchestrator*,
+  never the blind reviewer, which must not even read `META.md` (it leaks intent). `META.md` is
+  orthogonal to the `GOAL→PLAN→TECH→REVIEW` spine and retained on merge like the rest of `spec/{slug}/`.
+- **The applier is separated from the observer** (fresh eyes + a human gate, mirroring blind review).
+  `hs-harness` is **human-gated always** and bound by hard guardrails: it **never auto-weakens a
+  non-negotiable gate** (tests, CLI-verify, an `invariants.md` item) without an explicit typed override
+  — *a finding arguing to loosen a guardrail is itself a warning sign* — prefers an example over a new
+  hard rule (fixes must generalize), keeps per-finding **atomic revertable** commits with **post-apply
+  verification**, writes **no `META.md` findings** (no meta-on-meta, no recursion), and reads
+  `harness-log.md` first so a fix that reverts a recent change or repeats a rejected one is flagged, not
+  silently re-applied.
+
+**Observe earns act.** The cheap half (meta-notes + PR surfacing) should prove it produces real signal
+over the first few features before the applier is leaned on hard; a finding that recurs across features
+(via `hs-harness --all` and the ledger) escalates itself. As with the FSM, the fragile parsing is owned
+by a script — `meta_status.py`, stdlib-only (no PyYAML) — not the model.
 
 ## Traceability chain
 

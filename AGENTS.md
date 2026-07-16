@@ -92,13 +92,13 @@ TLS-aware manager), `tls` (`TLSConfig`, cert generation), `heartbeat`, `template
 (`ciphers` is just an OpenSSL-string field on `TLSConfig`).
 
 Two repo-level trees sit outside the package: **`.agents/`** — the spec-driven "software
-factory" (the `hs-feature|plan|build|review|publish` skills plus `factory/` methodology,
-invariants, EARS/templates, and the `bin/` FSM scripts; `.claude` symlinks here); and
-**`spec/{slug}/`** — the committed, dated per-feature design records
-(`GOAL.md`/`PLAN.md`/`TECH.md`/`REVIEW.md`) the factory produces and **retains on merge**.
-`AGENTS.md` remains ground truth; `spec/{slug}/` is a point-in-time record of intent. See
-`.agents/factory/methodology.md` and the lifecycle note under "Working on this codebase as an
-agent."
+factory" (the `hs-feature|plan|build|review|publish` lifecycle skills plus the meta/maintenance
+`hs-harness`; `factory/` methodology, invariants, EARS/templates, and the `bin/` FSM +
+`meta_status.py` scripts; `.claude` symlinks here); and **`spec/{slug}/`** — the committed, dated
+per-feature design records (`GOAL.md`/`PLAN.md`/`TECH.md`/`REVIEW.md`, plus a `META.md` harness-feedback
+log) the factory produces and **retains on merge**. `AGENTS.md` remains ground truth; `spec/{slug}/` is
+a point-in-time record of intent. See `.agents/factory/methodology.md` and the lifecycle note under
+"Working on this codebase as an agent."
 
 ## Architecture & data flow
 
@@ -329,7 +329,11 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
   committed under `spec/{slug}/`. `.agents/factory/methodology.md` is the *why*;
   `.agents/factory/invariants.md` is the curated footgun checklist derived from this file (kept in
   lockstep — if it drifts, this file wins). Ceremony scales to appetite: a one-sentence change may
-  skip the lifecycle entirely.
+  skip the lifecycle entirely. Each lifecycle skill also ends with a **silence-by-default meta-note**
+  that logs *harness* friction (not code issues) to `spec/{slug}/META.md`; `/hs-publish` surfaces
+  substantial notes in the PR; and the human-gated **`/hs-harness`** (meta/maintenance, **not** a
+  lifecycle step) applies those fixes back to `.agents/`, logging each in `factory/harness-log.md` —
+  and never weakens a non-negotiable gate on a finding's say-so.
 - **Verify by driving the CLI, not just tests.** After a change, exercise the real flow in a
   `temp_site`: e.g. `seq 100 | uv run hsx -t 'echo {}' -N4` and inspect `uv run hs list` /
   `hs info`. The concurrency and DB behavior are where bugs hide, and integration tests need

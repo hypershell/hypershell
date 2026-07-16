@@ -122,7 +122,38 @@ or advance state; consider the circuit breaker.
    For a mid-phase amendment, edit phase bodies and use `set_phase.py` for any status/pointer/hill
    change. If all phases are now done, also `--top-status in_review`.
 
-### Step 6 — Commit (atomic code + state)
+### Step 6 — Meta-note (self-improvement loop · silence by default)
+Before committing, reflect on the **skillset itself** — not the task, not the code. Write nothing
+unless the bar is met.
+
+**The bar (one test):** *was this the skill's fault — not mine, not the task's?* **Qualifies:** you
+hand-fixed a command this skill gave (wrong flag/path, a bare `python`/`python3` that should be `uv run
+python`, unquoted YAML); a genuinely ambiguous instruction; a verify gate that passed/failed
+misleadingly (e.g. "exit 0" hid a wrong final state); an allowed-tools/step mismatch. **Stay silent
+for:** a merely hard task; your own error against clear guidance; a one-off content/code issue (→
+`REVIEW.md` at review time, not here); a vague preference.
+
+If (and only if) the bar is met, record it in `spec/{slug}/META.md` (create from
+[`templates/META.md`](../../factory/templates/META.md) if absent, else append). You may also add a
+one-line **What worked well** note when a part of this skill materially helped. Caps: **≤3 findings**,
+terse; if an equivalent finding already exists, append "· seen again" rather than duplicating
+(recurrence across phases is exactly the signal `/hs-harness` acts on); a fix that would weaken a
+non-negotiable gate (tests, the CLI-drive verify, an `invariants.md` item) is `severity=high` and must
+say so. **Records only** — `/hs-harness` applies fixes later, human-reviewed. Use the next unused `F#`;
+always write `status=open`; append the finding as a section **outside** any code fence:
+```markdown
+## F<n> — <one-line title>
+`origin=hs-build:{id} severity=<high|medium|low> category=<instruction|steering|tooling|template|missing-guidance> status=open target=<best-guess file>`
+- **What happened:** <what the skill made you do, or fail to do>.
+- **Skill cause:** <why it's the instructions' fault — not yours, not the task's>.
+- **Recommended fix:** <the change to the skill/template/script>.
+- **Confidence:** <high|med|low> · **Effort:** <small|medium|large>
+```
+`hs-build` is **the richest source** and runs **per phase across separate invocations** — appending to
+the file (not memory) is exactly how you preserve a finding a context reset would erase. The note rides
+in this phase's atomic `git add -A` commit below.
+
+### Step 7 — Commit (atomic code + state)
 ```
 git add -A
 git commit -m "[{category}] Build {slug} {id}: {phase name}"
@@ -135,7 +166,7 @@ and describe the fix, e.g. `[feature] Build {slug} P1: F1 — full covering inde
 non-obvious decisions or to record a `TECH.md` amendment. **No co-author trailer.** Do not push.
 `bundle` → one commit for the whole run.
 
-### Step 7 — Continue or stop
+### Step 8 — Continue or stop
 Default / at a phase boundary: stop and report. `through`/`next`/multi: loop to Step 2 with the next
 phase until the stop condition, a phase boundary (unless `skip review`), or a STOP from Steps 3–4.
 
