@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest *)",
+      "Bash(uv run python .agents/factory/bin/*)",
+      "Bash(uv run sphinx-build *)",
+      "Bash(uv run hs list *)",
+      "Bash(uv run hs info *)",
+      "Bash(uv run hs status *)",
+      "Bash(uv run hs config get *)",
+      "Bash(uv sync *)",
+      "Bash(git status *)",
+      "Bash(git branch *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(git rev-parse *)",
+      "Bash(git ls-files *)",
+      "Bash(git ls-tree *)",
+      "Bash(git fetch *)",
+      "Bash(seq *)"
+    ]
+  }
+}
