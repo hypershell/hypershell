@@ -537,13 +537,8 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
     <div class="step"><div class="n">/hs-publish</div><div class="t">Ship</div><div class="d">PR → develop</div></div>
   </div>
   <p style="font-size:14px;color:var(--muted);margin-top:-6px">The ⟲ steps loop: review sends confirmed
-    problems back to build until the change is clean, then publish opens the pull request.</p>
-  <p style="font-size:14px;color:var(--muted);margin-top:10px"><strong>+1 · the self-improvement loop.</strong>
-    As those five skills run, each quietly notes any <em>harness</em> friction — where the skillset itself
-    got in the way — into an optional <code><a href="templates/META.md">META.md</a></code> (alongside what
-    worked well). Separately, and only as needed, the lead developer runs <code>/hs-harness</code> to fold
-    those lessons back into the factory. It sits deliberately <strong>outside</strong> the feature
-    lifecycle — it is how the factory improves <em>itself</em>.</p>
+    problems back to build until the change is clean, then publish opens the pull request. A silent
+    <strong>+1</strong> rides alongside — <a href="#factory">the factory improves itself</a>, below.</p>
 
   <h3>The artifact spine <a class="anchor" href="#factory">#</a></h3>
   <p>Each stage reads the previous stage's committed files and writes its own. This is the durable
@@ -566,7 +561,8 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
           <td>Severity-ranked findings + a requirement→evidence matrix.</td></tr>
       <tr><td><code><a href="templates/META.md">META.md</a></code></td><td>the lifecycle skills</td>
           <td>Optional <strong>harness-feedback log</strong>: what worked well, and where the skillset
-              itself caused friction. Feeds the self-improvement loop (the +1 below), not the change.</td></tr>
+              itself caused friction. Feeds the self-improvement loop (see <em>The factory improves
+              itself</em>, below), not the change.</td></tr>
     </tbody>
   </table>
   </div>
@@ -597,6 +593,40 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
     committed to the repository. The methodology is not a hidden prompt; it is version-controlled,
     reviewable, and improvable like any other part of the codebase. The full rationale lives in
     <code><a href="methodology.md">methodology.md</a></code>.</p>
+
+  <h3>The factory improves itself <a class="anchor" href="#factory">#</a></h3>
+  <p>The five lifecycle skills don't just run the process — they <em>watch it for friction</em>. Each
+    ends with a silent-by-default <strong>meta-note</strong> step: when a concrete problem in the
+    <em>skillset itself</em> — a misleading instruction, a wrong command, a gap in guidance — costs
+    something during a job, the skill records a terse finding in that job's
+    <code><a href="templates/META.md">spec/&lt;slug&gt;/META.md</a></code>, gated by a single test:
+    <em>"was this the instructions' fault, not mine or the task's?"</em> A merely hard task is not a
+    finding. These <code>F#</code> findings (plus an optional "what worked well" note) run
+    <em>orthogonal</em> to the <code>GOAL → REVIEW</code> content spine, and are deliberately
+    <strong>hidden from the blind reviewer</strong> (they can leak author intent).</p>
+
+  <p>The loop is <strong>asymmetric by design — cheap to observe, deliberate to act</strong> — so it can
+    never become a token-sink or quietly loosen a guardrail:</p>
+
+  <div class="flow" aria-label="The self-improvement loop">
+    <div class="step"><div class="n">observe</div><div class="t">meta-note</div><div class="d">skills log friction to META.md (F#)</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">surface</div><div class="t">/hs-publish</div><div class="d">open findings → a PR "🔧 Harness feedback" block</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">act</div><div class="t">/hs-harness</div><div class="d">human-gated fix to .agents/</div></div>
+  </div>
+
+  <p>A sixth skill, <code>/hs-harness</code>, stands <em>outside</em> the lifecycle and is the only one
+    that edits the factory itself. Pointed at a finished job's <code>META.md</code>, it shapes the fix
+    with you, previews a diff per finding, and — <strong>only with human approval</strong> — applies each
+    to <code>.agents/</code> as an atomic <code>[harness]</code> commit, recording every decision in a
+    cross-job ledger, <code><a href="harness-log.md">harness-log.md</a></code>. It is bound by rules it
+    cannot break: the observer is never the fixer; it <strong>never auto-weakens a non-negotiable
+    gate</strong> (the tests, the CLI-drive verify, or an
+    <code><a href="invariants.md">invariants.md</a></code> rule — a <code>hammerable:false</code> phase);
+    fixes must generalize (no overfitting to one job); and it writes no findings of its own (no
+    meta-on-meta). Every change lands through human review and a PR to <code>develop</code> — it never
+    touches product code, and it runs on any harness (<code><a href="portability.md">portability.md</a></code>).</p>
 </section>
 
 <!-- =================== 5. SKILLS =================== -->
@@ -654,6 +684,19 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
       never targets the release branch.</p>
     <div class="io"><b>reads</b> all artifacts + git log · <b>writes</b> a PR (or a local merge) ·
       <b>skill</b> <a href="../skills/hs-publish/SKILL.md">hs-publish/SKILL.md</a></div>
+  </div>
+
+  <div class="skill" style="border-left-color:var(--muted)">
+    <div class="cmd" style="color:var(--text-2)">/hs-harness <span style="color:var(--muted);font-weight:400">— the self-improvement skill (+1 · not part of the lifecycle)</span></div>
+    <p>Stands apart from the five above: it changes the <strong>factory</strong>, not any feature. Pointed
+      at a finished job's <code>META.md</code>, it shapes the fix with you, previews a diff per finding,
+      and — <strong>only with your approval</strong> — applies each recorded process fix to
+      <code>.agents/</code> as an atomic <code>[harness]</code> commit, logging every decision. It never
+      fires on its own (<code>disable-model-invocation</code>), never auto-weakens a non-negotiable gate,
+      and writes no findings itself. See <a href="#factory">The factory improves itself</a> for the loop
+      it closes.</p>
+    <div class="io"><b>reads</b> spec/&lt;slug&gt;/META.md + harness-log.md · <b>writes</b> .agents/ fixes, harness-log.md ·
+      <b>skill</b> <a href="../skills/hs-harness/SKILL.md">hs-harness/SKILL.md</a></div>
   </div>
 
   <h3>A day in the life <a class="anchor" href="#skills">#</a></h3>
