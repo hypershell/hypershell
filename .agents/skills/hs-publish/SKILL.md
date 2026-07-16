@@ -18,6 +18,10 @@ Invoke `/hs-publish` once `/hs-review` has approved the branch (`TECH.md` `revie
 This is the **one irreversible step** — remote pushes and PRs can't be checkpointed — so it always
 confirms with you before acting. Default is a PR to `develop`; `local` does a local squash-merge.
 
+**Harness portability.** Runs on any harness — see [`factory/portability.md`](../../factory/portability.md).
+Fallbacks: run the *Current state* commands yourself if not auto-injected; ask in plain text and STOP if
+`AskUserQuestion` is unavailable. `gh`/`git` are portable shell.
+
 ## User Instructions
 
 Additional instructions provided with the invocation: $ARGUMENTS

@@ -103,6 +103,7 @@ phase to "fit the appetite."
     invariants.md         # curated AGENTS.md footgun checklist (plan gate + review rubric)
     ears.md               # EARS requirement templates
     review-rubric.md      # severity scale, refutation protocol, human-gate triggers
+    portability.md        # non-Claude / smaller-model harness compatibility contract
     templates/            # GOAL.md PLAN.md TECH.md REVIEW.md META.md skeletons
     bin/                  # next_phase.py, set_phase.py, _fsm.py (FSM); meta_status.py (META.md reader)
     harness-log.md        # hs-harness decision ledger (cross-job anti-thrash memory)
@@ -111,8 +112,11 @@ AGENTS.md                 # the constitution (CLAUDE.md is a symlink to it)
 ```
 
 `.claude` is a symlink to `.agents`, so Claude Code discovers the skills and reads settings through
-it. The skills reference bundled scripts via `${CLAUDE_SKILL_DIR}` and shared reference material by
-repo-relative path.
+it. The skills reference the bundled scripts and shared reference material by **repo-relative path**
+(`.agents/factory/…`), which keeps them portable. They are meant to run on other harnesses too (Warp,
+OpenCode, open-weight models): the Claude-Code-specific affordances (frontmatter, `` !`…` `` state
+injection, `AskUserQuestion`, `Agent` fan-out, `ReportFindings`) each have a documented fallback in
+[`portability.md`](portability.md), so the factory degrades gracefully rather than breaking.
 
 ## The self-improvement loop (META.md + `hs-harness`)
 

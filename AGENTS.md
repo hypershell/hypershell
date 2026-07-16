@@ -93,8 +93,9 @@ TLS-aware manager), `tls` (`TLSConfig`, cert generation), `heartbeat`, `template
 
 Two repo-level trees sit outside the package: **`.agents/`** — the spec-driven "software
 factory" (the `hs-feature|plan|build|review|publish` lifecycle skills plus the meta/maintenance
-`hs-harness`; `factory/` methodology, invariants, EARS/templates, and the `bin/` FSM +
-`meta_status.py` scripts; `.claude` symlinks here); and **`spec/{slug}/`** — the committed, dated
+`hs-harness`; `factory/` methodology, invariants, EARS/templates, a non-Claude harness
+`portability.md` contract, and the `bin/` FSM + `meta_status.py` scripts; `.claude` symlinks here);
+and **`spec/{slug}/`** — the committed, dated
 per-feature design records (`GOAL.md`/`PLAN.md`/`TECH.md`/`REVIEW.md`, plus a `META.md` harness-feedback
 log) the factory produces and **retains on merge**. `AGENTS.md` remains ground truth; `spec/{slug}/` is
 a point-in-time record of intent. See `.agents/factory/methodology.md` and the lifecycle note under

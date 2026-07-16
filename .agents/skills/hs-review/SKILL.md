@@ -24,6 +24,12 @@ opinion.
 Operating manual: [`.agents/factory/review-rubric.md`](../../factory/review-rubric.md) and
 [`.agents/factory/invariants.md`](../../factory/invariants.md). Read them before delegating.
 
+**Harness portability.** Runs on any harness — see [`factory/portability.md`](../../factory/portability.md).
+Fallbacks: run the *Current state* commands yourself if not auto-injected; ask in plain text and STOP if
+`AskUserQuestion` is unavailable; **if subagents are unavailable, perform the correctness pass yourself
+in a clean context** (you lose delegated blindness — compensate with executed evidence, per the rubric);
+and skip `ReportFindings` (`REVIEW.md` is the durable record).
+
 ## User Instructions
 
 Additional instructions provided with the invocation: $ARGUMENTS

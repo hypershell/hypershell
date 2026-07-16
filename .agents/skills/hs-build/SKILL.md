@@ -24,6 +24,10 @@ locked contract; `research/` holds detail. Track progress **only** in `TECH.md` 
 Reference: [`methodology.md`](../../factory/methodology.md),
 [`invariants.md`](../../factory/invariants.md), and `AGENTS.md` (the constitution).
 
+**Harness portability.** Runs on any harness — see [`factory/portability.md`](../../factory/portability.md).
+Fallback: if the *Current state* block isn't auto-injected, run those commands yourself in Step 1 (which
+already re-runs `next_phase.py`). No other Claude-specific affordances — the rest is portable shell.
+
 ## User Instructions
 
 Additional instructions provided with the invocation: $ARGUMENTS

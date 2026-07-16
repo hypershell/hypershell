@@ -22,6 +22,11 @@ Reference: [`.agents/factory/methodology.md`](../../factory/methodology.md),
 [`.agents/factory/invariants.md`](../../factory/invariants.md) (the gate),
 templates [`PLAN.md`](../../factory/templates/PLAN.md) / [`TECH.md`](../../factory/templates/TECH.md).
 
+**Harness portability.** Runs on any harness — see [`factory/portability.md`](../../factory/portability.md).
+Fallbacks: if the *Current state* block isn't auto-injected, run those commands yourself in Step 1; ask
+in plain text and STOP if `AskUserQuestion` is unavailable; and **if subagents are unavailable, do the
+research fan-out sequentially yourself** (Step 3 gives the fallback). Everything else is portable shell.
+
 ## User Instructions
 
 Additional instructions provided with the invocation: $ARGUMENTS

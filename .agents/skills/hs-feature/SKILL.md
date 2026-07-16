@@ -25,6 +25,12 @@ Reference (load only if needed): [`.agents/factory/methodology.md`](../../factor
 [`.agents/factory/ears.md`](../../factory/ears.md), the template
 [`.agents/factory/templates/GOAL.md`](../../factory/templates/GOAL.md).
 
+**Harness portability.** These skills run on any harness, not only Claude Code — see
+[`factory/portability.md`](../../factory/portability.md). Here the Claude-specific affordances degrade
+gracefully: if the *Current state* block below isn't auto-injected, run those commands yourself in
+Step 1; if `AskUserQuestion` is unavailable, ask in plain text and STOP. Everything else (git, `uv run`)
+is portable shell.
+
 ## User Instructions
 
 Additional instructions provided with the invocation: $ARGUMENTS

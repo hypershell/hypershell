@@ -31,6 +31,10 @@ Reference: [`methodology.md`](../../factory/methodology.md) ("The self-improveme
 [`harness-log.md`](../../factory/harness-log.md) (the ledger), `AGENTS.md` + `invariants.md` (what may
 **never** be weakened).
 
+**Harness portability.** Runs on any harness — see [`factory/portability.md`](../../factory/portability.md).
+Fallbacks: run the *Current state* commands yourself if not auto-injected; ask in plain text and STOP if
+`AskUserQuestion` is unavailable. `git` / `uv run` are portable shell.
+
 ## User Instructions
 
 Additional instructions provided with the invocation — **this is your shaping prompt** (which findings
