@@ -7,7 +7,7 @@ description: >-
   driven by /hs-build. Second step of the software-factory lifecycle (see .agents/factory/methodology.md).
 disable-model-invocation: true
 argument-hint: "[appetite small|big] [skip research] [status]"
-allowed-tools: Read, Write, Edit, Grep, Glob, Agent, AskUserQuestion, WebSearch, WebFetch, Bash(git status *), Bash(git branch *), Bash(git rev-parse *), Bash(git log *), Bash(git add *), Bash(git commit *), Bash(uv run *)
+allowed-tools: Read, Write, Edit, Grep, Glob, Agent, AskUserQuestion, WebSearch, WebFetch, Bash(git status *), Bash(git branch *), Bash(git rev-parse *), Bash(git log *), Bash(git add *), Bash(git commit *), Bash(uv run *), Bash(ls *), Bash(head *)
 ---
 
 # hs-plan — research → PLAN → TECH

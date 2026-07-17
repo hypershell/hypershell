@@ -18,7 +18,10 @@
       "Bash(git ls-files *)",
       "Bash(git ls-tree *)",
       "Bash(git fetch *)",
-      "Bash(seq *)"
+      "Bash(seq *)",
+      "Bash(ls *)",
+      "Bash(head *)",
+      "Bash(tail *)"
     ]
   }
 }

@@ -8,7 +8,7 @@ description: >-
   forces a stop. The /continue-style driver of the software factory (see .agents/factory/methodology.md).
 disable-model-invocation: true
 argument-hint: "[status | dry run | phase P3 | through P5 | next 2 | bundle | skip review]"
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash(git status *), Bash(git branch *), Bash(git rev-parse *), Bash(git log *), Bash(git diff *), Bash(git add *), Bash(git commit *), Bash(uv run *), Bash(uv sync *), Bash(seq *)
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash(git status *), Bash(git branch *), Bash(git rev-parse *), Bash(git log *), Bash(git diff *), Bash(git add *), Bash(git commit *), Bash(uv run *), Bash(uv sync *), Bash(seq *), Bash(head *)
 ---
 
 # hs-build — execute the roadmap (resume-and-implement)

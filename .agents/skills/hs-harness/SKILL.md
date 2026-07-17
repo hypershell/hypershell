@@ -9,7 +9,7 @@ description: >-
   weakens a non-negotiable gate, never writes META findings, never recurses.
 disable-model-invocation: true
 argument-hint: "<slug | spec/<slug>/META.md | --all> [F1 F3 …] [--severity high] [--dry-run] [pr]"
-allowed-tools: Read, Write, Edit, Grep, Glob, AskUserQuestion, Bash(uv run *), Bash(uv sync *), Bash(git status *), Bash(git branch *), Bash(git switch *), Bash(git checkout *), Bash(git rev-parse *), Bash(git fetch *), Bash(git log *), Bash(git diff *), Bash(git add *), Bash(git commit *), Bash(git push *), Bash(gh pr *), Bash(gh repo *)
+allowed-tools: Read, Write, Edit, Grep, Glob, AskUserQuestion, Bash(uv run *), Bash(uv sync *), Bash(git status *), Bash(git branch *), Bash(git switch *), Bash(git checkout *), Bash(git rev-parse *), Bash(git fetch *), Bash(git log *), Bash(git diff *), Bash(git add *), Bash(git commit *), Bash(git push *), Bash(gh pr *), Bash(gh repo *), Bash(ls *), Bash(head *), Bash(tail *)
 ---
 
 # hs-harness — apply the self-improvement loop (human-gated)

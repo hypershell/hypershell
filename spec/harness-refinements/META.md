@@ -120,7 +120,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F10 — hs-feature's "Untracked GOAL.md" injection lists every tracked spec, and grows forever
-`origin=external-review:hs-feature severity=low category=tooling status=open target=.agents/skills/hs-feature/SKILL.md`
+`origin=external-review:hs-feature severity=low category=tooling status=applied target=.agents/skills/hs-feature/SKILL.md`
 - **What happened:** the "Untracked GOAL.md files" injection runs `ls spec/*/GOAL.md`, which lists every retained (tracked) spec — mislabeled noise that grows with each merged feature; separately, injected commands use `ls`/`head`/`tail`, which appear in no allowed-tools or settings allowlist, so a permission-blocked injection can silently blank the "Current state" block the pre-flights rely on.
 - **Skill cause:** the injection command's fallback half contradicts its own label, and the injection allowlist audit was never done end-to-end.
 - **Recommended fix:** keep only the `git ls-files --others --exclude-standard` half of that injection; audit every skill's injected sub-commands (`ls`, `head`, `tail`) against frontmatter allowed-tools + `.agents/settings.json` and add the missing safe-read entries.

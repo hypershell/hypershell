@@ -8,7 +8,7 @@ description: >-
   forces a human gate. Fourth step of the software factory (see .agents/factory/review-rubric.md).
 disable-model-invocation: true
 argument-hint: "[debate] [completeness] [status]"
-allowed-tools: Read, Grep, Glob, Write, Agent, ReportFindings, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git log *), Bash(git diff *), Bash(git rev-parse *), Bash(git add *), Bash(git commit *), Bash(uv run *)
+allowed-tools: Read, Grep, Glob, Write, Agent, ReportFindings, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git log *), Bash(git diff *), Bash(git rev-parse *), Bash(git add *), Bash(git commit *), Bash(uv run *), Bash(tail *)
 ---
 
 # hs-review — adversarial QA (clean context)
