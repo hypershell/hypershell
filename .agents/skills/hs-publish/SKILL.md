@@ -104,6 +104,13 @@ where fixes get applied.
 Present the mode (PR vs local), the title, and the body via AskUserQuestion. Do not proceed without a
 choice.
 
+Once confirmed, stamp the FSM terminal so the retained record does not read `in_review` forever:
+```
+uv run python .agents/factory/bin/set_phase.py spec/{slug}/TECH.md --top-status done --touch
+git add spec/{slug}/TECH.md && git commit -m "[{category}] Mark {slug} roadmap done"
+```
+(A spec-only commit — the Step 1 staleness gate ignores it by design.)
+
 ### Step 4a — PR (default)
 ```
 git push -u origin {branch}

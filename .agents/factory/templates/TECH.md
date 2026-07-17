@@ -49,7 +49,8 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 
 ## Frontmatter field reference
 
-- `status` (top): `planned | in_progress | blocked | in_review | done`
+- `status` (top): `planned | in_progress | blocked | in_review | done` (`done` is stamped by
+  `hs-publish` after confirmation, just before landing — the terminal state of the retained record)
 - `appetite`: `small | big` — caps phase count and build-iteration budget (circuit breaker).
 - phase `status`: `pending | in_progress | done | blocked`
 - `satisfies`: GOAL R-IDs this phase delivers (traceability anchor for `hs-review`).

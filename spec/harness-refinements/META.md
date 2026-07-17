@@ -112,7 +112,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F9 — No terminal state: merged features stay `in_review` forever
-`origin=external-review:hs-publish severity=low category=instruction status=open target=.agents/skills/hs-publish/SKILL.md`
+`origin=external-review:hs-publish severity=low category=instruction status=applied target=.agents/skills/hs-publish/SKILL.md`
 - **What happened:** `TOP_STATUSES` includes `done` but nothing ever sets it; the merged dogfood's retained TECH.md reads `status: in_review`, verdict `approved`, permanently.
 - **Skill cause:** the FSM defines a terminal state with no transition into it.
 - **Recommended fix:** `hs-publish` flips `--top-status done` as its final pre-push branch commit, or the docs declare `in_review` + `approved` the intended terminal state of the retained record.
