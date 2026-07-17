@@ -96,7 +96,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F7 — GOAL "locked" is convention-only, and cycle-2 review semantics are undefined
-`origin=external-review:hs-review severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+`origin=external-review:hs-review severity=medium category=missing-guidance status=applied target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** nothing detects a mid-build GOAL.md edit — a build that drifts the contract to match what got built then passes review, since the reviewer grades the drifted file; separately, the skill says "Write REVIEW.md from the template" (implying overwrite), while the dogfood correctly improvised appending a dated "Review cycle 2" section, and cycle 2 was human-verified remediation rather than a fresh blind pass — none of which is written down.
 - **Skill cause:** the lock and the cycle semantics both live in prose with no mechanical check and no codified procedure.
 - **Recommended fix:** review pre-flight runs `git log develop..HEAD --oneline -- spec/{slug}/GOAL.md`; more than the shaping commit → surface to the human ("contract changed mid-build — confirm before grading"). Codify what the dogfood did: cycle 2+ appends a dated section (never overwrites cycle 1), and state explicitly what a cycle-2 pass is (fresh blind re-review vs human-gated remediation verification).

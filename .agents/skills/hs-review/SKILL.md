@@ -78,6 +78,11 @@ Confirm a feature/fix branch; resolve `{slug}` from the branch, confirm `base` (
 and read `kind` (the commit `{category}`) from TECH.md. Capture the head SHA (`git rev-parse HEAD`). If `TECH.md` `status`
 is not `in_review`/`done`, note it (the build may be incomplete) and ask whether to proceed.
 
+**Contract-drift check:** `git log --oneline {base}..HEAD -- spec/{slug}/GOAL.md` — anything beyond
+the original shaping commit means the locked contract moved mid-build. Surface those commits to the
+human and confirm before grading: post-shape clarifications happen legitimately, but a silently
+drifted requirement would make this review grade the wrong contract.
+
 ### Step 2 — Delegate the correctness pass (fresh subagent)
 Launch a fresh `general-purpose` reviewer via the `Agent` tool. Give it, inline, **only**:
 - the full text of `spec/{slug}/GOAL.md` (the contract — R-IDs);
@@ -105,8 +110,12 @@ reconcile their findings.
 Read the reviewer's returned findings. Confirm the reviewer left the tree clean
 (`git status --porcelain` empty; if not, inspect and revert its leftovers before anything else).
 Do a light second-pass sanity check (drop anything not backed by cited evidence). Then:
-1. Write `spec/{slug}/REVIEW.md` from the template (verification run, requirement→evidence matrix,
-   findings most-severe-first, human-gate triggers).
+1. **Cycle 1:** write `spec/{slug}/REVIEW.md` from the template (verification run,
+   requirement→evidence matrix, findings most-severe-first, human-gate triggers). **Cycle 2+
+   (`review.cycle` ≥ 1): never overwrite** — append a dated `## Review cycle {n} — {verdict}
+   ({YYYY-MM-DD})` section; the file is the cumulative review record. A later cycle defaults to a
+   fresh blind pass over the full (spec-excluded) diff; the human may instead scope it to verifying
+   the remediation of the named findings — record in the section which mode was used.
 2. Call `ReportFindings` with the verified findings (most-severe first; empty array if clean),
    `verdict` = CONFIRMED/PLAUSIBLE per finding.
 

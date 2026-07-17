@@ -67,6 +67,8 @@ context, so lean on *executed evidence*, not opinion.
   (via `set_phase.py`) and loop back to `hs-build`.
 - **PLAUSIBLE** findings → surface to the human for triage, do not auto-loop.
 - Clean pass → `review.verdict: approved`; proceed to `hs-publish`.
+- Cycle 2+ **appends** a dated `## Review cycle {n}` section to `REVIEW.md` — never overwrite an
+  earlier cycle; the file is the cumulative record.
 - **Bounded loop:** at most 2–3 review↔build cycles — graded against the durable `review.cycle`
   counter in `TECH.md` (auto-incremented by each `set_phase.py --verdict`). On non-convergence, STOP
   and escalate to the human (self-correction does not reliably converge).
