@@ -144,7 +144,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F13 — getting-started.html duplicates factory truth with no drift check
-`origin=external-review:factory-docs severity=low category=missing-guidance status=open target=.agents/skills/hs-harness/SKILL.md`
+`origin=external-review:factory-docs severity=low category=missing-guidance status=applied target=.agents/skills/hs-harness/SKILL.md`
 - **What happened:** the 56KB hand-built onboarding HTML restates the factory in a second medium and already needed same-day sync commits when the skillset changed.
 - **Skill cause:** no step in the change workflow asks whether the onboarding page went stale.
 - **Recommended fix:** add "did this change stale `getting-started.html`?" to hs-harness Step 6's post-apply checklist (or consciously document the page as point-in-time and dated).

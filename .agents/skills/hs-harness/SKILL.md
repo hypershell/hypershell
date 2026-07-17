@@ -151,6 +151,10 @@ Match each applied fix to its check and run it **before** finalizing:
   template → re-run `meta_status.py` (0 findings).
 - edited a `SKILL.md`/doc → re-read it for internal consistency (step numbering, allowed-tools vs the
   commands it calls, links resolve). A red check is a STOP — fix or revert that commit.
+- changed the factory's *shape* (a skill's arguments/defaults, a lifecycle/gate change, a new or
+  renamed script) → check [`factory/getting-started.html`](../../factory/getting-started.html) for
+  staleness; update it or log the gap in the run report — the onboarding page drifts silently
+  otherwise.
 
 ### Step 7 — Log every decision (the ledger)
 Append one entry per **applied** and **rejected** (and notable **deferred**) decision to
