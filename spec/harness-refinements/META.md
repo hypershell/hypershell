@@ -48,7 +48,7 @@ F1–F2 high · F3–F8 medium · F9–F16 low. Per convention, `target` is a be
 number; evidence lines carry the audit's verified `file:line` refs (re-derive at apply time).
 
 ## F1 — Blind review isn't blind: the branch diff hands the reviewer PLAN/TECH/research
-`origin=external-review:hs-review severity=high category=steering status=open target=.agents/skills/hs-review/SKILL.md`
+`origin=external-review:hs-review severity=high category=steering status=applied target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** the reviewer subagent is told not to read PLAN.md/TECH.md/research/META.md but is instructed to produce the diff with plain `git diff {base}...HEAD` — and those files are committed on the branch, so their full text arrives inside the diff.
 - **Skill cause:** the curated-input design controls what the reviewer *reads* but not what the diff *contains*; blindness is defeated structurally, invisibly, on every review.
 - **Recommended fix:** instruct the reviewer to diff with `git diff {base}...HEAD -- . ':(exclude)spec/'` (GOAL.md is already supplied inline); optionally, for mechanical rather than instructional blindness, spawn the reviewer in an isolated worktree with `spec/{slug}/{PLAN,TECH,research,META}*` deleted (Claude-Code-specific — add the portability.md fallback note). Also fixes cycle-2 contamination (prior REVIEW.md rides in the re-review diff) and cleans the scope-creep matrix (spec/ files otherwise appear as unmapped changes).

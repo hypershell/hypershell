@@ -53,6 +53,9 @@ Additional instructions provided with the invocation: $ARGUMENTS
   `PLAN.md`, `TECH.md`, `research/`, or `META.md`** (the last leaks author intent / harness notes, same
   reason as PLAN/TECH). Only this skill (the orchestrator) reads `TECH.md`, and only
   for the `base`/`slug`/`kind` metadata — it must not pass PLAN/TECH *content* into the reviewer prompt.
+  **The diff must be blind too:** those artifacts are committed on the branch, so a plain
+  `git diff {base}...HEAD` hands the reviewer PLAN/TECH/research (and any prior cycle's REVIEW.md) as
+  added hunks — the `':(exclude)spec/'` pathspec below is load-bearing, not cosmetic.
 - **External verification is the spine.** Every finding must cite an executed command
   (`uv run pytest`, real CLI in a `temp_site`, docs build when touched). No assertion-only findings.
 - **Refute before reporting.** Try to disprove each candidate; classify `CONFIRMED` (reproduced) vs
@@ -77,7 +80,9 @@ is not `in_review`/`done`, note it (the build may be incomplete) and ask whether
 ### Step 2 — Delegate the correctness pass (fresh subagent)
 Launch a fresh `general-purpose` reviewer via the `Agent` tool. Give it, inline, **only**:
 - the full text of `spec/{slug}/GOAL.md` (the contract — R-IDs);
-- the command to produce the diff: `git diff {base}...HEAD` (and `git log --oneline {base}..HEAD`);
+- the command to produce the diff: `git diff {base}...HEAD -- . ':(exclude)spec/'` (and
+  `git log --oneline {base}..HEAD`) — never a bare `git diff {base}...HEAD`, which would leak the
+  committed spec artifacts into the reviewer's context;
 - the full text of `invariants.md` and `review-rubric.md`;
 - the instruction: work in the runnable repo, follow the refutation protocol, **run** the relevant
   `verify` commands / drive the CLI in a `temp_site`, and **do NOT read `PLAN.md`/`TECH.md`/`research/`

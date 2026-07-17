@@ -9,7 +9,9 @@ assertion.
 ## What the reviewer sees
 
 - ✅ `GOAL.md` (the locked contract — R-IDs)
-- ✅ the branch diff (`git diff <base>...HEAD`) and the full runnable repo
+- ✅ the branch diff **excluding `spec/`** (`git diff <base>...HEAD -- . ':(exclude)spec/'` — the
+  spec artifacts are committed on the branch, so an unfiltered diff would hand the reviewer
+  PLAN/TECH/research and any prior cycle's REVIEW.md) and the full runnable repo
 - ✅ [`invariants.md`](invariants.md) (the footgun checklist) and `AGENTS.md`
 - ❌ **NOT** `PLAN.md`, `TECH.md`, `research/`, or `META.md` (for the correctness pass — `META.md` is
   the harness self-improvement log and leaks author intent, same as PLAN/TECH)
