@@ -100,8 +100,10 @@ Steps 1–2, then report the plan that *would* run and stop (no edits/commits).
    changes-requested`, a prior `/hs-review` requested changes: read `spec/{slug}/REVIEW.md`, then make
    the fixes actionable by amending `TECH.md` — **prefer reopening** the existing phase(s) whose
    `satisfies` covers the failing R-IDs (`set_phase.py --phase P<n> --phase-status in_progress`,
-   script-safe); only if a fix maps to no existing phase, carefully append a new remediation phase and
-   re-validate with `next_phase.py`. Set `--top-status in_progress`, then proceed. If a finding
+   script-safe); only if a fix maps to no existing phase, add one **through the script** — never by
+   hand-editing the YAML: `set_phase.py --add-phase P<next> --name "F# remediation: …" --satisfies
+   R<n> --depends-on P<m> --verify "…"` — then write its checklist body and re-validate with
+   `next_phase.py`. Set `--top-status in_progress`, then proceed. If a finding
    contradicts a `GOAL.md` R-ID (not just the plan), STOP and escalate instead.
 
 ### Step 2 — Identify target phase + load context

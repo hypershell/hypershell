@@ -80,7 +80,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** medium
 
 ## F5 — The remediation path hand-edits YAML at the worst possible moment
-`origin=external-review:hs-build severity=medium category=tooling status=open target=.agents/factory/bin/set_phase.py`
+`origin=external-review:hs-build severity=medium category=tooling status=applied target=.agents/factory/bin/set_phase.py`
 - **What happened:** `set_phase.py` can mutate statuses but cannot add a phase, so hs-build's remediation mode tells the model to "carefully append a new remediation phase" by hand-editing frontmatter YAML — while the FSM is blocked.
 - **Skill cause:** the one mutation the scripts can't do is delegated back to in-context YAML editing, which `_fsm.py`'s own docstring names the primary FSM-corruption risk.
 - **Recommended fix:** add `set_phase.py --add-phase` (id, name, satisfies, depends-on, verify, insert-after) so remediation phases go through the same validated, canonical serializer as every other mutation.

@@ -28,7 +28,14 @@ Usage examples:
     uv run python .agents/factory/bin/set_phase.py spec/<slug>/TECH.md \
         --verdict approved --reviewed-commit abc1234 --touch
 
-Exit codes: 0 ok · 2 parse/validation error · 3 unknown --phase id.
+    # append a remediation phase through the validated serializer (never hand-edit the YAML)
+    uv run python .agents/factory/bin/set_phase.py spec/<slug>/TECH.md \
+        --add-phase P7 --name "F1 remediation: full covering index" \
+        --satisfies R17 --depends-on P6 --after P6 \
+        --verify "uv run pytest -v -k index" \
+        --current P7 --top-status in_progress --touch
+
+Exit codes: 0 ok · 2 parse/validation error · 3 unknown --phase/--after id.
 """
 from __future__ import annotations
 
@@ -61,6 +68,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--hill", choices=["uphill", "crest", "downhill"], help="risk/honesty signal for --phase")
     ap.add_argument("--record-attempt", action="store_true",
                     help="increment --phase's failed-verify attempts counter (durable circuit breaker)")
+    ap.add_argument("--add-phase", metavar="ID", help="add a new pending phase with this id (requires --name and --verify)")
+    ap.add_argument("--name", help="phase name (for --add-phase)")
+    ap.add_argument("--satisfies", help="comma-separated GOAL R-IDs (for --add-phase, e.g. R3,R17)")
+    ap.add_argument("--depends-on", dest="depends_on", help="comma-separated prerequisite phase ids (for --add-phase)")
+    ap.add_argument("--after", help="insert the new phase after this phase id (default: append last)")
+    ap.add_argument("--verify", help="verify command (for --add-phase)")
     ap.add_argument("--current", help="set current_phase pointer (phase id, '' , or 'done')")
     ap.add_argument("--top-status", choices=sorted(TOP_STATUSES), help="set top-level status")
     ap.add_argument("--verdict", choices=["none", "changes-requested", "approved"], help="set review.verdict")
@@ -78,6 +91,35 @@ def main(argv: list[str]) -> int:
         data, body = split_frontmatter(text)
     except (OSError, FSMError) as exc:
         print(f"{path}: {exc}", file=sys.stderr)
+        return 2
+
+    if args.add_phase:
+        if not args.name or not args.verify:
+            print("--add-phase requires --name and --verify", file=sys.stderr)
+            return 2
+        new_phase = {
+            "id": args.add_phase,
+            "name": args.name,
+            "status": "pending",
+            "satisfies": [s.strip() for s in (args.satisfies or "").split(",") if s.strip()],
+            "depends_on": [d.strip() for d in (args.depends_on or "").split(",") if d.strip()],
+            "parallel": False,
+            "hammerable": False,
+            "hill": "uphill",
+            "verify": args.verify,
+        }
+        phases = data.setdefault("phases", [])
+        if args.after:
+            idx = next((i for i, p in enumerate(phases)
+                        if isinstance(p, dict) and p.get("id") == args.after), None)
+            if idx is None:
+                print(f"{path}: unknown --after phase id {args.after!r}", file=sys.stderr)
+                return 3
+            phases.insert(idx + 1, new_phase)
+        else:
+            phases.append(new_phase)
+    elif args.name or args.satisfies or args.depends_on or args.after or args.verify:
+        print("--name/--satisfies/--depends-on/--after/--verify require --add-phase", file=sys.stderr)
         return 2
 
     if args.phase:
