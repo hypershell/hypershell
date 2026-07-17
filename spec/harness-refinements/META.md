@@ -160,7 +160,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F15 — CRLF-saved TECH.md reports "unterminated frontmatter"
-`origin=external-review:factory-bin severity=low category=tooling status=open target=.agents/factory/bin/_fsm.py`
+`origin=external-review:factory-bin severity=low category=tooling status=applied target=.agents/factory/bin/_fsm.py`
 - **What happened:** the closing-fence match uses `rstrip("\n")`, so a `\r\n` line ending never equals `---`.
 - **Skill cause:** one-character oversight in the fence scanner.
 - **Recommended fix:** `rstrip("\r\n")` at the fence comparison (and cover it in the F3 test file).

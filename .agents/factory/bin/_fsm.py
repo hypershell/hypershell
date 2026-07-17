@@ -78,7 +78,7 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     lines = text.splitlines(keepends=True)
     # lines[0] is the opening fence; find the closing fence.
     for i in range(1, len(lines)):
-        if lines[i].rstrip("\n") == "---":
+        if lines[i].rstrip("\r\n") == "---":
             fm_text = "".join(lines[1:i])
             body = "".join(lines[i + 1:])
             break
