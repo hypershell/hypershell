@@ -88,6 +88,10 @@ Launch a fresh `general-purpose` reviewer via the `Agent` tool. Give it, inline,
   `verify` commands / drive the CLI in a `temp_site`, and **do NOT read `PLAN.md`/`TECH.md`/`research/`
   or `META.md`** (`META.md` is the harness self-improvement log — it leaks author intent, same reason
   as PLAN/TECH).
+- the conduct rule: **no edits to tracked files** (revert any instrumentation before returning;
+  `git status --porcelain` must be clean on hand-back), and the rubric's "Verdict & loop" section is
+  the orchestrator's job — the reviewer must not write `REVIEW.md`, call `ReportFindings`, or run
+  `set_phase.py`;
 - required return: a structured findings list (severity, CONFIRMED/PLAUSIBLE, file:line, failure
   scenario, the executed evidence) + a requirement→evidence matrix (every R-ID: implemented? verified
   how?) + any unmapped (scope-creep) changes.
@@ -96,8 +100,9 @@ Launch a fresh `general-purpose` reviewer via the `Agent` tool. Give it, inline,
 reconcile their findings.
 
 ### Step 3 — Collect, sanity-check, and report
-Read the reviewer's returned findings. Do a light second-pass sanity check (drop anything not
-backed by cited evidence). Then:
+Read the reviewer's returned findings. Confirm the reviewer left the tree clean
+(`git status --porcelain` empty; if not, inspect and revert its leftovers before anything else).
+Do a light second-pass sanity check (drop anything not backed by cited evidence). Then:
 1. Write `spec/{slug}/REVIEW.md` from the template (verification run, requirement→evidence matrix,
    findings most-severe-first, human-gate triggers).
 2. Call `ReportFindings` with the verified findings (most-severe first; empty array if clean),

@@ -128,7 +128,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F11 — The rubric handed verbatim to the blind reviewer contains orchestrator-only instructions
-`origin=external-review:hs-review severity=low category=steering status=open target=.agents/factory/review-rubric.md`
+`origin=external-review:hs-review severity=low category=steering status=applied target=.agents/factory/review-rubric.md`
 - **What happened:** the reviewer subagent receives `review-rubric.md` in full, including "Verdict & loop" instructions addressed to the orchestrator (write REVIEW.md, call ReportFindings, run set_phase.py) — inviting the subagent to perform them; nothing tells the reviewer to leave the tree clean, so an instrumenting reviewer can strand a dirty tree that STOPs the next lifecycle step.
 - **Skill cause:** one document serves two roles without ownership annotations, and the reviewer prompt omits tree-hygiene requirements.
 - **Recommended fix:** annotate rubric sections by owner (reviewer vs orchestrator) or pass the reviewer only its sections (scope, refutation, severity); add to the reviewer prompt: no edits to tracked files, revert any instrumentation, `git status --porcelain` must be clean on return.

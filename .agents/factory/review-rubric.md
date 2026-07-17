@@ -29,6 +29,16 @@ assertion.
 gap-hunting reviewer manufactures gaps, which drives over-engineering. Silence on a clean diff is a
 valid, valuable result.
 
+## Reviewer conduct (the subagent)
+
+- **Leave the tree clean.** Make no edits to tracked files; if you must instrument to reproduce a
+  finding (a probe, a print), revert it before returning — `git status --porcelain` must be empty
+  when you hand back. Drive the CLI in a throwaway site (`.agents/factory/bin/temp_site.sh`), never
+  the developer's real one.
+- The **Verdict & loop** section below is the *orchestrator's* job, executed after you return — do
+  not write `REVIEW.md`, call `ReportFindings`, or run `set_phase.py` yourself. Your deliverable is
+  the structured findings list + requirement→evidence matrix you were asked for.
+
 ## Refutation protocol (mandatory)
 
 For every candidate finding, **try to disprove it first**:
@@ -50,7 +60,7 @@ context, so lean on *executed evidence*, not opinion.
 | **MEDIUM** | A bug on an edge path; a partial/again-fragile requirement. |
 | **LOW** | Minor correctness risk; missing-but-non-blocking test coverage of an R-ID. |
 
-## Verdict & loop
+## Verdict & loop (orchestrator only)
 
 - Emit findings via `ReportFindings` (most-severe first) **and** write `REVIEW.md`.
 - **CONFIRMED** findings → set `TECH.md` `status: blocked` + `review.verdict: changes-requested`
