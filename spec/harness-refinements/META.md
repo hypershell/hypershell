@@ -88,7 +88,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** medium
 
 ## F6 — `verify:` CLI drives aren't hermetic: the blessed example hits the real database
-`origin=external-review:templates severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+`origin=external-review:templates severity=medium category=tooling status=applied target=.agents/factory/bin/temp_site.sh`
 - **What happened:** the factory correctly pushes CLI drives over tests, but its canonical example (`seq 100 | uv run hsx -t 'echo {}' -N4 && uv run hs list`) runs against the developer's real site/DB; there is no temp-site wrapper anywhere in the factory, and the blind reviewer's live cluster drives have the same exposure.
 - **Skill cause:** the templates/rubric recommend a pattern the factory provides no safe tooling for; the dogfood dodged it only because all six phases' `verify:` happened to be pytest (which isolates via fixtures).
 - **Recommended fix:** ship `.agents/factory/bin/temp_site.sh` (mktemp dir; export `HYPERSHELL_SITE`, `HYPERSHELL_DATABASE_FILE`; exec `"$@"`) and use it in every template/rubric example verify command; also protects post-condition assertions from stale cross-phase state.

@@ -63,8 +63,9 @@ Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
 - **A phase is the unit of work.** Execute every `[ ]` item in the target phase, not just the first.
   A phase is `done` only when all items are satisfied **and** its `verify:` command passes.
 - **Verify by driving the CLI, not just tests.** Run the phase's `verify:` command; for behavior,
-  exercise the real flow (e.g. `seq 100 | uv run hsx -t 'echo {}' -N4` then inspect `uv run hs list`
-  / `hs info`). **Exit 0 is necessary but not sufficient** — assert a concrete post-condition (task
+  exercise the real flow in a throwaway site — e.g. `.agents/factory/bin/temp_site.sh sh -c
+  "seq 100 | uv run hsx -t 'echo {}' -N4 && uv run hs list"` — never against the developer's real
+  database. **Exit 0 is necessary but not sufficient** — assert a concrete post-condition (task
   count / final states / a known stdout token); a run that "completed" but left wrong task state is a
   FAIL. A red gate is a STOP condition — do not mark the phase done or advance state.
 - **Amend `TECH.md` freely; GOAL is locked.** When reality diverges from the plan (a phase is wrong,

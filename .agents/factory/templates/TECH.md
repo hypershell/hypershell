@@ -26,7 +26,7 @@ phases:
     parallel: false
     hammerable: true
     hill: uphill
-    verify: "seq 100 | uv run hsx -t 'echo {}' -N4 && uv run hs list"
+    verify: ".agents/factory/bin/temp_site.sh sh -c \"seq 100 | uv run hsx -t 'echo {}' -N4 && uv run hs list\""
 review:
   last_reviewed_commit: ""
   verdict: none
@@ -62,7 +62,9 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 - `attempts`: durable failed-verify counter (absent = 0), bumped by `set_phase.py --phase P<n>
   --record-attempt` on every red verify gate; `next_phase.py` warns at ≥3 — the circuit breaker
   runs on this file, not on session memory.
-- `verify`: the exact command that proves the phase (prefer driving the real CLI, not just tests).
+- `verify`: the exact command that proves the phase (prefer driving the real CLI, not just tests —
+  wrap CLI drives in `.agents/factory/bin/temp_site.sh sh -c "…"` so they hit a throwaway site,
+  never the developer's real database).
 - `review.cycle`: completed review passes, auto-incremented by every `set_phase.py --verdict …`;
   REVIEW.md's "Cycle {n}" mirrors it and the ≤3-cycle bound is graded against it.
 
@@ -95,7 +97,7 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 **Goal:** <…>.
 
 - [ ] <concrete step>
-- **Verify:** `seq 100 | uv run hsx -t 'echo {}' -N4 && uv run hs list`.
+- **Verify:** `.agents/factory/bin/temp_site.sh sh -c "seq 100 | uv run hsx -t 'echo {}' -N4 && uv run hs list"`.
 - **Touches:** `src/hypershell/…`.
 
 ---

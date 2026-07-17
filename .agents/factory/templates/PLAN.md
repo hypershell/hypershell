@@ -54,8 +54,8 @@ Scary unknowns that could have blown the appetite, and how research settled them
 ## 6. Verification strategy
 
 How we will *prove* the feature works — the CLI flows to drive and the tests to add/run (this seeds
-each phase's `verify:` command in `TECH.md`). Prefer driving `hs`/`hsx` in a `temp_site` over unit
-tests alone.
+each phase's `verify:` command in `TECH.md`). Prefer driving `hs`/`hsx` in a throwaway site
+(`.agents/factory/bin/temp_site.sh sh -c "…"`) over unit tests alone.
 
 ---
 

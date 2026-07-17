@@ -14,7 +14,7 @@
 Commands actually executed and their outcomes (the spine of the review):
 
 - `uv run pytest -m unit` → <result>
-- `seq 100 | uv run hsx -t 'echo {}' -N4 && uv run hs list` → <observed behavior>
+- `.agents/factory/bin/temp_site.sh sh -c "seq 100 | uv run hsx -t 'echo {}' -N4 && uv run hs list"` → <observed behavior>
 - <docs build / other CLI drives when relevant>
 
 ## Requirement → evidence matrix

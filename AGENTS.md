@@ -336,9 +336,10 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
   lifecycle step) applies those fixes back to `.agents/`, logging each in `factory/harness-log.md` —
   and never weakens a non-negotiable gate on a finding's say-so.
 - **Verify by driving the CLI, not just tests.** After a change, exercise the real flow in a
-  `temp_site`: e.g. `seq 100 | uv run hsx -t 'echo {}' -N4` and inspect `uv run hs list` /
-  `hs info`. The concurrency and DB behavior are where bugs hide, and integration tests need
-  the installed CLI anyway.
+  throwaway site: e.g. `.agents/factory/bin/temp_site.sh sh -c "seq 100 | uv run hsx -t 'echo {}'
+  -N4 && uv run hs list"` — the wrapper mirrors the pytest `temp_site` fixture's env isolation so
+  nothing touches your real database. The concurrency and DB behavior are where bugs hide, and
+  integration tests need the installed CLI anyway.
 - **Put logic where it belongs:** task state/query logic → `Task` classmethods; never
   hand-roll state predicates in FSM code. Reuse `cmdkit.app.exit_status` constants for return
   codes — don't invent integer literals. New subcommand = a cmdkit `App`

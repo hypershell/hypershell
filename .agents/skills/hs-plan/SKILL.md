@@ -89,7 +89,8 @@ escalate.
 From the template: **Summary**, **Design** at architecture altitude (reference concrete
 `src/hypershell/…` files), the **requirement → design map** (every R-ID covered), **rabbit holes
 resolved** (link briefs), **risks/open questions**, **verification strategy** (seeds the per-phase
-`verify:` commands — prefer driving `hs`/`hsx` in a `temp_site`).
+`verify:` commands — prefer driving `hs`/`hsx` in a throwaway site,
+`.agents/factory/bin/temp_site.sh sh -c "…"`).
 
 ### Step 5 — Invariant gate #2 (post-design)
 Re-walk the touched invariant sections against the *drafted design*. Fill PLAN's **deviation

@@ -57,7 +57,8 @@ Additional instructions provided with the invocation: $ARGUMENTS
   `git diff {base}...HEAD` hands the reviewer PLAN/TECH/research (and any prior cycle's REVIEW.md) as
   added hunks — the `':(exclude)spec/'` pathspec below is load-bearing, not cosmetic.
 - **External verification is the spine.** Every finding must cite an executed command
-  (`uv run pytest`, real CLI in a `temp_site`, docs build when touched). No assertion-only findings.
+  (`uv run pytest`, real CLI in a throwaway site via `.agents/factory/bin/temp_site.sh`, docs build
+  when touched). No assertion-only findings.
 - **Refute before reporting.** Try to disprove each candidate; classify `CONFIRMED` (reproduced) vs
   `PLAUSIBLE` (needs human triage). Default to dropping when uncertain.
 - **Scope is narrow:** correctness bugs, GOAL R-ID gaps, AGENTS.md invariant violations
@@ -85,7 +86,8 @@ Launch a fresh `general-purpose` reviewer via the `Agent` tool. Give it, inline,
   committed spec artifacts into the reviewer's context;
 - the full text of `invariants.md` and `review-rubric.md`;
 - the instruction: work in the runnable repo, follow the refutation protocol, **run** the relevant
-  `verify` commands / drive the CLI in a `temp_site`, and **do NOT read `PLAN.md`/`TECH.md`/`research/`
+  `verify` commands / drive the CLI in a throwaway site (`.agents/factory/bin/temp_site.sh sh -c "…"`,
+  never the developer's real one), and **do NOT read `PLAN.md`/`TECH.md`/`research/`
   or `META.md`** (`META.md` is the harness self-improvement log — it leaks author intent, same reason
   as PLAN/TECH).
 - the conduct rule: **no edits to tracked files** (revert any instrumentation before returning;
