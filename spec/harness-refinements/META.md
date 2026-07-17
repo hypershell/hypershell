@@ -56,7 +56,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F2 — `approved` is sticky: publish never checks for commits after the reviewed one
-`origin=external-review:hs-publish severity=high category=instruction status=open target=.agents/skills/hs-publish/SKILL.md`
+`origin=external-review:hs-publish severity=high category=instruction status=applied target=.agents/skills/hs-publish/SKILL.md`
 - **What happened:** `hs-publish` gates only on `review.verdict: approved`; `review.last_reviewed_commit` exists precisely to detect staleness and nothing consumes it, so any code commit after approval still publishes as approved.
 - **Skill cause:** the gate checks a sticky flag, not the relationship between the approved state and HEAD.
 - **Recommended fix:** publish pre-flight asserts `git diff {last_reviewed_commit}..HEAD -- . ':(exclude)spec/'` is empty, else STOP for re-review or explicit human override (the exclude correctly tolerates the review's own REVIEW.md/TECH.md commit and meta-note commits). Optionally `hs-build` resets the verdict to `none` whenever it commits code while verdict is `approved`.

@@ -42,8 +42,11 @@ Additional instructions provided with the invocation: $ARGUMENTS
 ## Safety Principles
 
 - **Base is `develop`, never `master`.** Hotfixes to `master` are out of scope.
-- **Require an approved review.** If `TECH.md` `review.verdict` is not `approved`, STOP and report —
-  proceed only on explicit human override.
+- **Require a *current* approved review.** If `TECH.md` `review.verdict` is not `approved`, STOP and
+  report — proceed only on explicit human override. Approval is pinned to
+  `review.last_reviewed_commit`: any later commit touching anything **outside `spec/`** invalidates
+  it (the review's own artifact commit and meta-notes do not) — the Step 1 staleness gate checks this
+  mechanically.
 - **Confirm before irreversible/outward actions.** Always confirm the mode, PR title, and body with
   the human (AskUserQuestion) before `git push` / `gh pr create` / local merge.
 - **Squash-only repo.** Do not create merge commits or rebase-merge. The PR title becomes the squash
@@ -59,9 +62,13 @@ Additional instructions provided with the invocation: $ARGUMENTS
 Report the verdict, commits vs `develop`, and whether a PR already exists (`gh pr status`). Stop.
 
 ### Step 1 — Pre-flight
-1. On a feature/fix branch, clean tree; resolve `{slug}` from the branch, then read `kind` and the
-   review `verdict` from `spec/{slug}/TECH.md`. STOP if verdict ≠ `approved` (unless the human overrides).
-2. `git fetch origin`. Confirm `develop` is reachable and note if the branch is behind `develop`
+1. On a feature/fix branch, clean tree; resolve `{slug}` from the branch, then read `kind`, the
+   review `verdict`, and `review.last_reviewed_commit` from `spec/{slug}/TECH.md`. STOP if verdict ≠
+   `approved` (unless the human overrides).
+2. **Staleness gate:** `git diff --stat {last_reviewed_commit}..HEAD -- . ':(exclude)spec/'` must be
+   empty. Non-empty means code changed after the approved review — STOP and send back to
+   `/hs-review`; proceed only on an explicit human override, recorded in the PR body.
+3. `git fetch origin`. Confirm `develop` is reachable and note if the branch is behind `develop`
    (squash-merge tolerates it, but flag a large drift).
 
 ### Step 2 — Compose the PR title + body
