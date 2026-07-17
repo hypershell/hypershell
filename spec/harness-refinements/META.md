@@ -136,7 +136,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F12 — hs-build's `skip review` argument reads as "skip /hs-review"
-`origin=external-review:hs-build severity=low category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
+`origin=external-review:hs-build severity=low category=instruction status=applied target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** the argument means "continue past the natural phase-boundary stop" but its name collides with the lifecycle's review stage.
 - **Skill cause:** naming.
 - **Recommended fix:** rename to `no-pause` (or `continuous`), keeping `skip review` as a deprecated alias for one cycle.

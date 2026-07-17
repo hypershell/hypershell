@@ -7,7 +7,7 @@ description: >-
   code+state commit. May amend TECH.md freely as reality dictates; only a GOAL.md contradiction
   forces a stop. The /continue-style driver of the software factory (see .agents/factory/methodology.md).
 disable-model-invocation: true
-argument-hint: "[status | dry run | phase P3 | through P5 | next 2 | bundle | skip review]"
+argument-hint: "[status | dry run | phase P3 | through P5 | next 2 | bundle | no-pause]"
 allowed-tools: Read, Write, Edit, Grep, Glob, Bash(git status *), Bash(git branch *), Bash(git rev-parse *), Bash(git log *), Bash(git diff *), Bash(git add *), Bash(git commit *), Bash(uv run *), Bash(uv sync *), Bash(seq *), Bash(head *)
 ---
 
@@ -50,7 +50,8 @@ Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
 - `through P<n>` / `up to P<n>` → execute forward, stopping after `P<n>` completes.
 - `next N` / `N phases` → execute the next `N` incomplete phases (each its own commit).
 - `bundle` → collapse the run into a single commit (only for tightly-coupled phases).
-- `skip review` → continue past the natural phase-boundary stop (use sparingly).
+- `no-pause` → continue past the natural phase-boundary stop (use sparingly). Deprecated alias:
+  `skip review` — accepted, but note it does **not** skip `/hs-review`.
 - No arguments → default next-phase-then-stop.
 
 ## Safety Principles
@@ -183,7 +184,7 @@ non-obvious decisions or to record a `TECH.md` amendment. **No co-author trailer
 
 ### Step 8 — Continue or stop
 Default / at a phase boundary: stop and report. `through`/`next`/multi: loop to Step 2 with the next
-phase until the stop condition, a phase boundary (unless `skip review`), or a STOP from Steps 3–4.
+phase until the stop condition, a phase boundary (unless `no-pause`), or a STOP from Steps 3–4.
 
 ### Final report
 Phases completed (ids + one-line summaries), any `TECH.md` amendments made (and why), any `[ ]`
