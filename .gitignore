@@ -139,6 +139,7 @@ dmypy.json
 
 # Local-only security review notes (not for publication)
 .security/
+.local/
 
 # Personal Claude Code settings (permission allowlist etc.); not for publication
 .agents/settings.local.json
