@@ -64,7 +64,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F3 — The factory's state substrate has zero tests
-`origin=external-review:factory-bin severity=medium category=tooling status=open target=tests/test_factory_fsm.py`
+`origin=external-review:factory-bin severity=medium category=tooling status=applied target=tests/test_factory_fsm.py`
 - **What happened:** `_fsm.py`, `next_phase.py`, `set_phase.py`, and `meta_status.py` — the code that owns every feature's lifecycle state — have no test coverage; a grep of `tests/` finds only pytest's `tmpdir_factory`.
 - **Skill cause:** the factory reproduced the exact anti-pattern its own constitution warns about ("`core/fsm.py` — load-bearing, untested — edit with care"); `hs-harness` Step 6's manual post-apply spot checks are the only net.
 - **Recommended fix:** add ~15 unit tests (frontmatter round-trip and idempotence, `compute_next` ordering and drift warnings, `validate` rejections, meta-parser fence/filter/`· seen again` cases) as `tests/test_factory_fsm.py` + `tests/test_meta_status.py`, marked `unit`; they run free in existing CI. Note these files live outside `.agents/` — a deliberate, flagged extension of `hs-harness`'s remit (toolchain tests per repo convention), or route this one finding through a small lifecycle feature.
