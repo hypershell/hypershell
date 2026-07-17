@@ -3,12 +3,12 @@ name: hs-harness
 description: >-
   Human-gated applier of the factory's self-improvement findings. Reads a feature's spec/{slug}/META.md
   (or --all) via meta_status.py, shapes with the human which harness improvements to make, previews a
-  concrete diff per fix, applies each as an atomic [harness] commit on a harness/{slug} branch off
-  develop, flips finding status open→applied/rejected/deferred, and records every decision in
-  harness-log.md (anti-thrash memory). Meta/maintenance — NOT a lifecycle step. Never weakens a
-  non-negotiable gate, never writes META findings, never recurses.
+  concrete diff per fix, applies each as an atomic [harness] commit directly on develop (default; `pr`
+  uses a harness/{slug} branch + PR), flips finding status open→applied/rejected/deferred, and records
+  every decision in harness-log.md (anti-thrash memory). Meta/maintenance — NOT a lifecycle step. Never
+  weakens a non-negotiable gate, never writes META findings, never recurses.
 disable-model-invocation: true
-argument-hint: "<slug | spec/<slug>/META.md | --all> [F1 F3 …] [--severity high] [--dry-run]"
+argument-hint: "<slug | spec/<slug>/META.md | --all> [F1 F3 …] [--severity high] [--dry-run] [pr]"
 allowed-tools: Read, Write, Edit, Grep, Glob, AskUserQuestion, Bash(uv run *), Bash(uv sync *), Bash(git status *), Bash(git branch *), Bash(git switch *), Bash(git checkout *), Bash(git rev-parse *), Bash(git fetch *), Bash(git log *), Bash(git diff *), Bash(git add *), Bash(git commit *), Bash(git push *), Bash(gh pr *), Bash(gh repo *)
 ---
 
@@ -24,7 +24,9 @@ on it is careful (fresh eyes, previewed diffs, per-finding commits, a cross-job 
 or the FSM; it edits the skills, templates, scripts, and docs under `.agents/`.
 
 Best run **after** a feature has merged to `develop` (so its `META.md` is on `develop` and the fix is
-unentangled from code review), but it can also read a still-open branch's `META.md`.
+unentangled from code review). It can also read a still-open branch's `META.md`, but such pre-merge
+runs are **preview-only** (`--dry-run` semantics): the status flips live in a file `develop` does not
+have yet, so applying waits for the merge.
 
 Reference: [`methodology.md`](../../factory/methodology.md) ("The self-improvement loop"),
 [`templates/META.md`](../../factory/templates/META.md) (the finding schema),
@@ -58,6 +60,8 @@ Parse `$ARGUMENTS`; if ambiguous, STOP and ask.
 - `--severity high` → restrict to that severity.
 - `--dry-run` → do everything up to and including the per-finding diff **preview**, then STOP — no
   edits, no commits, no branch. Recommended first pass.
+- `pr` → work on a `harness/{slug}` branch and open a PR to `develop`, instead of the default direct
+  commits on `develop` (the repo's demonstrated practice for `[harness]` toolchain work).
 - No argument → STOP and ask which slug (or `--all`).
 
 ## Safety Principles (the loop is net-positive only if these hold)
@@ -80,8 +84,10 @@ Parse `$ARGUMENTS`; if ambiguous, STOP and ask.
    is its own **atomic, revertable** `[harness]` commit.
 6. **Read the ledger first (anti-thrash).** A proposed fix that **reverts a recent change** or
    **repeats a previously-rejected** one is flagged to the human, not silently re-applied.
-7. **`develop`, never `master`.** Work on a `harness/{slug}` branch off `develop`; PR to `develop`
-   (git-flow). Toolchain changes stay unentangled from product review. **No `Co-Authored-By` trailer.**
+7. **`develop`, never `master`.** Default is direct, atomic `[harness]` commits on `develop` — the
+   repo's demonstrated practice; toolchain changes stay small and unentangled from product review.
+   `pr` mode works on a `harness/{slug}` branch off `develop` and PRs back. Never push unless the
+   human explicitly asks. **No `Co-Authored-By` trailer.**
 
 ## Procedure
 
@@ -90,8 +96,9 @@ Parse `$ARGUMENTS`; if ambiguous, STOP and ask.
 `<slug>` with no open findings → report "nothing to apply" and stop.
 
 ### Step 1 — Pre-flight
-1. Clean tree (non-empty → STOP: commit/stash/discard first). Confirm you are on `develop` (or a base
-   from which to branch); if on a `feature/`|`fix/` branch you intend to read pre-merge, note it.
+1. Clean tree (non-empty → STOP: commit/stash/discard first). Confirm you are on `develop`; if on a
+   `feature/`|`fix/` branch you intend to read pre-merge, treat the whole run as `--dry-run`
+   (preview-only — see When to Use).
 2. Resolve the target `META.md`(s) from the argument. `uv sync --quiet` if the scripts' env may be
    stale.
 
@@ -119,8 +126,9 @@ For each finding to apply: **re-derive** the edit against the current `target` (
 stored line number). Produce the exact change (skill prose, template, script, or doc) and show it as a
 diff-style preview. Confirm. This is where a bad or stale finding gets caught before it touches disk.
 
-### Step 5 — Create the branch + apply (skip on `--dry-run`)
-1. `git switch -c harness/{slug} develop` (or `harness/multi` for `--all`).
+### Step 5 — Apply (skip on `--dry-run`)
+1. Default (direct mode): stay on `develop`. With `pr`: `git switch -c harness/{slug} develop`
+   (or `harness/multi` for `--all`).
 2. Apply **one finding per commit**:
    ```
    git add <edited .agents/… files> spec/{slug}/META.md
@@ -150,16 +158,16 @@ Append one entry per **applied** and **rejected** (and notable **deferred**) dec
 format). This is the anti-thrash memory the *next* run reads. Include `harness-log.md` in the run's
 commits.
 
-### Step 8 — PR to develop / report
-Open a PR to `develop` (or hand back for `local` at the human's choice), title `[harness] {summary}`,
-body listing each finding → decision → commit, ending with the Claude Code generation line. Report:
-applied / rejected / deferred counts, the commits, verification results, and any ledger collisions
-surfaced.
+### Step 8 — Report (and PR, in `pr` mode)
+In `pr` mode, open a PR to `develop`: title `[harness] {summary}`, body listing each finding →
+decision → commit, ending with the Claude Code generation line. In direct mode there is nothing to
+open — and do **not** push `develop` unless the human explicitly asks. Report: applied / rejected /
+deferred counts, the commits, verification results, and any ledger collisions surfaced.
 
 ## Examples
 
 - `/hs-harness cli-cluster-restart-repeat-update` — apply all open findings from that feature's
-  `META.md`, one commit each, PR to `develop`.
+  `META.md`, one commit each, directly on `develop`.
 - `/hs-harness cli-cluster-restart-repeat-update F1 F3 --dry-run` — preview just F1 and F3; no changes.
 - `/hs-harness --all --severity high` — consider every high-severity open finding across all features
   (recurrence escalates).

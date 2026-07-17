@@ -104,7 +104,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F8 — hs-harness's branch-and-PR flow contradicts demonstrated practice
-`origin=external-review:hs-harness severity=medium category=instruction status=open target=.agents/skills/hs-harness/SKILL.md`
+`origin=external-review:hs-harness severity=medium category=instruction status=applied target=.agents/skills/hs-harness/SKILL.md`
 - **What happened:** all thirteen `[harness]` commits on develop are direct commits (no squash `(#NN)` suffixes; the maintainer's stated preference), yet the skill mandates a `harness/{slug}` branch + PR — the first real `/hs-harness` run will fight its owner's workflow.
 - **Skill cause:** the skill encodes a ceremony its own maintainer doesn't use; additionally the "can read a still-open branch's META.md" path cannot work as written — a `harness/` branch off develop has no `spec/{slug}/META.md` to flip statuses in.
 - **Recommended fix:** add a `direct` mode mirroring `hs-publish local` (commits straight to develop; consider making it the default) and declare pre-merge runs preview-only (`--dry-run` semantics) since status flips are impossible from a develop-based branch.
