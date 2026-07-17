@@ -7,7 +7,7 @@ description: >-
   irreversible/outward step; never targets master. Final step of the software factory.
 disable-model-invocation: true
 argument-hint: "[pr (default) | local] [merge]"
-allowed-tools: Read, Grep, Glob, AskUserQuestion, Bash(uv run *), Bash(git status *), Bash(git branch *), Bash(git log *), Bash(git diff *), Bash(git rev-parse *), Bash(git fetch *), Bash(git push *), Bash(git switch *), Bash(git checkout *), Bash(git merge *), Bash(git add *), Bash(git commit *), Bash(gh pr *), Bash(gh repo *), Bash(head *)
+allowed-tools: Read, Grep, Glob, AskUserQuestion, Bash(uv run *), Bash(git status *), Bash(git branch *), Bash(git log *), Bash(git diff *), Bash(git rev-parse *), Bash(git fetch *), Bash(git pull *), Bash(git push *), Bash(git switch *), Bash(git merge *), Bash(git add *), Bash(git commit *), Bash(gh pr *), Bash(gh repo *), Bash(head *)
 ---
 
 # hs-publish — ship the branch to develop

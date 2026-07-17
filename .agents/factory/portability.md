@@ -18,6 +18,12 @@ contract — keep it current when a skill gains a new affordance, and every skil
 | **`ReportFindings`** (`hs-review`) | Renders findings in the host UI | **Additive, not load-bearing** — `REVIEW.md` is the durable record. Skip the call; still write `REVIEW.md`. |
 | **`Skill` / `/hs-*` launch** | How a skill starts | Launch by your harness's mechanism; the lifecycle handoffs ("then run `/hs-plan`") are advisory prose. |
 
+> **Scope the allowlists honestly:** the frontmatter `allowed-tools` and the committed
+> `.agents/settings.json` are accident-protection, not a security boundary — `Bash(uv run *)` alone
+> admits arbitrary Python (`uv run python -c …`). They exist to stop fat-fingered mutations (which
+> is why `git checkout` — a silent working-tree discard — is deliberately absent), not to confine a
+> determined adversary.
+
 ## Already portable — no action
 
 `git`, `uv run …` (incl. the FSM scripts and `meta_status.py`), file read/edit/grep/glob, and every

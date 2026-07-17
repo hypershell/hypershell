@@ -152,7 +152,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** medium · **Effort:** small
 
 ## F14 — `git checkout *` in three skills permits silent working-tree discard
-`origin=external-review:allowed-tools severity=low category=tooling status=open target=.agents/skills/hs-feature/SKILL.md`
+`origin=external-review:allowed-tools severity=low category=tooling status=applied target=.agents/skills/hs-feature/SKILL.md`
 - **What happened:** hs-feature, hs-publish, and hs-harness allow `Bash(git checkout *)`, which includes `git checkout -- .` (unprompted discard of the working tree); every actual use is covered by `git switch`. Also, `Bash(uv run *)` in every skill subsumes `uv run python -c '…'` (arbitrary code), so the tight git allowlist is accident-protection, not capability confinement.
 - **Skill cause:** allowed-tools were enumerated for coverage, not minimality; the portability doc calls settings.json "the safe baseline" without stating the confinement caveat.
 - **Recommended fix:** drop `Bash(git checkout *)` from all three frontmatters (keep `git switch`); add one honest sentence to `portability.md` that the allowlists guard against accidents, not adversarial capability.

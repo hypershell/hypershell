@@ -8,7 +8,7 @@ description: >-
   first step of the spec-driven "software factory" lifecycle (see .agents/factory/methodology.md).
 disable-model-invocation: true
 argument-hint: "<inline feature description> | spec/<slug>/GOAL.md [fix|refactor] [appetite small|big]"
-allowed-tools: Read, Write, Edit, Grep, Glob, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git switch *), Bash(git checkout *), Bash(git rev-parse *), Bash(git fetch *), Bash(git add *), Bash(git commit *), Bash(git log *), Bash(git ls-files *), Bash(head *)
+allowed-tools: Read, Write, Edit, Grep, Glob, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git switch *), Bash(git rev-parse *), Bash(git fetch *), Bash(git add *), Bash(git commit *), Bash(git log *), Bash(git ls-files *), Bash(head *)
 ---
 
 # hs-feature — shape the goal
