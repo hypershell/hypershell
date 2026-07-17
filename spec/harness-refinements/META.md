@@ -72,7 +72,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** medium
 
 ## F4 — Circuit breakers run on session memory the factory explicitly distrusts
-`origin=external-review:hs-build severity=medium category=tooling status=open target=.agents/factory/bin/set_phase.py`
+`origin=external-review:hs-build severity=medium category=tooling status=applied target=.agents/factory/bin/set_phase.py`
 - **What happened:** "fails its verify gate across repeated attempts" and "stuck `hill: uphill` across builds" have no durable counter — nothing records verify failures, so a phase that failed five times across five sessions looks fresh each time; REVIEW.md's "Cycle {n} of ≤3" likewise has no file-backed source, making the ≤2–3 review-cycle bound unenforceable.
 - **Skill cause:** methodology principle 2 says files + git are the durable substrate, but the two circuit breakers were left on conversation memory.
 - **Recommended fix:** add a per-phase `attempts:` counter (`set_phase.py --record-attempt`, bumped on a red verify gate) and auto-increment `review.cycle` when `--verdict` is set; wire hs-build's breaker prose and REVIEW.md's cycle header to those fields.

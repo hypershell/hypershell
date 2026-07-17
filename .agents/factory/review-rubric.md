@@ -67,8 +67,9 @@ context, so lean on *executed evidence*, not opinion.
   (via `set_phase.py`) and loop back to `hs-build`.
 - **PLAUSIBLE** findings → surface to the human for triage, do not auto-loop.
 - Clean pass → `review.verdict: approved`; proceed to `hs-publish`.
-- **Bounded loop:** at most 2–3 review↔build cycles. On non-convergence, STOP and escalate to the
-  human (self-correction does not reliably converge).
+- **Bounded loop:** at most 2–3 review↔build cycles — graded against the durable `review.cycle`
+  counter in `TECH.md` (auto-incremented by each `set_phase.py --verdict`). On non-convergence, STOP
+  and escalate to the human (self-correction does not reliably converge).
 
 ## Mandatory human sign-off gate
 

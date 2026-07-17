@@ -7,7 +7,7 @@
 
 - **Reviewed commit:** {sha}  ·  **Base:** {base}  ·  **Date:** {YYYY-MM-DD}
 - **Verdict:** approved | changes-requested
-- **Cycle:** {n} of ≤3 (escalate to human on non-convergence)
+- **Cycle:** {n} of ≤3 — mirrors `review.cycle` in `TECH.md` (escalate to human on non-convergence)
 
 ## Verification run
 

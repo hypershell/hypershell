@@ -31,6 +31,7 @@ review:
   last_reviewed_commit: ""
   verdict: none
   blocked_reason: ""
+  cycle: 0
 ---
 
 # TECH.md — {title}
@@ -58,7 +59,12 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 - `hammerable`: `false` marks a correctness/security phase that scope-hammering must **never** cut.
 - `hill`: `uphill` (still figuring it out) → `crest` (unknowns resolved) → `downhill` (just
   executing). A phase stuck `uphill` across builds is a raised hand → escalate to the human.
+- `attempts`: durable failed-verify counter (absent = 0), bumped by `set_phase.py --phase P<n>
+  --record-attempt` on every red verify gate; `next_phase.py` warns at ≥3 — the circuit breaker
+  runs on this file, not on session memory.
 - `verify`: the exact command that proves the phase (prefer driving the real CLI, not just tests).
+- `review.cycle`: completed review passes, auto-incremented by every `set_phase.py --verdict …`;
+  REVIEW.md's "Cycle {n}" mirrors it and the ≤3-cycle bound is graded against it.
 
 ## Conventions (apply to every phase)
 

@@ -16,11 +16,15 @@ Usage examples:
     uv run python .agents/factory/bin/set_phase.py spec/<slug>/TECH.md \
         --phase P3 --phase-status in_progress --hill uphill --touch
 
+    # record a failed verify attempt (the durable circuit-breaker counter)
+    uv run python .agents/factory/bin/set_phase.py spec/<slug>/TECH.md \
+        --phase P3 --record-attempt --touch
+
     # record a blocked state from a failed review
     uv run python .agents/factory/bin/set_phase.py spec/<slug>/TECH.md \
         --top-status blocked --blocked-reason "review: R2 gap" --touch
 
-    # record a review verdict
+    # record a review verdict (auto-increments the review.cycle counter)
     uv run python .agents/factory/bin/set_phase.py spec/<slug>/TECH.md \
         --verdict approved --reviewed-commit abc1234 --touch
 
@@ -55,6 +59,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--phase", help="phase id to mutate (e.g. P2)")
     ap.add_argument("--phase-status", choices=sorted(PHASE_STATUSES), help="new status for --phase")
     ap.add_argument("--hill", choices=["uphill", "crest", "downhill"], help="risk/honesty signal for --phase")
+    ap.add_argument("--record-attempt", action="store_true",
+                    help="increment --phase's failed-verify attempts counter (durable circuit breaker)")
     ap.add_argument("--current", help="set current_phase pointer (phase id, '' , or 'done')")
     ap.add_argument("--top-status", choices=sorted(TOP_STATUSES), help="set top-level status")
     ap.add_argument("--verdict", choices=["none", "changes-requested", "approved"], help="set review.verdict")
@@ -84,8 +90,10 @@ def main(argv: list[str]) -> int:
             target["status"] = args.phase_status
         if args.hill:
             target["hill"] = args.hill
-    elif args.phase_status or args.hill:
-        print("--phase-status/--hill require --phase", file=sys.stderr)
+        if args.record_attempt:
+            target["attempts"] = int(target.get("attempts") or 0) + 1
+    elif args.phase_status or args.hill or args.record_attempt:
+        print("--phase-status/--hill/--record-attempt require --phase", file=sys.stderr)
         return 2
 
     if args.current is not None:
@@ -98,6 +106,8 @@ def main(argv: list[str]) -> int:
             review = {}
         if args.verdict:
             review["verdict"] = args.verdict
+            # A verdict marks one completed review pass; the counter backs the bounded loop.
+            review["cycle"] = int(review.get("cycle") or 0) + 1
         if args.reviewed_commit is not None:
             review["last_reviewed_commit"] = args.reviewed_commit
         if args.blocked_reason is not None:

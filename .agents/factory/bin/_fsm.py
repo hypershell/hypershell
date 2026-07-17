@@ -54,7 +54,7 @@ FIELD_ORDER = [
 ]
 PHASE_FIELD_ORDER = [
     "id", "name", "status", "satisfies", "depends_on",
-    "parallel", "hammerable", "hill", "verify",
+    "parallel", "hammerable", "hill", "attempts", "verify",
 ]
 
 
@@ -190,6 +190,15 @@ def compute_next(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]
                 continue
             nxt = p
             break
+
+    if nxt is not None:
+        # The attempts counter is the durable circuit breaker: it survives context resets.
+        attempts = int(nxt.get("attempts") or 0)
+        if attempts >= 3:
+            warnings.append(
+                f"phase {nxt.get('id')} has {attempts} recorded failed verify attempts "
+                "(circuit breaker: stop-and-re-shape rather than retry)"
+            )
 
     stored = data.get("current_phase")
     if nxt is not None and stored not in (nxt.get("id"), None, ""):

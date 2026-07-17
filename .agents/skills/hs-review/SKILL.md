@@ -119,6 +119,9 @@ Do a light second-pass sanity check (drop anything not backed by cited evidence)
   **STOP and require explicit human sign-off** before any further step.
 - **PLAUSIBLE only:** surface to the human for triage; do not auto-block.
 
+Every `--verdict` call auto-increments the durable `review.cycle` counter in `TECH.md` — do not
+manage it by hand; it is the source of truth for the ≤3-cycle bound and REVIEW.md's "Cycle {n}".
+
 **Meta-note (orchestrator only · silence by default).** Reflect on the **review skillset itself** — not
 the diff, not the code. *You (the orchestrator)* may record a finding; the blind reviewer never does,
 and content/correctness issues belong in `REVIEW.md`, not here. You may also add a one-line

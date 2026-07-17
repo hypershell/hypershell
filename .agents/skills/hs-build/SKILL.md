@@ -76,9 +76,11 @@ Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
   source), `exit_status` ranges, the task-lifecycle predicates, the
   same-commit rule (a CLI/feature change updates `docs/_include/*.rst` + `share/` completions), and
   the `cmdkit.app.exit_status` constants. Consult `invariants.md` for the footguns the phase touches.
-- **Circuit breaker.** If a phase fails its verify gate across repeated attempts, or stays
-  `hill: uphill` across builds (unknowns unresolved), **stop-and-re-shape**: STOP and recommend
-  `/hs-plan` (or human input) rather than looping. Respect the appetite.
+- **Circuit breaker (durable).** Every red verify gate is recorded on file via
+  `set_phase.py --phase {id} --record-attempt` — the counter, not session memory, trips the breaker.
+  When a phase's `attempts` reaches ~3 (`next_phase.py` warns), or it stays `hill: uphill` across
+  builds (unknowns unresolved), **stop-and-re-shape**: STOP and recommend `/hs-plan` (or human
+  input) rather than looping. Respect the appetite.
 - **`develop`/`master` are off-limits; never push, squash, force-push, or open PRs** — that is
   `/hs-publish`. **No `Co-Authored-By` trailer.**
 
@@ -117,8 +119,10 @@ contradiction, STOP and escalate.
 ### Step 4 — Verify gate
 Run the phase's `verify:` command (plus any CLI drive). "Green" means the **asserted post-condition
 held** — the observed output (task counts, final states, a known token) is correct — not merely that the
-command exited 0. Green → proceed. Red → STOP; do not mark done or advance state; consider the circuit
-breaker.
+command exited 0. Green → proceed. Red → STOP; do not mark done or advance state; record the failure
+(`uv run python .agents/factory/bin/set_phase.py spec/{slug}/TECH.md --phase {id} --record-attempt
+--touch`) and commit at least that `TECH.md` change before handing back, so the circuit breaker
+counts across sessions.
 
 ### Step 5 — Update `TECH.md` (the resume contract)
 1. Check off the phase's `[ ]` items in the body.
