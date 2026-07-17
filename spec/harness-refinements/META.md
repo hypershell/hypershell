@@ -168,7 +168,7 @@ number; evidence lines carry the audit's verified `file:line` refs (re-derive at
 - **Confidence:** high · **Effort:** small
 
 ## F16 — No aggregate status view across features
-`origin=external-review:factory-bin severity=low category=tooling status=open target=.agents/factory/bin/next_phase.py`
+`origin=external-review:factory-bin severity=low category=tooling status=applied target=.agents/factory/bin/next_phase.py`
 - **What happened:** answering "where is everything" requires one `next_phase.py` invocation per slug; nothing walks `spec/*/TECH.md`.
 - **Skill cause:** the tooling was built per-feature; the portfolio view was never needed until specs accumulated (they are retained on merge, so they will).
 - **Recommended fix:** a `--all` mode (or tiny `factory_status.py`) emitting one line per spec: slug, top_status, verdict, next actionable phase. Pairs with F9 so merged work reads `done`.
