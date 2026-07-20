@@ -3,10 +3,10 @@ slug: task-slot
 title: Expose a per-executor TASK_SLOT to tasks
 kind: feature
 appetite: small
-status: in_progress
+status: in_review
 branch: feature/task-slot
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-07-19'
 phases:
 - id: P1
@@ -43,7 +43,7 @@ phases:
   verify: uv run pytest -v -k slot
 - id: P3
   name: Document TASK_SLOT/TASK_SLOT_COUNT + placeholders with a worked pinning example
-  status: pending
+  status: done
   satisfies:
   - R7
   depends_on:
@@ -124,18 +124,17 @@ executor. Verifiable end-to-end by driving `hsx`.
 **Satisfies:** R7 · **Depends on:** P1 · **Parallel:** yes
 **Goal:** users can discover and use the slot, with a copy-pasteable pinning example.
 
-- [ ] `docs/getting_started.rst` (~line 158, the task-env-var paragraph): add `TASK_SLOT` (0-based
-      executor slot, `0..N-1`) and `TASK_SLOT_COUNT` (`N`, executors on this client), plus a worked
-      pinning example — e.g. `hsx -N4 -t 'CUDA_VISIBLE_DEVICES={slot} python train.py {}'` and a
-      `taskset`/`OMP_NUM_THREADS` wrapper computing `cores_per_slot = ncores / TASK_SLOT_COUNT`.
-- [ ] `docs/templates.rst`: document the `{slot}` / `{slot_count}` placeholders (resolved
-      client-side at run time); note they need client-side expansion — available in DB-backed runs;
-      under `--no-db`/JSON use `$TASK_SLOT`.
-- [ ] Man pages: check whether `docs/manual.rst` renders these sections; if so regenerate
-      `share/man/man1/*.1` via `uv run sphinx-build -b man docs docs/_build/man` and sync changed
-      files. If `manual.rst` is unaffected, note `share/` is unchanged (no CLI flag added).
-- [ ] Confirm no new Sphinx warnings beyond the known pre-existing `task_submit.rst`/`manual.rst`
-      toctree ones.
+- [x] `docs/getting_started.rst` (§Dynamic, ~line 158): added `TASK_SLOT` / `TASK_SLOT_COUNT` to the
+      task-env-var narrative, a "Pin resources per task slot" admonition (taskset + CUDA examples),
+      and a `{slot}`/`{slot_count}` bullet in the template-pattern list.
+- [x] `docs/_include/templates.rst` (rendered by the `templates.rst` stub): added an **Execution
+      Slot** section documenting `{slot}`/`{slot_count}`, noting they resolve client-side at run time
+      (DB-backed mode) — under `--no-db`/JSON or `submit` use `$TASK_SLOT`.
+- [x] Man pages: `docs/manual.rst` only `.. include::`s the command `_include/{cmd}_*` snippets, not
+      `getting_started.rst`/`_include/templates.rst`, so the man pages and `share/` are unaffected (no
+      CLI flag added) — nothing to regenerate.
+- [x] Confirmed no new Sphinx warnings (only the pre-existing `task_submit.rst`/`manual.rst` toctree
+      warnings remain); build exits 0 and content renders in `templates.html`/`getting_started.html`.
 - **Verify:** `uv run sphinx-build docs docs/_build && grep -rq TASK_SLOT docs/getting_started.rst docs/templates.rst`.
 - **Touches:** `docs/getting_started.rst`, `docs/templates.rst`, possibly `docs/manual.rst` + `share/man/man1/*`.
 
