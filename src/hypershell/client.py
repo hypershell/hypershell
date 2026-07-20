@@ -436,8 +436,8 @@ DEFAULT_TEMPLATE: Final[str] = DEFAULT_TEMPLATE  # redefined for documentation p
 """Default command pattern for template expansion."""
 
 
-def task_env(task: Task) -> Dict[str, str]:
-    """Build environment dictionary for the given `task`."""
+def task_env(task: Task, slot: int = 0, slot_count: int = 1) -> Dict[str, str]:
+    """Build environment dictionary for the given `task` and its executor `slot`."""
     task_data = task.to_json()
     try:
         # We have to flatten tag data separately, otherwise we'd have TASK_TAG='{...}'
@@ -453,6 +453,10 @@ def task_env(task: Task) -> Dict[str, str]:
         'TASK_OUTPATH': os.path.join(default_path.lib, 'task', f'{task.id}.out'),
         'TASK_ERRPATH': os.path.join(default_path.lib, 'task', f'{task.id}.err'),
         'TASK_CSVPATH': os.path.join(default_path.lib, 'task', f'{task.id}.csv'),
+        # Zero-based executor slot (0..N-1) and executor count on this client. A task infers a
+        # non-colliding resource slice from these (e.g. taskset/OMP/CUDA_VISIBLE_DEVICES).
+        'TASK_SLOT': str(slot),
+        'TASK_SLOT_COUNT': str(slot_count),
     }
 
 
@@ -617,6 +621,7 @@ class TaskExecutor(StateMachine):
     """Run tasks locally."""
 
     id: int
+    slot_count: int
     task: Task
     process: Popen
     template: Template
@@ -648,6 +653,7 @@ class TaskExecutor(StateMachine):
                  id: int,
                  inbound: Queue[Optional[Task]],
                  outbound: Queue[Optional[Task]],
+                 slot_count: int = 1,
                  template: str = DEFAULT_TEMPLATE,
                  redirect_output: IO = None,
                  redirect_errors: IO = None,
@@ -658,6 +664,7 @@ class TaskExecutor(StateMachine):
                  ratelimit: float = None) -> None:
         """Initialize task executor."""
         self.id = id
+        self.slot_count = slot_count
         self.template = Template(template)
         self.inbound = inbound
         self.outbound = outbound
@@ -669,6 +676,11 @@ class TaskExecutor(StateMachine):
         self.timeout = timeout
         self.signalwait = signalwait
         self.ratelimit = ratelimit
+
+    @property
+    def slot(self: TaskExecutor) -> int:
+        """Zero-based execution slot for this executor (the 1-based `id` re-based to 0)."""
+        return self.id - 1
 
     @functools.cached_property
     def actions(self: TaskExecutor) -> Dict[TaskState, Callable[[], TaskState]]:
@@ -708,7 +720,8 @@ class TaskExecutor(StateMachine):
         try:
             self.task.client_id = INSTANCE
             self.task.client_host = HOSTNAME
-            self.task.command = self.template.expand(self.task.args)
+            self.task.command = self.template.expand(
+                self.task.args, context={'slot': self.slot, 'slot_count': self.slot_count})
         except Exception as error:
             log.error(f'Template expansion failed for task ({self.task.id}): {error} (cancelled)')
             self.task.start_time = datetime.now().astimezone()
@@ -740,7 +753,7 @@ class TaskExecutor(StateMachine):
             return TaskState.START_TASK
         self.task.start_time = datetime.now().astimezone()  # Possible TZ aware submit_time
         self.task.waited = int((self.task.start_time - self.task.submit_time.astimezone()).total_seconds())
-        env = task_env(self.task)
+        env = task_env(self.task, self.slot, self.slot_count)
         if self.capture:
             self.task.outpath = env['TASK_OUTPATH']
             self.task.errpath = env['TASK_ERRPATH']
@@ -917,6 +930,7 @@ class TaskThread(Thread):
                  id: int,
                  inbound: Queue[Optional[str]],
                  outbound: Queue[Optional[str]],
+                 slot_count: int = 1,
                  template: str = DEFAULT_TEMPLATE,
                  capture: bool = False,
                  monitor: bool = False,
@@ -928,7 +942,8 @@ class TaskThread(Thread):
         """Initialize task executor."""
         self.id = id
         super().__init__(name=f'hypershell-executor-{id}')
-        self.machine = TaskExecutor(id=id, inbound=inbound, outbound=outbound, template=template,
+        self.machine = TaskExecutor(id=id, inbound=inbound, outbound=outbound, slot_count=slot_count,
+                                    template=template,
                                     redirect_output=redirect_output, redirect_errors=redirect_errors,
                                     capture=capture, monitor=monitor, timeout=timeout,
                                     signalwait=signalwait, ratelimit=ratelimit)
@@ -1212,7 +1227,7 @@ class ClientThread(Thread):
         if ratelimit is not None:
             ratelimit = ratelimit / num_threads
             log.debug(f'Rate limit enabled: {ratelimit:.2} tasks per second per thread')
-        self.executors = [TaskThread(id=count+1,
+        self.executors = [TaskThread(id=count+1, slot_count=num_threads,
                                      inbound=self.inbound, outbound=self.outbound,
                                      redirect_output=redirect_output, redirect_errors=redirect_errors,
                                      template=template, capture=capture, monitor=monitor, timeout=task_timeout,

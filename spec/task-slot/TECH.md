@@ -1,48 +1,64 @@
 ---
 slug: task-slot
-title: "Expose a per-executor TASK_SLOT to tasks"
+title: Expose a per-executor TASK_SLOT to tasks
 kind: feature
 appetite: small
 status: in_progress
 branch: feature/task-slot
 base: develop
-current_phase: P1
-last_updated: "2026-07-19"
+current_phase: P2
+last_updated: '2026-07-19'
 phases:
-  - id: P1
-    name: "Wire slot/count through the client executor (env vars + template placeholders)"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: ".agents/factory/bin/temp_site.sh sh -c \"seq 40 | uv run hsx -N4 -t 'echo {slot}' 2>/dev/null | sort -un\""
-  - id: P2
-    name: "Automated tests (task_env vars, template context, slot-set integration)"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6]
-    depends_on: [P1]
-    parallel: true
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v -k slot"
-  - id: P3
-    name: "Document TASK_SLOT/TASK_SLOT_COUNT + placeholders with a worked pinning example"
-    status: pending
-    satisfies: [R7]
-    depends_on: [P1]
-    parallel: true
-    hammerable: false
-    hill: uphill
-    verify: "uv run sphinx-build docs docs/_build && grep -rq TASK_SLOT docs/getting_started.rst docs/templates.rst"
+- id: P1
+  name: Wire slot/count through the client executor (env vars + template placeholders)
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: .agents/factory/bin/temp_site.sh sh -c "seq 40 | uv run hsx -N4 -t 'echo
+    {slot}' 2>/dev/null | sort -un"
+- id: P2
+  name: Automated tests (task_env vars, template context, slot-set integration)
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  depends_on:
+  - P1
+  parallel: true
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v -k slot
+- id: P3
+  name: Document TASK_SLOT/TASK_SLOT_COUNT + placeholders with a worked pinning example
+  status: pending
+  satisfies:
+  - R7
+  depends_on:
+  - P1
+  parallel: true
+  hammerable: false
+  hill: uphill
+  verify: uv run sphinx-build docs docs/_build && grep -rq TASK_SLOT docs/getting_started.rst
+    docs/templates.rst
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Expose a per-executor TASK_SLOT to tasks
 
 The **context engine and finite-state machine** for building this feature. The YAML frontmatter
@@ -72,17 +88,17 @@ below are the work.
 use `{slot}`/`{slot_count}` in a client-side template, with slots distinct (`0..N-1`) and stable per
 executor. Verifiable end-to-end by driving `hsx`.
 
-- [ ] `task_env` (`client.py:439`): widen to `def task_env(task: Task, slot: int = 0, slot_count: int = 1)`;
-      add `'TASK_SLOT': str(slot)` and `'TASK_SLOT_COUNT': str(slot_count)` to the returned dict.
-- [ ] `TaskExecutor.__init__` (`client.py:647`): add `slot_count: int = 1` param, store
+- [x] `task_env` (`client.py:439`): widen to `def task_env(task: Task, slot: int = 0, slot_count: int = 1)`;
+      add `'TASK_SLOT': str(slot)` and `'TASK_SLOT_COUNT': str(slot_count)` to the returned dict (last, so they win).
+- [x] `TaskExecutor.__init__` (`client.py:647`): add `slot_count: int = 1` param, store
       `self.slot_count`. Add a `slot` property returning `self.id - 1` with a one-line declarative
       docstring (0-based execution slot; `id` is 1-based).
-- [ ] `TaskExecutor.create_task` (`client.py:711`): pass
+- [x] `TaskExecutor.create_task` (`client.py:711`): pass
       `context={'slot': self.slot, 'slot_count': self.slot_count}` to `self.template.expand(...)`.
-- [ ] `TaskExecutor.start_task` (`client.py:743`): `env = task_env(self.task, self.slot, self.slot_count)`.
-- [ ] `TaskThread.__init__` (`client.py:916`): add `slot_count: int = 1`; forward it to
+- [x] `TaskExecutor.start_task` (`client.py:743`): `env = task_env(self.task, self.slot, self.slot_count)`.
+- [x] `TaskThread.__init__` (`client.py:916`): add `slot_count: int = 1`; forward it to
       `TaskExecutor(..., slot_count=slot_count)`.
-- [ ] `ClientThread` executor list (`client.py:1215`): pass `slot_count=num_threads` to each
+- [x] `ClientThread` executor list (`client.py:1215`): pass `slot_count=num_threads` to each
       `TaskThread(...)`. (`count` stays `id=count+1`; `slot` is derived as `id-1`.)
 - **Verify:** `.agents/factory/bin/temp_site.sh sh -c "seq 40 | uv run hsx -N4 -t 'echo {slot}' 2>/dev/null | sort -un"` → `0 1 2 3`.
       Also spot-check env var (`-t 'printenv TASK_SLOT'`) and degenerate (`-N1 -t 'echo {slot}/{slot_count}'` → all `0/1`).
