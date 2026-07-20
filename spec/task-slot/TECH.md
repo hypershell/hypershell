@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: feature/task-slot
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-07-19'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
     {slot}' 2>/dev/null | sort -un"
 - id: P2
   name: Automated tests (task_env vars, template context, slot-set integration)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -108,13 +108,15 @@ executor. Verifiable end-to-end by driving `hsx`.
 **Satisfies:** R1, R2, R3, R4, R5, R6 · **Depends on:** P1 · **Parallel:** yes
 **Goal:** lock the behavior with deterministic unit tests plus one integration slot-set check.
 
-- [ ] `tests/test_template.py` (new, `@mark.unit`): `Template('{slot}/{slot_count}').expand('x',
+- [x] `tests/test_template.py` (new, `@mark.unit`): `Template('{slot}/{slot_count}').expand('x',
       context={'slot': 2, 'slot_count': 4}) == '2/4'`; `{slot}` with no context raises
-      `Template.UnmatchedPattern`; `{slot}` does not shadow `{}`/`{N}`.
-- [ ] `tests/test_client.py` (new, `@mark.unit`, uses `temp_site`): `task_env(task, 2, 4)` yields
-      `TASK_SLOT=='2'`, `TASK_SLOT_COUNT=='4'`; `task_env(task)` defaults to `'0'`/`'1'` (R5).
-- [ ] `tests/test_cluster.py` (`@mark.integration`): DB-mode `-N4 -t 'echo {slot}'` over ~40 tasks →
-      observed slot set `== {0,1,2,3}`; `-N1` → `{0}`. Assert on the **set**, not per-task mapping.
+      `Template.UnmatchedPattern`; `{slot}` coexists with `{}` argument expansion.
+- [x] `tests/test_client.py` (new, `@mark.unit`, uses `temp_site`): `task_env(task, 2, 4)` yields
+      `TASK_SLOT=='2'`, `TASK_SLOT_COUNT=='4'`; `task_env(task)` defaults to `'0'`/`'1'` (R5); plus
+      the `TaskExecutor.slot` derivation (`id-1`).
+- [x] `tests/test_cluster.py` (`@mark.integration`): DB-mode `-N4 -t 'echo {slot}'` over 40 tasks →
+      observed slot set `== {0,1,2,3}`; `-N1 -t 'echo {slot}/{slot_count}'` → `{'0/1'}`. Assert on
+      the **set**, not per-task mapping.
 - **Verify:** `uv run pytest -v -k slot`.
 - **Touches:** `tests/test_template.py`, `tests/test_client.py`, `tests/test_cluster.py`.
 

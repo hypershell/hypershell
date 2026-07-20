@@ -246,3 +246,21 @@ def test_cluster_backfill(temp_site: Path) -> None:
 
     # Confirm task output
     assert sorted(stdout.strip().split('\n')) == list(map(str, range(1, 9)))
+
+
+@mark.integration
+def test_cluster_task_slot(temp_site: Path) -> None:
+    """TASK_SLOT resolves to distinct 0..N-1 across N executors (DB mode, client-side template)."""
+    taskfile = create_taskfile_echo(temp_site, count=40)
+    rc, stdout, stderr = main(['hs', 'cluster', taskfile, '-N', '4', '-t', 'echo {slot}'])
+    assert rc == exit_status.success
+    assert {int(token) for token in stdout.split()} == {0, 1, 2, 3}
+
+
+@mark.integration
+def test_cluster_task_slot_single(temp_site: Path) -> None:
+    """A single executor reports slot 0 and slot count 1 (via the {slot}/{slot_count} placeholders)."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    rc, stdout, stderr = main(['hs', 'cluster', taskfile, '-N', '1', '-t', 'echo {slot}/{slot_count}'])
+    assert rc == exit_status.success
+    assert set(stdout.split()) == {'0/1'}
