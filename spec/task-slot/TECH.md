@@ -3,7 +3,7 @@ slug: task-slot
 title: Expose a per-executor TASK_SLOT to tasks
 kind: feature
 appetite: small
-status: in_review
+status: done
 branch: feature/task-slot
 base: develop
 current_phase: done
