@@ -213,6 +213,24 @@ def test_set_phase_add_phase_inserts_with_safe_defaults(tmp_path: Path) -> None:
 
 
 @mark.unit
+def test_set_phase_updates_existing_phase_body_in_place(tmp_path: Path) -> None:
+    """A reopened phase retunes its body via --phase (remediation tightening a stale gate)."""
+    doc = tmp_path / 'TECH.md'
+    doc.write_text(make_doc(MINIMAL))
+    code = set_phase.main([
+        str(doc), '--phase', 'P1', '--verify', 'uv run pytest -k slot',
+        '--name', 'retuned', '--satisfies', 'R1, R2', '--depends-on', '',
+    ])
+    assert code == 0
+    data, _ = split_frontmatter(doc.read_text())
+    p1 = data['phases'][0]
+    assert p1['verify'] == 'uv run pytest -k slot'
+    assert p1['name'] == 'retuned'
+    assert p1['satisfies'] == ['R1', 'R2']
+    assert p1['depends_on'] == []           # '' clears the list.
+
+
+@mark.unit
 def test_set_phase_refuses_bad_mutations(tmp_path: Path) -> None:
     """Unknown ids and invalid results are refused without writing the file."""
     doc = tmp_path / 'TECH.md'
@@ -222,6 +240,8 @@ def test_set_phase_refuses_bad_mutations(tmp_path: Path) -> None:
     assert set_phase.main([str(doc), '--add-phase', 'P1', '--name', 'dup', '--verify', 'true']) == 2
     assert set_phase.main([str(doc), '--add-phase', 'P4', '--name', 'x', '--verify', 'y', '--after', 'P9']) == 3
     assert set_phase.main([str(doc), '--record-attempt']) == 2       # Requires --phase.
+    assert set_phase.main([str(doc), '--after', 'P1']) == 2          # --after needs --add-phase.
+    assert set_phase.main([str(doc), '--phase', 'P1', '--verify', '']) == 2   # Can't blank a gate.
     assert doc.read_text() == before
 
 

@@ -35,6 +35,10 @@ Usage examples:
         --verify "uv run pytest -v -k index" \
         --current P7 --top-status in_progress --touch
 
+    # retune a reopened phase's body in place (remediation tightening a too-weak gate)
+    uv run python .agents/factory/bin/set_phase.py spec/<slug>/TECH.md \
+        --phase P3 --verify "uv run pytest -v -k task_slot" --touch
+
 Exit codes: 0 ok · 2 parse/validation error · 3 unknown --phase/--after id.
 """
 from __future__ import annotations
@@ -60,6 +64,11 @@ from _fsm import (
 __all__ = ["main"]
 
 
+def _csv_list(value: str | None) -> list[str]:
+    """Parse a comma-separated flag into a stripped, empty-free list ('' -> [])."""
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Regenerate a TECH.md FSM frontmatter block.")
     ap.add_argument("path", help="path to spec/<slug>/TECH.md")
@@ -69,11 +78,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--record-attempt", action="store_true",
                     help="increment --phase's failed-verify attempts counter (durable circuit breaker)")
     ap.add_argument("--add-phase", metavar="ID", help="add a new pending phase with this id (requires --name and --verify)")
-    ap.add_argument("--name", help="phase name (for --add-phase)")
-    ap.add_argument("--satisfies", help="comma-separated GOAL R-IDs (for --add-phase, e.g. R3,R17)")
-    ap.add_argument("--depends-on", dest="depends_on", help="comma-separated prerequisite phase ids (for --add-phase)")
-    ap.add_argument("--after", help="insert the new phase after this phase id (default: append last)")
-    ap.add_argument("--verify", help="verify command (for --add-phase)")
+    ap.add_argument("--name", help="phase name (for --add-phase, or to rename an existing --phase)")
+    ap.add_argument("--satisfies", help="comma-separated GOAL R-IDs (for --add-phase or an existing --phase; '' clears)")
+    ap.add_argument("--depends-on", dest="depends_on", help="comma-separated prerequisite phase ids (for --add-phase or an existing --phase; '' clears)")
+    ap.add_argument("--after", help="insert the new phase after this phase id (default: append last; --add-phase only)")
+    ap.add_argument("--verify", help="verify command (for --add-phase, or to retune an existing --phase's gate)")
     ap.add_argument("--current", help="set current_phase pointer (phase id, '' , or 'done')")
     ap.add_argument("--top-status", choices=sorted(TOP_STATUSES), help="set top-level status")
     ap.add_argument("--verdict", choices=["none", "changes-requested", "approved"], help="set review.verdict")
@@ -101,8 +110,8 @@ def main(argv: list[str]) -> int:
             "id": args.add_phase,
             "name": args.name,
             "status": "pending",
-            "satisfies": [s.strip() for s in (args.satisfies or "").split(",") if s.strip()],
-            "depends_on": [d.strip() for d in (args.depends_on or "").split(",") if d.strip()],
+            "satisfies": _csv_list(args.satisfies),
+            "depends_on": _csv_list(args.depends_on),
             "parallel": False,
             "hammerable": False,
             "hill": "uphill",
@@ -118,8 +127,12 @@ def main(argv: list[str]) -> int:
             phases.insert(idx + 1, new_phase)
         else:
             phases.append(new_phase)
-    elif args.name or args.satisfies or args.depends_on or args.after or args.verify:
-        print("--name/--satisfies/--depends-on/--after/--verify require --add-phase", file=sys.stderr)
+    elif args.after:
+        # --after is a position, meaningless without a phase to insert.
+        print("--after requires --add-phase", file=sys.stderr)
+        return 2
+    elif (args.name or args.satisfies or args.depends_on or args.verify) and not args.phase:
+        print("--name/--satisfies/--depends-on/--verify require --add-phase or --phase", file=sys.stderr)
         return 2
 
     if args.phase:
@@ -134,6 +147,22 @@ def main(argv: list[str]) -> int:
             target["hill"] = args.hill
         if args.record_attempt:
             target["attempts"] = int(target.get("attempts") or 0) + 1
+        # A reopened phase can retune its body in place — remediation tightening a stale
+        # gate. name/verify may not be blanked; empty --satisfies/--depends-on clears the list.
+        if args.name is not None:
+            if not args.name:
+                print("--name cannot be set empty", file=sys.stderr)
+                return 2
+            target["name"] = args.name
+        if args.verify is not None:
+            if not args.verify:
+                print("--verify cannot be set empty", file=sys.stderr)
+                return 2
+            target["verify"] = args.verify
+        if args.satisfies is not None:
+            target["satisfies"] = _csv_list(args.satisfies)
+        if args.depends_on is not None:
+            target["depends_on"] = _csv_list(args.depends_on)
     elif args.phase_status or args.hill or args.record_attempt:
         print("--phase-status/--hill/--record-attempt require --phase", file=sys.stderr)
         return 2
