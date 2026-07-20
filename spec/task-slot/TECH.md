@@ -3,7 +3,7 @@ slug: task-slot
 title: Expose a per-executor TASK_SLOT to tasks
 kind: feature
 appetite: small
-status: in_review
+status: blocked
 branch: feature/task-slot
 base: develop
 current_phase: done
@@ -54,10 +54,11 @@ phases:
   verify: uv run sphinx-build docs docs/_build && grep -rq TASK_SLOT docs/getting_started.rst
     docs/templates.rst
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 9d03047e7fc7589ac81439340ed4813c642e1545
+  verdict: changes-requested
+  blocked_reason: 'R7 docs incomplete: task-env reference (_alt) + man pages omit
+    TASK_SLOT/TASK_SLOT_COUNT; templates.rst --no-db claim is wrong'
+  cycle: 1
 ---
 # TECH.md — Expose a per-executor TASK_SLOT to tasks
 
