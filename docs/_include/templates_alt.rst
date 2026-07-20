@@ -30,6 +30,32 @@ string, and nested objects/arrays as compact JSON. A built-in pattern (below) ta
 precedence over a task key of the same name. Named fields are resolved at submit time,
 and every ``{key}`` must be present in each task object or the submission is rejected.
 
+Execution Slot
+^^^^^^^^^^^^^^
+
+Each client runs ``N`` task executors (set with ``-N``/``--num-threads``); every executor owns
+a fixed **slot** for its lifetime, a zero-based index in ``0 .. N-1``. Two patterns expose it so a
+task can claim a non-overlapping share of the node's cores, memory, or GPUs without colliding with
+its siblings.
+
+``{slot}``
+    The executor's zero-based slot index (``0 .. N-1``).
+
+``{slot_count}``
+    The number of executors on this client (``N``).
+
+``taskset -c {slot} ./sim {}``
+    Pin each task to a distinct CPU core.
+
+``CUDA_VISIBLE_DEVICES={slot} python train.py {}``
+    Assign a distinct GPU per task.
+
+These fields are resolved at execution time, when the ``client`` expands the template — the normal
+line-input path, whether database-backed or ``--no-db``. They are *not* available when the template
+is instead expanded at submit time (JSON mode via ``--from-json``, or the ``submit`` command); use
+the equivalent ``TASK_SLOT`` and ``TASK_SLOT_COUNT`` environment variables there, which are always
+defined.
+
 Filepath Operations
 ^^^^^^^^^^^^^^^^^^^
 

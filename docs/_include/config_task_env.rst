@@ -57,6 +57,14 @@ A few common environment variables are defined for every task.
 ``TASK_ERRPATH``
     Absolute file path where standard error is directed (if defined).
 
+``TASK_SLOT``
+    Zero-based execution slot of the task's executor (``0 .. N-1`` for a client
+    running ``N`` tasks in parallel). Stable for the executor's lifetime; use it to
+    pin resources (cores, GPUs) without colliding with sibling tasks. Defaults to ``0``.
+
+``TASK_SLOT_COUNT``
+    Number of concurrent executors on the client (``N``). Defaults to ``1``.
+
 |
 
 Any user-defined tags are included as environment variables as well with

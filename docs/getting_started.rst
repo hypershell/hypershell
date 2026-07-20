@@ -157,6 +157,9 @@ will each pull tasks off the queue asynchronously, balancing the load.
 
 Individual task metadata is exposed to tasks as environment variables. For example, ``TASK_ID`` provides
 the UUID for the task, and ``TASK_SUBMIT_TIME`` records the date and time the task was submitted.
+For resource-sensitive workloads, ``TASK_SLOT`` is the task's zero-based execution slot (``0 .. N-1``
+for a client running ``N`` tasks in parallel) and ``TASK_SLOT_COUNT`` is that total ``N`` — enough to
+pin each task to a non-colliding share of the node's cores or GPUs.
 
 Any environment variable defined with the ``HYPERSHELL_EXPORT_`` prefix will be injected into
 the environment of each task, *sans prefix*.
@@ -169,6 +172,7 @@ expansion. Many meta-patterns are supported (see full overview of :ref:`template
 * Slicing on whitespace (e.g., first ``'{[0]}'``, first three ``'{[:3]}'``, every other ``'{[::2]}'``)
 * Sub-commands (e.g., ``'{% dirname @ %}'``)
 * Lambda expressions in *x* (e.g., ``'{= x + 1 =}'``)
+* Execution slot for resource pinning (e.g., ``'{slot}'``, ``'{slot_count}'``)
 
 .. admonition:: Templates
     :class: note
@@ -176,6 +180,21 @@ expansion. Many meta-patterns are supported (see full overview of :ref:`template
     .. code-block:: shell
 
         hsx tasks.in -N12 -t './some_program.py {} >outputs/{/-}.out'
+
+.. admonition:: Pin resources per task slot
+    :class: note
+
+    Give each concurrent task a distinct slice of the node — a CPU core:
+
+    .. code-block:: shell
+
+        hsx tasks.in -N4 -t 'taskset -c {slot} ./simulate {}'
+
+    ...or a GPU for accelerator workloads:
+
+    .. code-block:: shell
+
+        hsx tasks.in -N4 -t 'CUDA_VISIBLE_DEVICES={slot} python train.py {}'
 
 Capturing `stdout` and `stderr` is supported directly in fact with the ``--capture`` option.
 See the full documentation for environment variables under :ref:`configuration <config>`.
