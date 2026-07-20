@@ -84,3 +84,7 @@ Read `origin`/`severity`/`category` from the finding in `META.md`; this ledger r
 ## 2026-07-16 — harness-refinements F14: `git checkout *` allowed silent tree discard
 `decision=applied commit=07d26c8 target=.agents/skills/hs-feature/SKILL.md`
 - **Rationale:** dropped from all three frontmatters (`git switch` covers every real use); portability.md now states the allowlists' honest scope (accident-protection, not confinement). Also added the missing `git pull` allowance hs-publish's local mode always needed.
+
+## 2026-07-20 — task-slot F1: set_phase.py couldn't update a reopened phase's verify
+`decision=applied commit=4793cba target=.agents/factory/bin/set_phase.py`
+- **Rationale:** `--name/--verify/--satisfies/--depends-on` were gated behind `--add-phase`, so remediation (which reopens phases) could not tighten a too-weak gate without hand-editing YAML — leaving the frontmatter `verify` (next_phase.py's source of truth) stale vs the real gate. `--phase` now mutates the phase body in place (symmetric with `--add-phase`); name/verify are un-blankable, empty `--satisfies/--depends-on` clears the list, and `--after` stays add-phase-only. hs-build's remediation step now points at the scripted retune path; extends F4/F5 (file-backed set_phase flags), reverts nothing.
