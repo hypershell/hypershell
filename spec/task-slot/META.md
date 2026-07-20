@@ -50,3 +50,10 @@ is skipped by the parser):
 ```
 
 <!-- Real findings are appended below this line by the lifecycle skills. -->
+
+## F1 — set_phase.py cannot update an existing phase's verify command
+`origin=hs-build:P3 severity=medium category=tooling status=open target=.agents/factory/bin/set_phase.py`
+- **What happened:** Remediation needed to strengthen P3's `verify` (the original `grep -rq TASK_SLOT a b` is OR-semantics and passed vacuously on `getting_started.rst` alone, never actually asserting the templates surface). `set_phase.py --verify` is gated behind `--add-phase` (`--name/--satisfies/--depends-on/--after/--verify require --add-phase`), so there is no scripted way to update the `verify` of an existing / reopened phase. I ran the stronger gate manually and documented it in the phase body, leaving the frontmatter `verify` field stale relative to the real gate.
+- **Skill cause:** Remediation (hs-build Step 1.3) is a first-class path that *reopens* existing phases, and tightening a too-weak gate is a natural part of remediation — but the tooling only lets you set `verify` at phase-creation time, so the frontmatter (`next_phase.py`'s source of truth) and the actual gate drift on any reopened phase.
+- **Recommended fix:** Let `set_phase.py --phase P<n> --verify "…"` update an existing phase's verify independent of `--add-phase` (same for `--name`).
+- **Confidence:** high · **Effort:** small

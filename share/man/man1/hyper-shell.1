@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Jul 12, 2026" "2.8.1" "hypershell"
+.TH "HYPER-SHELL" "1" "Jul 19, 2026" "2.8.1" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -1801,6 +1801,32 @@ Values are stringified: booleans render as \fBtrue\fP/\fBfalse\fP, \fBnull\fP as
 string, and nested objects/arrays as compact JSON. A built\-in pattern (below) takes
 precedence over a task key of the same name. Named fields are resolved at submit time,
 and every \fB{key}\fP must be present in each task object or the submission is rejected.
+.SS Execution Slot
+.sp
+Each client runs \fBN\fP task executors (set with \fB\-N\fP/\fB\-\-num\-threads\fP); every executor owns
+a fixed \fBslot\fP for its lifetime, a zero\-based index in \fB0 .. N\-1\fP\&. Two patterns expose it so a
+task can claim a non\-overlapping share of the node\(aqs cores, memory, or GPUs without colliding with
+its siblings.
+.INDENT 0.0
+.TP
+.B \fB{slot}\fP
+The executor\(aqs zero\-based slot index (\fB0 .. N\-1\fP).
+.TP
+.B \fB{slot_count}\fP
+The number of executors on this client (\fBN\fP).
+.TP
+.B \fBtaskset \-c {slot} ./sim {}\fP
+Pin each task to a distinct CPU core.
+.TP
+.B \fBCUDA_VISIBLE_DEVICES={slot} python train.py {}\fP
+Assign a distinct GPU per task.
+.UNINDENT
+.sp
+These fields are resolved at execution time, when the \fBclient\fP expands the template — the normal
+line\-input path, whether database\-backed or \fB\-\-no\-db\fP\&. They are \fInot\fP available when the template
+is instead expanded at submit time (JSON mode via \fB\-\-from\-json\fP, or the \fBsubmit\fP command); use
+the equivalent \fBTASK_SLOT\fP and \fBTASK_SLOT_COUNT\fP environment variables there, which are always
+defined.
 .SS Filepath Operations
 .sp
 Shell commands often operate on filepaths. In such cases, it may be useful to manipulate
@@ -2781,6 +2807,14 @@ Absolute file path where standard output is directed (if defined).
 .TP
 .B \fBTASK_ERRPATH\fP
 Absolute file path where standard error is directed (if defined).
+.TP
+.B \fBTASK_SLOT\fP
+Zero\-based execution slot of the task\(aqs executor (\fB0 .. N\-1\fP for a client
+running \fBN\fP tasks in parallel). Stable for the executor\(aqs lifetime; use it to
+pin resources (cores, GPUs) without colliding with sibling tasks. Defaults to \fB0\fP\&.
+.TP
+.B \fBTASK_SLOT_COUNT\fP
+Number of concurrent executors on the client (\fBN\fP). Defaults to \fB1\fP\&.
 .UNINDENT
 .sp
 Further, any environment variable starting with \fBHYPERSHELL_EXPORT_\fP will be injected

@@ -62,10 +62,11 @@ its siblings.
 ``CUDA_VISIBLE_DEVICES={slot} python train.py {}``
     Assign a distinct GPU per task.
 
-These fields are resolved at execution time, when the ``client`` expands the template — the
-``cluster`` command's default, database-backed mode. They are *not* available when a template is
-expanded at submit time (``--no-db``/JSON mode, or the ``submit`` command); use the equivalent
-``TASK_SLOT`` and ``TASK_SLOT_COUNT`` environment variables there, which are always defined.
+These fields are resolved at execution time, when the ``client`` expands the template — the normal
+line-input path, whether database-backed or ``--no-db``. They are *not* available when the template
+is instead expanded at submit time (JSON mode via ``--from-json``, or the ``submit`` command); use
+the equivalent ``TASK_SLOT`` and ``TASK_SLOT_COUNT`` environment variables there, which are always
+defined.
 
 -------------------
 
