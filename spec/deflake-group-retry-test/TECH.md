@@ -3,7 +3,7 @@ slug: deflake-group-retry-test
 title: De-flake test_group_failed_task_with_retries
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/deflake-group-retry-test
 base: develop
 current_phase: done
