@@ -123,27 +123,42 @@ def test_group_failed_task_with_retries(temp_site: Path) -> None:
     ]
 
     taskfile = create_taskfile(temp_site, tasks)
-    rc, stdout, stderr = main(['hs', 'cluster', str(taskfile), '-r', '3'])
+    # Task stdout is deliberately ignored: it is a best-effort concurrent echo to the shared
+    # console fd, so a line can be dropped or reordered under load. The database is the source
+    # of truth, so correctness is asserted from authoritative task state (via `hs list`) below.
+    rc, _, stderr = main(['hs', 'cluster', str(taskfile), '-r', '3'])
     assert rc == exit_status.success
     logs = stderr.strip().splitlines()
-    
-    # Task n:1 should fail the first 2 times
+
+    # Task n:1 fails its first two attempts. The log stream is single-writer (serialized), so
+    # unlike task stdout its line counts are reliable under load.
     assert_output(r'Non-zero exit status', stderr, 2)
-    
-    # Group should transition after retries
+
+    # Group 0 transitions to group 1 exactly once, only after n:1's retries complete.
     assert_output(r'Completed task group 0 - starting task group 1', stderr, 1)
+
+    # Ordering: the group transition is logged before group 1's task (n:2) completes.
     rc, stdout_2, _ = main(['hs', 'list', 'id', '-t', 'n:2'])
     n2_id = stdout_2.strip()
     n2_idx, *_ = [i for i, line in enumerate(logs) if f'Completed task ({n2_id})' in line]
     group_idx, *_ = [i for i, line in enumerate(logs) if 'Completed task group 0 - starting task group 1' in line]
     assert group_idx < n2_idx
 
-    
-    # Task n:2 should still complete
-    assert sorted(stdout.strip().splitlines()) == list(map(str, range(len(tasks))))
+    # Five rows exist: n:0, the three-row retry chain for n:1, and n:2. Retries copy the parent's
+    # tag, so `-t n:1` matches the whole chain.
+    assert main_lines(['hs', 'list', '-c']) == (exit_status.success, ['5'], NO_OUTPUT)
+    assert main_lines(['hs', 'list', '-c', '-t', 'n:1']) == (exit_status.success, ['3'], NO_OUTPUT)
+    assert main_lines(['hs', 'list', '-c', '-t', 'n:1', '-F']) == (exit_status.success, ['2'], NO_OUTPUT)
 
-    # There should be 5 total tasks after 2 retries on n:1
-    assert main_lines(['hs', 'list', '-c']) == (exit_status.success, ['5', ], NO_OUTPUT)
+    # n:1 terminally succeeded on its 3rd attempt. `[ $TASK_ATTEMPT -eq 3 ] && echo 1` can only
+    # exit 0 when `echo 1` runs, so a successful attempt 3 proves the output was produced.
+    assert main_lines(['hs', 'list', 'exit_status', '-t', 'n:1', '-S']) == (exit_status.success, ['0'], NO_OUTPUT)
+    assert main_lines(['hs', 'list', 'attempt', '-t', 'n:1', '-S']) == (exit_status.success, ['3'], NO_OUTPUT)
+
+    # n:2 ran in group 1 and succeeded; nothing is left incomplete.
+    assert main_lines(['hs', 'list', 'exit_status', '-t', 'n:2', '-S']) == (exit_status.success, ['0'], NO_OUTPUT)
+    assert main_lines(['hs', 'list', 'group', '-t', 'n:2']) == (exit_status.success, ['1'], NO_OUTPUT)
+    assert main_lines(['hs', 'list', '-c', '-R']) == (exit_status.success, ['0'], NO_OUTPUT)
 
 
 @mark.integration

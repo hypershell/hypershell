@@ -33,3 +33,17 @@
   emit a `diagnosis: required` hint (or accept `appetite: medium`) so the gate is explicit rather
   than relying on the planner to notice.
 - **Confidence:** high · **Effort:** small
+
+## F2 — `temp_site.sh` doesn't isolate cwd, so verify drives leak files into the repo
+`origin=hs-build:P1 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** a CLI cross-check run via `temp_site.sh sh -c "… > t.in; …"` wrote `t.in` to the
+  repo root (not the throwaway site), and `hs-build` Step 7's `git add -A` silently committed it; I
+  had to `del` it and amend.
+- **Skill cause:** `temp_site.sh` isolates env (`HYPERSHELL_SITE`/`HYPERSHELL_DATABASE_FILE`) but
+  never `cd`s into `$site`, so any relative file write in a verify/cross-check command escapes the
+  "throwaway site" into the working tree — unlike the pytest `temp_site` fixture, which contains
+  writes. `hs-build`'s blanket `git add -A` then sweeps the stray into the atomic commit.
+- **Recommended fix:** add `cd "$site"` in `temp_site.sh` before `"$@"` (and note it in the docstring)
+  so relative writes stay contained; optionally have `hs-build` Step 7 warn on files outside the
+  phase's declared `Touches:` set before `git add -A`.
+- **Confidence:** high · **Effort:** small

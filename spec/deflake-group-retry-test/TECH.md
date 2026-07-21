@@ -1,30 +1,36 @@
 ---
 slug: deflake-group-retry-test
-title: "De-flake test_group_failed_task_with_retries"
+title: De-flake test_group_failed_task_with_retries
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/deflake-group-retry-test
 base: develop
-current_phase: P1
-last_updated: "2026-07-20"
+current_phase: done
+last_updated: '2026-07-20'
 phases:
-  - id: P1
-    name: "Rebuild the test on authoritative DB state"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: downhill
-    verify: "for i in $(seq 1 15); do uv run pytest -q tests/test_groups.py::test_group_failed_task_with_retries || exit 1; done && uv run pytest -q tests/test_groups.py"
+- id: P1
+  name: Rebuild the test on authoritative DB state
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: for i in $(seq 1 15); do uv run pytest -q tests/test_groups.py::test_group_failed_task_with_retries
+    || exit 1; done && uv run pytest -q tests/test_groups.py
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — De-flake `test_group_failed_task_with_retries`
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above
@@ -61,33 +67,33 @@ contract entirely from authoritative task state + the single-writer stderr log s
 dependence on the non-deterministic merged task-stdout stream — removing the CI-load flake at its
 source while strengthening coverage.
 
-- [ ] Edit **only** `tests/test_groups.py`, function `test_group_failed_task_with_retries`
+- [x] Edit **only** `tests/test_groups.py`, function `test_group_failed_task_with_retries`
       (lines 115–146). Keep the task list, `create_taskfile`, and the `hs cluster … -r 3` invocation
       unchanged (preserve the exact scenario).
-- [ ] **Keep** the robust `stderr`/`rc` assertions: `rc == exit_status.success`;
+- [x] **Keep** the robust `stderr`/`rc` assertions: `rc == exit_status.success`;
       `assert_output(r'Non-zero exit status', stderr, 2)`;
       `assert_output(r'Completed task group 0 - starting task group 1', stderr, 1)`; and the
       `group_idx < n2_idx` ordering proof (both indices come from `stderr`, the serialized log).
-- [ ] **Remove** the fragile stdout scrape at line 143
+- [x] **Remove** the fragile stdout scrape at line 143
       (`assert sorted(stdout.strip().splitlines()) == list(map(str, range(len(tasks))))`) and the
       trailing `hs list -c == ['5']` line; replace with authoritative `hs list` queries (via
       `main`/`main_lines`, all against the per-test DB the server has already written back):
-  - [ ] `main_lines(['hs','list','-c'])` → `['5']` (n:0=1, n:1=3-row chain, n:2=1).
-  - [ ] `main_lines(['hs','list','-c','-t','n:1'])` → `['3']` (retry chain length).
-  - [ ] `main_lines(['hs','list','-c','-t','n:1','-F'])` → `['2']` (superseded failed rows;
+  - [x] `main_lines(['hs','list','-c'])` → `['5']` (n:0=1, n:1=3-row chain, n:2=1).
+  - [x] `main_lines(['hs','list','-c','-t','n:1'])` → `['3']` (retry chain length).
+  - [x] `main_lines(['hs','list','-c','-t','n:1','-F'])` → `['2']` (superseded failed rows;
         `-F` = `exit_status != 0`).
-  - [ ] `main_lines(['hs','list','exit_status','-t','n:1','-S'])` → `['0']` **and**
+  - [x] `main_lines(['hs','list','exit_status','-t','n:1','-S'])` → `['0']` **and**
         `main_lines(['hs','list','attempt','-t','n:1','-S'])` → `['3']` — key oracle: n:1 succeeded
         on attempt 3, which (given `[ $TASK_ATTEMPT -eq 3 ] && echo 1`) proves `echo 1` ran without
         scraping stdout.
-  - [ ] `main_lines(['hs','list','exit_status','-t','n:2','-S'])` → `['0']` **and**
+  - [x] `main_lines(['hs','list','exit_status','-t','n:2','-S'])` → `['0']` **and**
         `main_lines(['hs','list','group','-t','n:2'])` → `['1']` (n:2 ran, in group 1).
-  - [ ] `main_lines(['hs','list','-c','-R'])` → `['0']` (nothing incomplete).
-  - [ ] Use `NO_OUTPUT` for the stderr slot in `main_lines` comparisons, matching existing tests.
-- [ ] Add a short **declarative** comment stating *why* stdout is not asserted (best-effort
+  - [x] `main_lines(['hs','list','-c','-R'])` → `['0']` (nothing incomplete).
+  - [x] Use `NO_OUTPUT` for the stderr slot in `main_lines` comparisons, matching existing tests.
+- [x] Add a short **declarative** comment stating *why* stdout is not asserted (best-effort
       concurrent console echo; the database is the source of truth) so a future reader does not
       reinstate the scrape. Do **not** embed spec R-IDs (AGENTS.md comment rule).
-- [ ] Confirm the exact `hs list` field names / flags against `src/hypershell/task.py`
+- [x] Confirm the exact `hs list` field names / flags against `src/hypershell/task.py`
       (`exit_status`, `attempt`, `group` positionals; `-t/--with-tag`, `-c/--count`, `-F/--failed`,
       `-S/--succeeded`, `-R/--remaining`) before relying on them — fix any drift.
 - **Verify:** `for i in $(seq 1 15); do uv run pytest -q tests/test_groups.py::test_group_failed_task_with_retries || exit 1; done && uv run pytest -q tests/test_groups.py`
