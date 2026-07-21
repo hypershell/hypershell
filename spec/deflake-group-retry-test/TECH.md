@@ -7,7 +7,7 @@ status: in_review
 branch: fix/deflake-group-retry-test
 base: develop
 current_phase: done
-last_updated: '2026-07-20'
+last_updated: '2026-07-21'
 phases:
 - id: P1
   name: Rebuild the test on authoritative DB state
@@ -26,10 +26,10 @@ phases:
   verify: for i in $(seq 1 15); do uv run pytest -q tests/test_groups.py::test_group_failed_task_with_retries
     || exit 1; done && uv run pytest -q tests/test_groups.py
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 1f3737c6dfea5a0c6c25014f41993b2f2e627c03
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — De-flake `test_group_failed_task_with_retries`
 
