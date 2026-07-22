@@ -17,7 +17,7 @@
 <!-- Real findings are appended below this line by the lifecycle skills. -->
 
 ## F1 — `kind: fix` research-skip rule misfires for diagnostic fixes
-`origin=hs-plan:3 severity=medium category=steering status=open target=.claude/skills/hs-plan/SKILL.md`
+`origin=hs-plan:3 severity=medium category=steering status=applied target=.claude/skills/hs-plan/SKILL.md`
 - **What happened:** Step 3 says for `kind: fix` (and `appetite: small`) to *skip the research
   fan-out* and "do at most a couple of targeted reads yourself." This fix's `GOAL.md` explicitly
   demanded first-principles root-cause diagnosis of an unknown failure (test-fragility vs. a real
