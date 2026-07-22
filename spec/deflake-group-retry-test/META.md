@@ -35,7 +35,7 @@
 - **Confidence:** high · **Effort:** small
 
 ## F2 — `temp_site.sh` doesn't isolate cwd, so verify drives leak files into the repo
-`origin=hs-build:P1 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+`origin=hs-build:P1 severity=low category=tooling status=applied target=.agents/factory/bin/temp_site.sh`
 - **What happened:** a CLI cross-check run via `temp_site.sh sh -c "… > t.in; …"` wrote `t.in` to the
   repo root (not the throwaway site), and `hs-build` Step 7's `git add -A` silently committed it; I
   had to `del` it and amend.
