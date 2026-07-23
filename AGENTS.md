@@ -92,8 +92,9 @@ TLS-aware manager), `tls` (`TLSConfig`, cert generation), `heartbeat`, `template
 (`ciphers` is just an OpenSSL-string field on `TLSConfig`).
 
 Two repo-level trees sit outside the package: **`.agents/`** — the spec-driven "software
-factory" (the `hs-feature|plan|build|review|publish` lifecycle skills plus the meta/maintenance
-`hs-harness`; `factory/` methodology, invariants, EARS/templates, a non-Claude harness
+factory" (the `hs-feature|plan|build|review|publish` lifecycle skills plus two operational siblings —
+`hs-harness` (meta/maintenance) and `hs-release` (version bumps / releases); `factory/` methodology,
+invariants, EARS/templates, a non-Claude harness
 `portability.md` contract, and the `bin/` FSM + `meta_status.py` scripts; `.claude` symlinks here);
 and **`spec/{slug}/`** — the committed, dated
 per-feature design records (`GOAL.md`/`PLAN.md`/`TECH.md`/`REVIEW.md`, plus a `META.md` harness-feedback
@@ -335,6 +336,11 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
   substantial notes in the PR; and the human-gated **`/hs-harness`** (meta/maintenance, **not** a
   lifecycle step) applies those fixes back to `.agents/`, logging each in `factory/harness-log.md` —
   and never weakens a non-negotiable gate on a finding's say-so.
+- **Cut releases with `/hs-release`** (also operational, **not** a lifecycle step): it bumps the
+  single version source, rebuilds man pages, runs the CI-mirror gate (incl. `twine check --strict`),
+  signs a tag, and publishes — in one of three modes (`patch` off `master`, `pre-release` off
+  `develop`, `full-release` promoting `develop` → `master`) — rehearsed in a `git worktree` dry-run
+  and gated on an explicit human OK before any irreversible push. It fills the gap `/hs-publish` leaves.
 - **Verify by driving the CLI, not just tests.** After a change, exercise the real flow in a
   throwaway site: e.g. `.agents/factory/bin/temp_site.sh sh -c "seq 100 | uv run hsx -t 'echo {}'
   -N4 && uv run hs list"` — the wrapper mirrors the pytest `temp_site` fixture's env isolation so

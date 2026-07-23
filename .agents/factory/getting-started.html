@@ -289,7 +289,8 @@
     quickly, or the right thing in a way you cannot review. The discipline that channels it is
     <strong>method</strong> — and it turns out the good parts of agile practice (especially
     37signals' <em>Shape Up</em>) map cleanly onto agent work. HyperShell packages that method as a
-    small, transparent toolkit in <code><a href="../">.agents/</a></code>: five skills and a set of
+    small, transparent toolkit in <code><a href="../">.agents/</a></code>: five lifecycle skills — plus
+    two operational siblings, <code>hs-harness</code> and <code>hs-release</code> — and a set of
     reference documents that carry a change from a shaped goal, through a researched plan, through
     execution, through an adversarial review, to a pull request — with a durable, committed record at
     every step.</p>
@@ -354,7 +355,7 @@
       <li><a href="#harness">The harness: context + action</a></li>
       <li><a href="#methodology">Method: Shape Up meets agents</a></li>
       <li><a href="#factory">The <code>.agents/factory</code> lifecycle</a></li>
-      <li><a href="#skills">Hands-on: the five skills</a></li>
+      <li><a href="#skills">Hands-on: the skills</a></li>
       <li><a href="#reference">Reference: every material, linked</a></li>
     </ol>
   </div>
@@ -464,7 +465,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
     a body of instructions. When you type its name as a slash command — say <code>/hs-build</code> —
     the harness loads those instructions, injects live facts (the current branch, the git status), and
     the agent follows the procedure. Skills are how you capture "the way we do X here" once, so nobody
-    re-explains it every time. The five skills in this guide are exactly that: the HyperShell way to
+    re-explains it every time. The lifecycle skills in this guide are exactly that: the HyperShell way to
     take a change from idea to merge.</p>
 </section>
 
@@ -522,7 +523,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
 <section id="factory">
   <p class="kicker">Practitioner guide · 4</p>
   <h2>The <code>.agents/factory</code> lifecycle <a class="anchor" href="#factory">#</a></h2>
-  <p>One change flows through five skills, on its own git branch, leaving a committed trail under
+  <p>One change flows through five lifecycle skills, on its own git branch, leaving a committed trail under
     <code>spec/&lt;slug&gt;/</code>. The whole pipeline:</p>
 
   <div class="flow" aria-label="The factory lifecycle">
@@ -616,7 +617,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
     <div class="step"><div class="n">act</div><div class="t">/hs-harness</div><div class="d">human-gated fix to .agents/</div></div>
   </div>
 
-  <p>A sixth skill, <code>/hs-harness</code>, stands <em>outside</em> the lifecycle and is the only one
+  <p>One skill, <code>/hs-harness</code>, stands <em>outside</em> the lifecycle and is the only one
     that edits the factory itself. Pointed at a finished job's <code>META.md</code>, it shapes the fix
     with you, previews a diff per finding, and — <strong>only with human approval</strong> — applies each
     to <code>.agents/</code> as an atomic <code>[harness]</code> commit, recording every decision in a
@@ -632,7 +633,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
 <!-- =================== 5. SKILLS =================== -->
 <section id="skills">
   <p class="kicker">Practitioner guide · 5</p>
-  <h2>Hands-on: the five skills <a class="anchor" href="#skills">#</a></h2>
+  <h2>Hands-on: the skills <a class="anchor" href="#skills">#</a></h2>
   <p>Each is a slash command you invoke deliberately (none fire on their own). They guard their own
     preconditions — a wrong branch or a dirty tree stops them cold — so the process is hard to run out
     of order.</p>
@@ -687,7 +688,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
   </div>
 
   <div class="skill" style="border-left-color:var(--muted)">
-    <div class="cmd" style="color:var(--text-2)">/hs-harness <span style="color:var(--muted);font-weight:400">— the self-improvement skill (+1 · not part of the lifecycle)</span></div>
+    <div class="cmd" style="color:var(--text-2)">/hs-harness <span style="color:var(--muted);font-weight:400">— the self-improvement skill (operational · not part of the lifecycle)</span></div>
     <p>Stands apart from the five above: it changes the <strong>factory</strong>, not any feature. Pointed
       at a finished job's <code>META.md</code>, it shapes the fix with you, previews a diff per finding,
       and — <strong>only with your approval</strong> — applies each recorded process fix to
@@ -697,6 +698,20 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
       it closes.</p>
     <div class="io"><b>reads</b> spec/&lt;slug&gt;/META.md + harness-log.md · <b>writes</b> .agents/ fixes, harness-log.md ·
       <b>skill</b> <a href="../skills/hs-harness/SKILL.md">hs-harness/SKILL.md</a></div>
+  </div>
+
+  <div class="skill" style="border-left-color:var(--muted)">
+    <div class="cmd" style="color:var(--text-2)">/hs-release <span style="color:var(--muted);font-weight:400">— cut a version (operational · not part of the lifecycle)</span></div>
+    <p>The other operational sibling: it changes the <strong>release</strong>, not any feature. In one of
+      three modes — <code>patch</code> (hotfix off <code>master</code>), <code>pre-release</code>
+      (alpha/beta/rc off <code>develop</code>), or <code>full-release</code> (promote <code>develop</code>
+      → <code>master</code>) — it bumps the single version source, rebuilds the man pages, runs a
+      CI-mirror gate (tests, build, <code>twine check --strict</code>, sdist hygiene), signs an annotated
+      tag, and — <strong>only after you approve, before any irreversible push</strong> — publishes to
+      PyPI and ghcr, then verifies the result. Every branch op is rehearsed in an isolated git-worktree
+      dry-run first. Fills the gap <code>/hs-publish</code> leaves.</p>
+    <div class="io"><b>reads</b> pyproject.toml, git history, CI workflows · <b>writes</b> a version bump, man pages, a signed tag, a GitHub release ·
+      <b>skill</b> <a href="../skills/hs-release/SKILL.md">hs-release/SKILL.md</a></div>
   </div>
 
   <h3>A day in the life <a class="anchor" href="#skills">#</a></h3>
@@ -806,7 +821,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
   </table>
   </div>
 
-  <h3>The five lifecycle skills (+1 meta) <a class="anchor" href="#reference">#</a></h3>
+  <h3>The five lifecycle skills (+2 operational) <a class="anchor" href="#reference">#</a></h3>
   <div class="tablewrap">
   <table>
     <thead><tr><th>Skill</th><th>Role</th></tr></thead>
@@ -816,7 +831,8 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
       <tr><td><code><a href="../skills/hs-build/SKILL.md">hs-build</a></code></td><td>Execute the roadmap, one verified phase at a time.</td></tr>
       <tr><td><code><a href="../skills/hs-review/SKILL.md">hs-review</a></code></td><td>Independent, blind, evidence-based QA.</td></tr>
       <tr><td><code><a href="../skills/hs-publish/SKILL.md">hs-publish</a></code></td><td>Open the pull request (or merge locally).</td></tr>
-      <tr><td><code><a href="../skills/hs-harness/SKILL.md">hs-harness</a></code> <span style="color:var(--muted)">(+1 · meta)</span></td><td>Fold the self-improvement loop's findings back into the factory — human-gated, run by the lead developer as needed. <strong>Not</strong> a feature-lifecycle step.</td></tr>
+      <tr><td><code><a href="../skills/hs-harness/SKILL.md">hs-harness</a></code> <span style="color:var(--muted)">(operational · meta)</span></td><td>Fold the self-improvement loop's findings back into the factory — human-gated, run by the lead developer as needed. <strong>Not</strong> a feature-lifecycle step.</td></tr>
+      <tr><td><code><a href="../skills/hs-release/SKILL.md">hs-release</a></code> <span style="color:var(--muted)">(operational · release)</span></td><td>Cut a version — <code>patch</code> / <code>pre-release</code> / <code>full-release</code>: bump the single version source, rebuild man pages, run the CI-mirror gate (incl. <code>twine check --strict</code>), sign a tag, and publish to PyPI/ghcr — human-gated, dry-run-first. <strong>Not</strong> a feature-lifecycle step.</td></tr>
     </tbody>
   </table>
   </div>

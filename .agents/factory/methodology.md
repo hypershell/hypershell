@@ -11,7 +11,7 @@ this file.
 
 ## The lifecycle
 
-One feature (or fix/refactor) flows through five skills, on its own git branch, with every artifact
+One feature (or fix/refactor) flows through five lifecycle skills, on its own git branch, with every artifact
 committed under `spec/{slug}/`:
 
 ```
@@ -98,6 +98,7 @@ phase to "fit the appetite."
 .agents/
   skills/hs-{feature,plan,build,review,publish}/SKILL.md   # the five lifecycle skills
   skills/hs-harness/SKILL.md                               # meta/maintenance: apply the self-improvement loop
+  skills/hs-release/SKILL.md                               # operational: cut a version (patch/pre-release/full-release)
   factory/
     methodology.md        # this file
     invariants.md         # curated AGENTS.md footgun checklist (plan gate + review rubric)
