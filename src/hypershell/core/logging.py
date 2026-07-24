@@ -590,6 +590,14 @@ def panic(_msg: str) -> None:
     sys.exit(exit_status.bad_config)
 
 
+def require_croniter() -> None:
+    """Missing croniter is fatal only for time-based rotation; guide to the 'cron' extra."""
+    try:
+        import croniter  # noqa: F401 (probe only; TimedRotatingFileHandler imports it at rotate time)
+    except ImportError:
+        panic('Missing optional dependency "croniter" (the "cron" extra) needed for time-based log rotation')
+
+
 def _set_compression(policy: str) -> None:
     """Local wrapper to catch exception."""
     _label = blame(config, 'logging', 'file', 'compress')
@@ -1053,6 +1061,12 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
                 f'Using file-naming policy \'{FILE_NAMING_POLICY}\'',
             ]
         except ValueError:
+            # A time-like policy needs croniter; probe before constructing the handler so a missing
+            # dependency yields one clean message instead of a ModuleNotFoundError chained onto this
+            # size-parse ValueError. 'never' also lands here (parse_bytes rejects it) but skips
+            # croniter, mirroring TimedRotatingFileHandler.reset_interval's own ROTATE_NEVER guard.
+            if file_policy != ROTATE_NEVER:
+                require_croniter()
             set_naming_policy('date' if file_policy in DATE_ELIGIBLE else 'datetime')
             file_handler = TimedRotatingFileHandler(filename=file_path, interval=file_policy)
             info = [
@@ -1060,12 +1074,6 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
                 f'Rotation policy \'{file_policy}\' (time-like) with {compression_info}',
                 f'Using file-naming policy \'{FILE_NAMING_POLICY}\'',
             ]
-
-        if isinstance(file_handler, TimedRotatingFileHandler):
-            try:
-                from croniter import croniter
-            except ImportError:
-                panic('Missing optional dependency \'croniter\' needed for time-based rotation')
 
         file_handler.setFormatter(Formatter(file_format, datefmt=config.logging.datefmt))
         file_handler.setLevel(file_level)

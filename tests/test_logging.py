@@ -17,7 +17,7 @@ from pathlib import Path
 from subprocess import Popen, PIPE
 
 # External libs
-from pytest import mark, skip, fixture
+from pytest import mark, skip, fixture, raises
 from cmdkit.app import exit_status
 
 # Internal libs
@@ -449,3 +449,21 @@ def test_main_role_never_prunes_sidecars(temp_site: Path) -> None:
     assert Popen([sys.executable, '-c', _RUN_CLI, 'list', '--count'],
                  env=env, stdout=PIPE, stderr=PIPE).wait() == 0
     assert stale.exists()
+
+
+@mark.unit
+def test_require_croniter_panics_when_absent(monkeypatch, caplog) -> None:
+    """A missing croniter yields one actionable CRITICAL line + clean exit, not a raw ImportError."""
+    monkeypatch.setitem(sys.modules, 'croniter', None)  # makes `import croniter` raise ImportError
+    with caplog.at_level('CRITICAL', logger='hypershell.core.logging'):
+        with raises(SystemExit) as exc_info:
+            log.require_croniter()
+    assert exc_info.value.code == exit_status.bad_config  # single clean, non-zero exit
+    assert 'croniter' in caplog.text  # names the missing dependency
+    assert 'cron' in caplog.text      # names the remedy (the 'cron' extra)
+
+
+@mark.unit
+def test_require_croniter_noop_when_present() -> None:
+    """With croniter installed (dev/CI default), the probe is a silent no-op."""
+    assert log.require_croniter() is None

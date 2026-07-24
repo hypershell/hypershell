@@ -1,39 +1,46 @@
 ---
 slug: croniter-missing-guidance
-title: "Graceful guidance when croniter is missing for time-based log rotation"
+title: Graceful guidance when croniter is missing for time-based log rotation
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/croniter-missing-guidance
 base: develop
-current_phase: P1
-last_updated: "2026-07-24"
+current_phase: P2
+last_updated: '2026-07-24'
 phases:
-  - id: P1
-    name: "Core fix + unit proof (message, exit, no eager crash)"
-    status: pending
-    satisfies: [R1, R5]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: crest
-    verify: "uv run pytest -v -m unit tests/test_logging.py -k croniter"
-  - id: P2
-    name: "End-to-end regression proof (no double traceback; never/size/cron-present unaffected)"
-    status: pending
-    satisfies: [R2, R3, R4]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: crest
-    verify: "uv run pytest -v -m integration tests/test_logging.py -k croniter && .agents/factory/bin/temp_site.sh sh -c \"HYPERSHELL_LOGGING_FILE_ROTATE=@daily uv run hs list --count\""
+- id: P1
+  name: Core fix + unit proof (message, exit, no eager crash)
+  status: done
+  satisfies:
+  - R1
+  - R5
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: crest
+  verify: uv run pytest -v -m unit tests/test_logging.py -k croniter
+- id: P2
+  name: End-to-end regression proof (no double traceback; never/size/cron-present
+    unaffected)
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  - R4
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: crest
+  verify: uv run pytest -v -m integration tests/test_logging.py -k croniter && .agents/factory/bin/temp_site.sh
+    sh -c "HYPERSHELL_LOGGING_FILE_ROTATE=@daily uv run hs list --count"
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Graceful guidance when croniter is missing for time-based log rotation
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -65,7 +72,7 @@ spec/croniter-missing-guidance/TECH.md`); the per-phase checklists below are the
 actionable message + non-zero exit, delivered *before* any handler is constructed. Proven directly by
 unit tests on an extracted helper (no `_INIT`/full-init gymnastics).
 
-- [ ] In `src/hypershell/core/logging.py`, add a module-level helper near `panic()`:
+- [x] In `src/hypershell/core/logging.py`, add a module-level helper near `panic()`:
       ```python
       def require_croniter() -> None:
           """Missing croniter is fatal only for time-based rotation; guide to the 'cron' extra."""
@@ -74,7 +81,7 @@ unit tests on an extracted helper (no `_INIT`/full-init gymnastics).
           except ImportError:
               panic('Missing optional dependency "croniter" (the "cron" extra) needed for time-based log rotation')
       ```
-- [ ] In `initialize_logging()`'s `[logging.file]` Namespace branch, inside the `except ValueError:`
+- [x] In `initialize_logging()`'s `[logging.file]` Namespace branch, inside the `except ValueError:`
       time-like branch, **before** `file_handler = TimedRotatingFileHandler(...)`, insert the gated
       call:
       ```python
@@ -83,11 +90,11 @@ unit tests on an extracted helper (no `_INIT`/full-init gymnastics).
       ```
       (The gate is load-bearing: `'never'`/default also raises in `parse_bytes` and lands here but
       needs no croniter — mirrors `reset_interval`'s `interval != ROTATE_NEVER` guard.)
-- [ ] **Delete** the now-dead, ordering-broken block that follows the `try/except`
+- [x] **Delete** the now-dead, ordering-broken block that follows the `try/except`
       (`if isinstance(file_handler, TimedRotatingFileHandler): try: from croniter import croniter …
       except ImportError: panic(...)`). This is what caused the reachable-but-wrong `'never'`
       false-positive; removing it plus the earlier gated check subsumes it.
-- [ ] Add unit tests in `tests/test_logging.py` (import path style matches the file's `import
+- [x] Add unit tests in `tests/test_logging.py` (import path style matches the file's `import
       hypershell.core.logging as log` / `from cmdkit.app import exit_status`):
       - `test_require_croniter_panics_when_absent` (`@mark.unit`): `monkeypatch.setitem(sys.modules,
         'croniter', None)`; `with caplog.at_level('CRITICAL', logger='hypershell.core.logging'):`
