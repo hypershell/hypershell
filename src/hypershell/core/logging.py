@@ -9,11 +9,15 @@ from __future__ import annotations
 from typing import Tuple, Dict, Any, Type, Final, Optional, List, Callable, TypeAlias
 from types import ModuleType
 
-# standard libraries
+# Standard libs
 import os
 import re
 import sys
+import json
+import errno
+import atexit
 import socket
+import platform
 import importlib
 from datetime import datetime, timedelta
 from abc import abstractmethod, ABC
@@ -31,6 +35,7 @@ from logging import (
 from cmdkit.app import exit_status
 from cmdkit.config import Namespace, ConfigurationError
 from cmdkit.ansi import Ansi, COLOR_STDERR
+import psutil
 
 # Internal libs
 from hypershell.core.uuid import uuid
@@ -44,8 +49,9 @@ from hypershell.core.config import (
 )
 
 # Public interface
-__all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'initialize_logging', 'DEFAULT_LOGGING_LEVEL',
-           'role_from_command', 'default_file_for', 'claim_file_slot']
+__all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'initialize_logging', 'finalize_logging',
+           'close_inherited_slot_locks', 'DEFAULT_LOGGING_LEVEL', 'role_from_command',
+           'default_file_for', 'claim_file_slot', 'read_lock_record']
 
 
 # Cached for later use
@@ -657,70 +663,326 @@ def default_file_for(role: str) -> str:
     return os.path.join(default_path.log, f'{stem}.log')
 
 
-# We enforce the single-writer invariant with an advisory lock on a per-file
-# '.lock' sidecar, held (by the OS, so it releases even on a crash) for the life
-# of the process. Contention is only ever same-host because the hostname is baked
-# into the filename, and same-host advisory locks are reliable even on shared
-# network filesystems. Contended slots fall through to 'name-2.log', 'name-3.log',
-# ..., bounding the file count by peak concurrency on a host rather than by the
-# total number of processes ever launched (which matters under autoscaling).
-try:
-    import fcntl
-    def _try_lock(path: str) -> Optional[Any]:
-        """Acquire an exclusive, non-blocking lock; return the held handle or None."""
-        handle = open(path, mode='w')
+class LockUnsupported(Exception):
+    """Raised when the filesystem provides no advisory locking (degrade to canonical append)."""
+
+
+# The sidecar record identifies the live slot owner. It is one fixed-shape JSON line
+# written by the winner while holding the lock, so a later process can tell whether a
+# real process still holds the slot (start-time defeats PID reuse; the baked-in host
+# guarantees the PID is local and checkable). Version 1 record shape:
+#   {"v": 1, "pid": int, "create_time": float|null, "host": str, "instance": str}
+LOCK_RECORD_VERSION: Final[int] = 1
+
+
+def process_create_time() -> Optional[float]:
+    """This process's start time (epoch seconds) for pid-reuse defense in the owner record."""
+    try:
+        return psutil.Process(os.getpid()).create_time()
+    except Exception:  # psutil should always resolve our own pid; never fail claiming over it.
+        return None
+
+
+def write_lock_record(handle: Any) -> None:
+    """
+    Stamp the (locked) sidecar with this process's owner record; keep the lock held.
+
+    Best-effort: the flock, not the record, is the single-writer gate, so a failed write
+    never blocks slot claiming (the sidecar simply reads back as 'no live holder').
+    """
+    record = json.dumps({
+        'v': LOCK_RECORD_VERSION,
+        'pid': os.getpid(),
+        'create_time': process_create_time(),
+        'host': HOSTNAME_SHORT,
+        'instance': INSTANCE,
+    })
+    try:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(record + '\n')
+        handle.flush()  # Never close(): closing would drop the advisory lock.
+    except OSError as exc:
+        debug(f'Could not write lock record ({exc})')
+
+
+def read_lock_record(path: str) -> Optional[Dict[str, Any]]:
+    """Read a sidecar's owner record; None if empty, legacy, torn, or unparseable."""
+    for _ in range(2):  # Retry once: a probe can race the winner's single-line write.
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return handle
+            with open(path, mode='r') as handle:
+                line = handle.readline()
         except OSError:
-            handle.close()
             return None
-    _LOCKING = True
-except ImportError:
+        if not line.strip():
+            return None  # Empty or legacy 0-byte sidecar records no live holder.
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue  # Possibly torn mid-write; re-read once before giving up.
+        return record if isinstance(record, dict) else None
+    return None
+
+
+def owner_alive(record: Optional[Dict[str, Any]]) -> bool:
+    """
+    Whether the process that wrote `record` is still alive on this host.
+
+    Conservative: an empty, foreign-host, or malformed record reads as no live holder,
+    but a live same-identity process we merely cannot inspect is treated as alive so we
+    never steal a slot from a running owner.
+    """
+    if not record or record.get('host') != HOSTNAME_SHORT:
+        return False
+    pid = record.get('pid')
+    if not isinstance(pid, int):
+        return False
+    if not psutil.pid_exists(pid):
+        return False
+    try:
+        create_time = psutil.Process(pid).create_time()
+    except psutil.NoSuchProcess:
+        return False
+    except psutil.AccessDenied:
+        return True  # Live but owned by another user; never reclaim its slot.
+    recorded = record.get('create_time')
+    if not isinstance(recorded, (int, float)):
+        return True  # Live local pid but no checkable start-time; do not steal.
+    return abs(create_time - recorded) <= 2.0  # ~2s tolerance defeats pid reuse.
+
+
+# We enforce the single-writer invariant with an advisory lock on a per-file '.lock'
+# sidecar. The winner stamps the sidecar with an owner record (pid + start-time + short
+# host + app instance) while holding the lock, so a later process can tell whether a
+# live process holds the slot. Contention is only ever same-host (the hostname is baked
+# into the filename), and same-host advisory locks are reliable even on shared network
+# filesystems, so a genuinely contended slot falls through to 'name-2.log',
+# 'name-3.log', ..., bounding the file count by peak same-host concurrency. Only genuine
+# contention (EAGAIN) advances a slot; if the filesystem provides no advisory locking at
+# all, we append to the canonical per-host path rather than proliferating one file per
+# process. The lock releases when the last descriptor on its open-file-description closes
+# (normally at process exit; a forked child that inherits the descriptor must close its
+# own copy or the slot stays held past the true owner's death).
+def open_sidecar(path: str) -> Any:
+    """
+    Open (creating if needed) a lock sidecar for read/write, never truncating.
+
+    A losing probe must not blank the winner's record, so the open is non-truncating; only the
+    winner rewrites the record after it holds the lock. The handle's '.name' is the sidecar path,
+    which the shutdown finalizer relies on to unlink it while still holding the lock.
+    """
+    return open(path, mode='a+')
+
+
+# Filesystem implements locking mechanism
+LOCKING: bool = True
+
+if platform.system() == 'Windows':
     try:
         import msvcrt
-        def _try_lock(path: str) -> Optional[Any]:
-            """Acquire an exclusive, non-blocking lock; return the held handle or None."""
-            handle = open(path, mode='w')
+
+        def acquire_lock(handle: Any) -> bool:
+            """
+            Take the advisory lock on `handle`; msvcrt cannot distinguish contention from an
+            unsupported filesystem, so every failure reads as contention (conflict-only).
+            """
             try:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                return handle
+                return True
             except OSError:
-                handle.close()
-                return None
-        _LOCKING = True
+                return False
+
     except ImportError:
-        _try_lock = None
-        _LOCKING = False
+        acquire_lock = None
+        LOCKING = False
+else:
+    try:
+        import fcntl
+
+        def acquire_lock(handle: Any) -> bool:
+            """
+            Take the advisory lock on `handle`: True if acquired, False on genuine contention;
+            raise `LockUnsupported` if the filesystem provides no advisory locking.
+            """
+            while True:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return True
+                except InterruptedError:
+                    continue  # EINTR: retry the interrupted syscall.
+                except BlockingIOError:
+                    return False  # A live holder has the slot.
+                except OSError as exc:
+                    if exc.errno == errno.EINTR:
+                        continue
+                    if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                        return False
+                    raise LockUnsupported from exc  # No advisory locking on this filesystem.
+
+    except ImportError:
+        acquire_lock = None
+        LOCKING = False
 
 
-# Held lock handles keep claimed slots reserved for the life of the process.
-_slot_locks: List[Any] = []
+def try_lock(path: str) -> Optional[Any]:
+    """Acquire an exclusive, non-blocking lock on the sidecar; return the held handle (with the
+    owner record written), None on genuine contention, or raise `LockUnsupported` when the
+    filesystem lacks advisory locking."""
+    handle = open_sidecar(path)
+    try:
+        acquired = acquire_lock(handle)
+    except LockUnsupported:
+        handle.close()
+        raise
+    if not acquired:
+        handle.close()
+        return None
+    write_lock_record(handle)
+    return handle
+
+
+# Held lock handles keep claimed slots reserved for the life of the process. Each handle's
+# '.name' is its sidecar path, so a clean shutdown can unlink it while still holding the lock.
+slot_locks: List[Any] = []
+
+# The shutdown finalizer is registered once, on the first successful claim.
+ATEXIT_REGISTERED: bool = False
+_FINAL: bool = False
 
 
 def claim_file_slot(path: str, max_slots: int = 100) -> str:
     """Return the first unclaimed per-process variant of `path`, holding its lock."""
+    global ATEXIT_REGISTERED
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     root, ext = os.path.splitext(path)
-    if _LOCKING:
-        for n in range(1, max_slots + 1):
-            candidate = path if n == 1 else f'{root}-{n}{ext}'
-            handle = _try_lock(candidate + '.lock')
-            if handle is not None:
-                _slot_locks.append(handle)
-                return candidate
-        warn(f'Exhausted {max_slots} log-file slots for \'{path}\'; using PID suffix')
-    return f'{root}-{os.getpid()}{ext}'
+    if LOCKING:
+        try:
+            for n in range(1, max_slots + 1):
+                candidate = path if n == 1 else f'{root}-{n}{ext}'
+                handle = try_lock(candidate + '.lock')
+                if handle is not None:
+                    slot_locks.append(handle)
+                    if not ATEXIT_REGISTERED:
+                        atexit.register(finalize_logging)  # Drop our sidecars on clean exit.
+                        ATEXIT_REGISTERED = True
+                    return candidate
+            warn(f'Exhausted {max_slots} log-file slots for \'{path}\'; using PID suffix')
+            return f'{root}-{os.getpid()}{ext}'  # Genuine all-EAGAIN exhaustion: real concurrency.
+        except LockUnsupported:
+            return path  # Lockless filesystem: append to the canonical per-host path.
+    return path  # No advisory-locking support at all: append to the canonical per-host path.
 
 
-def resolve_log_path(path: str, role: str, is_default: bool) -> str:
-    """Host-scope an explicit client path, then claim an exclusive per-process slot."""
+def finalize_logging() -> None:
+    """
+    Stop file logging and drop this process's own lock sidecars (best-effort, clean exit).
+
+    Registered via `atexit` on the first claim. File logging is stopped first so no record races
+    the unlink, then each held sidecar is unlinked *while its lock is still held* (the R8
+    only-unlink-under-the-held-lock safety invariant) and closed. Idempotent; a `SIGKILL`/OOM
+    that skips this is swept by the next start's `prune_stale_sidecars`.
+    """
+    global _FINAL
+    if _FINAL:
+        return
+    _FINAL = True
+    if queue_listener is not None:
+        try:
+            queue_listener.stop()  # Flush and stop the writer thread: no further file writes.
+        except Exception:
+            pass
+    while slot_locks:
+        handle = slot_locks.pop()
+        try:
+            os.unlink(handle.name)  # Unlink our own sidecar while still holding its lock.
+        except OSError:
+            pass
+        try:
+            handle.close()
+        except OSError:
+            pass
+
+
+def close_inherited_slot_locks() -> None:
+    """
+    Close slot-lock descriptors inherited by a forked child, without unlinking any sidecar.
+
+    A fork-without-exec child (the queue-manager subprocess) inherits the parent's slot-lock
+    open-file-descriptions and would keep their advisory locks held until it too exits, ghost-
+    locking the slot if the parent is killed. The child closes its inherited copies so each lock
+    releases exactly when the true owner (the parent) exits. It must NOT unlink the sidecars —
+    the parent still owns them (only-unlink-under-the-held-lock, R8). No-op where there is no
+    fork / on Windows / when nothing is held.
+    """
+    while slot_locks:
+        handle = slot_locks.pop()
+        try:
+            handle.close()
+        except OSError:
+            pass
+
+
+def prune_stale_sidecars(canonical_path: str) -> None:
+    """
+    Remove stale sibling '<root>-N<ext>.lock' sidecars that no live process holds.
+
+    Only the process that won the canonical slot calls this. A candidate is removed only if its
+    advisory lock can be acquired (no live holder) and *while that lock is held* (R8); a sidecar
+    a live process holds is left untouched. Only '.lock' sidecars are ever removed — never the
+    '-N<ext>' data, its rotated/compressed lineage, or the 'main' role (R5).
+    """
+    if not LOCKING:
+        return  # Nothing to prune where advisory locking is unavailable.
+    root, ext = os.path.splitext(canonical_path)
+    log_dir = os.path.dirname(canonical_path) or '.'
+    pattern = re.compile(rf'^{re.escape(os.path.basename(root))}-([0-9]+){re.escape(ext)}\.lock$')
+    try:
+        entries = os.listdir(log_dir)
+    except OSError:
+        return
+    for name in entries:
+        if pattern.fullmatch(name):
+            prune_one_sidecar(os.path.join(log_dir, name))
+
+
+def prune_one_sidecar(path: str) -> None:
+    """Flock-guarded unlink of a single stale sidecar (the acquirable lock is the safety gate)."""
+    try:
+        handle = open_sidecar(path)
+    except OSError:
+        return
+    try:
+        acquired = acquire_lock(handle)
+    except LockUnsupported:
+        handle.close()
+        return  # A lockless filesystem has no reclaimable sidecar to prune safely.
+    if not acquired:
+        handle.close()  # A live process holds the slot; leave its sidecar in place.
+        return
+    record = read_lock_record(path)  # Diagnostics only; the flock-acquire is the safety gate.
+    try:
+        os.unlink(path)  # Unlink while holding the lock: closes the inode-reuse race (R8).
+        pid = record.get('pid') if record else None
+        debug(f'Pruned stale log-lock sidecar ({path})' + (f' (dead pid {pid})' if pid else ''))
+    except OSError:
+        pass
+    finally:
+        handle.close()
+
+
+def host_scoped_path(path: str, role: str, is_default: bool) -> str:
+    """Host-scope an explicit client path (the default is already host-scoped)."""
     if role == 'client' and not is_default:
         # A client-role process launched across many hosts must not share a user's
         # explicit path (the default is already host-scoped); decorate it per host.
         root, ext = os.path.splitext(path)
         path = f'{root}-client-{HOSTNAME_SHORT}{ext}'
-    return claim_file_slot(path)
+    return path
+
+
+def resolve_log_path(path: str, role: str, is_default: bool) -> str:
+    """Host-scope an explicit client path, then claim an exclusive per-process slot."""
+    return claim_file_slot(host_scoped_path(path, role, is_default))
 
 
 # Only permit calling initialize_logging once
@@ -754,7 +1016,8 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
     merely_enabled = [True, 'enabled']
     if isinstance(file_config, (str, bool)):
         is_default = file_config in merely_enabled
-        file_path = resolve_log_path(default_file if is_default else file_config, role, is_default)
+        canonical_path = host_scoped_path(default_file if is_default else file_config, role, is_default)
+        file_path = claim_file_slot(canonical_path)
         file_handler = TimedRotatingFileHandler(filename=file_path)
         file_handler.setFormatter(Formatter(default_file_format, datefmt=datefmt))
         file_handler.setLevel(LEVEL_MAPPING[default_file_level])
@@ -768,7 +1031,8 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
 
         requested = file_config.pop('path', default_config.logging.file.path)
         is_default = requested == PARAM_UNSET
-        file_path = resolve_log_path(default_file if is_default else requested, role, is_default)
+        canonical_path = host_scoped_path(default_file if is_default else requested, role, is_default)
+        file_path = claim_file_slot(canonical_path)
         file_policy = file_config.pop('rotate', DEFAULT_ROTATION_INTERVAL)
         file_compress = file_config.pop('compress', default_config.logging.file.compress)
         file_compress = file_compress if file_compress != PARAM_UNSET else None
@@ -835,4 +1099,6 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
 
     if file_handler is not None:
         recover_interrupted_compression(file_handler.filename)
+        if role in DISTRIBUTED_ROLES and file_path == canonical_path:
+            prune_stale_sidecars(canonical_path)  # Sweep crash-leftover sibling sidecars (R4).
         compression_jobs.put_nowait(False)  # Bookmark the completion of recovered files

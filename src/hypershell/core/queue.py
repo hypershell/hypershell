@@ -25,7 +25,7 @@ from multiprocessing import JoinableQueue
 
 # Internal libs
 from hypershell.core.config import default, config as _config
-from hypershell.core.logging import Logger
+from hypershell.core.logging import Logger, close_inherited_slot_locks
 from hypershell.core.types import NoneType, serialize
 from hypershell.core.tls import (TLSConfig, install_process_context,
                                  get_server_context, get_client_context, get_tls_config,
@@ -240,9 +240,17 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
 listener_client[TLS_SERIALIZER] = (SecureListener, secure_client)
 
 
-def _tls_bootstrap(cfg: TLSConfig, user_init, user_initargs) -> None:
-    """Initializer used by :class:`SecureManager.start` to install TLS state in the subprocess."""
-    install_process_context(cfg)
+def _child_bootstrap(cfg: Optional[TLSConfig], user_init, user_initargs) -> None:
+    """Initializer run in the forked manager child before it serves.
+
+    Closes log-slot lock descriptors inherited across the fork so the parent stays the sole
+    holder (a killed parent never leaves a ghost lock), installs the per-process TLS context
+    when TLS is active, then runs any user initializer. Ordered so the fd hygiene and TLS state
+    are in place before serving; touches neither the RPC framing, authkey, nor the handshake.
+    """
+    close_inherited_slot_locks()
+    if cfg is not None:
+        install_process_context(cfg)
     if user_init is not None:
         user_init(*user_initargs)
 
@@ -273,12 +281,10 @@ class SecureManager(BaseManager):
     def start(self: SecureManager,
               initializer: Optional[Callable[..., Any]] = None,
               initargs: Iterable[Any] = ()) -> None:
-        """Spawn the server subprocess, ensuring the TLS context is installed inside it."""
-        if self._tls is not None:
-            super().start(initializer=_tls_bootstrap,
-                          initargs=(self._tls, initializer, tuple(initargs)))
-        else:
-            super().start(initializer=initializer, initargs=initargs)
+        """Spawn the server subprocess, closing inherited log-slot locks (and installing the TLS
+        context when active) inside the forked child before any user initializer runs."""
+        super().start(initializer=_child_bootstrap,
+                      initargs=(self._tls, initializer, tuple(initargs)))
 
     def connect(self: SecureManager) -> None:
         """Install the local-process TLS context, then perform the manager handshake."""
