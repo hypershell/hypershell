@@ -3,10 +3,10 @@ slug: logging-file-slot-reclaim
 title: Ephemeral log-lock sidecars + fd-leak/errno hardening
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/logging-file-slot-reclaim
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-07-23'
 phases:
 - id: P1
@@ -49,7 +49,7 @@ phases:
   verify: uv run pytest -v tests/test_logging.py -k "fork or leak or inherit or manager"
 - id: P4
   name: End-to-end bound + regression + docs note
-  status: pending
+  status: done
   satisfies:
   - R1
   - R8
@@ -170,15 +170,15 @@ killed `server`/`cluster` parent never ghost-locks its slot.
 **Goal:** prove the whole thing holds under real CLI drive, codify the behaviors that already
 work, and document the legitimate concurrency/rotation cases.
 
-- [ ] `@mark.integration` test in a `temp_site` (`HYPERSHELL_LOGGING_FILE=enabled`): repeated
+- [x] `@mark.integration` test in a `temp_site` (`HYPERSHELL_LOGGING_FILE=enabled`): repeated
       serial `hsx` generations reclaim the canonical file and leave a bounded set of sidecars;
       simulate concurrency and assert distinct `-N.log` files are created and their data is never
       removed.
-- [ ] Regression (R1/R8): existing role/host-scope/`resolve_log_path`/reclaim tests stay green;
+- [x] Regression (R1/R8): existing role/host-scope/`resolve_log_path`/reclaim tests stay green;
       `main` un-host-scoped and un-pruned; cross-host isolation intact; no-lock/msvcrt fallbacks.
-- [ ] Manual CLI drive (record in commit body):
+- [x] Manual CLI drive (record in commit body):
       `.agents/factory/bin/temp_site.sh sh -c "HYPERSHELL_LOGGING_FILE=enabled; for i in 1 2 3; do seq 20 | uv run hsx -t 'echo {}' -N2 >/dev/null; done; find \"$HYPERSHELL_SITE\" -name '*.log.lock' | wc -l"`.
-- [ ] **Docs (R9):** in the file-based-logging docs, note (a) per-host `-N.log` under legitimate
+- [x] **Docs (R9):** in the file-based-logging docs, note (a) per-host `-N.log` under legitimate
       same-host concurrency, (b) ephemeral, owner-stamped sidecars, (c) legitimate dangling
       rotated leaves when revisiting a host at lower concurrency.
 - **Verify:** `uv run pytest -v -m integration tests/test_logging.py`

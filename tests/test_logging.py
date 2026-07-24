@@ -386,3 +386,66 @@ def test_forked_child_closing_inherited_lock_releases_parent_slot(tmp_path: Path
     if not _LOCKING:
         skip('requires advisory file locking')
     assert _fork_lock_probe(tmp_path, child_closes=True) is True
+
+
+# Runs the real 'hs' CLI in a fresh subprocess (so logging initializes from scratch each time).
+_RUN_CLI = 'from hypershell import main; main()'
+
+
+@mark.integration
+def test_serial_generations_reclaim_canonical_and_leave_no_sidecars(tmp_path: Path) -> None:
+    """Serial claim-and-exit generations each reclaim the canonical slot; sidecars never
+    accumulate across clean restarts (R1: reclaim works; the count stays bounded)."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    for _ in range(4):
+        proc = Popen([sys.executable, '-c', _CLEAN_EXITER, base], stdout=PIPE, env=os.environ)
+        claimed = proc.stdout.readline().decode().strip()
+        proc.wait()
+        assert proc.returncode == 0
+        assert os.path.basename(claimed) == 'client.log'  # canonical reclaimed every generation
+    assert list(tmp_path.glob('*.lock')) == []            # ephemeral: nothing left behind
+
+
+@mark.integration
+def test_concurrent_holders_get_distinct_slots_and_data_survives(tmp_path: Path) -> None:
+    """Genuinely concurrent same-host processes get distinct '-N' slots, and a canonical prune
+    never removes their data or their live sidecars (R1: concurrency is legitimate; R5/R8)."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    holders = [Popen([sys.executable, '-c', _HOLDER, base], stdout=PIPE, env=os.environ)
+               for _ in range(3)]
+    try:
+        claimed = [h.stdout.readline().decode().strip() for h in holders]
+        assert sorted(os.path.basename(c) for c in claimed) == \
+            ['client-2.log', 'client-3.log', 'client.log']  # distinct concurrent slots
+        for path in claimed:
+            Path(path).write_text('rank output')            # each rank writes its own data
+        log.prune_stale_sidecars(base)                       # a canonical sweep must not disturb live ranks
+        for path in claimed:
+            assert Path(path).read_text() == 'rank output'   # rank data preserved (R5)
+            assert os.path.exists(path + '.lock')            # live sibling sidecar retained (R8)
+    finally:
+        for holder in holders:
+            holder.terminate()
+            holder.wait()
+
+
+@mark.integration
+def test_main_role_never_prunes_sidecars(temp_site: Path) -> None:
+    """A real 'main'-role command never prunes sibling sidecars (R8: 'main' is left alone)."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    env = {**os.environ, 'HYPERSHELL_LOGGING_FILE': 'enabled'}
+    # First run materializes the site log directory and main.log.
+    assert Popen([sys.executable, '-c', _RUN_CLI, 'initdb', '--yes'],
+                 env=env, stdout=PIPE, stderr=PIPE).wait() == 0
+    main_log = next(iter(Path(temp_site).rglob('main.log')), None)
+    assert main_log is not None
+    stale = main_log.parent / 'main-2.log.lock'
+    stale.write_bytes(b'')  # a sibling a distributed role would prune -- but 'main' must not
+    assert Popen([sys.executable, '-c', _RUN_CLI, 'list', '--count'],
+                 env=env, stdout=PIPE, stderr=PIPE).wait() == 0
+    assert stale.exists()

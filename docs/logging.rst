@@ -289,6 +289,23 @@ If you set an explicit ``path`` it is honored verbatim, with one exception: for 
 ``client`` role — which is launched en masse across a cluster — the hostname is appended so
 the mass-launched clients still never share a file.
 
+Each active slot is guarded by an adjacent ``<file>.lock`` *sidecar*. The sidecar carries the
+owning process's identity — its process id, start time, short hostname, and run instance —
+written while the advisory lock is held, so any later process can tell whether a *live* process
+still holds the slot. Sidecars are ephemeral: a process removes its own on a clean exit, and the
+next process to win the canonical slot sweeps any left behind by a crash — removing only the
+``.lock`` file, **never** any ``.log`` data. A lock file lingering without a live owner is
+therefore harmless and self-healing, not a sign that anything is wrong. (The non-distributed
+``main`` role is never host-scoped and never pruned.)
+
+The numbered ``<role>-<host>-2.log``, ``-3``, … files produced by *genuinely concurrent*
+same-host processes are legitimate per-rank output and are **never** deleted, truncated, or
+merged — one client per rank (e.g. under ``srun`` with one client per GPU) is expected, not a
+fault. Relatedly, revisiting a host at a *lower* concurrency than a previous run can leave an
+earlier rank's rotated or compressed files (e.g. ``client-<host>-3.20260101.log.gz``) with no
+active writer; these dangling rotated leaves are legitimate and are left untouched — remove them
+yourself if you no longer need them.
+
 |
 
 Parameters
