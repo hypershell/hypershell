@@ -1,4 +1,4 @@
-# GOAL — Reclaim per-host log-file slots on shared HPC filesystems
+# GOAL — Ephemeral log-lock sidecars + hardening (per-host log-file hygiene)
 
 > **Origin spec.** The *what* and *why* — the locked contract `hs-review` grades against.
 > The *how* lives in [`PLAN.md`](PLAN.md) and [`TECH.md`](TECH.md) (written by `hs-plan`).
@@ -7,102 +7,119 @@
 
 - **slug:** logging-file-slot-reclaim
 - **kind:** fix
-- **appetite:** small
+- **appetite:** small (→ small-medium)
+
+> **Re-scoped 2026-07-23 after investigation.** The original premise — "the per-host log-slot
+> scheme never reclaims the canonical path on Lustre/ZFS and proliferates files without bound" —
+> was **refuted by ground-truth evidence**. `flock` acquire, conflict-detection, and
+> **reclaim+append all work** on both Lustre and ZFS; the `client-<host>-N.log` files the
+> maintainer saw were **legitimate concurrent clients** (one per rank under
+> `--launcher=srun`, e.g. one client per GPU), plus a `SIGINT`/`SIGTERM` quirk in an external
+> management script that was unknowingly overlapping client generations. See
+> [`research/09-revised-design.md`](research/09-revised-design.md) (supersedes
+> [`research/00-digest.md`](research/00-digest.md)). This GOAL now targets the *real* residual
+> issues that the investigation surfaced.
 
 ## Problem
 
-HyperShell's file-based logging gives long-running / distributed roles (`server`, `client`,
-`cluster`, `submit`) a **per-host** log file — a client on host `a123.cluster.edu` logs to
-`client-a123.log` — and enforces a single-writer invariant with an advisory `flock` on a
-per-file `.lock` sidecar. When a slot is contended, the process falls through to
-`client-a123-2.log`, `client-a123-3.log`, …, so the file count is meant to be bounded by *peak
-concurrency on a host*, not by the *total number of processes ever launched* (which matters
-under autoscaling, where a host cycles through many short-lived client generations).
+Per-host file logging works as designed: distributed roles get `<role>-<host>.log`, a single
+writer is enforced by an advisory `flock` on a `<path>.lock` sidecar, and concurrent same-host
+clients correctly fall through to `-2.log`, `-3.log`, … (bounded by peak concurrency). Three real
+issues remain, none of which is a reclaim bug:
 
-In real-world use on our Gautschi HPC cluster this is not what happens. On both `/home` (ZFS)
-and `/scratch` (Lustre), the canonical per-host path is **never reclaimed**: successive client
-generations keep falling through to fresh `-N` slots, and the `.lock` sidecars and `-N.log`
-files **proliferate without bound** — exactly the "one file per process ever launched" failure
-the slot scheme was designed to prevent. The lock is either never released or never seen as
-released across the network filesystem. It is not yet confirmed whether this reproduces on a
-local filesystem; the code comment's assumption that "same-host advisory locks are reliable
-even on shared network filesystems" is the prime suspect (Lustre commonly needs an explicit
-`flock` mount option; without it `flock` may error or be node-local, and `_try_lock` treats a
-lock **error** identically to a lock **conflict**, forcing every process onto a new slot).
-
-The concrete pain: an autoscaling client fleet running for hours or days silently fills the log
-directory with thousands of near-empty `client-<host>-<N>.log` and `.lock` files, on precisely
-the shared filesystems (ZFS/Lustre) HPC users are told to use.
+1. **The `.lock` sidecars are permanent and alarming.** They are 0-byte, carry no owner
+   information, and are never removed — so a log directory accumulates `.lock` files that look
+   like something is wrong and give no way to tell whether a *live* process actually holds a
+   slot. Operators expect a lock file to be ephemeral: present while the owner runs, gone when it
+   stops.
+2. **A latent fd-inheritance lock leak for `server`/`cluster` roles.** `initialize_logging()`
+   runs before any process creation, so the flock'd sidecar descriptor is open when
+   `BaseManager.start()` (`core/queue.py`) forks the queue-manager child on Linux's default
+   `fork` start method. The child inherits and *shares* that lock's open-file-description, so a
+   `SIGKILL`/OOM'd parent can leave the slot **ghost-locked** until the child also dies. (Clients
+   never fork a manager, so client slots are unaffected — consistent with the evidence.)
+3. **A latent proliferation bug on a genuinely lockless filesystem.** `_try_lock` treats *every*
+   `OSError` as contention, and both the no-locking and exhausted-slots branches fall back to a
+   per-PID path (`<root>-<pid>.log`) — i.e. one file per process. On a filesystem that truly does
+   not support `flock` (e.g. Lustre actually mounted `noflock`), this would proliferate. Not the
+   maintainer's current symptom, but a real footgun to close while we are here.
 
 ## Outcome / vision
 
-On the filesystems HyperShell actually runs on in production — including Lustre and ZFS — the
-per-host log-slot scheme behaves as designed: a freed canonical per-host path is **reclaimed**
-by the next generation, so a host that runs one client at a time trends toward **a single log
-file per host** rather than an ever-growing pile. The file count stays bounded by real
-concurrency, not by cumulative launches. The root cause is understood and documented (not just
-patched), and the artifacts that have already accumulated (orphaned `.lock` sidecars and stale
-`-N.log` slots whose owning process is gone) are reaped. The single-writer safety intent is
-preserved to whatever degree the underlying filesystem permits, with the trade-off made
-deliberately rather than by accident.
+Lock sidecars behave like well-mannered PID/socket files: created while a client runs, carrying
+the owner's identity, and removed when the client stops (best-effort on clean exit; swept on the
+next start for crashes). No accumulation across clean restarts, and an operator can always tell
+whether a real live process holds a slot. The `server`/`cluster` fd-leak is closed so a killed
+parent never ghost-locks its slot. On a lockless filesystem the file count stays bounded instead
+of growing per-process. Throughout, the behaviors that already work — reclaim+append on a healthy
+FS, distinct files for genuinely-concurrent same-host clients, cross-host isolation — are
+**preserved and regression-tested**, and legitimate `-N.log` data is **never** deleted or merged.
 
 ## Acceptance criteria (the contract)
 
-- **R1** — The investigation SHALL identify and document (in `TECH.md`) the root cause of
-  non-reclamation and unbounded proliferation on Lustre and ZFS, including whether it
-  reproduces on a local POSIX filesystem, before a fix is committed.
-- **R2** — WHEN a client process starts on a host and no live process holds the canonical
-  per-host log path, the logging subsystem SHALL reclaim that canonical path (e.g.
-  `client-<host>.log`) rather than falling through to a new `-N` slot.
-- **R3** — WHEN a canonical per-host path is reclaimed under R2, the logging subsystem SHALL
-  **append** to the existing file, preserving prior generations' log history (subject to normal
-  rotation), and SHALL NOT truncate it.
-- **R4** — WHILE multiple client generations are launched serially on one host over time (the
-  autoscaling case), the number of `*.log` and `*.lock` files for that host SHALL remain
-  bounded by peak concurrent processes on the host, NOT by the cumulative count of processes
-  ever launched.
-- **R5** — IF advisory locking is unavailable or unreliable on the target filesystem, THEN the
-  logging subsystem SHALL still keep the per-host file count bounded (it SHALL NOT degenerate to
-  one file per process). *The specific mechanism — graceful degradation to a reused per-host
-  path vs. a bounded, self-reaping distinct-file scheme — is deferred to `/hs-plan` once the
-  root cause is confirmed.*
-- **R6** — The fix SHALL reap orphaned artifacts: stale `.lock` sidecars and `-N.log` slots
-  whose owning process is no longer alive SHALL be reclaimable/removable rather than reserved
-  forever.
-- **R7** — The single-writer intent SHALL be honored wherever the filesystem supports it: two
-  genuinely concurrent same-host processes SHALL NOT silently corrupt each other's log via
-  interleaved writes on a filesystem where locking works.
-- **R8** — The change SHALL NOT regress the cross-host safety property (distinct hosts keep
-  distinct files via the baked-in hostname) nor the non-distributed `main`-role default, and
-  SHALL preserve the existing Windows (`msvcrt`) and no-locking (`_LOCKING = False`) fallbacks.
+- **R1** — The investigation finding SHALL be recorded (retained `research/`): the observed
+  proliferation was legitimate same-host concurrency, not a reclaim/lock failure, and reclaim+
+  append already works on Lustre and ZFS. Regression tests SHALL codify that correct behavior.
+- **R2** — Each per-host lock sidecar SHALL carry its owner's identity (process id + process
+  start-time + short hostname + app instance), written by the owner **while holding the advisory
+  lock**, so any later process can determine whether a *live* process holds the slot (start-time
+  defeats PID reuse; the baked-in hostname guarantees the PID is local and checkable).
+- **R3** — WHEN a process shuts down cleanly, it SHALL remove its own lock sidecar(s) on a
+  best-effort basis — after its file logging has stopped and **while still holding the lock** —
+  so sidecars do not accumulate across clean restarts.
+- **R4** — WHEN a process starts and resolves its log slot, it SHALL prune stale sibling lock
+  sidecars (those with no live holder), **acquiring each sidecar's lock before removing it**, and
+  SHALL NOT remove a sidecar that a live process holds.
+- **R5** — The system SHALL NEVER delete, truncate, or rewrite `-N.log` data files or their
+  rotated/compressed lineage. Concurrent-rank logs are legitimate output.
+- **R6** — IF a distributed role forks a queue-manager child (`server`/`cluster`), THEN the
+  inherited log-slot lock descriptor SHALL be closed in the child, so the lock releases when the
+  true owner exits (no ghost lock from a killed parent).
+- **R7** — WHEN acquiring a slot lock fails, the system SHALL advance to the next `-N` slot ONLY
+  on genuine contention (`EAGAIN`/`EWOULDBLOCK`); IF advisory locking is unavailable (any other
+  lock error, or no locking support), THEN it SHALL reuse the canonical per-host path (append)
+  rather than a per-PID path, keeping the file count bounded.
+- **R8** — The change SHALL preserve existing correct behavior: canonical reclaim+append on a
+  healthy filesystem, cross-host file isolation (hostname in filename), the non-distributed
+  `main` role, and the Windows (`msvcrt`) and no-locking fallbacks. The safety invariant **"only
+  unlink a sidecar while holding its lock"** SHALL hold everywhere (no inode-reuse races).
+- **R9** — The file-based-logging documentation SHALL note that (a) per-host `-N.log` files are
+  expected under legitimate same-host concurrency, (b) sidecars are ephemeral and carry owner
+  identity, and (c) revisiting a host at lower concurrency can leave earlier ranks' rotated
+  leaves dangling — which is legitimate.
 
 ## Non-goals (no-gos)
 
-- Redesigning the logging architecture beyond the per-host file-slot / lock scheme (no new log
-  backends, no change to the queue-based handler, rotation policy, or log formats).
-- Changing the role model (`DISTRIBUTED_ROLES`, `role_from_command`, `main`-role sharing) or the
-  choice to bake the short hostname into the filename.
-- Fixing HPC filesystem mount configuration (e.g. mandating a Lustre `flock` mount option) —
-  HyperShell must behave acceptably regardless, but we do not own the site's mount options.
-- A background reaper daemon or cross-run garbage-collection service; orphan reaping (R6) is
-  expected to happen opportunistically at slot-claim time, not as a separate long-lived process.
-- Distributed coordination of a shared log across hosts (each host remains independent).
+- **Deleting, merging, or concatenating `-N.log` data** (explicitly rejected — legitimate logs).
+- **Single-file-per-host** logging (one shared appending file for all same-host clients):
+  correctness-breaking with rotation (`FILE_LOCK` is process-local → compress-under-writer data
+  loss), risks torn lines on Lustre, and violates single-writer.
+- **A PID-record "override a held `flock` to force reclaim" mechanism** — unnecessary; reclaim
+  already works. The PID record is for liveness/diagnostics and safe pruning only.
+- Fixing the external box-manager `SIGINT`/`SIGTERM` behavior that overlaps client generations
+  (separate work the maintainer will do later).
+- Cross-process rotation coordination; a new config knob; changing the role model or the
+  hostname-in-filename scheme.
 
 ## Clarifications
 
-- **Q:** On reclaiming a freed canonical per-host path, append or truncate? — **A:** Append,
-  preserving history (rotation still bounds size) (resolved 2026-07-23).
-- **Q:** When advisory locking is unsupported/unreliable on the filesystem, degrade to a reused
-  per-host path (accepting possible interleave) or preserve strict single-writer with bounded
-  distinct files? — **A:** Require only that proliferation stays bounded (R5); defer the
-  mechanism choice to `/hs-plan` after the root cause is confirmed (resolved 2026-07-23).
-- **Q:** Reap already-accumulated orphaned `.lock` and `-N.log` files as part of this fix? —
-  **A:** Yes, in scope (R6) (resolved 2026-07-23).
+- **Q:** Is the observed `-N.log` proliferation a reclaim bug? — **A:** No; it is legitimate
+  same-host concurrency (confirmed by log-timestamp forensics + a ZFS restart-reclaim test);
+  reclaim+append works on both filesystems (resolved 2026-07-23).
+- **Q:** Delete `-N.log` orphans on reap? — **A:** No — never delete legitimate rank logs; the
+  reap target is the `.lock` sidecar only (resolved 2026-07-23).
+- **Q:** How to handle leftover `.lock` sidecars? — **A:** Ephemeral lifecycle: best-effort
+  unlink at clean shutdown + flock-guarded prune at startup, with a PID+timestamp record
+  (resolved 2026-07-23).
+- **Q:** Fold in the latent errno/lockless-FS cleanup now? — **A:** Yes (R7) (resolved
+  2026-07-23).
 
 ## Related materials
 
-- Source: `src/hypershell/core/logging.py` — `claim_file_slot`, `_try_lock`, `resolve_log_path`,
-  `default_file_for`, `role_from_command` (~lines 640–723); `FILE_LOCK` rotation lock (~line 355).
-- Observed on: Gautschi HPC cluster — `/home` (ZFS), `/scratch` (Lustre).
-- Context: autoscaling client fleets (`cluster/remote.py` `AutoScalingCluster`) cycle many
-  short-lived client generations per host — the workload that makes non-reclamation visible.
+- Source: `src/hypershell/core/logging.py` (`_try_lock`, `claim_file_slot`, `resolve_log_path`,
+  `_slot_locks`, `initialize_logging`, rotation/compression machinery) and `src/hypershell/core/
+  queue.py` (`SecureManager`/`BaseManager.start()` fork seam, ~`:243-281`,`:385`).
+- Observed on: Gautschi HPC — `/scratch` (Lustre), `/home` (ZFS); autoscaling + `--launcher=srun`
+  one-client-per-GPU.
+- Investigation: [`research/04`](research/04-evidence-forensics.md)–[`research/11`](research/11-stress-reap.md);
+  synthesis [`research/09-revised-design.md`](research/09-revised-design.md).

@@ -1,6 +1,6 @@
 ---
 slug: logging-file-slot-reclaim
-title: "Reclaim per-host log-file slots on shared HPC filesystems"
+title: "Ephemeral log-lock sidecars + fd-leak/errno hardening"
 kind: fix
 appetite: small
 status: in_progress
@@ -10,28 +10,37 @@ current_phase: P1
 last_updated: "2026-07-23"
 phases:
   - id: P1
-    name: "errno discrimination + degrade-to-canonical (core fix)"
+    name: "Self-describing sidecar record + errno discrimination + degrade-to-canonical"
     status: pending
-    satisfies: [R1, R2, R3, R5, R7, R8]
+    satisfies: [R2, R7, R8]
     depends_on: []
     parallel: false
     hammerable: false
     hill: uphill
-    verify: "uv run pytest -v tests/test_logging.py -k \"slot or lock or degrade or unsupported\""
+    verify: "uv run pytest -v tests/test_logging.py -k \"slot or lock or errno or degrade or record\""
   - id: P2
-    name: "Opportunistic orphan-slot reap"
+    name: "Ephemeral sidecar lifecycle (shutdown drop + flock-guarded startup prune)"
     status: pending
-    satisfies: [R6, R4]
+    satisfies: [R3, R4, R5]
     depends_on: [P1]
     parallel: false
     hammerable: false
     hill: uphill
-    verify: "uv run pytest -v tests/test_logging.py -k \"reap or orphan\""
+    verify: "uv run pytest -v tests/test_logging.py -k \"sidecar or prune or ephemeral or shutdown\""
   - id: P3
-    name: "End-to-end bounded-count verification (CLI-driven)"
+    name: "server/cluster fork fd-leak hardening (core/queue.py)"
     status: pending
-    satisfies: [R4, R8]
-    depends_on: [P1, P2]
+    satisfies: [R6]
+    depends_on: [P1]
+    parallel: false
+    hammerable: false
+    hill: uphill
+    verify: "uv run pytest -v tests/test_logging.py -k \"fork or leak or inherit or manager\""
+  - id: P4
+    name: "End-to-end bound + regression + docs note"
+    status: pending
+    satisfies: [R1, R8, R9]
+    depends_on: [P1, P2, P3]
     parallel: false
     hammerable: false
     hill: uphill
@@ -43,126 +52,130 @@ review:
   cycle: 0
 ---
 
-# TECH.md — Reclaim per-host log-file slots on shared HPC filesystems
+# TECH.md — Ephemeral log-lock sidecars + fd-leak/errno hardening
 
-The **context engine and finite-state machine** for building this fix. The YAML frontmatter
-is the resume ground-truth (read it with
-`uv run python .agents/factory/bin/next_phase.py spec/logging-file-slot-reclaim/TECH.md`); the
-per-phase checklists below are the work.
+Resume ground-truth is the YAML frontmatter (read with
+`uv run python .agents/factory/bin/next_phase.py spec/logging-file-slot-reclaim/TECH.md`).
 
-- **Vision / requirements (locked):** [`GOAL.md`](GOAL.md) — R-IDs are the contract.
+- **Vision / requirements (locked):** [`GOAL.md`](GOAL.md) — R-IDs are the contract (re-scoped
+  2026-07-23 after the reclaim-bug premise was refuted).
 - **Authoritative design:** [`PLAN.md`](PLAN.md).
-- **Backing research:** [`research/00-digest.md`](research/00-digest.md) + briefs 01–03.
+- **Backing research:** [`research/09-revised-design.md`](research/09-revised-design.md)
+  (supersedes [`00-digest.md`](research/00-digest.md)); briefs 04–11.
 
 ## Conventions (apply to every phase)
 
-- Invariants and house style come from [`AGENTS.md`](../../AGENTS.md) /
-  [`invariants.md`](../../.agents/factory/invariants.md). The whole fix is contained to
-  `src/hypershell/core/logging.py` + `tests/test_logging.py`.
-- One phase per `hs-build` invocation; one atomic commit with **both** code and the `TECH.md`
-  state change. Subjects: `[fix] Build logging-file-slot-reclaim P<n>: …`. **No `Co-Authored-By`.**
-- **No new CLI flag or config key** (internal-only) ⇒ **no** `docs/_include` / `share/` edits
-  (invariant §12). If a phase discovers a knob is truly needed, STOP and escalate — it would
-  change scope and force companion doc/completion edits.
-- Use symbolic `errno.*` constants, never integer literals (numbers differ macOS↔Linux).
-- Add an **autouse fixture** in `tests/test_logging.py` (P1) that closes and clears the module
-  global `_slot_locks` after each test — otherwise held handles leak across tests and cause flakes.
+- Invariants/house style from [`AGENTS.md`](../../AGENTS.md) /
+  [`invariants.md`](../../.agents/factory/invariants.md). Core changes live in
+  `src/hypershell/core/logging.py`; P3 also edits **`core/queue.py` (high-blast-radius §16)** —
+  touch only the post-fork child fd-close; leave RPC/TLS/authkey/handshake untouched.
+- One phase per `hs-build` invocation; one atomic commit (code + `TECH.md` state). Subjects:
+  `[fix] Build logging-file-slot-reclaim P<n>: …`. **No `Co-Authored-By`.**
+- **No new CLI flag / config key** ⇒ no `docs/_include` / `share/` edits. R9 is prose in the
+  file-logging docs (not CLI help). Symbolic `errno.*`, never integer literals.
+- **Load-bearing safety invariant (R8): only ever `unlink` a sidecar while holding its `flock`.**
+  Audit every unlink site against it.
+- Add an **autouse fixture** in `tests/test_logging.py` that closes + clears the module global
+  `_slot_locks` after each test (prevents held-handle leakage / cross-test flakes).
 
 ---
 
-## Phase P1 — errno discrimination + degrade-to-canonical (core fix)
-**Satisfies:** R1, R2, R3, R5, R7, R8 · **Depends on:** —
-**Goal:** teach the slot machinery to tell a genuine lock *conflict* from *unavailable* locking,
-and on unavailable locking reuse-and-append the canonical per-host path instead of manufacturing
-a new file — curing the primary proliferation bug end to end.
+## Phase P1 — Self-describing sidecar record + errno discrimination + degrade
+**Satisfies:** R2, R7, R8 · **Depends on:** —
+**Goal:** the sidecar carries its owner's identity, and lock failures are classified so a lockless
+FS degrades to canonical-append instead of a per-PID file — foundational for P2/P3.
 
-- [ ] In `_try_lock` (`logging.py:669-677`), replace the bare `except OSError` with errno
-      classification: success → return handle; `errno ∈ {errno.EAGAIN, errno.EWOULDBLOCK}`
-      (i.e. `BlockingIOError`) → **CONFLICT** (return `None`, meaning "advance a slot");
-      `errno == errno.EINTR` → retry the same candidate; **any other** `OSError` → **UNSUPPORTED**
-      (signal the caller to stop walking — e.g. raise a small module-internal `_LockUnavailable`
-      or return a distinct sentinel). Use `getattr(errno, 'ENOTSUP', None)`-style guards only if
-      you enumerate names; the "everything else = unsupported" default avoids that.
-- [ ] Keep the `msvcrt` branch behavior as conflict-only (its `OSError` still means contended);
-      keep the `_LOCKING = False` guard.
-- [ ] In `claim_file_slot` (`logging.py:701-713`): on CONFLICT advance to the next `-N` slot
-      (unchanged); on the **first** UNSUPPORTED, or when `_LOCKING is False`, stop and return the
-      **canonical** (n=1) per-host path, emitting exactly one `warn(...)` that advisory locking is
-      unavailable so files are shared per host. Leave the genuine-exhaustion (all-100-CONFLICT)
-      branch returning the PID suffix — that is real 100-way concurrency where a distinct file is
-      correct. Remove the `_LOCKING=False` PID-suffix return in favor of the canonical degrade.
-- [ ] Update the false comment at `logging.py:660-666` to state the real contract (fall through
-      only on genuine contention; degrade to the shared canonical path when locking is
-      unavailable). Declarative statement of the invariant, no spec ids.
-- [ ] Confirm reclaim+append needs no code change: the handler already opens `mode='a'`
-      (`logging.py:377`); the degrade path returns the same canonical name → appends (R3).
-- [ ] Tests (`tests/test_logging.py`, `@mark.unit`): add the autouse `_slot_locks` cleanup
-      fixture. Patch `hypershell.core.logging.fcntl.flock` to raise `OSError(errno.ENOSYS)` and
-      `OSError(errno.ENOLCK)` → assert `claim_file_slot` returns the **canonical** path (degrade,
-      R5); raise `OSError(errno.EAGAIN)` → assert it returns `client-…-2.log` (conflict
-      fallthrough, R7); `monkeypatch.setattr('hypershell.core.logging._LOCKING', False)` → assert
-      canonical (R8). Add a repro/documentation test asserting the *old* behavior does not recur
-      (many generations under injected `ENOSYS` yield **one** canonical file, not a PID pile) — this
-      is the empirical half of R1 (and confirms local working-flock still reclaims via the existing
-      `test_slot_reclaimed_after_owner_dies`).
-- **Verify:** `uv run pytest -v tests/test_logging.py -k "slot or lock or degrade or unsupported"`
+- [ ] Rework `_try_lock` (`logging.py:669-694`): open the sidecar **non-truncating** (not
+      `mode='w'`); classify failure — `EAGAIN`/`EWOULDBLOCK` (`BlockingIOError`) → CONFLICT
+      (return `None` = advance); `EINTR` → retry; any other `OSError` → UNSUPPORTED (signal the
+      caller). Keep the `msvcrt` branch (conflict-only) and the `_LOCKING=False` guard.
+- [ ] On a won lock, write the owner record `{"v":1,"pid","create_time","host","instance"}` as a
+      single fixed-shape line + `flush()` (never `close()`). Add a reader `read_lock_record(path)`
+      opening `'r'`, tolerant of empty/legacy/torn (→ `None` = "no live holder"), with a
+      retry-once on parse failure.
+- [ ] Add a liveness helper `_owner_alive(record)` using `psutil.pid_exists` +
+      `psutil.Process(pid).create_time()` within a ~2s tolerance; treat `AccessDenied` as alive
+      (never steal); host-guard on `HOSTNAME_SHORT`. `psutil` is already a dep (`core/resource.py`).
+- [ ] `claim_file_slot` (`logging.py:701-713`): advance only on CONFLICT; on first UNSUPPORTED or
+      `_LOCKING is False`, return the **canonical** path (append) — remove the `<root>-<pid>`
+      returns at `:713` (keep PID-suffix only for genuine all-`EAGAIN` exhaustion). Fix the false
+      comment `:660-666`.
+- [ ] Tests (`@mark.unit`): autouse `_slot_locks` cleanup; patch `fcntl.flock` to inject
+      `ENOSYS`/`ENOLCK` (→ canonical) vs `EAGAIN` (→ `-2`); `_LOCKING=False` → canonical; record
+      round-trips and reads back; legacy 0-byte sidecar parses as no-holder.
+- **Verify:** `uv run pytest -v tests/test_logging.py -k "slot or lock or errno or degrade or record"`
 - **Touches:** `src/hypershell/core/logging.py`, `tests/test_logging.py`.
 
-## Phase P2 — Opportunistic orphan-slot reap
-**Satisfies:** R6, R4 · **Depends on:** P1
-**Goal:** the process that wins the canonical slot removes stale `-N.log` files whose owning
-process is gone, so the artifacts already accumulated on Gautschi get reclaimed — without racing
-live siblings or the rotation/compression machinery.
+## Phase P2 — Ephemeral sidecar lifecycle
+**Satisfies:** R3, R4, R5 · **Depends on:** P1
+**Goal:** sidecars are created while a client runs and removed when it stops — best-effort at
+clean shutdown, swept for crashes at startup — **never** touching `-N.log` data.
 
-- [ ] Add a helper `reap_orphan_slots(canonical_path)` that runs **only** when the caller won the
-      canonical (n=1) lock (one reaper per host). Enumerate `os.listdir(dirname)`, match the
-      **exact** slot shape via a compiled regex on the `basename_without_ext`-scoped prefix:
-      `^{re.escape(root_basename)}-([0-9]+){re.escape(ext)}$` (i.e. `client-<host>-<int>.log`),
-      mirroring `recover_interrupted_compression`'s prefix-scoping discipline (`logging.py:513-533`).
-- [ ] For each matched slot: `_try_lock(slot + '.lock')` — if it returns a handle (LOCKED →
-      orphan), `os.remove` the `-N.log` **data file** and release the probe handle; on CONFLICT
-      (live sibling) or UNSUPPORTED, skip. **Never** remove: the `.lock` sidecars (POSIX
-      inode-reuse race — see PLAN §5), the dot-separated rotation namespace
-      (`client-<host>.<N>` / `.YYYYMMDD` / `.YYYYMMDD-HHMMSS`), the freshly-claimed file, or
-      anything for the `main` role. Wrap `os.remove` to tolerate `FileNotFoundError`/`OSError`
-      (a racing reaper or a live writer).
-- [ ] Call the reaper from `initialize_logging` right where `recover_interrupted_compression`
-      runs (`logging.py:837`), guarded to fire only when the canonical slot was claimed. Keep it
-      before the compression thread does real work (invariant §5 — do not race `FILE_LOCK`).
-- [ ] Tests (`@mark.unit`): seed unlocked orphan `client-h-2.log`/`-3.log`, a *locked*
-      `client-h-4.log` (hold its sidecar flock in-test), rotated `client-h.1` /
-      `client-h.20260723`, and `main.log`; after a canonical claim assert only the unlocked
-      orphans are removed and everything else is retained.
-- **Verify:** `uv run pytest -v tests/test_logging.py -k "reap or orphan"`
+- [ ] **Shutdown drop (R3):** register a finalizer (an `atexit` hook when a slot is claimed and/or
+      an explicit `finalize_logging()` in the app stop path) that stops file logging (the
+      `QueueListener`) so no further writes, then for each `_slot_locks` handle: `unlink` the
+      sidecar **while holding the lock**, then `close`. Wrap best-effort (`try/except OSError`).
+- [ ] **Startup prune (R4):** only the process that wins the **canonical** slot scans sibling
+      sidecars matching the exact dash shape `^{re.escape(root)}-([0-9]+){re.escape(ext)}\.lock$`
+      (prefix-scoped like `recover_interrupted_compression`, `:513-533`). For each:
+      `flock(LOCK_EX|LOCK_NB)` — acquired ⇒ stale ⇒ `unlink` the **sidecar only** while holding
+      it, then release; blocked ⇒ live ⇒ skip. Use `read_lock_record`/`_owner_alive` for
+      diagnostics/logging, but the `flock`-acquire is the safety gate. Invoke beside
+      `recover_interrupted_compression` (`:837`), before the compression thread does real work (§5).
+- [ ] **R5 guard:** never `unlink`/rewrite `-N.log`, rotated (`client-h.<N>`/`.YYYYMMDD…`),
+      `.partial`, or `main`-role files. Add an assertion/test that data files survive a prune.
+- [ ] Tests (`@mark.unit`/`integration`): clean-exit path removes own sidecar; stale sibling
+      (dead PID, unlocked) removed; *held* sibling retained; `-N.log` + rotated + `main.log` all
+      survive; inode-reuse guard (never unlink an unlockable sidecar).
+- **Verify:** `uv run pytest -v tests/test_logging.py -k "sidecar or prune or ephemeral or shutdown"`
 - **Touches:** `src/hypershell/core/logging.py`, `tests/test_logging.py`.
 
-## Phase P3 — End-to-end bounded-count verification (CLI-driven)
-**Satisfies:** R4, R8 · **Depends on:** P1, P2
-**Goal:** prove, by driving the real CLI, that repeated client generations on one host converge
-to a bounded set of log files (no proliferation), and that cross-host / `main`-role behavior is
-unregressed.
+## Phase P3 — server/cluster fork fd-leak hardening
+**Satisfies:** R6 · **Depends on:** P1
+**Goal:** a forked queue-manager child no longer holds the parent's log-slot lock alive, so a
+killed `server`/`cluster` parent never ghost-locks its slot.
 
-- [ ] Add an `@mark.integration` test that, in an isolated `temp_site` with file logging enabled
-      (`HYPERSHELL_LOGGING_FILE=enabled`), runs several serial `hsx`/`hs cluster` generations and
-      asserts the count of `client-*.log` files stays bounded (does not grow with the generation
-      count). Reuse the `temp_site` fixture and the `main`/`main_lines` helpers.
-- [ ] Manually drive the flow once to confirm (record the command in the commit body):
-      `.agents/factory/bin/temp_site.sh sh -c "for i in 1 2 3; do seq 20 | uv run hsx -t 'echo {}' -N2 >/dev/null; done; find \"$HYPERSHELL_SITE\" -name 'client-*.log' | wc -l"`
-      — the count must not scale with the loop iterations.
-- [ ] Confirm no regression: full `uv run pytest -v tests/test_logging.py` stays green
-      (role mapping, host-scoping, `resolve_log_path` client decoration, crash-reclaim), and the
-      `main` role remains un-host-scoped and un-reaped.
+- [ ] In `core/queue.py`, close the inherited `_slot_locks` handles in the forked manager child
+      via the existing post-fork initializer seam (`_tls_bootstrap` path, ~`:243-281`) or
+      `os.register_at_fork(after_in_child=…)`. Import the logging handles list without creating an
+      import cycle (a small `hypershell.core.logging.close_inherited_slot_locks()` helper is
+      cleanest). No-op where there is no fork / on Windows. **Do not** touch RPC framing, TLS
+      context, authkey, or the handshake/fingerprint (high-blast-radius §16).
+- [ ] Note: `os.set_inheritable(False)` is useless here (exec-only; this is fork-without-exec).
+- [ ] Tests (`@mark.unit`, POSIX-only `skipif` Windows): a raw `os.fork()` after a claim — assert
+      the parent's `flock` is released once the parent closes iff the child closed its inherited
+      copy (the child-close is what P3 adds). Keep it `os.fork`, not `multiprocessing`, to isolate
+      the mechanism.
+- **Verify:** `uv run pytest -v tests/test_logging.py -k "fork or leak or inherit or manager"`
+- **Touches:** `src/hypershell/core/queue.py`, `src/hypershell/core/logging.py`, `tests/test_logging.py`.
+
+## Phase P4 — End-to-end bound + regression + docs note
+**Satisfies:** R1, R8, R9 · **Depends on:** P1, P2, P3
+**Goal:** prove the whole thing holds under real CLI drive, codify the behaviors that already
+work, and document the legitimate concurrency/rotation cases.
+
+- [ ] `@mark.integration` test in a `temp_site` (`HYPERSHELL_LOGGING_FILE=enabled`): repeated
+      serial `hsx` generations reclaim the canonical file and leave a bounded set of sidecars;
+      simulate concurrency and assert distinct `-N.log` files are created and their data is never
+      removed.
+- [ ] Regression (R1/R8): existing role/host-scope/`resolve_log_path`/reclaim tests stay green;
+      `main` un-host-scoped and un-pruned; cross-host isolation intact; no-lock/msvcrt fallbacks.
+- [ ] Manual CLI drive (record in commit body):
+      `.agents/factory/bin/temp_site.sh sh -c "HYPERSHELL_LOGGING_FILE=enabled; for i in 1 2 3; do seq 20 | uv run hsx -t 'echo {}' -N2 >/dev/null; done; find \"$HYPERSHELL_SITE\" -name '*.log.lock' | wc -l"`.
+- [ ] **Docs (R9):** in the file-based-logging docs, note (a) per-host `-N.log` under legitimate
+      same-host concurrency, (b) ephemeral, owner-stamped sidecars, (c) legitimate dangling
+      rotated leaves when revisiting a host at lower concurrency.
 - **Verify:** `uv run pytest -v -m integration tests/test_logging.py`
-- **Touches:** `tests/test_logging.py`.
+- **Touches:** `tests/test_logging.py`, `docs/…` (file-logging section).
 
 ---
 
 ## How `hs-build` drives this
 
-1. `next_phase.py` prints the next actionable phase (statuses are authoritative).
+1. `next_phase.py` prints the next actionable phase (statuses authoritative).
 2. Pre-flight: clean tree, on `fix/logging-file-slot-reclaim`, `develop` reachable.
-3. Execute every `[ ]` in the phase (consult `PLAN.md` / `research/` for detail).
-4. Run the phase's `verify:` command — never advance on a checkbox alone.
-5. Amend this file if reality diverges (regenerate frontmatter with `set_phase.py`); STOP and
-   escalate only on a `GOAL.md` contradiction (e.g. discovering a config knob is unavoidable).
-6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[fix]` commit; stop and report.
+3. Execute every `[ ]` (consult `PLAN.md`/`research/09` for detail).
+4. Run the phase `verify:` — never advance on a checkbox alone.
+5. Amend this file if reality diverges (`set_phase.py`); STOP only on a `GOAL.md` contradiction.
+6. Mark phase `done`, advance `current_phase`, `--touch`; one `[fix]` commit; stop and report.
+   P3 touches high-blast-radius `core/queue.py` → expect a human review gate.

@@ -1,5 +1,12 @@
 # Research digest — logging-file-slot-reclaim
 
+> **⚠️ SUPERSEDED (2026-07-23).** This digest's root-cause theory (errno conflation / Lustre
+> `noflock`→`ENOSYS`→slot exhaustion) was **refuted by ground-truth evidence** from Gautschi:
+> `flock` acquire and reclaim+append work on both Lustre and ZFS, and the `-N.log` files were
+> **legitimate concurrent clients**, not a reclaim failure. See
+> [`09-revised-design.md`](09-revised-design.md) for the corrected diagnosis and the re-scoped
+> plan. Retained only as an audit trail of the initial (wrong) hypothesis.
+
 Consolidated decisions from briefs [01](01-fs-lock-semantics.md) (FS lock semantics),
 [02](02-code-trace-signatures.md) (code trace + failure signatures),
 [03](03-fix-surface-and-tests.md) (fix surface + tests). Where briefs disagreed, the single
