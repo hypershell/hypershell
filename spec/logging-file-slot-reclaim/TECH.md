@@ -3,7 +3,7 @@ slug: logging-file-slot-reclaim
 title: Ephemeral log-lock sidecars + fd-leak/errno hardening
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/logging-file-slot-reclaim
 base: develop
 current_phase: done
