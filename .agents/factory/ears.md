@@ -45,3 +45,6 @@ log line, a printed message) so `hs-review` can check it by driving the CLI.
 - Untestable adjectives ("fast", "robust", "user-friendly") — replace with an observable threshold.
 - Multiple requirements in one line — split so each has its own R-ID and pass/fail.
 - Specifying the *how* (implementation) in a criterion — that belongs in `PLAN.md`.
+- Encoding a **suspected cause/mechanism** in a *fix's* criterion (e.g. "the fix must not use the
+  broken code path") — the root cause is unverified until `/hs-plan`; state the observable broken→fixed
+  behavior instead.

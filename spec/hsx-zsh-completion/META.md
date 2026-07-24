@@ -14,7 +14,7 @@
 ## Friction findings
 
 ## F1 — Fix GOAL encoded an unverified root-cause hypothesis in an acceptance criterion
-`origin=hs-plan:step4 severity=low category=steering status=open target=.claude/skills/hs-feature/SKILL.md`
+`origin=hs-plan:step4 severity=low category=steering status=applied target=.claude/skills/hs-feature/SKILL.md`
 - **What happened:** the shaped `GOAL.md` (from `/hs-feature`) baked the reporter's suspected
   mechanism into the contract — the *Problem* blamed the `(1)` exclusion form and asserted "submit
   works", and **R4** required the fix to "not use two conflicting, one-broken spec forms". `/hs-plan`

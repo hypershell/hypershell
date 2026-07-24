@@ -100,6 +100,10 @@ links, source paths). Record `slug`, `kind`, `appetite` in the header. If adopti
 GOAL.md, refine it **in place** — preserve the author's intent; only disambiguate, structure, and add
 R-IDs/appetite/non-goals. Do not expand scope.
 
+**For `kind: fix`, phrase acceptance criteria as the observable broken→fixed behavior the user sees —
+never the suspected cause/mechanism of the bug, which is unverified until `/hs-plan` root-causes it.** A
+criterion pinned to a wrong diagnosis has to be reinterpreted mid-lifecycle.
+
 ### Step 5 — Coherence self-check
 Re-read the GOAL: is it solved, bounded to the appetite, and free of unresolved markers? Every
 requirement testable and observable? If not, iterate (ask the human) before committing.
