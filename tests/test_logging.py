@@ -29,10 +29,11 @@ from hypershell.core.logging import (
 
 @fixture(autouse=True)
 def _clean_slot_locks():
-    """Release and clear any held slot-lock handles after each test.
+    """Release and clear process-global slot-lock state after each test.
 
-    Slot locks are process-global and held for the life of the owner; without this a
-    claimed handle would leak across tests and skew later contention/liveness checks.
+    Slot locks are held for the life of the owner and the finalizer runs once; without this a
+    claimed handle (or a tripped `_FINALIZED` flag) would leak across tests and skew later
+    contention/liveness/finalize checks.
     """
     yield
     for handle in log._slot_locks:
@@ -41,6 +42,7 @@ def _clean_slot_locks():
         except OSError:
             pass
     log._slot_locks.clear()
+    log._FINALIZED = False
 
 
 # A tiny program that claims a slot, announces it, and holds the lock while it sleeps.
@@ -239,3 +241,92 @@ def test_owner_alive_lock_record_false_for_other_host() -> None:
     """A record stamped by another host is not a checkable local holder."""
     record = {'v': 1, 'pid': os.getpid(), 'create_time': 0.0, 'host': 'some-other-host', 'instance': 'x'}
     assert log._owner_alive(record) is False
+
+
+# A program that claims a slot then exits cleanly, so its atexit finalizer drops the sidecar.
+_CLEAN_EXITER = (
+    'import sys;'
+    'from hypershell.core.logging import claim_file_slot;'
+    'print(claim_file_slot(sys.argv[1]), flush=True)'
+)
+
+
+@mark.unit
+def test_finalize_logging_drops_own_sidecar(tmp_path: Path) -> None:
+    """On clean shutdown a process removes its own held lock sidecar (best-effort, R3)."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    claimed = claim_file_slot(base)
+    sidecar = claimed + '.lock'
+    assert os.path.exists(sidecar)
+    log.finalize_logging()
+    assert not os.path.exists(sidecar)  # own sidecar removed while its lock was still held
+    assert not log._slot_locks
+
+
+@mark.integration
+def test_clean_exit_removes_own_sidecar_via_atexit(tmp_path: Path) -> None:
+    """A cleanly-exiting subprocess sweeps its own sidecar through the registered atexit hook."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    proc = Popen([sys.executable, '-c', _CLEAN_EXITER, base], stdout=PIPE, env=os.environ)
+    claimed = proc.stdout.readline().decode().strip()
+    proc.wait()
+    assert proc.returncode == 0
+    assert os.path.basename(claimed) == 'client.log'
+    assert not os.path.exists(claimed + '.lock')  # atexit finalizer dropped it on clean exit
+
+
+@mark.unit
+def test_prune_removes_stale_unlocked_sidecar(tmp_path: Path) -> None:
+    """The canonical winner prunes a sibling '-N' sidecar that no live process holds (R4)."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    root, ext = os.path.splitext(base)
+    stale = f'{root}-2{ext}.lock'
+    open(stale, 'w').close()  # unlocked, legacy 0-byte sidecar: no live holder
+    assert os.path.exists(stale)
+    claim_file_slot(base)  # win the canonical slot (holds client.log.lock)
+    log.prune_stale_sidecars(base)
+    assert not os.path.exists(stale)
+
+
+@mark.unit
+def test_prune_keeps_live_held_sibling_sidecar(tmp_path: Path) -> None:
+    """A sibling sidecar a live process holds is never pruned (flock-acquire is the safety gate)."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    root, ext = os.path.splitext(base)
+    claim_file_slot(base)      # holds client.log.lock (canonical)
+    claim_file_slot(base)      # holds client-2.log.lock (a live sibling)
+    held = f'{root}-2{ext}.lock'
+    assert os.path.exists(held)
+    log.prune_stale_sidecars(base)
+    assert os.path.exists(held)  # live holder -> retained
+
+
+@mark.unit
+def test_prune_sidecar_never_touches_data_or_rotated_files(tmp_path: Path) -> None:
+    """Pruning removes only '.lock' sidecars, never '-N' data, its rotated lineage, or 'main' (R5)."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    root, ext = os.path.splitext(base)
+    stale = f'{root}-2{ext}.lock'
+    data = f'{root}-2{ext}'                          # client-2.log        (rank data)
+    rotated = f'{root}-2.20260723'                   # client-2.20260723   (rotated lineage)
+    partial = f'{root}-2.20260723.gz.partial'        # mid-compression child
+    main_side = str(tmp_path / 'main.log.lock')      # the 'main' role is never pruned
+    open(stale, 'w').close()
+    for survivor in (data, rotated, partial, main_side):
+        Path(survivor).write_text('keep me')
+    claim_file_slot(base)
+    log.prune_stale_sidecars(base)
+    assert not os.path.exists(stale)  # only the sidecar goes
+    for survivor in (data, rotated, partial, main_side):
+        assert os.path.exists(survivor), survivor
+        assert Path(survivor).read_text() == 'keep me'

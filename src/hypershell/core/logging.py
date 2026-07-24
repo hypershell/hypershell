@@ -15,6 +15,7 @@ import re
 import sys
 import json
 import errno
+import atexit
 import socket
 import importlib
 from datetime import datetime, timedelta
@@ -46,8 +47,9 @@ from hypershell.core.config import (
 )
 
 # Public interface
-__all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'initialize_logging', 'DEFAULT_LOGGING_LEVEL',
-           'role_from_command', 'default_file_for', 'claim_file_slot', 'read_lock_record']
+__all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'initialize_logging', 'finalize_logging',
+           'DEFAULT_LOGGING_LEVEL', 'role_from_command', 'default_file_for', 'claim_file_slot',
+           'read_lock_record']
 
 
 # Cached for later use
@@ -762,65 +764,79 @@ def _owner_alive(record: Optional[Dict[str, Any]]) -> bool:
 def _open_sidecar(path: str) -> Any:
     """Open (creating if needed) a lock sidecar for read/write, never truncating.
 
-    A losing probe must not blank the winner's record, so the open is non-truncating;
-    only the winner rewrites the record after it holds the lock.
+    A losing probe must not blank the winner's record, so the open is non-truncating; only the
+    winner rewrites the record after it holds the lock. The handle's '.name' is the sidecar path,
+    which the shutdown finalizer relies on to unlink it while still holding the lock.
     """
-    return os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o644), 'r+')
+    return open(path, mode='a+')
 
 
 try:
     import fcntl
-    def _try_lock(path: str) -> Optional[Any]:
-        """Acquire an exclusive, non-blocking lock; return the held handle, None on genuine
-        contention, and raise `_LockUnsupported` when the filesystem lacks advisory locking."""
-        handle = _open_sidecar(path)
+    def _acquire_lock(handle: Any) -> bool:
+        """Take the advisory lock on `handle`: True if acquired, False on genuine contention;
+        raise `_LockUnsupported` if the filesystem provides no advisory locking."""
         while True:
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
             except InterruptedError:
                 continue  # EINTR: retry the interrupted syscall.
             except BlockingIOError:
-                handle.close()
-                return None  # A live sibling holds the slot; advance.
+                return False  # A live holder has the slot.
             except OSError as exc:
                 if exc.errno == errno.EINTR:
                     continue
                 if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
-                    handle.close()
-                    return None
-                handle.close()
+                    return False
                 raise _LockUnsupported from exc  # No advisory locking on this filesystem.
-            _write_lock_record(handle)
-            return handle
     _LOCKING = True
 except ImportError:
     try:
         import msvcrt
-        def _try_lock(path: str) -> Optional[Any]:
-            """Acquire an exclusive, non-blocking lock; return the held handle or None.
-
-            msvcrt cannot distinguish contention from an unsupported filesystem, so every
-            failure is treated as contention (conflict-only)."""
-            handle = _open_sidecar(path)
+        def _acquire_lock(handle: Any) -> bool:
+            """Take the advisory lock on `handle`; msvcrt cannot distinguish contention from an
+            unsupported filesystem, so every failure reads as contention (conflict-only)."""
             try:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                return True
             except OSError:
-                handle.close()
-                return None
-            _write_lock_record(handle)
-            return handle
+                return False
         _LOCKING = True
     except ImportError:
-        _try_lock = None
+        _acquire_lock = None
         _LOCKING = False
 
 
-# Held lock handles keep claimed slots reserved for the life of the process.
+def _try_lock(path: str) -> Optional[Any]:
+    """Acquire an exclusive, non-blocking lock on the sidecar; return the held handle (with the
+    owner record written), None on genuine contention, or raise `_LockUnsupported` when the
+    filesystem lacks advisory locking."""
+    handle = _open_sidecar(path)
+    try:
+        acquired = _acquire_lock(handle)
+    except _LockUnsupported:
+        handle.close()
+        raise
+    if not acquired:
+        handle.close()
+        return None
+    _write_lock_record(handle)
+    return handle
+
+
+# Held lock handles keep claimed slots reserved for the life of the process. Each handle's
+# '.name' is its sidecar path, so a clean shutdown can unlink it while still holding the lock.
 _slot_locks: List[Any] = []
+
+# The shutdown finalizer is registered once, on the first successful claim.
+_ATEXIT_REGISTERED: bool = False
+_FINALIZED: bool = False
 
 
 def claim_file_slot(path: str, max_slots: int = 100) -> str:
     """Return the first unclaimed per-process variant of `path`, holding its lock."""
+    global _ATEXIT_REGISTERED
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     root, ext = os.path.splitext(path)
     if _LOCKING:
@@ -830,6 +846,9 @@ def claim_file_slot(path: str, max_slots: int = 100) -> str:
                 handle = _try_lock(candidate + '.lock')
                 if handle is not None:
                     _slot_locks.append(handle)
+                    if not _ATEXIT_REGISTERED:
+                        atexit.register(finalize_logging)  # Drop our sidecars on clean exit.
+                        _ATEXIT_REGISTERED = True
                     return candidate
             warn(f'Exhausted {max_slots} log-file slots for \'{path}\'; using PID suffix')
             return f'{root}-{os.getpid()}{ext}'  # Genuine all-EAGAIN exhaustion: real concurrency.
@@ -838,14 +857,95 @@ def claim_file_slot(path: str, max_slots: int = 100) -> str:
     return path  # No advisory-locking support at all: append to the canonical per-host path.
 
 
-def resolve_log_path(path: str, role: str, is_default: bool) -> str:
-    """Host-scope an explicit client path, then claim an exclusive per-process slot."""
+def finalize_logging() -> None:
+    """Stop file logging and drop this process's own lock sidecars (best-effort, clean exit).
+
+    Registered via `atexit` on the first claim. File logging is stopped first so no record races
+    the unlink, then each held sidecar is unlinked *while its lock is still held* (the R8
+    only-unlink-under-the-held-lock safety invariant) and closed. Idempotent; a `SIGKILL`/OOM
+    that skips this is swept by the next start's `prune_stale_sidecars`.
+    """
+    global _FINALIZED
+    if _FINALIZED:
+        return
+    _FINALIZED = True
+    if queue_listener is not None:
+        try:
+            queue_listener.stop()  # Flush and stop the writer thread: no further file writes.
+        except Exception:
+            pass
+    while _slot_locks:
+        handle = _slot_locks.pop()
+        try:
+            os.unlink(handle.name)  # Unlink our own sidecar while still holding its lock.
+        except OSError:
+            pass
+        try:
+            handle.close()
+        except OSError:
+            pass
+
+
+def prune_stale_sidecars(canonical_path: str) -> None:
+    """Remove stale sibling '<root>-N<ext>.lock' sidecars that no live process holds.
+
+    Only the process that won the canonical slot calls this. A candidate is removed only if its
+    advisory lock can be acquired (no live holder) and *while that lock is held* (R8); a sidecar
+    a live process holds is left untouched. Only '.lock' sidecars are ever removed — never the
+    '-N<ext>' data, its rotated/compressed lineage, or the 'main' role (R5).
+    """
+    if not _LOCKING:
+        return  # Nothing to prune where advisory locking is unavailable.
+    root, ext = os.path.splitext(canonical_path)
+    log_dir = os.path.dirname(canonical_path) or '.'
+    pattern = re.compile(rf'^{re.escape(os.path.basename(root))}-([0-9]+){re.escape(ext)}\.lock$')
+    try:
+        entries = os.listdir(log_dir)
+    except OSError:
+        return
+    for name in entries:
+        if pattern.fullmatch(name):
+            _prune_one_sidecar(os.path.join(log_dir, name))
+
+
+def _prune_one_sidecar(path: str) -> None:
+    """Flock-guarded unlink of a single stale sidecar (the acquirable lock is the safety gate)."""
+    try:
+        handle = _open_sidecar(path)
+    except OSError:
+        return
+    try:
+        acquired = _acquire_lock(handle)
+    except _LockUnsupported:
+        handle.close()
+        return  # A lockless filesystem has no reclaimable sidecar to prune safely.
+    if not acquired:
+        handle.close()  # A live process holds the slot; leave its sidecar in place.
+        return
+    record = read_lock_record(path)  # Diagnostics only; the flock-acquire is the safety gate.
+    try:
+        os.unlink(path)  # Unlink while holding the lock: closes the inode-reuse race (R8).
+        pid = record.get('pid') if record else None
+        debug(f'Pruned stale log-lock sidecar ({path})' + (f' (dead pid {pid})' if pid else ''))
+    except OSError:
+        pass
+    finally:
+        handle.close()
+
+
+def host_scoped_path(path: str, role: str, is_default: bool) -> str:
+    """Host-scope an explicit client path (the default is already host-scoped)."""
     if role == 'client' and not is_default:
         # A client-role process launched across many hosts must not share a user's
         # explicit path (the default is already host-scoped); decorate it per host.
         root, ext = os.path.splitext(path)
         path = f'{root}-client-{HOSTNAME_SHORT}{ext}'
-    return claim_file_slot(path)
+    return path
+
+
+def resolve_log_path(path: str, role: str, is_default: bool) -> str:
+    """Host-scope an explicit client path, then claim an exclusive per-process slot."""
+    return claim_file_slot(host_scoped_path(path, role, is_default))
 
 
 # Only permit calling initialize_logging once
@@ -879,7 +979,8 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
     merely_enabled = [True, 'enabled']
     if isinstance(file_config, (str, bool)):
         is_default = file_config in merely_enabled
-        file_path = resolve_log_path(default_file if is_default else file_config, role, is_default)
+        canonical_path = host_scoped_path(default_file if is_default else file_config, role, is_default)
+        file_path = claim_file_slot(canonical_path)
         file_handler = TimedRotatingFileHandler(filename=file_path)
         file_handler.setFormatter(Formatter(default_file_format, datefmt=datefmt))
         file_handler.setLevel(LEVEL_MAPPING[default_file_level])
@@ -893,7 +994,8 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
 
         requested = file_config.pop('path', default_config.logging.file.path)
         is_default = requested == PARAM_UNSET
-        file_path = resolve_log_path(default_file if is_default else requested, role, is_default)
+        canonical_path = host_scoped_path(default_file if is_default else requested, role, is_default)
+        file_path = claim_file_slot(canonical_path)
         file_policy = file_config.pop('rotate', DEFAULT_ROTATION_INTERVAL)
         file_compress = file_config.pop('compress', default_config.logging.file.compress)
         file_compress = file_compress if file_compress != PARAM_UNSET else None
@@ -960,4 +1062,6 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
 
     if file_handler is not None:
         recover_interrupted_compression(file_handler.filename)
+        if role in DISTRIBUTED_ROLES and file_path == canonical_path:
+            prune_stale_sidecars(canonical_path)  # Sweep crash-leftover sibling sidecars (R4).
         compression_jobs.put_nowait(False)  # Bookmark the completion of recovered files

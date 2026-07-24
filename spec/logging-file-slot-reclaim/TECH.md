@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/logging-file-slot-reclaim
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-07-23'
 phases:
 - id: P1
@@ -24,7 +24,7 @@ phases:
     or record"
 - id: P2
   name: Ephemeral sidecar lifecycle (shutdown drop + flock-guarded startup prune)
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -127,20 +127,20 @@ FS degrades to canonical-append instead of a per-PID file — foundational for P
 **Goal:** sidecars are created while a client runs and removed when it stops — best-effort at
 clean shutdown, swept for crashes at startup — **never** touching `-N.log` data.
 
-- [ ] **Shutdown drop (R3):** register a finalizer (an `atexit` hook when a slot is claimed and/or
+- [x] **Shutdown drop (R3):** register a finalizer (an `atexit` hook when a slot is claimed and/or
       an explicit `finalize_logging()` in the app stop path) that stops file logging (the
       `QueueListener`) so no further writes, then for each `_slot_locks` handle: `unlink` the
       sidecar **while holding the lock**, then `close`. Wrap best-effort (`try/except OSError`).
-- [ ] **Startup prune (R4):** only the process that wins the **canonical** slot scans sibling
+- [x] **Startup prune (R4):** only the process that wins the **canonical** slot scans sibling
       sidecars matching the exact dash shape `^{re.escape(root)}-([0-9]+){re.escape(ext)}\.lock$`
       (prefix-scoped like `recover_interrupted_compression`, `:513-533`). For each:
       `flock(LOCK_EX|LOCK_NB)` — acquired ⇒ stale ⇒ `unlink` the **sidecar only** while holding
       it, then release; blocked ⇒ live ⇒ skip. Use `read_lock_record`/`_owner_alive` for
       diagnostics/logging, but the `flock`-acquire is the safety gate. Invoke beside
       `recover_interrupted_compression` (`:837`), before the compression thread does real work (§5).
-- [ ] **R5 guard:** never `unlink`/rewrite `-N.log`, rotated (`client-h.<N>`/`.YYYYMMDD…`),
+- [x] **R5 guard:** never `unlink`/rewrite `-N.log`, rotated (`client-h.<N>`/`.YYYYMMDD…`),
       `.partial`, or `main`-role files. Add an assertion/test that data files survive a prune.
-- [ ] Tests (`@mark.unit`/`integration`): clean-exit path removes own sidecar; stale sibling
+- [x] Tests (`@mark.unit`/`integration`): clean-exit path removes own sidecar; stale sibling
       (dead PID, unlocked) removed; *held* sibling retained; `-N.log` + rotated + `main.log` all
       survive; inode-reuse guard (never unlink an unlockable sidecar).
 - **Verify:** `uv run pytest -v tests/test_logging.py -k "sidecar or prune or ephemeral or shutdown"`
