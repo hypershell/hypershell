@@ -48,8 +48,8 @@ from hypershell.core.config import (
 
 # Public interface
 __all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'initialize_logging', 'finalize_logging',
-           'DEFAULT_LOGGING_LEVEL', 'role_from_command', 'default_file_for', 'claim_file_slot',
-           'read_lock_record']
+           'close_inherited_slot_locks', 'DEFAULT_LOGGING_LEVEL', 'role_from_command',
+           'default_file_for', 'claim_file_slot', 'read_lock_record']
 
 
 # Cached for later use
@@ -880,6 +880,24 @@ def finalize_logging() -> None:
             os.unlink(handle.name)  # Unlink our own sidecar while still holding its lock.
         except OSError:
             pass
+        try:
+            handle.close()
+        except OSError:
+            pass
+
+
+def close_inherited_slot_locks() -> None:
+    """Close slot-lock descriptors inherited by a forked child, without unlinking any sidecar.
+
+    A fork-without-exec child (the queue-manager subprocess) inherits the parent's slot-lock
+    open-file-descriptions and would keep their advisory locks held until it too exits, ghost-
+    locking the slot if the parent is killed. The child closes its inherited copies so each lock
+    releases exactly when the true owner (the parent) exits. It must NOT unlink the sidecars —
+    the parent still owns them (only-unlink-under-the-held-lock, R8). No-op where there is no
+    fork / on Windows / when nothing is held.
+    """
+    while _slot_locks:
+        handle = _slot_locks.pop()
         try:
             handle.close()
         except OSError:

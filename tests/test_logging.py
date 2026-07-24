@@ -10,7 +10,9 @@ from __future__ import annotations
 # Standard libs
 import os
 import sys
+import time
 import errno
+import signal
 from pathlib import Path
 from subprocess import Popen, PIPE
 
@@ -330,3 +332,57 @@ def test_prune_sidecar_never_touches_data_or_rotated_files(tmp_path: Path) -> No
     for survivor in (data, rotated, partial, main_side):
         assert os.path.exists(survivor), survivor
         assert Path(survivor).read_text() == 'keep me'
+
+
+def _fork_lock_probe(tmp_path: Path, child_closes: bool) -> bool:
+    """Claim a slot, `os.fork()`, and (optionally) close the child's inherited copy.
+
+    Models the queue-manager fork: the child shares the parent's slot-lock open-file-description.
+    After the child has done its close-or-not and the parent releases its own handle, probe
+    whether the slot lock is re-acquirable. Returns True if released, False if a child that kept
+    the inherited descriptor is ghost-holding it. Isolates the fd mechanism (no multiprocessing).
+    """
+    base = str(tmp_path / 'server.log')
+    sidecar = claim_file_slot(base) + '.lock'
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # Child: shares the parent's slot-lock OFD across the fork.
+        os.close(r)
+        if child_closes:
+            log.close_inherited_slot_locks()  # The P3 fix: drop the inherited copy.
+        os.write(w, b'x')   # Signal readiness (still holding the OFD if we did not close).
+        time.sleep(10)      # Linger so the parent can probe while we are alive.
+        os._exit(0)
+    os.close(w)
+    os.read(r, 1)           # Wait until the child has closed-or-not.
+    os.close(r)
+    for handle in list(log._slot_locks):  # Parent releases its own handle (as on a clean exit).
+        handle.close()
+    log._slot_locks.clear()
+    probe = log._try_lock(sidecar)        # Acquirable iff no live descriptor holds the OFD.
+    acquired = probe is not None
+    if probe is not None:
+        probe.close()
+    os.kill(pid, signal.SIGTERM)
+    os.waitpid(pid, 0)
+    return acquired
+
+
+@mark.unit
+@mark.skipif(os.name == 'nt', reason='POSIX fork semantics')
+def test_forked_child_keeping_inherited_lock_ghost_locks_parent_slot(tmp_path: Path) -> None:
+    """The latent leak: a forked child that keeps the inherited descriptor holds the slot lock
+    alive after the parent releases it (a killed parent would ghost-lock its slot)."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    assert _fork_lock_probe(tmp_path, child_closes=False) is False
+
+
+@mark.unit
+@mark.skipif(os.name == 'nt', reason='POSIX fork semantics')
+def test_forked_child_closing_inherited_lock_releases_parent_slot(tmp_path: Path) -> None:
+    """P3's fix (R6): the child closing its inherited descriptor lets the slot lock release
+    exactly when the true owner (the parent) exits — no ghost lock."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    assert _fork_lock_probe(tmp_path, child_closes=True) is True

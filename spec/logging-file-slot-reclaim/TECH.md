@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/logging-file-slot-reclaim
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-07-23'
 phases:
 - id: P1
@@ -38,7 +38,7 @@ phases:
     or shutdown"
 - id: P3
   name: server/cluster fork fd-leak hardening (core/queue.py)
-  status: pending
+  status: done
   satisfies:
   - R6
   depends_on:
@@ -151,14 +151,14 @@ clean shutdown, swept for crashes at startup — **never** touching `-N.log` dat
 **Goal:** a forked queue-manager child no longer holds the parent's log-slot lock alive, so a
 killed `server`/`cluster` parent never ghost-locks its slot.
 
-- [ ] In `core/queue.py`, close the inherited `_slot_locks` handles in the forked manager child
+- [x] In `core/queue.py`, close the inherited `_slot_locks` handles in the forked manager child
       via the existing post-fork initializer seam (`_tls_bootstrap` path, ~`:243-281`) or
       `os.register_at_fork(after_in_child=…)`. Import the logging handles list without creating an
       import cycle (a small `hypershell.core.logging.close_inherited_slot_locks()` helper is
       cleanest). No-op where there is no fork / on Windows. **Do not** touch RPC framing, TLS
       context, authkey, or the handshake/fingerprint (high-blast-radius §16).
-- [ ] Note: `os.set_inheritable(False)` is useless here (exec-only; this is fork-without-exec).
-- [ ] Tests (`@mark.unit`, POSIX-only `skipif` Windows): a raw `os.fork()` after a claim — assert
+- [x] Note: `os.set_inheritable(False)` is useless here (exec-only; this is fork-without-exec).
+- [x] Tests (`@mark.unit`, POSIX-only `skipif` Windows): a raw `os.fork()` after a claim — assert
       the parent's `flock` is released once the parent closes iff the child closed its inherited
       copy (the child-close is what P3 adds). Keep it `os.fork`, not `multiprocessing`, to isolate
       the mechanism.
