@@ -3,7 +3,7 @@ slug: hsx-zsh-completion
 title: Fix Zsh completion for hsx / hs cluster
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/hsx-zsh-completion
 base: develop
 current_phase: done
