@@ -13,6 +13,8 @@ from types import ModuleType
 import os
 import re
 import sys
+import json
+import errno
 import socket
 import importlib
 from datetime import datetime, timedelta
@@ -45,7 +47,7 @@ from hypershell.core.config import (
 
 # Public interface
 __all__ = ['Logger', 'HOSTNAME', 'INSTANCE', 'initialize_logging', 'DEFAULT_LOGGING_LEVEL',
-           'role_from_command', 'default_file_for', 'claim_file_slot']
+           'role_from_command', 'default_file_for', 'claim_file_slot', 'read_lock_record']
 
 
 # Cached for later use
@@ -657,37 +659,156 @@ def default_file_for(role: str) -> str:
     return os.path.join(default_path.log, f'{stem}.log')
 
 
-# We enforce the single-writer invariant with an advisory lock on a per-file
-# '.lock' sidecar, held (by the OS, so it releases even on a crash) for the life
-# of the process. Contention is only ever same-host because the hostname is baked
-# into the filename, and same-host advisory locks are reliable even on shared
-# network filesystems. Contended slots fall through to 'name-2.log', 'name-3.log',
-# ..., bounding the file count by peak concurrency on a host rather than by the
-# total number of processes ever launched (which matters under autoscaling).
+class _LockUnsupported(Exception):
+    """Raised when the filesystem provides no advisory locking (degrade to canonical append)."""
+
+
+# The sidecar record identifies the live slot owner. It is one fixed-shape JSON line
+# written by the winner while holding the lock, so a later process can tell whether a
+# real process still holds the slot (start-time defeats PID reuse; the baked-in host
+# guarantees the PID is local and checkable). Version 1 record shape:
+#   {"v": 1, "pid": int, "create_time": float|null, "host": str, "instance": str}
+_LOCK_RECORD_VERSION: Final[int] = 1
+
+
+def _process_create_time() -> Optional[float]:
+    """This process's start time (epoch seconds) for pid-reuse defense in the owner record."""
+    try:
+        import psutil
+        return psutil.Process(os.getpid()).create_time()
+    except Exception:  # psutil should always resolve our own pid; never fail claiming over it.
+        return None
+
+
+def _write_lock_record(handle: Any) -> None:
+    """Stamp the (locked) sidecar with this process's owner record; keep the lock held.
+
+    Best-effort: the flock, not the record, is the single-writer gate, so a failed write
+    never blocks slot claiming (the sidecar simply reads back as 'no live holder').
+    """
+    record = json.dumps({
+        'v': _LOCK_RECORD_VERSION,
+        'pid': os.getpid(),
+        'create_time': _process_create_time(),
+        'host': HOSTNAME_SHORT,
+        'instance': INSTANCE,
+    })
+    try:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(record + '\n')
+        handle.flush()  # Never close(): closing would drop the advisory lock.
+    except OSError as exc:
+        debug(f'Could not write lock record ({exc})')
+
+
+def read_lock_record(path: str) -> Optional[Dict[str, Any]]:
+    """Read a sidecar's owner record; None if empty, legacy, torn, or unparseable."""
+    for _ in range(2):  # Retry once: a probe can race the winner's single-line write.
+        try:
+            with open(path, mode='r') as handle:
+                line = handle.readline()
+        except OSError:
+            return None
+        if not line.strip():
+            return None  # Empty or legacy 0-byte sidecar records no live holder.
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue  # Possibly torn mid-write; re-read once before giving up.
+        return record if isinstance(record, dict) else None
+    return None
+
+
+def _owner_alive(record: Optional[Dict[str, Any]]) -> bool:
+    """Whether the process that wrote `record` is still alive on this host.
+
+    Conservative: an empty, foreign-host, or malformed record reads as no live holder,
+    but a live same-identity process we merely cannot inspect is treated as alive so we
+    never steal a slot from a running owner.
+    """
+    if not record or record.get('host') != HOSTNAME_SHORT:
+        return False
+    pid = record.get('pid')
+    if not isinstance(pid, int):
+        return False
+    import psutil
+    if not psutil.pid_exists(pid):
+        return False
+    try:
+        create_time = psutil.Process(pid).create_time()
+    except psutil.NoSuchProcess:
+        return False
+    except psutil.AccessDenied:
+        return True  # Live but owned by another user; never reclaim its slot.
+    recorded = record.get('create_time')
+    if not isinstance(recorded, (int, float)):
+        return True  # Live local pid but no checkable start-time; do not steal.
+    return abs(create_time - recorded) <= 2.0  # ~2s tolerance defeats pid reuse.
+
+
+# We enforce the single-writer invariant with an advisory lock on a per-file '.lock'
+# sidecar. The winner stamps the sidecar with an owner record (pid + start-time + short
+# host + app instance) while holding the lock, so a later process can tell whether a
+# live process holds the slot. Contention is only ever same-host (the hostname is baked
+# into the filename), and same-host advisory locks are reliable even on shared network
+# filesystems, so a genuinely contended slot falls through to 'name-2.log',
+# 'name-3.log', ..., bounding the file count by peak same-host concurrency. Only genuine
+# contention (EAGAIN) advances a slot; if the filesystem provides no advisory locking at
+# all, we append to the canonical per-host path rather than proliferating one file per
+# process. The lock releases when the last descriptor on its open-file-description closes
+# (normally at process exit; a forked child that inherits the descriptor must close its
+# own copy or the slot stays held past the true owner's death).
+def _open_sidecar(path: str) -> Any:
+    """Open (creating if needed) a lock sidecar for read/write, never truncating.
+
+    A losing probe must not blank the winner's record, so the open is non-truncating;
+    only the winner rewrites the record after it holds the lock.
+    """
+    return os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o644), 'r+')
+
+
 try:
     import fcntl
     def _try_lock(path: str) -> Optional[Any]:
-        """Acquire an exclusive, non-blocking lock; return the held handle or None."""
-        handle = open(path, mode='w')
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        """Acquire an exclusive, non-blocking lock; return the held handle, None on genuine
+        contention, and raise `_LockUnsupported` when the filesystem lacks advisory locking."""
+        handle = _open_sidecar(path)
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except InterruptedError:
+                continue  # EINTR: retry the interrupted syscall.
+            except BlockingIOError:
+                handle.close()
+                return None  # A live sibling holds the slot; advance.
+            except OSError as exc:
+                if exc.errno == errno.EINTR:
+                    continue
+                if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                    handle.close()
+                    return None
+                handle.close()
+                raise _LockUnsupported from exc  # No advisory locking on this filesystem.
+            _write_lock_record(handle)
             return handle
-        except OSError:
-            handle.close()
-            return None
     _LOCKING = True
 except ImportError:
     try:
         import msvcrt
         def _try_lock(path: str) -> Optional[Any]:
-            """Acquire an exclusive, non-blocking lock; return the held handle or None."""
-            handle = open(path, mode='w')
+            """Acquire an exclusive, non-blocking lock; return the held handle or None.
+
+            msvcrt cannot distinguish contention from an unsupported filesystem, so every
+            failure is treated as contention (conflict-only)."""
+            handle = _open_sidecar(path)
             try:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                return handle
             except OSError:
                 handle.close()
                 return None
+            _write_lock_record(handle)
+            return handle
         _LOCKING = True
     except ImportError:
         _try_lock = None
@@ -703,14 +824,18 @@ def claim_file_slot(path: str, max_slots: int = 100) -> str:
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     root, ext = os.path.splitext(path)
     if _LOCKING:
-        for n in range(1, max_slots + 1):
-            candidate = path if n == 1 else f'{root}-{n}{ext}'
-            handle = _try_lock(candidate + '.lock')
-            if handle is not None:
-                _slot_locks.append(handle)
-                return candidate
-        warn(f'Exhausted {max_slots} log-file slots for \'{path}\'; using PID suffix')
-    return f'{root}-{os.getpid()}{ext}'
+        try:
+            for n in range(1, max_slots + 1):
+                candidate = path if n == 1 else f'{root}-{n}{ext}'
+                handle = _try_lock(candidate + '.lock')
+                if handle is not None:
+                    _slot_locks.append(handle)
+                    return candidate
+            warn(f'Exhausted {max_slots} log-file slots for \'{path}\'; using PID suffix')
+            return f'{root}-{os.getpid()}{ext}'  # Genuine all-EAGAIN exhaustion: real concurrency.
+        except _LockUnsupported:
+            return path  # Lockless filesystem: append to the canonical per-host path.
+    return path  # No advisory-locking support at all: append to the canonical per-host path.
 
 
 def resolve_log_path(path: str, role: str, is_default: bool) -> str:

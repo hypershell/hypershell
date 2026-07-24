@@ -10,19 +10,37 @@ from __future__ import annotations
 # Standard libs
 import os
 import sys
+import errno
 from pathlib import Path
 from subprocess import Popen, PIPE
 
 # External libs
-from pytest import mark, skip
+from pytest import mark, skip, fixture
 from cmdkit.app import exit_status
 
 # Internal libs
 from tests import main
+import hypershell.core.logging as log
 from hypershell.core.logging import (
     role_from_command, default_file_for, claim_file_slot, resolve_log_path,
-    HOSTNAME_SHORT, _LOCKING,
+    read_lock_record, HOSTNAME_SHORT, INSTANCE, _LOCKING,
 )
+
+
+@fixture(autouse=True)
+def _clean_slot_locks():
+    """Release and clear any held slot-lock handles after each test.
+
+    Slot locks are process-global and held for the life of the owner; without this a
+    claimed handle would leak across tests and skew later contention/liveness checks.
+    """
+    yield
+    for handle in log._slot_locks:
+        try:
+            handle.close()
+        except OSError:
+            pass
+    log._slot_locks.clear()
 
 
 # A tiny program that claims a slot, announces it, and holds the lock while it sleeps.
@@ -117,3 +135,107 @@ def test_file_logging_writes_role_named_file(temp_site: Path) -> None:
         assert matches, f'expected main.log somewhere under {temp_site}'
     finally:
         os.environ.pop('HYPERSHELL_LOGGING_FILE', None)
+
+
+def _raise_errno(code: int):
+    """Return a fake `flock` that always raises `OSError(code, ...)`."""
+    def _flock(_fd, _flags):
+        raise OSError(code, os.strerror(code))
+    return _flock
+
+
+@mark.unit
+@mark.parametrize('bad_errno', [errno.ENOSYS, errno.ENOLCK, errno.EPERM])
+def test_unsupported_lock_errno_degrades_to_canonical(tmp_path: Path, monkeypatch, bad_errno: int) -> None:
+    """A non-contention lock error (lockless FS) appends to the canonical path, never a PID file."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    monkeypatch.setattr(log.fcntl, 'flock', _raise_errno(bad_errno))
+    base = str(tmp_path / 'client.log')
+    claimed = claim_file_slot(base)
+    assert claimed == base  # canonical path, not '<root>-<pid>.log'
+    assert not log._slot_locks  # nothing held: we degraded rather than acquired
+
+
+@mark.unit
+def test_no_locking_support_uses_canonical(tmp_path: Path, monkeypatch) -> None:
+    """With no advisory-locking support at all, the canonical path is reused (not per-PID)."""
+    monkeypatch.setattr(log, '_LOCKING', False)
+    base = str(tmp_path / 'client.log')
+    assert claim_file_slot(base) == base
+
+
+@mark.unit
+def test_contention_advances_to_next_slot(tmp_path: Path, monkeypatch) -> None:
+    """Genuine contention (EAGAIN) on slot 1 advances to the '-2' slot."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    real_flock = log.fcntl.flock
+    calls = {'n': 0}
+    def _flock(fd, flags):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise OSError(errno.EAGAIN, 'temporarily unavailable')  # slot 1 contended
+        return real_flock(fd, flags)  # slot 2 acquires for real
+    monkeypatch.setattr(log.fcntl, 'flock', _flock)
+    base = str(tmp_path / 'app.log')
+    assert os.path.basename(claim_file_slot(base)) == 'app-2.log'
+
+
+@mark.unit
+def test_lock_record_round_trips(tmp_path: Path) -> None:
+    """A won lock stamps the sidecar with this process's owner record, readable back."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    claimed = claim_file_slot(base)
+    record = read_lock_record(claimed + '.lock')
+    assert record is not None
+    assert record['v'] == 1
+    assert record['pid'] == os.getpid()
+    assert record['host'] == HOSTNAME_SHORT
+    assert record['instance'] == INSTANCE
+    assert log._owner_alive(record) is True
+
+
+@mark.unit
+def test_losing_probe_does_not_blank_the_record(tmp_path: Path) -> None:
+    """A second (losing) claim opens the sidecar non-truncating, preserving the winner's record."""
+    if not _LOCKING:
+        skip('requires advisory file locking')
+    base = str(tmp_path / 'client.log')
+    claim_file_slot(base)                 # winner writes its record on slot 1
+    claim_file_slot(base)                 # loser probes slot 1 (fails), advances to slot 2
+    record = read_lock_record(base + '.lock')
+    assert record is not None and record['pid'] == os.getpid()
+
+
+@mark.unit
+def test_legacy_empty_lock_record_reads_as_no_holder(tmp_path: Path) -> None:
+    """A legacy 0-byte sidecar carries no record and reads as 'no live holder'."""
+    sidecar = tmp_path / 'client.log.lock'
+    sidecar.write_bytes(b'')
+    assert read_lock_record(str(sidecar)) is None
+    assert log._owner_alive(read_lock_record(str(sidecar))) is False
+
+
+@mark.unit
+def test_torn_lock_record_reads_as_no_holder(tmp_path: Path) -> None:
+    """An unparseable (torn) record reads as 'no live holder' after the retry."""
+    sidecar = tmp_path / 'client.log.lock'
+    sidecar.write_text('{not valid json')
+    assert read_lock_record(str(sidecar)) is None
+
+
+@mark.unit
+def test_owner_alive_lock_record_false_on_create_time_mismatch() -> None:
+    """Our own live pid with a wrong start-time reads as dead (pid-reuse defense)."""
+    record = {'v': 1, 'pid': os.getpid(), 'create_time': 1.0, 'host': HOSTNAME_SHORT, 'instance': 'x'}
+    assert log._owner_alive(record) is False
+
+
+@mark.unit
+def test_owner_alive_lock_record_false_for_other_host() -> None:
+    """A record stamped by another host is not a checkable local holder."""
+    record = {'v': 1, 'pid': os.getpid(), 'create_time': 0.0, 'host': 'some-other-host', 'instance': 'x'}
+    assert log._owner_alive(record) is False

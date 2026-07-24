@@ -1,57 +1,73 @@
 ---
 slug: logging-file-slot-reclaim
-title: "Ephemeral log-lock sidecars + fd-leak/errno hardening"
+title: Ephemeral log-lock sidecars + fd-leak/errno hardening
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/logging-file-slot-reclaim
 base: develop
-current_phase: P1
-last_updated: "2026-07-23"
+current_phase: P2
+last_updated: '2026-07-23'
 phases:
-  - id: P1
-    name: "Self-describing sidecar record + errno discrimination + degrade-to-canonical"
-    status: pending
-    satisfies: [R2, R7, R8]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_logging.py -k \"slot or lock or errno or degrade or record\""
-  - id: P2
-    name: "Ephemeral sidecar lifecycle (shutdown drop + flock-guarded startup prune)"
-    status: pending
-    satisfies: [R3, R4, R5]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_logging.py -k \"sidecar or prune or ephemeral or shutdown\""
-  - id: P3
-    name: "server/cluster fork fd-leak hardening (core/queue.py)"
-    status: pending
-    satisfies: [R6]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_logging.py -k \"fork or leak or inherit or manager\""
-  - id: P4
-    name: "End-to-end bound + regression + docs note"
-    status: pending
-    satisfies: [R1, R8, R9]
-    depends_on: [P1, P2, P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v -m integration tests/test_logging.py"
+- id: P1
+  name: Self-describing sidecar record + errno discrimination + degrade-to-canonical
+  status: done
+  satisfies:
+  - R2
+  - R7
+  - R8
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_logging.py -k "slot or lock or errno or degrade
+    or record"
+- id: P2
+  name: Ephemeral sidecar lifecycle (shutdown drop + flock-guarded startup prune)
+  status: pending
+  satisfies:
+  - R3
+  - R4
+  - R5
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_logging.py -k "sidecar or prune or ephemeral
+    or shutdown"
+- id: P3
+  name: server/cluster fork fd-leak hardening (core/queue.py)
+  status: pending
+  satisfies:
+  - R6
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_logging.py -k "fork or leak or inherit or manager"
+- id: P4
+  name: End-to-end bound + regression + docs note
+  status: pending
+  satisfies:
+  - R1
+  - R8
+  - R9
+  depends_on:
+  - P1
+  - P2
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v -m integration tests/test_logging.py
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Ephemeral log-lock sidecars + fd-leak/errno hardening
 
 Resume ground-truth is the YAML frontmatter (read with
@@ -85,22 +101,22 @@ Resume ground-truth is the YAML frontmatter (read with
 **Goal:** the sidecar carries its owner's identity, and lock failures are classified so a lockless
 FS degrades to canonical-append instead of a per-PID file — foundational for P2/P3.
 
-- [ ] Rework `_try_lock` (`logging.py:669-694`): open the sidecar **non-truncating** (not
+- [x] Rework `_try_lock` (`logging.py:669-694`): open the sidecar **non-truncating** (not
       `mode='w'`); classify failure — `EAGAIN`/`EWOULDBLOCK` (`BlockingIOError`) → CONFLICT
       (return `None` = advance); `EINTR` → retry; any other `OSError` → UNSUPPORTED (signal the
       caller). Keep the `msvcrt` branch (conflict-only) and the `_LOCKING=False` guard.
-- [ ] On a won lock, write the owner record `{"v":1,"pid","create_time","host","instance"}` as a
+- [x] On a won lock, write the owner record `{"v":1,"pid","create_time","host","instance"}` as a
       single fixed-shape line + `flush()` (never `close()`). Add a reader `read_lock_record(path)`
       opening `'r'`, tolerant of empty/legacy/torn (→ `None` = "no live holder"), with a
       retry-once on parse failure.
-- [ ] Add a liveness helper `_owner_alive(record)` using `psutil.pid_exists` +
+- [x] Add a liveness helper `_owner_alive(record)` using `psutil.pid_exists` +
       `psutil.Process(pid).create_time()` within a ~2s tolerance; treat `AccessDenied` as alive
       (never steal); host-guard on `HOSTNAME_SHORT`. `psutil` is already a dep (`core/resource.py`).
-- [ ] `claim_file_slot` (`logging.py:701-713`): advance only on CONFLICT; on first UNSUPPORTED or
+- [x] `claim_file_slot` (`logging.py:701-713`): advance only on CONFLICT; on first UNSUPPORTED or
       `_LOCKING is False`, return the **canonical** path (append) — remove the `<root>-<pid>`
       returns at `:713` (keep PID-suffix only for genuine all-`EAGAIN` exhaustion). Fix the false
       comment `:660-666`.
-- [ ] Tests (`@mark.unit`): autouse `_slot_locks` cleanup; patch `fcntl.flock` to inject
+- [x] Tests (`@mark.unit`): autouse `_slot_locks` cleanup; patch `fcntl.flock` to inject
       `ENOSYS`/`ENOLCK` (→ canonical) vs `EAGAIN` (→ `-2`); `_LOCKING=False` → canonical; record
       round-trips and reads back; legacy 0-byte sidecar parses as no-holder.
 - **Verify:** `uv run pytest -v tests/test_logging.py -k "slot or lock or errno or degrade or record"`
