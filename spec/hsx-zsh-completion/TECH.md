@@ -1,30 +1,33 @@
 ---
 slug: hsx-zsh-completion
-title: "Fix Zsh completion for hsx / hs cluster"
+title: Fix Zsh completion for hsx / hs cluster
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/hsx-zsh-completion
 base: develop
-current_phase: P1
-last_updated: "2026-07-24"
+current_phase: done
+last_updated: '2026-07-24'
 phases:
-  - id: P1
-    name: "Escape --from-json description brackets + add completion regression test"
-    status: pending
-    satisfies: [R1, R2, R3, R4]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: crest
-    verify: "uv run pytest -m unit -k completion"
+- id: P1
+  name: Escape --from-json description brackets + add completion regression test
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: uv run pytest -m unit -k completion
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Fix Zsh completion for `hsx` / `hs cluster`
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter is the
@@ -50,20 +53,21 @@ the per-phase checklist below is the work.
 **Goal:** `hsx` / `hs cluster` (and `hs submit`) Zsh completion runs with no `comparguments` error,
 `--from-json` still completes files, and a CI-portable test prevents the defect class from returning.
 
-- [ ] In `share/zsh/site-functions/_hs`, edit **both** `--from-json` spec lines (`_hs_submit` ~`:465`
-      and `_hs_cluster` ~`:562`): replace `("FILE[@path]")` with `("FILE\[@path\]")`. Change nothing
+- [x] In `share/zsh/site-functions/_hs`, edit **both** `--from-json` spec lines (`_hs_submit` `:465`
+      and `_hs_cluster` `:562`): replace `("FILE[@path]")` with `("FILE\[@path\]")`. Changed nothing
       else — option names, the `(1)` / `(--from-json)` exclusions, the positional `1:input file:_files`,
       and the `:json spec:_files` action stay byte-identical.
-- [ ] Confirm shell syntax: `zsh -n share/zsh/site-functions/_hs`.
-- [ ] Drive **real zsh completion** and record the result (needs `zsh` + `expect`, present locally):
-      assert the `invalid option definition` line is gone for `hsx -`, `hs cluster -`, and
-      `hs submit -`, and that `hsx --from-json <TAB>` lists `.json` files. (Prepend the working-tree
-      `share/zsh/site-functions` to `fpath`, `compinit -u`, then TAB.)
-- [ ] Add `tests/test_completions.py` (`@mark.unit`, SPDX header, `REPO = Path(__file__).parent.parent`
+- [x] Confirmed shell syntax: `zsh -n share/zsh/site-functions/_hs` → OK.
+- [x] Drove **real zsh completion** (via `expect` + `compinit -u` with the working-tree
+      `share/zsh/site-functions` prepended to `fpath`): the `invalid option definition` line is gone for
+      `hsx -`, `hs cluster -`, and `hs submit -`, and `hsx --from-json <TAB>` lists `.json` files
+      (`alpha.json`, `beta.json`).
+- [x] Added `tests/test_completions.py` (`@mark.unit`, SPDX header, `REPO = Path(__file__).parent.parent`
       style à la `tests/test_meta_status.py`): a static lint of `share/zsh/site-functions/_hs`. For
-      every stripped line starting with `'` that contains `[`, take the first `[` as the description
-      open and scan for the first *unescaped* `]`; assert the following char is `:`, `'`, or
-      end-of-line. Assert zero offending lines (guards the whole file, incl. `--from-json`).
+      every stripped line starting with `'` that contains `[`, it takes the first `[` as the description
+      open and scans for the first *unescaped* `]`; asserts the following char is `:`, `'`, or
+      end-of-line. Guards the whole file (incl. both `--from-json` specs) plus a targeted
+      escaped-brackets check and a self-test of the linter against the known defect.
 - **Verify:** `uv run pytest -m unit -k completion`.
 - **Touches:** `share/zsh/site-functions/_hs`, `tests/test_completions.py`.
 
