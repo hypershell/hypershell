@@ -25,7 +25,7 @@ from tests import main
 import hypershell.core.logging as log
 from hypershell.core.logging import (
     role_from_command, default_file_for, claim_file_slot, resolve_log_path,
-    read_lock_record, HOSTNAME_SHORT, INSTANCE, _LOCKING,
+    read_lock_record, HOSTNAME_SHORT, INSTANCE, LOCKING,
 )
 
 
@@ -34,17 +34,17 @@ def _clean_slot_locks():
     """Release and clear process-global slot-lock state after each test.
 
     Slot locks are held for the life of the owner and the finalizer runs once; without this a
-    claimed handle (or a tripped `_FINALIZED` flag) would leak across tests and skew later
+    claimed handle (or a tripped `_FINAL` flag) would leak across tests and skew later
     contention/liveness/finalize checks.
     """
     yield
-    for handle in log._slot_locks:
+    for handle in log.slot_locks:
         try:
             handle.close()
         except OSError:
             pass
-    log._slot_locks.clear()
-    log._FINALIZED = False
+    log.slot_locks.clear()
+    log._FINAL = False
 
 
 # A tiny program that claims a slot, announces it, and holds the lock while it sleeps.
@@ -87,7 +87,7 @@ def test_default_file_is_host_scoped_except_main() -> None:
 @mark.unit
 def test_resolve_log_path_decorates_only_explicit_client_paths(tmp_path: Path) -> None:
     """An explicit client path is host-scoped; the (already host-scoped) default is not."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     explicit = resolve_log_path(str(tmp_path / 'shared.log'), role='client', is_default=False)
     assert os.path.basename(explicit) == f'shared-client-{HOSTNAME_SHORT}.log'
@@ -101,7 +101,7 @@ def test_resolve_log_path_decorates_only_explicit_client_paths(tmp_path: Path) -
 @mark.unit
 def test_claim_file_slot_disambiguates_within_process(tmp_path: Path) -> None:
     """A second live claim on the same path falls through to the next slot."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'app.log')
     assert os.path.basename(claim_file_slot(base)) == 'app.log'
@@ -112,7 +112,7 @@ def test_claim_file_slot_disambiguates_within_process(tmp_path: Path) -> None:
 @mark.integration
 def test_slot_reclaimed_after_owner_dies(tmp_path: Path) -> None:
     """A crashed owner's slot is immediately reclaimable (OS releases the lock)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     holder = Popen([sys.executable, '-c', _HOLDER, base], stdout=PIPE, env=os.environ)
@@ -152,19 +152,19 @@ def _raise_errno(code: int):
 @mark.parametrize('bad_errno', [errno.ENOSYS, errno.ENOLCK, errno.EPERM])
 def test_unsupported_lock_errno_degrades_to_canonical(tmp_path: Path, monkeypatch, bad_errno: int) -> None:
     """A non-contention lock error (lockless FS) appends to the canonical path, never a PID file."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     monkeypatch.setattr(log.fcntl, 'flock', _raise_errno(bad_errno))
     base = str(tmp_path / 'client.log')
     claimed = claim_file_slot(base)
     assert claimed == base  # canonical path, not '<root>-<pid>.log'
-    assert not log._slot_locks  # nothing held: we degraded rather than acquired
+    assert not log.slot_locks  # nothing held: we degraded rather than acquired
 
 
 @mark.unit
 def test_no_locking_support_uses_canonical(tmp_path: Path, monkeypatch) -> None:
     """With no advisory-locking support at all, the canonical path is reused (not per-PID)."""
-    monkeypatch.setattr(log, '_LOCKING', False)
+    monkeypatch.setattr(log, 'LOCKING', False)
     base = str(tmp_path / 'client.log')
     assert claim_file_slot(base) == base
 
@@ -172,7 +172,7 @@ def test_no_locking_support_uses_canonical(tmp_path: Path, monkeypatch) -> None:
 @mark.unit
 def test_contention_advances_to_next_slot(tmp_path: Path, monkeypatch) -> None:
     """Genuine contention (EAGAIN) on slot 1 advances to the '-2' slot."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     real_flock = log.fcntl.flock
     calls = {'n': 0}
@@ -189,7 +189,7 @@ def test_contention_advances_to_next_slot(tmp_path: Path, monkeypatch) -> None:
 @mark.unit
 def test_lock_record_round_trips(tmp_path: Path) -> None:
     """A won lock stamps the sidecar with this process's owner record, readable back."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     claimed = claim_file_slot(base)
@@ -199,13 +199,13 @@ def test_lock_record_round_trips(tmp_path: Path) -> None:
     assert record['pid'] == os.getpid()
     assert record['host'] == HOSTNAME_SHORT
     assert record['instance'] == INSTANCE
-    assert log._owner_alive(record) is True
+    assert log.owner_alive(record) is True
 
 
 @mark.unit
 def test_losing_probe_does_not_blank_the_record(tmp_path: Path) -> None:
     """A second (losing) claim opens the sidecar non-truncating, preserving the winner's record."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     claim_file_slot(base)                 # winner writes its record on slot 1
@@ -220,7 +220,7 @@ def test_legacy_empty_lock_record_reads_as_no_holder(tmp_path: Path) -> None:
     sidecar = tmp_path / 'client.log.lock'
     sidecar.write_bytes(b'')
     assert read_lock_record(str(sidecar)) is None
-    assert log._owner_alive(read_lock_record(str(sidecar))) is False
+    assert log.owner_alive(read_lock_record(str(sidecar))) is False
 
 
 @mark.unit
@@ -235,14 +235,14 @@ def test_torn_lock_record_reads_as_no_holder(tmp_path: Path) -> None:
 def test_owner_alive_lock_record_false_on_create_time_mismatch() -> None:
     """Our own live pid with a wrong start-time reads as dead (pid-reuse defense)."""
     record = {'v': 1, 'pid': os.getpid(), 'create_time': 1.0, 'host': HOSTNAME_SHORT, 'instance': 'x'}
-    assert log._owner_alive(record) is False
+    assert log.owner_alive(record) is False
 
 
 @mark.unit
 def test_owner_alive_lock_record_false_for_other_host() -> None:
     """A record stamped by another host is not a checkable local holder."""
     record = {'v': 1, 'pid': os.getpid(), 'create_time': 0.0, 'host': 'some-other-host', 'instance': 'x'}
-    assert log._owner_alive(record) is False
+    assert log.owner_alive(record) is False
 
 
 # A program that claims a slot then exits cleanly, so its atexit finalizer drops the sidecar.
@@ -256,7 +256,7 @@ _CLEAN_EXITER = (
 @mark.unit
 def test_finalize_logging_drops_own_sidecar(tmp_path: Path) -> None:
     """On clean shutdown a process removes its own held lock sidecar (best-effort, R3)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     claimed = claim_file_slot(base)
@@ -264,13 +264,13 @@ def test_finalize_logging_drops_own_sidecar(tmp_path: Path) -> None:
     assert os.path.exists(sidecar)
     log.finalize_logging()
     assert not os.path.exists(sidecar)  # own sidecar removed while its lock was still held
-    assert not log._slot_locks
+    assert not log.slot_locks
 
 
 @mark.integration
 def test_clean_exit_removes_own_sidecar_via_atexit(tmp_path: Path) -> None:
     """A cleanly-exiting subprocess sweeps its own sidecar through the registered atexit hook."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     proc = Popen([sys.executable, '-c', _CLEAN_EXITER, base], stdout=PIPE, env=os.environ)
@@ -284,7 +284,7 @@ def test_clean_exit_removes_own_sidecar_via_atexit(tmp_path: Path) -> None:
 @mark.unit
 def test_prune_removes_stale_unlocked_sidecar(tmp_path: Path) -> None:
     """The canonical winner prunes a sibling '-N' sidecar that no live process holds (R4)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     root, ext = os.path.splitext(base)
@@ -299,7 +299,7 @@ def test_prune_removes_stale_unlocked_sidecar(tmp_path: Path) -> None:
 @mark.unit
 def test_prune_keeps_live_held_sibling_sidecar(tmp_path: Path) -> None:
     """A sibling sidecar a live process holds is never pruned (flock-acquire is the safety gate)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     root, ext = os.path.splitext(base)
@@ -314,7 +314,7 @@ def test_prune_keeps_live_held_sibling_sidecar(tmp_path: Path) -> None:
 @mark.unit
 def test_prune_sidecar_never_touches_data_or_rotated_files(tmp_path: Path) -> None:
     """Pruning removes only '.lock' sidecars, never '-N' data, its rotated lineage, or 'main' (R5)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     root, ext = os.path.splitext(base)
@@ -356,10 +356,10 @@ def _fork_lock_probe(tmp_path: Path, child_closes: bool) -> bool:
     os.close(w)
     os.read(r, 1)           # Wait until the child has closed-or-not.
     os.close(r)
-    for handle in list(log._slot_locks):  # Parent releases its own handle (as on a clean exit).
+    for handle in list(log.slot_locks):  # Parent releases its own handle (as on a clean exit).
         handle.close()
-    log._slot_locks.clear()
-    probe = log._try_lock(sidecar)        # Acquirable iff no live descriptor holds the OFD.
+    log.slot_locks.clear()
+    probe = log.try_lock(sidecar)        # Acquirable iff no live descriptor holds the OFD.
     acquired = probe is not None
     if probe is not None:
         probe.close()
@@ -373,7 +373,7 @@ def _fork_lock_probe(tmp_path: Path, child_closes: bool) -> bool:
 def test_forked_child_keeping_inherited_lock_ghost_locks_parent_slot(tmp_path: Path) -> None:
     """The latent leak: a forked child that keeps the inherited descriptor holds the slot lock
     alive after the parent releases it (a killed parent would ghost-lock its slot)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     assert _fork_lock_probe(tmp_path, child_closes=False) is False
 
@@ -383,7 +383,7 @@ def test_forked_child_keeping_inherited_lock_ghost_locks_parent_slot(tmp_path: P
 def test_forked_child_closing_inherited_lock_releases_parent_slot(tmp_path: Path) -> None:
     """P3's fix (R6): the child closing its inherited descriptor lets the slot lock release
     exactly when the true owner (the parent) exits — no ghost lock."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     assert _fork_lock_probe(tmp_path, child_closes=True) is True
 
@@ -396,7 +396,7 @@ _RUN_CLI = 'from hypershell import main; main()'
 def test_serial_generations_reclaim_canonical_and_leave_no_sidecars(tmp_path: Path) -> None:
     """Serial claim-and-exit generations each reclaim the canonical slot; sidecars never
     accumulate across clean restarts (R1: reclaim works; the count stays bounded)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     for _ in range(4):
@@ -412,7 +412,7 @@ def test_serial_generations_reclaim_canonical_and_leave_no_sidecars(tmp_path: Pa
 def test_concurrent_holders_get_distinct_slots_and_data_survives(tmp_path: Path) -> None:
     """Genuinely concurrent same-host processes get distinct '-N' slots, and a canonical prune
     never removes their data or their live sidecars (R1: concurrency is legitimate; R5/R8)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     base = str(tmp_path / 'client.log')
     holders = [Popen([sys.executable, '-c', _HOLDER, base], stdout=PIPE, env=os.environ)
@@ -436,7 +436,7 @@ def test_concurrent_holders_get_distinct_slots_and_data_survives(tmp_path: Path)
 @mark.integration
 def test_main_role_never_prunes_sidecars(temp_site: Path) -> None:
     """A real 'main'-role command never prunes sibling sidecars (R8: 'main' is left alone)."""
-    if not _LOCKING:
+    if not LOCKING:
         skip('requires advisory file locking')
     env = {**os.environ, 'HYPERSHELL_LOGGING_FILE': 'enabled'}
     # First run materializes the site log directory and main.log.
