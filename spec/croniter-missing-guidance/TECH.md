@@ -3,7 +3,7 @@ slug: croniter-missing-guidance
 title: Graceful guidance when croniter is missing for time-based log rotation
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/croniter-missing-guidance
 base: develop
 current_phase: done
