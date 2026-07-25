@@ -467,3 +467,54 @@ def test_require_croniter_panics_when_absent(monkeypatch, caplog) -> None:
 def test_require_croniter_noop_when_present() -> None:
     """With croniter installed (dev/CI default), the probe is a silent no-op."""
     assert log.require_croniter() is None
+
+
+# croniter is installed in dev/CI, so the end-user "no cron extra" state is simulated by neutralizing
+# the module in a fresh subprocess before importing hypershell (the import is lazy, so hypershell
+# itself still loads and only rotation setup sees the absence).
+_RUN_CLI_NO_CRONITER = (
+    "import sys; sys.modules['croniter'] = None; from hypershell import main; sys.exit(main())"
+)
+
+
+def _run_cli(temp_site: Path, rotate: str, *, croniter: bool) -> tuple[int, str]:
+    """Run a real CLI command in a subprocess under a given rotation policy; return (rc, stderr)."""
+    src = _RUN_CLI if croniter else _RUN_CLI_NO_CRONITER
+    env = {**os.environ, 'HYPERSHELL_LOGGING_FILE_ROTATE': rotate}  # sub-key alone -> Namespace branch
+    proc = Popen([sys.executable, '-c', src, 'initdb', '--yes'], env=env, stdout=PIPE, stderr=PIPE)
+    _, err = proc.communicate()
+    return proc.returncode, err.decode()
+
+
+@mark.integration
+def test_missing_croniter_is_clean_not_double_traceback(temp_site: Path) -> None:
+    """A missing croniter under a time-based policy is one actionable line, not a chained traceback."""
+    rc, err = _run_cli(temp_site, '@daily', croniter=False)
+    assert rc == exit_status.bad_config                        # clean non-zero exit
+    assert 'croniter' in err and 'cron' in err                # names the dependency and the remedy
+    assert 'Traceback (most recent call last)' not in err     # no raw traceback
+    assert 'During handling of the above exception' not in err  # no chained double traceback
+    assert 'ModuleNotFoundError' not in err                   # raw dependency error not leaked
+
+
+@mark.integration
+def test_missing_croniter_never_policy_starts_clean(temp_site: Path) -> None:
+    """'never' (the default) needs no croniter, so its absence must not raise a false demand."""
+    rc, err = _run_cli(temp_site, 'never', croniter=False)
+    assert rc == 0
+    assert 'croniter' not in err  # no spurious "cron extra" panic for a rotation-off user
+
+
+@mark.integration
+def test_missing_croniter_size_policy_starts_clean(temp_site: Path) -> None:
+    """Size-based rotation is independent of croniter; a missing croniter must not affect it."""
+    rc, err = _run_cli(temp_site, '2GB', croniter=False)
+    assert rc == 0
+    assert 'croniter' not in err
+
+
+@mark.integration
+def test_present_croniter_time_policy_starts_clean(temp_site: Path) -> None:
+    """With croniter installed, a time-based policy configures rotation and starts normally."""
+    rc, _ = _run_cli(temp_site, '@daily', croniter=True)
+    assert rc == 0

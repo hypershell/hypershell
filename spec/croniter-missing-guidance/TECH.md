@@ -3,10 +3,10 @@ slug: croniter-missing-guidance
 title: Graceful guidance when croniter is missing for time-based log rotation
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/croniter-missing-guidance
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-07-24'
 phases:
 - id: P1
@@ -23,7 +23,7 @@ phases:
 - id: P2
   name: End-to-end regression proof (no double traceback; never/size/cron-present
     unaffected)
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -110,7 +110,7 @@ unit tests on an extracted helper (no `_INIT`/full-init gymnastics).
 **Goal:** Prove the user-visible behavior end to end: the double traceback is gone, and the
 `'never'`/size/cron-present paths are unaffected.
 
-- [ ] Add integration tests in `tests/test_logging.py` (subprocess pattern already used there —
+- [x] Add integration tests in `tests/test_logging.py` (subprocess pattern already used there —
       `Popen([sys.executable, '-c', <src>, <argv...>], env=..., stdout=PIPE, stderr=PIPE)`):
       - `test_missing_croniter_is_clean_not_double_traceback` (`@mark.integration`): run
         `python -c "import sys; sys.modules['croniter']=None; from hypershell import main;
@@ -129,7 +129,7 @@ unit tests on an extracted helper (no `_INIT`/full-init gymnastics).
         `HYPERSHELL_LOGGING_FILE_ROTATE='@daily'` → `returncode == 0`.
       Use a `temp_site`-style env so nothing touches a real DB (follow the existing integration
       tests' fixture usage in this file).
-- [ ] Confirm the reproduction from `~/ISSUE.md` no longer double-tracebacks (covered by the first
+- [x] Confirm the reproduction from `~/ISSUE.md` no longer double-tracebacks (covered by the first
       test).
 - **Verify:** `uv run pytest -v -m integration tests/test_logging.py -k croniter && .agents/factory/bin/temp_site.sh sh -c "HYPERSHELL_LOGGING_FILE_ROTATE=@daily uv run hs list --count"`
 - **Touches:** `tests/test_logging.py`.
