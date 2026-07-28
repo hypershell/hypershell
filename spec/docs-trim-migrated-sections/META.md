@@ -56,3 +56,19 @@ is skipped by the parser):
   the downstream gates accept), and make Step 7's `{category}` follow `kind` directly rather than
   collapsing everything non-`fix` to `feature`.
 - **Confidence:** high · **Effort:** small
+
+## F2 — research-depth gate keys off appetite/kind, missing GOAL-flagged unknowns
+`origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** This GOAL is `appetite: small, kind: docs`, which Step 3 tells me to treat as
+  "skip the fan-out, do a couple of targeted reads." But the GOAL explicitly deferred a real external
+  unknown to `/hs-plan` (the redirect mechanism / docs hosting / hypershell.org URL map). Following the
+  appetite gate literally would have produced a plan that guessed R3. I overrode it and ran a full
+  5-topic fan-out, which was clearly the right call.
+- **Skill cause:** Step 3 uses `appetite`/`kind` as proxies for "is there a scary unknown?", but a
+  small-appetite change can still carry a bounded-but-genuine design unknown. The "GOAL wins when they
+  disagree" escape hatch is scoped only to the *diagnostic-fix* exception, not generalized to any
+  GOAL-flagged unknown.
+- **Recommended fix:** Generalize the exception: if `GOAL.md` explicitly flags an unknown for
+  `/hs-plan` to resolve (e.g. a "Related materials"/Clarifications note saying "the mechanism is a
+  `/hs-plan` decision"), run a scoped fan-out regardless of `appetite`/`kind`.
+- **Confidence:** med · **Effort:** small
