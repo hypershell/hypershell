@@ -3,7 +3,7 @@ slug: docs-trim-migrated-sections
 title: Trim docs sections that have moved to hypershell.org
 kind: docs
 appetite: small
-status: in_review
+status: done
 branch: feature/docs-trim-migrated-sections
 base: develop
 current_phase: done
