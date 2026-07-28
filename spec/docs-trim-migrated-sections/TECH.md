@@ -3,10 +3,10 @@ slug: docs-trim-migrated-sections
 title: Trim docs sections that have moved to hypershell.org
 kind: docs
 appetite: small
-status: in_progress
+status: in_review
 branch: feature/docs-trim-migrated-sections
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-07-28'
 phases:
 - id: P1
@@ -26,7 +26,7 @@ phases:
     -eq 2 && ! grep -q 'ERROR:' /tmp/hs_docs_p1.log && echo VERIFY_OK
 - id: P2
   name: 'Preserve old URLs: sphinx-reredirects stubs + RTD dashboard runbook (R3)'
-  status: pending
+  status: done
   satisfies:
   - R3
   depends_on:
@@ -103,17 +103,17 @@ toctree" warnings and fail R5).
 at the old paths pointing to `www.hypershell.org`, and a committed runbook lets the maintainer add the
 durable native RTD Page Redirects.
 
-- [ ] Add `sphinx-reredirects` to the **`docs`** dependency group in `pyproject.toml` (low floor,
+- [x] Add `sphinx-reredirects` to the **`docs`** dependency group in `pyproject.toml` (low floor,
       e.g. `>=0.1.3`; keep EPEL-parity spirit — it's docs/dev-only, not shipped). Run `uv lock` /
       `uv sync` so `uv.lock` updates.
-- [ ] `docs/conf.py`: add `'sphinx_reredirects'` to `extensions`, and an **explicit** `redirects = {…}`
+- [x] `docs/conf.py`: add `'sphinx_reredirects'` to `extensions`, and an **explicit** `redirects = {…}`
       dict — the 18 entries from [`research/00-digest.md`](research/00-digest.md) (keys = deleted source
       docnames, values = absolute `https://www.hypershell.org/…` URLs). Explicit (non-wildcard) keys are
       required so stubs emit for the *deleted* pages.
-- [ ] **Reconfirm targets before finalizing** (digest "build-time" notes): the live tutorial route is
+- [x] **Reconfirm targets before finalizing** (digest "build-time" notes): the live tutorial route is
       `/tutorials/<slug>` (plural) — verify against `../hypershell.org/src/`; confirm each blog slug
       exists in `../hypershell.org/content/blog/` and `content/pages/about.md` backs `/about`.
-- [ ] Commit `spec/docs-trim-migrated-sections/redirect-runbook.md`: the same 18-row map as a maintainer
+- [x] Commit `spec/docs-trim-migrated-sections/redirect-runbook.md`: the same 18-row map as a maintainer
       checklist for native RTD **Page Redirects** (RTD admin/API — not repo-configurable), each old path
       → its `www.hypershell.org` target.
 - **Verify:** `uv run sphinx-build -E -b html docs docs/_build …` → still exactly 2 baseline warnings,
