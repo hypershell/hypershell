@@ -1,39 +1,51 @@
 ---
 slug: docs-trim-migrated-sections
-title: "Trim docs sections that have moved to hypershell.org"
+title: Trim docs sections that have moved to hypershell.org
 kind: docs
 appetite: small
 status: in_progress
 branch: feature/docs-trim-migrated-sections
 base: develop
-current_phase: P1
-last_updated: "2026-07-28"
+current_phase: P2
+last_updated: '2026-07-28'
 phases:
-  - id: P1
-    name: "Remove Tutorial + Project (blog/roadmap) sections, toctrees, and inbound refs"
-    status: pending
-    satisfies: [R1, R2, R4, R5]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run sphinx-build -E -b html docs docs/_build 2>&1 | tee /tmp/hs_docs_p1.log | grep -E 'WARNING:|ERROR:'; test $(grep -cE 'WARNING:|ERROR:' /tmp/hs_docs_p1.log) -eq 2 && ! grep -q 'ERROR:' /tmp/hs_docs_p1.log && echo VERIFY_OK"
-  - id: P2
-    name: "Preserve old URLs: sphinx-reredirects stubs + RTD dashboard runbook (R3)"
-    status: pending
-    satisfies: [R3]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run sphinx-build -E -b html docs docs/_build 2>&1 | tee /tmp/hs_docs_p2.log | grep -E 'WARNING:|ERROR:'; test $(grep -cE 'WARNING:|ERROR:' /tmp/hs_docs_p2.log) -eq 2 && grep -q 'www.hypershell.org/about' docs/_build/roadmap.html && grep -q 'www.hypershell.org/tutorials/basic' docs/_build/tutorial/basic.html && grep -q 'www.hypershell.org/blog/hypershell-2-8-0' docs/_build/blog/20260705_2_8_0_release.html && echo VERIFY_OK"
+- id: P1
+  name: Remove Tutorial + Project (blog/roadmap) sections, toctrees, and inbound refs
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R4
+  - R5
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run sphinx-build -E -b html docs docs/_build 2>&1 | tee /tmp/hs_docs_p1.log
+    | grep -E 'WARNING:|ERROR:'; test $(grep -cE 'WARNING:|ERROR:' /tmp/hs_docs_p1.log)
+    -eq 2 && ! grep -q 'ERROR:' /tmp/hs_docs_p1.log && echo VERIFY_OK
+- id: P2
+  name: 'Preserve old URLs: sphinx-reredirects stubs + RTD dashboard runbook (R3)'
+  status: pending
+  satisfies:
+  - R3
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run sphinx-build -E -b html docs docs/_build 2>&1 | tee /tmp/hs_docs_p2.log
+    | grep -E 'WARNING:|ERROR:'; test $(grep -cE 'WARNING:|ERROR:' /tmp/hs_docs_p2.log)
+    -eq 2 && grep -q 'www.hypershell.org/about' docs/_build/roadmap.html && grep -q
+    'www.hypershell.org/tutorials/basic' docs/_build/tutorial/basic.html && grep -q
+    'www.hypershell.org/blog/hypershell-2-8-0' docs/_build/blog/20260705_2_8_0_release.html
+    && echo VERIFY_OK
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Trim docs sections that have moved to hypershell.org
 
 The **context engine and finite-state machine** for building this change. The YAML frontmatter above
@@ -67,18 +79,18 @@ navigation captions, and the two would-dangle inbound refs — with the build st
 2-warning baseline. One atomic edit (partial removal would spike new "undefined label" / "not in any
 toctree" warnings and fail R5).
 
-- [ ] `docs/index.rst`: delete the **Tutorial** toctree block (lines 205–212) and the **Project**
+- [x] `docs/index.rst`: delete the **Tutorial** toctree block (lines 205–212) and the **Project**
       toctree block (lines 214–219) at the file tail. No other `index.rst` edits.
-- [ ] Delete the Tutorial pages: `docs/tutorial/{basic,distributed,hybrid,advanced}.rst` and the now-empty
+- [x] Delete the Tutorial pages: `docs/tutorial/{basic,distributed,hybrid,advanced}.rst` and the now-empty
       `docs/tutorial/` dir (use `del`).
-- [ ] Delete the Project pages: all of `docs/blog/` (the 12 posts + `index.rst`) and its dir, and
+- [x] Delete the Project pages: all of `docs/blog/` (the 12 posts + `index.rst`) and its dir, and
       `docs/roadmap.rst` (use `del`).
-- [ ] Delete the only two inbound refs from retained pages (verified exhaustive; `README.rst` clean):
+- [x] Delete the only two inbound refs from retained pages (verified exhaustive; `README.rst` clean):
       - `docs/cli/index.rst:9` — remove the whole line
         (`See our :ref:`tutorials <tutorial_basic>` (COMING SOON) …`).
       - `docs/alternatives.rst:518` — remove the trailing parenthetical only, leaving the sentence
         ending `… best.` (drop `(A ``hypershell-nextflow`` integration is on the :ref:`roadmap <roadmap>`.)`).
-- [ ] Confirm `docs/conf.py` needs **no** edit for removal (no `ablog`, no coupling) — do not touch it here.
+- [x] Confirm `docs/conf.py` needs **no** edit for removal (no `ablog`, no coupling) — do not touch it here.
 - **Verify:** `uv run sphinx-build -E -b html docs docs/_build …` → prints only the two baseline
       `WARNING:` lines, asserts `VERIFY_OK` (exactly 2 warnings, 0 errors). Also eyeball that the
       removed files/dirs are gone and `docs/index.rst` has no Tutorial/Project caption.
