@@ -41,10 +41,10 @@ phases:
     'www.hypershell.org/blog/hypershell-2-8-0' docs/_build/blog/20260705_2_8_0_release.html
     && echo VERIFY_OK
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 047e6f38bcc077976e9f24e9045f1b0eeb1c3833
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — Trim docs sections that have moved to hypershell.org
 
