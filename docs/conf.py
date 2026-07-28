@@ -39,8 +39,35 @@ extensions = [
     'sphinx_sitemap',
     'sphinx_inline_tabs',
     'sphinx_copybutton',
-    'sphinxcontrib.details.directive'
+    'sphinxcontrib.details.directive',
+    'sphinx_reredirects',
 ]
+
+# The Tutorial, blog, and roadmap pages moved to the hypershell.org site. sphinx-reredirects emits a
+# meta-refresh stub at each old path so previously-published ReadTheDocs URLs redirect there instead
+# of 404ing. Keys must be explicit (non-wildcard): the source docs are deleted, and a wildcard would
+# match only pages that still exist. The durable native RTD dashboard redirects are documented in
+# spec/docs-trim-migrated-sections/redirect-runbook.md.
+redirects = {
+    'tutorial/basic': 'https://www.hypershell.org/tutorials/basic',
+    'tutorial/distributed': 'https://www.hypershell.org/tutorials/distributed',
+    'tutorial/hybrid': 'https://www.hypershell.org/tutorials/hybrid',
+    'tutorial/advanced': 'https://www.hypershell.org/tutorials/advanced',
+    'blog/index': 'https://www.hypershell.org/blog',
+    'blog/20230329_2_2_0_release': 'https://www.hypershell.org/blog/hypershell-2-2-0',
+    'blog/20230413_2_3_0_release': 'https://www.hypershell.org/blog/hypershell-2-3-0',
+    'blog/20230602_2_4_0_release': 'https://www.hypershell.org/blog/hypershell-2-4-0',
+    'blog/20240518_2_5_0_release': 'https://www.hypershell.org/blog/hypershell-2-5-0',
+    'blog/20240706_2_5_2_release': 'https://www.hypershell.org/blog/hypershell-2-5-2',
+    'blog/20241115_2_6_0_release': 'https://www.hypershell.org/blog/hypershell-2-6-0',
+    'blog/20241115_announce_logo': 'https://www.hypershell.org/blog/new-logo-and-discord',
+    'blog/20241231_2_6_1_release': 'https://www.hypershell.org/blog/hypershell-2-6-1',
+    'blog/20250215_2_6_5_release': 'https://www.hypershell.org/blog/hypershell-2-6-5',
+    'blog/20250405_2_6_6_release': 'https://www.hypershell.org/blog/hypershell-2-6-6',
+    'blog/20250504_2_7_0_release': 'https://www.hypershell.org/blog/hypershell-2-7-0',
+    'blog/20260705_2_8_0_release': 'https://www.hypershell.org/blog/hypershell-2-8-0',
+    'roadmap': 'https://www.hypershell.org/about',
+}
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

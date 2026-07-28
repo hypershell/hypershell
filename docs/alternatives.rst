@@ -515,7 +515,7 @@ This is where *HyperShell* has a natural role beyond the flat regime. Because Ne
 executor layer is pluggable, *HyperShell* is well-positioned to serve as a **high-throughput
 executor backend** beneath Nextflow — absorbing the many small tasks that should never become
 individual Slurm jobs — while Nextflow handles the DAG, containers, and resume logic it does
-best. (A ``hypershell-nextflow`` integration is on the :ref:`roadmap <roadmap>`.)
+best.
 
 -------------------
 

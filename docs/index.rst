@@ -201,19 +201,3 @@ If this software has helped facilitate your research please consider citing us.
     logging
     database
     templates
-
-.. toctree::
-    :hidden:
-    :caption: Tutorial
-
-    tutorial/basic
-    tutorial/distributed
-    tutorial/hybrid
-    tutorial/advanced
-
-.. toctree::
-    :hidden:
-    :caption: Project
-
-    blog/index
-    roadmap
