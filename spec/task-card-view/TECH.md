@@ -3,7 +3,7 @@ slug: task-card-view
 title: Rich "card" view for tasks
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/task-card-view
 base: develop
 current_phase: done
