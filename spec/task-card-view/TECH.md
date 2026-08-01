@@ -74,11 +74,10 @@ phases:
   hill: downhill
   verify: uv run pytest -m integration -k card
 review:
-  last_reviewed_commit: dbfe83b93ab04c59cdabda8bec987eb1d22bef75
-  verdict: changes-requested
-  blocked_reason: R5 min-60 width clamp inert below 60 cols (card call sites use bare
-    Console); id truncated
-  cycle: 2
+  last_reviewed_commit: b3fd5b79e2d5ac578225d33b692558c9e5ae0a74
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — Rich "card" view for tasks
 

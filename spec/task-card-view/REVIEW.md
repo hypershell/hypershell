@@ -174,3 +174,31 @@ R3's submission/provenance region.
 additions this cycle were re-verified read-only with no finding. Verdict routed to
 `changes-requested` per the rubric (any CONFIRMED finding loops to `/hs-build`); the fix is small and
 localized to the two call sites.
+
+---
+
+## Review cycle 3 — approved (2026-08-01)
+
+- **Reviewed commit:** b3fd5b79e2d5ac578225d33b692558c9e5ae0a74  ·  **Base:** develop
+- **Mode:** **scoped remediation-verification** of cycle-2 finding **C2-1** (not a fresh full blind
+  pass — the remediation delta since `dbfe83b` is only `task.py` +20/−4 and `test_card_render.py`
+  +16/−1; no `data/model.py`/coupled-core change). Delegated to a fresh blind subagent to keep the
+  executed-evidence spine; denied PLAN/TECH/research/META/prior-REVIEW.
+
+### C2-1 — CLOSED
+
+The fix adds a shared `card_console()` (`task.py:1485`) = `Console(width=card_width(Console().size.
+width))`, and routes both card call sites (`TaskInfoApp.run` `task.py:207`, `TaskSearchApp.print_card`
+`task.py:805`) through it, so the **console** — not just the Panel — carries the clamped width. A
+wider-than-terminal Panel is no longer clipped.
+
+- Executed at `COLUMNS=30` (throwaway site): `hs list --format=card` and `hs info <id> --format=card`
+  both contain the **full task id** (`LIST_OK` / `INFO_OK`) — no truncation.
+- **R5** closed (unit `test_card_console_clamps_terminal_width`: 30→60, 9999→160, 100→100).
+- **R6** non-regressed: piped + `NO_COLOR=1` emits **zero ANSI**, `status:` literal (fixing `width`
+  leaves `is_terminal` detection intact).
+- **R1** non-regressed: default (~80) card renders; `normal`/`json`/`csv` unchanged; `normal` default.
+- Card suite `-k "card or status_label"` → **38 passed**. Tree clean on hand-back.
+
+**New findings:** none. **Human-gate triggers:** none (fix is in `task.py`, not a high-blast-radius
+core file or security/DB invariant). Verdict: **approved** → `/hs-publish`.
