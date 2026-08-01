@@ -3,7 +3,7 @@ slug: part-tag-to-column
 title: Promote `part` from a bookkeeping tag to a first-class column
 kind: refactor
 appetite: small
-status: in_review
+status: blocked
 branch: feature/part-tag-to-column
 base: develop
 current_phase: done
@@ -39,10 +39,11 @@ phases:
   hill: uphill
   verify: uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: a3af53941279b9e0d79d81cdb522b1274f04933a
+  verdict: changes-requested
+  blocked_reason: 'R8 partial: part omitted from NORMAL_MODE_TEMPLATE (hs info / bare
+    hs list)'
+  cycle: 1
 ---
 # TECH.md — Promote `part` from a bookkeeping tag to a first-class column
 
