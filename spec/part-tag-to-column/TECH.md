@@ -3,7 +3,7 @@ slug: part-tag-to-column
 title: Promote `part` from a bookkeeping tag to a first-class column
 kind: refactor
 appetite: small
-status: in_review
+status: done
 branch: feature/part-tag-to-column
 base: develop
 current_phase: done
