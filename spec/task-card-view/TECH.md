@@ -3,10 +3,10 @@ slug: task-card-view
 title: Rich "card" view for tasks
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/task-card-view
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-08-01'
 phases:
 - id: P1
@@ -63,7 +63,7 @@ phases:
   verify: uv run pytest -m unit -k card_info
 - id: P5
   name: Regenerate man pages, add integration test, confirm docs build clean
-  status: pending
+  status: done
   satisfies:
   - R8
   - R1
@@ -209,29 +209,31 @@ help/docs/completions list `card`.
 - **Touches:** `src/hypershell/task.py`, `docs/_include/task_info_help.rst`,
   `docs/_include/task_wait_help.rst`, `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`,
   `tests/test_card_info.py`.
-- **Verify:** `uv run pytest -m unit -k card_info`.
-- **Touches:** `src/hypershell/task.py`, `docs/_include/task_info_help.rst`,
-  `docs/_include/task_wait_help.rst`, `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`.
 
 ## Phase P5 — Regenerate man pages, integration test, docs build
 **Satisfies:** R8, R1 · **Depends on:** P4
 **Goal:** Generated assets carry `card`, the feature is proven end-to-end through the installed CLI,
 and the docs build is clean.
 
-- [ ] Regenerate man pages: `uv run sphinx-build -b man docs docs/_build/man`, copy to
-      `share/man/man1/hs.1` and `hyper-shell.1`, and copy `hs.1`→`share/man/man1/hsx.1` (per the
-      `/hs-release` process). **Inspect the diff:** if it's only the `card` additions (±a date line),
-      keep it; if noisy/unrelated, **defer man to the next `/hs-release`** and note it in the commit
-      body (completions + `docs/_include` from P3/P4 remain the hard §12 requirement).
-- [ ] Add an integration test (`@mark.integration`, `-k card`): in a throwaway site submit a few
-      tasks and drive `hs list --format=card` and `hs info <id> --format=card`; assert a border glyph
-      and `status:` appear. (Integration tests shell out — needs `uv sync`.)
-- [ ] `uv run sphinx-build docs docs/_build` — no **new** warnings (the pre-existing
-      `task_submit.rst`/`manual.rst` toctree warnings are expected).
-- [ ] Final sweep: grep that `card` appears in every `-f/--format` enumeration (help strings,
-      `docs/_include/*`, bash, zsh, man).
-- **Verify:** `uv run pytest -m integration -k card`.
-- **Touches:** `share/man/man1/*.1`, `tests/…` (integration).
+- [x] Man regeneration **DEFERRED to the next `/hs-release`** (per the plan's noisy-diff fallback). A
+      trial `uv run sphinx-build -b man docs docs/_build/man` produced a diff carrying **unrelated**
+      content — the already-merged `--part`/`--rotate` (part-tag-to-column) doc changes the committed
+      man pages predate, plus a today `.TH` date bump — not just `card`. Bundling that into this
+      feature commit would muddy the diff; man is a release-time generated aggregate, so the man pages
+      were reverted to their committed state. R8's hard requirement (bash/zsh completions +
+      `docs/_include`) is fully met by P3/P4; the man `card` lines land at the next release alongside
+      the pending `--part` ones.
+- [x] Added `tests/test_card_integration.py` (`@mark.integration`, `-k card`): runs a file-mode
+      cluster to completion, then drives `hs list --format=card` (asserts **2 cards, 2× `status: OK`**),
+      `hs info <id> --format=card` (one card, full id, `status: OK`), and `hs wait <id> --info -f card`
+      (`status: OK`).
+- [x] `uv run sphinx-build docs docs/_build` — no **new** warnings (only the pre-existing
+      `task_submit.rst`/`manual.rst` toctree + `pkg_resources` deprecation warnings).
+- [x] Final sweep: `card` present in `task.py` help strings, all three `docs/_include/*`, bash (search
+      + info + wait), and zsh (search + info + wait). (Man deferred as above.)
+- **Verify:** `uv run pytest -m integration -k card` → 1 passed (full unit suite 203; all `-k card`
+      tests 27 passed).
+- **Touches:** `tests/test_card_integration.py`. (Man pages intentionally **not** touched — deferred.)
 
 ---
 
