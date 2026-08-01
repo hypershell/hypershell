@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/task-card-view
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-08-01'
 phases:
 - id: P1
@@ -37,7 +37,7 @@ phases:
   verify: uv run pytest -m unit -k card_render
 - id: P3
   name: Wire card into hs list / hs search (+ search docs & completions)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R8
@@ -164,19 +164,23 @@ that adapts across narrow/normal/wide and stays legible with no color.
 **Goal:** `hs list --format=card` / `hs search … --format=card` render one card per matched task,
 responsive to terminal width; `normal` stays default; search help/docs/completions list `card`.
 
-- [ ] In `TaskSearchApp` (`task.py`): add `'card'` to `output_formats` (`:663`). Add
-      `print_card(self, results)` mirroring the static `print_normal` (`:783`) — build `Task` objects,
-      batch `Source.paths_for_ids`, create one `Console()`, compute `W = max(60, min(160,
-      console.size.width))`, loop `console.print(render_card(task, W, source_map))`. Extend the subset
-      guard in `check_output_format` (`:829`) from `== 'normal'` to `in ('normal', 'card')`.
-- [ ] Update the `SEARCH_HELP` `-f/--format` enumeration (`task.py:591`) to include `card`.
-- [ ] Same commit (§12): `docs/_include/task_search_help.rst` (`:75`),
-      `share/bash_completion.d/hs` search word list (`:418`), `share/zsh/site-functions/_hs` search
-      spec (`:417`, append ` card` inside the `(…)`). (`hsx` bash file is a symlink → covered.)
-- [ ] Sanity: `zsh -n share/zsh/site-functions/_hs`; confirm `--format` rejects unknown values and
-      `card` requires all fields (`hs list id --format=card` → the subset error).
-- **Verify:** `.agents/factory/bin/temp_site.sh sh -c "seq 20 | uv run hsx -t 'echo {}' -N4 && uv run hs list --format=card"`
-  (also eyeball under `COLUMNS=70` and `COLUMNS=140`).
+- [x] In `TaskSearchApp` (`task.py`): added `'card'` to `output_formats` (after `normal`). Added the
+      static `print_card(results)` mirroring `print_normal` — build `Task` objects, batch
+      `Source.paths_for_ids`, one `Console()`, `card_width(console.size.width)`, loop
+      `console.print(render_card(task, W, source_map))` with a blank line between cards. Extended the
+      subset guard in `check_output_format` from `== 'normal'` to `in ('normal', 'card')` (message now
+      interpolates the format).
+- [x] Updated the `SEARCH_HELP` `-f/--format` enumeration to `(normal, card, plain, table, csv, json)`.
+- [x] Same commit (§12): `docs/_include/task_search_help.rst` (added `card` to the list + a prose
+      sentence), `share/bash_completion.d/hs` search word list (`normal card plain table csv json`),
+      `share/zsh/site-functions/_hs` search spec (`:format:(normal card plain table csv json)`).
+      (`hsx` bash file is a symlink → covered.)
+- [x] Sanity: `zsh -n share/zsh/site-functions/_hs` OK; module import OK; `hs list id --format=card`
+      → `Cannot use --format=card with subset of field names`.
+- **Verify:** drove `hs list --format=card` in a `temp_site` (20 echo tasks, `-N4`): **20 cards, all
+      `status: OK`**; subset rejected; `normal` still the default (0 cards without `--format`);
+      responsive confirmed live at `COLUMNS=70`(1-col) / `100`(2-col) / `155`(3-col + horizontal
+      header). Full unit suite 200 passed.
 - **Touches:** `src/hypershell/task.py`, `docs/_include/task_search_help.rst`,
   `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`.
 

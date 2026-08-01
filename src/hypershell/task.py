@@ -591,7 +591,7 @@ Options:
   -X, --cancelled            Alias for `-w exit_status == {CANCEL_STATUS}`.
       --retries              Alias for `-w attempt > 1`.
       --signal      NAME     Match tasks killed by signal NAME (e.g. TERM, KILL, HUP).
-  -f, --format      FORMAT   Format output (normal, plain, table, csv, json).
+  -f, --format      FORMAT   Format output (normal, card, plain, table, csv, json).
       --json                 Format output as JSON (alias for `--format=json`).
       --csv                  Format output as CSV (alias for `--format=csv`).
   -d, --delimiter   CHAR     Field seperator for plain/csv formats.
@@ -663,7 +663,7 @@ class TaskSearchApp(Application, SearchableMixin):
     interface.add_argument('--signal', default=None, dest='signal_filter')
 
     output_format: str = '<default>'  # 'plain' if field_names else 'normal'
-    output_formats: List[str] = ['normal', 'plain', 'table', 'json', 'csv']
+    output_formats: List[str] = ['normal', 'card', 'plain', 'table', 'json', 'csv']
     output_interface = interface.add_mutually_exclusive_group()
     output_interface.add_argument('-f', '--format', default=output_format,
                                   dest='output_format', choices=output_formats)
@@ -792,6 +792,18 @@ class TaskSearchApp(Application, SearchableMixin):
             print('---')
             print_normal(task, source_map=source_map)
 
+    @staticmethod
+    def print_card(results: List[Tuple]) -> None:
+        """Print each task as a richly-formatted, width-responsive card (see `render_card`)."""
+        tasks = [Task.from_dict(dict(zip(Task.columns, record))) for record in results]
+        source_map = Source.paths_for_ids([task.source for task in tasks if task.source])
+        console = Console()
+        width = card_width(console.size.width)
+        for i, task in enumerate(tasks):
+            if i:
+                console.print()  # A blank line separates adjacent cards.
+            console.print(render_card(task, width, source_map=source_map))
+
     def print_plain(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print plain text output with given field names, one task per line."""
         for record in results:
@@ -829,8 +841,8 @@ class TaskSearchApp(Application, SearchableMixin):
         else:
             if self.output_format == '<default>':
                 self.output_format = 'plain'
-            elif self.output_format == 'normal':
-                raise ArgumentError('Cannot use --format=normal with subset of field names')
+            elif self.output_format in ('normal', 'card'):
+                raise ArgumentError(f'Cannot use --format={self.output_format} with subset of field names')
         if self.output_delimiter != '<default>' and self.output_format not in ['plain', 'csv']:
             raise ArgumentError(f'Unused --delimiter for --format={self.output_format}')
         if len(self.output_delimiter) > DELIMITER_MAX_SIZE:

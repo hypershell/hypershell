@@ -415,7 +415,7 @@ function _hs_task_search() {
 			return
 			;;
 		-f | --format)
-			COMPREPLY=($(compgen -W "normal plain table csv json" -- "${current}"))
+			COMPREPLY=($(compgen -W "normal card plain table csv json" -- "${current}"))
 			return
 			;;
 		-d | --delimiter)
