@@ -8,7 +8,8 @@ Options
 ^^^^^^^
 
 ``-f``, ``--format`` *FORMAT*
-    Format task info ([normal], json, yaml).
+    Format task info ([normal], card, json, yaml). The ``card`` format renders the task as a
+    richly-formatted, bordered panel with a color-coded status badge (see ``task search``).
 
 ``--json``
     Format metadata output as JSON.

@@ -141,7 +141,7 @@ Arguments:
   ID                        Unique task UUID.
 
 Options:
-  -f, --format     FORMAT   Format task info ([normal], json, yaml).
+  -f, --format     FORMAT   Format task info ([normal], card, json, yaml).
       --json                Format task metadata as JSON.
       --yaml                Format task metadata as YAML.
   -x, --extract    FIELD    Print single field.
@@ -172,7 +172,7 @@ class TaskInfoApp(Application):
     print_interface.add_argument('-x', '--extract', default=None, choices=Task.columns, dest='extract_field')
 
     output_format: str = 'normal'
-    output_formats: List[str] = ['normal', 'json', 'yaml']
+    output_formats: List[str] = ['normal', 'card', 'json', 'yaml']
     output_interface = interface.add_mutually_exclusive_group()
     output_interface.add_argument('-f', '--format', default=output_format, dest='output_format', choices=output_formats)
     output_interface.add_argument('--json', action='store_const', const='json', dest='output_format')
@@ -203,6 +203,9 @@ class TaskInfoApp(Application):
             self.print_file('csvpath')
         elif self.output_format == 'normal':
             print_normal(self.task)
+        elif self.output_format == 'card':
+            console = Console()
+            console.print(render_card(self.task, card_width(console.size.width)))
         else:
             self.print_formatted()
 
@@ -310,7 +313,7 @@ Arguments:
 Options:
   -n, --interval  SEC     Time to wait between polling (default: {DEFAULT_INTERVAL}).
   -i, --info              Print info on task.
-  -f, --format    FORMAT  Format task info ([normal], json, yaml).
+  -f, --format    FORMAT  Format task info ([normal], card, json, yaml).
       --json              Format info as JSON.
       --yaml              Format info as YAML.
   -s, --status            Print exit status for task.
@@ -339,7 +342,7 @@ class TaskWaitApp(Application):
     print_interface.add_argument('-r', '--return', action='store_true', dest='return_status')
 
     output_format: str = 'normal'
-    output_formats: List[str] = ['normal', 'json', 'yaml']
+    output_formats: List[str] = ['normal', 'card', 'json', 'yaml']
     output_interface = interface.add_mutually_exclusive_group()
     output_interface.add_argument('-f', '--format', default=output_format,
                                   dest='output_format', choices=output_formats)

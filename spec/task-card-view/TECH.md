@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/task-card-view
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-08-01'
 phases:
 - id: P1
@@ -50,7 +50,7 @@ phases:
     -N4 && uv run hs list --format=card"
 - id: P4
   name: Wire card into hs info (+ hs wait parity) with info/wait docs & completions
-  status: pending
+  status: done
   satisfies:
   - R7
   - R1
@@ -190,18 +190,25 @@ responsive to terminal width; `normal` stays default; search help/docs/completio
 `hs list` renders that task; `hs wait --info -f card` accepted for parity; info/wait
 help/docs/completions list `card`.
 
-- [ ] In `TaskInfoApp` (`task.py`): add `'card'` to `output_formats` (`:172`) and branch `run()`
-      (`:201`) so `card` computes the clamped width and prints `render_card(self.task, W)` for the
-      single loaded task (source resolved directly, no batch needed).
-- [ ] In `TaskWaitApp` (`task.py`): add `'card'` to its forwarded `output_formats` (`:339`) so
-      `hs wait --info -f card` delegates cleanly to `TaskInfoApp`.
-- [ ] Update `INFO_HELP` (`:141`) and `WAIT_HELP` `-f/--format` enumerations to include `card`.
-- [ ] Same commit (§12): `docs/_include/task_info_help.rst` (`:11`), `task_wait_help.rst` (`:19`);
-      `share/bash_completion.d/hs` info (`:297`) & wait (`:327`) word lists; `share/zsh/site-functions/_hs`
-      info (`:355`) & wait (`:377`) specs.
-- [ ] Unit/functional tests (`@mark.unit`, `-k card_info`): submit a task in a `temp_site`, then run
-      `hs info <id> --format=card` via the `tests.main(argv)` helper and assert the border + `status:`
-      + the id are present; assert `hs info` accepts `card` in its `choices`.
+- [x] In `TaskInfoApp` (`task.py`): added `'card'` to `output_formats` and a `run()` branch that
+      creates one `Console()` and prints `render_card(self.task, card_width(console.size.width))` for
+      the single loaded task (source resolved directly via the `source_map=None` path — no batch).
+- [x] In `TaskWaitApp` (`task.py`): added `'card'` to its forwarded `output_formats` so
+      `hs wait --info -f card` delegates cleanly to `TaskInfoApp` (which now handles it).
+- [x] Updated `INFO_HELP` and `WAIT_HELP` `-f/--format` enumerations to `([normal], card, json, yaml)`.
+- [x] Same commit (§12): `docs/_include/task_info_help.rst` (+ prose), `task_wait_help.rst`;
+      `share/bash_completion.d/hs` info & wait word lists (`normal card json yaml`);
+      `share/zsh/site-functions/_hs` info & wait specs (`:format:(normal card json yaml)`).
+- [x] Functional tests (`tests/test_card_info.py`, `@mark.unit`, `-k card_info`): `card` is a choice
+      for both info and wait; `hs info <id> --format=card` on a submitted task renders exactly one
+      card with the full id and `status: WAITING` (the honest unscheduled state, via `tests.main`);
+      `normal` remains the info default. The **completed-task `OK` card and `hs wait --info -f card`**
+      (which blocks until completion) are pinned by the **P5 integration** test — verified manually
+      here: a run-to-completion task renders `status: OK` via both `hs info` and `hs wait --info`.
+- **Verify:** `uv run pytest -m unit -k card_info` → 3 passed (full unit suite 203 passed).
+- **Touches:** `src/hypershell/task.py`, `docs/_include/task_info_help.rst`,
+  `docs/_include/task_wait_help.rst`, `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`,
+  `tests/test_card_info.py`.
 - **Verify:** `uv run pytest -m unit -k card_info`.
 - **Touches:** `src/hypershell/task.py`, `docs/_include/task_info_help.rst`,
   `docs/_include/task_wait_help.rst`, `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`.

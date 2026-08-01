@@ -294,7 +294,7 @@ function _hs_task_info() {
 
 	case "${previous}" in
 		-f | --format)
-			COMPREPLY=($(compgen -W "normal json yaml" -- "${current}"))
+			COMPREPLY=($(compgen -W "normal card json yaml" -- "${current}"))
 			return
 			;;
 		-x | --extract)
@@ -324,7 +324,7 @@ function _hs_task_wait() {
 			return
 			;;
 		-f | --format)
-			COMPREPLY=($(compgen -W "normal json yaml" -- "${current}"))
+			COMPREPLY=($(compgen -W "normal card json yaml" -- "${current}"))
 			return
 			;;
 	esac
