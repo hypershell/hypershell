@@ -22,7 +22,7 @@
 ## Friction findings
 
 ## F1 — Step 7 commit-category rule (`else feature`) contradicts practice and omits `refactor` · seen again (hs-plan:step8)
-`origin=hs-feature:step7 severity=low category=instruction status=open target=.agents/skills/hs-feature/SKILL.md`
+`origin=hs-feature:step7 severity=low category=instruction status=applied target=.agents/skills/hs-feature/SKILL.md`
 - **What happened:** Step 7 says `{category} = fix for kind:fix, else feature`, so a `kind: refactor`
   goal would be committed as `[feature] Shape …`. I used `[refactor]` instead, matching AGENTS.md's
   category list and the repo's demonstrated convention (git log: `[docs] Shape docs-trim-migrated-sections

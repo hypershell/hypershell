@@ -143,7 +143,9 @@ code fence:
 git add spec/{slug}/GOAL.md          # add spec/{slug}/META.md too if you recorded a meta-note
 git commit -m "[{category}] Shape {slug} goal"
 ```
-`{category}` = `fix` for `kind: fix`, else `feature`. **No co-author trailer.** Do not push.
+`{category}` = the AGENTS.md commit category matching the work — normally `{kind}` itself
+(`fix`|`feature`|`refactor`), or a more specific category (e.g. `docs`) when the GOAL is really that
+kind of change. Never collapse everything non-`fix` to `feature`. **No co-author trailer.** Do not push.
 
 ### Step 8 — Report & hand off
 Report: branch, slug, kind, appetite, the R-ID list, any open clarifications. Tell the human the

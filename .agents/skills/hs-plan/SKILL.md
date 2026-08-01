@@ -152,7 +152,9 @@ Likely sources here: the research fan-out mechanics (Step 3), the invariant-gate
 git add -A spec/{slug}      # PLAN.md + TECH.md, plus research/ and META.md when present (research/ is omitted on the lean path)
 git commit -m "[{category}] Plan {slug}: design + phased roadmap"
 ```
-`{category}` = `fix`|`feature`. **No `Co-Authored-By` trailer.** Do not push.
+`{category}` = the same category as the shape commit (`hs-feature` Step 7) — normally `{kind}`
+(`fix`|`feature`|`refactor`), or a more specific AGENTS.md category (e.g. `docs`) when it fits.
+**No `Co-Authored-By` trailer.** Do not push.
 
 ### Step 9 — Report & hand off
 Report the design summary, the phase list (id · name · satisfies · verify), any deviations recorded,
