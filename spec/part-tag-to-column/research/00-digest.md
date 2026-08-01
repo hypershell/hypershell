@@ -85,6 +85,41 @@ is the mechanical root of forward-only. `part` never enters via `submit.py` — 
 
 Drive `hs` in a throwaway site via `.agents/factory/bin/temp_site.sh sh -c "…"` (run `sqlite3` inside the
 same `sh -c` — the site is deleted on exit). Prove: (a) submitted task's `part` **column** = 0 and its
-`tag` has no `part`; (b) `hs list part` still "Invalid field name" (internal); (c) `hs initdb --rotate`
-partitions by the column and `hs list` (auto-union) still works; (d) fingerprint unchanged. Docs baseline:
-the 2 pre-existing toctree warnings (`docs/cli/task_submit.rst`, `docs/manual.rst`).
+`tag` has no `part`; (b) `hs initdb --rotate` partitions by the column and `hs list` (auto-union) still
+works; (c) fingerprint unchanged; and (after the reshape) (d) `hs list part` is a valid field and
+`hs list --part N` selects partition N. Docs baseline: the 2 pre-existing toctree warnings
+(`docs/cli/task_submit.rst`, `docs/manual.rst`).
+
+## CLI surface — added after the 2026-07-31 GOAL reshape (briefs 05, 06)
+
+The maintainer reversed the "keep internal" decision: `part` is now a **visible column** (in
+`Task.columns`) and `hs list`/`hs search` gain a `--part` filter (R8, R9).
+
+- **`hs list` and `hs search` are the SAME app** — `TaskSearchApp` (`task.py:601`), registered as `list`
+  (`__init__.py:130`) and `search` (`task.py:1235`). `--part` is added **once**; one help source; one
+  completion function per shell.
+- **Visible field (R8):** field validation checks `name in Task.columns` (`task.py:545-549`); adding
+  `'part'` to `Task.columns` (`model.py:303-336`) makes `hs list part` / `--fields` / `-x` /
+  `hs list --all` treat `part` as a normal column. **This reverses the earlier omit-from-columns
+  deviation** — `part` is now a normal entry, so PLAN's deviation table is empty.
+- **`--part` filter (R9):** add `part_filter: Optional[int] = None` to `SearchableMixin` +
+  `interface.add_argument('--part', type=int, default=None, dest='part_filter')` on `TaskSearchApp`; in
+  `__build_filters` (`task.py:513-538`) append `f'part == {self.part_filter}'` when `part_filter is not
+  None` — mirroring the `-g/--group` filter (`:465`, `:531-532`, `:646-647`). Works because `part` is a
+  real column (`WhereClause.compile` → `getattr(Task,'part')`). `--part 0` is a legitimate filter (the
+  main partition); absent flag = no filter (`is not None` guard).
+- **Auto-union composition:** the union temp view is created in `run()` (`:684-685`) **before**
+  `build_query()` (`:694`), so `WHERE part = N` over the view correctly selects partition N's rows. No
+  ordering issue.
+- **Docs (§12) — hand-maintained, NO generator:** help originates from `SEARCH_USAGE`/`SEARCH_HELP`
+  constants (`task.py:554`/`:568`); the RST includes `docs/_include/task_search_{usage,desc,help}.rst`
+  are hand-authored (there is **no** `list_*` include). Precedent: `961fb22 [feature] Add --all to task
+  list` hand-edited `task_search_desc.rst` + `task_search_help.rst`. Edit by hand.
+- **Completions (§12):** bash `_hs_task_search` (add `--part` to the `all_opts` string, ~`:377-380`, +
+  optional `--part)` value branch); zsh `_hs_list` (add an `_arguments` line mirroring
+  `--ignore-partitions`, ~`:422`). `hsx`/`hs cluster` completions are separate and unaffected.
+- **Man pages / CI:** man pages are regenerated at **release time only** (`sphinx-build -b man`; the
+  `--all` precedent did not touch `share/man/` in the feature commit) — **not** a same-commit
+  obligation. The CI wheel-metadata assertion (`tests.yml:95-113`) checks a fixed path list; adding an
+  option changes file *contents*, not the list, so it stays green.
+- **Tests:** mirror `tests/test_list.py` invocation/assertion patterns for the `--part` cases.
