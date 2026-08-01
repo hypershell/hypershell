@@ -36,7 +36,7 @@
 - **Confidence:** high · **Effort:** small
 
 ## F2 — Research-depth gate (appetite/kind) ignores blast-radius; would skip needed research
-`origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+`origin=hs-plan:step3 severity=low category=missing-guidance status=applied target=.agents/skills/hs-plan/SKILL.md`
 - **What happened:** the GOAL is `appetite: small` / `kind: refactor`, so Step 3 instructs skipping the
   research fan-out. But the change touches `data/model.py` (the `invariants.md` highest-blast-radius file)
   and a subtle SQLite JSON→column rotation mechanism whose exact shape was unknown; a lean plan would have

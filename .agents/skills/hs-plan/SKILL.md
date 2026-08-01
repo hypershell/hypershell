@@ -75,8 +75,13 @@ escalate.
   diagnosis (an unreproducible failure, an `appetite: … — diagnosis-gated` qualifier), run the full
   fan-out regardless of `kind`/`appetite` — for such a fix the investigation *is* the deliverable, and
   skipping it yields a test-only guess. `kind`/`appetite` are proxies for "is the root cause known?";
-  when they disagree with the GOAL, the GOAL wins. (An explicit `skip research` argument stays a human
-  override and still skips.)
+  when they disagree with the GOAL, the GOAL wins.
+  **Exception — high blast radius:** run the full fan-out whenever the change is expected to touch the
+  coupled core — any file on `invariants.md`'s **High-blast-radius files** list (`data/model.py`,
+  `server.py`, `client.py`, …) — regardless of `appetite`/`kind`. Step 2 already surfaced which
+  invariants the change touches; a "small" edit to those files still needs the exact contracts pinned
+  before design, or a lean plan gets them subtly wrong.
+  (An explicit `skip research` argument stays a human override and still skips.)
 - **`appetite: big`:** identify the *rabbit holes* — the scary unknowns that could blow the appetite
   (unfamiliar code paths, algorithmic choices, external tech, perf at scale, dialect differences).
   Launch **read-only research subagents in parallel** (Agent tool), one per topic, breadth-first:
