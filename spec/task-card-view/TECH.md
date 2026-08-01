@@ -3,7 +3,7 @@ slug: task-card-view
 title: Rich "card" view for tasks
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/task-card-view
 base: develop
 current_phase: done
@@ -74,10 +74,11 @@ phases:
   hill: downhill
   verify: uv run pytest -m integration -k card
 review:
-  last_reviewed_commit: 232b2773caf4d7d17cc2c0acd39e7f1a37ff6b96
-  verdict: approved
-  blocked_reason: ''
-  cycle: 1
+  last_reviewed_commit: dbfe83b93ab04c59cdabda8bec987eb1d22bef75
+  verdict: changes-requested
+  blocked_reason: R5 min-60 width clamp inert below 60 cols (card call sites use bare
+    Console); id truncated
+  cycle: 2
 ---
 # TECH.md — Rich "card" view for tasks
 

@@ -86,3 +86,91 @@ invariant was weakened. No human sign-off gate is forced by this cycle.
 Not run this cycle (invoked as plain `/hs-review`). All five planned phases (P1–P5) are marked `done`
 in `TECH.md` and the requirement→evidence matrix shows full R1–R8 coverage; scope stayed within the
 `big` appetite with no unmapped changes.
+
+---
+
+## Review cycle 2 — changes-requested (2026-08-01)
+
+- **Reviewed commit:** dbfe83b93ab04c59cdabda8bec987eb1d22bef75  ·  **Base:** develop
+- **Trigger:** cycle 1 approved at `232b277`, then two commits landed after it — `b67d827`
+  (*Refine: submission region + source fingerprint*, re-touching `data/model.py`) and `dbfe83b`
+  (*docstring reformat*). `last_reviewed_commit` was stale, so this is a **fresh full blind pass**
+  over `git diff develop...HEAD -- . ':(exclude)spec/'` (not a scoped remediation pass — cycle 1
+  had no findings to remediate).
+- **Mode:** single blind `general-purpose` reviewer (curated inputs: `GOAL.md` inline,
+  spec-excluded diff, `invariants.md`, `review-rubric.md`; denied `PLAN.md`/`TECH.md`/`research/`/
+  `META.md`/prior `REVIEW.md`). Orchestrator second-pass sanity check by code inspection.
+
+### Verification run (executed, not asserted)
+
+- `uv run pytest -q -m unit -k "card or status_label"`, `uv run pytest -q -k card`, and the full
+  `uv run pytest -q` suite — **459 passed**; the only failure (`test_groups.py::
+  test_group_hard_failure_halts`) is a **pre-existing timing-flaky** server group-gating test that
+  passes in isolation and lies on a path this diff does not touch.
+- Real CLI in a throwaway site (`.agents/factory/bin/temp_site.sh`, never the developer's DB):
+  OK/FAILED/WAITING badges correct; shell-metachar commands (`sed 's/x/[/]/'`,
+  `echo '[bold]hi[/bold]'`) render verbatim (rich-markup safety holds); piped non-TTY + `NO_COLOR=1`
+  emit zero ANSI with border + literal `status:` intact (**R6**); `hs info … --format=card` matches
+  `hs list` for the same id (**R7**); `json`/`csv`/`table`/`plain`/`normal` unchanged (**R1**).
+- Width sweep `COLUMNS` 30/60/100/150/200 → rendered widths 30/60/100/150/**160**: the **max** clamp
+  holds; the **min-60** clamp does **not** (finding C2-1 below).
+- Non-goal proof: the `format_task_fields` extraction is behavior-preserving — full suite (incl.
+  existing `normal` tests) green; the only textual delta (`int(format_json(x))`→`int(x)` for the
+  INTEGER `waited`/`duration` columns) is a verified identity.
+- `git status --porcelain` empty at reviewer hand-back (tree left clean); orchestrator re-verified
+  the `data/model.py` additions are read-only (`Task.status_label` property + `Source.
+  fingerprints_for_ids` batched query mirroring `paths_for_ids`) — no query/state-transition or
+  `exit_status`-range logic altered (§1/§2 clean).
+
+### Findings
+
+**C2-1 — MEDIUM · CONFIRMED · R5 (partial).** The min-60 width clamp is **inert below 60 columns**,
+so the card renders narrower than the contracted floor and the identity header (full UUID +
+fingerprint) is truncated with an ellipsis.
+
+- **Where:** `render_card`/`card_width` (`src/hypershell/task.py:1480`, `1516`) are correct in
+  isolation, but both call sites — `TaskInfoApp.run` (`task.py:207-208`) and
+  `TaskSearchApp.print_card` (`task.py:805-810`) — print into a **bare `Console()`** sized to the
+  real terminal while passing the clamped width only to the `Panel`. Rich clips a Panel wider than
+  its Console to the console width, defeating the min-60 floor.
+- **Failure scenario:** `COLUMNS=30 hs list --format=card` →
+  `id 019fbe23-7da9-7b11-9801-0…` (UUID truncated, uncopyable); `fp 5ebb0a127fb5bd6… g… …`
+  (fingerprint + group/part truncated). Contradicts R5's explicit "minimum of 60" and the
+  renderer's own docstring guarantee ("the id … never truncated"). `normal` mode preserves the full
+  id at the same width.
+- **Severity rationale:** edge path (default piped width 80; typical TTYs ≥ 80), and clipping is a
+  *defensible* fallback — hence MEDIUM, not HIGH. But it is a real, reproducible gap against a stated
+  acceptance criterion.
+- **Fix direction:** size the console to the clamped width at both call sites —
+  `Console(width=card_width(console.size.width))` — so a sub-60 terminal renders a structurally
+  60-wide card (id on its own line, intact; terminal soft-wraps/scrolls the overflow, matching how
+  `normal` mode's long lines already behave) instead of truncating. Add a render-through-a-narrow-
+  console regression test (the existing `test_id_never_truncated_even_at_min_width` forces the width
+  directly and so does not exercise the call-site console-sizing path).
+
+No other correctness bugs, invariant violations, or scope creep survived the refutation protocol.
+
+### Requirement → evidence matrix (cycle 2)
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R1 — additive; other formats unchanged | full suite + live normal/plain/json/csv/table; `format_task_fields` equivalence proof | ✅ |
+| R2 — bordered custom layout; id/fp/group/part horizontal + zone slot | live render 100/150; unit tests | ✅ (id truncation <60 → C2-1) |
+| R3 — labeled regions w/ color/emphasis | live render shows all region titles; unit tests | ✅ |
+| R4 — lower-right lifecycle `status:` badge, ≥6 states | `status_label` + `STATUS_STYLES`; live OK/FAILED/WAITING; parametrized tests | ✅ |
+| R5 — auto narrow/normal/wide, clamp [60,160] | width sweep 30–200 | ⚠️ **partial** — max clamp holds, **min-60 inert** (C2-1) |
+| R6 — non-TTY/NO_COLOR legible, status plain | live piped + `NO_COLOR=1`; unit test | ✅ |
+| R7 — info card == list card (shared renderer) | live `hs info` vs `hs list` same id; integration test | ✅ |
+| R8 — docs snippets + completions list `card`, same commit | grep of 3× rst + bash + zsh | ✅ |
+
+**Unmapped changes:** none blocking. Docstring reformatting (`dbfe83b`) of pre-existing functions is
+comments-only/behavior-inert (house style); the source content-fingerprint parenthetical sits within
+R3's submission/provenance region.
+
+### Human-gate triggers
+
+**None mandatory.** The sole CONFIRMED finding (C2-1) is in `task.py` rendering + its call sites —
+**not** a high-blast-radius core file and not a security/DB-lifecycle invariant. The `data/model.py`
+additions this cycle were re-verified read-only with no finding. Verdict routed to
+`changes-requested` per the rubric (any CONFIRMED finding loops to `/hs-build`); the fix is small and
+localized to the two call sites.
