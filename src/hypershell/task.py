@@ -799,13 +799,15 @@ class TaskSearchApp(Application, SearchableMixin):
     def print_card(results: List[Tuple]) -> None:
         """Print each task as a richly-formatted, width-responsive card (see `render_card`)."""
         tasks = [Task.from_dict(dict(zip(Task.columns, record))) for record in results]
-        source_map = Source.paths_for_ids([task.source for task in tasks if task.source])
+        source_ids = [task.source for task in tasks if task.source]
+        source_map = Source.paths_for_ids(source_ids)
+        fingerprint_map = Source.fingerprints_for_ids(source_ids)
         console = Console()
         width = card_width(console.size.width)
         for i, task in enumerate(tasks):
             if i:
                 console.print()  # A blank line separates adjacent cards.
-            console.print(render_card(task, width, source_map=source_map))
+            console.print(render_card(task, width, source_map=source_map, fingerprint_map=fingerprint_map))
 
     def print_plain(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print plain text output with given field names, one task per line."""
@@ -1413,6 +1415,25 @@ def resolve_source(source: Optional[str], source_map: Optional[Dict[str, str]] =
     return format_source(path) if path else source
 
 
+def resolve_source_fingerprint(source: Optional[str],
+                               fingerprint_map: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """Resolve a task's `source` UUID to its Source content-fingerprint for the card's `source id`.
+
+    Mirrors `resolve_source`: a batched `fingerprint_map` (id -> fingerprint) is consulted first to
+    avoid an N+1 lookup; otherwise a single `Source.from_id` resolves it. Returns None when the task
+    has no source, the source row is missing, or the source predates fingerprinting - callers then
+    render no parenthetical.
+    """
+    if not source:
+        return None
+    if fingerprint_map is not None:
+        return fingerprint_map.get(source)
+    try:
+        return Source.from_id(source).fingerprint
+    except Source.NotFound:
+        return None
+
+
 def format_task_fields(task: Task, source_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Prepare a task's columns as display values shared by the `normal` and `card` views.
 
@@ -1473,7 +1494,8 @@ def card_region(title: str, rows: List[Tuple[str, Any]]) -> Group:
     return Group(Text(''), Text(title, style='bold underline'), grid)
 
 
-def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = None) -> Panel:
+def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = None,
+                fingerprint_map: Optional[Dict[str, str]] = None) -> Panel:
     """Build a `rich` card for one task (the `card` output format).
 
     `width` is clamped to [60, 160]; the metadata region layout is chosen from it (one column
@@ -1481,7 +1503,8 @@ def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = N
     top - the id on its own line below 130 so it is never truncated - and the virtual `status:`
     badge from `Task.status_label` is pinned to the lower-right via the Panel subtitle. Renders
     legibly with no color: rich drops styling on a non-terminal and the status stays literal
-    text.
+    text. `source_map`/`fingerprint_map` (id -> path / id -> fingerprint) let a multi-task caller
+    batch-resolve the source's path and content-fingerprint and avoid N+1 lookups.
     """
     width = card_width(width)
     # One column below 90; two through 149; three only when wide enough that a full UUID
@@ -1490,6 +1513,9 @@ def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = N
     data = format_task_fields(task, source_map)
     label = task.status_label
     style = STATUS_STYLES.get(label, 'magenta')
+    # The Source content-fingerprint rides in parens on the `source id` line, when the source has one.
+    source_fingerprint = resolve_source_fingerprint(task.source, fingerprint_map)
+    source_id = data['source_id'] if not source_fingerprint else f"{data['source_id']} ({source_fingerprint})"
 
     # Identity header. A future `zone` column adds another cell here without further change.
     def field(key: str, value: Any) -> Text:
@@ -1509,11 +1535,15 @@ def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = N
         second.add_row(*identity)
         header.add_row(second)
 
-    command = card_region('command', [('args', data['args']), ('command', data['command'])])
+    # The command and its provenance/outcome (source, exit status) go full-width, above the
+    # responsive grid, so long source paths and the command line are never cramped into a cell.
+    submission = card_region('submission', [('args', data['args']), ('command', data['command']),
+                                            ('source', data['source']), ('source id', source_id),
+                                            ('exit status', data['exit_status'])])
     metadata = [
         card_region('timing', [('submitted', data['submit_time']), ('scheduled', data['schedule_time']),
-                               ('started', data['start_time']), ('waited', data['waited']),
-                               ('completed', data['completion_time']), ('duration', data['duration']),
+                               ('started', data['start_time']), ('completed', data['completion_time']),
+                               ('waited', data['waited']), ('duration', data['duration']),
                                ('timeout', data['timeout'])]),
         card_region('resources', [('cores', f"{data['cores']} (max {data['cores_max']})"),
                                   ('memory', f"{data['memory']} (max {data['memory_max']})")]),
@@ -1524,8 +1554,6 @@ def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = N
                                ('csv', data['csvpath'])]),
         card_region('retry', [('attempt', data['attempt']), ('retried', data['retried']),
                               ('prev', data['previous_id']), ('next', data['next_id'])]),
-        card_region('result', [('source', data['source']), ('source id', data['source_id']),
-                               ('exit status', data['exit_status'])]),
     ]
     columns = Table.grid(expand=True, padding=(0, 3))
     for _ in range(ncols):
@@ -1535,7 +1563,7 @@ def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = N
         cells += [''] * (ncols - len(cells))
         columns.add_row(*cells)
 
-    body = [header, command, columns]
+    body = [header, submission, columns]
     if task.tag:
         body.append(card_region('tags', [('', data['tag'])]))
     badge = Text.assemble(('status: ', 'dim'), (label, style))

@@ -1045,6 +1045,17 @@ class Source(Entity):
             return {}
         return dict(cls.query(cls.id, cls.path).filter(cls.id.in_(set(ids))).all())
 
+    @classmethod
+    def fingerprints_for_ids(cls: Type[Source], ids: List[str]) -> Dict[str, str]:
+        """Map of source id -> content fingerprint for the given `ids` (batched presentation lookup).
+
+        A source with a NULL fingerprint (the reserved `<direct>`/`<stdin>` rows, or a pre-
+        fingerprinting row) maps to None; callers render no parenthetical for those.
+        """
+        if not ids:
+            return {}
+        return dict(cls.query(cls.id, cls.fingerprint).filter(cls.id.in_(set(ids))).all())
+
 
 # Indices for efficient queries
 index_source_lookup = Index('index_source_lookup', Source.path, Source.fingerprint)

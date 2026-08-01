@@ -31,20 +31,27 @@ def strip_ansi(text: str) -> str:
     return ANSI.sub('', text)
 
 
+SOURCE_ID_FP = re.compile(r'source id [0-9a-f-]{36} \([0-9a-f]{32}\)')
+
+
 @mark.integration
-def test_card_format_end_to_end(temp_site: Path) -> None:
+def test_card_format_end_to_end(temp_site: Path, monkeypatch) -> None:
     """`--format=card` renders completed tasks as OK cards via list, info, and wait."""
+    # A wide, non-folding card keeps the `source id <uuid> (<fingerprint>)` line intact to assert on.
+    monkeypatch.setenv('COLUMNS', '160')
     taskfile = create_taskfile(temp_site, ['echo CARD_0  # HYPERSHELL: n:0',
                                            'echo CARD_1  # HYPERSHELL: n:1'])
     rc, _, _ = main(['hs', 'cluster', str(taskfile), '-N1'])
     assert rc == exit_status.success
 
-    # hs list --format=card → one OK card per completed task.
+    # hs list --format=card → one OK card per completed task, each carrying the batched
+    # Source content-fingerprint in parens on the source id line.
     rc, out, _ = main(['hs', 'list', '--format=card'])
     assert rc == exit_status.success
     listing = strip_ansi(out)
     assert listing.count('╭─ task') == 2
     assert listing.count('status: OK') == 2
+    assert len(SOURCE_ID_FP.findall(listing)) == 2
 
     # hs info <id> --format=card → a single OK card carrying the full id.
     rc, ids, _ = main_lines(['hs', 'list', 'id'])
@@ -58,6 +65,8 @@ def test_card_format_end_to_end(temp_site: Path) -> None:
     assert info.count('╭─ task') == 1
     assert task_id in info
     assert 'status: OK' in info
+    # The single-task path resolves the same fingerprint directly via `Source.from_id`.
+    assert SOURCE_ID_FP.search(info)
 
     # hs wait --info -f card → completed task returns immediately with the same card.
     rc, out, _ = main(['hs', 'wait', task_id, '--info', '-f', 'card'])

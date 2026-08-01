@@ -73,8 +73,11 @@ class TestCardRender:
         out = strip_ansi(render(make(), 100))
         assert UID in out                       # id shown in full
         assert FP in out                        # fingerprint in the header
-        for title in ('command', 'timing', 'resources', 'execution', 'output', 'retry', 'result'):
+        for title in ('submission', 'timing', 'resources', 'execution', 'output', 'retry'):
             assert title in out
+        # The command's provenance and outcome live in the full-width `submission` region.
+        for label in ('source', 'source id', 'exit status'):
+            assert label in out
         assert 'status: OK' in out
 
     def test_id_never_truncated_even_at_min_width(self) -> None:
@@ -137,6 +140,25 @@ class TestCardRender:
         with_tags = strip_ansi(render(make(tag={'priority': 'high'}), 100))
         assert 'tags' in with_tags and 'priority:high' in with_tags
         assert 'tags' not in strip_ansi(render(make(tag={}), 100))
+
+    def test_source_fingerprint_in_parens(self) -> None:
+        """The Source content-fingerprint rides in parens on the `source id` line when present."""
+        src = 'a1b2c3d4-0000-4000-8000-000000000001'
+        fp = 'd41d8cd98f00b204e9800998ecf8427e'
+        buffer = io.StringIO()
+        Console(width=120, file=buffer).print(
+            render_card(make(source=src), 120,
+                        source_map={src: 'tasks.txt'}, fingerprint_map={src: fp}))
+        assert f'{src} ({fp})' in strip_ansi(buffer.getvalue())
+
+    def test_source_fingerprint_omitted_when_absent(self) -> None:
+        """A source with a NULL/missing fingerprint shows the id alone - no empty parens."""
+        src = 'a1b2c3d4-0000-4000-8000-000000000001'
+        buffer = io.StringIO()
+        Console(width=120, file=buffer).print(
+            render_card(make(source=src), 120, source_map={src: 'tasks.txt'}, fingerprint_map={src: None}))
+        id_line = next(line for line in strip_ansi(buffer.getvalue()).splitlines() if 'source id' in line)
+        assert src in id_line and '(' not in id_line
 
     def test_markup_safe_values_do_not_crash_or_corrupt(self) -> None:
         """Regression: bracketed shell (rich markup) renders verbatim, never MarkupError."""
