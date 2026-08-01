@@ -3,10 +3,10 @@ slug: part-tag-to-column
 title: Promote `part` from a bookkeeping tag to a first-class column
 kind: refactor
 appetite: small
-status: in_progress
+status: in_review
 branch: feature/part-tag-to-column
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-07-31'
 phases:
 - id: P1
@@ -28,7 +28,7 @@ phases:
   verify: uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build
 - id: P2
   name: 'CLI: `--part N` filter on hs list/search + same-commit help snippets + completions'
-  status: pending
+  status: done
   satisfies:
   - R9
   - R7
@@ -133,30 +133,34 @@ rotated partition), with the same-commit help snippets and shell completions upd
 verifiable: rotate, then filter by partition.
 
 ### CLI — `src/hypershell/task.py` (single `TaskSearchApp`)
-- [ ] Add `part_filter: Optional[int] = None` to `SearchableMixin` and
+- [x] Add `part_filter: Optional[int] = None` to `SearchableMixin` and
       `interface.add_argument('--part', type=int, default=None, dest='part_filter')` to `TaskSearchApp`,
-      mirroring the `-g/--group` option (`:465`).
-- [ ] In `__build_filters` (`:513-538`), append `f'part == {self.part_filter}'` when `part_filter is not
-      None` (mirroring the group filter at `:531-532`, `:646-647`). `--part 0` is a valid filter (main
-      partition); absent ⇒ no filter. `--part` is added **once** (list and search are the same app).
+      mirroring the `-g/--group` option. (Added the mixin attr only once; the flag is declared on
+      `TaskSearchApp`, not `TaskUpdateApp` — R9 scopes it to list/search.)
+- [x] In `__build_filters`, append `f'part == {self.part_filter}'` when `part_filter is not
+      None` (mirroring the group filter). `--part 0` is a valid filter (main partition); absent ⇒ no
+      filter. `--part` is added **once** (list and search are the same app).
 
 ### Docs / help / completions (R7, R9, §12 same-commit)
-- [ ] Update `SEARCH_USAGE`/`SEARCH_HELP` (`task.py:554`/`:568`) to document `--part`, and hand-edit
-      `docs/_include/task_search_help.rst` (and `task_search_usage.rst` iff the synopsis changes) — per
-      the `961fb22 [feature] Add --all` precedent.
-- [ ] bash completion `_hs_task_search`: add `--part` to the `all_opts` string (~`:377-380`) (+ optional
-      `--part)` value branch). zsh completion `_hs_list`: add an `_arguments` line mirroring
-      `--ignore-partitions` (~`:422`). Do not touch `hsx`/`hs cluster` completions.
+- [x] Update `SEARCH_USAGE`/`SEARCH_HELP` to document `--part` (synopsis gained `[--part N]`), and
+      hand-edit `docs/_include/task_search_help.rst` **and** `task_search_usage.rst` (synopsis changed).
+- [x] bash completion `_hs_task_search`: added `--part` to `all_opts` + a `--part)` value branch. zsh
+      completion `_hs_list`: added an `_arguments` line after `--group`. Did not touch `hsx`/`hs cluster`.
 
-### Tests (R7) — `@mark.unit`
-- [ ] `tests/test_list.py`: add `--part` cases mirroring existing filter tests — after a rotate,
-      `--part N` returns only partition-N rows, `--part 0` returns the main partition, and omitting it
-      returns all; an out-of-range `--part` returns nothing.
+### Tests (R7)
+- [x] `tests/test_list.py`: added `test_part_filter` — after a rotate, `--part 1` returns partition-1
+      rows, `--part 0` the main partition, omitting it returns all, an out-of-range `--part` returns
+      nothing, `--part` composes with `-t`, and `hs task search --part` behaves identically.
+      (Marked `@mark.integration`, not `@mark.unit` as the P2 header said — the test shells out to the
+      installed CLI/DB, which AGENTS.md §Testing classifies as integration.)
 
 ### Verify
-- [ ] Frontmatter gate: `uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build`.
-- [ ] CLI drive (partition targeting): `.agents/factory/bin/temp_site.sh sh -c "…submit + complete tasks + uv run hs initdb --rotate…; uv run hs list --part 1; uv run hs list --part 0"` returns the right partition subsets.
-- [ ] Completions: `--part` appears in `share/` bash + zsh completions for `hs list`/`hs search`.
+- [x] Frontmatter gate: `uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build` — 422
+      passed; docs build with only the 2 baseline toctree warnings.
+- [x] CLI drive (partition targeting): after rotate, `hs list args --part 1` → partition-1 rows,
+      `--part 0` → main, no `--part` count 4, `--part 1 -t n:0` → one row, `--part 99` → empty,
+      `hs task search --part 1` identical.
+- [x] Completions: `--part` appears in `share/` bash (`all_opts` + value branch) and zsh completions.
 
 **Touches:** `src/hypershell/task.py`, `docs/_include/task_search_help.rst` (± `task_search_usage.rst`),
 `share/` bash + zsh completions, `tests/test_list.py`.

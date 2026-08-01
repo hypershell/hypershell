@@ -233,3 +233,31 @@ def test_sighup_cancel_equivalence(temp_site: Path) -> None:
     by_cancelled = main_lines(['hs', 'list', 'exit_status', '-t', 'n:0', '--cancelled'])[1]
     assert by_signal == ['-1']
     assert by_cancelled == ['-1']
+
+
+@mark.integration
+def test_part_filter(temp_site: Path) -> None:
+    """`--part N` restricts the listing to one rotated partition; auto-union keeps all visible."""
+    taskfile = create_taskfile(temp_site, [f'echo {n}  # HYPERSHELL: n:{n}' for n in range(4)])
+    assert main(['hs', 'submit', str(taskfile)])[0] == cli_status.success
+
+    # Complete n:0 and n:1 so they rotate into partition 1; n:2 and n:3 stay in main (part 0).
+    assert main(['hs', 'update', 'exit_status=0', '-t', 'n:0', '--no-confirm'])[0] == cli_status.success
+    assert main(['hs', 'update', 'exit_status=0', '-t', 'n:1', '--no-confirm'])[0] == cli_status.success
+    assert main(['hs', 'initdb', '--rotate', '--yes'])[0] == cli_status.success
+
+    # --part 1 targets the rotated partition; --part 0 the main database.
+    assert sorted(main_lines(['hs', 'list', 'args', '--part', '1'])[1]) == ['echo 0', 'echo 1']
+    assert sorted(main_lines(['hs', 'list', 'args', '--part', '0'])[1]) == ['echo 2', 'echo 3']
+
+    # Omitting --part lists everything (auto-union across both files).
+    assert main_lines(['hs', 'list', '--count'])[1] == ['4']
+
+    # --part composes with a tag filter, and 0 is a legitimate filter (not treated as "unset").
+    assert main_lines(['hs', 'list', 'args', '--part', '1', '-t', 'n:0'])[1] == ['echo 0']
+
+    # An out-of-range partition returns nothing.
+    assert main_lines(['hs', 'list', 'args', '--part', '99'])[1] == ['']
+
+    # `hs task search` is the same app -> identical filtering.
+    assert sorted(main_lines(['hs', 'task', 'search', 'args', '--part', '1'])[1]) == ['echo 0', 'echo 1']

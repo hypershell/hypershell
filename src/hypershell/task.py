@@ -463,6 +463,7 @@ class SearchableMixin:
     show_cancelled: bool = False
 
     group_filter: Optional[int] = None
+    part_filter: Optional[int] = None
     retry_filter: bool = False
     signal_filter: Optional[str] = None
 
@@ -530,6 +531,8 @@ class SearchableMixin:
             self.where_clauses.append(f'exit_status == {signal_status}')
         if self.group_filter is not None:
             self.where_clauses.append(f'group == {self.group_filter}')
+        if self.part_filter is not None:
+            self.where_clauses.append(f'part == {self.part_filter}')  # 0 is valid (main partition)
         if self.retry_filter:
             self.where_clauses.append('attempt > 1')
         if not self.where_clauses:
@@ -553,7 +556,7 @@ SEARCH_PROGRAM = 'hs list'
 SEARCH_SYNOPSIS = f'{SEARCH_PROGRAM} [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] ...'
 SEARCH_USAGE = f"""\
 Usage:
-  hs list [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] [-g GROUP]
+  hs list [-h] [FIELD [FIELD ...]] [-w COND [COND ...]] [-t TAG [TAG...]] [-g GROUP] [--part N]
           [--failed | --succeeded | --completed | --remaining | --cancelled] [--retries]
           [--signal NAME] [--order-by FIELD [--desc]] [--all | --count | --limit LIMIT]
           [-f FORMAT | --json | --csv]  [-d CHAR] [-i]
@@ -575,6 +578,7 @@ Options:
   -w, --where       COND...  Filter on conditional expression.
   -t, --with-tag    TAG...   Filter by tag.
   -g, --group       GROUP    Filter by group.
+      --part        N        Filter by partition (0 is the main database).
   -s, --order-by    FIELD    Order output by field.
       --desc                 Descending order (requires --order-by).
   -F, --failed               Alias for `-w exit_status != 0`.
@@ -645,6 +649,9 @@ class TaskSearchApp(Application, SearchableMixin):
 
     group_filter: Optional[int] = None
     interface.add_argument('-g', '--group', type=int, default=None, dest='group_filter')
+
+    part_filter: Optional[int] = None
+    interface.add_argument('--part', type=int, default=None, dest='part_filter')
 
     retry_filter: bool = False
     interface.add_argument('--retries', action='store_true', dest='retry_filter')
