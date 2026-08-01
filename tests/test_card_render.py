@@ -19,7 +19,8 @@ from rich.panel import Panel
 
 # Internal libs
 from hypershell.data.model import Task
-from hypershell.task import render_card, card_width, CARD_MIN_WIDTH, CARD_MAX_WIDTH, STATUS_STYLES
+from hypershell.task import (render_card, card_width, card_console,
+                             CARD_MIN_WIDTH, CARD_MAX_WIDTH, STATUS_STYLES)
 
 
 UID = '3f2a9c1e-7b4d-4a2e-9c1e-7b4d4a2e9c1e'
@@ -90,6 +91,19 @@ class TestCardRender:
         assert card_width(123) == 123
         assert max_line_width(render(make(), 40)) <= 60      # clamped up to the minimum
         assert max_line_width(render(make(), 300)) <= 160    # clamped down to the maximum
+
+    def test_card_console_clamps_terminal_width(self, monkeypatch) -> None:
+        """The card console clamps the detected terminal width to [60, 160] so the id survives.
+
+        Sizing the console (not just the Panel) is the fix: a bare console renders at the raw
+        terminal width and clips a wider Panel, truncating the id below 60 columns.
+        """
+        monkeypatch.setenv('COLUMNS', '30')
+        assert card_console().width == CARD_MIN_WIDTH == 60
+        monkeypatch.setenv('COLUMNS', '9999')
+        assert card_console().width == CARD_MAX_WIDTH == 160
+        monkeypatch.setenv('COLUMNS', '100')
+        assert card_console().width == 100
 
     def test_narrow_one_column(self) -> None:
         """Below 90 cols, regions stack: no single line holds two region titles."""

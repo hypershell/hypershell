@@ -204,8 +204,8 @@ class TaskInfoApp(Application):
         elif self.output_format == 'normal':
             print_normal(self.task)
         elif self.output_format == 'card':
-            console = Console()
-            console.print(render_card(self.task, card_width(console.size.width)))
+            console = card_console()
+            console.print(render_card(self.task, console.width))
         else:
             self.print_formatted()
 
@@ -802,8 +802,8 @@ class TaskSearchApp(Application, SearchableMixin):
         source_ids = [task.source for task in tasks if task.source]
         source_map = Source.paths_for_ids(source_ids)
         fingerprint_map = Source.fingerprints_for_ids(source_ids)
-        console = Console()
-        width = card_width(console.size.width)
+        console = card_console()
+        width = console.width
         for i, task in enumerate(tasks):
             if i:
                 console.print()  # A blank line separates adjacent cards.
@@ -1480,6 +1480,18 @@ CARD_MAX_WIDTH: Final[int] = 160
 def card_width(console_width: int) -> int:
     """Clamp a raw console width to the card's supported [60, 160] range."""
     return max(CARD_MIN_WIDTH, min(CARD_MAX_WIDTH, console_width))
+
+
+def card_console() -> Console:
+    """
+    A `Console` whose render width is the clamped card width for the current terminal.
+
+    Sizing the console itself (not just the Panel) to `card_width` is what honors the minimum-60
+    floor: a bare `Console` renders at the raw terminal width and clips a wider Panel, truncating
+    the id below 60 columns. Fixing `width` leaves `is_terminal` detection intact, so a non-TTY
+    still drops color and the status stays literal text.
+    """
+    return Console(width=card_width(Console().size.width))
 
 
 def card_region(title: str, rows: List[Tuple[str, Any]]) -> Group:

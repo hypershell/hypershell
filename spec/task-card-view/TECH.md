@@ -3,7 +3,7 @@ slug: task-card-view
 title: Rich "card" view for tasks
 kind: feature
 appetite: big
-status: blocked
+status: in_review
 branch: feature/task-card-view
 base: develop
 current_phase: done
@@ -33,7 +33,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -m unit -k card_render
 - id: P3
   name: Wire card into hs list / hs search (+ search docs & completions)
@@ -157,7 +157,18 @@ that adapts across narrow/normal/wide and stays legible with no color.
       titles, `status: <LABEL>`; the [60,160] clamp; distinct 1/2/3-column layouts; horizontal vs
       stacked header; badge lower-right + pinned palette; tags present/omitted; no-color legibility;
       color-on-TTY; and the markup-safety regression. 24 card tests, 200 unit total.
-- **Verify:** `uv run pytest -m unit -k card_render` → 24 passed (full unit suite 200 passed).
+- [x] **REMEDIATION (review cycle 2, C2-1 · MEDIUM · R5):** the min-60 clamp was *inert below 60
+      columns* — the `hs list`/`hs info` call sites printed into a bare `Console()` sized to the raw
+      terminal, so rich clipped the ≥60 Panel down to the terminal width and truncated the id
+      (`COLUMNS=30` → `id 019fbe23-…-0…`). Added a shared `card_console()` (a `Console` fixed to
+      `card_width(detected)`) and routed both call sites (`TaskInfoApp.run`, `TaskSearchApp.print_card`)
+      through it, so the console — not just the Panel — carries the clamped width. `is_terminal`
+      detection is untouched, so R6 (non-TTY drops color, status stays literal) still holds. Regression
+      test `test_card_console_clamps_terminal_width` (COLUMNS 30→60, 9999→160, 100→100). No CLI-surface
+      change, so no docs/completions delta.
+- **Verify:** `uv run pytest -m unit -k card_render` → 26 passed (full unit suite 206 passed). CLI
+      drive at `COLUMNS=30`: `hs list`/`hs info --format=card` render a 60-wide card with the **full id
+      present**; default piped width still 80; `NO_COLOR=1` piped emits 0 ANSI with `status: OK` plain.
 - **Touches:** `src/hypershell/task.py`, `tests/test_card_render.py`.
 
 ## Phase P3 — Wire `card` into `hs list` / `hs search`
