@@ -347,6 +347,25 @@ class Task(Entity):
     class AlreadyExists(AlreadyExists):
         pass
 
+    @property
+    def status_label(self: Task) -> str:
+        """Human-readable lifecycle status for display (e.g. the `card`-view badge)."""
+        if self.schedule_time is None:
+            return 'WAITING'
+        if self.completion_time is None:
+            return 'RUNNING'
+        if self.exit_status == 0:
+            return 'OK'
+        if self.exit_status == CANCEL_STATUS:
+            return 'CANCELLED'
+        if self.exit_status is None:
+            return 'UNKNOWN'
+        if self.exit_status <= -1000:
+            return 'ERROR'
+        if self.exit_status < 0:
+            return 'KILLED'
+        return 'FAILED'
+
     @classmethod
     def from_id(cls: Type[Task], id: str, caching: bool = True) -> Task:
         """Look up task by unique `id`."""
@@ -411,11 +430,13 @@ class Task(Entity):
     @classmethod
     def compute_fingerprint(cls: Type[Task], raw_command: str, group: int,
                             tags: Optional[Dict[str, JSONData]]) -> str:
-        """Stable, order-independent identity fingerprint.
+        """
+        Stable, order-independent identity fingerprint.
 
-        An md5 over canonical JSON of the pre-template ``raw_command``, the task
-        ``group``, and user ``tags`` (resource knobs are already popped from the tag
-        dict before this is called; the bookkeeping ``part`` is a column, never a tag).
+        An md5 over canonical JSON of the pre-template ``raw_command``, the task ``group``,
+        and user ``tags`` (resource knobs are already popped from the tag dict before this
+        is called; the bookkeeping ``part`` is a column, never a tag).
+
         The uuid, attempt/retry counters, timing, exit status, and execution template
         deliberately do not participate — re-running the same work under a different
         template yields the same fingerprint. MD5 matches the SOURCE content fingerprint
@@ -449,7 +470,8 @@ class Task(Entity):
 
     @staticmethod
     def ensure_valid_tag(tag: Optional[Dict[str, JSONData]], *, strict: bool = True) -> None:
-        """Check tag dictionary and raise if invalid.
+        """
+        Check tag dictionary and raise if invalid.
 
         With ``strict=False`` (used for JSON-sourced tags) the character-set and
         length restrictions on keys and values are relaxed; only the structural
@@ -1025,6 +1047,18 @@ class Source(Entity):
         if not ids:
             return {}
         return dict(cls.query(cls.id, cls.path).filter(cls.id.in_(set(ids))).all())
+
+    @classmethod
+    def fingerprints_for_ids(cls: Type[Source], ids: List[str]) -> Dict[str, str]:
+        """
+        Map of source id -> content fingerprint for the given `ids` (batched presentation lookup).
+
+        A source with a NULL fingerprint (the reserved `<direct>`/`<stdin>` rows, or a pre-
+        fingerprinting row) maps to None; callers render no parenthetical for those.
+        """
+        if not ids:
+            return {}
+        return dict(cls.query(cls.id, cls.fingerprint).filter(cls.id.in_(set(ids))).all())
 
 
 # Indices for efficient queries

@@ -23,9 +23,12 @@ from shutil import copyfileobj
 
 # External libs
 import yaml
-from rich.console import Console
+from rich.console import Console, Group
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+from rich import box
 from cmdkit.app import Application, ApplicationGroup, exit_status
 from cmdkit.cli import Interface, ArgumentError
 from cmdkit.ansi import red, green, yellow, faint, COLOR_STDOUT
@@ -138,7 +141,7 @@ Arguments:
   ID                        Unique task UUID.
 
 Options:
-  -f, --format     FORMAT   Format task info ([normal], json, yaml).
+  -f, --format     FORMAT   Format task info ([normal], card, json, yaml).
       --json                Format task metadata as JSON.
       --yaml                Format task metadata as YAML.
   -x, --extract    FIELD    Print single field.
@@ -169,7 +172,7 @@ class TaskInfoApp(Application):
     print_interface.add_argument('-x', '--extract', default=None, choices=Task.columns, dest='extract_field')
 
     output_format: str = 'normal'
-    output_formats: List[str] = ['normal', 'json', 'yaml']
+    output_formats: List[str] = ['normal', 'card', 'json', 'yaml']
     output_interface = interface.add_mutually_exclusive_group()
     output_interface.add_argument('-f', '--format', default=output_format, dest='output_format', choices=output_formats)
     output_interface.add_argument('--json', action='store_const', const='json', dest='output_format')
@@ -200,6 +203,9 @@ class TaskInfoApp(Application):
             self.print_file('csvpath')
         elif self.output_format == 'normal':
             print_normal(self.task)
+        elif self.output_format == 'card':
+            console = card_console()
+            console.print(render_card(self.task, console.width))
         else:
             self.print_formatted()
 
@@ -307,7 +313,7 @@ Arguments:
 Options:
   -n, --interval  SEC     Time to wait between polling (default: {DEFAULT_INTERVAL}).
   -i, --info              Print info on task.
-  -f, --format    FORMAT  Format task info ([normal], json, yaml).
+  -f, --format    FORMAT  Format task info ([normal], card, json, yaml).
       --json              Format info as JSON.
       --yaml              Format info as YAML.
   -s, --status            Print exit status for task.
@@ -336,7 +342,7 @@ class TaskWaitApp(Application):
     print_interface.add_argument('-r', '--return', action='store_true', dest='return_status')
 
     output_format: str = 'normal'
-    output_formats: List[str] = ['normal', 'json', 'yaml']
+    output_formats: List[str] = ['normal', 'card', 'json', 'yaml']
     output_interface = interface.add_mutually_exclusive_group()
     output_interface.add_argument('-f', '--format', default=output_format,
                                   dest='output_format', choices=output_formats)
@@ -588,7 +594,7 @@ Options:
   -X, --cancelled            Alias for `-w exit_status == {CANCEL_STATUS}`.
       --retries              Alias for `-w attempt > 1`.
       --signal      NAME     Match tasks killed by signal NAME (e.g. TERM, KILL, HUP).
-  -f, --format      FORMAT   Format output (normal, plain, table, csv, json).
+  -f, --format      FORMAT   Format output (normal, card, plain, table, csv, json).
       --json                 Format output as JSON (alias for `--format=json`).
       --csv                  Format output as CSV (alias for `--format=csv`).
   -d, --delimiter   CHAR     Field seperator for plain/csv formats.
@@ -660,7 +666,7 @@ class TaskSearchApp(Application, SearchableMixin):
     interface.add_argument('--signal', default=None, dest='signal_filter')
 
     output_format: str = '<default>'  # 'plain' if field_names else 'normal'
-    output_formats: List[str] = ['normal', 'plain', 'table', 'json', 'csv']
+    output_formats: List[str] = ['normal', 'card', 'plain', 'table', 'json', 'csv']
     output_interface = interface.add_mutually_exclusive_group()
     output_interface.add_argument('-f', '--format', default=output_format,
                                   dest='output_format', choices=output_formats)
@@ -789,6 +795,20 @@ class TaskSearchApp(Application, SearchableMixin):
             print('---')
             print_normal(task, source_map=source_map)
 
+    @staticmethod
+    def print_card(results: List[Tuple]) -> None:
+        """Print each task as a richly-formatted, width-responsive card (see `render_card`)."""
+        tasks = [Task.from_dict(dict(zip(Task.columns, record))) for record in results]
+        source_ids = [task.source for task in tasks if task.source]
+        source_map = Source.paths_for_ids(source_ids)
+        fingerprint_map = Source.fingerprints_for_ids(source_ids)
+        console = card_console()
+        width = console.width
+        for i, task in enumerate(tasks):
+            if i:
+                console.print()  # A blank line separates adjacent cards.
+            console.print(render_card(task, width, source_map=source_map, fingerprint_map=fingerprint_map))
+
     def print_plain(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print plain text output with given field names, one task per line."""
         for record in results:
@@ -826,8 +846,8 @@ class TaskSearchApp(Application, SearchableMixin):
         else:
             if self.output_format == '<default>':
                 self.output_format = 'plain'
-            elif self.output_format == 'normal':
-                raise ArgumentError('Cannot use --format=normal with subset of field names')
+            elif self.output_format in ('normal', 'card'):
+                raise ArgumentError(f'Cannot use --format={self.output_format} with subset of field names')
         if self.output_delimiter != '<default>' and self.output_format not in ['plain', 'csv']:
             raise ArgumentError(f'Unused --delimiter for --format={self.output_format}')
         if len(self.output_delimiter) > DELIMITER_MAX_SIZE:
@@ -1333,7 +1353,8 @@ SPECIAL_TASK_COLORS: Final[Dict[Optional[int], Callable[[str], str]]] = {
 
 
 def select_color(status: Optional[int]) -> Callable[[str], str]:
-    """Delegate function for colorization based on task exit status.
+    """
+    Delegate function for colorization based on task exit status.
 
     Remaining (unrun) tasks are uncolored, successful tasks are green, and cancelled tasks
     (exit_status == CANCEL_STATUS, including those terminated by SIGHUP) are faint. Any other
@@ -1360,8 +1381,25 @@ def select_style(status: Optional[int]) -> Optional[str]:
     return SPECIAL_TASK_STYLES.get(status, 'yellow' if status is not None and status < 0 else 'red')
 
 
+# Rich styles for the `card` view's virtual status badge and border, keyed by
+# `Task.status_label`. Unlike `select_style` (exit-status only), the whole-lifecycle
+# derivation tells WAITING from RUNNING and colors CANCELLED yellow - a deliberate card
+# palette; normal/plain/table keep the exit-status coloring above.
+STATUS_STYLES: Final[Dict[str, str]] = {
+    'OK': 'bold green',
+    'FAILED': 'bold red',
+    'CANCELLED': 'yellow',
+    'RUNNING': 'cyan',
+    'WAITING': 'dim',
+    'ERROR': 'magenta',
+    'KILLED': 'magenta',
+    'UNKNOWN': 'magenta',
+}
+
+
 def resolve_source(source: Optional[str], source_map: Optional[Dict[str, str]] = None) -> str:
-    """Resolve a task's `source` UUID to a display path/sentinel for the normal view.
+    """
+    Resolve a task's `source` UUID to a display path/sentinel for the normal view.
 
     NULL (historical rows) renders as ``null``. A batched `source_map` (id -> path) is
     consulted first to avoid an N+1 lookup; otherwise a single `Source.from_id` resolves
@@ -1379,22 +1417,175 @@ def resolve_source(source: Optional[str], source_map: Optional[Dict[str, str]] =
     return format_source(path) if path else source
 
 
-def print_normal(task: Task, source_map: Optional[Dict[str, str]] = None) -> None:
-    """Print semi-structured task metadata with all field names.
+def resolve_source_fingerprint(source: Optional[str],
+                               fingerprint_map: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """
+    Resolve a task's `source` UUID to its Source content-fingerprint for the card's `source id`.
 
-    `source_map` (id -> path) lets a multi-task caller batch-resolve sources up front and
+    Mirrors `resolve_source`: a batched `fingerprint_map` (id -> fingerprint) is consulted first to
+    avoid an N+1 lookup; otherwise a single `Source.from_id` resolves it. Returns None when the task
+    has no source, the source row is missing, or the source predates fingerprinting - callers then
+    render no parenthetical.
+    """
+    if not source:
+        return None
+    if fingerprint_map is not None:
+        return fingerprint_map.get(source)
+    try:
+        return Source.from_id(source).fingerprint
+    except Source.NotFound:
+        return None
+
+
+def format_task_fields(task: Task, source_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """
+    Prepare a task's columns as display values shared by the `normal` and `card` views.
+
+    Every column is JSON-formatted first, then the human-friendly overrides are applied:
+    durations/timeout as `timedelta`, memory via `format_bytes`, the resolved `source` path
+    plus its raw id (`source_id`), and tags flattened to `key:value` pairs. `source_map`
+    (id -> path) lets a multitask caller batch-resolve sources and avoid an N+1 lookup.
+    """
+    data = {k: format_json(v) for k, v in task.to_dict().items()}
+    data['waited'] = 'null' if task.waited is None else timedelta(seconds=int(task.waited))
+    data['duration'] = 'null' if task.duration is None else timedelta(seconds=int(task.duration))
+    data['tag'] = ', '.join(format_tag(k, v) for k, v in task.tag.items())
+    data['cores'] = int(task.cores or 0)
+    data['cores_max'] = 'null' if not task.cores_max else f'{task.cores_max:.2f}'
+    data['memory'] = format_bytes(int(task.memory or 0))
+    data['memory_max'] = 'null' if not task.memory_max else format_bytes(int(task.memory_max))
+    data['timeout'] = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
+    data['source_id'] = format_json(task.source)          # raw Source.id, shown in parens on `source`
+    data['source'] = resolve_source(task.source, source_map)
+    return data
+
+
+def print_normal(task: Task, source_map: Optional[Dict[str, str]] = None) -> None:
+    """
+    Print semi-structured task metadata with all field names.
+
+    `source_map` (id -> path) lets a multitask caller batch-resolve sources up front and
     avoid an N+1 lookup; when omitted (e.g. `hs info`), the single source is resolved directly.
     """
-    task_data = {k: format_json(v) for k, v in task.to_dict().items()}
-    task_data['waited'] = 'null' if task.waited is None else timedelta(seconds=int(task_data['waited']))
-    task_data['duration'] = 'null' if task.duration is None else timedelta(seconds=int(task_data['duration']))
-    task_data['tag'] = ', '.join(format_tag(k, v) for k, v in task.tag.items())
-    task_data['cores'] = int(task.cores or 0)
-    task_data['cores_max'] = 'null' if not task.cores_max else f'{task.cores_max:.2f}'
-    task_data['memory'] = format_bytes(int(task.memory or 0))
-    task_data['memory_max'] = 'null' if not task.memory_max else format_bytes(int(task.memory_max))
-    task_data['timeout'] = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
-    task_data['source_id'] = format_json(task.source)          # raw Source.id, shown in parens on `source`
-    task_data['source'] = resolve_source(task.source, source_map)
     color = select_color(task.exit_status)
-    print(color(NORMAL_MODE_TEMPLATE.format(**task_data)))
+    print(color(NORMAL_MODE_TEMPLATE.format(**format_task_fields(task, source_map))))
+
+
+# The `card` view supports terminal widths in this range; a raw console width is clamped
+# into it and the region layout (one/two/three columns) is chosen from the result.
+CARD_MIN_WIDTH: Final[int] = 60
+CARD_MAX_WIDTH: Final[int] = 160
+
+
+def card_width(console_width: int) -> int:
+    """Clamp a raw console width to the card's supported [60, 160] range."""
+    return max(CARD_MIN_WIDTH, min(CARD_MAX_WIDTH, console_width))
+
+
+def card_console() -> Console:
+    """
+    A `Console` whose render width is the clamped card width for the current terminal.
+
+    Sizing the console itself (not just the Panel) to `card_width` is what honors the minimum-60
+    floor: a bare `Console` renders at the raw terminal width and clips a wider Panel, truncating
+    the id below 60 columns. Fixing `width` leaves `is_terminal` detection intact, so a non-TTY
+    still drops color and the status stays literal text.
+    """
+    return Console(width=card_width(Console().size.width))
+
+
+def card_region(title: str, rows: List[Tuple[str, Any]]) -> Group:
+    """
+    A titled label:value block for one logical group of card fields.
+
+    Each block carries one leading blank line so regions stay evenly spaced whether stacked
+    in one column or laid side by side in a grid, without doubling separators.
+    """
+    grid = Table.grid(padding=(0, 1))
+    grid.add_column(justify='right', style='dim', no_wrap=True)
+    grid.add_column(overflow='fold')
+    for key, value in rows:
+        # Values are task data (commands, paths, tags) and must render literally: a bare string
+        # cell is parsed as `rich` console markup, so brackets (`sed 's/[/]/'`, bash arrays) would
+        # be silently stripped or raise MarkupError. Text renders verbatim, as the header does.
+        grid.add_row(key, Text(str(value)))
+    return Group(Text(''), Text(title, style='bold underline'), grid)
+
+
+def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = None,
+                fingerprint_map: Optional[Dict[str, str]] = None) -> Panel:
+    """
+    Build a `rich` card for one task (the `card` output format).
+
+    `width` is clamped to [60, 160]; the metadata region layout is chosen from it (one column
+    below 90, two below 150, three at or above 150). Identity fields sit horizontally across the
+    top - the id on its own line below 130 so it is never truncated - and the virtual `status:`
+    badge from `Task.status_label` is pinned to the lower-right via the Panel subtitle. Renders
+    legibly with no color: rich drops styling on a non-terminal and the status stays literal
+    text. `source_map`/`fingerprint_map` (id -> path / id -> fingerprint) let a multi-task caller
+    batch-resolve the source's path and content-fingerprint and avoid N+1 lookups.
+    """
+    width = card_width(width)
+    # One column below 90; two through 149; three only when wide enough that a full UUID
+    # value does not fold mid-token. The identity header goes fully horizontal at >= 130.
+    ncols = 1 if width < 90 else 2 if width < 150 else 3
+    data = format_task_fields(task, source_map)
+    label = task.status_label
+    style = STATUS_STYLES.get(label, 'magenta')
+    # The Source content-fingerprint rides in parens on the `source id` line, when the source has one.
+    source_fingerprint = resolve_source_fingerprint(task.source, fingerprint_map)
+    source_id = data['source_id'] if not source_fingerprint else f"{data['source_id']} ({source_fingerprint})"
+
+    # Identity header. A future `zone` column adds another cell here without further change.
+    def field(key: str, value: Any) -> Text:
+        return Text.assemble((f'{key} ', 'dim'), str(value))
+    identity = [field('fp', data['fingerprint']), field('group', data['group']), field('part', data['part'])]
+    header = Table.grid(padding=(0, 3))
+    if width >= 130:
+        for _ in range(4):
+            header.add_column(no_wrap=True)
+        header.add_row(field('id', data['id']), *identity)
+    else:
+        header.add_column()
+        header.add_row(field('id', data['id']))
+        second = Table.grid(padding=(0, 2))
+        for _ in range(3):
+            second.add_column(no_wrap=True)
+        second.add_row(*identity)
+        header.add_row(second)
+
+    # The command and its provenance/outcome (source, exit status) go full-width, above the
+    # responsive grid, so long source paths and the command line are never cramped into a cell.
+    submission = card_region('submission', [('args', data['args']), ('command', data['command']),
+                                            ('source', data['source']), ('source id', source_id),
+                                            ('exit status', data['exit_status'])])
+    metadata = [
+        card_region('timing', [('submitted', data['submit_time']), ('scheduled', data['schedule_time']),
+                               ('started', data['start_time']), ('completed', data['completion_time']),
+                               ('waited', data['waited']), ('duration', data['duration']),
+                               ('timeout', data['timeout'])]),
+        card_region('resources', [('cores', f"{data['cores']} (max {data['cores_max']})"),
+                                  ('memory', f"{data['memory']} (max {data['memory_max']})")]),
+        card_region('execution', [('submit', f"{data['submit_host']} ({data['submit_id']})"),
+                                  ('server', f"{data['server_host']} ({data['server_id']})"),
+                                  ('client', f"{data['client_host']} ({data['client_id']})")]),
+        card_region('output', [('out', data['outpath']), ('err', data['errpath']),
+                               ('csv', data['csvpath'])]),
+        card_region('retry', [('attempt', data['attempt']), ('retried', data['retried']),
+                              ('prev', data['previous_id']), ('next', data['next_id'])]),
+    ]
+    columns = Table.grid(expand=True, padding=(0, 3))
+    for _ in range(ncols):
+        columns.add_column(ratio=1, overflow='fold')
+    for i in range(0, len(metadata), ncols):
+        cells = list(metadata[i:i + ncols])
+        cells += [''] * (ncols - len(cells))
+        columns.add_row(*cells)
+
+    body = [header, submission, columns]
+    if task.tag:
+        body.append(card_region('tags', [('', data['tag'])]))
+    badge = Text.assemble(('status: ', 'dim'), (label, style))
+    return Panel(Group(*body), title='task', title_align='left', box=box.ROUNDED,
+                 width=width, padding=(0, 1), subtitle=badge, subtitle_align='right',
+                 border_style=style)

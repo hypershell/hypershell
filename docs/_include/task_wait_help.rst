@@ -16,7 +16,7 @@ Options
     See ``task info`` command.
 
 ``-f``, ``--format`` *FORMAT*
-    Format task info ([normal], json, yaml).
+    Format task info ([normal], card, json, yaml).
 
 ``--json``
     Format metadata output as JSON.

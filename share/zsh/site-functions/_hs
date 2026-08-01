@@ -352,7 +352,7 @@ function _hs_task_submit() {
 function _hs_info() {
     _arguments -s \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
-        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal json yaml)' \
+        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal card json yaml)' \
         '(-f --format --json --yaml)--json[Format task metadata as JSON]' \
         '(-f --format --json --yaml)--yaml[Format task metadata as YAML]' \
         '(--stdout --stderr --perf -x --extract)'{-x,--extract}'[Print a single field]:field:_hs_fields' \
@@ -374,7 +374,7 @@ function _hs_wait() {
         '(-i --info -s --status -r --return)'{-i,--info}'[Print info on task]' \
         '(-i --info -s --status -r --return)'{-s,--status}'[Print exit status for task]' \
         '(-i --info -s --status -r --return)'{-r,--return}'[Use exit status from task]' \
-        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal json yaml)' \
+        '(-f --format --json --yaml)'{-f,--format}'[Format task info]:format:(normal card json yaml)' \
         '(-f --format --json --yaml)--json[Format info as JSON]' \
         '(-f --format --json --yaml)--yaml[Format info as YAML]' \
         '1:task UUID:_hs_task_ids'
@@ -414,7 +414,7 @@ function _hs_list() {
         '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-X,--cancelled}'[Alias for -w "exit_status == -1"]' \
         '--retries[Alias for -w "attempt > 1"]' \
         '--signal[Match tasks killed by signal NAME]:signal:(HUP INT QUIT ABRT KILL TERM)' \
-        '(-f --format --json --csv)'{-f,--format}'[Format output]:format:(normal plain table csv json)' \
+        '(-f --format --json --csv)'{-f,--format}'[Format output]:format:(normal card plain table csv json)' \
         '(-f --format --json --csv)--json[Format output as JSON]' \
         '(-f --format --json --csv)--csv[Format output as CSV]' \
         '(-d --delimiter)'{-d,--delimiter}'[Field separator for plain/csv formats]:delimiter:(, \; \|)' \

@@ -72,11 +72,13 @@ Options
     (see ``--cancelled``).
 
 ``-f``, ``--format`` *FORMAT*
-    Specify output format (either ``normal``, ``plain``, ``table``, ``csv``, ``json``).
+    Specify output format (either ``normal``, ``card``, ``plain``, ``table``, ``csv``, ``json``).
 
     Default is ``normal`` for whole-task output. If any *FIELD* names are given, output is
     formatted in simple ``plain`` text; use ``csv`` for compliant output. The pretty-printed
-    ``table`` formatting is good for presentation on wide screens.
+    ``table`` formatting is good for presentation on wide screens. The ``card`` format renders
+    each task as a richly-formatted, bordered panel that adapts to the terminal width and shows a
+    color-coded status badge; like ``normal`` it needs the whole task (not a subset of *FIELD* s).
 
     See ``--csv``, ``--json``, and ``--delimiter``.
 
