@@ -1353,7 +1353,8 @@ SPECIAL_TASK_COLORS: Final[Dict[Optional[int], Callable[[str], str]]] = {
 
 
 def select_color(status: Optional[int]) -> Callable[[str], str]:
-    """Delegate function for colorization based on task exit status.
+    """
+    Delegate function for colorization based on task exit status.
 
     Remaining (unrun) tasks are uncolored, successful tasks are green, and cancelled tasks
     (exit_status == CANCEL_STATUS, including those terminated by SIGHUP) are faint. Any other
@@ -1397,7 +1398,8 @@ STATUS_STYLES: Final[Dict[str, str]] = {
 
 
 def resolve_source(source: Optional[str], source_map: Optional[Dict[str, str]] = None) -> str:
-    """Resolve a task's `source` UUID to a display path/sentinel for the normal view.
+    """
+    Resolve a task's `source` UUID to a display path/sentinel for the normal view.
 
     NULL (historical rows) renders as ``null``. A batched `source_map` (id -> path) is
     consulted first to avoid an N+1 lookup; otherwise a single `Source.from_id` resolves
@@ -1417,7 +1419,8 @@ def resolve_source(source: Optional[str], source_map: Optional[Dict[str, str]] =
 
 def resolve_source_fingerprint(source: Optional[str],
                                fingerprint_map: Optional[Dict[str, str]] = None) -> Optional[str]:
-    """Resolve a task's `source` UUID to its Source content-fingerprint for the card's `source id`.
+    """
+    Resolve a task's `source` UUID to its Source content-fingerprint for the card's `source id`.
 
     Mirrors `resolve_source`: a batched `fingerprint_map` (id -> fingerprint) is consulted first to
     avoid an N+1 lookup; otherwise a single `Source.from_id` resolves it. Returns None when the task
@@ -1435,12 +1438,13 @@ def resolve_source_fingerprint(source: Optional[str],
 
 
 def format_task_fields(task: Task, source_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    """Prepare a task's columns as display values shared by the `normal` and `card` views.
+    """
+    Prepare a task's columns as display values shared by the `normal` and `card` views.
 
     Every column is JSON-formatted first, then the human-friendly overrides are applied:
     durations/timeout as `timedelta`, memory via `format_bytes`, the resolved `source` path
     plus its raw id (`source_id`), and tags flattened to `key:value` pairs. `source_map`
-    (id -> path) lets a multi-task caller batch-resolve sources and avoid an N+1 lookup.
+    (id -> path) lets a multitask caller batch-resolve sources and avoid an N+1 lookup.
     """
     data = {k: format_json(v) for k, v in task.to_dict().items()}
     data['waited'] = 'null' if task.waited is None else timedelta(seconds=int(task.waited))
@@ -1457,9 +1461,10 @@ def format_task_fields(task: Task, source_map: Optional[Dict[str, str]] = None) 
 
 
 def print_normal(task: Task, source_map: Optional[Dict[str, str]] = None) -> None:
-    """Print semi-structured task metadata with all field names.
+    """
+    Print semi-structured task metadata with all field names.
 
-    `source_map` (id -> path) lets a multi-task caller batch-resolve sources up front and
+    `source_map` (id -> path) lets a multitask caller batch-resolve sources up front and
     avoid an N+1 lookup; when omitted (e.g. `hs info`), the single source is resolved directly.
     """
     color = select_color(task.exit_status)
@@ -1478,7 +1483,8 @@ def card_width(console_width: int) -> int:
 
 
 def card_region(title: str, rows: List[Tuple[str, Any]]) -> Group:
-    """A titled label:value block for one logical group of card fields.
+    """
+    A titled label:value block for one logical group of card fields.
 
     Each block carries one leading blank line so regions stay evenly spaced whether stacked
     in one column or laid side by side in a grid, without doubling separators.
@@ -1496,7 +1502,8 @@ def card_region(title: str, rows: List[Tuple[str, Any]]) -> Group:
 
 def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = None,
                 fingerprint_map: Optional[Dict[str, str]] = None) -> Panel:
-    """Build a `rich` card for one task (the `card` output format).
+    """
+    Build a `rich` card for one task (the `card` output format).
 
     `width` is clamped to [60, 160]; the metadata region layout is chosen from it (one column
     below 90, two below 150, three at or above 150). Identity fields sit horizontally across the
