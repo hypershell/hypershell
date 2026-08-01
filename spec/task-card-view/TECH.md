@@ -6,12 +6,12 @@ appetite: big
 status: in_progress
 branch: feature/task-card-view
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-08-01'
 phases:
 - id: P1
   name: Derive task status from lifecycle (Task.status_label)
-  status: pending
+  status: done
   satisfies:
   - R4
   depends_on: []
@@ -20,7 +20,8 @@ phases:
   hill: uphill
   verify: uv run pytest -m unit -k status_label
 - id: P2
-  name: Card renderer (Panel + header + regions + lower-right status + responsive width)
+  name: Card renderer (Panel + header + regions + lower-right status + responsive
+    width)
   status: pending
   satisfies:
   - R2
@@ -45,7 +46,8 @@ phases:
   parallel: false
   hammerable: false
   hill: crest
-  verify: ".agents/factory/bin/temp_site.sh sh -c \"seq 20 | uv run hsx -t 'echo {}' -N4 && uv run hs list --format=card\""
+  verify: .agents/factory/bin/temp_site.sh sh -c "seq 20 | uv run hsx -t 'echo {}'
+    -N4 && uv run hs list --format=card"
 - id: P4
   name: Wire card into hs info (+ hs wait parity) with info/wait docs & completions
   status: pending
@@ -77,7 +79,6 @@ review:
   blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Rich "card" view for tasks
 
 The **context engine and finite-state machine** for building this feature. The YAML frontmatter is the
@@ -108,20 +109,23 @@ the per-phase checklists below are the work. `hs-build` executes the next action
 **Goal:** A read-only `Task.status_label` property maps a fully-loaded task to exactly one lifecycle
 label, honoring the `exit_status` reserved ranges — the foundation the badge renders.
 
-- [ ] In `src/hypershell/data/model.py`, add a read-only property `Task.status_label -> str`
+- [x] In `src/hypershell/data/model.py`, add a read-only property `Task.status_label -> str`
       implementing the **order-critical** ladder (see [`research/02`](research/02-status-lifecycle-derivation.md)):
       `schedule_time is None`→`WAITING`; elif `completion_time is None`→`RUNNING`; elif
       `exit_status == 0`→`OK`; elif `exit_status == CANCEL_STATUS`→`CANCELLED`; elif
-      `exit_status <= -1000`→`ERROR`; elif `exit_status < 0`→`KILLED`; elif `exit_status > 0`→`FAILED`;
-      else→`UNKNOWN`. Comment it as a declarative statement of the invariant it reproduces.
-- [ ] Do **not** import `TASK_TEMPLATE_ERROR`/`TASK_RESOURCE_ERROR` (circular + heavy `client.py`
-      import) — classify never-ran by the documented `<= -1000` range.
-- [ ] Add `tests/` unit coverage (`@mark.unit`, SPDX header): construct `Task` objects covering each
-      branch (unscheduled; scheduled+incomplete; exit 0; `CANCEL_STATUS`; `-1001`; `-9`; `>0`;
-      completed+null-exit) and assert `status_label`. Name tests so `-k status_label` selects them.
-- **Verify:** `uv run pytest -m unit -k status_label`.
+      `exit_status is None`→`UNKNOWN`; elif `exit_status <= -1000`→`ERROR`; elif `exit_status < 0`→
+      `KILLED`; else (`> 0`)→`FAILED`. Comment it as a declarative statement of the invariant it
+      reproduces. (The `is None` check moved ahead of the numeric comparisons vs. the digest's
+      ordering, so a completed-but-unstamped row can't raise on `None < 0`.)
+- [x] Did **not** import `TASK_TEMPLATE_ERROR`/`TASK_RESOURCE_ERROR` (circular + heavy `client.py`
+      import) — never-ran classified by the documented `<= -1000` range.
+- [x] Added `tests/test_status_label.py` (`@mark.unit`, SPDX header): construct transient `Task`
+      objects covering every branch (unscheduled; scheduled+incomplete; exit 0; `CANCEL_STATUS`;
+      `-1001`/`-1002`/`-5000`; `-2`/`-9`/`-64`; `1`/`127`; completed+null-exit) and assert
+      `status_label`. Module name selects under `-k status_label`.
+- **Verify:** `uv run pytest -m unit -k status_label` → 8 passed.
 - **Touches:** `src/hypershell/data/model.py` (high-blast-radius, **additive read-only only**),
-  `tests/…`.
+  `tests/test_status_label.py`.
 
 ## Phase P2 — Card renderer
 **Satisfies:** R2, R3, R4, R5, R6 · **Depends on:** P1

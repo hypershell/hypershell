@@ -347,6 +347,25 @@ class Task(Entity):
     class AlreadyExists(AlreadyExists):
         pass
 
+    @property
+    def status_label(self: Task) -> str:
+        """Human-readable lifecycle status for display (e.g. the `card`-view badge)."""
+        if self.schedule_time is None:
+            return 'WAITING'
+        if self.completion_time is None:
+            return 'RUNNING'
+        if self.exit_status == 0:
+            return 'OK'
+        if self.exit_status == CANCEL_STATUS:
+            return 'CANCELLED'
+        if self.exit_status is None:
+            return 'UNKNOWN'
+        if self.exit_status <= -1000:
+            return 'ERROR'
+        if self.exit_status < 0:
+            return 'KILLED'
+        return 'FAILED'
+
     @classmethod
     def from_id(cls: Type[Task], id: str, caching: bool = True) -> Task:
         """Look up task by unique `id`."""
