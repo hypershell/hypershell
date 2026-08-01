@@ -17,7 +17,7 @@ import functools
 from cmdkit.app import Application, exit_status
 from cmdkit.cli import Interface, ArgumentError
 from cmdkit.config import ConfigurationError
-from sqlalchemy import inspect, text, type_coerce
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import close_all_sessions, sessionmaker, Session as SessionType
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.engine import create_engine
@@ -28,7 +28,7 @@ from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, DatabaseUninitialized, get_shared_exception_mapping
 from hypershell.core.pretty_print import format_bytes
 from hypershell.data.core import Session, engine, in_memory, schema, providers
-from hypershell.data.model import Entity, Task, JSON
+from hypershell.data.model import Entity, Task
 
 # Public interface
 __all__ = [
@@ -130,13 +130,13 @@ def rotatedb() -> None:
     part_id, part_path = next_rotate_path()
     log.info(f'Rotating database {DATABASE_SITE} into {part_path}')
 
-    # Mark completed tasks as having part:N
+    # Stamp completed tasks with this partition's index in the `part` column.
     # We cannot simply drop completed tasks naively as more tasks may be updated in the
     # time between vacuuming to the new partition and the drop step
     (
         Session.query(Task)
             .filter(Task.exit_status.isnot(None))
-            .update({Task.tag: text('json_set(task.tag, :k, :v)').params({'k': '$.part', 'v': part_id})})
+            .update({Task.part: part_id})
     )
     Session.commit()
 
@@ -144,7 +144,7 @@ def rotatedb() -> None:
     # Previously marked tasks as part:N can then be dropped from main database
     log.debug(f'Vacuuming into {part_path}')
     Session.execute(text(f'VACUUM INTO :path'), params={'path': part_path})
-    count_deleted = Session.query(Task).filter(Task.tag['part'] == type_coerce(part_id, JSON)).delete()
+    count_deleted = Session.query(Task).filter(Task.part == part_id).delete()
     Session.commit()
     log.debug(f'Dropped {count_deleted} completed tasks from main ({DATABASE_SITE})')
 
@@ -154,7 +154,7 @@ def rotatedb() -> None:
 
     # Now we can drop anything in the new partition not belonging to part:N
     with sessionmaker(bind=create_engine(f'{providers[DATABASE_PROVIDER]}:///{part_path}'))() as external_session:
-        count_deleted = external_session.query(Task).filter(Task.tag['part'] != type_coerce(part_id, JSON)).delete()
+        count_deleted = external_session.query(Task).filter(Task.part != part_id).delete()
         external_session.commit()
         external_session.execute(text('VACUUM'))
         log.debug(f'Dropped {count_deleted} remaining tasks from partition ({part_path})')
@@ -188,8 +188,8 @@ INITDB_HELP = f"""\
   See also --initdb for the `hs cluster` command.
 
   The available special actions are mutually exclusive.
-  The --rotate operation migrates completed tasks to the next database partition,
-  and applies a special purpose `part:N` tag to the new partition and remaining tasks.
+  The --rotate operation migrates completed tasks into the next database partition,
+  recording that partition's index in each moved task's `part` column.
 
 Actions:
   -v, --vacuum             Vacuum an existing database.

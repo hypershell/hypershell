@@ -31,6 +31,15 @@ Options
 ``-g``, ``--group`` *GROUP*
     Filter results to a single task group.
 
+``--part`` *N*
+    Filter results to a single database partition.
+
+    After ``hs initdb --rotate``, completed tasks are moved into numbered partition files and
+    stamped with that partition's index in their ``part`` column. ``--part`` *N* restricts the
+    listing to a single partition (``--part 0`` is the main database). The filter is a plain
+    column comparison and works on any backend, though only the SQLite provider populates
+    ``part`` via rotation.
+
 ``-s``, ``--order-by`` *FIELD* ``[--desc]``
     Order results by field. Optionally, in descending order.
 

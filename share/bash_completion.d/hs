@@ -374,7 +374,7 @@ function _hs_task_search() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 
-	local all_opts="-h --help --all -w --where -t --with-tag -g --group -s --order-by --desc
+	local all_opts="-h --help --all -w --where -t --with-tag -g --group --part -s --order-by --desc
 	-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled --retries --signal
 	-f --format --csv --json -d --delimiter -l --limit -c --count
 	-i --ignore-partitions --fields --tag-keys --tag-values"
@@ -407,6 +407,10 @@ function _hs_task_search() {
 			return
 			;;
 		-g | --group)
+			COMPREPLY=($(compgen -W "0 1 2 3" -- "${current}"))
+			return
+			;;
+		--part)
 			COMPREPLY=($(compgen -W "0 1 2 3" -- "${current}"))
 			return
 			;;

@@ -1,5 +1,5 @@
 ``hs`` ``list`` ``[-h]``
-    ``[FIELD [FIELD ...]]`` ``[-w COND [COND ...]]`` ``[-t TAG [TAG...]]`` ``[-g GROUP]``
+    ``[FIELD [FIELD ...]]`` ``[-w COND [COND ...]]`` ``[-t TAG [TAG...]]`` ``[-g GROUP]`` ``[--part N]``
     ``[--order-by FIELD [--desc]]`` ``[--count | --limit NUM]``
     ``[-f FORMAT | --json | --csv]`` ``[-d CHAR]`` ``[-i]``
     ``[--failed | --succeeded | --completed | --remaining]`` ``[--retries]``

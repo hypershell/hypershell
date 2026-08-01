@@ -298,6 +298,8 @@ class Task(Entity):
     source: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)  # Source.id or reserved-const id
     fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)  # Stable identity hash (args + group + tags).
 
+    part: Mapped[int] = mapped_column(INTEGER, nullable=False, default=0)  # Partition index for SQLite database rotation.
+
     tag: Mapped[dict] = mapped_column(JSON, nullable=False, default={})  # kept last (export/print order)
 
     columns = {
@@ -332,6 +334,7 @@ class Task(Entity):
         'next_id': str,
         'source': str,
         'fingerprint': str,
+        'part': int,
         'tag': dict,
     }
 
@@ -384,7 +387,7 @@ class Task(Entity):
             args, inline_tags = cls.split_argline(args)
         else:
             args, inline_tags = str(args).strip(), {}
-        tag = {**(tag or {}), **inline_tags, **{'part': 0, }}
+        tag = {**(tag or {}), **inline_tags}
         other['group'] = tag.pop('group', group)
         other['cores'] = tag.pop('cores', other.get('cores', None))
         # A memory value may arrive as a unit-bearing string ('2GB') from an inline
@@ -411,16 +414,17 @@ class Task(Entity):
         """Stable, order-independent identity fingerprint.
 
         An md5 over canonical JSON of the pre-template ``raw_command``, the task
-        ``group``, and user ``tags`` (the bookkeeping ``part`` tag excluded; resource
-        knobs are already popped from the tag dict before this is called). The uuid,
-        attempt/retry counters, timing, exit status, and execution template deliberately
-        do not participate — re-running the same work under a different template yields
-        the same fingerprint. MD5 matches the SOURCE content fingerprint and is stdlib.
+        ``group``, and user ``tags`` (resource knobs are already popped from the tag
+        dict before this is called; the bookkeeping ``part`` is a column, never a tag).
+        The uuid, attempt/retry counters, timing, exit status, and execution template
+        deliberately do not participate — re-running the same work under a different
+        template yields the same fingerprint. MD5 matches the SOURCE content fingerprint
+        and is stdlib.
         """
         payload = json.dumps(
             {'args': raw_command,
              'group': group,
-             'tags': {key: value for key, value in (tags or {}).items() if key != 'part'}},
+             'tags': dict(tags or {})},
             sort_keys=True, separators=(',', ':'), ensure_ascii=False,
         )
         return hashlib.md5(payload.encode()).hexdigest()

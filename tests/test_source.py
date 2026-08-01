@@ -60,12 +60,12 @@ def test_fingerprint_differs_on_args_group_or_tag_change() -> None:
 
 
 @mark.unit
-def test_fingerprint_excludes_part_tag() -> None:
-    """The bookkeeping ``part`` tag (rewritten on rotation) must not affect identity."""
-    a = Task.compute_fingerprint('echo a', 0, {'k': '1', 'part': 0})
-    b = Task.compute_fingerprint('echo a', 0, {'k': '1', 'part': 7})
-    c = Task.compute_fingerprint('echo a', 0, {'k': '1'})
-    assert a == b == c
+def test_new_keeps_part_out_of_tag_and_identity() -> None:
+    """``part`` is a column now, not a tag: creation leaves ``tag`` user-only and identity is
+    computed over the user tags directly (no more routing around a bookkeeping ``part`` key)."""
+    task = Task.new(args='echo a', raw_args='a', tag={'k': '1'})
+    assert task.tag == {'k': '1'}                                    # no bookkeeping 'part' key
+    assert task.fingerprint == Task.compute_fingerprint('a', 0, {'k': '1'})
 
 
 @mark.unit
@@ -83,7 +83,7 @@ def test_new_stamps_source_and_falls_back_to_args_without_raw() -> None:
     stamped = Task.new(args='echo x', raw_args='x', source=DIRECT_SOURCE_ID)
     assert stamped.source == DIRECT_SOURCE_ID
     fallback = Task.new(args='echo x')            # no raw_args -> uses expanded args
-    assert fallback.fingerprint == Task.compute_fingerprint('echo x', 0, {'part': 0})
+    assert fallback.fingerprint == Task.compute_fingerprint('echo x', 0, {})
 
 
 @mark.unit
@@ -108,7 +108,8 @@ def test_fresh_schema_creates_source_table_columns_and_indices() -> None:
     assert source_columns == {'id', 'path', 'fingerprint', 'task_count', 'created'}
 
     task_columns = {col['name'] for col in insp.get_columns('task')}
-    assert {'source', 'fingerprint'} <= task_columns
+    assert {'source', 'fingerprint', 'part'} <= task_columns
+    assert 'part' in Task.columns          # first-class, selectable/displayable like `group`
 
     source_indices = {ix['name'] for ix in insp.get_indexes('source')}
     task_indices = {ix['name'] for ix in insp.get_indexes('task')}
@@ -147,10 +148,10 @@ def test_source_lookups_use_the_index_not_a_full_scan() -> None:
     Entity.metadata.create_all(engine)
     real = 'aaaaaaaa-0000-7000-8000-000000000000'
     columns = ('id', '"group"', 'args', 'submit_id', 'submit_time', 'attempt', 'retried', 'tag',
-               'source', 'fingerprint')
-    rows = ([(f'{i:036d}', 1, 'echo', 'sub', '2026-01-01', 1, 0, '{}', real, f'fp{i % 5}')
+               'source', 'fingerprint', 'part')
+    rows = ([(f'{i:036d}', 1, 'echo', 'sub', '2026-01-01', 1, 0, '{}', real, f'fp{i % 5}', 0)
              for i in range(30)] +
-            [(f'r{i:035d}', 1, 'echo', 'sub', '2026-01-01', 1, 0, '{}', DIRECT_SOURCE_ID, None)
+            [(f'r{i:035d}', 1, 'echo', 'sub', '2026-01-01', 1, 0, '{}', DIRECT_SOURCE_ID, None, 0)
              for i in range(2000)])   # bulk reserved rows -> a scan would be far costlier than the index
     with engine.begin() as conn:
         conn.exec_driver_sql(f'INSERT INTO task ({", ".join(columns)}) VALUES ({", ".join(["?"] * len(columns))})', rows)

@@ -404,6 +404,7 @@ function _hs_list() {
         '*'{-w,--where}'[Filter on conditional expression]:condition:_hs_fields' \
         '*'{-t,--with-tag}'[Filter by tag]:tag:_hs_tags' \
         '(-g --group)'{-g,--group}'[Filter by group]:group:' \
+        '--part[Filter by partition (0 is the main database)]:partition:' \
         '(-s --order-by)'{-s,--order-by}'[Order output by field]:field:_hs_fields' \
         '--desc[Descending order (requires --order-by)]' \
         '(-F --failed -C --completed -S --succeeded -R --remaining -X --cancelled)'{-F,--failed}'[Alias for -w "exit_status != 0"]' \
