@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/task-card-view
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-08-01'
 phases:
 - id: P1
@@ -22,7 +22,7 @@ phases:
 - id: P2
   name: Card renderer (Panel + header + regions + lower-right status + responsive
     width)
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -133,27 +133,31 @@ label, honoring the `exit_status` reserved ranges — the foundation the badge r
 horizontal id/fingerprint/group/part/(zone) header, labeled regions, lower-right `status:` badge —
 that adapts across narrow/normal/wide and stays legible with no color.
 
-- [ ] In `src/hypershell/task.py`, add `STATUS_STYLES: Dict[str, str]` beside `select_style`:
+- [x] In `src/hypershell/task.py`, added `STATUS_STYLES: Dict[str, str]` beside `select_style`:
       OK→`bold green`, FAILED→`bold red`, CANCELLED→`yellow`, RUNNING→`cyan`, WAITING→`dim`,
       ERROR/KILLED/UNKNOWN→`magenta`.
-- [ ] Add `render_card(task, width, source_map=None) -> Panel` next to `print_normal`. Reuse
-      `print_normal`'s field-prep (waited/duration/timeout→`timedelta`, memory/`memory_max`→
-      `format_bytes`, cores, `resolve_source`, `format_tag`). Compose `Panel(Group(header, "",
-      regions), title="task", title_align="left", box=box.ROUNDED, width=width, padding=(0,1),
-      subtitle=f"status: {task.status_label}", subtitle_align="right",
-      border_style=STATUS_STYLES[task.status_label])`. Header = `Table.grid(expand=True)`. Regions =
-      `Table.grid` label:value blocks grouped command / timing / resources / hosts / output / retry /
-      source / tags, side-by-side via `Columns(expand=True, equal=True)` in normal/wide, **stacked** in
-      narrow. **Never truncate the id**; fingerprint may abbreviate in narrow.
-- [ ] Responsive: caller passes a clamped `width`; regions pick layout by `<90` narrow / `90–129`
-      normal / `>=130` wide. Style the badge/border via `STATUS_STYLES`; rely on rich to strip ANSI
-      when non-TTY so the literal `status:` text always survives (R6).
-- [ ] Unit tests (`@mark.unit`, `-k card_render`): render real `Task` objects through a width-forced
-      `Console(width=…, file=StringIO())` at 60/70/120/150; assert full id present, region labels
-      present, `status: <LABEL>` text present, output width within the clamp; assert a no-color render
-      (e.g. `Console(..., no_color=True)` / non-terminal) still shows border + literal status text.
-- **Verify:** `uv run pytest -m unit -k card_render`.
-- **Touches:** `src/hypershell/task.py`, `tests/…`.
+- [x] Added `render_card(task, width, source_map=None) -> Panel` next to `print_normal`, plus a shared
+      `format_task_fields` (extracted from `print_normal`, which now delegates to it — `normal` output
+      byte-identical), `card_region`, `card_width`, and `CARD_MIN_WIDTH`/`CARD_MAX_WIDTH`. Composes
+      `Panel(Group(header, command, columns[, tags]), title="task", box=box.ROUNDED, width=W,
+      subtitle=Text("status: <LABEL>"), subtitle_align="right", border_style=STATUS_STYLES[...])`.
+      Header = `Table.grid`; regions = `Table.grid` label:value blocks (command / timing / resources /
+      execution / output / retry / result / tags) arranged in a `Table.grid` of 1/2/3 columns. **Id
+      never truncated** (own line below 130).
+- [x] Responsive: `card_width` clamps to [60,160]; region columns = `<90` →1, `90–149` →2, `>=150` →3
+      (three columns only where a full UUID does not fold mid-token); identity header goes horizontal
+      at `>=130`. rich strips ANSI on a non-TTY so the literal `status:` text always survives (R6).
+- [x] **AMENDMENT (adversarial review, HIGH):** region values are wrapped in `rich.text.Text` so task
+      data renders literally — a bare string cell is parsed as `rich` markup, which silently stripped
+      brackets (`awk '{a[b]=1}'`) and raised `MarkupError` on `sed 's/x/[/]/'`, aborting the whole
+      listing. The header was already immune (`Text.assemble`). Regression test added.
+- [x] Unit tests (`tests/test_card_render.py`, `@mark.unit`, `-k card_render`): render real `Task`
+      objects through a width-forced `Console(file=StringIO())`; assert full id, fingerprint, region
+      titles, `status: <LABEL>`; the [60,160] clamp; distinct 1/2/3-column layouts; horizontal vs
+      stacked header; badge lower-right + pinned palette; tags present/omitted; no-color legibility;
+      color-on-TTY; and the markup-safety regression. 24 card tests, 200 unit total.
+- **Verify:** `uv run pytest -m unit -k card_render` → 24 passed (full unit suite 200 passed).
+- **Touches:** `src/hypershell/task.py`, `tests/test_card_render.py`.
 
 ## Phase P3 — Wire `card` into `hs list` / `hs search`
 **Satisfies:** R1, R8 · **Depends on:** P2
