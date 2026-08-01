@@ -3,7 +3,7 @@ slug: part-tag-to-column
 title: Promote `part` from a bookkeeping tag to a first-class column
 kind: refactor
 appetite: small
-status: blocked
+status: in_review
 branch: feature/part-tag-to-column
 base: develop
 current_phase: done
@@ -124,8 +124,22 @@ no longer in the `tag` dict; `rotatedb()` reads/writes the column with no SQLite
       mentions `part` in either file (count 0).
 - [x] Grep: no `json_set`/`json_extract`/`type_coerce` reference to `part` remains in `src/hypershell`.
 
+### F1 remediation (review cycle 1) — R8 display consistency
+Review found R8 only partially met: `part` is in `Task.columns` and selectable by name / `--fields` /
+table / plain / json / csv, but the detailed `NORMAL_MODE_TEMPLATE` (used by `hs info` and bare
+`hs list`) rendered every other column **except** `part`, contradicting R8's "consistent with columns
+like `group`" and its explicit `hs info` example.
+- [x] `src/hypershell/task.py` `NORMAL_MODE_TEMPLATE`: add a `part: {part}` line immediately before the
+      `tags: {tag}` line, mirroring the schema order (`part` is the last column before `tag`). Fixes both
+      `hs info` and the fields-less `hs list` normal view. No new CLI flag → no help-snippet/completion
+      change (`--fields`/`--list-columns` already list `part`).
+- [x] `tests/test_list.py`: add `test_part_in_normal_view` — after a rotate, `hs list --all` (the
+      fields-less normal template; bare `hs list` hits the no-args usage guard) shows `part: 0` for the
+      main row and `part: 1` for the rotated row.
+
 **Touches:** `src/hypershell/data/model.py`, `src/hypershell/data/__init__.py`,
-`docs/_include/initdb_desc.rst`, `tests/test_source.py`, `tests/test_initdb.py`.
+`docs/_include/initdb_desc.rst`, `tests/test_source.py`, `tests/test_initdb.py`,
+`src/hypershell/task.py` (F1), `tests/test_list.py` (F1).
 
 ## Phase P2 — CLI: `--part N` filter on `hs list` / `hs search`
 **Satisfies:** R9 (+ CLI tests/docs of R7) · **Depends on:** P1

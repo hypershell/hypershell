@@ -261,3 +261,19 @@ def test_part_filter(temp_site: Path) -> None:
 
     # `hs task search` is the same app -> identical filtering.
     assert sorted(main_lines(['hs', 'task', 'search', 'args', '--part', '1'])[1]) == ['echo 0', 'echo 1']
+
+
+@mark.integration
+def test_part_in_normal_view(temp_site: Path) -> None:
+    """The detailed (normal / `hs info`) view renders the `part` column, consistent with `group`."""
+    taskfile = create_taskfile(temp_site, [f'echo {n}  # HYPERSHELL: n:{n}' for n in range(2)])
+    assert main(['hs', 'submit', str(taskfile)])[0] == cli_status.success
+
+    # Complete n:0 so it rotates into partition 1; n:1 stays in main (part 0).
+    assert main(['hs', 'update', 'exit_status=0', '-t', 'n:0', '--no-confirm'])[0] == cli_status.success
+    assert main(['hs', 'initdb', '--rotate', '--yes'])[0] == cli_status.success
+
+    # `hs list --all` (no explicit fields) renders the detailed normal template; `part` must appear
+    # there, consistent with `group` — not only via `hs list part` / `-x part` / `--json`.
+    lines = [strip_ansi(line).strip() for line in main_lines(['hs', 'list', '--all'])[1]]
+    assert sorted(line for line in lines if line.startswith('part:')) == ['part: 0', 'part: 1']

@@ -1315,6 +1315,7 @@ NORMAL_MODE_TEMPLATE: Final[str] = """\
      csvpath: {csvpath}
  previous_id: {previous_id}
      next_id: {next_id}
+        part: {part}
         tags: {tag}
 """
 
