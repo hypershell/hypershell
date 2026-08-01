@@ -74,10 +74,10 @@ phases:
   hill: downhill
   verify: uv run pytest -m integration -k card
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 232b2773caf4d7d17cc2c0acd39e7f1a37ff6b96
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — Rich "card" view for tasks
 
