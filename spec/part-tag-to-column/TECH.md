@@ -1,39 +1,49 @@
 ---
 slug: part-tag-to-column
-title: "Promote `part` from a bookkeeping tag to a first-class column"
+title: Promote `part` from a bookkeeping tag to a first-class column
 kind: refactor
 appetite: small
 status: in_progress
 branch: feature/part-tag-to-column
 base: develop
-current_phase: P1
-last_updated: "2026-07-31"
+current_phase: P2
+last_updated: '2026-07-31'
 phases:
-  - id: P1
-    name: "Data layer: `part` column (visible) + rotatedb via column + same-commit initdb help"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R8]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build"
-  - id: P2
-    name: "CLI: `--part N` filter on hs list/search + same-commit help snippets + completions"
-    status: pending
-    satisfies: [R9, R7]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build"
+- id: P1
+  name: 'Data layer: `part` column (visible) + rotatedb via column + same-commit initdb
+    help'
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R8
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build
+- id: P2
+  name: 'CLI: `--part N` filter on hs list/search + same-commit help snippets + completions'
+  status: pending
+  satisfies:
+  - R9
+  - R7
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Promote `part` from a bookkeeping tag to a first-class column
 
 The **context engine and finite-state machine** for building this feature. The YAML frontmatter above
@@ -67,47 +77,51 @@ no longer in the `tag` dict; `rotatedb()` reads/writes the column with no SQLite
 `hs initdb` schema includes it; suite + docs build green. End-to-end verifiable without the CLI filter.
 
 ### Model — `src/hypershell/data/model.py`
-- [ ] Add the column between `fingerprint` (`:299`) and `tag` (`:301`):
+- [x] Add the column between `fingerprint` (`:299`) and `tag` (`:301`):
       `part: Mapped[int] = mapped_column(INTEGER, nullable=False, default=0)` with a one-line declarative
       comment (partition index for SQLite database rotation) (R1, R3).
-- [ ] Add `'part': int` to the `Task.columns` dict (`:303-336`) in the matching position (after
+- [x] Add `'part': int` to the `Task.columns` dict (`:303-336`) in the matching position (after
       `fingerprint`, before `tag`) so `part` is selectable/displayable like `group` (R8).
-- [ ] `Task.new`: change `:387` → `tag = {**(tag or {}), **inline_tags}` (drop `**{'part': 0, }`); leave
+- [x] `Task.new`: change `:387` → `tag = {**(tag or {}), **inline_tags}` (drop `**{'part': 0, }`); leave
       the `Task(...)` constructor as-is (column `default=0` supplies the value; retries → `part=0`) (R2).
-- [ ] `compute_fingerprint`: remove the `if key != 'part'` filter at `:423` (→ `'tags': dict(tags or {})`)
+- [x] `compute_fingerprint`: remove the `if key != 'part'` filter at `:423` (→ `'tags': dict(tags or {})`)
       and fix the docstring at `:414` (R5).
 
 ### Rotation — `src/hypershell/data/__init__.py` (`rotatedb`)
-- [ ] `:139` write → `.update({Task.part: part_id})`; `:147` → `Task.part == part_id`; `:157` →
+- [x] `:139` write → `.update({Task.part: part_id})`; `:147` → `Task.part == part_id`; `:157` →
       `Task.part != part_id` (drop the `json_set` / `Task.tag['part']` / `type_coerce` / `JSON`) (R4).
-- [ ] Remove now-unused `type_coerce`/`JSON` imports **after** grep-confirming they're unused elsewhere
+- [x] Remove now-unused `type_coerce`/`JSON` imports **after** grep-confirming they're unused elsewhere
       in the file (`text` stays — used by `VACUUM`). Leave the `exit_status.isnot(None)` filter (`:138`)
       and `next_rotate_path` untouched; do not touch `auto_union_sqlite`.
 
 ### Docs / help (R7, §12 same-commit)
-- [ ] Update `INITDB_HELP` (`data/__init__.py`) so the `--rotate` description no longer calls `part` a
+- [x] Update `INITDB_HELP` (`data/__init__.py`) so the `--rotate` description no longer calls `part` a
       "special purpose `part:N` tag", and hand-edit the matching `docs/_include/initdb_desc.rst`. (Man
       page is release-time; completions carry no long description → unchanged.)
 
 ### Tests (R7) — `@mark.unit`
-- [ ] `tests/test_source.py:63-67,:86`: drop the hardcoded `{'part': …}` literals from
-      `compute_fingerprint` calls; confirm fingerprints stay stable.
-- [ ] `tests/test_source.py:99-116`: assert `'part'` **is** in `Task.columns` **and** the real `Task`
-      table has a `part` column.
-- [ ] `tests/test_initdb.py::test_rotate` (currently a stub): make it actually rotate — submit + complete
+- [x] `tests/test_source.py:63-67,:86`: drop the hardcoded `{'part': …}` literals from
+      `compute_fingerprint` calls; confirm fingerprints stay stable. (Repurposed the obsolete
+      `excludes_part_tag` test into `test_new_keeps_part_out_of_tag_and_identity`; `:86` → `{}`.)
+- [x] `tests/test_source.py:99-116`: assert `'part'` **is** in `Task.columns` **and** the real `Task`
+      table has a `part` column. (Also added `part` to the raw-insert column list in the index test — a
+      NOT NULL column with only a Python-side default, exactly like `"group"`.)
+- [x] `tests/test_initdb.py::test_rotate` (currently a stub): make it actually rotate — submit + complete
       tasks, run `rotatedb()` / `hs initdb --rotate`, assert completed rows carry the right `part` value,
       land in the partition file, and are dropped from `main`; assert `tag` never contains `part`.
-- [ ] Fix any existing test that asserts an exact column/serialization set now that `part` is in
-      `columns` (grep for surprises; the full-suite verify will surface them).
+- [x] Fix any existing test that asserts an exact column/serialization set now that `part` is in
+      `columns` (grep for surprises; the full-suite verify will surface them). (Only the raw-insert index
+      test needed the NOT NULL column added; full suite 421 passed.)
 
 ### Verify
-- [ ] Frontmatter gate: `uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build` (full suite
-      green; docs build with only the 2 pre-existing baseline toctree warnings).
-- [ ] CLI drive: `.agents/factory/bin/temp_site.sh sh -c 'uv run hs initdb && printf "echo a\necho b\n" | uv run hs submit && uv run hs initdb --rotate && uv run hs list part'` runs clean and `part` shows as a column.
-- [ ] Column + tag-clean (sqlite3 in the same `sh -c`):
-      `sqlite3 "$HYPERSHELL_DATABASE_FILE" "select part from task; select count(*) from task where json_extract(tag,'\$.part') is not null"`
-      → `part=0`, count `0`.
-- [ ] Grep: no `json_set`/`json_extract`/`type_coerce` reference to `part` remains in `src/hypershell`.
+- [x] Frontmatter gate: `uv run pytest -q && uv run sphinx-build -E -b html docs docs/_build` (full suite
+      green — 421 passed; docs build with only the 2 pre-existing baseline toctree warnings).
+- [x] CLI drive: submit tagged tasks, complete two, `hs initdb --rotate --yes`, then `hs list part
+      exit_status args --all` shows `part` as a column (0 in main, 1 in the partition); union count 3,
+      `--ignore-partitions` count 1. (`--rotate` needs `--yes` non-interactively.)
+- [x] Column + tag-clean (sqlite3): `select part from task` → 0 in main, 1 in the partition; no `tag`
+      mentions `part` in either file (count 0).
+- [x] Grep: no `json_set`/`json_extract`/`type_coerce` reference to `part` remains in `src/hypershell`.
 
 **Touches:** `src/hypershell/data/model.py`, `src/hypershell/data/__init__.py`,
 `docs/_include/initdb_desc.rst`, `tests/test_source.py`, `tests/test_initdb.py`.
