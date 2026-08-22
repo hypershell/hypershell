@@ -137,6 +137,16 @@ Do **not** push `develop` unless the human explicitly asks.
 The PR URL (or local merge result), the squash subject that landed, retained `spec/{slug}/` artifacts,
 and the issue-close caveat below.
 
+If this cycle was seeded from a deferral — `Grep` for `^status: adopted:{slug}$` under `issues/` and
+`.security/issues/` — name the seed and flag what the landed cycle leaves behind: its `## ` entry in
+`ROADMAP.md` now advertises work that has shipped. **Report it; never retire it here.** Deleting or
+editing the seed would put this skill's own commit outside `spec/`, where the Step 1 staleness gate
+reads it as post-review drift and STOPs the next invocation — which is why publish carries neither an
+`Edit` tool nor a deletion verb. Retirement is `/hs-roadmap`'s job, run once the merge lands on
+`develop`, and only when the cycle shipped the seed *whole*: scope cut to a non-goal leaves a live
+remainder that must stay on the index. A match under `.security/` is never named in a PR body or a
+report — say only that a hidden-lane seed is affected.
+
 ## Notes
 
 - **`Refs #NN` will not auto-close the issue:** GitHub auto-closes only on merge into the *default*

@@ -8,7 +8,7 @@ description: >-
   forces a human gate. Fourth step of the software factory (see .agents/factory/review-rubric.md).
 disable-model-invocation: true
 argument-hint: "[debate] [completeness] [status]"
-allowed-tools: Read, Grep, Glob, Write, Agent, ReportFindings, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git log *), Bash(git diff *), Bash(git rev-parse *), Bash(git add *), Bash(git commit *), Bash(uv run *), Bash(tail *)
+allowed-tools: Read, Grep, Glob, Write, Edit, Agent, ReportFindings, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git log *), Bash(git diff *), Bash(git rev-parse *), Bash(git add *), Bash(git commit *), Bash(uv run *), Bash(tail *)
 ---
 
 # hs-review — adversarial QA (clean context)
@@ -128,6 +128,18 @@ Do a light second-pass sanity check (drop anything not backed by cited evidence)
   --reviewed-commit {sha} --blocked-reason "<short>" --touch` → recommend `/hs-build` to fix the
   named R-IDs/invariants. If any CONFIRMED finding hit the coupled core / a security-DB invariant,
   **STOP and require explicit human sign-off** before any further step.
+
+  A CONFIRMED finding meeting the rubric's *Verdict & loop* exception — pre-existing behavior a
+  `GOAL.md` criterion requires preserving, unrepairable this cycle without failing that criterion —
+  is **deferred, not blocked**: record it in `REVIEW.md`, write an `issues/{slug}.md` seed (from
+  [`templates/ISSUE.md`](../../factory/templates/ISSUE.md), `status: unshaped`) plus its
+  `ROADMAP.md` entry, and commit that pair **before** the `set_phase.py --reviewed-commit` call,
+  re-pinning `{sha}` with a fresh `git rev-parse HEAD` — the Step 1 SHA predates the seed, and the
+  seed lives outside `spec/`, so `/hs-publish`'s staleness gate would otherwise read it as
+  post-review drift. Then take the clean route above. **If either condition fails, it blocks.** A
+  finding describing an unremediated weakness goes to `.security/issues/` + `.security/ROADMAP.md`
+  instead; that lane is gitignored, so there is nothing to commit and no re-pin, and it is never
+  named in the report.
 - **PLAUSIBLE only:** surface to the human for triage; do not auto-block.
 
 Every `--verdict` call auto-increments the durable `review.cycle` counter in `TECH.md` — do not

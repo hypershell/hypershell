@@ -47,4 +47,6 @@ CLARIFICATION: …]` and **block** `hs-plan` — never guess.
 ## Related materials
 
 - Issue: <https://github.com/hypershell/hypershell/issues/NN>
+- Seed: <`issues/{slug}.md`, when this GOAL was promoted from a recorded deferral — the link stays
+  after `/hs-roadmap` retires the seed, so `git log --diff-filter=D` recovers it>
 - <docs, prior art, source paths, external references>
