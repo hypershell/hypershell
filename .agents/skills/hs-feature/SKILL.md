@@ -2,12 +2,12 @@
 name: hs-feature
 description: >-
   Start a new HyperShell feature/fix/refactor from a clean develop branch. Safety-checks the tree,
-  derives a {slug}, creates feature/{slug} or fix/{slug}, ingests an inline prompt or an untracked
-  GOAL.md, and refines it into spec/{slug}/GOAL.md — appetite, non-goals, EARS acceptance criteria
+  derives a {slug}, creates feature/{slug} or fix/{slug}, ingests an inline prompt, an untracked
+  GOAL.md, or an issues/{slug}.md deferral, and refines it into spec/{slug}/GOAL.md — appetite, non-goals, EARS acceptance criteria
   with stable R-IDs, resolved clarifications. Shaping only: no deep research, no big code reads. The
   first step of the spec-driven "software factory" lifecycle (see .agents/factory/methodology.md).
 disable-model-invocation: true
-argument-hint: "<inline feature description> | spec/<slug>/GOAL.md [fix|refactor] [appetite small|big]"
+argument-hint: "<inline feature description> | spec/<slug>/GOAL.md | issues/<slug>.md [fix|refactor] [appetite small|big]"
 allowed-tools: Read, Write, Edit, Grep, Glob, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git switch *), Bash(git rev-parse *), Bash(git fetch *), Bash(git add *), Bash(git commit *), Bash(git log *), Bash(git ls-files *), Bash(head *)
 ---
 
@@ -40,6 +40,7 @@ Additional instructions provided with the invocation: $ARGUMENTS
 - Branch: !`git branch --show-current`
 - Tree: !`git status --porcelain | head -n 20`
 - Untracked GOAL.md files: !`git ls-files --others --exclude-standard 'spec/**/GOAL.md'`
+- Open issues: !`git ls-files 'issues/*.md'`
 
 ## Argument Parsing
 
@@ -47,10 +48,17 @@ Parse `$ARGUMENTS` case-insensitively. If self-contradictory, STOP and ask.
 
 - A path matching `spec/<slug>/GOAL.md` → **adopt that file** as the seed; `{slug}` is taken from the
   path. (This is the "I hand-wrote a GOAL.md" flow.)
+- A path matching `issues/<slug>.md` (or `.security/issues/<slug>.md`) → **promote that issue**.
+  `{slug}` is the file stem; its frontmatter supplies `kind` and `appetite` unless the invocation
+  overrides them. A bare `{slug}` naming an existing `issues/{slug}.md` resolves the same way.
+  See "Promoting an issue" in Step 4.
 - `fix` / `bug` / `hotfix`(reject, out of scope) / `refactor` → set `kind`; otherwise infer from the
   wording, defaulting to `feature`. **Hotfixes against `master` are out of scope — STOP and say so.**
 - `appetite small` / `appetite big` → set appetite; else default `small` for `kind: fix`, `big` for
-  `feature`/`refactor`.
+  `feature`/`refactor`. Those two values are the whole vocabulary; a seed whose frontmatter still
+  reads `medium` rounds **up** to `big`, because rounding up costs a research fan-out while rounding
+  down fails `hs-review`'s scope check against a contract a human already accepted. Record the
+  round-up as a dated Clarification in the GOAL; leave the seed's own frontmatter alone.
 - Everything else → the inline feature description (the seed prompt).
 - No arguments **and** no untracked `spec/*/GOAL.md` present → STOP and ask for a description or a
   GOAL.md path.
@@ -63,7 +71,9 @@ Parse `$ARGUMENTS` case-insensitively. If self-contradictory, STOP and ask.
 - **Never overwrite a tracked GOAL.** If `spec/{slug}/` already exists **in git** or the target
   branch already exists, STOP and report a collision. (Adopting an *untracked* hand-written
   `spec/{slug}/GOAL.md` at an explicit path is the intended flow, not a collision.)
-- **Branch mapping:** `kind: fix` → `fix/{slug}`; `kind: feature|refactor` → `feature/{slug}`.
+- **Branch mapping:** `kind: fix` → `fix/{slug}`; every other kind → `feature/{slug}`. The `kind:`
+  set is open (it is the `AGENTS.md` commit category), so a promoted `kind: docs` seed still has a
+  defined branch.
 - **Never guess.** On any ambiguity in scope or requirements, emit a literal `[NEEDS CLARIFICATION:
   …]` marker in GOAL.md and ask the human (AskUserQuestion). Record answers in the Clarifications
   section. Do not invent behavior.
@@ -104,6 +114,36 @@ R-IDs/appetite/non-goals. Do not expand scope.
 never the suspected cause/mechanism of the bug, which is unverified until `/hs-plan` root-causes it.** A
 criterion pinned to a wrong diagnosis has to be reinterpreted mid-lifecycle.
 
+**Promoting an issue.** A deferral recorded earlier arrives pre-shaped — Problem, why it was
+deferred, draft R-IDs — and its body mirrors this template, so promotion is a move-and-fill. It is
+still a *candidate*: **do not copy it into `GOAL.md` verbatim.** Read its `status:` first.
+
+- **`unshaped`** — nobody has agreed an appetite, non-goals, or a final contract. That negotiation
+  is this step's job, and skipping it hands `hs-review` a contract no human ever accepted. Carry the
+  evidence (`file:line`, mechanism, whether the defect is **pre-existing**) into **Problem**, and
+  treat the draft R-IDs as input, not as the contract.
+- **`shaped`** — the shaping conversation already happened with a human: dated clarifications, an
+  agreed appetite, non-goals, R-IDs. Do **not** re-litigate it. Re-confirm the scope still holds
+  against current `develop`, cite anything that has drifted since it was written, surface that for
+  sign-off, and adopt it largely as written. Shaping already happened; what this step performs is
+  *acceptance into a cycle*.
+- **`adopted:{other-slug}`** — already promoted. STOP and report the collision.
+- **`declined` / `accepted-behaviour`** — terminal records, not candidates: the first was considered
+  and refused as debt, the second was reported as a defect and judged intended. STOP and report
+  which one, quoting the reasoning the record already carries. Promoting one is how a settled
+  question gets re-litigated by accident; if the human wants it re-opened anyway, that is a
+  deliberate `status:` change they make first.
+
+When the GOAL lands, leave the `issues/` file in place and set its `status:` to `adopted:{slug}`, so
+the `ROADMAP.md` index does not dangle; where that entry's `**Seed:**` line carries a `· *status: …*`
+marker, update it to `· *status: adopted:{slug}*` to match. Commit both edits alongside the GOAL. The
+seed and its entry stay for the duration of the cycle — it may bounce at review or be abandoned — and
+`/hs-roadmap` retires both once the branch lands on `develop`.
+
+An issue promoted out of `.security/issues/` keeps its evidence in the hidden lane: the public
+`GOAL.md` states the **observable hardening outcome** and points at `.security/` for detail — it
+never republishes an attack mechanism for a weakness that is still live.
+
 ### Step 5 — Coherence self-check
 Re-read the GOAL: is it solved, bounded to the appetite, and free of unresolved markers? Every
 requirement testable and observable? If not, iterate (ask the human) before committing.
@@ -141,6 +181,7 @@ code fence:
 ### Step 7 — Commit
 ```
 git add spec/{slug}/GOAL.md          # add spec/{slug}/META.md too if you recorded a meta-note
+git add issues/{slug}.md ROADMAP.md  # only when promoting: status -> adopted:{slug}
 git commit -m "[{category}] Shape {slug} goal"
 ```
 `{category}` = the AGENTS.md commit category matching the work — normally `{kind}` itself
@@ -160,6 +201,8 @@ sign-off gate: review `spec/{slug}/GOAL.md`, then run **`/hs-plan`** to research
   place.
 - `/hs-feature fix heartmonitor evicts a client that re-registered within evict window` — `kind: fix`,
   appetite small, branch `fix/{slug}`.
+- `/hs-feature issues/submit-comment-truncation.md` — promote the recorded deferral: shape its draft
+  R-IDs into a contract, then flip the issue to `status: adopted:submit-comment-truncation`.
 
 ## Notes
 

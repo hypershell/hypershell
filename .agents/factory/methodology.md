@@ -98,6 +98,7 @@ phase to "fit the appetite."
 .agents/
   skills/hs-{feature,plan,build,review,publish}/SKILL.md   # the five lifecycle skills
   skills/hs-harness/SKILL.md                               # meta/maintenance: apply the self-improvement loop
+  skills/hs-roadmap/SKILL.md                               # operational: retire landed seeds, keep ROADMAP.md true
   skills/hs-release/SKILL.md                               # operational: cut a version (patch/pre-release/full-release)
   factory/
     methodology.md        # this file
@@ -105,12 +106,30 @@ phase to "fit the appetite."
     ears.md               # EARS requirement templates
     review-rubric.md      # severity scale, refutation protocol, human-gate triggers
     portability.md        # non-Claude / smaller-model harness compatibility contract
-    templates/            # GOAL.md PLAN.md TECH.md REVIEW.md META.md skeletons
+    templates/            # GOAL.md PLAN.md TECH.md REVIEW.md META.md ISSUE.md skeletons
     bin/                  # next_phase.py, set_phase.py, _fsm.py (FSM); meta_status.py (META.md reader)
     harness-log.md        # hs-harness decision ledger (cross-job anti-thrash memory)
 spec/{slug}/              # per-feature artifacts incl. META.md (committed, retained on merge)
+issues/{slug}.md          # deferred code work, pre-shaped — /hs-feature promotes one into a GOAL
+ROADMAP.md                # the ordered index; each entry's **Seed:** points at an issues/ file
+.security/                # the same two, for unremediated findings — gitignored, never published
 AGENTS.md                 # the constitution (CLAUDE.md is a symlink to it)
 ```
+
+**Where a deferral goes.** Work a pass decides *not* to do is not an artifact of that feature, so it
+does not live in `spec/{slug}/`. It becomes an `issues/{slug}.md` — pre-shaped from
+[`templates/ISSUE.md`](templates/ISSUE.md) — plus an ordered `ROADMAP.md` entry pointing at it.
+`META.md` is **never** the destination: that file is harness/skill feedback, and the boundary
+between the two is stated once in `AGENTS.md`. The `status:` field is what keeps a deferral a
+*candidate*: `/hs-feature` promotes it into a real `GOAL.md`, and that promotion is where a human
+negotiates appetite, non-goals and the R-IDs `hs-review` will grade. Two statuses precede promotion
+— `unshaped` (a raw deferral) and `shaped` (already negotiated, but not yet accepted into a cycle) —
+and neither is a shortcut past the human gate. When the cycle lands on `develop`, `/hs-roadmap`
+retires the seed and its index entry, so the backlog stops advertising work that already shipped.
+
+Security-sensitive deferrals take the **hidden lane**: `.security/issues/` + `.security/ROADMAP.md`,
+same convention, gitignored. A public roadmap of unremediated vulnerabilities is an attacker's work
+plan; the fixes are public when they ship, the standing inventory is not. See `AGENTS.md`.
 
 `.claude` is a symlink to `.agents`, so Claude Code discovers the skills and reads settings through
 it. The skills reference the bundled scripts and shared reference material by **repo-relative path**

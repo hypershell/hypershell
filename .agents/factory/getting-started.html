@@ -290,7 +290,8 @@
     <strong>method</strong> — and it turns out the good parts of agile practice (especially
     37signals' <em>Shape Up</em>) map cleanly onto agent work. HyperShell packages that method as a
     small, transparent toolkit in <code><a href="../">.agents/</a></code>: five lifecycle skills — plus
-    two operational siblings, <code>hs-harness</code> and <code>hs-release</code> — and a set of
+    three operational siblings, <code>hs-harness</code>, <code>hs-roadmap</code> and
+    <code>hs-release</code> — and a set of
     reference documents that carry a change from a shaped goal, through a researched plan, through
     execution, through an adversarial review, to a pull request — with a durable, committed record at
     every step.</p>
@@ -617,8 +618,8 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
     <div class="step"><div class="n">act</div><div class="t">/hs-harness</div><div class="d">human-gated fix to .agents/</div></div>
   </div>
 
-  <p>One skill, <code>/hs-harness</code>, stands <em>outside</em> the lifecycle and is the only one
-    that edits the factory itself. Pointed at a finished job's <code>META.md</code>, it shapes the fix
+  <p>Three skills stand <em>outside</em> the lifecycle; <code>/hs-harness</code> is the only one
+    that <em>improves</em> the factory itself. Pointed at a finished job's <code>META.md</code>, it shapes the fix
     with you, previews a diff per finding, and — <strong>only with human approval</strong> — applies each
     to <code>.agents/</code> as an atomic <code>[harness]</code> commit, recording every decision in a
     cross-job ledger, <code><a href="harness-log.md">harness-log.md</a></code>. It is bound by rules it
@@ -701,8 +702,24 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
   </div>
 
   <div class="skill" style="border-left-color:var(--muted)">
+    <div class="cmd" style="color:var(--text-2)">/hs-roadmap <span style="color:var(--muted);font-weight:400">— retire what shipped (operational · not part of the lifecycle)</span></div>
+    <p>The backlog's missing terminal step. Work a cycle decides <em>not</em> to do is recorded as a
+      pre-shaped <code>issues/{slug}.md</code> seed plus an ordered <code>ROADMAP.md</code> entry;
+      <code>/hs-feature</code> promotes one into a real goal and marks it <code>adopted</code>. Nothing
+      then retires it — so this skill does. It confirms the cycle actually reached <code>develop</code>
+      (an adoption marker proves a cycle <em>started</em>, never that it finished), deletes the seed and
+      its index entry after you approve a preview, and repairs what the removal broke: discharged
+      prerequisites, dangling cross-references, stale figures in surviving seeds. In the hidden
+      security lane it moves entries and never deletes — that lane is gitignored, so a deletion there
+      leaves no history. Deliberately <em>not</em> folded into <code>/hs-publish</code>, whose staleness
+      gate exists to notice exactly this kind of write outside <code>spec/</code>.</p>
+    <div class="io"><b>reads</b> issues/, ROADMAP.md, .security/, spec/*/GOAL.md · <b>writes</b> ROADMAP.md, seed deletions ·
+      <b>skill</b> <a href="../skills/hs-roadmap/SKILL.md">hs-roadmap/SKILL.md</a></div>
+  </div>
+
+  <div class="skill" style="border-left-color:var(--muted)">
     <div class="cmd" style="color:var(--text-2)">/hs-release <span style="color:var(--muted);font-weight:400">— cut a version (operational · not part of the lifecycle)</span></div>
-    <p>The other operational sibling: it changes the <strong>release</strong>, not any feature. In one of
+    <p>The third operational sibling: it changes the <strong>release</strong>, not any feature. In one of
       three modes — <code>patch</code> (hotfix off <code>master</code>), <code>pre-release</code>
       (alpha/beta/rc off <code>develop</code>), or <code>full-release</code> (promote <code>develop</code>
       → <code>master</code>) — it bumps the single version source, rebuilds the man pages, runs a
@@ -821,7 +838,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
   </table>
   </div>
 
-  <h3>The five lifecycle skills (+2 operational) <a class="anchor" href="#reference">#</a></h3>
+  <h3>The five lifecycle skills (+3 operational) <a class="anchor" href="#reference">#</a></h3>
   <div class="tablewrap">
   <table>
     <thead><tr><th>Skill</th><th>Role</th></tr></thead>
@@ -832,6 +849,7 @@ you   ❯ <span class="c"># you run it, it breaks,</span>
       <tr><td><code><a href="../skills/hs-review/SKILL.md">hs-review</a></code></td><td>Independent, blind, evidence-based QA.</td></tr>
       <tr><td><code><a href="../skills/hs-publish/SKILL.md">hs-publish</a></code></td><td>Open the pull request (or merge locally).</td></tr>
       <tr><td><code><a href="../skills/hs-harness/SKILL.md">hs-harness</a></code> <span style="color:var(--muted)">(operational · meta)</span></td><td>Fold the self-improvement loop's findings back into the factory — human-gated, run by the lead developer as needed. <strong>Not</strong> a feature-lifecycle step.</td></tr>
+      <tr><td><code><a href="../skills/hs-roadmap/SKILL.md">hs-roadmap</a></code> <span style="color:var(--muted)">(operational · backlog)</span></td><td>Retire the deferrals whose cycles have landed and keep <code>ROADMAP.md</code> true — delete the shipped seed and its index entry after a human-gated preview, then repair the drift the removal leaves. Run between releases. <strong>Not</strong> a feature-lifecycle step.</td></tr>
       <tr><td><code><a href="../skills/hs-release/SKILL.md">hs-release</a></code> <span style="color:var(--muted)">(operational · release)</span></td><td>Cut a version — <code>patch</code> / <code>pre-release</code> / <code>full-release</code>: bump the single version source, rebuild man pages, run the CI-mirror gate (incl. <code>twine check --strict</code>), sign a tag, and publish to PyPI/ghcr — human-gated, dry-run-first. <strong>Not</strong> a feature-lifecycle step.</td></tr>
     </tbody>
   </table>

@@ -18,6 +18,15 @@ assertion.
 - A **separate, later** completeness sub-pass *may* read `TECH.md` to ask "was every planned phase
   shipped? did scope balloon?" — kept isolated so the plan never contaminates the correctness verdict.
 
+**The `spec/` exclusion bounds the artifacts, not the rationale.** `issues/{slug}.md` and
+`ROADMAP.md` sit outside `spec/`, so a seed this cycle filed is **inside** the graded diff — and it
+should be. It is a claim about the repository, not a design rationale: grade it as prose the same
+way you grade a docs change. Does its `Problem` describe behavior that is actually there, at the
+`file:line` it cites? Does its `status:` match reality? Does the `ROADMAP.md` entry point at a file
+that exists? A seed that misstates the defect is a real finding. What you must **not** do is treat
+the seed as evidence of what the cycle intended — that is the leak the `spec/` exclusion exists to
+prevent, and a deferral's stated reason is exactly the kind of author intent that would bias you.
+
 ## Scope — flag ONLY
 
 1. **Correctness bugs** — the code produces wrong behavior / crashes / data corruption.
@@ -65,6 +74,16 @@ context, so lean on *executed evidence*, not opinion.
 - Emit findings via `ReportFindings` (most-severe first) **and** write `REVIEW.md`.
 - **CONFIRMED** findings → set `TECH.md` `status: blocked` + `review.verdict: changes-requested`
   (via `set_phase.py`) and loop back to `hs-build`.
+- **One exception — deferred, not blocked.** A CONFIRMED finding against behavior that **predates
+  the diff** *and* that a `GOAL.md` criterion requires preserving, which cannot be repaired this
+  cycle without failing that criterion. Record it in `REVIEW.md` and defer it to `issues/{slug}.md`
+  (from `templates/ISSUE.md`, `status: unshaped`) plus a `ROADMAP.md` entry, committed *before* the
+  `set_phase.py --reviewed-commit` call and with that call re-pinned to a fresh `git rev-parse HEAD`
+  — both paths sit outside `spec/`, so a seed committed after the pinned SHA is what
+  `/hs-publish`'s staleness gate reads as post-review drift. The verdict is
+  otherwise unchanged by it. **If either condition fails, it blocks.** A finding that describes an
+  unremediated weakness takes the `.security/` lane instead, which is gitignored — nothing to commit,
+  and it is never named in the PR body.
 - **PLAUSIBLE** findings → surface to the human for triage, do not auto-loop.
 - Clean pass → `review.verdict: approved`; proceed to `hs-publish`.
 - Cycle 2+ **appends** a dated `## Review cycle {n}` section to `REVIEW.md` — never overwrite an

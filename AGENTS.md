@@ -92,8 +92,9 @@ TLS-aware manager), `tls` (`TLSConfig`, cert generation), `heartbeat`, `template
 (`ciphers` is just an OpenSSL-string field on `TLSConfig`).
 
 Two repo-level trees sit outside the package: **`.agents/`** — the spec-driven "software
-factory" (the `hs-feature|plan|build|review|publish` lifecycle skills plus two operational siblings —
-`hs-harness` (meta/maintenance) and `hs-release` (version bumps / releases); `factory/` methodology,
+factory" (the `hs-feature|plan|build|review|publish` lifecycle skills plus three operational siblings —
+`hs-harness` (meta/maintenance), `hs-roadmap` (retire landed seeds, keep `ROADMAP.md` true) and
+`hs-release` (version bumps / releases); `factory/` methodology,
 invariants, EARS/templates, a non-Claude harness
 `portability.md` contract, and the `bin/` FSM + `meta_status.py` scripts; `.claude` symlinks here);
 and **`spec/{slug}/`** — the committed, dated
@@ -101,6 +102,56 @@ per-feature design records (`GOAL.md`/`PLAN.md`/`TECH.md`/`REVIEW.md`, plus a `M
 log) the factory produces and **retains on merge**. `AGENTS.md` remains ground truth; `spec/{slug}/` is
 a point-in-time record of intent. See `.agents/factory/methodology.md` and the lifecycle note under
 "Working on this codebase as an agent."
+
+Two more repo-level paths carry work that is **not yet in flight**:
+
+```
+issues/{slug}.md   # deferred code work, pre-shaped; /hs-feature promotes one into a GOAL
+ROADMAP.md         # the ordered index of future cycles — one entry per issue
+```
+
+**Where a deferral goes — five homes, one rule each.** A pass that decides *not* to fix something
+must still record it, and the destination is not a matter of taste:
+
+| File | Holds | Written by |
+|------|-------|------------|
+| `spec/{slug}/META.md` | **Harness/skill feedback only** — "was this the *factory's* fault". Never code follow-ups. | the lifecycle skills |
+| `issues/{slug}.md` | **Deferred code work**, pre-shaped from [`templates/ISSUE.md`](.agents/factory/templates/ISSUE.md) | whoever defers it |
+| `ROADMAP.md` | the **ordered index** — one entry per issue, `**Seed:**` pointing at the `issues/` file | whoever defers it |
+| `.security/issues/{slug}.md` + `.security/ROADMAP.md` | the same two things for **unremediated security findings** — gitignored, never published | whoever defers it |
+| `spec/{slug}/` | work **actually in flight** | the lifecycle skills |
+
+An `issues/{slug}.md` is a *candidate, not a contract*: `/hs-feature` promotes it into
+`spec/{slug}/GOAL.md`, and that promotion is where appetite, non-goals and the R-IDs get
+negotiated with a human. **Never copy one into a `GOAL.md` verbatim** — `hs-review` grades a GOAL,
+and a proposal nobody accepted is not a contract. The `status:` field is the guard: `unshaped`
+(raw deferral — evidence captured, nothing agreed), `shaped` (already negotiated with a human, but
+**not yet accepted into a cycle**), `adopted:{slug}` (promoted; `spec/{slug}/` owns it now, and the
+record stays *while the cycle is in flight* so the ROADMAP index does not dangle). Two further
+values close a deferral **without** shipping — `declined` and `accepted-behaviour` — and those are
+terminal records, indexed under `ROADMAP.md` § *Settled questions* rather than as cycles.
+
+**A deferral is retired, not kept forever.** When the cycle that adopted a seed lands on `develop`,
+`/hs-roadmap` deletes the seed and removes its `ROADMAP.md` entry: `spec/{slug}/` is the retained
+account and git history holds the file. Retire only on evidence the cycle *landed* — an
+`adopted:{slug}` marker proves a cycle started, never that it finished. The security lane inverts
+this: nothing under `.security/` is ever deleted, because it is gitignored and a deletion there
+leaves no history to recover from, so a remediated finding keeps its file, its closure is recorded
+in `.security/STATUS.md`, and its `.security/ROADMAP.md` entry moves out of the ordered queue.
+
+**The security lane is not optional.** A deferral that describes an *unremediated* weakness — a
+live exploitable mechanism, an attack path, or enough evidence to reconstruct one — goes in
+`.security/`, which is gitignored along with `.local/`. Publishing a standing roadmap of live
+vulnerabilities hands an attacker a work plan. The *fixes* land as ordinary public commits and PRs
+when they ship; only the inventory of what is still open stays private. Inside that lane,
+`.security/README.md` + `findings/F*.md` hold the evidence, `.security/STATUS.md` is the
+current-status overlay, and `.security/ROADMAP.md` is the ordered remediation index — the same
+convention as the public lane, hidden. When in doubt which lane an item belongs to, use
+`.security/` and ask.
+
+This coexists with the **GitHub tracker**: a GH issue is the public-facing ticket,
+`issues/{slug}.md` is the pre-shaped spec behind it, and the two may link to each other. Neither
+replaces the other.
 
 ## Architecture & data flow
 
@@ -325,7 +376,8 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
 ## Working on this codebase as an agent
 
 - **Use the factory for non-trivial work.** A feature/fix/refactor flows through the `.agents/`
-  spec-driven lifecycle — `/hs-feature` (shape `GOAL.md`) → `/hs-plan` (research +
+  spec-driven lifecycle — `/hs-feature` (shape `GOAL.md`, or promote an
+  `issues/{slug}.md`) → `/hs-plan` (research +
   `PLAN.md`/`TECH.md`) → `/hs-build` (execute phases) → `/hs-review` (blind, externally-verified
   QA) → `/hs-publish` (squash PR to `develop`), each on a `feature/`|`fix/` branch with artifacts
   committed under `spec/{slug}/`. `.agents/factory/methodology.md` is the *why*;
@@ -336,6 +388,15 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
   substantial notes in the PR; and the human-gated **`/hs-harness`** (meta/maintenance, **not** a
   lifecycle step) applies those fixes back to `.agents/`, logging each in `factory/harness-log.md` —
   and never weakens a non-negotiable gate on a finding's say-so.
+- **Retire what shipped with `/hs-roadmap`** (operational, **not** a lifecycle step): run it between
+  releases. It finds every `issues/{slug}.md` carrying `status: adopted:{slug}`, confirms the cycle
+  actually reached `develop` (`git ls-tree develop -- spec/{slug}`, because the marker only proves a
+  cycle *started*), and after a human-gated preview deletes the seed and its `ROADMAP.md` entry —
+  then repairs the drift the removal leaves: discharged `Depends on:` prerequisites, dangling
+  cross-references, stale figures in surviving seeds, and markers left by abandoned branches. It is
+  deliberately **not** folded into `/hs-publish`: retirement writes outside `spec/`, which is exactly
+  what publish's staleness gate exists to notice. In the security lane it moves entries and never
+  deletes.
 - **Cut releases with `/hs-release`** (also operational, **not** a lifecycle step): it bumps the
   single version source, rebuilds man pages, runs the CI-mirror gate (incl. `twine check --strict`),
   signs a tag, and publishes — in one of three modes (`patch` off `master`, `pre-release` off
