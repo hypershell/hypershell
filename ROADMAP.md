@@ -382,8 +382,8 @@ managed queues move to the lighter threading primitive so per-client dispatch st
 and a feeder thread each.
 
 *Horizon: near-term · Depends on: — · Refs: ships in three cycles. R1 (the queue primitive) is
-carved into `zone-queue-primitive`; R2–R12 (dispatch and zones) and R13–R17 (zone-aware
-autoscaling) follow from this seed*
+carved into `zone-queue-primitive`; R2–R12 (dispatch and zones) into `zone-dispatch`; R13–R17
+(zone-aware autoscaling) follow from this seed*
 **Seed:** [`issues/zone.md`](issues/zone.md) · *status: shaped*
 
 ## Relay: two-level scheduling across administrative sites
