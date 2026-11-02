@@ -70,6 +70,33 @@ one atomic code+state commit.
 - **Authoritative design:** [`PLAN.md`](PLAN.md).
 - **Backing research:** [`research/00-digest.md`](research/00-digest.md) + briefs 01–02.
 
+## Plan gate rulings
+
+Passed by the foreman, as judge under the maintainer's delegation, 2026-11-02.
+
+1. **Assignment identity `(id, schedule_time)`, with no schema or wire change: accepted**, on the
+   condition that the PostgreSQL path is *run*, not only reasoned about. A test SHALL show that a
+   dispatched `schedule_time` round-trips through the bundle's JSON and back into an
+   `UPDATE … WHERE schedule_time = :echo` match on PostgreSQL, covering timezone-aware values and
+   microsecond precision. It runs in the existing PostgreSQL CI job (pg13 and pg18) next to
+   `tests/test_upgrade_postgres.py`, reusing that job's connection pattern, as its own module
+   skipped when no PostgreSQL URL is configured. PostgreSQL is not available locally, so its green
+   comes from CI on the PR, which the foreman opens. P2's verify gate gains: **the PostgreSQL
+   round-trip test passes in CI**.
+2. **Relay obligation (a): accepted.** Relay-facing contract: a relay SHALL return the upstream
+   `schedule_time` exactly as it received it in the bundle (same instant, same UTC offset, same
+   microseconds); any other value is refused as stale. The foreman carries this to relay's shaping;
+   `issues/relay.md` is not edited in this cycle.
+3. **A result for a missing row gets a refusal and a log line**, where `develop` raises
+   `StaleDataError` and stops the receiver thread: accepted as within scope, as R2's "missing row is
+   STALE".
+4. **STALE and DUPLICATE both log at WARNING**, with distinct wording: accepted.
+5. **Seed the pre-existing problems the planner found**, each `unshaped` with a `ROADMAP.md` entry,
+   in P3's commit or a sibling commit: a stale confirm can hide a row from `revert_orphaned`; a late
+   confirm can overwrite a relay's leaf attribution (relay-facing); `revert_orphaned` reads and then
+   reverts as two steps, so a result landing in between is lost; `from_json_type` turns date-like
+   `args` strings into datetimes. Generic names, framed as correctness issues.
+
 ## Final result-column set (R1)
 
 `Task.result_columns`, exactly these 13, in this order:
