@@ -219,3 +219,188 @@ to `hs-build`, which reopened P1.
 | P1 · PLAUSIBLE | accepted, fix | Fail fast at startup: the in-process loop runs the `TestPrivateInternals` checks (one function shared by the test and the server) before binding and exits non-zero like C2. `requires-python` is not capped. |
 | P2 · PLAUSIBLE | pending external evidence | No change; the foreman is running the multi-node matrix (P7). |
 | P3 · PLAUSIBLE | rejected | R9's footprint counts the server's whole process tree, per the foreman's ruling at the plan gate (TECH P5 "Gate reading"). The server process's own FD count is reported, not gated. |
+
+## Review cycle 2 — changes-requested (2026-11-02)
+
+- **Reviewed commit:** 12af7fbab7cdc1fd391acf0e8320d40e311b3b2c  ·  **Base:** `b819de6` (merge base with
+  `origin/develop`)  ·  **Date:** 2026-11-02
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3. Two cycles have not converged, so this escalates to the human (bounded loop).
+- **Mode:** a fresh blind pass over the full spec-excluded diff (`git diff b819de6...HEAD -- .
+  ':(exclude)spec/'`) by one blind reviewer (no `debate`, no `completeness` sub-pass). The reviewer
+  was not shown cycle 1's findings. The orchestrator separately verified the remediation of C1, C2
+  and P1 and re-ran the throughput gate.
+
+### Pre-flight
+
+- **Base resolution.** `origin/develop` has gained `8cdf62a` since the fork, a data-layer change
+  that does not touch `core/queue.py`. The branch's own diff was graded against its merge base
+  `b819de6`. The local `develop` ref is still stale (`222075b`) and was not used; the skill's
+  injected `develop...HEAD` diffstat was ignored again.
+- **Build state.** `TECH.md` is `status: in_progress`, P1–P6 `done`, P7 `pending`. As in cycle 1,
+  R9's multi-node clause is recorded as pending external evidence. The cluster run is being
+  re-staged at `12af7fb` and has no results yet.
+- **Contract drift.** `git log --oneline b819de6..HEAD -- spec/zone-queue-primitive/GOAL.md` shows
+  only the shaping commit `da987c2`. The contract did not move.
+- **Since cycle 1:** one commit, `12af7fb`, the remediation of C1, C2 and P1.
+
+### Cycle 1 findings: remediation check (orchestrator)
+
+| Finding | Status | Evidence |
+|---|---|---|
+| C1 · same-process TLS | **resolved** | Same-process probe: the server has cert, key and CA, and three CA-only clients run in the same process. It was also run with a CA-only config, and with a config naming missing cert files, pre-installed in the process-wide slot. Result: 24/24 round trips over all four queues in each case, children 0 → 0, on 3.12.13, 3.13.16 and 3.14.6. The same probe on the `6d0ac37` sources fails with `SSLEOFError [SSL: UNEXPECTED_EOF_WHILE_READING]`, so it discriminates. Starting a server leaves the process slot unset (`test_server_start_leaves_process_tls_config`). The blind reviewer found same-process clients with differing TLS configs behave as on base. |
+| C2 · silent hang on bind failure | **resolved** | `hs server` on a held port, TLS on and off: rc 5 (`runtime_error`) in 0.5 s, one CRITICAL line `QueueServerError: Cannot listen on 127.0.0.1:<port> ([Errno 48] Address already in use)`, no "Server listening". `hsx` on a held port: the same, rc 5 in 0.5–0.7 s. An unassignable bind address (`203.0.113.7`): rc 5, `[Errno 49] Can't assign requested address`, TLS on and off. Base hangs in each case: cycle 1 showed it, and the reviewer's base drives this cycle had to be killed at 15–20 s. |
+| P1 · internals drift | **resolved** | Six simulated drifts, each driven through `hs server`: `del Server.serve_client`, `del Server._handle_request`, a reshaped `Server.__init__`, a reshaped `Listener.__init__`, `del BaseProxy._address_to_local`, and `shutdown` dropped from `Server.public`. Each gave rc 5 in ≤ 0.7 s with one CRITICAL line naming the failed check, no "Server listening", and the port free afterwards. `unsupported_internals() == []` on 3.12–3.14. Python 3.11 was not run locally (see Human gate). |
+| P2 · multi-node evidence | pending external evidence | Unchanged. |
+| P3 · R9 FD reading | rejected at cycle 1 triage | The blind pass found the same root cause again, this time with a failure scenario cycle 1 did not have (C3 below). |
+
+### Verification run
+
+- **Reviewer:** `uv run pytest` on 3.14 → **543 passed**. On 3.12 and 3.13, `test_queue.py`,
+  `test_queue_start.py`, `test_queue_tls.py`, `test_server_fsm.py` and `test_queue_workload.py` →
+  **99 passed** each. Python 3.11 was not run (CI only).
+- `git diff --diff-filter=MDR b819de6 HEAD -- tests/` is empty, and `test_queue_tls.py` is
+  byte-identical. `--collect-only -m "not unit and not integration"` on the four new test files
+  collects 0 of 60, so every new test is tagged.
+- `bench_queue.py parity` (TLS on and off) and `compat` in both directions → **PASS** (reviewer).
+  A grouped workload with a retried failure, run with `b819de6` clients against the new server,
+  gives task rows identical to a base-server run.
+- **Reviewer CLI and API drives, base vs feature, in throwaway sites.** These covered: start-up on
+  a busy port, a bad bind address and an unresolvable host; SIGUSR1 → rc 0 and SIGINT → rc 4 on
+  both builds, with the port released; a wrong key and a TLS mismatch, which give the same messages
+  and codes as base; an exception exit through the API, after which the port rebinds in 0.00 s; an
+  in-process SIGUSR1 drain followed by a same-port `QueueServer` in the same process, with stdio
+  unchanged; `run_local` three times on one port, TLS on and off, under fork and spawn; the R1
+  child count, `active_children` 0 → 1 on base and 0 → 0 on feature under fork and spawn; and
+  footprint (process tree 3 → 1; tree FDs at idle 103 → 10 with TLS and 103 → 9 without).
+- **Throughput gate (orchestrator).** Python 3.14.6, start method `spawn`, macOS. Both builds were
+  frozen, non-editable venvs built from `git archive` of `b819de6` and `12af7fb`. Two unrelated
+  processes held two of the ten cores at 100% for the whole run; runs were interleaved, so both
+  builds shared that load. `bench_queue.py gate --base b819de6 --feature 12af7fb --repeats 5` →
+  **PASS**. All 60 runs were clean: every server and client exited rc 0 and every task completed.
+  Steady-state tasks/s (p10–p90 of completions), median [min–max]:
+
+  | config | base | feature | delta | tolerance | tree children b/f | tree FDs b/f | own FDs b/f | own threads b/f |
+  |---|---|---|---|---|---|---|---|---|
+  | 4x4 b=1 tls | 261.0 [243.0–266.8] | 242.4 [231.3–264.1] | −18.6 | 32.8 | 2/0 | 117/23 | 52/24 | 7/19 |
+  | 4x4 b=1 no-tls | 265.4 [232.6–267.6] | 261.1 [236.0–267.1] | −4.3 | 35.0 | 2/0 | 117/23 | 52/23 | 7/19 |
+  | 16x1 b=1 tls | 233.4 [232.1–257.4] | 236.4 [218.8–259.3] | +3.0 | 40.5 | 2/0 | 154/59 | 53/60 | 7/55 |
+  | 16x1 b=1 no-tls | 247.9 [239.8–259.6] | 257.8 [249.9–269.2] | +9.9 | 19.8 | 2/0 | 154/59 | 52/60 | 7/55 |
+  | 4x4 b=50 tls | 816.2 [788.5–817.2] | 817.5 [800.5–822.3] | +1.3 | 40.8 | 2/0 | 116/22 | 51/22 | 7/19 |
+  | 32x1 b=1 tls | 257.8 [246.7–267.5] | 260.6 [257.1–261.9] | +2.8 | 20.8 | 2/0 | 202/107 | 52/107 | 7/103 |
+
+  - The largest drop is 4x4 b=1 tls at −18.6, inside its 32.8 tolerance, and the two ranges
+    overlap. In cycle 1 the same config measured −1.2.
+  - Cycle 1's largest drop, 32x1 tls at −14.6, is now +2.8.
+  - Tree RSS roughly halves, from ≈205 to ≈100 MB.
+  - The server process's own FD and thread counts grow with clients, as in cycle 1 (see C3).
+- **Throughput cross-check (orchestrator), independent of `tests/bench`.** Local `hs cluster` ran
+  5000 `true` tasks with `-N 16 -b 1` on the same frozen venvs, measured by wall clock, with 5
+  interleaved repeats per build and TLS mode. All 20 runs exited rc 0 with 5000/5000 rows at exit
+  status 0.
+
+  | TLS | base | feature |
+  |---|---|---|
+  | on | 121.6 [121.5–121.7] | 122.3 [122.2–122.6] |
+  | off | 122.0 [121.8–122.0] | 122.7 [122.6–122.9] |
+
+  The feature was at or above base in every pairing.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `core/queue.py` `_InProcessServer`, `SecureManager._serve_in_process`, `QueueServer.start` | `test_start_creates_no_child[fork,spawn]` on 3.12–3.14; reviewer probe 0 → 0 (base 0 → 1) under both start methods | ✅ |
+| R2 | `QueueServer.start` (`queue.Queue`, same bounds), `QUEUE_EXPOSED` | bounds, timeout and `join`/`task_done` tests; idle server holds 9–10 FDs, with no per-queue pipes or feeder threads | ✅ |
+| R3 | as R1 | `test_roundtrip[tls,no-tls]` on all four queues, both directions | ✅ |
+| R4 | as R1; stock handshake and TLS layer; C1 fix keeps the server's context on its listener | `test_queue_tls.py` unmodified and passing; `compat` both directions TLS on and off; auth and TLS-mismatch probes match base; same-process TLS probe (C1) | ⚠️ C4 (diagnostics only) |
+| R5 | `_InProcessServer.stop`, `_finalize_in_process` | exception, SIGUSR1 and normal exits release the port; same-port rebind in-process; stdio unchanged | ✅ |
+| R6 | `tests/test_queue.py`, `tests/test_queue_start.py` (`unit`) | collected and passing | ✅ |
+| R7 | `tests/test_server_fsm.py` | as cycle 1, re-run on 3.12–3.14 | ✅ |
+| R8 | no existing test touched | full suite; `parity`; `--help` byte-identical; `test_queue_workload.py` | ⚠️ C3 (edge path: open-file limit) |
+| R9 (local) | as R1 | orchestrator gate, 5 interleaved repeats × 6 configs: every median within run-to-run spread, all 60 runs clean; tree children 2 → 0; tree FDs lower in every config; independent `hs cluster` cross-check: feature ≥ base in all 20 runs | ✅ (see C3 on the server process's own FDs) |
+| R9 (multi-node vs 2.8.3) | `tests/cluster/` drive | **pending external evidence**; the run is being re-staged at `12af7fb` | ⏳ |
+
+Unmapped changes, none blocking. The fail-fast start (`QueueServerError`,
+`unsupported_internals()`, the `ServerThread.start` re-raise) maps to the cycle 1 triage of C2
+and P1. The "Server listening on …" line now comes after the queue is ready, so it follows "Empty
+database - waiting for initial tasks". `QueueServer.start(initializer)` now runs its initializer
+in the calling process, but no caller in `src/` passes one. Cycle 1's notes on `tests/bench`,
+`tests/cluster`, `issues/zone.md` and `ROADMAP.md` stand.
+
+### Findings
+
+No AGENTS.md invariant violation was found.
+
+#### [MEDIUM/CONFIRMED] C3 — At the open-file limit, the server process's own files fail, and its state machines crash
+- **Where:** `src/hypershell/core/queue.py:397-420` (`_InProcessServer.serve`) and `:502-535`
+  (`_serve_in_process`). The connections now end in the server process.
+- **Failure scenario:** every queue connection now holds its descriptors in the server process.
+  At `b819de6` they lived in the manager child.
+  - Capacity barely moves, and is if anything slightly better. On the reviewer's counts the base
+    child holds 49 + ~3 per client and the feature server holds 10 + ~3 per client, so under one
+    `RLIMIT_NOFILE` the feature reaches `EMFILE` a few clients later.
+  - What changes is the blast radius. At base, the exhausted child stops taking new connections,
+    and the server's database and log files keep working. Now the server's own SQLite and log
+    opens fail with `EMFILE`, its Receiver, Scheduler, Confirm and HeartMonitor threads die, and
+    the run ends with exit 5.
+  - At a 1024 soft limit this comes at roughly 330–340 clients on one server.
+  - By reading only, not measured: the accept loop's catch-all `continue` retries `EMFILE` without
+    backoff. The stock accepter does the same at base, but there it spins in the child; now it
+    spins in the server process.
+- **Evidence:** reviewer. The server was given `RLIMIT_NOFILE` 128, then served 300 tasks to 44
+  `b819de6` clients with `--no-tls`:
+
+  | | base | feature |
+  |---|---|---|
+  | Server | no state-machine crash; hung, killed at 90 s | `Uncaught exception from Receiver/Scheduler`, `OSError: [Errno 24] Too many open files` opening its exception log; exit 5 after 2.8 s |
+  | Tasks done | 270/300 | 70/300 |
+  | Clients | mixed exits | all 44 exit 5 |
+
+  At limit 64 with 24 clients: base completes 285/300; feature completes 15/300, with
+  `sqlite3.OperationalError: unable to open database file` from Confirm and HeartMonitor.
+  Per-process FDs at idle, 4 clients and 8 clients: base server 51/53/52 and base child 49/61/73;
+  feature server 10/22/34.
+- **Touches invariant / requirement:** R8 (no behaviour change; every process exits cleanly) on an
+  edge path, and R9 footprint. High-blast-radius `core/queue.py`.
+- **For the human:** this shares its root cause with cycle 1's P3, which triage rejected as a
+  reading of R9. That ruling settled how footprint is graded, not this failure mode. Two choices:
+  - **Fix.** For example, raise the soft `RLIMIT_NOFILE` toward the hard limit at server start, or
+    stop accepting at `EMFILE` so that the server's own files keep working.
+  - **Accept.** Treat it as a documented limit and defer it. The rubric's deferral exception does
+    not fit, because the behaviour is new, so this has to be a human ruling.
+
+#### [LOW/CONFIRMED] C4 — A server TLS setup error is logged only at DEBUG
+- **Where:** `src/hypershell/core/queue.py:407-409`. A failed accept is logged with `log.debug` and
+  dropped. The server context is now built on first accept by the listener (`:195-201`).
+- **Failure scenario:** a server whose TLS materials cannot build a context, for example
+  `--tls-cert '<none>'`. At base, the manager child's accepter printed `TLSError: TLSConfig.cert
+  and TLSConfig.key are required for the server side` to stderr (the accepter thread died with
+  it). Now the server log shows only INFO lines, ending with "Server listening on …", while every
+  client connection fails. Clients exit 5 on both builds, so only the server-side diagnostic is
+  lost.
+- **Evidence:** reviewer, `hs server t.in --tls-cert '<none>'` plus `hs client`, base vs feature
+  frozen venvs. Output is as described above.
+- **Touches invariant / requirement:** R4 (TLS behaviour) and the GOAL outcome ("nothing a user …
+  can see changes"). High-blast-radius `core/queue.py`. TLS posture is unchanged: the server still
+  fails closed.
+
+### Observations (not findings)
+
+- **Pre-existing, identical on `b819de6` (reviewer):**
+  - A same-port restart with TLS can hang. When a dropped client's proxy is garbage-collected
+    while another connection is in its TLS handshake, the decref opens a second connection and
+    waits. Handshakes run one at a time in the accept path, so both wait for good. It reproduces
+    deterministically on both builds.
+  - A malformed result on `completed` crashes the Receiver, and the server then hangs.
+- The reviewer's process-hygiene note is in the orchestrator's report, not here.
+
+### Human-gate triggers
+
+- **Triggered.** C3 and C4 are CONFIRMED in high-blast-radius `core/queue.py`. Human sign-off is
+  required before any further step, including a return to `/hs-build`. This is cycle 2 without
+  convergence, so it escalates per the bounded loop.
+- **Before publish:** confirm the Python 3.11 CI job is green at `12af7fb`. The start-time check
+  requires `Server._handle_request` and the other pinned privates, and a 3.11 that lacked one would
+  refuse to start. 3.11 is not available locally, and CI could not be read from this session.
+- P2, the multi-node evidence, is still pending.

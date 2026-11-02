@@ -137,6 +137,10 @@ is skipped by the parser):
 - **Skill cause:** Unchanged from the original finding: Step 1 never resolves `{base}` to a commit.
 - **Recommended fix:** As in the original finding.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-review step1, cycle 2, 2026-11-02):** the injected diffstat again ran against
+  the stale local `develop` (`222075b`). `origin/develop` has since moved on to `8cdf62a`, so even
+  `origin/develop...HEAD` is no longer a usable literal; only the merge base `b819de6` grades the
+  branch's own diff. The stale local `develop` must not be used.
 
 ## F7 — Remediation mode has no place to record the human-gate triage, nor a path for an accepted PLAUSIBLE finding
 `origin=hs-build:P1-remediation severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
@@ -152,3 +156,35 @@ is skipped by the parser):
   date) and tell Step 1.3 to require it filled before reopening phases when the gate was triggered,
   treating accepted PLAUSIBLE rows like CONFIRMED ones.
 - **Confidence:** high · **Effort:** small
+
+## F8 — Reviewer conduct covers the git tree, not the processes a base-build drive leaves behind
+`origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** Some of the blind reviewer's base-versus-feature drives timed out. It killed
+  the base servers by process id, and their manager children and resource trackers survived as
+  orphans (eight processes, three still listening on loopback). The reviewer's request to signal
+  them was refused, so they were left for the human.
+- **Skill cause:** The rubric's conduct rule asks only for a clean `git status --porcelain`.
+  Neither Step 2's brief nor the rubric mentions processes. Nothing warns that a base build's
+  server starts a manager child that outlives a parent killed by process id. `temp_site.sh` cleans
+  the site, not the process tree.
+- **Recommended fix:** Add to the rubric's Reviewer conduct, and to Step 2's brief: start every
+  drive in its own session or process group, and on timeout kill the group, never a single process
+  id. At hand-back, list any process still running from the scratch environments and report it.
+  Name the base manager child as the known case.
+- **Confidence:** high · **Effort:** small
+
+## F9 — Cycle 2+ has no rule for a blind finding that re-raises an already-triaged one
+`origin=hs-review:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** The cycle-2 blind pass was kept blind to cycle 1's triage, as it should be. It
+  found the root cause of cycle 1's P3 again, which triage had rejected as a reading of R9, and
+  confirmed a new failure scenario for it (REVIEW C3). Steps 3 and 4 route every CONFIRMED finding
+  to changes-requested. They don't say whether an earlier human ruling covers a re-found finding.
+  The orchestrator graded it CONFIRMED, cross-referenced P3, and left the overlap to the human.
+- **Skill cause:** Step 3's cycle 2+ rule covers appending and the blind-or-remediation mode, but
+  not reconciling against earlier triage rulings. F7 notes that those rulings have no template
+  home either.
+- **Recommended fix:** In Step 3, for cycle ≥ 2, have the orchestrator, not the reviewer, compare
+  each finding with the earlier `Triage` rows. If a ruling already covers the finding's scenario,
+  record it as "covered by ruling {id}"; it does not block. A finding that adds a new failure
+  scenario is graded normally and cross-referenced to the ruling.
+- **Confidence:** med · **Effort:** small
