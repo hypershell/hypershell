@@ -205,3 +205,17 @@ CONFIRMED findings auto-loop to `hs-build`. No AGENTS.md invariant violation was
   return to `/hs-build`.
 - For human triage: P1 (start-time guard against internal drift: in or out of scope), P2 (the
   multi-node evidence, when it arrives) and P3 (the FD reading of R9).
+
+## Triage (human gate) — cycle 1
+
+The human gate for C1 and C2 (high-blast-radius `core/queue.py`, `server.py`) was **passed by the
+foreman's ruling**, as judge under the maintainer's delegation, on 2026-11-02. Remediation returned
+to `hs-build`, which reopened P1.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| C1 · CONFIRMED | fix | The server's TLS context belongs to the server instance, bound to its listener and accept path, and never read from or written to the process-wide slot clients use. Red-first unit test from the reviewer's same-process probe. `test_queue_tls.py` stays byte-identical; wire, auth and TLS behaviour unchanged (R4). |
+| C2 · CONFIRMED | fix | A bind or listen failure reaches `QueueServer.start()` as an exception before "Server listening" is logged; the server process exits non-zero with one CRITICAL line naming the address and the OS error, through the shared exception mapping and `exit_status` constants. Strictly better than base (which hung). The foreman's ruling covers the `server.py` change this needs. |
+| P1 · PLAUSIBLE | accepted, fix | Fail fast at startup: the in-process loop runs the `TestPrivateInternals` checks (one function shared by the test and the server) before binding and exits non-zero like C2. `requires-python` is not capped. |
+| P2 · PLAUSIBLE | pending external evidence | No change; the foreman is running the multi-node matrix (P7). |
+| P3 · PLAUSIBLE | rejected | R9's footprint counts the server's whole process tree, per the foreman's ruling at the plan gate (TECH P5 "Gate reading"). The server process's own FD count is reported, not gated. |

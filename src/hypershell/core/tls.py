@@ -212,7 +212,8 @@ def verify_peer_fingerprint(ssl_sock: ssl.SSLSocket, cfg: TLSConfig) -> None:
 
 
 # Process-local state populated by install_process_context().
-# The process serving the queues and each client process call install_process_context().
+# Each client and a forked manager child call install_process_context(). An in-process queue server
+# keeps its own context on its listener and neither reads nor writes this state.
 _PROCESS_CONFIG: Optional[TLSConfig] = None
 _PROCESS_SERVER_CONTEXT: Optional[ssl.SSLContext] = None
 _PROCESS_CLIENT_CONTEXT: Optional[ssl.SSLContext] = None
@@ -222,10 +223,10 @@ def install_process_context(cfg: Optional[TLSConfig]) -> None:
     """
     Stash `cfg` for use by :func:`get_server_context` / :func:`get_client_context`.
 
-    Called by the process that serves the queues before it accepts connections and by each
-    client before connecting. Repeat calls drop the cached contexts, which are rebuilt from the
-    new configuration on next use. Passing ``None`` (or a config with ``enabled=False``)
-    leaves TLS disabled in this process.
+    Called by each client before connecting and by a forked manager child before it serves. An
+    in-process queue server holds its own context and does not use this one. Repeat calls drop the
+    cached contexts, which are rebuilt from the new configuration on next use. Passing ``None`` (or
+    a config with ``enabled=False``) leaves TLS disabled in this process.
     """
     global _PROCESS_CONFIG, _PROCESS_SERVER_CONTEXT, _PROCESS_CLIENT_CONTEXT
     _PROCESS_SERVER_CONTEXT = None

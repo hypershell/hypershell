@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
@@ -21,9 +21,9 @@ phases:
   parallel: false
   hammerable: false
   hill: downhill
-  verify: uv run pytest -v tests/test_queue.py tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh
-    sh -c "seq 200 | uv run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo
-    {}' -N4 --no-tls && uv run hs list --count"
+  verify: uv run pytest -v tests/test_queue.py tests/test_queue_start.py tests/test_queue_tls.py
+    && .agents/factory/bin/temp_site.sh sh -c "seq 200 | uv run hsx -t 'echo {}' -N4
+    && seq 200 | uv run hsx -t 'echo {}' -N4 --no-tls && uv run hs list --count"
 - id: P2
   name: Swap the four queues to queue.Queue with a pinned method surface
   status: done
@@ -105,8 +105,7 @@ phases:
 review:
   last_reviewed_commit: 6d0ac37f05426d506500582c63ad025628a99fbf
   verdict: changes-requested
-  blocked_reason: 'review cycle 1: C1 same-process TLS context, C2 silent bind failure;
-    human gate (core/queue.py, server.py)'
+  blocked_reason: ''
   cycle: 1
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
@@ -145,7 +144,9 @@ cluster, from what P6 hands back.
     `git diff b819de6 --stat -- tests/` showing only new files.
   - **High blast radius:** `core/queue.py`. `server.py`, `client.py`, `submit.py` and `cluster/*`
     must not change at all in this cycle. If a phase seems to need a change there, stop and
-    escalate.
+    escalate. **Exception (review-1 triage, foreman's ruling):** C2's fix changes
+    `server.py` `ServerThread.start` only, so a failure to start the queue is raised in the caller
+    and "Server listening" is logged once the queue is ready.
 - **Commits and comments.**
   - One phase per `hs-build`; one atomic commit with subject `[feature] Build zone-queue-primitive
     P<n>: …`.
@@ -220,10 +221,31 @@ stdio. This is the core, small and novel slice: everything else builds on it.
       and `_mutex`; `util.Finalize(args=, exitpriority=)`. A CPython change fails it loudly.
 - **Built note.** Shutdown pops the proxy cache for the bound address and for the configured host
   with the bound port: with a requested port 0 the configured `(host, 0)` is never a dial address.
-- **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_tls.py`, then drive `hsx` with
-  TLS on and with `--no-tls` in a `temp_site` (the frontmatter command).
+- **Remediation (review cycle 1; triage in [`REVIEW.md`](REVIEW.md)).** P1 was reopened for C1, C2
+  and the accepted P1 finding.
+  - [x] **Red first:** `tests/test_queue_start.py` (new), 9 tests, all red on `2ec014e`: a
+        same-process client with another TLS config, the process-wide TLS slot after a server
+        start, `start()` on a busy port (TLS on and off), two simulated internals drifts, and
+        `hs server` on a busy port (TLS on and off) and on drifted internals.
+  - [x] **C1:** the in-process server's TLS config lives on its own `SecureListener`
+        (`serve_with`), which builds its server context from it on first accept.
+        `_serve_in_process` no longer calls `install_process_context`; the generic manager child
+        and clients still use the process-wide slot.
+  - [x] **C2:** `_serve_in_process` raises `QueueServerError` (a `RuntimeError`) naming the
+        address and the OS error when the bind or listen fails. `ServerThread.start` re-raises a
+        start failure in the caller and logs "Server listening" only once the queue is ready; the
+        shared exception mapping turns it into one CRITICAL line and `exit_status.runtime_error`.
+  - [x] **P1:** `unsupported_internals()` holds the presence and shape checks (signatures and
+        compiled names; no socket). `_serve_in_process` runs it before binding and raises
+        `QueueServerError` ("…multiprocessing internals are not supported: …").
+        `TestPrivateInternals` asserts it reports nothing and keeps the live checks.
+- **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_start.py
+  tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
+  frontmatter command).
 - **Touches:** `src/hypershell/core/queue.py`, `src/hypershell/core/tls.py` (docstrings),
-  `src/hypershell/core/logging.py` (docstring), `tests/test_queue.py` (new).
+  `src/hypershell/core/logging.py` (docstring), `tests/test_queue.py` (new),
+  `tests/test_queue_start.py` (new); remediation also `src/hypershell/server.py`
+  (`ServerThread.start`) and `AGENTS.md`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1

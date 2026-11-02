@@ -115,7 +115,7 @@ is skipped by the parser):
   prototypes there, not in `$TMPDIR`.
 - **Confidence:** med · **Effort:** small
 
-## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits
+## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again
 `origin=hs-build:P5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** P4's and P5's gates (`bench_queue.py … --feature HEAD`) build a venv from the
   committed `HEAD`. hs-build runs the gate in Step 4 and commits in Step 7, so the gate measured the
@@ -136,4 +136,19 @@ is skipped by the parser):
   review graded `origin/develop...HEAD` and ignored the injected diffstat.
 - **Skill cause:** Unchanged from the original finding: Step 1 never resolves `{base}` to a commit.
 - **Recommended fix:** As in the original finding.
+- **Confidence:** high · **Effort:** small
+
+## F7 — Remediation mode has no place to record the human-gate triage, nor a path for an accepted PLAUSIBLE finding
+`origin=hs-build:P1-remediation severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** Review cycle 1 forced a human gate (C1, C2) and left three PLAUSIBLE findings
+  for triage; one (P1) was accepted as a fix. Step 1.3 says to read `REVIEW.md` and reopen phases,
+  but neither it, `hs-review` nor `templates/REVIEW.md` defines a triage section, who records the
+  gate's passage, or how an accepted PLAUSIBLE joins the remediation. The build invented
+  `## Triage (human gate) — cycle 1` in `REVIEW.md`. F5 recurred too: the P5 gate re-run needed a
+  provisional commit object to build the uncommitted fix.
+- **Skill cause:** Step 1.3 assumes every remediation item is a CONFIRMED finding and is silent on
+  the human gate it follows.
+- **Recommended fix:** Add a `## Triage` block to `templates/REVIEW.md` (finding, ruling, by whom,
+  date) and tell Step 1.3 to require it filled before reopening phases when the gate was triggered,
+  treating accepted PLAUSIBLE rows like CONFIRMED ones.
 - **Confidence:** high · **Effort:** small

@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, Callable, Optional, Any, Iterable, Type, Final, Tuple
+from typing import Dict, Callable, Optional, Any, Iterable, Type, Final, Tuple, List
 from types import TracebackType
 
 # Standard libs
@@ -16,6 +16,7 @@ import ssl
 import select
 import socket
 import struct
+import inspect
 import threading
 import selectors
 from functools import cache
@@ -23,14 +24,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from multiprocessing import util, ProcessError
 from multiprocessing.managers import BaseManager, BaseProxy, Server, State, AutoProxy, listener_client
-from multiprocessing.connection import _ConnectionBase, answer_challenge, deliver_challenge, BUFSIZE
+from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener,
+                                        answer_challenge, deliver_challenge, BUFSIZE)
 from queue import Queue
 
 # Internal libs
 from hypershell.core.config import default, config as _config
 from hypershell.core.logging import Logger, close_inherited_slot_locks
 from hypershell.core.types import NoneType, serialize
-from hypershell.core.tls import (TLSConfig, install_process_context,
+from hypershell.core.tls import (TLSConfig, install_process_context, build_server_context,
                                  get_server_context, get_client_context, get_tls_config,
                                  verify_peer_fingerprint, from_namespace as _tls_from_namespace)
 
@@ -40,6 +42,7 @@ __all__ = [
     'SENTINEL', 'make_sentinel',
     'SecureConnection', 'SecureListener', 'secure_client', 'SecureManager',
     'QueueConfig', 'QueueInterface', 'QueueServer', 'QueueClient',
+    'QueueServerError', 'unsupported_internals',
 ]
 
 # Initialize logger
@@ -146,6 +149,9 @@ class SecureListener:
     Owns its bound listening socket directly rather than reaching into the internals of
     :class:`multiprocessing.connection.Listener`; the constructor signature mirrors that
     of the stock listener so this class slots into :data:`listener_client`.
+
+    A listener given its own configuration with :meth:`serve_with` builds its server context from
+    it and never reads the process-wide one; otherwise it uses the process-wide context.
     """
 
     def __init__(self: SecureListener,
@@ -167,6 +173,8 @@ class SecureListener:
         self._socket = sock
         self._address = sock.getsockname()
         self._last_accepted = None
+        self._tls: Optional[TLSConfig] = None
+        self._context: Optional[ssl.SSLContext] = None
         # `authkey` is part of the stock Listener interface but unused here; the manager
         # performs the challenge handshake explicitly after we hand back the connection.
         self._authkey = authkey
@@ -179,12 +187,25 @@ class SecureListener:
     def last_accepted(self: SecureListener):
         return self._last_accepted
 
+    def serve_with(self: SecureListener, cfg: TLSConfig) -> None:
+        """Use a server context built from `cfg` (on first accept) instead of the process-wide one."""
+        self._tls = cfg
+        self._context = None
+
+    def _server_context(self: SecureListener) -> ssl.SSLContext:
+        """This listener's own server context when it has a configuration, else the process-wide one."""
+        if self._tls is None:
+            return get_server_context()
+        if self._context is None:
+            self._context = build_server_context(self._tls)
+        return self._context
+
     def accept(self: SecureListener) -> SecureConnection:
         """Block on the listening socket and return a TLS-wrapped connection."""
         raw, self._last_accepted = self._socket.accept()
         raw.setblocking(True)
         try:
-            ssl_sock = get_server_context().wrap_socket(raw, server_side=True)
+            ssl_sock = self._server_context().wrap_socket(raw, server_side=True)
         except Exception:
             raw.close()
             raise
@@ -258,6 +279,63 @@ def _child_bootstrap(cfg: Optional[TLSConfig], user_init, user_initargs) -> None
         user_init(*user_initargs)
 
 
+class QueueServerError(RuntimeError):
+    """The queue server could not start serving."""
+
+
+def _parameters(func: Callable[..., Any]) -> List[str]:
+    """Parameter names of `func`, in order."""
+    return list(inspect.signature(func).parameters)
+
+
+def _names(func: Callable[..., Any]) -> Tuple[str, ...]:
+    """Global and attribute names referenced by the body of `func`."""
+    return func.__code__.co_names
+
+
+# The CPython multiprocessing privates the in-process serve loop relies on, each with a check of its
+# presence and shape. Checks read signatures and compiled names only; none binds a socket.
+_INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
+    ('Server.__init__(registry, address, authkey, serializer)',
+     lambda: _parameters(Server.__init__) == ['self', 'registry', 'address', 'authkey', 'serializer']),
+    ('Server.__init__ sets listener, address, mutex, id_to_obj, registry and authkey',
+     lambda: {'listener', 'address', 'mutex', 'id_to_obj', 'registry', 'authkey'} <= set(_names(Server.__init__))),
+    ('Server._handle_request(c)', lambda: _parameters(Server._handle_request) == ['self', 'c']),
+    ('Server.handle_request(conn)', lambda: _parameters(Server.handle_request) == ['self', 'conn']),
+    ('Server.serve_client(conn)', lambda: _parameters(Server.serve_client) == ['self', 'conn']),
+    ('Server.shutdown(c)', lambda: _parameters(Server.shutdown) == ['self', 'c']),
+    ("'shutdown' in Server.public", lambda: 'shutdown' in Server.public),
+    ('Server.serve_client loops on stop_event and exits through sys.exit',
+     lambda: {'stop_event', 'is_set', 'sys', 'exit'} <= set(_names(Server.serve_client))),
+    ('Server.handle_request absorbs SystemExit', lambda: 'SystemExit' in _names(Server.handle_request)),
+    ('Listener keeps its socket at _listener._socket',
+     lambda: '_listener' in _names(Listener.__init__) and '_socket' in _names(SocketListener.__init__)),
+    ('listener_client maps serializers to (Listener, Client) pairs',
+     lambda: len(listener_client['pickle']) == 2 and TLS_SERIALIZER in listener_client),
+    ('BaseManager sets _state, _address, _authkey and _serializer',
+     lambda: {'_state', '_address', '_authkey', '_serializer'} <= set(_names(BaseManager.__init__))),
+    ('State.INITIAL, State.STARTED and State.SHUTDOWN',
+     lambda: len({State.INITIAL, State.STARTED, State.SHUTDOWN}) == 3),
+    ('BaseProxy._address_to_local and BaseProxy._mutex',
+     lambda: isinstance(BaseProxy._address_to_local, dict) and callable(BaseProxy._mutex.__enter__)),
+    ('util.Finalize(args=, exitpriority=)',
+     lambda: {'args', 'exitpriority'} <= set(_parameters(util.Finalize.__init__))),
+)
+
+
+def unsupported_internals() -> List[str]:
+    """The multiprocessing internals the in-process serve loop needs but this Python lacks or reshaped."""
+    problems = []
+    for what, check in _INTERNALS:
+        try:
+            supported = check()
+        except Exception:  # A missing attribute or an unreadable signature is a failed check
+            supported = False
+        if not supported:
+            problems.append(what)
+    return problems
+
+
 # Seconds between checks of the halt flag in the in-process accept loop
 POLL: Final[float] = 0.25
 
@@ -299,9 +377,16 @@ class _InProcessServer(Server):
     without waiting on any thread.
     """
 
-    def __init__(self: _InProcessServer, *args: Any) -> None:
-        """Bind and listen; the accept loop starts with :meth:`serve`."""
-        super().__init__(*args)
+    def __init__(self: _InProcessServer, registry: Dict[str, tuple], address: Tuple[str, int],
+                 authkey: bytes, serializer: str, tls: Optional[TLSConfig] = None) -> None:
+        """Bind and listen; the accept loop starts with :meth:`serve`.
+
+        With `tls`, the listener serves with its own context built from it, so the process-wide
+        TLS configuration that clients in this process use plays no part in accepting connections.
+        """
+        super().__init__(registry, address, authkey, serializer)
+        if tls is not None:
+            self.listener.serve_with(tls)
         # Read by serve_client() between requests. Never set: setting it desynchronises a
         # connection's request/reply pairing; stopping cuts the sockets instead.
         self.stop_event = threading.Event()
@@ -417,20 +502,31 @@ class SecureManager(BaseManager):
     def _serve_in_process(self: SecureManager, registry: Dict[str, tuple]) -> None:
         """Serve `registry` from daemon threads of this process instead of a child process.
 
-        Installs the TLS context first when active, since this process now accepts connections.
-        Keeps the manager's shape: :attr:`address` is the bound address and ``shutdown()`` is an
-        idempotent finalizer that also runs at interpreter exit.
+        The server keeps its TLS configuration on its own listener and leaves the process-wide one,
+        which clients in this process use, untouched. Keeps the manager's shape: :attr:`address` is
+        the bound address and ``shutdown()`` is an idempotent finalizer that also runs at
+        interpreter exit.
+
+        Raises:
+            QueueServerError: this Python's multiprocessing internals are not supported, or the
+                address cannot be bound and listened on. Nothing is left running.
         """
         if self._state.value != State.INITIAL:
             if self._state.value == State.STARTED:
                 raise ProcessError('Already started server')
             raise ProcessError('Manager has shut down')
-        if self._tls is not None:
-            install_process_context(self._tls)
-        server = _InProcessServer(registry, self._address, self._authkey, self._serializer)
+        problems = unsupported_internals()
+        if problems:
+            raise QueueServerError("This Python's multiprocessing internals are not supported: "
+                                   + '; '.join(problems))
+        host, port = self._address
+        try:
+            server = _InProcessServer(registry, self._address, self._authkey, self._serializer, self._tls)
+        except OSError as error:
+            raise QueueServerError(f'Cannot listen on {host}:{port} ({error})') from error
         # Clients cache connections by the address they dial, which may name the host differently
         # (e.g., 'localhost') than the bound address does; both are dropped at shutdown.
-        dialed = (self._address[0], server.address[1])
+        dialed = (host, server.address[1])
         self._address = server.address
         self._process = None
         threading.Thread(target=server.serve, daemon=True, name='hypershell-queue-server').start()
@@ -542,7 +638,11 @@ class QueueServer(QueueInterface):
     def start(self: QueueServer,
               initializer: Optional[Callable[..., Any]] = None,
               initargs: Iterable[Any] = ()) -> None:
-        """Initialize queues and serve them from this process."""
+        """Initialize queues and serve them from this process.
+
+        Raises:
+            QueueServerError: the queues cannot be served (see :meth:`SecureManager._serve_in_process`).
+        """
         self.scheduled = Queue(maxsize=self.config.size)
         self.completed = Queue(maxsize=self.config.size)
         self.heartbeat = Queue(maxsize=0)

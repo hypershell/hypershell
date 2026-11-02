@@ -270,9 +270,12 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   (≥16) and `AUTH_ALLOWED_CHARS` (`[A-Za-z0-9._+/=-]`). Never weaken these; never remove the
   authkey to "disable TLS" (pass `tls=None` instead).
 - **The server process hosts the manager.** Queue connections, the HMAC handshake and the TLS
-  handshake are handled by threads of the server process itself (not a forked manager child), so
-  the per-process TLS context is installed there before the first accept. The wire, auth and TLS
-  behaviour are those of the stock manager, unchanged.
+  handshake are handled by threads of the server process itself (not a forked manager child). The
+  server's TLS context lives on its own listener, never in the process-wide slot that clients
+  install (`core/tls.py` `install_process_context`), so a same-process client with another TLS
+  config cannot affect it. The wire, auth and TLS behaviour are those of the stock manager,
+  unchanged. A failure to start serving (unsupported CPython internals, bind or listen error)
+  raises `QueueServerError` from `QueueServer.start`, which `ServerThread.start` re-raises.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
   mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,

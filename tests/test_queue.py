@@ -13,18 +13,17 @@ import sys
 import time
 import queue
 import socket
-import inspect
 import threading
 import multiprocessing as mp
 from multiprocessing import util
 from multiprocessing.connection import Listener
-from multiprocessing.managers import Server, BaseManager, BaseProxy, State, listener_client
+from multiprocessing.managers import Server, BaseManager, State
 
 # External libs
 from pytest import fixture, mark, raises, skip
 
 # Internal libs
-from hypershell.core.queue import QueueServer, QueueClient, QueueConfig, make_sentinel, TLS_SERIALIZER
+from hypershell.core.queue import QueueServer, QueueClient, QueueConfig, make_sentinel, unsupported_internals
 from hypershell.core.tls import TLSConfig, ensure_default_materials, clear_process_context
 
 
@@ -99,13 +98,16 @@ class TestPrivateInternals:
     """The CPython internals the in-process serve loop relies on are present and shaped as expected.
 
     These are private to :mod:`multiprocessing`; a future CPython that changes any of them must fail
-    here, loudly, rather than leave the queue server misbehaving silently.
+    here, loudly, rather than leave the queue server misbehaving silently. The presence and shape
+    checks are the ones a queue server runs before it binds; the rest exercise the behaviour live.
     """
+
+    def test_shared_checks_pass(self) -> None:
+        """Every check the queue server runs at start passes on this Python."""
+        assert unsupported_internals() == []
 
     def test_server_constructor(self) -> None:
         """``Server(registry, address, authkey, serializer)`` binds at construction."""
-        params = list(inspect.signature(Server.__init__).parameters)
-        assert params == ['self', 'registry', 'address', 'authkey', 'serializer']
         server = Server({}, ('127.0.0.1', 0), b'x' * 16, 'pickle')
         try:
             assert isinstance(server.address, tuple) and server.address[1] > 0
@@ -117,25 +119,6 @@ class TestPrivateInternals:
         finally:
             server.listener.close()
 
-    def test_request_handling_methods(self) -> None:
-        """``_handle_request``, ``handle_request``, ``serve_client`` and ``shutdown`` take one connection."""
-        for name, arg in [('_handle_request', 'c'), ('handle_request', 'conn'),
-                          ('serve_client', 'conn'), ('shutdown', 'c')]:
-            method = getattr(Server, name)
-            assert callable(method), name
-            assert list(inspect.signature(method).parameters) == ['self', arg], name
-
-    def test_shutdown_is_remotely_callable(self) -> None:
-        """The remote ``shutdown`` RPC dispatches to ``Server.shutdown``."""
-        assert 'shutdown' in Server.public
-
-    def test_serve_client_reads_stop_event(self) -> None:
-        """``serve_client`` loops on ``self.stop_event`` and exits its thread with ``sys.exit``."""
-        source = inspect.getsource(Server.serve_client)
-        assert 'self.stop_event.is_set()' in source
-        assert 'sys.exit' in source
-        assert 'SystemExit' in inspect.getsource(Server.handle_request)
-
     def test_stock_listener_socket(self) -> None:
         """The stock listener keeps its bound socket at ``_listener._socket``."""
         listener = Listener(('127.0.0.1', 0), family='AF_INET')
@@ -146,25 +129,12 @@ class TestPrivateInternals:
         finally:
             listener.close()
 
-    def test_listener_client_registry(self) -> None:
-        """``listener_client`` maps a serializer to its (Listener, Client) pair, including ours."""
-        assert 'pickle' in listener_client
-        assert len(listener_client['pickle']) == 2
-        assert TLS_SERIALIZER in listener_client
-
     def test_manager_state(self) -> None:
         """``BaseManager`` keeps the attributes the in-process start sets directly."""
         manager = BaseManager(address=('127.0.0.1', 0), authkey=b'x' * 16)
         for name in ('_state', '_address', '_authkey', '_serializer'):
             assert hasattr(manager, name), name
         assert manager._state.value == State.INITIAL
-        assert len({State.INITIAL, State.STARTED, State.SHUTDOWN}) == 3
-
-    def test_proxy_connection_cache(self) -> None:
-        """``BaseProxy`` caches per-address connections in ``_address_to_local`` under ``_mutex``."""
-        assert isinstance(BaseProxy._address_to_local, dict)
-        with BaseProxy._mutex:
-            pass
 
     def test_finalize(self) -> None:
         """``util.Finalize`` accepts ``args`` and ``exitpriority``, and runs once."""
