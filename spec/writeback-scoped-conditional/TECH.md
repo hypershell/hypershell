@@ -3,10 +3,10 @@ slug: writeback-scoped-conditional
 title: Scoped, conditional result writeback
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/writeback-scoped-conditional
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -54,7 +54,7 @@ phases:
     result" -e "duplicate result" log) || exit 1; done'''
 - id: P3
   name: 'Lifecycle contract prose: result writeback is fenced'
-  status: pending
+  status: done
   satisfies:
   - R10
   - R7
@@ -313,17 +313,17 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
 **Satisfies:** R10, R7 · **Depends on:** P2
 **Goal:** the contract documents the stronger guarantee in one commit, with no predicate changed.
 
-- [ ] `AGENTS.md` § Task lifecycle contract, third "Unguarded" bullet: change to "a reset
+- [x] `AGENTS.md` § Task lifecycle contract, third "Unguarded" bullet: change to "a reset
       `retried` flag, from `hs task update`." Add after the bullet list, before the pre-2.9
       `UNIQUE` paragraph: "A returned result writes only its result columns
       (`Task.result_columns`), and only for its current assignment: the row's `schedule_time` as
       dispatched, while `completion_time` is NULL (`Task.apply_results`). A stale or duplicate
       result is logged and dropped, so a late result from an evicted client cannot reopen a
       retried or cancelled row."
-- [ ] `.agents/factory/invariants.md` §3: drop "late full-row writeback by an evicted client, " from
+- [x] `.agents/factory/invariants.md` §3: drop "late full-row writeback by an evicted client, " from
       the "a reset `retried` (…)" clause, and add a bullet with the same sentence, containing the
       phrase "only its result columns".
-- [ ] No change to the four state predicates, the `exit_status` table, or any other section.
+- [x] No change to the four state predicates, the `exit_status` table, or any other section.
       Both files in **one** commit; the foreman surfaces it to the maintainer at sign-off.
 - **Verify:** the frontmatter `verify:` — no `src/`/`tests/` change; the old clause is gone from
   both files; the new sentence is in both; the writeback tests still pass.
