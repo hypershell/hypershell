@@ -81,6 +81,10 @@ escalate.
   `server.py`, `client.py`, …) — regardless of `appetite`/`kind`. Step 2 already surfaced which
   invariants the change touches; a "small" edit to those files still needs the exact contracts pinned
   before design, or a lean plan gets them subtly wrong.
+  **Exception — GOAL-deferred unknowns:** when `GOAL.md` explicitly hands an open question to
+  `/hs-plan` (e.g. a Clarifications or Related-materials note that "the mechanism is a `/hs-plan`
+  decision"), run a fan-out scoped to those questions — one brief each — regardless of
+  `appetite`/`kind`. A lean plan would otherwise guess the very criterion the GOAL left open.
   (An explicit `skip research` argument stays a human override and still skips.)
 - **`appetite: big`:** identify the *rabbit holes* — the scary unknowns that could blow the appetite
   (unfamiliar code paths, algorithmic choices, external tech, perf at scale, dialect differences).
