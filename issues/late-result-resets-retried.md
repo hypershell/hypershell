@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:writeback-scoped-conditional
 kind: fix
 appetite: small
 lane: public
