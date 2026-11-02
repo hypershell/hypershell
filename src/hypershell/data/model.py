@@ -13,6 +13,7 @@ import re
 import json
 import hashlib
 from enum import Enum
+from uuid import UUID as PyUUID, uuid5
 from datetime import datetime
 from dataclasses import dataclass
 
@@ -20,9 +21,12 @@ from dataclasses import dataclass
 from sqlalchemy import Column, Index, func, text, update, select
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.types import Integer, Float, DateTime, Text, Boolean, JSON as JSON_TEXT
 from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 # Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
@@ -34,9 +38,10 @@ from hypershell.data.core import schema, Session
 
 # Public interface
 __all__ = [
-    'Task', 'Client', 'Source', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
+    'Task', 'Client', 'Source', 'Zone', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
     'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
+    'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id',
 ]
 
 # Initialize logger
@@ -73,6 +78,25 @@ so they sort low and never raise a chunk's max) — this keeps `Task.source` a n
 and lets them be statically excluded from the de-dup index. Both represent explicit user
 intent and are exempt from all re-submission gating.
 """
+
+
+# Reserved id of the default zone. A task in the default zone stores NULL in `task.zone`, so rows
+# written before zones existed are already in it; the id names the default zone everywhere else.
+DEFAULT_ZONE_ID: Final[str] = '00000000-0000-7000-8000-000000000010'
+
+# Reserved name of the default zone. A missing or empty name means the default zone too.
+DEFAULT_ZONE_NAME: Final[str] = 'default'
+
+# Namespace of name-derived zone ids. It must never change: every release, and every process,
+# derives the same id from the same name, so resolving a name needs no lookup and cannot race.
+ZONE_NAMESPACE: Final[PyUUID] = PyUUID('6f1c9b4e-2a57-5d0e-9b3a-7e5f0c8d2a41')
+
+
+def zone_id(name: Optional[str]) -> str:
+    """The id of the zone called `name`; None, '' and the reserved name give the default zone."""
+    if name is None or name == '' or name == DEFAULT_ZONE_NAME:
+        return DEFAULT_ZONE_ID
+    return str(uuid5(ZONE_NAMESPACE, name))
 
 
 class DatabaseError(Exception):
@@ -318,6 +342,7 @@ class Task(Entity):
 
     source: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)  # Source.id or reserved-const id
     fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)  # Stable identity hash (args + group + tags).
+    zone: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)  # Zone.id; NULL is the default zone.
 
     # Partition index for SQLite database rotation. The server default lets an existing table gain
     # the column in place, with existing rows reading 0.
@@ -357,6 +382,7 @@ class Task(Entity):
         'next_id': str,
         'source': str,
         'fingerprint': str,
+        'zone': str,
         'part': int,
         'tag': dict,
     }
@@ -439,7 +465,7 @@ class Task(Entity):
         (falling back to the expanded ``args`` when not supplied) plus the resolved group and
         tags, unless ``fingerprint`` is passed directly (retries copy the parent's). ``source``
         links the task to its ingested file's ``Source`` record; both columns are NULL only for
-        historical/ungated rows.
+        historical/ungated rows. A ``zone`` of `DEFAULT_ZONE_ID` is stored as NULL.
         """
         cls.ensure_valid_tag(tag, strict=strict_tag)
         if parse_inline:
@@ -463,6 +489,8 @@ class Task(Entity):
             else:
                 raw_command = str(raw_args).strip()
             fingerprint = cls.compute_fingerprint(raw_command, other['group'], tag)
+        if other.get('zone') == DEFAULT_ZONE_ID:
+            other['zone'] = None  # The default zone is stored as NULL.
         return Task(id=uuid(), args=args, source=source, fingerprint=fingerprint,
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
                     attempt=attempt, retried=retried, tag=tag, **other)
@@ -623,16 +651,26 @@ class Task(Entity):
             return TaskGroupInfo(next_group[0])
 
     @classmethod
-    def select_new(cls: Type[Task], limit: int, group: int = None) -> List[Task]:
-        """Select unscheduled tasks up to some `limit` in order of submit_time."""
+    def _filter_zone(cls: Type[Task], query: Query, zone: Optional[str]) -> Query:
+        """Restrict `query` to one zone: None means every zone, and the default zone is NULL."""
+        if zone is None:
+            return query
+        if zone == DEFAULT_ZONE_ID:
+            return query.filter(cls.zone.is_(None))
+        return query.filter(cls.zone == zone)
+
+    @classmethod
+    def select_new(cls: Type[Task], limit: int, group: int = None, zone: str = None) -> List[Task]:
+        """Select unscheduled tasks up to some `limit` in order of submit_time (in one `zone` if given)."""
         query = cls.query().order_by(cls.submit_time).filter(cls.schedule_time.is_(None))
         if group is not None:
             query = query.filter(cls.group == group)
+        query = cls._filter_zone(query, zone)
         return query.limit(limit).all()
 
     @classmethod
-    def query_retryable(cls: Type[Task], attempts: int, group: int = None) -> Query:
-        """Query failed tasks still eligible for retry under given number of `attempts`."""
+    def query_retryable(cls: Type[Task], attempts: int, group: int = None, zone: str = None) -> Query:
+        """Query failed tasks still eligible for retry under given number of `attempts` (in one `zone` if given)."""
         query = (cls.query()
                  .filter(cls.exit_status.isnot(None))
                  .filter(cls.exit_status != 0)
@@ -641,12 +679,13 @@ class Task(Entity):
                  .filter(cls.retried.is_(False)))
         if group is not None:
             query = query.filter(cls.group == group)
-        return query
+        return cls._filter_zone(query, zone)
 
     @classmethod
-    def select_failed(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
+    def select_failed(cls: Type[Task], attempts: int, limit: int, group: int = None, zone: str = None) -> List[Task]:
         """Select failed tasks for retry up to some `limit` under given number of `attempts`."""
-        return cls.query_retryable(attempts, group=group).order_by(cls.completion_time).limit(limit).all()
+        return (cls.query_retryable(attempts, group=group, zone=zone)
+                .order_by(cls.completion_time).limit(limit).all())
 
     @classmethod
     def count_retryable(cls: Type[Task], attempts: int, group: int, eager: bool = False) -> int:
@@ -665,13 +704,14 @@ class Task(Entity):
              limit: int,
              group: int = DEFAULT_TASK_GROUP,
              attempts: int = 1,
-             eager: bool = False) -> List[Task]:
-        """Select tasks for scheduling including failed tasks for re-scheduling."""
+             eager: bool = False,
+             zone: str = None) -> List[Task]:
+        """Select tasks for scheduling including failed tasks for re-scheduling (in one `zone` if given)."""
         group = group if group is not None else cls.current_group().value
         if eager:
-            tasks = cls.__next_eager(attempts=attempts, limit=limit, group=group)
+            tasks = cls.__next_eager(attempts=attempts, limit=limit, group=group, zone=zone)
         else:
-            tasks = cls.__next_not_eager(attempts, limit, group=group)
+            tasks = cls.__next_not_eager(attempts, limit, group=group, zone=zone)
         for task in tasks:
             task.server_id = INSTANCE
             task.server_host = HOSTNAME
@@ -680,30 +720,33 @@ class Task(Entity):
         return tasks
 
     @classmethod
-    def __next_eager(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
+    def __next_eager(cls: Type[Task], attempts: int, limit: int, group: int = None, zone: str = None) -> List[Task]:
         """Select next batch of tasks from database preferring previously failed tasks."""
-        tasks = cls.__schedule_next_failed_tasks(attempts, limit, group=group)
+        tasks = cls.__schedule_next_failed_tasks(attempts, limit, group=group, zone=zone)
         if len(tasks) < limit:
-            new_tasks = cls.select_new(limit=limit - len(tasks), group=group)
+            new_tasks = cls.select_new(limit=limit - len(tasks), group=group, zone=zone)
             tasks.extend(new_tasks)
             log.trace(f'Selected {len(new_tasks)} new tasks')
         return tasks
 
     @classmethod
-    def __next_not_eager(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
+    def __next_not_eager(cls: Type[Task], attempts: int, limit: int, group: int = None,
+                         zone: str = None) -> List[Task]:
         """Select next batch of tasks for database preferring novel tasks to old failed ones."""
-        tasks = cls.select_new(limit=limit, group=group)
+        tasks = cls.select_new(limit=limit, group=group, zone=zone)
         log.trace(f'Selected {len(tasks)} new tasks')
         if len(tasks) < limit and attempts > 1:
-            failed_tasks = cls.__schedule_next_failed_tasks(attempts=attempts, limit=limit - len(tasks), group=group)
+            failed_tasks = cls.__schedule_next_failed_tasks(attempts=attempts, limit=limit - len(tasks),
+                                                            group=group, zone=zone)
             tasks.extend(failed_tasks)
         return tasks
 
     @classmethod
-    def __schedule_next_failed_tasks(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
+    def __schedule_next_failed_tasks(cls: Type[Task], attempts: int, limit: int, group: int = None,
+                                     zone: str = None) -> List[Task]:
         """Select previously failed tasks for scheduling."""
         tasks = []
-        failed_tasks = cls.select_failed(attempts=attempts, limit=limit, group=group)
+        failed_tasks = cls.select_failed(attempts=attempts, limit=limit, group=group, zone=zone)
         if failed_tasks:
             log.trace(f'Selected {len(failed_tasks)} previously failed tasks')
             new_tasks = [cls.new(args=task.args,
@@ -712,7 +755,8 @@ class Task(Entity):
                                  tag=task.tag,
                                  group=task.group,
                                  fingerprint=task.fingerprint,  # A retry is the same logical task.
-                                 source=task.source)            # Keep the retry chain linked to its source.
+                                 source=task.source,            # Keep the retry chain linked to its source.
+                                 zone=task.zone)                # A retry runs in its task's zone.
                          for task in failed_tasks]
             tasks.extend(new_tasks)
             cls.add_all(tasks)
@@ -1000,6 +1044,9 @@ index_tasks_next_id = Index('index_tasks_next_id', Task.next_id)
 # A full index is used with plain bound parameters on every engine; the reserved-source rows it
 # also carries are a marginal cost (real named-file sources dominate the target workload).
 index_tasks_source = Index('index_tasks_source', Task.source, Task.fingerprint)
+# Zone-filtered selection of unscheduled tasks. The default zone is stored as NULL, so its
+# `zone IS NULL` predicate seeks this index as a named zone's equality does.
+index_tasks_zone = Index('index_tasks_zone', Task.zone, Task.group, Task.schedule_time)
 
 
 class Client(Entity):
@@ -1178,3 +1225,76 @@ class Source(Entity):
 
 # Indices for efficient queries
 index_source_lookup = Index('index_source_lookup', Source.path, Source.fingerprint)
+
+
+# Inserts that can skip a row conflicting with an existing one, by dialect name.
+UPSERT_BY_DIALECT: Final[Dict[str, Any]] = {'sqlite': sqlite_insert, 'postgresql': postgres_insert}
+
+
+class Zone(Entity):
+    """Zone entity: a user-defined placement label for tasks and the clients that serve them.
+
+    One row per zone name. The id is derived from the name (see `zone_id`), so every process
+    resolves a name to the same id with no lookup, and `Zone.ensure` records the mapping with a
+    single insert that ignores a concurrent duplicate. The reserved default zone has the fixed id
+    `DEFAULT_ZONE_ID` and name `DEFAULT_ZONE_NAME`; tasks in it store NULL in `task.zone`, and
+    readers never require its row.
+    """
+
+    id: Mapped[str] = mapped_column(UUID, primary_key=True, nullable=False)
+    name: Mapped[str] = mapped_column(TEXT, nullable=False, unique=True)
+    created: Mapped[datetime] = mapped_column(DATETIME, nullable=False)
+
+    columns = {
+        'id': str,
+        'name': str,
+        'created': datetime,
+    }
+
+    class NotFound(NotFound):
+        pass
+
+    class NotDistinct(NotDistinct):
+        pass
+
+    class AlreadyExists(AlreadyExists):
+        pass
+
+    @classmethod
+    def from_id(cls: Type[Zone], id: str, caching: bool = True) -> Zone:
+        """Look up zone by unique `id`."""
+        try:
+            return cls.query(caching=caching).filter_by(id=id).one()
+        except NoResultFound as error:
+            raise cls.NotFound(f'No zone with id={id}') from error
+
+    @classmethod
+    def ensure(cls: Type[Zone], name: Optional[str]) -> str:
+        """Record the zone called `name` if it is not yet recorded, and return its id.
+
+        Idempotent and safe under concurrency: the id is derived from the name, and the row is
+        written by one insert that does nothing when the id or name already exists, so no
+        process fails because another created the row first.
+        """
+        id = zone_id(name)
+        name = DEFAULT_ZONE_NAME if id == DEFAULT_ZONE_ID else name
+        values = {'id': id, 'name': name, 'created': datetime.now().astimezone()}
+        insert = UPSERT_BY_DIALECT.get(Session.get_bind().dialect.name)
+        if insert is not None:
+            Session.execute(insert(cls).values(**values).on_conflict_do_nothing())
+            Session.commit()
+            return id
+        try:
+            with Session.begin_nested():
+                Session.add(cls(**values))
+            Session.commit()
+        except IntegrityError:
+            Session.rollback()
+        return id
+
+    @classmethod
+    def names_for_ids(cls: Type[Zone], ids: List[str]) -> Dict[str, str]:
+        """Map of zone id -> name for the given `ids` (batched presentation lookup)."""
+        if not ids:
+            return {}
+        return dict(cls.query(cls.id, cls.name).filter(cls.id.in_(set(ids))).all())

@@ -1,93 +1,147 @@
 ---
 slug: zone-dispatch
-title: "Zone-aware, demand-driven dispatch (zone, cycle 2)"
+title: Zone-aware, demand-driven dispatch (zone, cycle 2)
 kind: feature
 appetite: big
 status: in_progress
 branch: feature/zone-dispatch
 base: develop
-current_phase: P1
-last_updated: "2026-11-02"
+current_phase: P2
+last_updated: '2026-11-02'
 phases:
-  - id: P1
-    name: "Zone schema and zone-filtered selection on the upgrade step"
-    status: pending
-    satisfies: [R7, R8, R9, R10, R11]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -f src/hypershell/data/upgrade.py && test -f spec/writeback-scoped-conditional/TECH.md && uv run pytest -v tests/test_zone_model.py tests/test_groups.py tests/test_retry_gate.py tests/test_initdb.py tests/test_source.py tests/test_cancel.py tests/test_restart.py"
-  - id: P2
-    name: "Request callable, staging and the client request loop (default zone, homogeneous path)"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R13, R14]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v && uv run python tests/bench/bench_queue.py parity --base 2.8.3 --feature HEAD --skip-help"
-  - id: P3
-    name: "Version handshake: refuse old clients, fail cleanly against old servers"
-    status: pending
-    satisfies: [R5, R14]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_dispatch_version.py tests/test_queue.py tests/test_queue_tls.py tests/test_queue_start.py tests/test_queue_gc.py tests/test_queue_limits.py && uv run python tests/bench/bench_queue.py skew --new HEAD --old 2.8.3 --old 2.9.0a2 --bound 30"
-  - id: P4
-    name: "Zones end to end: --zone on submit, task submit, client and cluster; per-zone pools"
-    status: pending
-    satisfies: [R6, R9, R10, R11, R13, R14]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_zone_dispatch.py tests/test_zone_workload.py tests/test_completions.py tests/test_main.py tests/test_submit.py tests/test_cluster.py tests/test_client.py && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs && uv run sphinx-build -q docs docs/_build"
-  - id: P5
-    name: "R1 gate: throughput and footprint against 2.8.3, full suite"
-    status: pending
-    satisfies: [R1, R14]
-    depends_on: [P4]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v && uv run python tests/bench/bench_queue.py parity --base 2.8.3 --feature HEAD --skip-help && uv run python tests/bench/bench_queue.py gate --base 2.8.3 --feature HEAD --repeats 7 --min-ratio 0.95"
-  - id: P6
-    name: "Multi-node drive, run A: zone knobs in the drive, local smoke, hand back (external wait follows)"
-    status: pending
-    satisfies: [R1, R4, R14]
-    depends_on: [P4]
-    parallel: true
-    hammerable: false
-    hill: uphill
-    verify: "sh tests/cluster/smoke.sh"
-  - id: P7
-    name: "Multi-node drive, run B: judge the external evidence"
-    status: pending
-    satisfies: [R1, R4, R14]
-    depends_on: [P5, P6]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run python tests/cluster/compare.py spec/zone-dispatch/evidence/cluster --baseline 2.8.3 --candidate feature --control 2.9.0a2 --min-ratio 0.95 --zoned feature"
-  - id: P8
-    name: "(Deferrable) Show zone by name in hs list, hs info and the card"
-    status: pending
-    satisfies: [R12]
-    depends_on: [P4]
-    parallel: false
-    hammerable: true
-    hill: uphill
-    verify: "uv run pytest -v tests/test_zone_display.py tests/test_list.py tests/test_card_info.py tests/test_card_render.py tests/test_card_integration.py tests/test_main.py"
+- id: P1
+  name: Zone schema and zone-filtered selection on the upgrade step
+  status: done
+  satisfies:
+  - R7
+  - R8
+  - R9
+  - R10
+  - R11
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -f src/hypershell/data/upgrade.py && { test -f spec/writeback-scoped-conditional/TECH.md
+    || git cat-file -e origin/fix/writeback-scoped-conditional:spec/writeback-scoped-conditional/TECH.md;
+    } && uv run pytest -v tests/test_zone_model.py tests/test_zone_postgres.py tests/test_groups.py
+    tests/test_retry_gate.py tests/test_initdb.py tests/test_source.py tests/test_cancel.py
+    tests/test_restart.py
+- id: P2
+  name: Request callable, staging and the client request loop (default zone, homogeneous
+    path)
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R13
+  - R14
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v && uv run python tests/bench/bench_queue.py parity --base
+    2.8.3 --feature HEAD --skip-help
+- id: P3
+  name: 'Version handshake: refuse old clients, fail cleanly against old servers'
+  status: pending
+  satisfies:
+  - R5
+  - R14
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_dispatch_version.py tests/test_queue.py tests/test_queue_tls.py
+    tests/test_queue_start.py tests/test_queue_gc.py tests/test_queue_limits.py &&
+    uv run python tests/bench/bench_queue.py skew --new HEAD --old 2.8.3 --old 2.9.0a2
+    --bound 30
+- id: P4
+  name: 'Zones end to end: --zone on submit, task submit, client and cluster; per-zone
+    pools'
+  status: pending
+  satisfies:
+  - R6
+  - R9
+  - R10
+  - R11
+  - R13
+  - R14
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_zone_dispatch.py tests/test_zone_workload.py
+    tests/test_completions.py tests/test_main.py tests/test_submit.py tests/test_cluster.py
+    tests/test_client.py && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs
+    && uv run sphinx-build -q docs docs/_build
+- id: P5
+  name: 'R1 gate: throughput and footprint against 2.8.3, full suite'
+  status: pending
+  satisfies:
+  - R1
+  - R14
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v && uv run python tests/bench/bench_queue.py parity --base
+    2.8.3 --feature HEAD --skip-help && uv run python tests/bench/bench_queue.py gate
+    --base 2.8.3 --feature HEAD --repeats 7 --min-ratio 0.95
+- id: P6
+  name: 'Multi-node drive, run A: zone knobs in the drive, local smoke, hand back
+    (external wait follows)'
+  status: pending
+  satisfies:
+  - R1
+  - R4
+  - R14
+  depends_on:
+  - P4
+  parallel: true
+  hammerable: false
+  hill: uphill
+  verify: sh tests/cluster/smoke.sh
+- id: P7
+  name: 'Multi-node drive, run B: judge the external evidence'
+  status: pending
+  satisfies:
+  - R1
+  - R4
+  - R14
+  depends_on:
+  - P5
+  - P6
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run python tests/cluster/compare.py spec/zone-dispatch/evidence/cluster
+    --baseline 2.8.3 --candidate feature --control 2.9.0a2 --min-ratio 0.95 --zoned
+    feature
+- id: P8
+  name: (Deferrable) Show zone by name in hs list, hs info and the card
+  status: pending
+  satisfies:
+  - R12
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: true
+  hill: uphill
+  verify: uv run pytest -v tests/test_zone_display.py tests/test_list.py tests/test_card_info.py
+    tests/test_card_render.py tests/test_card_integration.py tests/test_main.py
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Zone-aware, demand-driven dispatch (zone, cycle 2)
 
 The YAML frontmatter above is the resume ground-truth. Read it with
@@ -112,6 +166,13 @@ uses Z1's **external wait** convention for P7:
   depends on it.
 
 ## Build precondition (before P1)
+
+**Integration base (foreman ruling, 2026-11-02).** The build runs on `integ/zone-dispatch-base` =
+`30993b8` (Z1 head `43d2d85` with `origin/develop` `d996579` merged, signed); this branch's spec
+commits were rebased onto it with `git rebase --onto integ/zone-dispatch-base aa55e86`. Until
+`writeback-scoped-conditional` is merged into the base, P1's check reads that cycle's TECH from
+`origin/fix/writeback-scoped-conditional` (`git cat-file -e`). When Z1 or writeback moves, the
+foreman has the base re-merged; this branch never edits their code.
 
 - This branch carries only spec commits over Z1's `aa55e86`. The foreman lands Z1, then
   `writeback-scoped-conditional`, on `develop`, and rebases with
@@ -213,7 +274,7 @@ place. `Task.next(zone=…)` selects only that zone, including retries, which ke
 group gating stays global. No dispatch change yet: every existing caller passes no zone and
 behaves as today.
 
-- [ ] **Red first:** `tests/test_zone_model.py` (`@mark.unit`):
+- [x] **Red first:** `tests/test_zone_model.py` (`@mark.unit`):
   - `zone_id` is deterministic, and `None`, `''` and `'default'` give `DEFAULT_ZONE_ID`.
   - `Zone.ensure` is idempotent (one row).
   - 6 processes × 20 rounds ensure the same new name, and the default, concurrently on one SQLite
@@ -226,7 +287,7 @@ behaves as today.
   - A failed zoned task's retry row has the same zone.
   - `current_group` / `increment_group` advance only when every zone's tasks in the group are
     done.
-- [ ] `data/model.py`:
+- [x] `data/model.py`:
   - `Zone` entity (PLAN §2.4), `DEFAULT_ZONE_ID`, `DEFAULT_ZONE_NAME`, `ZONE_NAMESPACE`,
     `zone_id()`, `Zone.ensure()` (dialect-dispatched `insert().on_conflict_do_nothing()`),
     `Zone.names_for_ids()`.
@@ -236,8 +297,12 @@ behaves as today.
     its two private helpers and `__schedule_next_failed_tasks`. Do **not** edit the stamping loop.
   - `Task.new(zone=)` normalises the default to `None`.
   - The retry constructor adds `zone=task.zone`.
-- [ ] Record N1 and N2 as the readings used in the commit body.
-- **Touches:** `src/hypershell/data/model.py`, `tests/test_zone_model.py`.
+- [x] Record N1 and N2 as the readings used in the commit body.
+- [x] PostgreSQL condition (plan gate): `tests/test_zone_postgres.py` (upsert under 8 concurrent
+      sessions, zone-filtered selection and retry, in-place upgrade), added to the existing
+      PostgreSQL CI job's pytest line; skipped without `HS_TEST_POSTGRES`. Gate: passes in CI.
+- **Touches:** `src/hypershell/data/model.py`, `tests/test_zone_model.py`,
+  `tests/test_zone_postgres.py`, `.github/workflows/tests.yml` (amended: plan gate condition).
 
 ## Phase P2 — Request callable, staging and the client request loop (default zone)
 **Satisfies:** R1, R2, R3, R4, R13, R14 · **Depends on:** P1

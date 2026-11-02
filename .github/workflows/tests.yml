@@ -80,7 +80,7 @@ jobs:
           PG_CONTAINER: ${{ job.services.postgres.id }}
 
       - name: Run PostgreSQL tests
-        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py
+        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_zone_postgres.py
 
   # Guards zero-conflict installability: a full install of the default extras must succeed using
   # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g., greenlet, pyyaml) that
