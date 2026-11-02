@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -76,7 +76,7 @@ phases:
 - id: P5
   name: Docs and the amended retry-model invariant (after group-advance-retry-gate
     lands)
-  status: in_progress
+  status: done
   satisfies:
   - R7
   - R8
@@ -398,10 +398,10 @@ work on upgraded databases.
 
 ### P5 remediation — review cycle 1 (out-of-diff drift)
 
-- [ ] `ROADMAP.md`, `issues/late-result-resets-retried.md` and `issues/writeback-scoped-conditional.md`:
+- [x] `ROADMAP.md`, `issues/late-result-resets-retried.md` and `issues/writeback-scoped-conditional.md`:
   a doubled retry hits the UNIQUE constraint only on a pre-2.9 SQLite database and is written
   silently elsewhere, per the amended *Retry model*.
-- [ ] `.agents/factory/review-rubric.md`: the human-gate list names the amended invariant (one retry
+- [x] `.agents/factory/review-rubric.md`: the human-gate list names the amended invariant (one retry
   row per failure: the single Scheduler and the `retried` filter) in place of "retry-chain UNIQUE".
 
 ## Phase P6 — PostgreSQL CI evidence (run B)

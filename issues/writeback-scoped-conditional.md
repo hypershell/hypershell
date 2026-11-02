@@ -27,8 +27,9 @@ into a *corruption* problem. When a client is evicted (`server.py:621-635` → `
 is no disconnect, no stop sentinel, no fence. A client that was merely partitioned, SIGSTOP'd, or
 NFS-stalled past `evict_after` keeps running its bundle. Its results land *after* the task was
 reverted and rescheduled, and stamp the row "done" — with `retried=False`, `next_id=None` — while
-another client is still executing the very same command. The UNIQUE `previous_id`/`next_id` retry
-chain can desync in the process.
+another client is still executing the very same command. The `previous_id`/`next_id` retry chain
+can desync in the process, and a reopened failed row can be retried a second time: silently, except
+on a pre-2.9 SQLite database, whose old UNIQUE constraint rejects the second retry row.
 
 The result: rows that read "completed" while the work is still running, broken retry linkage, and
 falsified provenance — with no operator signal at all.

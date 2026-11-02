@@ -64,7 +64,7 @@ never got the same treatment.
 ## Result writeback is last-writer-wins over every column
 
 A returning result rewrites *every* column from the client's wire copy of the row — including
-`schedule_time`, `attempt`, `retried`, and the UNIQUE retry chain. Combined with the fact that an
+`schedule_time`, `attempt`, `retried`, and the retry-chain links. Combined with the fact that an
 evicted client is never told to stop, a stale bundle can stamp a row "done" while another client is
 still running that command. Scoping the write to result columns and making it conditional on the
 row's owner and in-flight state closes the corruption without needing any new transport.
@@ -76,7 +76,8 @@ row's owner and in-flight state closes the corruption without needing any new tr
 
 One concrete path through the writeback hole above. An evicted client's late result writes
 `retried=False` and `next_id=None` back onto a row the scheduler has already retried, so the next
-`Task.next` tries a second retry with the same `previous_id` and hits the UNIQUE constraint. Found
+`Task.next` writes a second retry row with the same `previous_id`. Only a pre-2.9 SQLite database,
+which keeps the old UNIQUE constraint, rejects it; anywhere else it is written silently. Found
 by reading, not yet reproduced; the seed asks for the test first. The scoped writeback probably
 closes it, in which case this retires with that cycle.
 
