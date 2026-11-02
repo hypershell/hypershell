@@ -377,3 +377,22 @@ None. The reviewer dropped these under refutation:
   ruling asked for; confirm that ruling is meant to qualify R3's "nothing above DEBUG", which applies to a start
   with no contention. This cycle converged at the third pass, the bound.
 - **Completeness sub-pass:** not run (not requested).
+
+### Human triage (2026-11-02)
+
+Recorded by the foreman at `/hs-publish`, after the cycle-3 approval.
+
+- **The INFO wait line on a current schema (cycle 3's first dropped item): intended.** R3's quiet no-op applies
+  to an uncontended start. A start that must wait on another session's lock logs the wait at INFO: it cannot
+  know the schema is current until it holds the lock, and staying silent would hide a real wait. This is the
+  cycle-1 P1 ruling, now a dated clarification in `GOAL.md` (5442484). It clarifies the accepted contract and
+  changes no requirement.
+- **Out-of-diff drift: `timescale` R1.** `ROADMAP.md`'s `timescale` entry still said dropping the chain `UNIQUE`
+  constraints "could land any time", and `issues/timescale.md`'s Related materials said the same. Both now say
+  this cycle discharged R1 and the seed's remaining work starts at R2 (6d5ca53). The seed is neither retired nor
+  restructured: its appetite note and R1 text stay for `/hs-roadmap` once this cycle lands, as `GOAL.md`
+  Related materials says.
+- **Re-pin.** 6d5ca53 lies outside `spec/`, so `review.last_reviewed_commit` moves from 8c50df9 to 6d5ca53 with
+  `set_phase.py --reviewed-commit`, the deferral mechanic used for be27e5d. `git diff --stat 8c50df9 6d5ca53 --
+  . ':(exclude)spec/'` lists only `ROADMAP.md` and `issues/timescale.md`: no source, test, docs or CI change
+  since the approved review.

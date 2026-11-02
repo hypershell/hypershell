@@ -112,7 +112,7 @@ phases:
     --limit 1 --json headSha,conclusion --jq '.[0].headSha + " " + .[0].conclusion')"
     = "$(git rev-parse HEAD) success"
 review:
-  last_reviewed_commit: 8c50df971c9e0f4a018247507175518edbf6ec15
+  last_reviewed_commit: 6d5ca5395b732d7c728c631623d9e5d223ab35a8
   verdict: approved
   blocked_reason: ''
   cycle: 3

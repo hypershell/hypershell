@@ -49,12 +49,14 @@ is skipped by the parser):
 - **Seen again (hs-review:step1):** `hs-review` takes `{base}` from TECH `base: develop` and its injected diffstat runs against local `develop`, which had diverged from `origin/develop`; the review graded `git diff origin/develop...HEAD` by hand. The same fix applies: resolve `{base}` to `origin/{base}` after a fetch.
 - **Seen again (hs-review:step1, cycle 2):** the local `develop` (222075b) still differs from `origin/develop` (b819de6), so cycle 2 again used `origin/develop` wherever the skill says `{base}`: the contract-drift check, the diff and the diffstat.
 - **Seen again (hs-review:step1, cycle 3):** unchanged (local `develop` 222075b, `origin/develop` b819de6); cycle 3 used `origin/develop` for the drift check, the graded diff and the regression diffs.
+- **Seen again (hs-publish:step1):** the injected "Commits vs develop" runs `git log develop..HEAD` against the stale local ref, and Step 4a's `gh pr create --base develop` names the remote branch while Step 4b's local merge would use the stale ref. Publish used `origin/develop` (b819de6) for the commit list and the behind-check.
 
 ## F2 — No guidance for carving one R-ID out of a shaped seed into a different cycle
 `origin=hs-feature:step4 severity=low category=missing-guidance status=open target=.agents/skills/hs-feature/SKILL.md`
 - **What happened:** This cycle discharges `timescale` R1 while the rest of that seed stays a future cycle. "Promoting an issue" covers only whole-seed adoption (`status: adopted:{slug}`), so the partial discharge is recorded only in this GOAL's Related materials, and the seed still reads `shaped` with R1 intact.
 - **Skill cause:** The `status:` vocabulary and the Step 4 promotion rules have no partial state and no instruction for marking a carved-out R-ID on the seed, or for deferring that marking to `/hs-roadmap`.
 - **Recommended fix:** Add a "carving a requirement" paragraph: record the discharge in the receiving GOAL, and either annotate the seed's R-ID (`*(carved into {slug})*`) in the same commit or explicitly leave it to `/hs-roadmap`. Teach `/hs-roadmap` to find and retire carved R-IDs when the receiving cycle lands.
+- **Seen again (hs-publish:step5):** at publish, `ROADMAP.md`'s `timescale` entry and the seed still called R1 a future step. Step 5 only reports a seed matched by `status: adopted:{slug}`, which a carved seed never carries, and forbids edits outside `spec/`. The foreman ruled a one-sentence correction in both files; it went in before the cycle was marked done, with `review.last_reviewed_commit` re-pinned through `hs-review`'s deferral mechanic, since `hs-publish` has none.
 - **Confidence:** med · **Effort:** small
 
 ## F3 — No way to express an external wait (CI evidence, a sibling cycle landing) in a TECH phase
