@@ -40,12 +40,13 @@ is skipped by the parser):
 
 <!-- Real findings are appended below this line by the lifecycle skills. -->
 
-## F1 — Step 3 branches from local `develop`, which may be stale; `origin/develop` start point sets a wrong upstream
+## F1 — Step 3 branches from local `develop`, which may be stale; `origin/develop` start point sets a wrong upstream · seen again
 `origin=hs-feature:step3 severity=medium category=instruction status=open target=.agents/skills/hs-feature/SKILL.md`
 - **What happened:** The local `develop` was behind `origin/develop`, so the cycle was opened in a detached worktree at `origin/develop` and branched with `git switch -c fix/schema-upgrade-step origin/develop`. That deviates from Step 3, and it set the new branch's upstream to `origin/develop`, which had to be removed by hand with `git branch --unset-upstream`.
 - **Skill cause:** Step 1 treats "`develop` is behind" as a note ("not fatal"). Step 3 then branches from that stale local ref. Step 1's literal "on `develop`" check cannot pass in a worktree, which is the normal way to run parallel cycles. Neither step mentions that a remote-ref start point turns on upstream tracking.
 - **Recommended fix:** In Step 3, branch with `git switch --no-track -c {branch} origin/develop` after the Step 1 fetch. In Step 1, accept a detached `HEAD` equal to `origin/develop` (or a fresh worktree created there) as satisfying the "on develop" pre-flight.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-review:step1):** `hs-review` takes `{base}` from TECH `base: develop` and its injected diffstat runs against local `develop`, which had diverged from `origin/develop`; the review graded `git diff origin/develop...HEAD` by hand. The same fix applies: resolve `{base}` to `origin/{base}` after a fetch.
 
 ## F2 — No guidance for carving one R-ID out of a shaped seed into a different cycle
 `origin=hs-feature:step4 severity=low category=missing-guidance status=open target=.agents/skills/hs-feature/SKILL.md`
@@ -81,3 +82,10 @@ is skipped by the parser):
 - **Skill cause:** Steps 4–7 assume a gate that stays true after its own commit. Nothing covers an external-evidence phase: where the evidence goes, who may supply it, or how to gate on "the last code-changing commit".
 - **Recommended fix:** Add a run-B step to `hs-build`: record the run id, head sha and per-job results in the phase body, and gate on the last commit outside `spec/` (e.g. `git log -1 --format=%H -- . ':!spec'`), not `HEAD`. Pair with F3's `waits_on` field.
 - **Confidence:** med · **Effort:** small
+
+## F7 — The rubric's human-gate list still names "retry-chain UNIQUE", an invariant this cycle retired
+`origin=hs-review:step4 severity=low category=instruction status=open target=.agents/factory/review-rubric.md`
+- **What happened:** Deciding the human gate, the review found `review-rubric.md`'s security/DB-lifecycle list naming "retry-chain UNIQUE", which `AGENTS.md` and `invariants.md` §3 no longer state. The gate class had to be read as "the one-retry-per-failed-row guard" by inference.
+- **Skill cause:** The rubric copies invariant names instead of pointing at `invariants.md`, so an approved amendment there (R8 named only `AGENTS.md` and `invariants.md`) leaves the gate list stale.
+- **Recommended fix:** Rename the entry to the retry guard (`retried` filter + single Scheduler), or reference `invariants.md` sections instead of restating names. This renames the class; it does not weaken the gate.
+- **Confidence:** high · **Effort:** small

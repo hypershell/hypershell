@@ -3,7 +3,7 @@ slug: schema-upgrade-step
 title: 'Open 2.8 databases in 2.9: an idempotent schema-upgrade step'
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/schema-upgrade-step
 base: develop
 current_phase: done
@@ -112,10 +112,11 @@ phases:
     --limit 1 --json headSha,conclusion --jq '.[0].headSha + " " + .[0].conclusion')"
     = "$(git rev-parse HEAD) success"
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 1a466d6dbde524142a83059bb7f70299d7f016d0
+  verdict: changes-requested
+  blocked_reason: 'C1 (R3): concurrent first start on a large SQLite DB fails with
+    a raw lock error'
+  cycle: 1
 ---
 # TECH.md — Open 2.8 databases in 2.9: an idempotent schema-upgrade step
 
