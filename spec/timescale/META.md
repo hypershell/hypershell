@@ -84,6 +84,10 @@ is skipped by the parser):
   convention for a precondition outside the FSM.
 - **Recommended fix:** As in the original finding (`waits_on: "ci:<workflow>@<last code commit>"`,
   documented run-A/run-B split).
+- **Seen again at build (hs-build:P6):** the foreman ordered P6 built before its `depends_on` P5
+  (the CI wait), so the FSM now holds P6 `done` with P5 `pending`, and `next_phase.py` reports no
+  warning for a done phase whose dependency is not done. A `waits_on` field would let the
+  dependency be on code, not on the evidence phase.
 - **Confidence:** high · **Effort:** medium
 
 ## F4 — The planned Sphinx gate could never pass: its `grep -i warning` matches the build summary and a known import warning

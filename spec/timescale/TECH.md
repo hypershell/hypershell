@@ -101,7 +101,7 @@ phases:
 - id: P6
   name: 'R6 (deferrable): the [database.timescale] override table, validation and
     drift'
-  status: pending
+  status: done
   satisfies:
   - R6
   - R4
@@ -110,7 +110,7 @@ phases:
   - P5
   parallel: false
   hammerable: true
-  hill: uphill
+  hill: downhill
   verify: grep -q "pop('timescale'" src/hypershell/data/core.py && grep -q 'compress_after'
     docs/_include/database.rst && grep -q 'timescale' docs/_include/config_param_ref.rst
     && uv run pytest -rs tests/test_timescale.py && uv run pytest
@@ -355,19 +355,25 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
 **Satisfies:** R6, R4, R10 · **Depends on:** P5
 **Goal:** an operator tunes the pass from configuration; invalid values fail at startup.
 
-- [ ] `data/core.py`: `timescale_config = config.pop('timescale', {})` beside `pragmas` (always, so
+- [x] `data/core.py`: `timescale_config = config.pop('timescale', {})` beside `pragmas` (always, so
       it never reaches the URL); export it.
-- [ ] `timescale.py`: `Settings.from_config(ns)` per PLAN §2.6 (keys, interval regex, `Task` column
+- [x] `timescale.py`: `Settings.from_config(ns)` per PLAN §2.6 (keys, interval regex, `Task` column
       checks, `policy` without `columnstore` refused); `data/__init__.py` builds the settings at
       import under a timescale alias, `display_critical` + `sys.exit(exit_status.bad_config)` on
       error, and passes them to `converge`.
-- [ ] `converge`: `columnstore = false` with columnstore enabled → manual-action warning;
+- [x] `converge`: `columnstore = false` with columnstore enabled → manual-action warning;
       `policy = false` → remove an existing policy (INFO).
-- [ ] Docs: `database.rst` reference table for the six keys with defaults and the future-chunks
+- [x] Docs: `database.rst` reference table for the six keys with defaults and the future-chunks
       caveat; `config_param_ref.rst` `[timescale]` entry.
-- [ ] Tests: unit validation table; integration — configured `chunk_interval = "1 day"` and
+- [x] Tests: unit validation table; integration — configured `chunk_interval = "1 day"` and
       `compress_after = "2 weeks"` applied on fresh and as drift; `policy = false` removes the job;
       an invalid value exits `bad_config` with the key named and no traceback.
+- *(Build notes: `timescale_config` is popped as `None` when absent, so zero configuration is
+  `DEFAULTS`; the table is ignored under other providers. Booleans also accept the strings
+  `"true"`/`"false"` (environment values arrive as text); `segmentby = ""` means none. The
+  integration scenarios are proven only in CI, at P7. Local CLI drive: an invalid
+  `chunk_interval` exits `bad_config` (3) with one CRITICAL line naming the key; a valid table
+  reaches the connection, so it is not forwarded to psycopg.)*
 - **If cut:** add a dated Clarification to `GOAL.md`, move R6 to Non-goals, return it to
   `issues/timescale.md`, mark P6/P7 `blocked` with the reason, and drop the config-reference bullet
   from R10's evidence (GOAL Clarifications, 2026-11-01).

@@ -202,7 +202,8 @@ shape logs nothing. Initialization runs in one transaction, serialized with the 
 concurrent launches are safe.
 
 If someone changed the chunk interval, the columnstore settings, or the policy's interval by hand,
-the next ``hs initdb`` puts them back and logs each change. A new chunk interval applies to new
+the next ``hs initdb`` puts them back to the configured values (see *Tuning* below) and logs each
+change. A new chunk interval applies to new
 chunks only, and new columnstore settings apply to chunks converted from then on; existing chunks
 keep theirs (recompress them by hand if needed). Turning the columnstore off is never done for
 you; ``hs initdb`` warns instead. If the policy's last run failed, ``hs initdb`` warns and points
@@ -210,6 +211,50 @@ to ``timescaledb_information.job_stats``.
 
 Other commands (``hs cluster``, ``hs server``, ``hs submit`` without ``--initdb``) only run the
 schema step, as for PostgreSQL; run ``hs initdb`` after upgrading *HyperShell* or TimescaleDB.
+
+|
+
+Tuning
+^^^^^^
+
+The defaults suit most sites; zero configuration is the norm. To change them, add a ``timescale``
+table to the ``[database]`` section. Each key is optional and falls back to its default.
+
+.. admonition:: Configuration file with TimescaleDB settings
+    :class: note
+
+    .. code-block:: toml
+
+        [database]
+        provider = "timescale"
+        database = "hypershell"
+
+        [database.timescale]
+        chunk_interval = "1 day"
+        compress_after = "2 weeks"
+
+==================  ===============  ==========================================================
+Key                 Default          Meaning
+==================  ===============  ==========================================================
+``chunk_interval``  ``"1 week"``     Time span of each chunk of ``task``.
+``columnstore``     ``true``         Enable the columnstore on ``task``.
+``segmentby``       ``"client_id"``  Columns that group rows in a compressed chunk
+                                     (comma-separated task columns, or ``""`` for none).
+``orderby``         ``"id DESC"``    Order of rows in a compressed chunk
+                                     (``<column> [ASC|DESC] [NULLS FIRST|LAST]``, comma-separated).
+``policy``          ``true``         Keep a columnstore policy on ``task``.
+``compress_after``  ``"4 weeks"``    Age at which the policy converts a chunk.
+==================  ===============  ==========================================================
+
+Intervals are a positive whole number and a unit, from ``microseconds`` to ``months``
+(e.g., ``"12 hours"``). An invalid value, an unknown key, or ``policy = true`` with
+``columnstore = false`` stops every command at startup with a message naming the key.
+
+Changes take effect at the next ``hs initdb``, which applies them as described above: a new
+``chunk_interval`` applies to new chunks only, new ``segmentby`` or ``orderby`` to chunks converted
+from then on, and a new ``compress_after`` replaces the policy. Setting ``policy = false`` removes
+an existing policy. Setting ``columnstore = false`` (with ``policy = false``) stops ``hs initdb``
+from enabling the columnstore, but does not disable one that is already on; it warns instead.
 
 |
 

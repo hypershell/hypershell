@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 from pytest import mark, fixture
 from cmdkit.app import exit_status
+from cmdkit.config import ConfigurationError
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import DBAPIError
@@ -215,8 +216,9 @@ def shape(engine: Engine, schema: str = 'public') -> Dict[str, object]:
                                          'FROM timescaledb_information.hypertable_columnstore_settings '
                                          'WHERE hypertable = CAST(:table AS regclass)'), params).first()
         jobs = conn.execute(text('SELECT CAST(config->>\'compress_after\' AS interval) '
-                                 'FROM timescaledb_information.jobs WHERE proc_name = \'policy_compression\' AND hypertable_schema = :schema '
-                                 'AND hypertable_name = \'task\''), params).scalars().all()
+                                 'FROM timescaledb_information.jobs WHERE proc_name = \'policy_compression\' '
+                                 'AND hypertable_schema = :schema AND hypertable_name = \'task\''),
+                            params).scalars().all()
     return {'hypertable': True, 'column': column, 'interval': interval, 'columnstore': bool(enabled[0]),
             'segmentby': normalize_columns(settings[0]) if settings else None,
             'orderby': normalize_columns(settings[1]) if settings else None,
@@ -635,3 +637,123 @@ def test_concurrent_initdb(ts_database, ts_site) -> None:
     assert [rc for rc, _, _ in results] == [exit_status.success] * count, results
     assert len([stderr for _, _, stderr in results if 'Converted table task' in stderr]) == 1, results
     assert_converged(engine)
+
+
+# --------------------------------------------------------------------------------------------------
+# The [database.timescale] configuration table
+
+
+@mark.unit
+@mark.parametrize('table, expected', [
+    (None, Settings()),
+    ({}, Settings()),
+    ({'chunk_interval': '1  day', 'compress_after': '2 weeks'},
+     Settings(chunk_interval='1 day', compress_after='2 weeks')),
+    ({'chunk_interval': '12 HOURS'}, Settings(chunk_interval='12 HOURS')),
+    ({'segmentby': 'client_id, group', 'orderby': 'id desc, submit_time ASC NULLS FIRST'},
+     Settings(segmentby='client_id, group', orderby='id desc, submit_time ASC NULLS FIRST')),
+    ({'segmentby': ''}, Settings(segmentby='')),
+    ({'policy': False}, Settings(policy=False)),
+    ({'policy': 'false', 'columnstore': 'false'}, Settings(policy=False, columnstore=False)),
+])
+def test_settings_from_config(table, expected: Settings) -> None:
+    """Zero configuration gives the defaults; each key overrides one of them."""
+    assert Settings.from_config(table) == expected
+
+
+@mark.unit
+@mark.parametrize('table, named', [
+    ({'chunk_interval': 'soon'}, 'database.timescale.chunk_interval'),
+    ({'chunk_interval': '0 days'}, 'database.timescale.chunk_interval'),
+    ({'chunk_interval': '1 fortnight'}, 'database.timescale.chunk_interval'),
+    ({'compress_after': 7}, 'database.timescale.compress_after'),
+    ({'segmentby': 'nope'}, 'database.timescale.segmentby'),
+    ({'orderby': 'id sideways'}, 'database.timescale.orderby'),
+    ({'orderby': ''}, 'database.timescale.orderby'),
+    ({'orderby': 'id; DROP TABLE task'}, 'database.timescale.orderby'),
+    ({'columnstore': 'maybe'}, 'database.timescale.columnstore'),
+    ({'policy': 1}, 'database.timescale.policy'),
+    ({'chunk': '1 day'}, 'database.timescale.chunk'),
+    ({'columnstore': False}, 'policy = true needs columnstore = true'),
+    ('1 day', 'database.timescale'),
+])
+def test_settings_invalid(table, named: str) -> None:
+    """An invalid value fails with the key, the value, and the accepted form."""
+    with pytest.raises(ConfigurationError, match='expected|needs') as caught:
+        Settings.from_config(table)
+    assert named in str(caught.value)
+
+
+def write_config(path: Path, lines: List[str]) -> None:
+    """Use `lines` as the only configuration file."""
+    path.write_text('\n'.join(['[database.timescale]', *lines, '']))
+    os.environ['HYPERSHELL_CONFIG_FILE'] = str(path)
+
+
+@mark.integration
+@needs_server
+def test_invalid_setting_exits(ts_database, ts_site, tmp_path: Path) -> None:
+    """An invalid setting stops every command at startup with bad_config, naming the key, before connecting."""
+    engine = ts_site(ts_database())
+    write_config(tmp_path / 'config.toml', ['chunk_interval = "soon"'])
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.bad_config, stderr
+    output = '\n'.join(stderr)
+    assert 'database.timescale.chunk_interval' in output and 'soon' in output
+    assert 'Traceback' not in output
+    assert inspect(engine).get_table_names() == []
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_configured_fresh(ts_database, ts_site, tmp_path: Path) -> None:
+    """Configured chunk interval and policy interval are applied to a new database."""
+    engine = ts_site(ts_database())
+    write_config(tmp_path / 'config.toml', ['chunk_interval = "1 day"', 'compress_after = "2 weeks"'])
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert_converged(engine, interval=timedelta(days=1), after=timedelta(days=14))
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success and pass_lines(stderr, 'INFO') == [], stderr
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_configured_drift(ts_database, ts_site, tmp_path: Path) -> None:
+    """Changing the configuration later is applied as drift, with INFO naming each change."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    assert_converged(engine)
+    allowed = server_gates(engine)
+    write_config(tmp_path / 'config.toml', ['chunk_interval = "1 day"', 'compress_after = "2 weeks"'])
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    info = pass_lines(stderr, 'INFO')
+    assert any('Changed the chunk interval of task' in line and 'to 1 day' in line for line in info), stderr
+    assert any('Replaced the columnstore policy on task: compress chunks older than 2 weeks' in line
+               for line in info) == allowed.policy, stderr
+    assert_converged(engine, interval=timedelta(days=1), after=timedelta(days=14))
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_policy_off_removes_job(ts_database, ts_site, tmp_path: Path) -> None:
+    """With policy = false, an existing columnstore policy is removed and none is added again."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    allowed = server_gates(engine)
+    write_config(tmp_path / 'config.toml', ['policy = false'])
+    for run in range(2):
+        rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+        assert rc == exit_status.success, stderr
+        removed = any(line.endswith('Removed the columnstore policy on task') for line in pass_lines(stderr, 'INFO'))
+        assert removed == (allowed.policy and run == 0), stderr
+        assert shape(engine)['jobs'] == []
+    state = shape(engine)
+    assert state['hypertable'] and state['columnstore'] == allowed.columnstore
+    rc, _, stderr = main_lines(['hs', 'initdb', '--truncate', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert shape(engine)['jobs'] == []

@@ -25,9 +25,10 @@ from sqlalchemy.engine import create_engine
 # Internal libs
 from hypershell.core.logging import Logger
 from hypershell.core.config import config
-from hypershell.core.exceptions import handle_exception, DatabaseUninitialized, get_shared_exception_mapping
+from hypershell.core.exceptions import (handle_exception, display_critical, DatabaseUninitialized,
+                                        get_shared_exception_mapping)
 from hypershell.core.pretty_print import format_bytes
-from hypershell.data.core import Session, engine, in_memory, schema, providers, TIMESCALE_ALIASES
+from hypershell.data.core import Session, engine, in_memory, schema, providers, TIMESCALE_ALIASES, timescale_config
 from hypershell.data.model import Entity, Task
 from hypershell.data.upgrade import upgrade_schema
 from hypershell.data import timescale
@@ -55,6 +56,16 @@ DATABASE_DIALECT: Final[str] = 'sqlite' if DATABASE_PROVIDER in ['sqlite', 'turs
 TIMESCALE: Final[bool] = DATABASE_PROVIDER in TIMESCALE_ALIASES
 """Set if the provider is a TimescaleDB alias (PostgreSQL with the hypertable pass)."""
 
+TIMESCALE_SETTINGS: timescale.Settings = timescale.DEFAULTS
+"""Target shape of the `task` hypertable, from `[database.timescale]` (TimescaleDB only)."""
+
+if TIMESCALE:
+    try:
+        TIMESCALE_SETTINGS = timescale.Settings.from_config(timescale_config)
+    except ConfigurationError as error:
+        display_critical(str(error), module=__name__)
+        sys.exit(exit_status.bad_config)
+
 DATABASE_HOST: Final[str] = config.database.get('host', 'localhost')
 """Database server hostname (default: localhost)."""
 
@@ -79,7 +90,7 @@ def initdb(optimize: bool = False) -> None:
         timescale.prepare(engine)
     upgradedb()
     if TIMESCALE:
-        timescale.converge(engine, schema, timescale.DEFAULTS)
+        timescale.converge(engine, schema, TIMESCALE_SETTINGS)
     if optimize and DATABASE_DIALECT == 'sqlite':
         log.info(f'Optimizing database {DATABASE_SITE}')
         Session.execute(text('PRAGMA optimize'))
@@ -96,7 +107,7 @@ def truncatedb() -> None:
     log.trace('Creating all tables')
     Entity.metadata.create_all(engine)
     if TIMESCALE:
-        timescale.converge(engine, schema, timescale.DEFAULTS)
+        timescale.converge(engine, schema, TIMESCALE_SETTINGS)
     log.warning('Truncated database')
 
 

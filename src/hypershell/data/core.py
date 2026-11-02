@@ -27,7 +27,8 @@ from hypershell.core.logging import Logger, stream_handler
 from hypershell.core.exceptions import display_critical, write_traceback
 
 # Public interface
-__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', 'providers', 'TIMESCALE_ALIASES']
+__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', 'providers',
+           'TIMESCALE_ALIASES', 'timescale_config']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -201,6 +202,7 @@ schema = config.pop('schema', None)
 engine_echo = config.pop('echo', False)
 connect_args = config.pop('connect_args', {})
 pragmas = config.pop('pragmas', {})
+timescale_config = config.pop('timescale', None)  # Settings for the hypertable pass, never a URL parameter
 
 
 # Additional parameters for engine creation

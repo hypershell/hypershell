@@ -141,6 +141,14 @@
         Specify one or more pragmas to apply to database connections (SQLite only).
         For example ``pragmas = { journal_mode = "wal" }`` to enable WAL-mode.
 
+    ``[timescale]``
+        Settings for the TimescaleDB shape ``hs initdb`` gives the task table (``timescale``
+        provider only; never forwarded to the connection). Keys: ``chunk_interval``
+        (default ``"1 week"``), ``columnstore`` (``true``), ``segmentby`` (``"client_id"``),
+        ``orderby`` (``"id DESC"``), ``policy`` (``true``), and ``compress_after``
+        (``"4 weeks"``). For example ``timescale = { chunk_interval = "1 day" }``.
+        See the TimescaleDB section of :ref:`database <database>`.
+
     ``*``
         Any additional arguments are forwarded to the provider, e.g., ``encoding = 'utf-8'``.
 

@@ -19,13 +19,14 @@ plain `task` table that already holds rows is never migrated.
 
 # Type annotations
 from __future__ import annotations
-from typing import Final, List, Optional, Tuple
+from typing import Any, Final, List, Mapping, Optional, Tuple
 
 # Standard libs
 import re
 from dataclasses import dataclass
 
 # External libs
+from cmdkit.config import ConfigurationError
 from sqlalchemy import text
 from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.exc import DBAPIError
@@ -33,12 +34,13 @@ from sqlalchemy.exc import DBAPIError
 # Internal libs
 from hypershell.core.logging import Logger
 from hypershell.core.exceptions import SchemaUpgradeError
+from hypershell.data.model import Task
 from hypershell.data.upgrade import (_sqlstate, _message, _waiting, _waiting_for, _set_lock_timeout,
                                      _lock_postgres, WAIT_UPGRADE, WAIT_TABLES)
 
 # Public interface
 __all__ = ['prepare', 'converge', 'gates', 'parse_version', 'normalize_columns',
-           'Settings', 'DEFAULTS', 'Gates', 'TimescaleError', 'MIN_VERSION', 'POLICY_VERSION', ]
+           'Settings', 'DEFAULTS', 'SETTINGS_KEYS', 'Gates', 'TimescaleError', 'MIN_VERSION', 'POLICY_VERSION', ]
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -63,6 +65,14 @@ VERSION_PATTERN: Final[re.Pattern] = re.compile(r'^\s*(\d+)\.(\d+)(?:\.(\d+))?')
 TABLE: Final[str] = 'task'
 PARTITION_COLUMN: Final[str] = 'id'
 
+# An interval as configured: a positive whole number of one unit (e.g., '1 week', '12 hours').
+INTERVAL_PATTERN: Final[re.Pattern] = re.compile(
+    r'^\s*[1-9]\d*\s*(microsecond|millisecond|second|minute|hour|day|week|month)s?\s*$', re.IGNORECASE)
+
+# One orderby item: a column, an optional direction, an optional NULLS placement.
+ORDERBY_PATTERN: Final[re.Pattern] = re.compile(
+    r'^\s*(\w+)(\s+(asc|desc))?(\s+nulls\s+(first|last))?\s*$', re.IGNORECASE)
+
 
 class TimescaleError(SchemaUpgradeError):
     """The database cannot be brought to the TimescaleDB shape the provider promises."""
@@ -70,13 +80,73 @@ class TimescaleError(SchemaUpgradeError):
 
 @dataclass(frozen=True)
 class Settings:
-    """The target shape of the `task` hypertable."""
+    """The target shape of the `task` hypertable (`[database.timescale]` overrides each field)."""
     chunk_interval: str = '1 week'
     columnstore: bool = True
     segmentby: str = 'client_id'
     orderby: str = 'id DESC'
     policy: bool = True
     compress_after: str = '4 weeks'
+
+    @classmethod
+    def from_config(cls, table: Optional[Mapping[str, Any]],
+                    columns: Optional[Tuple[str, ...]] = None) -> Settings:
+        """
+        Settings from the `[database.timescale]` configuration table, defaults for what it omits.
+        Raises `ConfigurationError` naming the key, the value, and the accepted form.
+        """
+        if table is None:
+            return cls()
+        if not isinstance(table, Mapping):
+            raise ConfigurationError(f'Invalid database.timescale = {table!r}: expected a table of settings '
+                                     f'({", ".join(SETTINGS_KEYS)})')
+        columns = columns if columns is not None else tuple(Task.__table__.columns.keys())
+        values = {}
+        for key, value in table.items():
+            if key not in SETTINGS_KEYS:
+                raise ConfigurationError(f'Unknown setting database.timescale.{key}: expected one of '
+                                         f'{", ".join(SETTINGS_KEYS)}')
+            values[key] = _check_setting(key, value, columns)
+        settings = cls(**values)
+        if settings.policy and not settings.columnstore:
+            raise ConfigurationError('Invalid database.timescale: policy = true needs columnstore = true '
+                                     '(the policy converts chunks to the columnstore); set policy = false')
+        return settings
+
+
+SETTINGS_KEYS: Final[Tuple[str, ...]] = ('chunk_interval', 'columnstore', 'segmentby', 'orderby',
+                                         'policy', 'compress_after')
+
+
+def _check_setting(key: str, value: Any, columns: Tuple[str, ...]) -> Any:
+    """The validated value of one `[database.timescale]` setting."""
+    def invalid(form: str) -> ConfigurationError:
+        return ConfigurationError(f'Invalid database.timescale.{key} = {value!r}: expected {form}')
+    if key in ('columnstore', 'policy'):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in ('true', 'false'):
+            return value.strip().lower() == 'true'
+        raise invalid('true or false')
+    if not isinstance(value, str):
+        raise invalid('a string')
+    if key in ('chunk_interval', 'compress_after'):
+        if INTERVAL_PATTERN.match(value) is None:
+            raise invalid('a positive whole number and a unit, e.g. "1 week" or "12 hours" '
+                          '(microseconds through months)')
+        return ' '.join(value.split())
+    if key == 'segmentby':
+        names = [name.strip() for name in value.split(',')] if value.strip() else []
+        if any(name not in columns for name in names):
+            raise invalid(f'comma-separated task columns ({", ".join(columns)}), or "" for none')
+        return ', '.join(names)
+    items = value.split(',')
+    for item in items:
+        match = ORDERBY_PATTERN.match(item)
+        if match is None or match.group(1) not in columns:
+            raise invalid(f'comma-separated "<task column> [ASC|DESC] [NULLS FIRST|LAST]" items, '
+                          f'e.g. "id DESC"; columns: {", ".join(columns)}')
+    return ', '.join(' '.join(item.split()) for item in items)
 
 
 DEFAULTS: Final[Settings] = Settings()
