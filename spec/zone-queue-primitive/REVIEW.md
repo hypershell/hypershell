@@ -982,3 +982,23 @@ never reuse a port within one process, and keep their in-process client for the 
   triage of P4 and P5) needs the maintainer's decision.
 - C5 and C6 are resolved. Every gate passed: suite, repeats, parity, compat and throughput.
 - P2, the multi-node evidence, is still pending.
+
+## Triage (human gate) — cycle 4
+
+Cycle 4, the authorized final cycle, did not converge: C5 and C6 are resolved, and the blind pass
+found two LOW CONFIRMED defects inside the delta. The foreman stopped and escalated. On 2026-11-02
+the maintainer chose to fix C7 and C8, seed the rest, and run **one further review (cycle 5) scoped
+to the C7/C8 remediation diff only**. The foreman rules as judge under that authorization.
+Remediation returns to `hs-build`, which reopens P1. A non-converged cycle 5 stops the feature again.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| C7 · CONFIRMED | fix | A forked child of a process that serves queues never sends a decref it inherited from its parent: hand-offs queued before the fork, and the hand-off state itself, are discarded in the child (e.g. `os.register_at_fork(after_in_child=…)`), and the child's own later proxies follow the normal rules. Red-first test: the reviewer's reproduction (a live parent client keeps its queues usable after a forked child exits), bounded; skipped where `fork` is unavailable. |
+| C8 · CONFIRMED | fix | The hand-off matches on the **full listener address** a proxy's token names, not the port alone, and a queued hand-off is never stranded: the sender starts on the first enqueue (or the enqueue path otherwise guarantees a live sender), not only in `connect()`. A decref for any address this process does not serve is the stock path, on the finalizing thread, byte-for-byte as before. Correct the `AGENTS.md` sentence to match. Red-first test: the reviewer's reproduction (a client of a remote server whose port number equals an in-process server's port leaks no objects on the remote server). The C5 property and its tests must still hold. |
+| P4 · PLAUSIBLE | seed | The finalizer swap happens after the proxy constructor returns; an injected connection failure inside that window leaves a stock finalizer. Pre-existing window, fault-injection only. Seed as `unshaped` with the reviewer's scenario. |
+| P5 · PLAUSIBLE | seed | The hand-off can delay decrefs past their own server's lifetime under collection confined to one thread (stress only). Seed as `unshaped`, or fold into P4's seed if the build finds they share a cause. |
+| Observation · stale decref after same-key, same-port restart | seed | Present at `d3e00f9`, not at `b819de6`; no CLI path (`run_local` uses a random key). Seed as `unshaped` with the reviewer's reproduction. |
+| P2 · PLAUSIBLE | pending external evidence | Unchanged; the foreman reruns the multi-node matrix at the remediated head. |
+
+Every seed added gets its `ROADMAP.md` entry in the same commit (C6's rule). Out of scope for cycle 5:
+everything outside the C7/C8 diff, and every ruling already made.

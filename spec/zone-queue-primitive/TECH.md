@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
@@ -106,9 +106,7 @@ phases:
 review:
   last_reviewed_commit: 4904c97466d2de19e184699f05bdf41f7ede6bdf
   verdict: changes-requested
-  blocked_reason: 'review cycle 4 (final): C5, C6 resolved; C7 fork re-sends handed-off
-    decrefs, C8 handed-off decref with no sender (both LOW, core/queue.py) need the
-    maintainer'
+  blocked_reason: ''
   cycle: 4
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
@@ -339,39 +337,73 @@ stdio. This is the core, small and novel slice: everything else builds on it.
         otherwise it runs the stock decref, unchanged, in the finalizer's thread. A daemon
         `hypershell-queue-decref` thread sends handed-off decrefs with the stock decref, in order.
         `QueueClient.connect` starts it when the process serves queues; the server never does.
-  - **Why the property holds,** for every thread the collector may pick:
-    1. A connection reaches an in-process server only at its port, and only while its listener is
-       open. `_serving` lists the server from before its bind (as the requested port, so 0 for an
-       ephemeral one, which matches every port) to after `_finalize_in_process` has closed its
-       listener (`stop()` first, then the entry is dropped). So the listing covers every moment a
+        *(Amended by the review-4 remediation: the match is on the full listener address, the
+        process's first server starts the sender, and a forked child drops the hand-off state.)*
+  - **Why the property holds,** for every thread the collector may pick (argument as amended by
+    the review-4 remediation, below: full-address matching, the sender's start, and fork):
+    1. A connection reaches an in-process server only at its listener's port, and only at an
+       address the listener answers on: its bound IPv4 address, or every address of this host when
+       it is bound to the wildcard address. `_serving` lists each server's listener as
+       `(IPv4 address, port)` from before its bind (the requested host resolved as the bind resolves
+       it, with the requested port, so 0 for an ephemeral one) to after `_finalize_in_process` has
+       closed its listener (`stop()` first, then the entry is dropped); after the bind the entry is
+       the bound address itself. So the listing covers every moment and every address at which a
        connection could reach the server.
-    2. The finalizer reads `_serving` when it runs. The accept loop, each handler, and the stop
-       thread are started after the entry exists, and the thread that starts the server writes it
-       before binding, so a finalizer on any of them, or on the starting thread between the bind
-       and the start of the accept loop, sees the entry. It then only puts onto a `SimpleQueue`,
+    2. A queue client's proxies dial the address its manager names, and their tokens carry that
+       address. `QueueClient.connect` records, before it makes any proxy, the IPv4 address that
+       address resolves to (the same resolution the stock connect uses) and whether it is one of
+       this host's (a socket can bind it). The finalizer matches the token against the listing:
+       a listed port (any port while a server binds an ephemeral one) at the same IPv4 address, or
+       at any of this host's addresses when either side is the wildcard address. A host that did not
+       resolve, or a token never recorded, matches on its port alone. So every decref that could
+       reach an in-process server matches. The match can be wider than the reach, never narrower: a
+       wildcard listener also matches a host address where a more specific listener of another
+       process holds the same port, and such a decref is handed off and still delivered.
+    3. The finalizer reads `_serving` and the record when it runs. The accept loop, each handler,
+       and the stop thread are started after the entry exists, and the thread that starts the server
+       writes it before binding, so a finalizer on any of them, or on the starting thread between the
+       bind and the start of the accept loop, sees the entry. It then only puts onto a `SimpleQueue`,
        which never blocks and is documented safe to re-enter from a finalizer. It opens no
-       connection, takes no lock and starts no thread.
-    3. Nothing else in a finalizer on those threads connects to the server: the stock decref runs
-       there only for a port no in-process server listens on.
-    4. The decref sender waits on the accept loop, but it is a client-side thread, not a server
+       connection, takes no lock and starts no thread; the match is dictionary reads and tuple
+       comparisons.
+    4. Nothing else in a finalizer on those threads connects to the server: the stock decref runs
+       there only for an address no in-process listener answers on.
+    5. The decref sender waits on the accept loop, but it is a client-side thread, not a server
        thread, and holds no lock while it connects; the accept loop never waits on it, and a
        finalizer on the sender either hands off or reaches no in-process server. So no wait in
        the accept loop (the TLS handshake, `_lock`, a handler's start) can depend, through a
        finalizer, on the accept loop itself: a finalizer run on a server thread returns at once.
        A peer that stalls a TLS handshake for other reasons still holds the accept loop, as on
        base (cycle 3 observation, out of scope).
-    5. Remote clients: a process that serves no queues has an empty `_serving`, so the finalizer
-       is the stock decref in the same thread with the same arguments. Wire, auth and TLS are
-       untouched, and `b819de6` clients never run this code.
-  - **Scope and limits.** Proxies made by `QueueClient` are covered. A proxy from another manager
-    class pointed at an in-process server keeps the stock finalizer. A decref handed off in a
-    process where no client has connected since it began serving waits until one does. That needs
-    a proxy made before the server existed, so the decref names an object this server never
-    issued, or one a same-port server on another host keeps for its own lifetime anyway. Decrefs
-    handed off at interpreter exit may not be sent before the process ends, as the server is
-    stopping then too. The sender, not the dropping thread, now runs the stock decref's tidy-up of
-    its own cached connection; a thread's cached connection is closed when that thread ends or at
-    server shutdown (`_finalize_in_process` drops the cache), as before.
+    6. **No hand-off is stranded.** `_serve_in_process` starts the sender (once per process; again
+       if it is not alive) before it lists its server, in an ordinary call, never in a finalizer.
+       A decref is handed off only while something is listed, and the sender loops for the life of
+       the process, so whenever a decref is put on the queue a sender is alive to send it.
+    7. **Fork.** A forked child runs none of its parent's server threads, and the parent sends the
+       decrefs it handed off. An `os.register_at_fork` hook (`after_in_child`) gives the child an
+       empty listing, a new empty queue, no sender and a new lock: the parent's waiting decrefs are
+       never sent again from the child, and the child's own proxies follow the rules above (with
+       nothing listed, the stock decref; if the child serves queues, its first server starts its own
+       sender). A finalizer in the child cannot reach a parent server's accept loop from one of
+       that loop's own threads, since those threads are not in the child.
+    8. Remote clients: a process that serves no queues has an empty `_serving`, so the finalizer
+       is the stock decref in the same thread with the same arguments; the only addition is the
+       connect-time record (a local name lookup and a bind test, no traffic to the server). A
+       decref for an address that no in-process server of the process answers on is likewise the
+       stock one, on the finalizing thread. Wire, auth and TLS are untouched, and `b819de6`
+       clients never run this code.
+  - **Scope and limits.** Proxies made by `QueueClient` are covered, from the moment
+    `QueueClient.connect` swaps their finalizer: a proxy left half-made by a connection failure
+    inside the stock constructor keeps the stock finalizer (REVIEW cycle 4 P4, seeded as
+    `issues/queue-proxy-finalizer-swap-window.md`). A proxy from another manager class pointed at
+    an in-process server keeps the stock finalizer. The record is made at connect: a host whose
+    resolution changes between connect and decref is matched as it resolved then. Decrefs handed off
+    at interpreter exit may not be sent before the process ends, as the server is stopping then too.
+    The sender, not the dropping thread, runs the stock decref's tidy-up of its own cached
+    connection for a handed-off decref; a thread's cached connection is closed when that thread
+    ends or at server shutdown (`_finalize_in_process` drops the cache), as before. The sender is
+    started by the process's first server and lives as long as the process, so a server start that
+    fails at the bind leaves it running (and nothing of the server).
   - [x] **Private internals.** `unsupported_internals()` adds three checks: `BaseProxy._incref`
         sets `_close` to a `util.Finalize` of `BaseProxy._decref`; `BaseProxy._decref` takes the
         token first (3.11 has six parameters, 3.12+ seven, adding `serial`); and `util.Finalize`
@@ -423,6 +455,72 @@ stdio. This is the core, small and novel slice: everything else builds on it.
       log one refusal WARNING, no `Too many open files`, no `unable to open database file`, no
       uncaught exception or traceback; 0 children. C3(b) holds, as at `d3e00f9` (294/300 there;
       the count varies run to run).
+- **Remediation (review cycle 4; triage in [`REVIEW.md`](REVIEW.md)).** P1 was reopened for C7 and
+  C8 under the maintainer's one further cycle (5), scoped to this diff. The argument above is
+  amended for both.
+  - [x] **Red first** (source at `aa55e86`), in `tests/test_queue_gc.py`, each probe in its own
+        process group under the existing watchdog and backstop:
+        - `test_forked_child_never_resends_decrefs` (C7; skipped where `fork` is unavailable;
+          TLS, since the backlog is made by a peer that never starts its TLS handshake, which holds
+          up the accept loop and so the sender). A serving process drops a client, so its decrefs
+          wait; it forks a child that connects, uses and drops a client; then the peer is cut. After
+          the child exits, the parent's live client must still hold all four queues.
+        - `test_shared_port_number_leaks_nothing` (C8, TLS on and off): a client of a server in
+          another process at `127.0.0.1:P` is dropped while this process serves `P` at another
+          address (`127.0.0.2` where the host binds it, as on Linux; else the wildcard address,
+          which macOS lets listen beside `127.0.0.1`). The other server must be left holding no
+          objects. Skipped where neither address can listen.
+        - `test_finalizer_hands_off_only_when_served_here`, rewritten for the full-address rule
+          (same address, another port, the same port at another address, the wildcard address, an
+          ephemeral bind, an unrecorded host) and the connect-time record.
+  - [x] **C8 — full-address match, never stranded.** `_serving` lists `(IPv4 address, port)`;
+        `QueueClient.connect` records each dialed address's IPv4 address and whether it is this
+        host's (`_note_dialed`); `_served_here` is the match (argument items 1–2).
+        `_serve_in_process` starts the sender before it lists its server; `QueueClient.connect` no
+        longer starts it (item 6). A decref for an address no in-process server answers on is the
+        stock one, on the finalizing thread. `AGENTS.md` corrected to match.
+  - [x] **C7 — fork.** `os.register_at_fork(after_in_child=_forget_after_fork)` empties the
+        listing and gives the child a new queue, no sender and a new lock (item 7).
+  - [x] `test_busy_port_raises_from_start` (added on this branch, not a base test) leaves the
+        decref sender out of its thread count, as `test_threads_drain_after_shutdown` does: the
+        first server of a process now starts it, before the bind. Its docstring's "nothing is left
+        running" now reads "nothing of the server".
+  - [x] **Seeds**, each with its `ROADMAP.md` entry: P4 as
+        `issues/queue-proxy-finalizer-swap-window.md`; P5 as `issues/queue-decref-handoff-delay.md`
+        (a different cause from P4's, so not folded); the observation as
+        `issues/queue-stale-decref-same-port-restart.md`. All `unshaped`.
+  - **Gate record (macOS; the source as provisional commit `fb8dab4`, since squashed).**
+    - **Red at `aa55e86`** (the new test module against that source, on each of 3.11.18, 3.12.16,
+      3.13.18 and 3.14.6): the three tests fail on every Python with the reviewer's symptoms.
+      Fork: "decrefs waiting at the fork: 3" (4 on 3.11), then "objects after the child exited: 1"
+      and `RemoteError` puts from the parent's live client. Shared port: "objects left elsewhere: 4;
+      decrefs waiting: 4", TLS on and off. The rule test fails on the missing record.
+    - **Green:** `tests/test_queue_gc.py` (10 tests) passed **20/20** consecutive runs on each of
+      the four Pythons.
+    - Full suite: **560 passed** on each of the four (557 before, plus the two probe tests, one
+      parametrised over TLS); `unsupported_internals() == []`.
+    - `parity` vs `b819de6`: identical task tables TLS on and off, rc 0/[0, 0]; the four `--help`
+      outputs byte-identical. `compat` (server here, client `b819de6`): 200/200 TLS on and off.
+    - `hsx` drive in an isolated site (`HYPERSHELL_SITE`, `HYPERSHELL_DATABASE_FILE`,
+      `HYPERSHELL_CONFIG_FILE=''`), 200 tasks TLS on and `--no-tls`: rc 0, 200 distinct outputs
+      each, 400 rows, 0 failed.
+    - Throughput gate, 5 interleaved repeats, 3.14.6 `spawn`: **PASS**, all 60 runs clean. It ran
+      alone among this build's processes, but the host was shared with other agents' work: the
+      1-min load average, sampled every 30 s (54 samples), was min 2.7, median 11.8, max 44.2,
+      against median 3.8–4.4 in the two previous gates. The spreads, and so the tolerances, are
+      wider than before; the runs are interleaved, so both builds shared the load.
+
+      | config | base median [min-max] | feature median [min-max] | delta | tolerance | tree children b/f | tree FDs b/f | own threads b/f |
+      |---|---|---|---|---|---|---|---|
+      | 4x4 b=1 tls | 271.2 [262.7-273.8] | 273.9 [269.1-276.6] | +2.7 | 13.6 | 2/0 | 117/23 | 7/20 |
+      | 4x4 b=1 no-tls | 267.8 [255.1-275.6] | 271.1 [261.4-277.0] | +3.3 | 20.5 | 2/0 | 116/24 | 7/20 |
+      | 16x1 b=1 tls | 275.7 [180.8-277.6] | 263.9 [183.9-274.4] | -11.8 | 96.8 | 2/0 | 153/59 | 7/56 |
+      | 16x1 b=1 no-tls | 197.0 [196.1-270.5] | 237.7 [185.2-263.4] | +40.7 | 78.2 | 2/0 | 153/59 | 7/56 |
+      | 4x4 b=50 tls | 830.7 [722.2-874.8] | 745.2 [585.8-860.5] | -85.5 | 274.7 | 2/0 | 116/22 | 7/20 |
+      | 32x1 b=1 tls | 255.4 [226.7-276.1] | 243.3 [224.6-265.0] | -12.1 | 49.4 | 2/0 | 201/108 | 7/104 |
+
+      The server's own threads are one more than at `4904c97` (19 → 20 in 4x4): the decref sender,
+      which the server now starts. Reported, not gated (cycle-1 P3 ruling).
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
@@ -430,7 +528,8 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   `src/hypershell/core/logging.py` (docstring), `tests/test_queue.py` (new),
   `tests/test_queue_start.py` (new); remediation also `src/hypershell/server.py`
   (`ServerThread.start`) and `AGENTS.md`; review-2 remediation `tests/test_queue_limits.py` (new);
-  review-3 remediation `tests/test_queue_gc.py` (new) and `ROADMAP.md`.
+  review-3 remediation `tests/test_queue_gc.py` (new) and `ROADMAP.md`; review-4 remediation
+  `tests/test_queue_start.py`, `ROADMAP.md` and three seeds in `issues/`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1

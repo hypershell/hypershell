@@ -260,7 +260,7 @@ def test_threads_drain_after_shutdown(tls: Optional[TLSConfig]) -> None:
     """Accept and handler threads are gone shortly after shutdown."""
 
     def count() -> int:
-        # The decref sender a same-process client starts lives as long as the process does
+        # The decref sender, which the first server of a process starts, lives as long as the process
         return sum(thread.name != 'hypershell-queue-decref' for thread in threading.enumerate())
 
     baseline = count()

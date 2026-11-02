@@ -280,9 +280,12 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   that would use the last `RESERVE` descriptors below the soft open-file limit (one WARNING per
   interval), so the database and logs keep working; a server TLS context that cannot be built is
   logged once at ERROR and connections fail closed. A queue client's proxy finalizer (its decref)
-  can run on any thread the cyclic GC picks, server threads included, so in a process that serves
-  queues it never connects to them from there: it hands the decref to the `hypershell-queue-decref`
-  thread (`core/queue.py` `_decref`). Elsewhere it is the stock decref.
+  can run on any thread the cyclic GC picks, server threads included. So once `QueueClient.connect`
+  has made a proxy, a decref for an address one of the process's own servers listens on (matched on
+  the full address; a wildcard bind covers every address of the host) goes to the
+  `hypershell-queue-decref` thread, which the process's first server starts (`core/queue.py`
+  `_decref`). A decref for any other address is the stock one, on the finalizing thread. A forked
+  child drops the servers and waiting decrefs it inherits.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
   mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,

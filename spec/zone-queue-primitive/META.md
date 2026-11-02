@@ -108,7 +108,7 @@ is skipped by the parser):
   `pending-external` status in the REVIEW template's matrix that neither approves nor fails the
   clause, and a Step 1 rule that proceeds past a phase carrying the external-wait flag.
 
-## F4 — Research prototypes live in `$TMPDIR` and vanish before the build
+## F4 — Research prototypes live in `$TMPDIR` and vanish before the build · seen again
 `origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
 - **What happened:** The research subagents built working prototypes in `$TMPDIR`: a serve loop, a
   benchmark harness, and a drive with a compare script. The briefs pointed at them. Those paths are
@@ -120,8 +120,13 @@ is skipped by the parser):
   these rules: not collected by pytest, no internal identifiers, kept lean. Tell the briefs to save
   prototypes there, not in `$TMPDIR`.
 - **Confidence:** med · **Effort:** small
+- **Seen again (hs-build:P1-remediation-4, 2026-11-02):** the same loss, from `hs-review`. The
+  cycle-4 triage rules "red-first: the reviewer's reproduction", and the brief pointed at the
+  reviewer's probes in `$TMPDIR`; they were gone when the build started. The red-first tests were
+  rebuilt from REVIEW.md's prose, which was detailed enough this time. `hs-review` Step 2 could keep
+  a CONFIRMED finding's reproduction in the spec (e.g. `spec/{slug}/review/`), under the same rules.
 
-## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again · seen again
+## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again · seen again · seen again
 `origin=hs-build:P5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** P4's and P5's gates (`bench_queue.py … --feature HEAD`) build a venv from the
   committed `HEAD`. hs-build runs the gate in Step 4 and commits in Step 7, so the gate measured the
@@ -204,7 +209,7 @@ is skipped by the parser):
   scenario is graded normally and cross-referenced to the ruling.
 - **Confidence:** med · **Effort:** small
 
-## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again
+## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again
 `origin=hs-build:P1-remediation-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
 - **What happened:** P1's `verify:` and Safety Principles' CLI drive both run
   `.agents/factory/bin/temp_site.sh`, whose cleanup is `trap 'rm -rf "$site"'`. Under a harness

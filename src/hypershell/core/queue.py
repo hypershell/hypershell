@@ -522,10 +522,19 @@ class _InProcessServer(Server):
             self._live.clear()
 
 
-# The port of each in-process queue server of this process, from before it binds until its listener
-# is closed; 0 while a server asking for an ephemeral port binds. Proxy finalizers read it without a
-# lock, so it is changed only by single dictionary operations.
-_serving: Dict[object, int] = {}
+# The address of each in-process queue server's listener in this process, as (IPv4 address, port),
+# from before it binds until it is closed. The port is 0 while a server asking for an ephemeral port
+# binds, and the address is None when its host name did not resolve (either matches more widely, see
+# _served_here). Proxy finalizers read it without a lock, so it is changed only by single dictionary
+# operations.
+_serving: Dict[object, Tuple[Optional[str], int]] = {}
+
+# For each address a queue client has connected to: the IPv4 address it resolved to (None if it did
+# not) and whether that address is one of this host's. Recorded on connect, read by proxy finalizers.
+_dialed: Dict[Tuple[str, int], Tuple[Optional[str], bool]] = {}
+
+# The wildcard bind address, on which a listener answers at every address of this host
+ANY_ADDRESS: Final[str] = '0.0.0.0'
 
 # Decrefs that proxy finalizers hand off, and the one thread that sends them
 _decrefs: SimpleQueue = SimpleQueue()
@@ -533,21 +542,59 @@ _decref_sender: Optional[threading.Thread] = None
 _decref_sender_lock = threading.Lock()
 
 
+def _ipv4(host: str) -> Optional[str]:
+    """The IPv4 address that binding or connecting to `host` uses, or None if it does not resolve."""
+    try:
+        return socket.gethostbyname(host)
+    except (OSError, UnicodeError):
+        return None
+
+
+def _is_own_address(ip: str) -> bool:
+    """Whether `ip` is an address of this host (a socket can bind it); True unless known otherwise."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind((ip, 0))
+    except OSError as error:
+        return error.errno != errno.EADDRNOTAVAIL
+    return True
+
+
+def _note_dialed(address: Tuple[str, int]) -> None:
+    """Record where `address`, which a queue client has just connected to, resolves."""
+    ip = _ipv4(address[0])
+    _dialed[address] = (ip, ip is None or _is_own_address(ip))
+
+
+def _served_here(address: Tuple[str, int]) -> bool:
+    """Whether a connection to `address` may reach a listener of an in-process server of this process.
+
+    It may when it names a listed port (any port while one binds an ephemeral port) at the listener's
+    own address, or at any of this host's addresses when the listener is bound to the wildcard
+    address. An address that did not resolve, or was never recorded, matches on its port alone.
+    """
+    ip, own = _dialed.get(address, (None, True))
+    port = address[1]
+    for host, listening in tuple(_serving.values()):
+        if listening in (port, 0) and (ip is None or host is None or host == ip
+                                       or (own and ANY_ADDRESS in (host, ip))):
+            return True
+    return False
+
+
 def _decref(*args: Any) -> None:
     """Finalizer of a queue client's proxy: the stock decref, unless an in-process server may answer it.
 
     The cyclic garbage collector runs a proxy's finalizer in whichever thread triggers the collection,
     including the threads of an in-process server, and the stock decref connects to the server and
-    waits for its accept loop. So a decref that may reach an in-process server of this process is
-    handed to the decref sender instead: ``SimpleQueue.put`` never blocks and is safe to re-enter.
-    Any other decref is the stock one, in the finalizer's thread.
+    waits for its accept loop. So a decref for an address an in-process server of this process listens
+    on is handed to the decref sender instead: ``SimpleQueue.put`` never blocks and is safe to
+    re-enter. Any other decref is the stock one, in the finalizer's thread.
     """
     address = getattr(args[0], 'address', None) if args else None
-    if isinstance(address, tuple):
-        ports = tuple(_serving.values())
-        if address[1] in ports or 0 in ports:
-            _decrefs.put(args)
-            return
+    if isinstance(address, tuple) and len(address) == 2 and _served_here(address):
+        _decrefs.put(args)
+        return
     BaseProxy._decref(*args)
 
 
@@ -562,12 +609,29 @@ def _send_decrefs() -> None:
 
 
 def _start_decref_sender() -> None:
-    """Start the decref sender, once per process (again in a forked child)."""
+    """Start the decref sender, once per process (again in a forked child that serves queues)."""
     global _decref_sender
     with _decref_sender_lock:
         if _decref_sender is None or not _decref_sender.is_alive():
             _decref_sender = threading.Thread(target=_send_decrefs, daemon=True, name='hypershell-queue-decref')
             _decref_sender.start()
+
+
+def _forget_after_fork() -> None:
+    """In a forked child, drop the parent's servers, waiting decrefs and sender, none of which are its own.
+
+    The parent sends its own decrefs; sending them again from the child would release objects that
+    the parent's clients still hold.
+    """
+    global _decrefs, _decref_sender, _decref_sender_lock
+    _serving.clear()
+    _decrefs = SimpleQueue()
+    _decref_sender = None
+    _decref_sender_lock = threading.Lock()
+
+
+if hasattr(os, 'register_at_fork'):
+    os.register_at_fork(after_in_child=_forget_after_fork)
 
 
 def _defer_decref(proxy: BaseProxy) -> BaseProxy:
@@ -633,7 +697,7 @@ class SecureManager(BaseManager):
 
         Raises:
             QueueServerError: this Python's multiprocessing internals are not supported, or the
-                address cannot be bound and listened on. Nothing is left running.
+                address cannot be bound and listened on. Nothing of the server is left running.
         """
         if self._state.value != State.INITIAL:
             if self._state.value == State.STARTED:
@@ -644,9 +708,11 @@ class SecureManager(BaseManager):
             raise QueueServerError("This Python's multiprocessing internals are not supported: "
                                    + '; '.join(problems))
         host, port = self._address
-        # Listed before the bind, so a proxy finalizer never connects to this server (see _decref)
+        # The sender runs before anything is listed, so a decref handed off for this server is sent.
+        # Listed before the bind, so a proxy finalizer never connects to this server (see _decref).
+        _start_decref_sender()
         key = object()
-        _serving[key] = port
+        _serving[key] = (_ipv4(host), port)
         try:
             server = _InProcessServer(registry, self._address, self._authkey, self._serializer, self._tls)
         except OSError as error:
@@ -655,7 +721,7 @@ class SecureManager(BaseManager):
         except BaseException:
             del _serving[key]
             raise
-        _serving[key] = server.address[1]
+        _serving[key] = server.address
         # Clients cache connections by the address they dial, which may name the host differently
         # (e.g., 'localhost') than the bound address does; both are dropped at shutdown.
         dialed = (host, server.address[1])
@@ -825,15 +891,14 @@ class QueueClient(QueueInterface):
         """Connect to server using unique client ID for token generation.
 
         The proxies' finalizer is :func:`_decref`: in a process that serves queues itself, a decref
-        that may reach its own server is sent by the decref sender, which starts here.
+        for an address one of its own servers listens on is sent by the decref sender.
         """
         self.register('_get_scheduled')
         self.register('_get_completed')
         self.register('_get_heartbeat')
         self.register('_get_confirmed')
         super().connect()
-        if _serving:
-            _start_decref_sender()
+        _note_dialed(self._address)
         self.scheduled = _defer_decref(self._get_scheduled())
         self.completed = _defer_decref(self._get_completed())
         self.heartbeat = _defer_decref(self._get_heartbeat())

@@ -224,6 +224,37 @@ cheap now; the mechanism is reworked by the turso rotation work anyway.
 *Horizon: mid-term, low priority · Depends on: — · Refs: turso R8–R11*
 **Seed:** [`issues/rotatedb-lost-update-window.md`](issues/rotatedb-lost-update-window.md)
 
+## A queue proxy keeps the stock decref finalizer until its constructor returns
+
+In a process that serves queues in-process, a queue client's proxy gets the decref hand-off only
+after the stock proxy constructor returns. If a connection inside that constructor fails while the
+server is alive, the half-made proxy keeps the stock finalizer, and a collection on the server's
+accept loop can then stall it. Seen only with an injected failure; the window predates the hand-off.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, P4)*
+**Seed:** [`issues/queue-proxy-finalizer-swap-window.md`](issues/queue-proxy-finalizer-swap-window.md)
+
+## Handed-off decrefs can outlive their server and reach a same-port successor
+
+A same-process decref waits for the one sender thread, which under churn falls behind, so it can
+reach a successor server on the same port instead of its own and release a live client's queue.
+Seen statistically under same-port restart stress in one process; no CLI path restarts that way.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, P5); the same-port restart entry below*
+**Seed:** [`issues/queue-decref-handoff-delay.md`](issues/queue-decref-handoff-delay.md)
+
+## A same-key, same-port restart in one process receives the old server's decrefs
+
+A dropped client of a stopped in-process server, collected after a same-key successor starts on
+the same port, sends its decrefs to the successor, which can release a queue a live client holds.
+It came with the in-process server's same-port restart; no CLI path uses the same key and port.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
+**Seed:** [`issues/queue-stale-decref-same-port-restart.md`](issues/queue-stale-decref-same-port-restart.md)
+
 ## Merged output is interleave-corruptible
 
 Concurrent executors write to one shared file description with no line discipline, so long lines

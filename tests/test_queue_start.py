@@ -115,14 +115,18 @@ def test_server_start_leaves_process_tls_config(tls_materials) -> None:
 @mark.unit
 def test_busy_port_raises_from_start(tls: Optional[TLSConfig], busy_port: int) -> None:
     """A bind failure reaches the caller of ``start()`` naming the address and the system error."""
-    threads = threading.active_count()
+    def count() -> int:
+        # The decref sender, which the first server of a process starts, lives as long as the process
+        return sum(thread.name != 'hypershell-queue-decref' for thread in threading.enumerate())
+
+    threads = count()
     server = QueueServer(make_config(port=busy_port, tls=tls))
     with raises(RuntimeError) as info:
         server.start()
     assert f'127.0.0.1:{busy_port}' in str(info.value)
     assert os.strerror(errno.EADDRINUSE) in str(info.value)
     assert not server.ready
-    assert threading.active_count() == threads
+    assert count() == threads
 
 
 @mark.unit
