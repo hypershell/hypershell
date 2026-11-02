@@ -140,14 +140,21 @@ server recognises that is `hs-plan`'s to design. It SHALL NOT depend on the retu
 - **Q:** Does this subsume `late-result-resets-retried`? — **A:** Yes. R6 carries its test and its
   two outcomes, and the seed is marked `adopted:writeback-scoped-conditional`. The other seeds
   deferred by `group-advance-retry-gate` (#68) stay out; see Non-goals (shaping, 2026-11-02).
-- [NEEDS CLARIFICATION: how should refused writes be surfaced? (a) a per-task warning log only, as
-  R2 states now; (b) (a) plus a count in the server's shutdown log; (c) a persisted or queryable
-  counter. Recommendation: (a). The seed's "counted" has no existing surface to land on, and adding
-  one grows the appetite.]
-- [NEEDS CLARIFICATION: when a reverted row has not yet been rescheduled, should its late
-  result be refused, as R2 and Non-goals state now, or applied to save a re-run? Recommendation:
-  refuse. Applying it races the scheduler, and keeping it is the waste-recovery half that belongs
-  with the fencing issue.]
+- **Q:** How are refused writes surfaced? — **A:** A per-task WARNING log only, as R2 states. No
+  persisted counter and no shutdown summary in this cycle. If build shows a count is cheap, it
+  becomes a follow-up seed, not scope here (foreman, as judge under the maintainer's delegation,
+  2026-11-02).
+- **Q:** If a reverted row has not been rescheduled yet, is its late result refused or applied? —
+  **A:** Refused, as R2 and Non-goals state. Recovering that work belongs with the
+  fencing/resilience issue (foreman, as judge under the maintainer's delegation, 2026-11-02).
+- **Q:** Is R10's edit to `AGENTS.md` within the spirit rules? — **A:** Yes. It removes an item from
+  the "unguarded" list, so it documents a guarantee that gets stronger, and it changes no predicate
+  and relaxes nothing. The edit stays exactly that, in `AGENTS.md` and `invariants.md`, in one
+  commit during build. The foreman surfaces it to the maintainer (foreman, as judge under the
+  maintainer's delegation, 2026-11-02).
+- **Q:** Should `issues/relay.md` be amended in this cycle? — **A:** No, leave it untouched. The
+  foreman carries the return-path note to relay's shaping (foreman, as judge under the
+  maintainer's delegation, 2026-11-02).
 
 ## Related materials
 
