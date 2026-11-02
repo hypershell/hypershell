@@ -247,10 +247,12 @@ class InitDBApp(Application):
             if self.confirm_action(f'Backup {DATABASE_INFO} into \'{self.backup_path}\''):
                 vacuumdb(self.backup_path)
         elif self.rotate_mode:
+            checkdb()
             part_id, part_path = next_rotate_path()
             if self.confirm_action(f'Rotate {DATABASE_INFO} to \'{part_path}\''):
                 rotatedb()
         elif self.truncate_mode:
+            checkdb()
             if self.confirm_action(f'Truncate {DATABASE_INFO}: {Task.count()} tasks'):
                 truncatedb()
         else:

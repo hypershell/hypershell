@@ -28,10 +28,6 @@ from cmdkit.app import exit_status
 from tests import (main, main_lines, NO_OUTPUT, FIXTURE_283, ORIGINAL_TASK_COLUMNS, copy_fixture,
                    make_half_upgraded, snapshot, task_columns, sqlite_schema)
 
-
-# The initdb side paths and the partition view do not handle 2.8 databases yet.
-RED = mark.xfail(strict=True, raises=AssertionError, reason='side paths do not handle 2.8 databases yet')
-
 FAIL_ARGS = "sh -c 'exit 3'"
 NEW_TASK_COLUMNS = ('source', 'fingerprint', 'part')
 NEW_INDEXES = ('index_tasks_source', 'index_tasks_previous_id', 'index_tasks_next_id', 'index_source_lookup')
@@ -264,7 +260,6 @@ def test_sqlite_keeps_chain_constraints(legacy_db: Path) -> None:
     assert 'UNIQUE (next_id)' in task_sql
 
 
-@RED
 @mark.integration
 def test_initdb_truncate(legacy_db: Path) -> None:
     """`hs initdb --truncate` works on a 2.8 database and leaves a fresh schema."""
@@ -276,7 +271,6 @@ def test_initdb_truncate(legacy_db: Path) -> None:
     assert 'UNIQUE' not in task_sql
 
 
-@RED
 @mark.integration
 def test_initdb_rotate(temp_site: Path, legacy_db: Path) -> None:
     """`hs initdb --rotate` works on a 2.8 database; completed rows move to the partition."""
@@ -289,7 +283,6 @@ def test_initdb_rotate(temp_site: Path, legacy_db: Path) -> None:
     assert sorted(main_lines(['hs', 'list', 'args', '--part', '0'])[1]) == ['echo pending-0', 'echo pending-1']
 
 
-@RED
 @mark.integration
 def test_partition_from_283(temp_site: Path) -> None:
     """A 2.8.3 partition lists beside an upgraded main database, columns aligned, and is never written."""
@@ -307,7 +300,6 @@ def test_partition_from_283(temp_site: Path) -> None:
     assert part.read_bytes() == FIXTURE_283.read_bytes()
 
 
-@RED
 @mark.integration
 def test_partition_column_order(temp_site: Path) -> None:
     """A freshly created partition and an upgraded main database (columns in another order) align by name."""

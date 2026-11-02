@@ -6,8 +6,8 @@ appetite: small
 status: in_progress
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: P4
-last_updated: '2026-11-01'
+current_phase: P5
+last_updated: '2026-11-02'
 phases:
 - id: P1
   name: 'Red: real-2.8.3 fixture, generator, and failing CLI tests (tests only)'
@@ -63,7 +63,7 @@ phases:
     && uv run pytest
 - id: P4
   name: 'Side paths: hs initdb --truncate/--rotate and the rotated-partition view'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R9
@@ -324,16 +324,16 @@ comes in P6.
 **Goal:** the two `hs initdb` branches that query `Task` before any helper, and the partition view,
 work on upgraded databases.
 
-- [ ] In `src/hypershell/data/__init__.py`, `InitDBApp.run` calls `checkdb()` at the top of the
+- [x] In `src/hypershell/data/__init__.py`, `InitDBApp.run` calls `checkdb()` at the top of the
   `--truncate` and `--rotate` branches. `--vacuum` and `--backup` are unchanged.
-- [ ] In `src/hypershell/task.py`, `auto_union_sqlite` builds the temp view with an explicit
+- [x] In `src/hypershell/task.py`, `auto_union_sqlite` builds the temp view with an explicit
   column list from `Task.__table__.columns`, in model order:
   - `main.task` selects them by name.
   - For each attached `part_N`, it reads `PRAGMA part_N.table_info(task)` and selects `NULL AS
     <col>` for each missing column, or `0 AS part` for `part`.
   - Identifiers are quoted with the dialect preparer, because `group` is a keyword.
   - Partition files are never written.
-- [ ] Remove the remaining `xfail` markers in `tests/test_upgrade_cli.py`.
+- [x] Remove the remaining `xfail` markers in `tests/test_upgrade_cli.py`.
 - **Verify:** no `xfail` left in `tests/test_upgrade_cli.py`, and the full suite is green.
 - **Touches:** `src/hypershell/data/__init__.py`, `src/hypershell/task.py`,
   `tests/test_upgrade_cli.py`.
