@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-01'
 phases:
 - id: P1
@@ -23,7 +23,7 @@ phases:
     && uv run pytest -rxX tests/test_upgrade_cli.py
 - id: P2
   name: 'The upgrade step: model diff, refusal, locked apply, wired into initdb/checkdb'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -219,10 +219,10 @@ the base `6c164d9` because the build cannot open it. No `src/` change.
 lock-serialized connection. A current schema is a silent, lock-free no-op, and unsafe columns are
 refused before any DDL.
 
-- [ ] Add `SchemaUpgradeError` to `src/hypershell/core/exceptions.py` and map it in
+- [x] Add `SchemaUpgradeError` to `src/hypershell/core/exceptions.py` and map it in
   `get_shared_exception_mapping` to `exit_status.runtime_error`, placed before the `Exception`
   catch-all.
-- [ ] Create `src/hypershell/data/upgrade.py` (PLAN §2.1):
+- [x] Create `src/hypershell/data/upgrade.py` (PLAN §2.1):
   - **`_plan(conn, metadata)`:** a fresh `inspect(conn)` per call, honouring `table.schema`. It
     plans missing tables (`CreateTable(if_not_exists=True)` plus their indexes), missing columns
     (`ALTER TABLE {format_table} ADD COLUMN {CreateColumn}`), PostgreSQL-only
@@ -247,17 +247,17 @@ refused before any DDL.
        `ProgrammingError` in `SchemaUpgradeError`, with actionable text.
   - **Logging:** INFO per executed step, naming the table, when `task` existed before the step.
     `trace` otherwise.
-- [ ] Change `src/hypershell/data/model.py`. Declarations only; no retry-gating method changes:
+- [x] Change `src/hypershell/data/model.py`. Declarations only; no retry-gating method changes:
   - `previous_id` / `next_id` lose `unique=True`. A declarative comment above them gives the
     hypertable and one-schema rationale, and says that the Scheduler's `retried` filter, not the
     schema, keeps one retry per row.
   - Add `index_tasks_previous_id` and `index_tasks_next_id` beside the other `index_tasks_*`.
   - `part` gains `server_default=text('0')` and keeps `default=0`.
-- [ ] Change `src/hypershell/data/__init__.py`:
+- [x] Change `src/hypershell/data/__init__.py`:
   - `upgradedb()` (exported) calls `upgrade_schema(engine)`.
   - `initdb()` calls `upgradedb()` in place of `create_all`, keeping `PRAGMA optimize` afterwards.
   - `checkdb()` keeps its `has_table('task', schema=schema)` refusal, then calls `upgradedb()`.
-- [ ] Add `tests/test_data/test_upgrade.py` (`@mark.unit`, per-test engines on fixture copies,
+- [x] Add `tests/test_data/test_upgrade.py` (`@mark.unit`, per-test engines on fixture copies,
   PLAN §2.6):
   - the R3 race, its mutation check and the no-op spy (no lock, no DDL events);
   - R4: generic add through a copied `MetaData`, each refusal rule with a byte-identical
@@ -266,7 +266,7 @@ refused before any DDL.
   - the ordering guard: a repeat `checkdb()` with a dirty `Session` does not wait;
   - SQLite atomicity: a forced mid-step failure leaves the schema unchanged;
   - the opt-in `HS_TEST_REGEN_FIXTURE` provenance check.
-- [ ] In `tests/test_upgrade_cli.py`, remove `xfail` from every test **except** the
+- [x] In `tests/test_upgrade_cli.py`, remove `xfail` from every test **except** the
   `--truncate`/`--rotate` and partition tests. Those stay red until P4.
 - **Verify:** the full suite (`uv run pytest -rxX`, where only the P4 tests remain XFAIL), then the
   throwaway-site drive: fixture copy, `hs submit`, `hsx --restart -r 2`, 9 rows, 0 remaining.

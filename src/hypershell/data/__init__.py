@@ -29,10 +29,11 @@ from hypershell.core.exceptions import handle_exception, DatabaseUninitialized, 
 from hypershell.core.pretty_print import format_bytes
 from hypershell.data.core import Session, engine, in_memory, schema, providers
 from hypershell.data.model import Entity, Task
+from hypershell.data.upgrade import upgrade_schema
 
 # Public interface
 __all__ = [
-    'initdb', 'truncatedb', 'checkdb', 'ensuredb', 'vacuumdb', 'rotatedb',
+    'initdb', 'upgradedb', 'truncatedb', 'checkdb', 'ensuredb', 'vacuumdb', 'rotatedb',
     'DATABASE_ENABLED', 'DATABASE_PROVIDER', 'DATABASE_DIALECT',
     'InitDBApp',
 ]
@@ -60,9 +61,17 @@ DATABASE_INFO: Final[str] = f'{config.database.provider} ({DATABASE_SITE})'
 """Concise connection info for database."""
 
 
+def upgradedb() -> list[str]:
+    """
+    Bring the database schema current in place: create missing tables, columns, and indexes.
+    Returns the changes made (empty if the schema was already current).
+    """
+    return upgrade_schema(engine)
+
+
 def initdb(optimize: bool = False) -> None:
-    """Initialize database tables."""
-    Entity.metadata.create_all(engine)
+    """Initialize database tables, or upgrade existing ones in place."""
+    upgradedb()
     if optimize and DATABASE_DIALECT == 'sqlite':
         log.info(f'Optimizing database {DATABASE_SITE}')
         Session.execute(text('PRAGMA optimize'))
@@ -80,9 +89,10 @@ def truncatedb() -> None:
 
 
 def checkdb() -> None:
-    """Ensure database connection and tables exist."""
+    """Ensure database connection and tables exist, and upgrade the schema in place if needed."""
     if not inspect(engine).has_table('task', schema=schema):
         raise DatabaseUninitialized('Use \'initdb\' to initialize the database')
+    upgradedb()
 
 
 def ensuredb(auto_init: bool = False) -> None:

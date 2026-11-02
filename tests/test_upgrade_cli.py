@@ -29,8 +29,8 @@ from tests import (main, main_lines, NO_OUTPUT, FIXTURE_283, ORIGINAL_TASK_COLUM
                    make_half_upgraded, snapshot, task_columns, sqlite_schema)
 
 
-# The upgrade does not exist yet; each test must fail on an assertion until it does.
-RED = mark.xfail(strict=True, raises=AssertionError, reason='2.8 databases are not upgraded in place yet')
+# The initdb side paths and the partition view do not handle 2.8 databases yet.
+RED = mark.xfail(strict=True, raises=AssertionError, reason='side paths do not handle 2.8 databases yet')
 
 FAIL_ARGS = "sh -c 'exit 3'"
 NEW_TASK_COLUMNS = ('source', 'fingerprint', 'part')
@@ -72,7 +72,6 @@ def upgrade_lines(stderr: List[str]) -> List[str]:
     return [line for line in stderr if UPGRADE_LINE.match(line)]
 
 
-@RED
 @mark.integration
 def test_end_to_end(temp_site: Path) -> None:
     """A 2.8.3 database takes new tasks, completes pending ones with a retry, and lists them all."""
@@ -134,7 +133,6 @@ R1_COMMANDS: Dict[str, Tuple[List[str], str]] = {
 }
 
 
-@RED
 @mark.integration
 @mark.parametrize('command', list(R1_COMMANDS))
 def test_first_command(legacy_db: Path, command: str) -> None:
@@ -161,7 +159,6 @@ def wait_for_port(port: int, server: Popen, timeout: float = 30) -> None:
     pytest.fail(f'server did not listen on port {port} within {timeout}s')
 
 
-@RED
 @mark.integration
 def test_first_command_server(legacy_db: Path) -> None:
     """A standalone server opens the database, completes pending tasks, and retries the failure."""
@@ -190,7 +187,6 @@ def test_first_command_server(legacy_db: Path) -> None:
     assert main_lines(['hs', 'list', '--remaining', '--count'])[:2] == (exit_status.success, ['0'])
 
 
-@RED
 @mark.integration
 def test_rows_preserved(legacy_db: Path) -> None:
     """The upgrade keeps every row as stored; new columns read NULL, NULL, and 0."""
@@ -205,7 +201,6 @@ def test_rows_preserved(legacy_db: Path) -> None:
     assert values == [(None, None, 0)] * 7
 
 
-@RED
 @mark.integration
 def test_upgrade_logged_once(request, legacy_db: Path) -> None:
     """The first command logs each change at INFO naming the table; the second is silent and changes nothing."""
@@ -223,7 +218,6 @@ def test_upgrade_logged_once(request, legacy_db: Path) -> None:
     assert sqlite_schema(legacy_db) == schema
 
 
-@RED
 @mark.integration
 @mark.parametrize('journal', ['delete', 'wal'])
 def test_concurrent_first_use(temp_site: Path, journal: str) -> None:
@@ -261,7 +255,6 @@ def test_concurrent_first_use(temp_site: Path, journal: str) -> None:
     assert_schema_current(path)
 
 
-@RED
 @mark.integration
 def test_sqlite_keeps_chain_constraints(legacy_db: Path) -> None:
     """The upgrade leaves the SQLite retry-chain UNIQUE constraints in place (no table rebuild)."""

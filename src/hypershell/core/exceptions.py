@@ -28,7 +28,7 @@ from hypershell.core.platform import default_path
 # Public interface
 __all__ = ['display_warning', 'display_error', 'display_critical', 'traceback_filepath', 'write_traceback',
            'handle_exception', 'handle_exception_silently', 'handle_disconnect', 'handle_address_unknown',
-           'handle_broken_pipe', 'HostAddressInfo', 'DatabaseUninitialized',
+           'handle_broken_pipe', 'HostAddressInfo', 'DatabaseUninitialized', 'SchemaUpgradeError',
            'get_shared_exception_mapping', ]
 
 
@@ -57,6 +57,10 @@ class HostAddressInfo(Exception):
 
 class DatabaseUninitialized(Exception):
     """The database needs to be initialized before operations."""
+
+
+class SchemaUpgradeError(Exception):
+    """The database schema could not be brought up to date; it was left unchanged."""
 
 
 def traceback_filepath(path: Namespace = None) -> str:
@@ -134,5 +138,6 @@ def get_shared_exception_mapping(modname: str = 'hypershell') -> Dict[Type[Excep
         FileNotFoundError: functools.partial(handle_exception, logger=logger, status=exit_status.runtime_error),
         ConfigurationError: functools.partial(handle_exception, logger=logger, status=exit_status.bad_config),
         DatabaseUninitialized: functools.partial(handle_exception, logger=logger, status=exit_status.runtime_error),
+        SchemaUpgradeError: functools.partial(handle_exception, logger=logger, status=exit_status.runtime_error),
         Exception: functools.partial(write_traceback, logger=logger, status=exit_status.runtime_error),
     }
