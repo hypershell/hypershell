@@ -291,8 +291,8 @@ by a module constant for this test.
   - The upgrade only adds; it never drops or rewrites data. The one removal is the PostgreSQL
     retry-chain constraints.
   - PostgreSQL holds a brief exclusive lock while it adds columns and builds indexes.
-  - Pre-2.9 SQLite databases keep the `previous_id`/`next_id` `UNIQUE` constraints. The exact
-    wording waits on §5 Q1.
+  - Pre-2.9 SQLite databases keep the `previous_id`/`next_id` `UNIQUE` constraints, with "no effect
+    on behaviour in normal operation" and a pointer to R8's unguarded cases (§5 Q1, ruled).
 - **Help text.** `INITDB_HELP` and the `InitDBApp` docstring get one line on upgrade on first
   use. The help includes regenerate in the same commit: `docs/_include/initdb_*.rst` and
   `share/man/man1/{hs,hsx,hyper-shell}.1` (§12). No flags change, so the completions are
@@ -337,7 +337,7 @@ the sibling's wording.
 | R4 | `CreateColumn`-driven `ADD COLUMN` with no per-column code. Six refusal rules checked at plan time, before any statement. `SchemaUpgradeError` → one-line CRITICAL, `runtime_error`. Atomic rollback on both dialects. |
 | R5 | `unique=True` removed. `index_tasks_previous_id` / `index_tasks_next_id` added. The model comment records the rationale. Fresh-database tests on both dialects. |
 | R6 | PostgreSQL-only reflected drop of `RETIRED_UNIQUE` constraints, then the generic index diff creates the R5 indexes. Idempotent through the no-op path. PostgreSQL CI test. |
-| R7 | The dialect skip: SQLite constraints are never touched and no table is rebuilt. The R9 retry runs with them in place. Docs paragraph (§2.7, wording pending §5 Q1). |
+| R7 | The dialect skip: SQLite constraints are never touched and no table is rebuilt. The R9 retry runs with them in place. Docs paragraph (§2.7, wording per the §5 Q1 ruling). |
 | R8 | The amended text in `AGENTS.md` (×2) and `invariants.md` §3, stating the real guard and naming the three unguarded configurations (§2.7). |
 | R9 | The committed real-2.8.3 SQLite fixture with provenance and an opt-in regeneration check. The CLI end-to-end test. The PostgreSQL CI job builds `hs283` from real 2.8.3 and reruns it. The existing suite and the docs build are in every phase's verify. |
 
@@ -406,15 +406,16 @@ None of these rows changes what an R-ID SHALL do.
 
 ## 5. Risks & open questions
 
-- **Q1 — R7's wording.** [NEEDS CLARIFICATION: R7 says retries on a pre-2.9 SQLite database
-  work "exactly as on a fresh one", and the docs must say the kept constraints have "no effect on
-  behaviour". Both hold in normal single-server operation. In the three unguarded cases of R8 (a
-  kill between commits, a reset `retried`, two servers), an old SQLite database raises
-  `IntegrityError` and kills the Scheduler, while a fresh one silently adds a second retry
-  ([06](research/06-retry-guard.md#unguarded-configurations)). May the docs and R7 read "no effect
-  on behaviour in normal operation", with the abnormal-case difference stated in the R8 invariant?
-  Until answered, P5 writes the docs sentence that way and flags it. No code depends on the
-  answer.]
+- **Q1 — R7's wording.** R7 says retries on a pre-2.9 SQLite database work "exactly as on a
+  fresh one", and the docs must say the kept constraints have "no effect on behaviour". Both hold
+  in normal single-server operation. In the three unguarded cases of R8 (a kill between commits, a
+  reset `retried`, two servers), an old SQLite database raises `IntegrityError` and kills the
+  Scheduler, while a fresh one silently adds a second retry
+  ([06](research/06-retry-guard.md#unguarded-configurations)). The question was whether the docs
+  and R7 may read "no effect on behaviour in normal operation", with the abnormal-case difference
+  stated in the R8 invariant. No code depends on the answer.
+  - 2026-11-01: foreman ruling (judge under the maintainer's SC26 mandate): 'in normal operation'
+    wording accepted; unguarded cases per R8.
 - **External waits.**
   - PostgreSQL evidence exists only once the `postgres` job runs on a pushed branch (P6).
   - The R8 text names `Task.query_retryable`, which exists only after `group-advance-retry-gate`
