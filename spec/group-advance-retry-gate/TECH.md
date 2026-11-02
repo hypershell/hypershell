@@ -3,7 +3,7 @@ slug: group-advance-retry-gate
 title: Don't advance a task group past a pending retry
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/group-advance-retry-gate
 base: develop
 current_phase: done
