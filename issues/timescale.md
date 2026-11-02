@@ -313,7 +313,8 @@ Non-goals).
 
 - Dependency: soft — `turso` R4's per-provider consolidation in `data/core.py` is the
   intended seam for this provider's connect/init policy; whichever GOAL builds second conforms
-  to the abstraction. R1 here is provider-independent and can land any time.
+  to the abstraction. R1 here was discharged by `schema-upgrade-step`
+  (`spec/schema-upgrade-step/`); the remaining work starts at R2.
 - Origin: `.local/timescale-ideas-transcript.txt` (2026-08 voice notes: the feature, the docs,
   the SC26 blog/demo ambitions — the latter two-thirds live in `../hypershell.org/`).
 - Prior art: the `uuid7`-gating provider aliases and their guard (this repo, `data/core.py`);

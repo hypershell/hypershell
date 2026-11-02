@@ -79,7 +79,7 @@ Top-level package `src/hypershell/`:
 | `client.py` | `ClientThread`, `ClientScheduler` + `TaskExecutor` FSMs — pull bundles, run subprocesses, emit heartbeats, return results. |
 | `task.py` | The `task` CLI group and top-level `submit`/`info`/`wait`/`run`/`list`/`search`/`update` apps, incl. exit-status-colorized `hs list`. |
 | `core/` | Shared infrastructure (see below). |
-| `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection, `InitDBApp` (`hs initdb`). |
+| `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection. `InitDBApp` (`hs initdb`) and the `initdb`/`checkdb`/`ensuredb` helpers live in `data/__init__.py`; the schema-upgrade step in `data/upgrade.py`. |
 | `data/model.py` | `Entity` base + `Task`, `Client`, and `Source` ORM models (`Source` records submission provenance for re-submission gating; `DIRECT_SOURCE_ID`/`STDIN_SOURCE_ID` are reserved source ids). **Most query/state logic lives as `Task` classmethods here.** |
 | `cluster/` | `__init__.py` (`ClusterApp`/`hsx`), `local.py` (`LocalCluster`), `remote.py` (`RemoteCluster`, `AutoScalingCluster`), `ssh.py` (`SSHCluster`). |
 
@@ -198,12 +198,26 @@ next server start.
 **New internal "never ran" sentinels go below `-1000`. Never use `-1..-64`** (reserved for
 signal deaths).
 
-**Retry model:** retries are **new rows** (`attempt+1`, `previous_id`/`next_id` UNIQUE chain,
-old row `retried=True`) — never mutate a row in place to retry. `attempts == max_retries + 1`
-and this relationship spans `server.py`, `Task.query_retryable`/`select_failed`/`count_retryable`,
-and `Task.increment_group` — change them together. **Every failure/retry/count-as-failed query
-MUST filter `exit_status != 0 AND exit_status != CANCEL_STATUS`**, or cancelled tasks get
-resurrected.
+**Retry model:** retries are **new rows** (`attempt+1`; the new row's `previous_id` names the
+old row, which gets `retried=True` and `next_id`) — never mutate a row in place to retry.
+`attempts == max_retries + 1` and this relationship spans `server.py`,
+`Task.query_retryable`/`select_failed`/`count_retryable`, and `Task.increment_group` — change them
+together. **Every failure/retry/count-as-failed query MUST filter `exit_status != 0 AND
+exit_status != CANCEL_STATUS`**, or cancelled tasks get resurrected.
+
+Nothing in the schema prevents a doubled retry. A failed row is retried once because the
+server's single Scheduler thread is the only caller of `Task.next`, and `Task.query_retryable`
+(under `select_failed`) skips rows already marked `retried`. **Unguarded**, each adding a second
+retry row with the same `previous_id`:
+- two servers on one database, which is unsupported: no query takes row locks, so new tasks
+  double-schedule too;
+- a process killed between the retry insert and the `retried` mark, which are separate commits;
+- a reset `retried` flag, from a late full-row writeback by an evicted client or from
+  `hs task update`.
+
+Pre-2.9 SQLite databases keep `UNIQUE` on both columns, because SQLite cannot drop them without a
+table rebuild. Normal operation never trips them; in the three cases above they raise
+`IntegrityError` instead.
 
 **Group-gating can stall by design:** `increment_group` won't advance while the current group
 has incomplete tasks or failures still awaiting retry, so one permanently-failing task halts the
@@ -320,6 +334,14 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   (`next`, `select_failed`, `increment_group`, `revert_orphaned`, `revert_interrupted`,
   `cancel_all`, …), not scattered into the FSM driver files. Adding a column means touching
   the model, the relevant queries, and any dialect-variant type handling.
+- **The schema-upgrade step** (`upgradedb()` → `data/upgrade.py`) runs from `initdb` (every SQLite
+  start, `--initdb`, `hs initdb`) and `checkdb` (every PostgreSQL start), and brings an existing
+  database up to the model in place. It only adds missing tables, columns and indexes — the one
+  removal is the retired `previous_id`/`next_id` `UNIQUE` constraints, on PostgreSQL only — and logs
+  each change at INFO (the no-op path at `trace`). A new column must be nullable or carry a
+  constant `server_default`, and a new index must not be `UNIQUE`, or the step refuses to upgrade
+  an existing table (`SchemaUpgradeError`). Python API callers bypass the CLI helpers and must
+  call `ensuredb()` first.
 
 ## Testing
 
@@ -360,7 +382,9 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
 ## High-risk files & footguns (quick reference)
 
 - **`data/model.py`** — highest blast radius. A dropped `CANCEL_STATUS` filter or a missing
-  `completion_time` silently double-runs or resurrects tasks; `previous_id`/`next_id` are UNIQUE.
+  `completion_time` silently double-runs or resurrects tasks; one retry per failed row rests on
+  the single Scheduler plus the `retried` filter, not on the schema (`previous_id`/`next_id` are
+  not unique, except in pre-2.9 SQLite databases).
 - **`server.py`** — Scheduler FSM, HeartMonitor (Issue-#29 re-registration branch, `evict_after≥10`),
   and shutdown/sentinel ordering.
 - **`client.py`** — FSMs, process-global resource counters under `executor_lock`, sticky

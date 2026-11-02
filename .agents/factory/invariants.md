@@ -49,12 +49,21 @@ subsystems.
 
 ## 3. Retry model
 
-- Retries are **new rows** (`attempt+1`, `previous_id`/`next_id` **UNIQUE** chain, old row
-  `retried=True`) — never mutate a row in place to retry.
-- `attempts == max_retries + 1`; this relationship spans `server.py`, `Task.select_failed`, and
-  `Task.increment_group` — change them together.
-- Group-gating can stall **by design** (a permanently-failing task halts the group); don't "fix" it
-  without understanding it.
+- Retries are **new rows** (`attempt+1`, new row's `previous_id` → old row, old row
+  `retried=True` and `next_id` → new row) — never mutate a row in place to retry.
+- One retry per failed row is held by the single Scheduler thread (sole `Task.next` caller) and
+  `Task.query_retryable`'s `retried IS FALSE` (under `select_failed`), **not** by the schema.
+  Unguarded, each yielding a second retry with the same `previous_id`: two servers on one database
+  (unsupported, no row locks, so new tasks double-schedule too); a kill between the retry insert
+  and the `retried` mark (two commits); a reset `retried` (late full-row writeback by an evicted
+  client, `hs task update`). Pre-2.9 SQLite DBs keep the `UNIQUE` constraints (forward-only, no
+  table rebuild): never tripped in normal operation, an `IntegrityError` in those cases.
+- `attempts == max_retries + 1`; this relationship spans `server.py`,
+  `Task.query_retryable`/`select_failed`/`count_retryable`, and `Task.increment_group` — change
+  them together. Every one of those queries keeps the `CANCEL_STATUS` filter (§2).
+- Group-gating can stall **by design**: `increment_group` won't advance while the group has
+  incomplete tasks or failures still awaiting retry, so a permanently-failing task halts the group
+  (and, in non-`forever` mode, the server); don't "fix" it without understanding it.
 
 ## 4. Server modes — guard before assuming DB behavior
 

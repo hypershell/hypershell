@@ -37,6 +37,51 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest -v
 
+  # Upgrades PostgreSQL databases that released hypershell versions created (2.8.3, and the
+  # half-upgraded state 2.9.0a1 leaves) in place. The PostgreSQL tests skip without
+  # HS_TEST_POSTGRES and fail if a listed template is missing, so a green run here means every
+  # one of them ran.
+  postgres:
+    name: PostgreSQL (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: pg13, image: 'postgres:13' }   # oldest supported server
+          - { name: pg18, image: 'postgres:18' }   # current release
+          # - { name: timescale, image: 'timescale/timescaledb:<version>-pg17' }
+    services:
+      postgres:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: [ '5432:5432' ]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      HS_TEST_POSTGRES: postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+      HS_TEST_POSTGRES_TEMPLATES: hs283,hs290a1
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Build template databases with hypershell 2.8.3 and 2.9.0a1
+        run: bash tests/fixtures/make-legacy-postgres.sh
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+
+      - name: Run PostgreSQL tests
+        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py
+
   # Guards zero-conflict installability: a full install of the default extras must succeed using
   # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g., greenlet, pyyaml) that
   # would force a source build on a minimal host like Rocky 8 — failures a local macOS build masks.
