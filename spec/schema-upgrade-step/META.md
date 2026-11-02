@@ -53,3 +53,10 @@ is skipped by the parser):
 - **Skill cause:** The `status:` vocabulary and the Step 4 promotion rules have no partial state and no instruction for marking a carved-out R-ID on the seed, or for deferring that marking to `/hs-roadmap`.
 - **Recommended fix:** Add a "carving a requirement" paragraph: record the discharge in the receiving GOAL, and either annotate the seed's R-ID (`*(carved into {slug})*`) in the same commit or explicitly leave it to `/hs-roadmap`. Teach `/hs-roadmap` to find and retire carved R-IDs when the receiving cycle lands.
 - **Confidence:** med · **Effort:** small
+
+## F3 — No way to express an external wait (CI evidence, a sibling cycle landing) in a TECH phase
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** Two phases in this plan depend on things `hs-build` cannot produce. One is PostgreSQL evidence that exists only after the branch is pushed and CI runs. The other is a sibling cycle (`group-advance-retry-gate`) that must land on `develop` before the R8 text can name its code. The plan improvised: it splits one piece of work into P3 (author, run A) and P6 (read CI, run B), and puts a `grep` precondition at the head of P5's `verify:`.
+- **Skill cause:** Step 6 and the TECH template define `depends_on` only between phases of the same FSM. They have no field or convention for a precondition outside the FSM, so `next_phase.py` reports P6 as actionable even though nothing local can make it pass. Neither the methodology nor the template mentions the run-A/run-B split.
+- **Recommended fix:** Add an optional phase field, e.g. `waits_on: "ci:<workflow>@HEAD" | "landed:<slug>"`. `next_phase.py` would report such a phase as `waiting`, not actionable, until the condition is checkable. Document the run-A/run-B split for CI-evidence phases in Step 6.
+- **Confidence:** med · **Effort:** medium
