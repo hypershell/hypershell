@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -26,7 +26,7 @@ phases:
     {}' -N4 --no-tls && uv run hs list --count"
 - id: P2
   name: Swap the four queues to queue.Queue with a pinned method surface
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -36,7 +36,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -v tests/test_queue.py tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh
     sh -c "seq 200 | uv run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo
     {}' -N4 --no-tls && uv run hs list --count"
@@ -229,7 +229,7 @@ stdio. This is the core, small and novel slice: everything else builds on it.
 **Goal:** the managed queues become threading `queue.Queue`s with today's bounds. There is no pipe
 and no feeder thread. The remote method surface is identical on 3.11–3.14.
 
-- [ ] **Red first:** add these tests to `tests/test_queue.py` and run them on P1.
+- [x] **Red first:** add these tests to `tests/test_queue.py` and run them on P1.
   - The four attributes are `queue.Queue`, with `maxsize == config.size` (`scheduled`, `completed`)
     and `0` (`heartbeat`, `confirmed`).
   - The proxy's `_exposed_` is exactly the nine common methods; `shutdown` is absent on 3.13+.
@@ -238,14 +238,16 @@ and no feeder thread. The remote method surface is identical on 3.11–3.14.
   - `join()` returns once every item is `task_done`.
   - A round trip in both directions on all four queues, TLS on and off: server-thread put to client
     get, and client put to server-thread get.
-- [ ] Add `QUEUE_EXPOSED` (the nine) to the registry entries. In `QueueServer.start`, create
+- [x] Add `QUEUE_EXPOSED` (the nine) to the registry entries. In `QueueServer.start`, create
       `queue.Queue`s and drop the `multiprocessing.JoinableQueue` import. Retype the `_get_*`
       methods and the `QueueInterface`/`QueueClient` annotations.
-- [ ] Update `AGENTS.md`. In § Architecture & data flow, "four `JoinableQueue`s over one manager"
+- [x] Update `AGENTS.md`. In § Architecture & data flow, "four `JoinableQueue`s over one manager"
       becomes "four threading `queue.Queue`s served in-process by the manager's request handling".
       Note in § Queue transport & security that the server process hosts the manager. Update
       `docs/security.rst` L37–44 to match. These are factual edits; the security posture is
       unchanged.
+- **Built note.** The bidirectional round trip already landed in P1 (`test_roundtrip`, TLS on and
+  off); P2 adds the type/bound, exposed-surface, `Empty`/`Full` and `join` tests.
 - **Verify:** the frontmatter command (queue tests plus `hsx` drives with TLS and `--no-tls`).
 - **Touches:** `src/hypershell/core/queue.py`, `tests/test_queue.py`, `AGENTS.md`,
   `docs/security.rst`.

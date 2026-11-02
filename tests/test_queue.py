@@ -283,3 +283,88 @@ def test_threads_drain_after_shutdown(tls: Optional[TLSConfig]) -> None:
             server.heartbeat.get(timeout=WAIT)
     assert wait_until(lambda: threading.active_count() <= baseline), \
         [t.name for t in threading.enumerate()]
+
+
+QUEUE_METHODS = {'empty', 'full', 'get', 'get_nowait', 'join', 'put', 'put_nowait', 'qsize', 'task_done'}
+
+
+@mark.unit
+def test_queue_types_and_bounds() -> None:
+    """The managed queues are threading queues; two are bounded by the configured size."""
+    with QueueServer(make_config(size=7)) as server:
+        for name in NAMES:
+            assert type(getattr(server, name)) is queue.Queue, name
+        assert server.scheduled.maxsize == 7
+        assert server.completed.maxsize == 7
+        assert server.heartbeat.maxsize == 0
+        assert server.confirmed.maxsize == 0
+
+
+@mark.unit
+def test_exposed_methods() -> None:
+    """Remote clients see the same nine queue methods on every Python version, and no ``shutdown``."""
+    with QueueServer(make_config()) as server:
+        client = connect('127.0.0.1', server.address[1])
+        for name in NAMES:
+            exposed = set(getattr(client, name)._exposed_)
+            assert exposed == QUEUE_METHODS, name
+            assert 'shutdown' not in exposed
+
+
+@mark.unit
+def test_remote_get_empty_raises(tls: Optional[TLSConfig]) -> None:
+    """A remote ``get`` on an empty queue raises ``queue.Empty`` within its timeout."""
+    with QueueServer(make_config(tls=tls)) as server:
+        client = connect('127.0.0.1', server.address[1], tls)
+        for name in NAMES:
+            start = time.monotonic()
+            with raises(queue.Empty):
+                getattr(client, name).get(timeout=TIMEOUT)
+            assert time.monotonic() - start < TIMEOUT + 1.0
+
+
+@mark.unit
+def test_remote_put_full_raises(tls: Optional[TLSConfig]) -> None:
+    """A remote ``put`` on a full bounded queue raises ``queue.Full`` within its timeout."""
+    with QueueServer(make_config(tls=tls, size=2)) as server:
+        client = connect('127.0.0.1', server.address[1], tls)
+        for name in ('scheduled', 'completed'):
+            remote = getattr(client, name)
+            remote.put(b'1', timeout=TIMEOUT)
+            remote.put(b'2', timeout=TIMEOUT)
+            start = time.monotonic()
+            with raises(queue.Full):
+                remote.put(b'3', timeout=TIMEOUT)
+            assert time.monotonic() - start < TIMEOUT + 1.0
+
+
+@mark.unit
+def test_join_after_task_done() -> None:
+    """``join`` returns, locally and remotely, once every item has been marked done."""
+    with QueueServer(make_config()) as server:
+        client = connect('127.0.0.1', server.address[1])
+
+        server.scheduled.put(b'a', timeout=WAIT)
+        server.scheduled.put(b'b', timeout=WAIT)
+        local = threading.Thread(target=server.scheduled.join, daemon=True)
+        local.start()
+        for _ in range(2):
+            client.scheduled.get(timeout=WAIT)
+            assert local.is_alive()
+            client.scheduled.task_done()
+        local.join(WAIT)
+        assert not local.is_alive()
+
+        client.completed.put(b'c', timeout=WAIT)
+
+        def remote_join() -> None:
+            connect('127.0.0.1', server.address[1]).completed.join()
+
+        remote = threading.Thread(target=remote_join, daemon=True)
+        remote.start()
+        assert server.completed.get(timeout=WAIT) == b'c'
+        time.sleep(TIMEOUT)
+        assert remote.is_alive()
+        server.completed.task_done()
+        remote.join(WAIT)
+        assert not remote.is_alive()

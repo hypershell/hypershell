@@ -161,8 +161,13 @@ submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─bundl
                        └──────────────── server writes exit/timing/output back ──────────────┘ returns results
 ```
 
-The queue exposes four `JoinableQueue`s over one manager: `scheduled` (task bundles),
-`completed` (results), `heartbeat` (client liveness), `confirmed` (bundle acks).
+The queue exposes four threading `queue.Queue`s served in-process by the manager's request
+handling: `scheduled` (task bundles), `completed` (results), `heartbeat` (client liveness),
+`confirmed` (bundle acks). There is no manager child process: `QueueServer.start` runs its own
+accept loop around the stock `multiprocessing.managers.Server` on daemon threads of the server
+process (`core/queue.py` `_InProcessServer`), whose handler threads and the server's own threads
+share the same queue objects. That loop leans on CPython privates; `tests/test_queue.py`
+`TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`).
 
 **Two modes change the picture — check for them before assuming DB behavior:**
 - `in_memory` (in-memory SQLite): the `Scheduler` is `None` and the server **skips all DB
@@ -264,6 +269,10 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   the placeholder key `DEFAULT_AUTH = '<not-secure>'` and enforces `AUTH_MINIMUM_LENGTH`
   (≥16) and `AUTH_ALLOWED_CHARS` (`[A-Za-z0-9._+/=-]`). Never weaken these; never remove the
   authkey to "disable TLS" (pass `tls=None` instead).
+- **The server process hosts the manager.** Queue connections, the HMAC handshake and the TLS
+  handshake are handled by threads of the server process itself (not a forked manager child), so
+  the per-process TLS context is installed there before the first accept. The wire, auth and TLS
+  behaviour are those of the stock manager, unchanged.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
   mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,

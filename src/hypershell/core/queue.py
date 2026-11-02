@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from multiprocessing import util, ProcessError
 from multiprocessing.managers import BaseManager, BaseProxy, Server, State, AutoProxy, listener_client
 from multiprocessing.connection import _ConnectionBase, answer_challenge, deliver_challenge, BUFSIZE
-from multiprocessing import JoinableQueue
+from queue import Queue
 
 # Internal libs
 from hypershell.core.config import default, config as _config
@@ -494,10 +494,10 @@ class QueueInterface(SecureManager, ABC):
     """The queue interface provides access to four managed distributed queues."""
 
     config: QueueConfig
-    scheduled: JoinableQueue[bytes]
-    completed: JoinableQueue[bytes]
-    heartbeat: JoinableQueue[bytes]
-    confirmed: JoinableQueue[bytes]
+    scheduled: Queue[bytes]
+    completed: Queue[bytes]
+    heartbeat: Queue[bytes]
+    confirmed: Queue[bytes]
     ready: bool = False
 
     def __init__(self: QueueInterface, config: QueueConfig) -> None:
@@ -525,6 +525,12 @@ class QueueInterface(SecureManager, ABC):
         """Stop or disconnect."""
 
 
+# Methods a remote client may call on a managed queue. Pinned rather than discovered, so the remote
+# surface is the same on every Python version (newer threading queues also offer `shutdown`).
+QUEUE_EXPOSED: Final[Tuple[str, ...]] = ('empty', 'full', 'get', 'get_nowait', 'join',
+                                         'put', 'put_nowait', 'qsize', 'task_done')
+
+
 def _provider(obj: Any) -> Callable[[], Any]:
     """Registry callable handing the manager `obj`; lock-free, since it runs under the server's mutex."""
     return lambda: obj
@@ -537,29 +543,29 @@ class QueueServer(QueueInterface):
               initializer: Optional[Callable[..., Any]] = None,
               initargs: Iterable[Any] = ()) -> None:
         """Initialize queues and serve them from this process."""
-        self.scheduled = JoinableQueue(maxsize=self.config.size)
-        self.completed = JoinableQueue(maxsize=self.config.size)
-        self.heartbeat = JoinableQueue(maxsize=0)
-        self.confirmed = JoinableQueue(maxsize=0)
+        self.scheduled = Queue(maxsize=self.config.size)
+        self.completed = Queue(maxsize=self.config.size)
+        self.heartbeat = Queue(maxsize=0)
+        self.confirmed = Queue(maxsize=0)
         # Per-instance registry: the class registry is shared, so two servers in one process
         # would otherwise serve each other's queues.
-        registry = {f'_get_{name}': (_provider(getattr(self, name)), None, None, AutoProxy)
+        registry = {f'_get_{name}': (_provider(getattr(self, name)), QUEUE_EXPOSED, None, AutoProxy)
                     for name in ('scheduled', 'completed', 'heartbeat', 'confirmed')}
         if initializer is not None:
             initializer(*initargs)
         self._serve_in_process(registry)
         self.ready = True
 
-    def _get_scheduled(self: QueueServer) -> JoinableQueue[bytes]:
+    def _get_scheduled(self: QueueServer) -> Queue[bytes]:
         return self.scheduled
 
-    def _get_completed(self: QueueServer) -> JoinableQueue[bytes]:
+    def _get_completed(self: QueueServer) -> Queue[bytes]:
         return self.completed
 
-    def _get_heartbeat(self: QueueServer) -> JoinableQueue[bytes]:
+    def _get_heartbeat(self: QueueServer) -> Queue[bytes]:
         return self.heartbeat
 
-    def _get_confirmed(self: QueueServer) -> JoinableQueue[bytes]:
+    def _get_confirmed(self: QueueServer) -> Queue[bytes]:
         return self.confirmed
 
     def __enter__(self: QueueServer) -> QueueServer:
@@ -578,10 +584,10 @@ class QueueServer(QueueInterface):
 class QueueClient(QueueInterface):
     """Client connection to queue manager."""
 
-    _get_scheduled: Callable[[], JoinableQueue[bytes]]
-    _get_completed: Callable[[], JoinableQueue[bytes]]
-    _get_heartbeat: Callable[[], JoinableQueue[bytes]]
-    _get_confirmed: Callable[[], JoinableQueue[bytes]]
+    _get_scheduled: Callable[[], Queue[bytes]]
+    _get_completed: Callable[[], Queue[bytes]]
+    _get_heartbeat: Callable[[], Queue[bytes]]
+    _get_confirmed: Callable[[], Queue[bytes]]
 
     def connect(self: QueueClient) -> None:
         """Connect to server using unique client ID for token generation."""

@@ -33,15 +33,16 @@ Architecture
 Components
 ^^^^^^^^^^
 
-*HyperShell* is built on Python's :class:`multiprocessing.managers.BaseManager` and
-:class:`multiprocessing.JoinableQueue` infrastructure. The runtime decomposes into three
-roles:
+*HyperShell* is built on Python's :class:`multiprocessing.managers.BaseManager` infrastructure,
+serving threading :class:`queue.Queue` objects from within the server process. The runtime
+decomposes into three roles:
 
 * **Submit** ingests shell commands from ``stdin`` or files and writes them to the database
   (SQLite or PostgreSQL) with stable UUIDs.
 
 * **Server** pulls pending tasks from the database, bundles them, and exposes four
-  ``JoinableQueue`` instances to clients via RPC over TCP:
+  queues to clients via RPC over TCP. The server process itself accepts and handles these
+  connections (there is no separate manager process):
 
   * ``scheduled`` — task bundles awaiting execution
   * ``completed`` — results returned from clients
