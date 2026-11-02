@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_progress
+status: blocked
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
@@ -103,10 +103,11 @@ phases:
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 6d0ac37f05426d506500582c63ad025628a99fbf
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: C1 same-process TLS context, C2 silent bind failure;
+    human gate (core/queue.py, server.py)'
+  cycle: 1
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 

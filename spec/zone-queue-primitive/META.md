@@ -18,6 +18,8 @@
 - `hs-feature` Step 4, the `shaped` promotion rule ("re-confirm against current `develop`, cite
   drift"): it gave the verified correction to the seed's Problem 2 a clear home without reopening
   the seed's settled clarifications.
+- `hs-review` Step 2, the blind brief with its executed-evidence demand: base-versus-feature probes
+  surfaced two same-process regressions (REVIEW C1, C2) that no phase gate exercised.
 
 ## Friction findings
 
@@ -78,7 +80,7 @@ is skipped by the parser):
   F2 when this is fixed.
 - **Confidence:** high · **Effort:** small
 
-## F3 — No convention for a phase whose evidence is produced outside the repo
+## F3 — No convention for a phase whose evidence is produced outside the repo · seen again
 `origin=hs-plan:step6 severity=medium category=missing-guidance status=open target=.agents/factory/templates/TECH.md`
 - **What happened:** R9's multi-node clause can only be met by a run outside the repo. The work
   splits into a "run A" phase, which builds the drive and hands it back, and a "run B" phase, which
@@ -92,6 +94,13 @@ is skipped by the parser):
   a phase flag (e.g. `external: true`), the evidence location convention, the `blocked` semantics,
   and whether review and publish may proceed past it.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-review step1 + step4, 2026-11-02):** Step 1 says to ask before reviewing when
+  `status` is not `in_review`/`done` (here `in_progress`, P7 pending), and Step 4 knows only
+  approved, changes-requested and PLAUSIBLE triage. Neither covers a GOAL clause whose evidence is
+  pending outside the repo. The review recorded R9's multi-node clause as a PLAUSIBLE finding
+  ("pending external evidence") on the operator's instruction. Fix on the review side: a
+  `pending-external` status in the REVIEW template's matrix that neither approves nor fails the
+  clause, and a Step 1 rule that proceeds past a phase carrying the external-wait flag.
 
 ## F4 — Research prototypes live in `$TMPDIR` and vanish before the build
 `origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
@@ -117,4 +126,14 @@ is skipped by the parser):
 - **Recommended fix:** In Step 4, say that a gate building from a git ref must either run after a
   provisional commit (amended on red) or name the working tree; or have the harness accept
   `--feature WORKTREE`. Mirror the rule in the TECH template's `verify:` guidance.
+- **Confidence:** high · **Effort:** small
+
+## F6 — hs-review grades `{base}...HEAD` with `{base}` a branch name, which a stale local ref breaks · seen again
+`origin=hs-review:step1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** A recurrence of `spec/group-advance-retry-gate/META.md` F3. `TECH.md` records
+  `base: develop`; the local `develop` has merge base `aee41ae` with this branch, not the fork point
+  `b819de6`. The skill's literal `develop...HEAD` (spec excluded) lists 56 files instead of 15. The
+  review graded `origin/develop...HEAD` and ignored the injected diffstat.
+- **Skill cause:** Unchanged from the original finding: Step 1 never resolves `{base}` to a commit.
+- **Recommended fix:** As in the original finding.
 - **Confidence:** high · **Effort:** small
