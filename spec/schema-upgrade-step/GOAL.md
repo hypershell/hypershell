@@ -165,6 +165,8 @@ that is documented and harmless. The retry-model invariant in `AGENTS.md` and
   hand-built to look like it. Generate one by installing `hypershell==2.8.3` in a throwaway
   environment, or check in a small generated fixture with a note on how it was produced. The plan
   chooses, keeping in mind that `hs-review` re-drives this flow.
+- 2026-11-02 — R3's quiet no-op applies to an uncontended start; a start that waits on another
+  session's lock logs the wait at INFO (foreman ruling, review cycle 1 P1 / cycle 3).
 
 ## Related materials
 
