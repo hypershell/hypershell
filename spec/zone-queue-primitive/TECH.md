@@ -1,84 +1,113 @@
 ---
 slug: zone-queue-primitive
-title: "Serve the managed queues in-process on a threading primitive (zone, cycle 1)"
+title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
 status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P1
-last_updated: "2026-11-02"
+current_phase: P2
+last_updated: '2026-11-02'
 phases:
-  - id: P1
-    name: "In-process serve loop: no manager child, clean shutdown and port release"
-    status: pending
-    satisfies: [R1, R4, R5, R6]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_queue.py tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh sh -c \"seq 200 | uv run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo {}' -N4 --no-tls && uv run hs list --count\""
-  - id: P2
-    name: "Swap the four queues to queue.Queue with a pinned method surface"
-    status: pending
-    satisfies: [R2, R3, R4, R6]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_queue.py tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh sh -c \"seq 200 | uv run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo {}' -N4 --no-tls && uv run hs list --count\""
-  - id: P3
-    name: "Tests for the server state machines that touch the managed queues"
-    status: pending
-    satisfies: [R7]
-    depends_on: [P2]
-    parallel: true
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_server_fsm.py"
-  - id: P4
-    name: "No-behaviour-change proof: workload test, base parity, b819de6 client compatibility"
-    status: pending
-    satisfies: [R4, R8]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v && uv run python tests/bench/bench_queue.py parity --base b819de6 --feature HEAD && uv run python tests/bench/bench_queue.py compat --server HEAD --client b819de6"
-  - id: P5
-    name: "Local throughput and footprint gate against b819de6"
-    status: pending
-    satisfies: [R9]
-    depends_on: [P4]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run python tests/bench/bench_queue.py gate --base b819de6 --feature HEAD --repeats 5"
-  - id: P6
-    name: "Multi-node drive, run A: build the cluster-agnostic drive and hand it back (external wait follows)"
-    status: pending
-    satisfies: [R9]
-    depends_on: [P5]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "sh tests/cluster/smoke.sh"
-  - id: P7
-    name: "Multi-node drive, run B: collect and judge the external evidence against 2.8.3"
-    status: pending
-    satisfies: [R9]
-    depends_on: [P6]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster --baseline 2.8.3 --candidate feature --control b819de6"
+- id: P1
+  name: 'In-process serve loop: no manager child, clean shutdown and port release'
+  status: done
+  satisfies:
+  - R1
+  - R4
+  - R5
+  - R6
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: uv run pytest -v tests/test_queue.py tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh
+    sh -c "seq 200 | uv run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo
+    {}' -N4 --no-tls && uv run hs list --count"
+- id: P2
+  name: Swap the four queues to queue.Queue with a pinned method surface
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  - R4
+  - R6
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_queue.py tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh
+    sh -c "seq 200 | uv run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo
+    {}' -N4 --no-tls && uv run hs list --count"
+- id: P3
+  name: Tests for the server state machines that touch the managed queues
+  status: pending
+  satisfies:
+  - R7
+  depends_on:
+  - P2
+  parallel: true
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_server_fsm.py
+- id: P4
+  name: 'No-behaviour-change proof: workload test, base parity, b819de6 client compatibility'
+  status: pending
+  satisfies:
+  - R4
+  - R8
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v && uv run python tests/bench/bench_queue.py parity --base
+    b819de6 --feature HEAD && uv run python tests/bench/bench_queue.py compat --server
+    HEAD --client b819de6
+- id: P5
+  name: Local throughput and footprint gate against b819de6
+  status: pending
+  satisfies:
+  - R9
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run python tests/bench/bench_queue.py gate --base b819de6 --feature HEAD
+    --repeats 5
+- id: P6
+  name: 'Multi-node drive, run A: build the cluster-agnostic drive and hand it back
+    (external wait follows)'
+  status: pending
+  satisfies:
+  - R9
+  depends_on:
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh tests/cluster/smoke.sh
+- id: P7
+  name: 'Multi-node drive, run B: collect and judge the external evidence against
+    2.8.3'
+  status: pending
+  satisfies:
+  - R9
+  depends_on:
+  - P6
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
+    --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 
 The YAML frontmatter above is the resume ground-truth. Read it with
@@ -139,7 +168,7 @@ from inside the server process, through HyperShell's own accept loop. A `b819de6
 `QueueClient` round-trips unchanged, and shutdown releases the port without exiting or touching
 stdio. This is the core, small and novel slice: everything else builds on it.
 
-- [ ] **Red first.** Create `tests/test_queue.py` (`@mark.unit`) with the following tests, run them
+- [x] **Red first.** Create `tests/test_queue.py` (`@mark.unit`) with the following tests, run them
       on the unchanged code, and record the result:
   - `active_children()` count unchanged across `start()`, parametrised over `fork` and `spawn`
     (restore the start method). Red on base.
@@ -152,7 +181,7 @@ stdio. This is the core, small and novel slice: everything else builds on it.
     identity unchanged; the same port rebinding at once; and accept/handler threads draining to
     baseline within 2 s (poll, don't assert immediately).
   - Bind `('127.0.0.1', 0)` and read `server.address`. Use 0.2 s operation timeouts.
-- [ ] **`_InProcessServer(Server)` in `core/queue.py`** (§2.1):
+- [x] **`_InProcessServer(Server)` in `core/queue.py`** (§2.1):
   - `stop_event` is created and never set.
   - Add a halt flag, a live-connection set and a lock.
   - `serve()` is a selector loop on the listening socket (`POLL = 0.25`) with a broad per-accept
@@ -163,23 +192,33 @@ stdio. This is the core, small and novel slice: everything else builds on it.
     `SHUT_RDWR` on each live connection: through the TLS socket, else through a socket duplicated
     from the fd, else it skips. It never joins.
   - Add a `_listening_socket(listener)` helper. Adapt `research/prototypes/serve_loop/proto3.py`.
-- [ ] **`SecureManager._serve_in_process(registry)`** (§2.1 steps 1–5):
+- [x] **`SecureManager._serve_in_process(registry)`** (§2.1 steps 1–5):
   - TLS install only when active.
   - Build the server and set `_address` to the real bound address and `_process = None`.
   - Start the daemon `hypershell-queue-server` thread, set the state to `STARTED`, and set the
     `Finalize`-backed `shutdown`.
   - `_finalize_in_process` stops the server, sets `SHUTDOWN`, and pops `BaseProxy._address_to_local`
     for both the configured and bound addresses under `BaseProxy._mutex`.
-- [ ] **`QueueServer.start`:**
+- [x] **`QueueServer.start`:**
   - Build a per-instance registry with the existing typeids and lock-free closures. Do not call
     `register`.
   - Run any `initializer` once.
   - Call `_serve_in_process`, then set `ready`.
   - Leave `SecureManager.start`, `_child_bootstrap`, `SecureListener`, `secure_client`,
     `SecureConnection` and `QueueClient` untouched.
-- [ ] **Docstrings.** Reword "server subprocess" in `SecureManager.start`, in `core/tls.py`
+- [x] **Docstrings.** Reword "server subprocess" in `SecureManager.start`, in `core/tls.py`
       (L80–82, L214, L224) and in `core/logging.py` `close_inherited_slot_locks` (now a generic
       fork-without-exec helper). Behaviour is unchanged.
+- [x] **Private-internals guard** (plan-gate ruling on deviation row 1). `TestPrivateInternals` in
+      `tests/test_queue.py` asserts the presence and shape of every CPython private the loop uses:
+      `Server.__init__(registry, address, authkey, serializer)` and its `listener`, `address`,
+      `mutex`, `id_to_obj`; `Server._handle_request`/`handle_request`/`serve_client`/`shutdown`
+      signatures; `'shutdown' in Server.public`; `serve_client` looping on `self.stop_event` and
+      exiting through `sys.exit`; the stock listener's `_listener._socket`; `listener_client`;
+      `BaseManager._state/_address/_authkey/_serializer` and `State`; `BaseProxy._address_to_local`
+      and `_mutex`; `util.Finalize(args=, exitpriority=)`. A CPython change fails it loudly.
+- **Built note.** Shutdown pops the proxy cache for the bound address and for the configured host
+  with the bound port: with a requested port 0 the configured `(host, 0)` is never a dial address.
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_tls.py`, then drive `hsx` with
   TLS on and with `--no-tls` in a `temp_site` (the frontmatter command).
 - **Touches:** `src/hypershell/core/queue.py`, `src/hypershell/core/tls.py` (docstrings),

@@ -915,7 +915,7 @@ def close_inherited_slot_locks() -> None:
     """
     Close slot-lock descriptors inherited by a forked child, without unlinking any sidecar.
 
-    A fork-without-exec child (the queue-manager subprocess) inherits the parent's slot-lock
+    A fork-without-exec child (e.g., a forked manager server) inherits the parent's slot-lock
     open-file-descriptions and would keep their advisory locks held until it too exits, ghost-
     locking the slot if the parent is killed. The child closes its inherited copies so each lock
     releases exactly when the true owner (the parent) exits. It must NOT unlink the sidecars —

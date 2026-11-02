@@ -78,8 +78,9 @@ class TLSConfig:
     """
     Picklable description of a TLS configuration.
 
-    Carries every value needed to rebuild a :class:`ssl.SSLContext` inside a freshly spawned
-    server subprocess. Paths must be absolute. Use :meth:`is_active` to detect a disabled config.
+    Carries every value needed to rebuild a :class:`ssl.SSLContext` in whichever process serves or
+    connects, including a freshly spawned one. Paths must be absolute. Use :meth:`is_active` to
+    detect a disabled config.
     """
 
     enabled: bool = False
@@ -211,7 +212,7 @@ def verify_peer_fingerprint(ssl_sock: ssl.SSLSocket, cfg: TLSConfig) -> None:
 
 
 # Process-local state populated by install_process_context().
-# The server subprocess and each client process call install_process_context() once.
+# The process serving the queues and each client process call install_process_context().
 _PROCESS_CONFIG: Optional[TLSConfig] = None
 _PROCESS_SERVER_CONTEXT: Optional[ssl.SSLContext] = None
 _PROCESS_CLIENT_CONTEXT: Optional[ssl.SSLContext] = None
@@ -221,8 +222,9 @@ def install_process_context(cfg: Optional[TLSConfig]) -> None:
     """
     Stash `cfg` for use by :func:`get_server_context` / :func:`get_client_context`.
 
-    Called once per process: by the server subprocess as part of its initializer and by each
-    client process before connecting. Passing ``None`` (or a config with ``enabled=False``)
+    Called by the process that serves the queues before it accepts connections and by each
+    client before connecting. Repeat calls drop the cached contexts, which are rebuilt from the
+    new configuration on next use. Passing ``None`` (or a config with ``enabled=False``)
     leaves TLS disabled in this process.
     """
     global _PROCESS_CONFIG, _PROCESS_SERVER_CONTEXT, _PROCESS_CLIENT_CONTEXT

@@ -16,10 +16,13 @@ import ssl
 import select
 import socket
 import struct
+import threading
+import selectors
 from functools import cache
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from multiprocessing.managers import BaseManager, listener_client
+from multiprocessing import util, ProcessError
+from multiprocessing.managers import BaseManager, BaseProxy, Server, State, AutoProxy, listener_client
 from multiprocessing.connection import _ConnectionBase, answer_challenge, deliver_challenge, BUFSIZE
 from multiprocessing import JoinableQueue
 
@@ -255,6 +258,128 @@ def _child_bootstrap(cfg: Optional[TLSConfig], user_init, user_initargs) -> None
         user_init(*user_initargs)
 
 
+# Seconds between checks of the halt flag in the in-process accept loop
+POLL: Final[float] = 0.25
+
+
+def _listening_socket(listener) -> socket.socket:
+    """The bound socket behind `listener`: our own for TLS, the stock listener's otherwise."""
+    sock = getattr(listener, '_socket', None)
+    if isinstance(sock, socket.socket):
+        return sock
+    return listener._listener._socket
+
+
+def _cut(conn) -> None:
+    """Shut down both directions of a live connection's socket so its handler wakes and exits.
+
+    The TLS socket is shut down at the plain-socket level, leaving its SSL object to the handler
+    thread that owns it. A stock connection is reached through a duplicate of its descriptor.
+    Platforms that offer neither are skipped; their handlers exit when the peer disconnects.
+    """
+    try:
+        ssl_sock = getattr(conn, '_ssl_sock', None)
+        if ssl_sock is not None:
+            socket.socket.shutdown(ssl_sock, socket.SHUT_RDWR)
+        else:
+            with socket.fromfd(conn.fileno(), socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.shutdown(socket.SHUT_RDWR)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+class _InProcessServer(Server):
+    """
+    A :class:`multiprocessing.managers.Server` served by daemon threads of the calling process.
+
+    Construction (bind and listen) and per-connection request handling are the stock ones, so the
+    wire protocol, authentication handshake and TLS layer are exactly those of a forked manager.
+    The accept loop is our own: unlike ``serve_forever`` it never exits the process or touches
+    ``sys.stdout``/``sys.stderr``, and :meth:`stop` releases the port and cuts live connections
+    without waiting on any thread.
+    """
+
+    def __init__(self: _InProcessServer, *args: Any) -> None:
+        """Bind and listen; the accept loop starts with :meth:`serve`."""
+        super().__init__(*args)
+        # Read by serve_client() between requests. Never set: setting it desynchronises a
+        # connection's request/reply pairing; stopping cuts the sockets instead.
+        self.stop_event = threading.Event()
+        self._halted = False
+        self._live = set()
+        self._lock = threading.Lock()
+
+    def serve(self: _InProcessServer) -> None:
+        """Accept connections until stopped, one daemon handler thread per connection."""
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(_listening_socket(self.listener), selectors.EVENT_READ)
+                while not self._halted:
+                    if not selector.select(timeout=POLL) or self._halted:
+                        continue
+                    try:
+                        conn = self.listener.accept()
+                    except Exception as error:
+                        # A failed accept (reset, handshake or TLS error, closed listener) drops that peer only.
+                        log.debug(f'Queue server dropped a connection: {error!r}')
+                        continue
+                    with self._lock:
+                        if self._halted:
+                            conn.close()
+                            break
+                        self._live.add(conn)
+                    threading.Thread(target=self.handle_request, args=(conn, ), daemon=True,
+                                     name='hypershell-queue-handler').start()
+        except Exception as error:
+            if not self._halted:
+                log.error(f'Queue server stopped accepting connections: {error!r}')
+
+    def handle_request(self: _InProcessServer, conn) -> None:
+        """Serve one connection, then forget and close it."""
+        try:
+            self._handle_request(conn)
+        except SystemExit:
+            # The stock serve_client() ends its thread with sys.exit() on EOF or a failed send.
+            pass
+        finally:
+            with self._lock:
+                self._live.discard(conn)
+            conn.close()
+
+    def shutdown(self: _InProcessServer, c) -> None:
+        """Remote shutdown request: stop serving after the reply, without exiting the process."""
+        with self._lock:
+            # The requesting connection is left to its handler so the reply can be sent.
+            self._live.discard(c)
+        threading.Thread(target=self.stop, daemon=True, name='hypershell-queue-stop').start()
+
+    def stop(self: _InProcessServer) -> None:
+        """Stop accepting, release the port and cut live connections. Idempotent; never blocks."""
+        with self._lock:
+            # Swept under the lock: a listed connection is not yet closed, so its descriptor
+            # cannot have been reused.
+            if self._halted:
+                return
+            self._halted = True
+            try:
+                _listening_socket(self.listener).shutdown(socket.SHUT_RDWR)
+            except (OSError, AttributeError):
+                pass
+            self.listener.close()
+            for conn in self._live:
+                _cut(conn)
+            self._live.clear()
+
+
+def _finalize_in_process(server: _InProcessServer, state: State, addresses: Iterable[Tuple[str, int]]) -> None:
+    """Stop an in-process server and drop cached proxy connections to every address it answered on."""
+    server.stop()
+    state.value = State.SHUTDOWN
+    with BaseProxy._mutex:
+        for address in addresses:
+            BaseProxy._address_to_local.pop(address, None)
+
+
 class SecureManager(BaseManager):
     """
     :class:`BaseManager` that transparently wraps queue traffic with TLS when configured.
@@ -281,10 +406,37 @@ class SecureManager(BaseManager):
     def start(self: SecureManager,
               initializer: Optional[Callable[..., Any]] = None,
               initargs: Iterable[Any] = ()) -> None:
-        """Spawn the server subprocess, closing inherited log-slot locks (and installing the TLS
-        context when active) inside the forked child before any user initializer runs."""
+        """Start a manager server in a child process, closing inherited log-slot locks (and installing
+        the TLS context when active) inside the child before any user initializer runs.
+
+        This is the generic manager path. :class:`QueueServer` serves its queues in-process instead.
+        """
         super().start(initializer=_child_bootstrap,
                       initargs=(self._tls, initializer, tuple(initargs)))
+
+    def _serve_in_process(self: SecureManager, registry: Dict[str, tuple]) -> None:
+        """Serve `registry` from daemon threads of this process instead of a child process.
+
+        Installs the TLS context first when active, since this process now accepts connections.
+        Keeps the manager's shape: :attr:`address` is the bound address and ``shutdown()`` is an
+        idempotent finalizer that also runs at interpreter exit.
+        """
+        if self._state.value != State.INITIAL:
+            if self._state.value == State.STARTED:
+                raise ProcessError('Already started server')
+            raise ProcessError('Manager has shut down')
+        if self._tls is not None:
+            install_process_context(self._tls)
+        server = _InProcessServer(registry, self._address, self._authkey, self._serializer)
+        # Clients cache connections by the address they dial, which may name the host differently
+        # (e.g., 'localhost') than the bound address does; both are dropped at shutdown.
+        dialed = (self._address[0], server.address[1])
+        self._address = server.address
+        self._process = None
+        threading.Thread(target=server.serve, daemon=True, name='hypershell-queue-server').start()
+        self._state.value = State.STARTED
+        self.shutdown = util.Finalize(self, _finalize_in_process, exitpriority=0,
+                                      args=(server, self._state, (dialed, server.address)))
 
     def connect(self: SecureManager) -> None:
         """Install the local-process TLS context, then perform the manager handshake."""
@@ -373,22 +525,29 @@ class QueueInterface(SecureManager, ABC):
         """Stop or disconnect."""
 
 
+def _provider(obj: Any) -> Callable[[], Any]:
+    """Registry callable handing the manager `obj`; lock-free, since it runs under the server's mutex."""
+    return lambda: obj
+
+
 class QueueServer(QueueInterface):
-    """Server for managing queue."""
+    """Server for managing queue, served from within the calling process."""
 
     def start(self: QueueServer,
               initializer: Optional[Callable[..., Any]] = None,
               initargs: Iterable[Any] = ()) -> None:
-        """Initialize queues and start server."""
+        """Initialize queues and serve them from this process."""
         self.scheduled = JoinableQueue(maxsize=self.config.size)
         self.completed = JoinableQueue(maxsize=self.config.size)
         self.heartbeat = JoinableQueue(maxsize=0)
         self.confirmed = JoinableQueue(maxsize=0)
-        self.register('_get_scheduled', callable=self._get_scheduled)
-        self.register('_get_completed', callable=self._get_completed)
-        self.register('_get_heartbeat', callable=self._get_heartbeat)
-        self.register('_get_confirmed', callable=self._get_confirmed)
-        super().start()
+        # Per-instance registry: the class registry is shared, so two servers in one process
+        # would otherwise serve each other's queues.
+        registry = {f'_get_{name}': (_provider(getattr(self, name)), None, None, AutoProxy)
+                    for name in ('scheduled', 'completed', 'heartbeat', 'confirmed')}
+        if initializer is not None:
+            initializer(*initargs)
+        self._serve_in_process(registry)
         self.ready = True
 
     def _get_scheduled(self: QueueServer) -> JoinableQueue[bytes]:
