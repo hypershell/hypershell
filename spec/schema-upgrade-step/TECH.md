@@ -1,96 +1,122 @@
 ---
 slug: schema-upgrade-step
-title: "Open 2.8 databases in 2.9: an idempotent schema-upgrade step"
+title: 'Open 2.8 databases in 2.9: an idempotent schema-upgrade step'
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: P1
-last_updated: "2026-11-01"
+current_phase: P2
+last_updated: '2026-11-01'
 phases:
-  - id: P1
-    name: "Red: real-2.8.3 fixture, generator, and failing CLI tests (tests only)"
-    status: pending
-    satisfies: [R9, R1]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      git diff --quiet 6c164d9 -- src
-      && ! grep -a -q "$(hostname)" tests/fixtures/hypershell-2.8.3.db
-      && uv run pytest -rxX tests/test_upgrade_cli.py
-  - id: P2
-    name: "The upgrade step: model diff, refusal, locked apply, wired into initdb/checkdb"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R7, R9]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      uv run pytest -rxX
-      && .agents/factory/bin/temp_site.sh sh -c "cp \"\$UV_PROJECT/tests/fixtures/hypershell-2.8.3.db\" \"\$HYPERSHELL_DATABASE_FILE\"
-      && uv run hs submit -- echo new && uv run hsx --restart -r 2 -N2 --no-tls
-      && test \$(uv run hs list --count) -eq 9 && test \$(uv run hs list --remaining --count) -eq 0"
-  - id: P3
-    name: "PostgreSQL: CI service job, legacy template builder, gated tests (run A: authoring)"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R9]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      uv run pytest -rs tests/test_upgrade_postgres.py
-      && uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/tests.yml'))"
-      && bash -n tests/fixtures/make-legacy-postgres.sh
-      && uv run pytest
-  - id: P4
-    name: "Side paths: hs initdb --truncate/--rotate and the rotated-partition view"
-    status: pending
-    satisfies: [R1, R9]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      ! grep -q xfail tests/test_upgrade_cli.py
-      && uv run pytest
-  - id: P5
-    name: "Docs and the amended retry-model invariant (after group-advance-retry-gate lands)"
-    status: pending
-    satisfies: [R7, R8, R9]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      grep -q 'def query_retryable' src/hypershell/data/model.py
-      && ! grep -nE 'UNIQUE\**( chain|\.)' AGENTS.md .agents/factory/invariants.md
-      && grep -q 'query_retryable' .agents/factory/invariants.md
-      && uv run pytest
-      && uv run sphinx-build -E -b html docs docs/_build
-  - id: P6
-    name: "PostgreSQL CI evidence (run B: external wait on a pushed branch)"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R9]
-    depends_on: [P3, P4, P5]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      test "$(gh run list --branch fix/schema-upgrade-step --workflow tests.yml --limit 1
-      --json headSha,conclusion --jq '.[0].headSha + " " + .[0].conclusion')"
-      = "$(git rev-parse HEAD) success"
+- id: P1
+  name: 'Red: real-2.8.3 fixture, generator, and failing CLI tests (tests only)'
+  status: done
+  satisfies:
+  - R9
+  - R1
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: git diff --quiet 6c164d9 -- src && ! grep -a -q "$(hostname)" tests/fixtures/hypershell-2.8.3.db
+    && uv run pytest -rxX tests/test_upgrade_cli.py
+- id: P2
+  name: 'The upgrade step: model diff, refusal, locked apply, wired into initdb/checkdb'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R7
+  - R9
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -rxX && .agents/factory/bin/temp_site.sh sh -c "cp \"\$UV_PROJECT/tests/fixtures/hypershell-2.8.3.db\"
+    \"\$HYPERSHELL_DATABASE_FILE\" && uv run hs submit -- echo new && uv run hsx --restart
+    -r 2 -N2 --no-tls && test \$(uv run hs list --count) -eq 9 && test \$(uv run hs
+    list --remaining --count) -eq 0"
+- id: P3
+  name: 'PostgreSQL: CI service job, legacy template builder, gated tests (run A:
+    authoring)'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R9
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -rs tests/test_upgrade_postgres.py && uv run python -c "import
+    yaml; yaml.safe_load(open('.github/workflows/tests.yml'))" && bash -n tests/fixtures/make-legacy-postgres.sh
+    && uv run pytest
+- id: P4
+  name: 'Side paths: hs initdb --truncate/--rotate and the rotated-partition view'
+  status: pending
+  satisfies:
+  - R1
+  - R9
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: '! grep -q xfail tests/test_upgrade_cli.py && uv run pytest'
+- id: P5
+  name: Docs and the amended retry-model invariant (after group-advance-retry-gate
+    lands)
+  status: pending
+  satisfies:
+  - R7
+  - R8
+  - R9
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: grep -q 'def query_retryable' src/hypershell/data/model.py && ! grep -nE
+    'UNIQUE\**( chain|\.)' AGENTS.md .agents/factory/invariants.md && grep -q 'query_retryable'
+    .agents/factory/invariants.md && uv run pytest && uv run sphinx-build -E -b html
+    docs docs/_build
+- id: P6
+  name: 'PostgreSQL CI evidence (run B: external wait on a pushed branch)'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R9
+  depends_on:
+  - P3
+  - P4
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test "$(gh run list --branch fix/schema-upgrade-step --workflow tests.yml
+    --limit 1 --json headSha,conclusion --jq '.[0].headSha + " " + .[0].conclusion')"
+    = "$(git rev-parse HEAD) success"
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Open 2.8 databases in 2.9: an idempotent schema-upgrade step
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above
@@ -145,7 +171,7 @@ matter for this cycle:
 **Goal:** a committed SQLite database that real hypershell 2.8.3 made, and CLI tests that fail on
 the base `6c164d9` because the build cannot open it. No `src/` change.
 
-- [ ] Add `tests/fixtures/make-2.8.3-db.sh`. Start from the recipe in
+- [x] Add `tests/fixtures/make-2.8.3-db.sh`. Start from the recipe in
   [research/05](research/05-fixture-and-red-first.md#generator-recipe) and make these changes:
   - Take the Python interpreter (with `hypershell==2.8.3`) and an output directory as arguments.
   - Isolate every `HYPERSHELL_*` variable and use a free port.
@@ -153,22 +179,22 @@ the base `6c164d9` because the build cannot open it. No `src/` change.
   - Use the `run.in` task file: 3 `echo done-N`, plus `sh -c 'exit 3'`.
   - Run `hsx … --max-retries 1 --no-tls`, then the two `hs submit -t kind:pending …`.
   - **Finish by refusing to keep the file** if `hostname` appears in it.
-- [ ] Generate the database. Use a `uv venv --python 3.12` under `$TMPDIR`, then
+- [x] Generate the database. Use a `uv venv --python 3.12` under `$TMPDIR`, then
   `uv pip install hypershell==2.8.3`. Commit `tests/fixtures/hypershell-2.8.3.db`.
-- [ ] Add `tests/fixtures/README.md` with the provenance:
+- [x] Add `tests/fixtures/README.md` with the provenance:
   - the hypershell, Python, SQLAlchemy and cmdkit versions;
   - the exact command;
   - the file's sha256;
   - what the file contains (7 task rows: done, a failed chain, pending; 1 client row);
   - "never open read-write; tests copy it".
-- [ ] Add the shared helpers to `tests/__init__.py`, or a small `tests/fixtures.py` module that
+- [x] Add the shared helpers to `tests/__init__.py`, or a small `tests/fixtures.py` module that
   pytest does not collect:
   - `copy_fixture(temp_site)`
   - `make_half_upgraded(path)`: applies the frozen 2.9.0a1 `CREATE TABLE source …` and
     `CREATE INDEX index_source_lookup …` through raw `sqlite3`
   - `snapshot(path)`: the original 30 `task` columns keyed by `id`, plus `client`, through raw
     `sqlite3`
-- [ ] Add `tests/test_upgrade_cli.py` (`@mark.integration`). Every test is
+- [x] Add `tests/test_upgrade_cli.py` (`@mark.integration`). Every test is
   `@mark.xfail(strict=True, raises=AssertionError)`, and its precondition failures use
   `pytest.fail`. The tests (PLAN §2.6):
   - R9 end to end;
@@ -179,7 +205,7 @@ the base `6c164d9` because the build cannot open it. No `src/` change.
   - R7: the SQLite `UNIQUE` constraints remain and the retry still works;
   - `hs initdb --truncate --yes` and `--rotate --yes` on a 2.8 copy;
   - partitions: the 2.8.3 file as `local.1`, plus a column-order mismatch case.
-- [ ] Confirm by hand on the base that the first command exits 5 with `no such column:
+- [x] Confirm by hand on the base that the first command exits 5 with `no such column:
   task.source`. Record that in the commit body.
 - **Verify:** `git diff --quiet 6c164d9 -- src`, no hostname in the fixture, and
   `uv run pytest -rxX tests/test_upgrade_cli.py`. Every test must be XFAIL; an XPASS fails the run.
