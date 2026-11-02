@@ -36,9 +36,16 @@
 - **Recommended fix:** Change Step 7 to `git add <paths the phase touched> spec/{slug}/TECH.md [spec/{slug}/META.md]`, taking the paths from the phase's **Touches** line, and note that `bundle` stages the union.
 - **Confidence:** high · **Effort:** small
 
-## F5 — The blind diff's base is a mutable branch name, so a stale local `develop` grades the wrong range
+## F5 — The blind diff's base is a mutable branch name, so a stale local `develop` grades the wrong range · seen again
 `origin=hs-review:step1 severity=medium category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
 - **What happened:** Step 1 resolves `{base}` from TECH's `base: develop`. The injected diffstat and the Step 2 diff command both use `develop...HEAD`. In this worktree the local `develop` is stale, so the reviewer would have been given a diff over the wrong range. The foreman had to pin the base SHA (`origin/develop` at plan time) by hand before the blind pass.
 - **Skill cause:** the skill takes the base as a branch name and never checks whether that ref is current. The plan's real base, the commit the branch was cut from, is recorded nowhere in TECH, so the diff can silently include unrelated commits or miss some. That is a blind-diff integrity gap.
 - **Recommended fix:** have `hs-plan`/`hs-build` record `base_sha` in TECH's frontmatter, then make Step 1 and the injected diffstat use `git merge-base origin/{base} HEAD` (or `base_sha`). Step 1 should stop and report when local `{base}` differs from `origin/{base}`. This strengthens the blind-review gate; it does not weaken it.
+- **Confidence:** high · **Effort:** small
+
+## F6 — On a later cycle, Step 2's `git log --oneline` hands the blind reviewer the prior findings
+`origin=hs-review:step2 severity=medium category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** Step 2 tells the orchestrator to give the reviewer `git log --oneline {base}..HEAD` with the diff. On cycle 2 that log holds the cycle-1 review commit and the remediation commit, whose subjects name the findings and their fixes ("F1 exit -1 redelivery is a duplicate, F2 seed corrected"). Handing it over would have shown a supposedly fresh blind pass the previous cycle's findings. I withheld the log and told the reviewer not to read commit messages.
+- **Skill cause:** the skill excludes `spec/` from the diff so that the reviewer does not see REVIEW.md, but it passes the commit log as safe. The factory's own commit convention (`Review {slug}: cycle {n}`, remediation subjects naming the finding) puts the same content into that log.
+- **Recommended fix:** In Step 2, drop `git log` from the reviewer's inputs, or limit it to cycle 1. Tell the reviewer not to read commit messages (`git log`, `git show <sha>`, `git blame` over the branch range) in every cycle. This strengthens blind-review integrity and weakens nothing.
 - **Confidence:** high · **Effort:** small

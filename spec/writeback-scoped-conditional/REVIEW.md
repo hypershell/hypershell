@@ -180,3 +180,143 @@ judge under the maintainer's delegation, on 2026-11-02. Remediation returns to `
 | Observation · 2.8.3 ↔ 2.9 wire break | seed | Pre-existing on `d996579` (2.9.0a1 onwards), not from this diff, so R9 holds: a 2.8.3 client crashes on the first bundle (`'source' is an invalid keyword argument for Task`), and a 2.9 client kills a 2.8.3 server's Receiver and the run hangs. Seed it `unshaped` with a `ROADMAP.md` entry and both reproductions, and record that zone-dispatch's version handshake (its R5 and the new-client-vs-old-server ruling) is the intended clean failure, to be verified against 2.8.3 there. |
 
 Out of scope for cycle 2: everything except F1, F2 and the seed.
+
+## Review cycle 2 — changes-requested (2026-11-02)
+
+- **Reviewed commit:** `36a4e67`  ·  **Base:** `d996579` (`origin/develop`)  ·  **Date:** 2026-11-02
+- **Verdict:** changes-requested (one CONFIRMED finding, LOW, one seed's prose; no code)
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`
+- **Mode:** a fresh blind reviewer over the full `git diff d996579...36a4e67 -- . ':(exclude)spec/'`.
+  It was not shown cycle 1's findings or the branch's commit messages. The orchestrator then
+  checked the cycle-1 remediation against the triage above and ruled on two loose ends the build
+  left.
+- **Contract drift:** none. `GOAL.md` still has only `456abde` and `a044f7e`, both before the plan.
+
+### Verification run
+
+- **Full suite**, with PostgreSQL skipping as designed:
+  - 3.14.6: 556 passed, 44 skipped.
+  - 3.13.16: 556 passed, 44 skipped.
+- **`tests/test_writeback.py`**, run 5 times in a row on 3.14.6: 21 passed each time.
+- **PostgreSQL round trip** (plan gate ruling 1): **pending CI (foreman)** on PR #70.
+- **Blind reviewer's executed evidence:**
+  - R2 with real processes: a client was suspended mid-task, evicted, its task rerun and retried
+    elsewhere, then resumed. The branch logs `Refused stale result`, the chain is unchanged and
+    there is one retry row. Base produces a second retry chain.
+  - R3: a differential probe covered timezone offsets, naive and empty values, and exit statuses
+    0, 1, -1001 and -15. Base and branch were byte-identical in the result columns, the failures
+    output, and the logs at DEBUG and above.
+  - R6: red on base and green on the branch, in-process and by CLI drive.
+  - The eager double-listed retry gives APPLIED, then DUPLICATE.
+  - Both cancel routes give STALE.
+- **Compat drives:** SQLite, 10 tasks of which 2 always fail, `-r 2 -f`, `-N 2`, TLS on and off.
+  The 2.8.3 pairings were skipped: they are known broken and seeded.
+
+| Server | Client | TLS | Result |
+|---|---|---|---|
+| branch | base | on, off | ✅ rc 0/0, 14/14 rows completed, 0 NULL `client_id`, 4 retries with distinct `previous_id`, 6 failure lines, 0 stale/duplicate lines, 0 tracebacks |
+| base | branch | on, off | ✅ identical to the row above |
+| branch | branch | on, off | ✅ identical (control) |
+| base | base | on, off | ✅ identical (control) |
+
+### Cycle-1 remediation
+
+- **F1: fixed.**
+  - The DUPLICATE probe no longer carries `exit_status != CANCEL_STATUS`
+    (`src/hypershell/data/model.py:852-860`).
+  - Red: the new `test_duplicate_result_with_cancel_status_value_is_ignored` fails 2 of 2 on the
+    pre-remediation source (`d7d746a`). The repeat logs `Refused stale result` instead of
+    `Ignored duplicate result`.
+  - Green at `36a4e67`, in the 5 repeats and in both suites.
+  - The test's second half shows that a result for a cancelled row is still STALE. Both cancel
+    paths restamp `schedule_time` (`Task.cancel_all`, `model.py:790`; `task.py:1108`).
+  - R7 is unchanged.
+- **F2: fixed.**
+  - `issues/stale-confirm-hides-orphan.md` (Problem and R1 sketch) and its `ROADMAP.md` entry now
+    state the reproduced mechanism.
+  - Driving its R1 sketch in-process reproduces both interleavings as written:
+    - (a) `schedule_time` set, `client_id` NULL, and `Task.next` returns `[]`.
+    - (b) after the late confirm, `client_id == A`, the row is still in flight, and `Task.next`
+      returns `[]`.
+  - The blind reviewer reproduced both independently.
+- **Wire-compat seed `issues/wire-compat-2-8.md`: accurate.**
+  - Release 2.8.3's `Task` has 30 columns. 2.9.0a1 adds `source` and `fingerprint`; 2.9.0a2 and
+    `d996579` also add `part`.
+  - 2.8.3 builds each bundled task with `cls(**data)` (`Entity.from_dict`), so the `TypeError`
+    on `source` holds from 2.9.0a1 onward.
+  - Its `zone-dispatch` reference resolves: the version handshake is R5 of
+    `spec/zone-dispatch/GOAL.md` and its 2026-11-02 ruling, on the zone-dispatch branch.
+  - The `ROADMAP.md` entry points at the seed, which exists.
+  - The runtime reproductions are cycle 1's; the 2.8.3 pairings were not re-driven.
+
+### Findings
+
+#### F3 · LOW · CONFIRMED — A sibling seed still says the stale-confirm case needs the dispatch token on the wire
+- **Where:** `issues/late-confirm-overwrites-attribution.md:53-54` (Notes).
+- **Failure scenario:**
+  - The line restates the mechanism that F2 retracted.
+  - It asserts a design need that the corrected seed leaves open: `stale-confirm-hides-orphan.md:66-68`
+    leaves it to `/hs-plan` whether recovery needs the token, or a bound on how long a dispatched
+    row may stay unconfirmed.
+  - In that seed's interleaving (a), no confirmation is ever applied, so nothing carried on the
+    confirmation wire can reach the row.
+  - Whoever shapes either seed gets two contradictory accounts.
+- **Evidence:**
+  - The in-process drive of the corrected R1(a) leaves the row in flight with `client_id` NULL
+    and `Task.next` returning `[]`, with no confirmation ever applied.
+  - A grep outside `spec/` finds this the only remaining copy of the old wording.
+- **Touches:** one seed's prose. No code, no core file, no invariant.
+
+### Rulings on the build's loose ends
+
+- **(a)** `late-confirm-overwrites-attribution.md:54`: confirmed wrong, and recorded as F3.
+- **(b)** `research/` and PLAN §2 keep the old stale-confirm wording. They are the historical
+  record (PLAN is left as reviewed), so this is not a finding.
+
+### Requirement → evidence matrix
+
+| R-ID | Verified how (this cycle) | Status |
+|------|---------------------------|--------|
+| R1 | `test_non_result_columns_are_never_written`, `test_result_columns_are_fixed`; the column set is listed in TECH | ✅ |
+| R2 | `test_stale_result_is_refused` and the missing-row and unscheduled-token tests; the blind real-process eviction drive | ✅ |
+| R3 | `test_result_applies_as_today`; the blind differential probe (byte-identical at DEBUG and above); the compat drives | ✅ |
+| R4 | `test_foreign_attribution_is_applied` | ✅ |
+| R5 | `test_duplicate_result_is_ignored`; `test_duplicate_result_with_cancel_status_value_is_ignored`, red then green (F1 closed) | ✅ |
+| R6 | `test_late_result_after_retry_keeps_chain`; blind probe and CLI drive, red on base and green on branch | ✅ |
+| R7 | `test_cancelled_row_keeps_cancel_status`; predicates untouched | ✅ |
+| R8 | `test_in_memory_receiver_writes_nothing`, `test_no_confirm_result_applies`, `test_cluster_no_confirm_with_db` | ✅ |
+| R9 | no codec, wire or schema change; the compat table above | ✅ (PostgreSQL pending CI) |
+| R10 | `AGENTS.md` and `invariants.md` hunks; no "late full-row writeback" left outside `spec/` | ✅ |
+
+**Unmapped changes:** the five seeds and their ROADMAP entries, and the CI job line. All are
+covered by plan gate rulings 1 and 5 and the cycle-1 triage.
+
+### Observations (not findings)
+
+- **Blind pass:** no findings. Every candidate fell when it was run: the timestamp round-trip,
+  the eager double listing, both cancel routes, and rollback on a failing statement (base behaves
+  the same).
+- **`late-confirm-overwrites-attribution.md:28`** says "Not reproduced". The blind reviewer
+  reproduced it in-process: a late confirm moved a completed row's attribution to the holder.
+  This can be updated with F3's edit, but is not required.
+- **`orphan-revert-loses-result.md:22`**, "the result columns are cleared": `revert_all` leaves
+  `csvpath`, `cores_max` and `memory_max` in place. The defect reproduces, so this is precision
+  only.
+- **`stale-confirm-hides-orphan.md:27-30`:** "A is not evicted again" holds when A never comes
+  back. A resumed A re-registers through the heartbeat path, and then either completes the row or
+  is evicted again, which reverts it. This is precision only, for shaping.
+- **The wire-compat ROADMAP entry** "Depends on: zone (version handshake)": the handshake is
+  specified in zone-dispatch's GOAL, not in `issues/zone.md`. The pointer resolves once
+  zone-dispatch lands.
+
+### Human-gate triggers
+
+None. F3 is prose only and touches no core file and no security or DB-lifecycle invariant.
+
+### Remediation for `hs-build`
+
+- **F3:** rewrite `issues/late-confirm-overwrites-attribution.md:53-54` so that it agrees with the
+  corrected seed. For example: whether `stale-confirm-hides-orphan` needs the dispatch token on
+  the confirmation is open there, and its unconfirmed-row case involves no confirmation at all.
+  Optionally, also update line 28's "Not reproduced".
+- Cycle 3 is the last under the bound. The judge may scope it to verifying F3.
