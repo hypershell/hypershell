@@ -14,3 +14,10 @@
 - **Skill cause:** "Promoting an issue" assumes one seed per GOAL. A subsumption decision is a normal shaping outcome, and the ROADMAP `/hs-roadmap` retirement flow depends on the sibling's status being set consistently.
 - **Recommended fix:** Add a line to Step 4: a seed the GOAL subsumes gets `status: adopted:{slug}` too, the GOAL names it under Related materials and carries its testable outcomes as R-IDs, and `/hs-roadmap` retires it with the cycle.
 - **Confidence:** med · **Effort:** small
+
+## F2 — `verify:` guidance assumes `temp_site.sh`, whose cleanup some harnesses forbid
+`origin=hs-plan:step6 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** Step 4/6 and the TECH template steer every CLI drive through `.agents/factory/bin/temp_site.sh`. This run's harness forbids that script, because its exit trap removes the site recursively and the shell blocks that. The plan had to hand-roll the same isolation (`HYPERSHELL_SITE`, `HYPERSHELL_DATABASE_FILE`, empty `HYPERSHELL_CONFIG_FILE`, `UV_PROJECT`, a `mktemp -d` site left under `$TMPDIR`) inline in a long `verify:` string.
+- **Skill cause:** The wrapper is the only sanctioned isolation route, and it couples isolation with deletion. The skill offers no fallback for a harness that permits the isolation but not the cleanup.
+- **Recommended fix:** Give `temp_site.sh` a keep-site mode (for example `TEMP_SITE_KEEP=1` skips the trap and prints the path), and mention it in Step 4 and the TECH template as the portable form.
+- **Confidence:** med · **Effort:** small
