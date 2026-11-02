@@ -1,62 +1,78 @@
 ---
 slug: writeback-scoped-conditional
-title: "Scoped, conditional result writeback"
+title: Scoped, conditional result writeback
 kind: fix
 appetite: big
 status: in_progress
 branch: fix/writeback-scoped-conditional
 base: develop
-current_phase: P1
-last_updated: "2026-11-02"
+current_phase: P2
+last_updated: '2026-11-02'
 phases:
-  - id: P1
-    name: "Red replays and unchanged-behaviour guards (tests only)"
-    status: pending
-    satisfies: [R1, R2, R4, R5, R6, R7, R3, R8]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "git diff --quiet d996579 -- src && uv run pytest -m unit -rxX tests/test_writeback.py"
-  - id: P2
-    name: "Fenced writeback: result columns only, current assignment only"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R7, R8, R9]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      ! grep -q xfail tests/test_writeback.py && uv run pytest &&
-      sh -c 'r=$(pwd); for m in "-N4" "-N4 --no-confirm"; do
-      d=$(mktemp -d "${TMPDIR:-/tmp}/wb-verify.XXXXXX") || exit 1;
-      (cd "$d" && HYPERSHELL_SITE="$d" HYPERSHELL_DATABASE_FILE="$d/task.db" HYPERSHELL_CONFIG_FILE= UV_PROJECT="$r"
-      && export HYPERSHELL_SITE HYPERSHELL_DATABASE_FILE HYPERSHELL_CONFIG_FILE UV_PROJECT
-      && seq 20 | uv run hsx -t "echo {}" $m 2> log
-      && test "$(uv run hs list -c)" -eq 20 && test "$(uv run hs list -c -S)" -eq 20
-      && test "$(uv run hs list -c -w "client_id == null")" -eq 0
-      && ! grep -q -e "stale result" -e "duplicate result" log) || exit 1; done'
-  - id: P3
-    name: "Lifecycle contract prose: result writeback is fenced"
-    status: pending
-    satisfies: [R10, R7]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      git diff --quiet HEAD -- src tests &&
-      ! grep -q "late full-row writeback" AGENTS.md .agents/factory/invariants.md &&
-      grep -q "only its result columns" AGENTS.md &&
-      grep -q "only its result columns" .agents/factory/invariants.md &&
-      uv run pytest -m unit -q tests/test_writeback.py
+- id: P1
+  name: Red replays and unchanged-behaviour guards (tests only)
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R4
+  - R5
+  - R6
+  - R7
+  - R3
+  - R8
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: git diff --quiet d996579 -- src && uv run pytest -m unit -rxX tests/test_writeback.py
+- id: P2
+  name: 'Fenced writeback: result columns only, current assignment only'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: '! grep -q xfail tests/test_writeback.py && uv run pytest && sh -c ''r=$(pwd);
+    for m in "-N4" "-N4 --no-confirm"; do d=$(mktemp -d "${TMPDIR:-/tmp}/wb-verify.XXXXXX")
+    || exit 1; (cd "$d" && HYPERSHELL_SITE="$d" HYPERSHELL_DATABASE_FILE="$d/task.db"
+    HYPERSHELL_CONFIG_FILE= UV_PROJECT="$r" && export HYPERSHELL_SITE HYPERSHELL_DATABASE_FILE
+    HYPERSHELL_CONFIG_FILE UV_PROJECT && seq 20 | uv run hsx -t "echo {}" $m 2> log
+    && test "$(uv run hs list -c)" -eq 20 && test "$(uv run hs list -c -S)" -eq 20
+    && test "$(uv run hs list -c -w "client_id == null")" -eq 0 && ! grep -q -e "stale
+    result" -e "duplicate result" log) || exit 1; done'''
+- id: P3
+  name: 'Lifecycle contract prose: result writeback is fenced'
+  status: pending
+  satisfies:
+  - R10
+  - R7
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: git diff --quiet HEAD -- src tests && ! grep -q "late full-row writeback"
+    AGENTS.md .agents/factory/invariants.md && grep -q "only its result columns" AGENTS.md
+    && grep -q "only its result columns" .agents/factory/invariants.md && uv run pytest
+    -m unit -q tests/test_writeback.py
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Scoped, conditional result writeback
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above
@@ -158,12 +174,12 @@ change and no wire change**, so the #69 upgrade step is not involved. See PLAN �
 assertion** on `d996579`, plus guards that pin today's behaviour where it must not change.
 **No `src/` edit in this phase.** Every test references only symbols that exist on `d996579`.
 
-- [ ] Create `tests/test_writeback.py`; every test `@mark.unit` (the CLI test in P2 is
+- [x] Create `tests/test_writeback.py`; every test `@mark.unit` (the CLI test in P2 is
       `@mark.integration`). Module docstring: deterministic replays of result writeback, driven
       in-process with no threads, queue or sleeps.
-- [ ] Copy the `task_db` fixture from `tests/test_retry_gate.py:35-47` verbatim (do not move it to
+- [x] Copy the `task_db` fixture from `tests/test_retry_gate.py:35-47` verbatim (do not move it to
       `conftest.py`).
-- [ ] Helpers:
+- [x] Helpers:
       `dispatch(limit=1, attempts=1)` → `deserialize_tasks(serialize_tasks(Task.next(limit=limit,
       attempts=attempts)))` (the client's copies, via the real wire codec);
       `confirm(client_id, host, ids)` → `Confirm(queue=None)` with `.client_info =
@@ -175,12 +191,12 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
       r.tasks = copies; r.update_tasks()`;
       `row(id)` → `Task.from_id(id, caching=False).to_dict()`.
       Eviction is `Task.revert_orphaned(client_id)` (exactly what `HeartMonitor.check_clients` calls).
-- [ ] Logs: `caplog.set_level(logging.DEBUG, logger='hypershell')`; match on `record.getMessage()`.
+- [x] Logs: `caplog.set_level(logging.DEBUG, logger='hypershell')`; match on `record.getMessage()`.
       Red-phase assertions use substrings that will exist after the fix: a WARNING whose message
       contains the task id, the returning client id and the word `stale` (R2), or `duplicate` (R5).
-- [ ] Preconditions use `pytest.fail(...)`, **never `assert`**, so a broken replay cannot pass as
+- [x] Preconditions use `pytest.fail(...)`, **never `assert`**, so a broken replay cannot pass as
       the expected failure.
-- [ ] Replays, each `@mark.xfail(strict=True, raises=AssertionError, reason=<declarative>)`:
+- [x] Replays, each `@mark.xfail(strict=True, raises=AssertionError, reason=<declarative>)`:
   - `test_late_result_after_retry_keeps_chain` (R6): `Task.add(Task.new('false'))`; dispatch with
     `attempts=3` → copy A; confirm to A; `revert_orphaned(A)`; dispatch → copy B; confirm to B;
     `receive([finish(B, 1, client B)])`; dispatch with `attempts=3` → precondition: one retry row
@@ -212,7 +228,7 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
     client C with `server_id`/`server_host` changed. Assert `client_id`/`client_host` are C's, the
     result columns applied, `server_id`, `server_host`, `schedule_time` unchanged. (Without the
     stamp mutation this passes on `d996579`; keep it.)
-- [ ] Guards (no `xfail`; green now and after the fix):
+- [x] Guards (no `xfail`; green now and after the fix):
   - `test_result_applies_as_today` (R3): dispatch, confirm to A, return a failed result with
     `failures=io.StringIO()`. Assert the row's 13 result columns equal the copy's, every other
     column equals the dispatched row, one `Completed task (X)` record, one `Non-zero exit status
@@ -222,7 +238,7 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
     return a success. Assert applied and attributed.
   - `test_in_memory_receiver_writes_nothing` (R8): `Receiver(queue=None, in_memory=True)` with a
     copy for a row that does not exist in the DB. Assert no exception, one `Completed task` record.
-- [ ] Red record: run `uv run pytest -m unit --runxfail tests/test_writeback.py`; it **must fail**,
+- [x] Red record: run `uv run pytest -m unit --runxfail tests/test_writeback.py`; it **must fail**,
       on the replay cases only. Paste its short failure summary into the commit body.
 - **Verify:** `git diff --quiet d996579 -- src && uv run pytest -m unit -rxX tests/test_writeback.py`
   — exits 0 only if `src/` is `d996579`'s, every replay fails by `AssertionError` (strict: an XPASS
