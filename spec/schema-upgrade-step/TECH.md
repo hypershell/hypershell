@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-01'
 phases:
 - id: P1
@@ -44,7 +44,7 @@ phases:
 - id: P3
   name: 'PostgreSQL: CI service job, legacy template builder, gated tests (run A:
     authoring)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -280,7 +280,7 @@ refused before any DDL.
 **Goal:** everything PostgreSQL needs is authored and proven to skip cleanly locally. The evidence
 comes in P6.
 
-- [ ] Add a `postgres` job to `.github/workflows/tests.yml` (PLAN §2.5, the sketch in
+- [x] Add a `postgres` job to `.github/workflows/tests.yml` (PLAN §2.5, the sketch in
   [research/01](research/01-postgres-testing.md#proposed-ci-job)):
   - a service container with `matrix.include` of `postgres:13` and `postgres:18`, and a
     `pg_isready` health check;
@@ -289,14 +289,14 @@ comes in P6.
   - a template-builder step, then
     `uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py`;
   - a commented placeholder row for a future `timescale/timescaledb` image.
-- [ ] Add `tests/fixtures/make-legacy-postgres.sh`:
+- [x] Add `tests/fixtures/make-legacy-postgres.sh`:
   - `uv venv --python 3.12` venvs for `hypershell[postgres]==2.8.3` and `==2.9.0a1`;
   - `hs283` built by 2.8.3 (`hs initdb --yes`, the same task file and `hsx … --max-retries 1`,
     two `hs submit`s);
   - `hs290a1` = `CREATE DATABASE … TEMPLATE hs283`, then 2.9.0a1 `hs initdb --yes`;
   - admin SQL through `docker exec "$PG_CONTAINER" psql`;
   - provider `postgres`, never `postgresql`.
-- [ ] Add `tests/test_upgrade_postgres.py`:
+- [x] Add `tests/test_upgrade_postgres.py`:
   - module `pytestmark = [mark.integration, mark.skipif(not os.getenv('HS_TEST_POSTGRES'), …)]`;
   - a missing template under a set gate → `pytest.fail`;
   - `pg_database` (AUTOCOMMIT admin engine, `CREATE DATABASE … TEMPLATE`,
