@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -67,14 +67,14 @@ phases:
     HEAD --client b819de6
 - id: P5
   name: Local throughput and footprint gate against b819de6
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on:
   - P4
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run python tests/bench/bench_queue.py gate --base b819de6 --feature HEAD
     --repeats 5
 - id: P6
@@ -331,25 +331,33 @@ server.
 **Goal:** a reproducible single-host benchmark showing that throughput didn't regress and that
 process count and FDs are no higher.
 
-- [ ] Add a `gate` subcommand to `tests/bench/bench_queue.py`, ported from the prototype's
+- [x] Add a `gate` subcommand to `tests/bench/bench_queue.py`, ported from the prototype's
       `one_run` and sampler.
   - **Setup:** pre-submit M `true` tasks, then run `hs server --restart`. Detect readiness by
     LISTEN through psutil, with no probe connection. Start N loopback clients.
   - **Metric:** p10–p90 tasks/s from the DB timestamps. Also report the full span.
   - **Peaks:** sample the server's own and whole-tree children, threads, FDs and RSS.
   - **Context:** record the Python version and the `multiprocessing` start method.
-- [ ] **Configs:**
+- [x] **Configs:**
   - 4×4 b=1, TLS on and off;
   - 16×1 b=1, TLS on and off;
   - 4×4 b=50 (client `-b 50 -w 1`, M=20000), TLS on;
   - 32×1 b=1, TLS on.
   - M=5000 unless stated. 5 repeats, with the builds interleaved A B A B.
-- [ ] **Thresholds** (PLAN §6), printed per config and exiting non-zero on any failure:
+- [x] **Thresholds** (PLAN §6), printed per config and exiting non-zero on any failure:
   - **Throughput:** pass when the feature median ≥ the base median − max(base spread, feature
     spread, 5% of the base median).
   - **Footprint:** peak tree children and peak tree FDs for the feature must be ≤ base.
   - **Reported only:** RSS, tree threads, and own threads and FDs.
-- [ ] Put the gate output (a table, no host names) in the commit body.
+- [x] Put the gate output (a table, no host names) in the commit body.
+- **Gate reading (plan-gate ruling, foreman).** GOAL R9's "its process count and open file
+  descriptors" means the **server's whole process tree**: on base the queue sockets and handler
+  threads live in the manager child, so only tree totals compare like with like. The gate therefore
+  fails on peak tree children or peak tree FDs above base, and reports the server process's own
+  thread and FD counts (which rise by about 3 per connected client, by design) without gating them.
+- **Built note.** `gate` also requires every run clean (server and client rc 0, rows = M, none
+  incomplete), takes `--only CONFIG` and `--out FILE.jsonl`, and prints Python version and start
+  method per build. Laptop spreads are wide (30-77 tasks/s at b=1), so the 5% floor never binds.
 - **Verify:** `uv run python tests/bench/bench_queue.py gate --base b819de6 --feature HEAD
   --repeats 5`. About 30 min.
 - **Touches:** `tests/bench/bench_queue.py`.

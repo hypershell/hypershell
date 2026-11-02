@@ -337,6 +337,99 @@ def cmd_compat(args: argparse.Namespace) -> bool:
     return ok
 
 
+# ------------------------------------------------------------------------------------------ gate
+
+
+# (name, clients, threads per client, server bundle, client bundle, tls, tasks)
+GATE_CONFIGS: Tuple[Tuple[str, int, int, int, int, bool, int], ...] = (
+    ('4x4 b=1 tls', 4, 4, 1, 1, True, 5000),
+    ('4x4 b=1 no-tls', 4, 4, 1, 1, False, 5000),
+    ('16x1 b=1 tls', 16, 1, 1, 1, True, 5000),
+    ('16x1 b=1 no-tls', 16, 1, 1, 1, False, 5000),
+    ('4x4 b=50 tls', 4, 4, 50, 50, True, 20000),
+    ('32x1 b=1 tls', 32, 1, 1, 1, True, 5000),
+)
+
+
+def context(venv: Path) -> str:
+    """Python version and multiprocessing start method of a build."""
+    return subprocess.run([str(venv / 'bin' / 'python'), '-c',
+                           'import sys, multiprocessing as mp; '
+                           'print(sys.version.split()[0], mp.get_start_method())'],
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
+def throughput(rows: List[Dict[str, Any]], tasks: int) -> Dict[str, Any]:
+    """Steady-state (p10-p90 of completions) and full-span tasks per second, from the database."""
+    done = sorted(datetime.fromisoformat(row['completion_time']).timestamp()
+                  for row in rows if row['completion_time'] is not None)
+    first = min(datetime.fromisoformat(row['schedule_time']).timestamp()
+                for row in rows if row['schedule_time'] is not None)
+    lo, hi = done[int(0.1 * len(done))], done[int(0.9 * len(done)) - 1]
+    histogram: Dict[str, int] = {}
+    for row in rows:
+        histogram[str(row['exit_status'])] = histogram.get(str(row['exit_status']), 0) + 1
+    return dict(p10_p90=round(0.8 * len(done) / (hi - lo), 1), full=round(len(done) / (done[-1] - first), 1),
+                rows=len(rows), incomplete=sum(row['completion_time'] is None for row in rows),
+                histogram=histogram, complete=len(rows) == tasks and len(done) == tasks)
+
+
+def run_gate_once(venv: Path, label: str, config: Tuple, args: argparse.Namespace) -> Dict[str, Any]:
+    name, clients, threads, bundle, client_bundle, tls, tasks = config
+    site = Site(args.workdir, label, tls, log_level='WARNING')
+    submit(site, venv, ['true'] * tasks)
+    result = serve(site, venv, venv, ['-b', str(bundle)],
+                   ['-N', str(threads), '-b', str(client_bundle), '-w', '1'], clients=clients,
+                   server_timeout=args.timeout, client_timeout=WAIT, sampler_interval=args.interval)
+    result.update(throughput(site.rows(), tasks))
+    result.update(label=label, config=name)
+    shutil.rmtree(site.path, ignore_errors=True)
+    return result
+
+
+def cmd_gate(args: argparse.Namespace) -> bool:
+    builds = [('base', build(args.base, args.workdir)), ('feature', build(args.feature, args.workdir))]
+    for label, venv in builds:
+        print(f'# {label}: {args.base if label == "base" else args.feature} (python, start method: {context(venv)})')
+    configs = [config for config in GATE_CONFIGS if not args.only or config[0] in args.only]
+    results: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for config in configs:
+        for repeat in range(args.repeats):
+            for label, venv in builds:
+                result = run_gate_once(venv, label, config, args)
+                results.setdefault((config[0], label), []).append(result)
+                if args.out:
+                    with open(args.out, 'a') as stream:
+                        stream.write(json.dumps(result) + '\n')
+                log(f'{config[0]} {label} #{repeat}: {result["p10_p90"]} tasks/s, rc {result["server_rc"]}/'
+                    f'{sorted(set(map(str, result["client_rcs"])))}, peak {result["peak"]}')
+    ok = True
+    print(f'| config | base median [min-max] | feature median [min-max] | delta | tolerance | throughput '
+          f'| tree children b/f | tree FDs b/f | tree threads b/f | own threads b/f | own FDs b/f '
+          f'| tree RSS MB b/f | clean | verdict |')
+    print('|' + '---|' * 14)
+    for config in configs:
+        name = config[0]
+        base, feature = results[(name, 'base')], results[(name, 'feature')]
+        tb, tf = [r['p10_p90'] for r in base], [r['p10_p90'] for r in feature]
+        mb, mf = statistics.median(tb), statistics.median(tf)
+        tolerance = max(max(tb) - min(tb), max(tf) - min(tf), 0.05 * mb)
+        fast = mf >= mb - tolerance
+        peak = {key: (max(r['peak'][key] for r in base), max(r['peak'][key] for r in feature))
+                for key in Sampler.KEYS}
+        small = peak['children'][1] <= peak['children'][0] and peak['tree_fds'][1] <= peak['tree_fds'][0]
+        tidy = all(clean(r) and r['complete'] and r['incomplete'] == 0 for r in base + feature)
+        passed = fast and small and tidy
+        ok &= passed
+        pair = lambda key: f'{peak[key][0]:g}/{peak[key][1]:g}'
+        print(f'| {name} | {mb:.1f} [{min(tb):.1f}-{max(tb):.1f}] | {mf:.1f} [{min(tf):.1f}-{max(tf):.1f}] '
+              f'| {mf - mb:+.1f} | {tolerance:.1f} | {"PASS" if fast else "FAIL"} | {pair("children")} '
+              f'| {pair("tree_fds")} | {pair("tree_threads")} | {pair("threads")} | {pair("fds")} '
+              f'| {pair("tree_rss_mb")} | {tidy} | {"PASS" if passed else "FAIL"} |')
+    print(f'# gate: {"PASS" if ok else "FAIL"} ({args.repeats} repeats per build, interleaved)')
+    return ok
+
+
 # ------------------------------------------------------------------------------------------ main
 
 
@@ -352,9 +445,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     compat.add_argument('--server', required=True)
     compat.add_argument('--client', required=True)
     compat.add_argument('--tasks', type=int, default=200)
+    gate = commands.add_parser('gate')
+    gate.add_argument('--base', required=True)
+    gate.add_argument('--feature', required=True)
+    gate.add_argument('--repeats', type=int, default=5)
+    gate.add_argument('--interval', type=float, default=0.2, help='footprint sampling period (seconds)')
+    gate.add_argument('--timeout', type=float, default=600.0, help='bound on one server run (seconds)')
+    gate.add_argument('--only', action='append', help='run only this config (repeatable)')
+    gate.add_argument('--out', help='append each run as a JSON line to this file')
     args = parser.parse_args(argv)
     args.workdir.mkdir(parents=True, exist_ok=True)
-    handler = {'parity': cmd_parity, 'compat': cmd_compat}[args.command]
+    handler = {'parity': cmd_parity, 'compat': cmd_compat, 'gate': cmd_gate}[args.command]
     return 0 if handler(args) else 1
 
 

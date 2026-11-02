@@ -105,3 +105,16 @@ is skipped by the parser):
   these rules: not collected by pytest, no internal identifiers, kept lean. Tell the briefs to save
   prototypes there, not in `$TMPDIR`.
 - **Confidence:** med · **Effort:** small
+
+## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits
+`origin=hs-build:P5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** P4's and P5's gates (`bench_queue.py … --feature HEAD`) build a venv from the
+  committed `HEAD`. hs-build runs the gate in Step 4 and commits in Step 7, so the gate measured the
+  previous phase's commit. It was harmless here only because P4/P5 changed no `src/` code.
+- **Skill cause:** Step 4 says "run the phase's `verify:`" without noting that a ref-based gate
+  sees committed code only; neither hs-build nor the TECH template says how to verify a phase whose
+  gate builds from git.
+- **Recommended fix:** In Step 4, say that a gate building from a git ref must either run after a
+  provisional commit (amended on red) or name the working tree; or have the harness accept
+  `--feature WORKTREE`. Mirror the rule in the TECH template's `verify:` guidance.
+- **Confidence:** high · **Effort:** small
