@@ -176,7 +176,7 @@ in this phase's atomic `git add -A` commit below.
 git add -A
 git commit -m "[{category}] Build {slug} {id}: {phase name}"
 ```
-`{category}` is the `TECH.md` `kind` (feature|fix|refactor), available from the Step 1 `next_phase.py`
+`{category}` is the `TECH.md` `kind` (feature|fix|refactor|docs|…), available from the Step 1 `next_phase.py`
 output — the same house style as `hs-feature`/`hs-plan`. There is **no `WIP:` prefix**: every branch
 commit is squashed into the single PR-title commit at `hs-publish`, so subjects only need to read well
 in the PR's commits tab. For a remediation commit (a phase reopened by `hs-review`), keep the `{id}`

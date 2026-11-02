@@ -157,8 +157,8 @@ Likely sources here: the research fan-out mechanics (Step 3), the invariant-gate
 git add -A spec/{slug}      # PLAN.md + TECH.md, plus research/ and META.md when present (research/ is omitted on the lean path)
 git commit -m "[{category}] Plan {slug}: design + phased roadmap"
 ```
-`{category}` = the same category as the shape commit (`hs-feature` Step 7) — normally `{kind}`
-(`fix`|`feature`|`refactor`), or a more specific AGENTS.md category (e.g. `docs`) when it fits.
+`{category}` = the same category as the shape commit (`hs-feature` Step 7) — `{kind}`
+(`fix`|`feature`|`refactor`|`docs`|…, the open AGENTS.md set).
 **No `Co-Authored-By` trailer.** Do not push.
 
 ### Step 9 — Report & hand off

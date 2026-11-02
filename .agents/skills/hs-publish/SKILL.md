@@ -51,7 +51,7 @@ Additional instructions provided with the invocation: $ARGUMENTS
   the human (AskUserQuestion) before `git push` / `gh pr create` / local merge.
 - **Squash-only repo.** Do not create merge commits or rebase-merge. The PR title becomes the squash
   commit subject on `develop`, so the **PR title is `[category] Imperative summary`** (category =
-  `TECH.md` `kind`: feature|fix|refactor) — **never Conventional Commits (`feat:`/`fix:`)**.
+  `TECH.md` `kind`: feature|fix|refactor|docs|…) — **never Conventional Commits (`feat:`/`fix:`)**.
 - **Link, don't quote.** The PR body references artifacts via SHA-pinned blob permalinks, not pasted
   copies.
 - **No `Co-Authored-By`** on any commit. PR **bodies** end with the Claude Code generation line.

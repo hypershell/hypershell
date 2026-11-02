@@ -7,7 +7,7 @@ description: >-
   with stable R-IDs, resolved clarifications. Shaping only: no deep research, no big code reads. The
   first step of the spec-driven "software factory" lifecycle (see .agents/factory/methodology.md).
 disable-model-invocation: true
-argument-hint: "<inline feature description> | spec/<slug>/GOAL.md | issues/<slug>.md [fix|refactor] [appetite small|big]"
+argument-hint: "<inline feature description> | spec/<slug>/GOAL.md | issues/<slug>.md [fix|refactor|docs|…] [appetite small|big]"
 allowed-tools: Read, Write, Edit, Grep, Glob, AskUserQuestion, Bash(git status *), Bash(git branch *), Bash(git switch *), Bash(git rev-parse *), Bash(git fetch *), Bash(git add *), Bash(git commit *), Bash(git log *), Bash(git ls-files *), Bash(head *)
 ---
 
@@ -52,10 +52,12 @@ Parse `$ARGUMENTS` case-insensitively. If self-contradictory, STOP and ask.
   `{slug}` is the file stem; its frontmatter supplies `kind` and `appetite` unless the invocation
   overrides them. A bare `{slug}` naming an existing `issues/{slug}.md` resolves the same way.
   See "Promoting an issue" in Step 4.
-- `fix` / `bug` / `hotfix`(reject, out of scope) / `refactor` → set `kind`; otherwise infer from the
-  wording, defaulting to `feature`. **Hotfixes against `master` are out of scope — STOP and say so.**
+- `fix` / `bug` / `hotfix`(reject, out of scope) / `refactor` / any other `AGENTS.md` commit category
+  (`docs`, `ci`, `test`, …) → set `kind`; otherwise infer from the wording, defaulting to `feature`.
+  The `kind:` set is open: a pure docs/ci/test change takes that category as its `kind`.
+  **Hotfixes against `master` are out of scope — STOP and say so.**
 - `appetite small` / `appetite big` → set appetite; else default `small` for `kind: fix`, `big` for
-  `feature`/`refactor`. Those two values are the whole vocabulary; a seed whose frontmatter still
+  every other kind. Those two values are the whole vocabulary; a seed whose frontmatter still
   reads `medium` rounds **up** to `big`, because rounding up costs a research fan-out while rounding
   down fails `hs-review`'s scope check against a contract a human already accepted. Record the
   round-up as a dated Clarification in the GOAL; leave the seed's own frontmatter alone.
@@ -72,8 +74,8 @@ Parse `$ARGUMENTS` case-insensitively. If self-contradictory, STOP and ask.
   branch already exists, STOP and report a collision. (Adopting an *untracked* hand-written
   `spec/{slug}/GOAL.md` at an explicit path is the intended flow, not a collision.)
 - **Branch mapping:** `kind: fix` → `fix/{slug}`; every other kind → `feature/{slug}`. The `kind:`
-  set is open (it is the `AGENTS.md` commit category), so a promoted `kind: docs` seed still has a
-  defined branch.
+  set is open (it is the `AGENTS.md` commit category), so a `kind: docs` change — inline or a
+  promoted seed — still has a defined branch.
 - **Never guess.** On any ambiguity in scope or requirements, emit a literal `[NEEDS CLARIFICATION:
   …]` marker in GOAL.md and ask the human (AskUserQuestion). Record answers in the Clarifications
   section. Do not invent behavior.
@@ -184,9 +186,11 @@ git add spec/{slug}/GOAL.md          # add spec/{slug}/META.md too if you record
 git add issues/{slug}.md ROADMAP.md  # only when promoting: status -> adopted:{slug}
 git commit -m "[{category}] Shape {slug} goal"
 ```
-`{category}` = the AGENTS.md commit category matching the work — normally `{kind}` itself
-(`fix`|`feature`|`refactor`), or a more specific category (e.g. `docs`) when the GOAL is really that
-kind of change. Never collapse everything non-`fix` to `feature`. **No co-author trailer.** Do not push.
+`{category}` = `{kind}` — the AGENTS.md commit category matching the work (`fix`|`feature`|`refactor`|
+`docs`|…). When the GOAL is really a more specific kind of change (e.g. `docs`), set `kind` to that
+category rather than committing under one that differs from `kind`: `hs-build`/`hs-review`/`hs-publish`
+read the category from `TECH.md` `kind`. Never collapse everything non-`fix` to `feature`.
+**No co-author trailer.** Do not push.
 
 ### Step 8 — Report & hand off
 Report: branch, slug, kind, appetite, the R-ID list, any open clarifications. Tell the human the
