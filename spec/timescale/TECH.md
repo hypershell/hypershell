@@ -95,6 +95,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: test "$(gh run list --branch feature/timescale --workflow tests.yml --commit
     "$(git log -1 --format=%H -- . ':!spec')" --json conclusion --jq '[.[] | select(.conclusion
     == "success")] | length')" -ge 1
@@ -349,6 +350,26 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
 - [ ] Foreman pushes and opens/updates the draft PR. Record run id, head sha and per-entry results
       (`pg13`, `pg18`, `timescale`, `timescale-oss`, `timescale-floor`, SQLite matrix) here.
 - [ ] If a scenario fails: reopen P3 (or P2) per `hs-build` remediation; do not patch tests to pass.
+- *(Attempt 1, run 41546097979 at `9c853d0`, red; the first block at P5 on this cause. `pg13` and
+  `pg18` passed. All three TimescaleDB entries failed before any test ran, in the template-building
+  step: `CREATE DATABASE hs290a1 TEMPLATE hs283` → `source database "hs283" is being accessed by
+  other users` (1 other session), about 5 s after the last client exited, which is PostgreSQL's
+  wait for other backends to leave the source. Cause, from TimescaleDB source (2.24.0 and 2.31.0
+  read 2026-11-02): the image creates the extension in `template1`, so every new database has it;
+  the launcher keeps a scheduler connected to every database that allows connections and is not a
+  template (`src/loader/bgw_launcher.c`, `populate_database_htab`); and the loader's CREATE
+  DATABASE hook sends RESTART to the scheduler of a TEMPLATE source that allows connections
+  (`src/loader/loader.c`, `post_analyze_hook`, `database_allowconn`). The restarted scheduler
+  connects first and only then waits on the CREATE DATABASE transaction's vxid
+  (`ts_bgw_db_scheduler_entrypoint`), so the copy fails every time, not by chance. The same would
+  hit every test clone of `hs283`/`hs290a1`. Fixture fix, no product change:
+  `make-legacy-postgres.sh` `seal_template` sets `ALLOW_CONNECTIONS false` on each template once
+  built and terminates its sessions, waiting until none remain. The hook then sends no RESTART and
+  the launcher starts no scheduler there, so the fixture's clone and the tests' clones see no
+  other session. The function returns at once unless `shared_preload_libraries` names
+  `timescaledb`, so the plain entries run the same SQL as before. Test clones from `template1`
+  and `template0` were never exposed: both are templates, and neither is named as a TEMPLATE source
+  that allows connections.)*
 - **Verify:** see frontmatter (gates on the last commit outside `spec/`, not `HEAD`).
 
 ## Phase P6 — R6: `[database.timescale]` (deferrable — cut here if over appetite)

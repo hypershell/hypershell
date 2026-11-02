@@ -9,6 +9,8 @@
 #   hs290a1  a copy of hs283 opened by hypershell[postgres]==2.9.0a1 (`hs initdb --yes`), which
 #            creates the new `source` table but leaves `task` without its new columns.
 #
+# On a TimescaleDB server both templates are left closed to connections (see seal_template).
+#
 # Usage:
 #   make-legacy-postgres.sh
 #
@@ -33,6 +35,33 @@ mkdir -p "$WORKDIR"
 
 admin_sql() {
     docker exec "$PG_CONTAINER" psql -v ON_ERROR_STOP=1 -X -q -t -A -U "$PGUSER" -d "${2:-postgres}" -c "$1"
+}
+
+# Close template database $1 to new connections and end the sessions already in it, when the
+# server preloads TimescaleDB; on any other server this does nothing.
+#
+# TimescaleDB's launcher keeps a scheduler connected to every database that allows connections
+# and is not a template, and its CREATE DATABASE hook restarts the scheduler of a TEMPLATE source
+# that allows connections. The restarted scheduler connects, then waits for the CREATE DATABASE
+# transaction to end, so the copy always fails with "source database is being accessed by other
+# users". A source that disallows connections gets no scheduler and no restart (TimescaleDB
+# src/loader/bgw_launcher.c, populate_database_htab; src/loader/loader.c, post_analyze_hook).
+# The scheduler is not a client session, so this does not change what the templates hold.
+seal_template() {
+    case "$(admin_sql 'SHOW shared_preload_libraries')" in
+        *timescaledb*) ;;
+        *) return 0 ;;
+    esac
+    admin_sql "ALTER DATABASE $1 ALLOW_CONNECTIONS false"
+    admin_sql "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$1'" > /dev/null
+    local sessions
+    for _ in $(seq 1 100); do
+        sessions="$(admin_sql "SELECT count(*) FROM pg_stat_activity WHERE datname = '$1'")"
+        test "$sessions" = 0 && return 0
+        sleep 0.1
+    done
+    echo "error: $sessions sessions remain on $1 after closing it" >&2
+    exit 1
 }
 
 make_env() {  # $1 = directory, $2 = requirement
@@ -91,6 +120,7 @@ test "$count" = 7 || { echo "error: hs283 holds $count tasks, expected 7" >&2; e
 chain="$(admin_sql "SELECT count(*) FROM task WHERE previous_id IS NOT NULL OR next_id IS NOT NULL" hs283)"
 test "$chain" = 2 || { echo "error: hs283 holds $chain chained tasks, expected 2" >&2; exit 1; }
 
+seal_template hs283
 admin_sql 'CREATE DATABASE hs290a1 TEMPLATE hs283'
 mkdir -p "$WORKDIR/site-hs290a1"
 (
@@ -104,5 +134,6 @@ test "$source_table" = 1 && test "$source_column" = 0 || {
     echo "error: hs290a1 is not half-upgraded (source table: $source_table, task.source: $source_column)" >&2
     exit 1
 }
+seal_template hs290a1
 
 echo "Built template databases: hs283 (7 tasks), hs290a1 (half-upgraded)"

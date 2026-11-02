@@ -88,6 +88,11 @@ is skipped by the parser):
   (the CI wait), so the FSM now holds P6 `done` with P5 `pending`, and `next_phase.py` reports no
   warning for a done phase whose dependency is not done. A `waits_on` field would let the
   dependency be on code, not on the evidence phase.
+- **Seen again at build (hs-build:P5):** the first CI run blocked P5 (attempt 1, the first block
+  on this cause) on a test-fixture defect only a TimescaleDB server shows: its scheduler holds a
+  session in the template database, so `CREATE DATABASE … TEMPLATE` fails. The fix landed while
+  the FSM stayed at P5, recorded with `--record-attempt`; `hs-build` has no stated path for a fix
+  found at an external-wait phase that touches no phase's checklist.
 - **Confidence:** high · **Effort:** medium
 
 ## F4 — The planned Sphinx gate could never pass: its `grep -i warning` matches the build summary and a known import warning
