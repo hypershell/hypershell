@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -42,14 +42,14 @@ phases:
     {}' -N4 --no-tls && uv run hs list --count"
 - id: P3
   name: Tests for the server state machines that touch the managed queues
-  status: pending
+  status: done
   satisfies:
   - R7
   depends_on:
   - P2
   parallel: true
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -v tests/test_server_fsm.py
 - id: P4
   name: 'No-behaviour-change proof: workload test, base parity, b819de6 client compatibility'
@@ -258,31 +258,35 @@ and no feeder thread. The remote method surface is identical on 3.11–3.14.
 `HeartMonitor`. For each, they show data moving through its queue, re-entry when a queue operation
 times out, and a halt on the sentinel. This phase adds tests only; `server.py` is not edited.
 
-- [ ] Create `tests/test_server_fsm.py`. Unit tests use `SimpleNamespace(scheduled=Queue(1),
+- [x] Create `tests/test_server_fsm.py`. Unit tests use `SimpleNamespace(scheduled=Queue(1),
       completed=Queue(1), heartbeat=Queue(), confirmed=Queue())` as stand-ins.
   - Monkeypatch `hypershell.server.DEFAULT_REMOTE_TIMEOUT` to `0.05`.
   - Use `in_memory=True` for Receiver, Confirm and HeartMonitor.
   - Sketches are in research 02 §6.
-- [ ] **Receiver:**
+- [x] **Receiver:**
   - empty → `unload_bundle()` returns `UNLOAD` (re-entry);
   - a packed bundle moves through `UNPACK` → `UPDATE` → `UNLOAD`;
   - `make_sentinel()` → `FINAL`;
   - `ReceiverThread` joins within 2 s after the sentinel.
-- [ ] **Confirm:** empty → `UNLOAD`; `ClientInfo` pack → `UNPACK`/`UPDATE`; sentinel → `FINAL`;
+- [x] **Confirm:** empty → `UNLOAD`; `ClientInfo` pack → `UNPACK`/`UPDATE`; sentinel → `FINAL`;
       the thread form joins.
-- [ ] **HeartMonitor** (`evict_after=10`):
+- [x] **HeartMonitor** (`evict_after=10`):
   - empty → `SWITCH`, then `NEXT`;
   - a beat → `UPDATE` and registered;
   - `should_signal` → `SIGNAL`, which puts one sentinel on `scheduled`. Keep `len(beats)` at or
     below the free slots, to avoid the pre-existing hang at L644.
   - heartbeat sentinel → `FINAL`.
-- [ ] **Scheduler:**
+- [x] **Scheduler:**
   - `post_bundle()` on an empty `scheduled` → `LOAD`, and the bundle can be fetched with `get`;
   - on a full `scheduled` → `POST` after the timeout (re-entry);
   - halt: `monkeypatch.setattr(hypershell.core.signal, 'RECEIVED', SIGUSR1)` → `load_bundle()`
     returns `FINAL`. Always restore the flag with monkeypatch, because it is sticky.
-- [ ] **One `@mark.integration` per FSM** through a started `QueueServer` and a `QueueClient`. The
+- [x] **One `@mark.integration` per FSM** through a started `QueueServer` and a `QueueClient`. The
       client puts or gets, the FSM thread consumes or produces, and the sentinel halts it.
+- **Built note.** The Scheduler's integration pass uses a module-local `task_db` fixture (modelled
+  on `tests/test_retry_gate.py`, not imported) and `forever_mode=True, poll=1`: it posts three
+  one-task bundles to a remote client, then halts through the patched `RECEIVED`. The HeartMonitor
+  pass also shows a `FINISHED` beat unregistering the client before the sentinel halts it.
 - **Verify:** `uv run pytest -v tests/test_server_fsm.py`.
 - **Touches:** `tests/test_server_fsm.py` (new).
 
