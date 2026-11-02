@@ -94,8 +94,10 @@
 
     ``.provider``
         Database provider (default: 'sqlite'). Supported alternatives include
-        'postgres' (or compatible). Support for other providers may be considered in
-        the future.
+        'postgres' (or compatible) and 'timescale' (alias 'timescaledb'), which is PostgreSQL
+        with the TimescaleDB extension: ``hs initdb`` makes the task table a hypertable
+        (requires the ``uuid7`` extra; see the TimescaleDB section of :ref:`database <database>`).
+        Support for other providers may be considered in the future.
 
     ``.file``
         Only applicable for SQLite provider.

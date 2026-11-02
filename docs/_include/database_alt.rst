@@ -37,6 +37,12 @@ local account authentication simply needs to know the database name.
     provider = "postgres"
     database = "hypershell"
 
+With the ``timescale`` provider (alias ``timescaledb``) the database is PostgreSQL with the
+TimescaleDB extension, and ``hs initdb`` also makes the ``task`` table a hypertable partitioned by
+its UUIDv7 ``id``, with columnstore compression and a policy where the server's TimescaleDB edition
+and version support them. Every process that submits tasks then needs the ``uuid7`` extra.
+See the TimescaleDB section of the database documentation.
+
 The ``port`` is assumed to be 5432 but can be specified. If a ``user`` is given then so too must
 a ``password``. The default `public` schema is assumed but can also be specified. Anything else
 is forwarded to the database as a connection parameter; e.g., ``encoding = "utf-8"``.

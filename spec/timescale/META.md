@@ -85,3 +85,19 @@ is skipped by the parser):
 - **Recommended fix:** As in the original finding (`waits_on: "ci:<workflow>@<last code commit>"`,
   documented run-A/run-B split).
 - **Confidence:** high · **Effort:** medium
+
+## F4 — The planned Sphinx gate could never pass: its `grep -i warning` matches the build summary and a known import warning
+`origin=hs-build:P4 severity=medium category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** P4's `verify:` piped `sphinx-build` through `grep -i 'warning'`, excluding only
+  the `task_submit.rst`/`manual.rst` toctree lines. Sphinx's own summary (`build succeeded, 2
+  warnings.`) and the `pkg_resources is deprecated` UserWarning that `sphinxcontrib.details` prints
+  at import both match, so the gate was red on every tree, docs or no docs. It was amended twice
+  through `set_phase.py --verify` (attempts 2) to exclude those two lines; a real Sphinx warning
+  (a duplicate label, seen mid-build) still turns it red.
+- **Skill cause:** `hs-plan` composes a docs gate by hand with no canonical, exercised form, and
+  `AGENTS.md` § Docs lists only the toctree warnings as pre-existing, although
+  `spec/task-card-view/TECH.md` already recorded the `pkg_resources` one.
+- **Recommended fix:** One canonical sandbox-safe docs gate (e.g. a factory script that filters
+  Sphinx `WARNING:` lines only, minus the listed pre-existing ones) that `hs-plan` cites instead of
+  an inline pipeline; add the `pkg_resources` warning to `AGENTS.md` § Docs.
+- **Confidence:** high · **Effort:** small

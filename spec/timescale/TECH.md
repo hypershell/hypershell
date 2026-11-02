@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/timescale
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -61,7 +61,7 @@ phases:
     && uv run pytest'
 - id: P4
   name: 'Docs: TimescaleDB as a first-class database section'
-  status: pending
+  status: done
   satisfies:
   - R8
   - R10
@@ -69,13 +69,14 @@ phases:
   - P2
   parallel: true
   hammerable: false
-  hill: uphill
+  hill: downhill
+  attempts: 2
   verify: grep -q 'to_uuidv7_boundary' docs/_include/database.rst && grep -q 'Tiger
     Cloud' docs/_include/database.rst && grep -q '0A000' docs/_include/database.rst
     && grep -q 'max_background_workers' docs/_include/database.rst && grep -q -i 'timescale'
     docs/_include/database_alt.rst && uv run sphinx-build -E -b html -D extensions=sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.extlinks,sphinx.ext.viewcode,sphinxext.opengraph,sphinx_inline_tabs,sphinx_copybutton,sphinxcontrib.details.directive,sphinx_reredirects
     docs docs/_build 2>&1 | grep -i 'warning' | grep -v -e 'task_submit.rst' -e 'manual.rst'
-    | (! grep .)
+    -e 'pkg_resources is deprecated' -e '^build succeeded' | (! grep .)
 - id: P5
   name: 'CI evidence for the load-bearing slice (run B: external wait on the draft
     PR)'
@@ -304,7 +305,7 @@ idempotently, honestly at every tier; the placeholder warning is gone.
 **Satisfies:** R8, R10 · **Depends on:** P2 · **Parallel:** yes (docs only; written from PLAN)
 **Goal:** a TimescaleDB section of equal standing with SQLite and PostgreSQL.
 
-- [ ] `docs/_include/database.rst`: new `TimescaleDB` section (house style: `-------------------`
+- [x] `docs/_include/database.rst`: new `TimescaleDB` section (house style: `-------------------`
       rule, `---` underline, first-person plural, admonition code blocks): provider selection and
       install (`hypershell[postgres,uuid7]`); what `hs initdb` does (hypertable on `id`, 1-week
       chunks, columnstore `client_id`/`id DESC`, policy after 4 weeks, idempotent, drift applied or
@@ -322,13 +323,21 @@ idempotently, honestly at every tier; the placeholder warning is gone.
       caveats: long lock, one transaction, aborts on any v4 id; then rerun `hs initdb`); naming
       (TimescaleDB the extension; TigerData the company, rebranded 2025; Tiger Cloud the managed
       product). Teach the columnstore vocabulary only. Retention, caggs and tiered storage only as
-      pointers/watch notes (non-goals).
-- [ ] `docs/_include/database_alt.rst`: two or three sentences (provider, what `initdb` does, link
+      pointers/watch notes (non-goals). *(Build note: the editions page was not re-fetched — this
+      lane's network allowance covered only the package index and the image digest lookup — so the
+      managed-offering sentence stays generic and is dated "as of August 2026", the seed research.
+      No labels inside `_include/database.rst`: the include directory is also built as standalone
+      documents, so a label there is a duplicate-label warning; cross-references point at
+      `:ref:`database <database>`` and name the TimescaleDB section.)*
+- [x] `docs/_include/database_alt.rst`: two or three sentences (provider, what `initdb` does, link
       target name) — it feeds the man pages at release.
-- [ ] `docs/install.rst`: the `uuid7` bullet says TimescaleDB requires it on every host that submits.
-- [ ] `docs/_include/config_param_ref.rst`: `.provider` lists `timescale` (alias `timescaledb`).
+- [x] `docs/install.rst`: the `uuid7` bullet says TimescaleDB requires it on every host that submits.
+- [x] `docs/_include/config_param_ref.rst`: `.provider` lists `timescale` (alias `timescaledb`).
 - **Verify:** see frontmatter (Sphinx without `sphinx_sitemap`, sandbox-safe; only the pre-existing
-  toctree warnings allowed).
+  toctree warnings allowed). **Amended at build (attempts 2):** the planned filter matched Sphinx's
+  own `build succeeded, 2 warnings.` summary and the pre-existing `pkg_resources is deprecated`
+  UserWarning from `sphinxcontrib.details`, so it was red on every tree; both lines are now excluded.
+  Any real Sphinx warning still turns it red (a mid-build duplicate-label warning did).
 - **Touches:** `docs/_include/database.rst`, `docs/_include/database_alt.rst`, `docs/install.rst`,
   `docs/_include/config_param_ref.rst`.
 
