@@ -276,3 +276,104 @@ Recorded by the foreman before the cycle-2 remediation build.
   step. Seeded as [`issues/source-reserved-race.md`](../../issues/source-reserved-race.md)
   (`status: unshaped`) with its `ROADMAP.md` Part I entry in be27e5d, committed before
   `review.last_reviewed_commit` was re-pinned to it, per the deferral mechanic.
+
+## Review cycle 3 — approved (2026-11-02)
+
+- **Reviewed commit:** 8c50df9  ·  **Base:** `origin/develop` (b819de6)
+- **Mode:** a fresh blind pass over the full spec-excluded diff (`git diff origin/develop...HEAD -- . ':(exclude)spec/'`).
+  The reviewer was also handed C2 with its human ruling, and cycle 1's C1 and P1, to verify by re-running their
+  scenarios. It was given `GOAL.md`, `invariants.md` and `review-rubric.md` by path, told `GOAL.md` was the only
+  file under `spec/` it could open, and got no `PLAN.md`/`TECH.md`/`META.md`/`REVIEW.md` content.
+- **Contract drift:** none. `git log origin/develop..HEAD -- spec/schema-upgrade-step/GOAL.md` lists only the
+  shaping commit 53bd6ee.
+- **Base:** `origin/develop` again, for the cycle-1 reason: the local `develop` (222075b) still differs from it.
+- **Regression check:** `git diff --stat be27e5d HEAD -- . ':(exclude)spec/'` (since the last reviewed commit)
+  lists only the three man pages. `git diff --stat ba4fe5e HEAD -- . ':(exclude)spec/'` (since the CI-verified
+  code head) lists the man pages, `ROADMAP.md` and `issues/source-reserved-race.md`: no source, test, docs-source or
+  CI change. C1 and P1 cannot have regressed, and CI run 41409167940 still covers all the code under review.
+
+### Verification run
+
+- `uv run pytest -rxX` (blind reviewer). The first run gave 534 passed, 1 failed, 30 skipped. The failure was
+  `tests/test_restart.py::test_restart_update_adds_novel_and_runs` (empty stdout), and it ran while the reviewer's
+  own concurrency drives were loading the machine. That test then passed 6/6 serially and 8/8 in parallel, and a
+  clean full rerun gave **535 passed, 30 skipped** (29 PostgreSQL, `HS_TEST_POSTGRES` unset; 1 fixture-provenance
+  gate). Neither the test nor its code path is in the diff, beyond fresh-table creation.
+- `test_fixture_provenance` with `HS_TEST_REGEN_FIXTURE` pointing at a fresh `hypershell==2.8.3` environment from
+  PyPI → passed. The fixture sha256 matches `tests/fixtures/README.md`.
+- Upgrade tests under SQLAlchemy 2.1.6, the version a PyPI install resolves (`uv.lock` pins 2.0.50):
+  `tests/test_data/test_upgrade.py` + `tests/test_upgrade_cli.py` → 52 passed, 1 skipped.
+- CLI drives in throwaway sites under `$TMPDIR`, with `temp_site.sh`'s isolation set by hand (the script was not
+  run; its cleanup is `rm -rf`, which this session forbids):
+  - First use on a 2.8.3 copy, then a second start that prints only the command's own output.
+  - `hs submit` on a real half-upgraded database (`origin/develop` code via `git archive`) → rc=0.
+  - `hsx --restart -r 2` on a 2.8.3 copy → rc=0. It ran the pending tasks and made the retry (attempt 3, its
+    `previous_id` the old attempt-2 row), and `hs list` counts 9 rows. The SQLite `UNIQUE (previous_id)` /
+    `UNIQUE (next_id)` remain.
+  - R4 by command line: `hs submit` against a model with an added NOT NULL column and no default → rc=5, one
+    CRITICAL line naming `task` and `extra`, schema unchanged, no traceback file.
+  - R3 concurrency: 4 modes × 10 rounds × 6 processes (list-only, and mixed with `hs submit`/`hs task search`; delete
+    and WAL journals) → all 240 rc=0, exactly one upgrader per round. `hs server` and `hs submit` started together,
+    4 rounds → all rc=0, one upgrader each.
+- **Docs:** `sphinx-build -b html` and `-b man` into `$TMPDIR`, with `sphinx_sitemap` dropped through
+  `-D extensions=…` → both rc=0, with only the two known toctree warnings.
+- **External evidence, weighed but not reproduced:** GitHub Actions run 41409167940 of `tests.yml` at ba4fe5e
+  succeeded in every job, and `PostgreSQL (pg13)` and `(pg18)` each reported 29 passed. That matches the 29
+  PostgreSQL cases the suite collects locally, and nothing those jobs cover has changed since.
+- **Orchestrator:** the regression diffs above; `grep -n "exclusive lock"` across the three man pages and
+  `docs/_include/database_alt.rst:14` finds the same sentence in all four, and no "brief … lock" wording remains in
+  `share/`, `docs/` or `src/`.
+
+### Prior findings
+
+| Finding | Status | Evidence |
+|---------|--------|----------|
+| C2: man pages call the upgrade lock brief and Postgres-only | **Resolved** | A fresh `-b man` build gives an upgrade paragraph ("An existing database … records it.") byte-identical to the one in all three committed pages, and the `initdb` description line matches too. The branch's `share/` hunks add lines only; the 28 other lines that differ from the fresh build (the `.TH` date, `--rotate` text, `card`, `--part`) come from doc sources the branch does not touch, so they are base drift. `git grep -i brief` over `share/`, `docs/` and `src/` finds only `database.rst:80` ("writers wait briefly"), which is about `busy_timeout` and predates the branch. |
+| C1: concurrent first start fails with a raw lock error | **Resolved** (still) | A fixture copy held under `BEGIN EXCLUSIVE` for 8 s, `hs list --count` started 0.5 s in → still alive at release, rc=0 at 8.2 s, prints `7`, one INFO wait line at 5 s, then the upgrade lines. |
+| P1: a long peer upgrade fails the waiter with a misleading message | **Resolved** (still) | Scaled slice 0.5 s, ceiling 60 s, peer holding the applied DDL under `BEGIN IMMEDIATE` for 3 s → rc=0, four INFO wait lines, no upgrade lines (the peer did it). Slice 0.4 s, ceiling 1.5 s → rc=5, one CRITICAL "gave up after 1.5 s waiting for another session to release the database…" with the `lsof` hint, schema unchanged. The shipped 30 s slice and 900 s ceiling match `database.rst`; `test_waits_for_slow_peer_upgrade` and `test_gives_up_past_ceiling` pass. |
+
+### Requirement → evidence matrix
+
+| R-ID | Verified how (cycle 3) | Status |
+|------|------------------------|--------|
+| R1 | `test_first_command` (7 commands × untouched/half-upgraded) and `test_first_command_server`; drives on an untouched and a half-upgraded copy and `hsx`. PostgreSQL in CI. | ✅ |
+| R2 | `test_rows_preserved`; before/after row snapshots differ only by lifecycle changes; new columns read NULL/NULL/0; 2.8 `tag` JSON keeps `"part": 0`. | ✅ |
+| R3 | Silent second start; the 240-process and server+submit concurrency drives; C1 and P1 re-runs. | ✅ |
+| R4 | `test_generic_column_add` and the refusal cases; the command-line refusal above. | ✅ |
+| R5 | `test_fresh_schema_has_no_chain_uniqueness`, `test_truncate_gives_fresh_schema`, `test_initdb_truncate`; PostgreSQL `test_fresh_schema` in CI. | ✅ |
+| R6 | CI `test_chain_constraints_dropped` (the second run is silent). | ✅ (CI-verified only) |
+| R7 | SQLite UNIQUE kept after the upgrade and through the retrying `hsx` run; `database.rst`, `database_alt.rst` and the man pages now agree (C2). | ✅ |
+| R8 | Each claim checked against the source: sole `Task.next` caller `server.py:211`; `retried.is_(False)` at `model.py:608`; the retry insert and the `retried` mark commit separately; the unguarded cases are stated plainly. | ✅ |
+| R9 | Provenance test against real 2.8.3; the end-to-end `hsx` drive; suite green; docs build clean. | ✅ |
+
+Unmapped changes: those listed in cycle 1, plus two the reviewer noted that serve R1/R5: `hs initdb --rotate` /
+`--truncate` now call `checkdb()`, and `task.py`'s SQLite partition view is built by column name. Neither blocks.
+
+### Findings
+
+None. The reviewer dropped these under refutation:
+- **A lock wait on an already-current schema logs one INFO line.** Holding the lock for 8 s on an upgraded database
+  made `hs list --count` log `Waiting for another session to release the database…` before rc=0; R3 read literally
+  allows nothing above DEBUG on a current schema. Dropped: the step cannot know the schema is current until it can
+  read it, the line reports a wait (the bounded-wait behaviour ruled at cycle-1 triage), not a change, and
+  `origin/develop` on the same drive fails rc=5 with a raw `database is locked`.
+- The `test_restart.py` failure above, which did not reproduce off load and is outside the diff.
+- `hs initdb --vacuum` / `--backup` don't run the step: both work on a 2.8 database, and a backup before the upgrade
+  is the behaviour a user wants.
+- Fresh-database table creation logs at trace (initialization, not an upgrade; as in cycle 2).
+- No `busy_timeout` for the Turso provider: it is not shipped and the GOAL does not cover it.
+
+### Out-of-diff context (not graded)
+
+- The deferred `Source.reserved` race reproduces as seeded: 6 concurrent `hs submit`s on upgraded 2.8.3 copies
+  failed 1 round in 15 with `IntegrityError: UNIQUE constraint failed: source.id`, rc=5 and a traceback file. Graded
+  as prose, `issues/source-reserved-race.md` is accurate: `model.py:1045-1057` is `Source.reserved`,
+  `status: unshaped` fits, and its `ROADMAP.md` link resolves.
+
+### Human-gate triggers
+
+- **Mandatory gate: not triggered.** No CONFIRMED findings.
+- **For the human:** the INFO wait line on a current schema (first dropped item) is the behaviour the cycle-1 P1
+  ruling asked for; confirm that ruling is meant to qualify R3's "nothing above DEBUG", which applies to a start
+  with no contention. This cycle converged at the third pass, the bound.
+- **Completeness sub-pass:** not run (not requested).

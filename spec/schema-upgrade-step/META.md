@@ -48,6 +48,7 @@ is skipped by the parser):
 - **Confidence:** high · **Effort:** small
 - **Seen again (hs-review:step1):** `hs-review` takes `{base}` from TECH `base: develop` and its injected diffstat runs against local `develop`, which had diverged from `origin/develop`; the review graded `git diff origin/develop...HEAD` by hand. The same fix applies: resolve `{base}` to `origin/{base}` after a fetch.
 - **Seen again (hs-review:step1, cycle 2):** the local `develop` (222075b) still differs from `origin/develop` (b819de6), so cycle 2 again used `origin/develop` wherever the skill says `{base}`: the contract-drift check, the diff and the diffstat.
+- **Seen again (hs-review:step1, cycle 3):** unchanged (local `develop` 222075b, `origin/develop` b819de6); cycle 3 used `origin/develop` for the drift check, the graded diff and the regression diffs.
 
 ## F2 — No guidance for carving one R-ID out of a shaped seed into a different cycle
 `origin=hs-feature:step4 severity=low category=missing-guidance status=open target=.agents/skills/hs-feature/SKILL.md`
@@ -100,11 +101,12 @@ is skipped by the parser):
 - **Recommended fix:** In Step 1.3, add: "also reopen any `done` phase whose verify reads evidence pinned to an earlier code commit (CI runs, external drives) when the fix touches the code it covers; leave it `pending` for the external wait."
 - **Confidence:** med · **Effort:** small
 
-## F9 — `temp_site.sh` cleans up with `rm -rf`, which the repo's own working rule forbids
+## F9 — `temp_site.sh` cleans up with `rm -rf`, which the repo's own working rule forbids · seen again
 `origin=hs-review:step2 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
 - **What happened:** the review rules for this session forbid `rm -rf`, including inside helper scripts, so the reviewer could not run the CLI drives through `temp_site.sh` (its `EXIT` trap runs `rm -rf "$site"`). It set up the same isolation by hand for about 110 drives and left the sites under `$TMPDIR`.
 - **Skill cause:** the rubric, `hs-review` and `AGENTS.md` all route CLI drives through `temp_site.sh`, while `AGENTS.md` says "`del`, not `rm`". Running under `/bin/sh`, the helper's trap reaches `/bin/rm` and gets around the guard that rule relies on.
 - **Recommended fix:** make the cleanup follow the working rule. Use `del` when it is on `PATH`; otherwise leave the site under `$TMPDIR` and print its path. An opt-in flag could restore removal for CI.
+- **Seen again (hs-review:step2, cycle 3):** the reviewer again set up every CLI drive's isolation by hand and left the sites under `$TMPDIR`.
 - **Confidence:** high · **Effort:** small
 
 ## F10 — The rubric doesn't say whether a LOW CONFIRMED finding blocks
@@ -113,3 +115,10 @@ is skipped by the parser):
 - **Skill cause:** the severity table calls a LOW coverage gap "non-blocking", but *Verdict & loop* and `hs-review` Step 4 route every CONFIRMED finding to `/hs-build`. They never say whether severity changes the route.
 - **Recommended fix:** state the rule explicitly in both places, either "every CONFIRMED finding blocks, whatever its severity" or a named exception for LOW docs-only findings, such as a fix recorded before `/hs-publish` with no new review cycle. Treat any exception as a change to the CONFIRMED-blocks gate and have a human decide it.
 - **Confidence:** med · **Effort:** small
+
+## F11 — Step 4's approved route leaves the previous cycle's `blocked_reason` in `TECH.md`
+`origin=hs-review:step4 severity=low category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** cycle 3 approved after a changes-requested cycle 2. The clean route's command (`--verdict approved --reviewed-commit {sha} --touch`) would have kept `blocked_reason: 'C2 (R7 docs): …'` beside `verdict: approved`, because `set_phase.py` only writes that field when `--blocked-reason` is passed. The review added `--blocked-reason ''`, the template's default.
+- **Skill cause:** the changes-requested route sets `blocked_reason`, and neither the clean route nor `set_phase.py` clears it, so any approval after a blocked cycle leaves a stale reason in the resume ground truth.
+- **Recommended fix:** add `--blocked-reason ""` to the clean route in Step 4, or have `set_phase.py` clear `review.blocked_reason` whenever `--verdict approved` is set.
+- **Confidence:** high · **Effort:** small

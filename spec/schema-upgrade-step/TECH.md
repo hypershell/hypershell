@@ -112,10 +112,10 @@ phases:
     --limit 1 --json headSha,conclusion --jq '.[0].headSha + " " + .[0].conclusion')"
     = "$(git rev-parse HEAD) success"
 review:
-  last_reviewed_commit: be27e5dbbf120a48c119e75f245dc50517a61eae
-  verdict: changes-requested
-  blocked_reason: 'C2 (R7 docs): man pages still call the upgrade lock brief and Postgres-only'
-  cycle: 2
+  last_reviewed_commit: 8c50df971c9e0f4a018247507175518edbf6ec15
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — Open 2.8 databases in 2.9: an idempotent schema-upgrade step
 
