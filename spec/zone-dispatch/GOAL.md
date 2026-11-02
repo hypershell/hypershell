@@ -63,8 +63,8 @@ This cycle stops at single-server, in-process zone routing. Zone-aware autoscali
 - **R2** [seed R3] — WHEN a client is ready for work, it SHALL request it from the server,
   advertising its identity, its zone, and its bundle size, which is its existing `-b`. The server
   SHALL size the reply from that client's advertised value. WHEN a client advertises no size, the
-  server SHALL use its own `-b`. *(Which clients count as advertising no size: see the open
-  clarification.)*
+  server SHALL use its own `-b`. Any explicitly configured `-b` (command line, environment, or
+  config file) SHALL be advertised; only the built-in default advertises no size.
 - **R3** [seed R3; transport condition] — The server SHALL bound every reply by a server-side cap,
   so that no reply carries more tasks than the cap whatever a client advertises. The cap's default
   SHALL NOT shrink any bundle the default configuration delivers today. The request's arguments and
@@ -79,7 +79,9 @@ This cycle stops at single-server, in-process zone routing. Zone-aware autoscali
 - **R5** [Q3] — WHEN a client too old to request work (2.8.x, or any build before this cycle)
   connects, the server SHALL disconnect it cleanly and log that the client is too old, and SHALL
   keep serving other clients. The old client SHALL exit within a bounded time rather than wait
-  forever.
+  forever. Conversely, WHEN a client of this cycle connects to an older server (2.8.x or 2.9.0a2),
+  it SHALL exit non-zero within a bounded time with one clear error naming the version mismatch,
+  with no fallback path.
 
 **Zones**
 
@@ -101,7 +103,7 @@ This cycle stops at single-server, in-process zone routing. Zone-aware autoscali
   stay global across zones, and group ordering is exactly as today.
 - **R11** [seed R10] — A task submitted without `--zone` SHALL belong to a reserved **default
   zone** with a fixed id, in the spirit of the reserved `Source` ids. A client given no `--zone`
-  SHALL run default-zone tasks. *(Whether it runs only those: see the open clarification.)*
+  SHALL run default-zone tasks, and only those.
   WHEN a command opens a 2.8 or 2.9.0a2 database, the in-place upgrade step from
   `schema-upgrade-step` (#69) SHALL bring it current: the `zone` table created and `task.zone`
   added, with no per-column upgrade code and no manual step, forward-only on SQLite. Pre-existing
@@ -173,18 +175,21 @@ This cycle stops at single-server, in-process zone routing. Zone-aware autoscali
 - **2026-11-02 — Target release 2.9.0a3 or a4, within about 3–3.5 days** (foreman, under the
   maintainer's delegation). Drift since the seed was written: 2.9.0a2 was cut on `develop`
   (`d996579`) without Z1, so the seed's "Z1 ships in 2.9.0a2" no longer holds.
-- **[NEEDS CLARIFICATION: which clients "advertise nothing" (R2)?]** A client's `-b` always has a
-  value (built-in default 1), while `hs server -b` is often larger. Options: (a) only a `-b` given on
-  the command line, or passed by `hs cluster` / `hsx`, is advertised; (b) any explicitly configured
-  value is advertised (command line, environment, or config file), and only the built-in default
-  advertises nothing; (c) the effective value is always advertised, so a standalone `hs client`
-  with no `-b` gets bundles of 1 from a `-b 100` server, which breaks R1.
-- **[NEEDS CLARIFICATION: does a client with no `--zone` serve only the default zone, or any zone
-  (R11)?]** Options: (a) default zone only, so zoned tasks never land on an unzoned client;
-  (b) wildcard, serving any zone.
-- **[NEEDS CLARIFICATION: what does a client of this cycle do against an older server (2.8.x or
-  2.9.0a2)?]** Options: (a) exit with an error naming the version mismatch; (b) fall back to the
-  shared `scheduled` queue; (c) leave it unspecified.
+- **2026-11-02 — Who advertises no size (R2): any explicitly configured `-b` is advertised**
+  (command line, environment, or config file); only the built-in default advertises nothing. This
+  keeps R1: a plain `hs client` against `hs server -b 100` behaves as today (foreman, as judge under
+  the maintainer's delegation, 2026-11-02).
+- **2026-11-02 — A client with no `--zone` serves the default zone only (R11).** In the
+  homogeneous, zone-less case every task and client is in the default zone, so behaviour is
+  unchanged (foreman, as judge under the maintainer's delegation, 2026-11-02).
+- **2026-11-02 — A new client against an older server (2.8.x or 2.9.0a2) exits non-zero** within
+  a bounded time, with one clear error naming the version mismatch, mirroring R5; no fallback path
+  (R5) (foreman, as judge under the maintainer's delegation, 2026-11-02).
+- **2026-11-02 — Sequencing: `writeback-scoped-conditional` lands first.** That cycle (branch
+  `fix/writeback-scoped-conditional`, in plan) lands on `develop` before Z2's build; Z2 rebases
+  onto it and SHALL preserve its result-column fence and assignment check in `server.py`
+  `Receiver` and `data/model.py`. No R-ID change (foreman, as judge under the maintainer's
+  delegation, 2026-11-02).
 - **Note (for `hs-plan`):** this branch starts at Z1's head (`aa55e86`), which is based on
   `b819de6` and does not contain #69. The upgrade step R11 relies on (`src/hypershell/data/upgrade.py`)
   arrives when the branch is rebased onto `develop` after Z1 lands. Plan against `origin/develop`
@@ -200,6 +205,7 @@ This cycle stops at single-server, in-process zone routing. Zone-aware autoscali
 - Seed: [`issues/zone.md`](../../issues/zone.md) — this cycle carries its R2–R12; the seed stays
   `shaped` for Z3 (R13–R17).
 - Previous cycle: [`spec/zone-queue-primitive/`](../zone-queue-primitive/GOAL.md) (Z1, R1).
+- Depends on: `fix/writeback-scoped-conditional` (lands on `develop` before Z2's build).
 - Upgrade step: `spec/schema-upgrade-step/` and `src/hypershell/data/upgrade.py` on `develop` (#69).
 - Source (likely touchpoints, to be confirmed by `hs-plan`): `src/hypershell/core/queue.py`
   (`QueueServer`, the request callable); `src/hypershell/server.py` (`Scheduler`, staging and cut);
