@@ -271,8 +271,9 @@ autoscaling — while the homogeneous founding case behaves exactly as it does t
 managed queues move to the lighter threading primitive so per-client dispatch stops costing a pipe
 and a feeder thread each.
 
-*Horizon: near-term · Depends on: — · Refs: R1 (the queue-primitive swap) is independently shippable
-and should land first as its own de-risking phase*
+*Horizon: near-term · Depends on: — · Refs: ships in three cycles. R1 (the queue primitive) is
+carved into `zone-queue-primitive`; R2–R12 (dispatch and zones) and R13–R17 (zone-aware
+autoscaling) follow from this seed*
 **Seed:** [`issues/zone.md`](issues/zone.md) · *status: shaped*
 
 ## Relay: two-level scheduling across administrative sites
