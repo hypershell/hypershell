@@ -72,3 +72,16 @@ is skipped by the parser):
   line: a GOAL keeps the seed's R-ID numbers and names the ones discharged elsewhere; a seed whose
   remaining R-IDs all go to one cycle is promoted whole (`adopted:{slug}`).
 - **Confidence:** med · **Effort:** small
+
+## F3 — No way to express an external wait (CI evidence) in a TECH phase · seen again
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** A recurrence of `spec/schema-upgrade-step/META.md` F3 (with its F6). No
+  TimescaleDB server exists locally, so every integration scenario is provable only by CI on a
+  pushed draft PR. The plan again improvised run-B phases (P5, P7) whose `verify:` reads `gh run
+  list`, gated on the last commit outside `spec/` (F6's recommendation) rather than `HEAD`, and
+  `next_phase.py` will report them actionable although nothing local can satisfy them.
+- **Skill cause:** Unchanged from the original finding: Step 6 and the TECH template have no field or
+  convention for a precondition outside the FSM.
+- **Recommended fix:** As in the original finding (`waits_on: "ci:<workflow>@<last code commit>"`,
+  documented run-A/run-B split).
+- **Confidence:** high · **Effort:** medium
