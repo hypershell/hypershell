@@ -3,11 +3,11 @@ slug: cli-cluster-restart-repeat-update
 title: 'Safe re-submission: --restart / --repeat / --update source gating'
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/cli-cluster-restart-repeat-update
 base: develop
 current_phase: done
-last_updated: '2026-07-11'
+last_updated: '2026-11-01'
 phases:
 - id: P1
   name: Schema + fingerprint core (Source entity, Task.source/fingerprint, timescale
