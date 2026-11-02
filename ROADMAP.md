@@ -180,6 +180,17 @@ untested; the seed asks for that test first.
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
+## Concurrent first submits can collide on the reserved source row
+
+`Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
+`hs submit`s started together against an empty `source` table can both insert it, and one exits
+rc=5 with a traceback and its tasks unsubmitted. Seen in 1 of 20 runs on `develop` and 2 of 10 on
+an upgraded 2.8.3 database, which starts with an empty `source` table. Pre-existing, and found by
+the review of the schema-upgrade fix.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/schema-upgrade-step/` (review cycle 2)*
+**Seed:** [`issues/source-reserved-race.md`](issues/source-reserved-race.md)
+
 ## Docs and runtime surfacing
 
 Behaviour that is correct or deliberate but unannounced: `--no-confirm` silently disables orphan
