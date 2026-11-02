@@ -76,7 +76,7 @@ is skipped by the parser):
 - **Recommended fix:** Load `sphinx_sitemap` only when building for publication (e.g. gated on an env var set by the docs host), or document the `-D extensions=…` form as the sandbox-safe warnings check.
 - **Confidence:** med · **Effort:** small
 
-## F6 — A CI-evidence gate pinned to `HEAD` goes red the moment the evidence is committed
+## F6 — A CI-evidence gate pinned to `HEAD` goes red the moment the evidence is committed · seen again
 `origin=hs-build:P6 severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** P6's gate compares the latest `tests.yml` run's `headSha` with `git rev-parse HEAD`. It held at `9aee1c7`, but Step 7's state commit moves `HEAD`, so the gate re-run afterwards fails although no code changed. The skill also has no run-B procedure, so evidence fetched by someone else (the sandbox can't reach GitHub) went into the phase body by improvisation.
 - **Skill cause:** Steps 4–7 assume a gate that stays true after its own commit. Nothing covers an external-evidence phase: where the evidence goes, who may supply it, or how to gate on "the last code-changing commit".

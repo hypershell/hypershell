@@ -3,10 +3,10 @@ slug: schema-upgrade-step
 title: 'Open 2.8 databases in 2.9: an idempotent schema-upgrade step'
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -92,7 +92,7 @@ phases:
     docs docs/_build
 - id: P6
   name: 'PostgreSQL CI evidence (run B: external wait on a pushed branch)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -431,10 +431,21 @@ green. Because a missing template fails rather than skips, green means every Pos
   `success`.
 - **Touches:** whatever the evidence requires. Expect `src/hypershell/data/upgrade.py` and
   `tests/test_upgrade_postgres.py` only.
-- [ ] **Reopened by the cycle-1 remediation.** The P2 remediation changed the PostgreSQL lock
+- [x] **Reopened by the cycle-1 remediation.** The P2 remediation changed the PostgreSQL lock
   path (sliced `lock_timeout`, advisory-lock wait) and added two PostgreSQL tests, which have not
   run anywhere: no local server. The run above no longer covers HEAD. The foreman pushes again;
   expect `29 passed` per matrix row.
+- **Evidence after the cycle-1 remediation (read by the foreman from GitHub Actions; no fix was
+  needed):** workflow `Tests` (`tests.yml`), run `41409167940`, at head `ba4fe5e`, concluded
+  `success` in every job:
+  - `PostgreSQL (pg13)` passed (1m31s) and `PostgreSQL (pg18)` passed (1m27s). In both, the
+    builder step logged `Built template databases: hs283 (7 tasks), hs290a1 (half-upgraded)`,
+    and pytest reported pg13 `29 passed in 46.96s` and pg18 `29 passed in 48.32s`. The module
+    now collects 29 tests, so none skipped: the two new lock tests ran on both servers.
+  - `tests (3.11)` through `tests (3.14)`, the zero-build install on 3.11–3.14, and package
+    metadata passed.
+  - The gate's head `ba4fe5e` is `git rev-parse HEAD` at verification time, the last code
+    commit. The commit that records this touches only `spec/`.
 
 ---
 
