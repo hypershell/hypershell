@@ -125,6 +125,19 @@ uses Z1's **external wait** convention for P7:
   - `zone` is server-held: never a result column; if the fence is a denylist, add `zone` to it.
   - Unstaging calls `Task.revert_all` and nothing else.
 
+## Plan gate rulings (foreman, as judge under the maintainer's delegation, 2026-11-02)
+
+The plan gate is **passed** with these rulings and conditions.
+
+- **N1 — accepted.** Zone ids are `uuid5(name)` ("minted by HyperShell"), inserted with `ON CONFLICT DO NOTHING`.
+- **N2 — accepted.** The default zone is stored as NULL on `task.zone`; presentation (R12) and docs name it as the reserved default zone.
+- **N3 — accepted, bounded.** Exactly the five white-box tests in `test_server_fsm.py` that pin the replaced `scheduled` posting and sentinels may be re-pointed at the dispatcher. Each keeps asserting the same observable ordering, and TECH lists each one with a one-line rationale. No other pre-existing test is modified (R14).
+- **N4 — accepted.** "Explicit `-b`" is `config.which('submit', 'bundlesize')`, the key the client reads today. The `client.`/`submit.` key mismatch becomes an `unshaped` seed with a `ROADMAP.md` entry.
+- **Invariant prose (`AGENTS.md`, `invariants.md` §6).** Accepted, as wording that names the new mechanism (`dispatcher.finish()` in place of "sentinels to clients"). The shutdown order is unchanged and nothing is relaxed. Make the edit in one commit with no code in it. The foreman reports it to the maintainer.
+- **PostgreSQL path — condition.** The `Zone` get-or-create upsert, and zone-filtered selection on PostgreSQL, get a test that runs in the existing PostgreSQL CI job (skipped when no PostgreSQL URL is configured). P1's gate gains "passes in CI". The foreman reads CI on the PR.
+- **Cluster drive — condition.** The test-cluster job class allows at most 4 nodes and 1 h. Node 0 runs the server and nodes 1–3 run clients. Run 2's mixed zones put several client processes per node, each with its own `--zone` and advertised size. Mixed zones are labels, not nodes, so ≥ 4 client *processes* across 3 nodes meets the plan's intent. Run 1 and Run 2 are separate jobs, each guarded to finish inside 54 minutes.
+- **Base — condition.** The build runs on an integration base (Z1's final head with `origin/develop` merged in), and `writeback-scoped-conditional` is merged in when it lands. P1's "writeback TECH present" check reads it from that base. Once Z1 and writeback have both landed on `develop`, the foreman rebases this branch onto `develop` before review.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling
