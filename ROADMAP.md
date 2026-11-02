@@ -322,8 +322,9 @@ well suited to it. An idempotent post-`create_all` pass converges the `task` tab
 with compression and a policy, interrogating the environment rather than assuming it.
 
 *Horizon: mid-term · Depends on: soft — conforms to (or establishes) turso R4's per-provider seam ·
-Refs: **R1 is provider-independent and cheap** — dropping the `previous_id`/`next_id` UNIQUE
-constraints could land any time and unblocks the rest*
+Refs: **R1 is discharged** — `schema-upgrade-step` dropped the `previous_id`/`next_id` UNIQUE
+constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQLite databases keep
+them, forward-only), so the remaining work starts at R2*
 **Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: shaped*
 
 ---
