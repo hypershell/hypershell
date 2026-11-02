@@ -200,13 +200,15 @@ signal deaths).
 
 **Retry model:** retries are **new rows** (`attempt+1`, `previous_id`/`next_id` UNIQUE chain,
 old row `retried=True`) — never mutate a row in place to retry. `attempts == max_retries + 1`
-and this relationship spans `server.py`, `Task.select_failed`, and `Task.increment_group` —
-change them together. **Every failure/retry/count-as-failed query MUST filter
-`exit_status != 0 AND exit_status != CANCEL_STATUS`**, or cancelled tasks get resurrected.
+and this relationship spans `server.py`, `Task.query_retryable`/`select_failed`/`count_retryable`,
+and `Task.increment_group` — change them together. **Every failure/retry/count-as-failed query
+MUST filter `exit_status != 0 AND exit_status != CANCEL_STATUS`**, or cancelled tasks get
+resurrected.
 
 **Group-gating can stall by design:** `increment_group` won't advance while the current group
-has incomplete tasks, so one permanently-failing task halts the group (and, in non-`forever`
-mode, the server). This is intended; don't "fix" it without understanding it.
+has incomplete tasks or failures still awaiting retry, so one permanently-failing task halts the
+group (and, in non-`forever` mode, the server). This is intended; don't "fix" it without
+understanding it.
 
 ## Concurrency model (read before touching `server.py`, `client.py`, `core/fsm.py|thread.py|signal.py`)
 

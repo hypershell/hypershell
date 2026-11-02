@@ -139,8 +139,6 @@ def scheduled_in_group(group: int) -> int:
 
 @mark.unit
 @mark.parametrize('eager', [False, True])
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='Group advance skips a retryable failure committed after Task.next')
 def test_group_advance_waits_for_pending_retry(task_db: Engine, monkeypatch: pytest.MonkeyPatch,
                                                caplog: pytest.LogCaptureFixture, eager: bool) -> None:
     """A failure committed between Task.next and the group decision is retried before the next group."""
@@ -174,8 +172,6 @@ def test_group_advance_waits_for_pending_retry(task_db: Engine, monkeypatch: pyt
 @mark.unit
 @mark.parametrize('eager', [False, True])
 @mark.parametrize('layout', ['no-groups', 'last-group'])
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='Stop check ends the run with a retryable failure committed after Task.next')
 def test_stop_waits_for_pending_retry(task_db: Engine, monkeypatch: pytest.MonkeyPatch,
                                       layout: str, eager: bool) -> None:
     """A failure committed between Task.next and the stop decision is retried before FINAL."""
@@ -271,3 +267,35 @@ def test_successful_run_reaches_final(task_db: Engine) -> None:
     scheduler = make_scheduler(attempts=3)
     succeed(expect_one(next_bundle(scheduler), group=0, attempt=1).id)
     assert scheduler.load_bundle() is SchedulerState.FINAL
+
+
+# --- One predicate for retry selection, group hold and stop ----------------------------------------
+
+@mark.unit
+@mark.parametrize('attempts', [1, 2, 3, 4])
+@mark.parametrize('eager', [False, True])
+def test_hold_matches_retry_selection(task_db: Engine, attempts: int, eager: bool) -> None:
+    """The failures that hold a group are exactly the failures Task.next retries."""
+    now = datetime.now().astimezone()
+    done = {'schedule_time': now, 'completion_time': now}
+    retried = Task.new(args='echo retried', group=0, attempt=1, retried=True, exit_status=1, **done)
+    successor = Task.new(args='echo retried', group=0, attempt=2, exit_status=0,
+                         previous_id=retried.id, **done)
+    retried.next_id = successor.id
+    Task.add_all([
+        Task.new(args='echo success', group=0, attempt=1, exit_status=0, **done),
+        Task.new(args='echo cancelled', group=0, attempt=1, exit_status=CANCEL_STATUS, **done),
+        Task.new(args='echo first', group=0, attempt=1, exit_status=1, **done),
+        Task.new(args='echo third', group=0, attempt=3, exit_status=1, **done),
+        retried, successor,
+        Task.new(args='echo signal', group=0, attempt=1, exit_status=-9, **done),
+        Task.new(args='echo never-ran', group=0, attempt=1, exit_status=-1001, **done),
+        Task.new(args='echo user-set', group=0, attempt=0, exit_status=1, **done),
+        Task.new(args='echo other-group', group=1, attempt=1, exit_status=1, **done),
+    ])
+
+    held = Task.count_retryable(attempts, 0, eager=eager)
+    # Eager selection can list a new retry row twice, so retries are compared by identity.
+    retries = {task.id: task for task in Task.next(limit=100, group=0, attempts=attempts, eager=eager)}
+    assert held == len(retries)
+    assert all(task.previous_id is not None for task in retries.values())
