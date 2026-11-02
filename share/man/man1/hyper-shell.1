@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Jul 23, 2026" "2.9.0a1" "hypershell"
+.TH "HYPER-SHELL" "1" "Nov 02, 2026" "2.9.0a2" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -1174,11 +1174,12 @@ See the \fIsecurity\fP section for peer verification modes.
 Initialize database.
 .sp
 For SQLite this happens automatically.
+An existing database from an earlier release is upgraded in place on first use.
 See also \fB\-\-initdb\fP for the \fBhs cluster\fP command.
 .sp
 The available special actions are mutually exclusive.
-The \fB\-\-rotate\fP operation migrates completed tasks to the next database partition,
-and applies a special purpose \fBpart:N\fP tag to the new partition and remaining tasks.
+The \fB\-\-rotate\fP operation migrates completed tasks into the next database partition,
+recording that partition\(aqs index in each moved task\(aqs \fBpart\fP column.
 .SS Actions
 .INDENT 0.0
 .TP
@@ -1225,7 +1226,8 @@ Unique task UUID.
 .INDENT 0.0
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Format task info ([normal], json, yaml).
+Format task info ([normal], card, json, yaml). The \fBcard\fP format renders the task as a
+richly\-formatted, bordered panel with a color\-coded status badge (see \fBtask search\fP).
 .TP
 .B \fB\-\-json\fP
 Format metadata output as JSON.
@@ -1286,7 +1288,7 @@ Print task info after completion.
 See \fBtask info\fP command.
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Format task info ([normal], json, yaml).
+Format task info ([normal], card, json, yaml).
 .TP
 .B \fB\-\-json\fP
 Format metadata output as JSON.
@@ -1338,7 +1340,7 @@ will return any task with that \fIkey\fP defined regardless of \fIvalue\fP (incl
 .INDENT 0.0
 .TP
 .B \fBhs\fP \fBlist\fP \fB[\-h]\fP
-\fB[FIELD [FIELD ...]]\fP \fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP \fB[\-g GROUP]\fP
+\fB[FIELD [FIELD ...]]\fP \fB[\-w COND [COND ...]]\fP \fB[\-t TAG [TAG...]]\fP \fB[\-g GROUP]\fP \fB[\-\-part N]\fP
 \fB[\-\-order\-by FIELD [\-\-desc]]\fP \fB[\-\-count | \-\-limit NUM]\fP
 \fB[\-f FORMAT | \-\-json | \-\-csv]\fP \fB[\-d CHAR]\fP \fB[\-i]\fP
 \fB[\-\-failed | \-\-succeeded | \-\-completed | \-\-remaining]\fP \fB[\-\-retries]\fP
@@ -1401,6 +1403,15 @@ Specifying a full \fIkey\fP:\fIvalue\fP pair will match on both.
 .B \fB\-g\fP, \fB\-\-group\fP \fIGROUP\fP
 Filter results to a single task group.
 .TP
+.B \fB\-\-part\fP \fIN\fP
+Filter results to a single database partition.
+.sp
+After \fBhs initdb \-\-rotate\fP, completed tasks are moved into numbered partition files and
+stamped with that partition\(aqs index in their \fBpart\fP column. \fB\-\-part\fP \fIN\fP restricts the
+listing to a single partition (\fB\-\-part 0\fP is the main database). The filter is a plain
+column comparison and works on any backend, though only the SQLite provider populates
+\fBpart\fP via rotation.
+.TP
 .B \fB\-s\fP, \fB\-\-order\-by\fP \fIFIELD\fP \fB[\-\-desc]\fP
 Order results by field. Optionally, in descending order.
 .TP
@@ -1433,11 +1444,13 @@ A task terminated by \fBHUP\fP lands on \-1 and is therefore treated as cancelle
 (see \fB\-\-cancelled\fP).
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
-Specify output format (either \fBnormal\fP, \fBplain\fP, \fBtable\fP, \fBcsv\fP, \fBjson\fP).
+Specify output format (either \fBnormal\fP, \fBcard\fP, \fBplain\fP, \fBtable\fP, \fBcsv\fP, \fBjson\fP).
 .sp
 Default is \fBnormal\fP for whole\-task output. If any \fIFIELD\fP names are given, output is
 formatted in simple \fBplain\fP text; use \fBcsv\fP for compliant output. The pretty\-printed
-\fBtable\fP formatting is good for presentation on wide screens.
+\fBtable\fP formatting is good for presentation on wide screens. The \fBcard\fP format renders
+each task as a richly\-formatted, bordered panel that adapts to the terminal width and shows a
+color\-coded status badge; like \fBnormal\fP it needs the whole task (not a subset of \fIFIELD\fP s).
 .sp
 See \fB\-\-csv\fP, \fB\-\-json\fP, and \fB\-\-delimiter\fP\&.
 .TP
@@ -2627,6 +2640,16 @@ This can be entirely through environment variables or within files.
 SQLite is automatically initialized upon opening the connection but
 Postgres must be explicitly initialized via \fBhs initdb\fP or at launch with
 the \fB\-\-initdb\fP command\-line option.
+An existing database created by an earlier release is upgraded in place on first use,
+for both SQLite and Postgres. The upgrade only adds missing tables, columns, and indexes and never
+rewrites existing tasks; on Postgres it also drops the \fBUNIQUE\fP constraints on the retry\-chain
+columns. It holds an exclusive lock while it runs (minutes, on a large database), and processes
+started meanwhile wait for it. A SQLite database created by an
+earlier release (2.8, or the 2.9.0a1 pre\-release) keeps those constraints, with no effect on
+behaviour in normal operation. Only in the rare cases where a failed task could be retried
+twice (two servers on one database, which is not supported; a server killed while scheduling a
+retry; a task\(aqs \fBretried\fP flag reset after the fact) does it reject the second retry with an
+error, where a newer database records it.
 .sp
 SQLite only needs the local file path.
 .INDENT 0.0

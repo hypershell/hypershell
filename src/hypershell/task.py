@@ -864,7 +864,14 @@ class TaskSearchApp(Application, SearchableMixin):
 
 
 def auto_union_sqlite() -> None:
-    """Automatically search for partitions and create a temporary view."""
+    """
+    Automatically search for partitions and create a temporary view.
+
+    The view names every model column. Partitions created by older versions may lack newer
+    columns (read as NULL, or 0 for `part`), and an upgraded table orders appended columns
+    differently than a new one, so columns are matched by name, never by position.
+    Partition files are only read.
+    """
     if DATABASE_DIALECT != 'sqlite':
         return
     dirname = os.path.dirname(config.database.file)
@@ -878,20 +885,31 @@ def auto_union_sqlite() -> None:
     for i, path in enumerate(parts):
         log.debug(f'Attached database partition ({path})')
         Session.execute(text(f'attach database \'{path}\' as \'part_{i+1}\''))
+    selects = [select_task_columns(f'part_{i+1}') for i, _ in enumerate(parts)]
     Session.execute(text(
-        SQLITE_UNION_PART + '\n'.join([
-            f'union all\nselect * from part_{i+1}.task'
-            for i, _ in enumerate(parts)
-        ])
+        'create temp view \'task\' as\n' +
+        '\nunion all\n'.join([select_task_columns('main'), *selects])
     ))
     Session.commit()
 
 
-# Start of temporary view used in union query
-SQLITE_UNION_PART: Final[str] = """\
-create temp view 'task' as 
-select * from main.task
-"""
+def select_task_columns(database: str) -> str:
+    """Select every model `task` column by name from one attached database, filling missing ones."""
+    quote = Session.get_bind().dialect.identifier_preparer.quote
+    present = {row[1] for row in Session.execute(text(f'PRAGMA {database}.table_info(task)'))}
+    columns = []
+    for column in Task.__table__.columns:
+        name = quote(column.name)
+        if column.name in present:
+            columns.append(name)
+        else:
+            columns.append(f'{MISSING_COLUMN_DEFAULTS.get(column.name, "NULL")} AS {name}')
+    return f'select {", ".join(columns)} from {database}.task'
+
+
+# Values for `task` columns that a partition predates (others read as NULL).
+# Rows rotated before the `part` column existed read as partition 0.
+MISSING_COLUMN_DEFAULTS: Final[Dict[str, str]] = {'part': '0'}
 
 
 # Iterative update batch size for updates with a limit

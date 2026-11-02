@@ -16,7 +16,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func
+from sqlalchemy import Column, Index, func, text
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.ext.declarative import declared_attr
@@ -292,13 +292,20 @@ class Task(Entity):
     waited: Mapped[Optional[int]] = mapped_column(INTEGER, nullable=True)
     duration: Mapped[Optional[int]] = mapped_column(INTEGER, nullable=True)
 
-    previous_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
-    next_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
+    # The retry chain carries plain indexes, not UNIQUE constraints: a TimescaleDB hypertable
+    # requires every unique index to include its partition column, and one schema serves every
+    # provider. One retry per failed row is held by the Scheduler's `retried` filter, not by the
+    # schema. SQLite databases created before 2.9 keep their UNIQUE constraints (SQLite cannot
+    # drop them without rebuilding the table).
+    previous_id: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)
+    next_id: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)
 
     source: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)  # Source.id or reserved-const id
     fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)  # Stable identity hash (args + group + tags).
 
-    part: Mapped[int] = mapped_column(INTEGER, nullable=False, default=0)  # Partition index for SQLite database rotation.
+    # Partition index for SQLite database rotation. The server default lets an existing table gain
+    # the column in place, with existing rows reading 0.
+    part: Mapped[int] = mapped_column(INTEGER, nullable=False, default=0, server_default=text('0'))
 
     tag: Mapped[dict] = mapped_column(JSON, nullable=False, default={})  # kept last (export/print order)
 
@@ -900,6 +907,8 @@ class Task(Entity):
 # Indices for efficient queries
 index_tasks_unscheduled = Index('index_tasks_unscheduled', Task.group, Task.schedule_time)
 index_tasks_retries = Index('index_tasks_retries', Task.exit_status, Task.retried)
+index_tasks_previous_id = Index('index_tasks_previous_id', Task.previous_id)
+index_tasks_next_id = Index('index_tasks_next_id', Task.next_id)
 # Covering index for source detection / lineage de-dup. Deliberately *not* partial:
 # a partial `WHERE source NOT IN (<direct>, <stdin>)` predicate is only honored when the query
 # repeats it with matching literals, but `count_for_source`/`fingerprints_for_sources` bind the

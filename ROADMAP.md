@@ -64,7 +64,7 @@ never got the same treatment.
 ## Result writeback is last-writer-wins over every column
 
 A returning result rewrites *every* column from the client's wire copy of the row — including
-`schedule_time`, `attempt`, `retried`, and the UNIQUE retry chain. Combined with the fact that an
+`schedule_time`, `attempt`, `retried`, and the retry-chain links. Combined with the fact that an
 evicted client is never told to stop, a stale bundle can stamp a row "done" while another client is
 still running that command. Scoping the write to result columns and making it conditional on the
 row's owner and in-flight state closes the corruption without needing any new transport.
@@ -76,7 +76,8 @@ row's owner and in-flight state closes the corruption without needing any new tr
 
 One concrete path through the writeback hole above. An evicted client's late result writes
 `retried=False` and `next_id=None` back onto a row the scheduler has already retried, so the next
-`Task.next` tries a second retry with the same `previous_id` and hits the UNIQUE constraint. Found
+`Task.next` writes a second retry row with the same `previous_id`. Only a pre-2.9 SQLite database,
+which keeps the old UNIQUE constraint, rejects it; anywhere else it is written silently. Found
 by reading, not yet reproduced; the seed asks for the test first. The scoped writeback probably
 closes it, in which case this retires with that cycle.
 
@@ -191,6 +192,17 @@ untested; the seed asks for that test first.
 
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
+
+## Concurrent first submits can collide on the reserved source row
+
+`Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
+`hs submit`s started together against an empty `source` table can both insert it, and one exits
+rc=5 with a traceback and its tasks unsubmitted. Seen in 1 of 20 runs on `develop` and 2 of 10 on
+an upgraded 2.8.3 database, which starts with an empty `source` table. Pre-existing, and found by
+the review of the schema-upgrade fix.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/schema-upgrade-step/` (review cycle 2)*
+**Seed:** [`issues/source-reserved-race.md`](issues/source-reserved-race.md)
 
 ## Docs and runtime surfacing
 
@@ -355,8 +367,9 @@ well suited to it. An idempotent post-`create_all` pass converges the `task` tab
 with compression and a policy, interrogating the environment rather than assuming it.
 
 *Horizon: mid-term · Depends on: soft — conforms to (or establishes) turso R4's per-provider seam ·
-Refs: **R1 is provider-independent and cheap** — dropping the `previous_id`/`next_id` UNIQUE
-constraints could land any time and unblocks the rest*
+Refs: **R1 is discharged** — `schema-upgrade-step` dropped the `previous_id`/`next_id` UNIQUE
+constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQLite databases keep
+them, forward-only), so the remaining work starts at R2*
 **Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: shaped*
 
 ---

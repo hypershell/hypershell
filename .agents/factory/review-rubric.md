@@ -100,7 +100,8 @@ touches:
 - the high-blast-radius core: `data/model.py`, `server.py`, `client.py`,
   `core/queue|tls|fsm|thread|signal.py`, `cluster/remote|ssh.py`; **or**
 - a security / DB-lifecycle invariant (auth minimums, TLS posture, CANCEL_STATUS/exit_status
-  filters, `completion_time` terminality, retry-chain UNIQUE, `in_memory` write guards).
+  filters, `completion_time` terminality, one retry row per failure (the single Scheduler and the
+  `retried` filter), `in_memory` write guards).
 
 ## Optional debate variant (high-risk diffs)
 

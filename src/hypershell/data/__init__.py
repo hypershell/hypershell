@@ -29,10 +29,11 @@ from hypershell.core.exceptions import handle_exception, DatabaseUninitialized, 
 from hypershell.core.pretty_print import format_bytes
 from hypershell.data.core import Session, engine, in_memory, schema, providers
 from hypershell.data.model import Entity, Task
+from hypershell.data.upgrade import upgrade_schema
 
 # Public interface
 __all__ = [
-    'initdb', 'truncatedb', 'checkdb', 'ensuredb', 'vacuumdb', 'rotatedb',
+    'initdb', 'upgradedb', 'truncatedb', 'checkdb', 'ensuredb', 'vacuumdb', 'rotatedb',
     'DATABASE_ENABLED', 'DATABASE_PROVIDER', 'DATABASE_DIALECT',
     'InitDBApp',
 ]
@@ -60,9 +61,17 @@ DATABASE_INFO: Final[str] = f'{config.database.provider} ({DATABASE_SITE})'
 """Concise connection info for database."""
 
 
+def upgradedb() -> list[str]:
+    """
+    Bring the database schema current in place: create missing tables, columns, and indexes.
+    Returns the changes made (empty if the schema was already current).
+    """
+    return upgrade_schema(engine)
+
+
 def initdb(optimize: bool = False) -> None:
-    """Initialize database tables."""
-    Entity.metadata.create_all(engine)
+    """Initialize database tables, or upgrade existing ones in place."""
+    upgradedb()
     if optimize and DATABASE_DIALECT == 'sqlite':
         log.info(f'Optimizing database {DATABASE_SITE}')
         Session.execute(text('PRAGMA optimize'))
@@ -80,9 +89,10 @@ def truncatedb() -> None:
 
 
 def checkdb() -> None:
-    """Ensure database connection and tables exist."""
+    """Ensure database connection and tables exist, and upgrade the schema in place if needed."""
     if not inspect(engine).has_table('task', schema=schema):
         raise DatabaseUninitialized('Use \'initdb\' to initialize the database')
+    upgradedb()
 
 
 def ensuredb(auto_init: bool = False) -> None:
@@ -185,6 +195,7 @@ Usage:
 INITDB_HELP = f"""\
 {INITDB_USAGE}
   For SQLite this happens automatically.
+  An existing database from an earlier release is upgraded in place on first use.
   See also --initdb for the `hs cluster` command.
 
   The available special actions are mutually exclusive.
@@ -204,7 +215,7 @@ Options:
 
 
 class InitDBApp(Application):
-    """Initialize database (not needed for SQLite/Turso)."""
+    """Initialize or upgrade database (automatic for SQLite/Turso)."""
 
     interface = Interface(INITDB_PROGRAM, INITDB_USAGE, INITDB_HELP)
     ALLOW_NOARGS = True
@@ -237,10 +248,12 @@ class InitDBApp(Application):
             if self.confirm_action(f'Backup {DATABASE_INFO} into \'{self.backup_path}\''):
                 vacuumdb(self.backup_path)
         elif self.rotate_mode:
+            checkdb()
             part_id, part_path = next_rotate_path()
             if self.confirm_action(f'Rotate {DATABASE_INFO} to \'{part_path}\''):
                 rotatedb()
         elif self.truncate_mode:
+            checkdb()
             if self.confirm_action(f'Truncate {DATABASE_INFO}: {Task.count()} tasks'):
                 truncatedb()
         else:
