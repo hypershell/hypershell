@@ -91,8 +91,9 @@ subsystems.
 ## 6. Shutdown / sentinel ordering — load-bearing
 
 - Preserve exact ordering. Client: scheduler → executors → collector → heartbeat. Server: submitter
-  → scheduler → sentinels to heartbeat/receiver/confirm. Submit flush: `loader.join()` **then**
-  `queue.put(None)`.
+  → scheduler → `dispatcher.finish()` (in place of the per-client sentinels on `scheduled`: requests
+  drain their zone's staged tasks, then get `shutdown`) → sentinels to heartbeat/receiver/confirm.
+  Submit flush: `loader.join()` **then** `queue.put(None)`.
 - Stream sentinel is `make_sentinel()` (`serialize(None)`).
 - **Remote-queue payloads** go through `serialize_tasks`/`deserialize_tasks` and `heartbeat.pack`
   (JSON) — **never** put a live object or a literal `None` on a remote queue.

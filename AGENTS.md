@@ -156,18 +156,23 @@ replaces the other.
 ## Architecture & data flow
 
 ```
-submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─bundles→ [TCP queue] → client(ClientScheduler)
+submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─stages→ [zone pools] ←request─ client(ClientScheduler)
                        ▲                                                                      │ spawns subprocs
                        └──────────────── server writes exit/timing/output back ──────────────┘ returns results
 ```
 
 The queue exposes four threading `queue.Queue`s served in-process by the manager's request
-handling: `scheduled` (task bundles), `completed` (results), `heartbeat` (client liveness),
-`confirmed` (bundle acks). There is no manager child process: `QueueServer.start` runs its own
+handling: `scheduled` (task bundles submitted live, without a database), `completed` (results),
+`heartbeat` (client liveness), `confirmed` (bundle acks); and one `Dispatcher` (`core/dispatch.py`),
+whose single method `request` hands work to clients. The scheduler stages stamped tasks in one
+pool per zone; a client calls `request` with its id, zone and advertised size, and the call runs
+on the handler thread of that client's own connection and returns, on it, up to that many tasks
+cut from its zone's pool (JSON text both ways, bounded wait, first-come-first-served). There is no manager child process: `QueueServer.start` runs its own
 accept loop around the stock `multiprocessing.managers.Server` on daemon threads of the server
 process (`core/queue.py` `_InProcessServer`), whose handler threads and the server's own threads
 share the same queue objects. That loop leans on CPython privates; `tests/test_queue.py`
-`TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`).
+`TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`)
+on the queues and the one method `request` on the dispatcher.
 
 **Two modes change the picture — check for them before assuming DB behavior:**
 - `in_memory` (in-memory SQLite): the `Scheduler` is `None` and the server **skips all DB
@@ -255,7 +260,9 @@ Long-running work runs in **daemon threads** (`core/thread.py`) driving **state 
 
 **Shutdown/sentinel ordering is load-bearing.** Preserve the exact ordering in
 `ServerThread`/`ClientThread` (client: scheduler → executors → collector → heartbeat; server:
-submitter → scheduler → sentinels to heartbeat/receiver/confirm) and the submit flush
+submitter → scheduler → `dispatcher.finish()` (where per-client sentinels on `scheduled` used to
+be posted: clients drain their zone's staged tasks, then are told to shut down) → sentinels to
+heartbeat/receiver/confirm) and the submit flush
 (`loader.join()` then `queue.put(None)`). Reordering drops the last results or hangs a join.
 The stream sentinel is `make_sentinel()` (`serialize(None)`); consumers detect end-of-stream
 by dequeuing it. **Remote-queue payloads go through `serialize_tasks`/`deserialize_tasks` and
