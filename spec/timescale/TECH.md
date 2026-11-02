@@ -150,6 +150,23 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
   foreman pushes and opens the draft PR; record run id, head sha and per-entry results in the phase
   body when marking done).
 
+### Plan gate rulings (foreman, as judge under the maintainer's delegation, 2026-11-02)
+
+These resolve PLAN §5's two `[NEEDS CLARIFICATION]` items and bind the build.
+
+1. **R7: option (a).** Below TimescaleDB 2.25.0 the columnstore policy is gated off, with a logged
+   WARNING that names the upstream fix version (2.25.0). The decision rests on the 2.24.0→2.25.0
+   source diff (#9045) and the release note, not on observing the failing job. The 2.24.x CI entry
+   exercises the gate: hypertable and columnstore settings present, no policy job, the warning
+   logged.
+2. **Keep the floor entry.** The `postgres` job has five entries (`pg13`, `pg18`, `timescale`,
+   `timescale-oss`, `timescale-floor`). The `2.24.x-pg17` tag and its index digest are resolved at
+   build time through the Docker Hub tag API, and the source (endpoint and date read) is recorded
+   here and in a workflow comment above the entry.
+3. **CI-evidence phases.** META F3 is noted. P5 and P7 are external waits: the foreman pushes the
+   branch, opens the draft PR into `develop`, reads CI and records the evidence; `hs-build` stops
+   with the FSM at P5.
+
 ### Touched files (the whole cycle — for lane-collision checks)
 
 | File | Phases | Change |
