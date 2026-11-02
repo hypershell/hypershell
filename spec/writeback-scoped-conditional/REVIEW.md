@@ -166,3 +166,17 @@ do not work on `develop` either; see the Observations.
 - **F2:** rewrite the seed's Problem, its R1 sketch and its ROADMAP entry to describe the real
   defect: a row whose client is evicted before its confirmation is applied is invisible to orphan
   recovery, and stays in flight until restart.
+
+## Triage (human gate) — cycle 1
+
+The human gate for F1 (high-blast-radius `data/model.py`) was **passed by the foreman's ruling**, as
+judge under the maintainer's delegation, on 2026-11-02. Remediation returns to `hs-build`.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| F1 · CONFIRMED | fix | Drop the `CANCEL_STATUS` exclusion from the DUPLICATE classifier. Every cancel path restamps `schedule_time`, so a result for a cancelled row already fails the echo match and is STALE (R2), while a row that its own assignment completed with exit status −1 (e.g. SIGHUP) and is then redelivered is a DUPLICATE (R5). Red-first test: a redelivered result for a row completed with exit −1 logs "Ignored duplicate result", and a result for a cancelled row still logs "Refused stale result". R7 is unchanged. |
+| F2 · CONFIRMED | fix | Correct `issues/stale-confirm-hides-orphan.md` and its `ROADMAP.md` entry to the mechanism actually reproduced: an unconfirmed row has a NULL `client_id`, so `revert_orphaned(A)` skips it and it stays in flight until restart, and A's late confirm then names the evicted A. Make the test sketch one that can be driven. |
+| Observation · TRACE-level log line | accepted | Below DEBUG, one `Updated N tasks` line becomes a `Result applied` line per task; DEBUG and above are byte-identical (R3 holds). No change. |
+| Observation · 2.8.3 ↔ 2.9 wire break | seed | Pre-existing on `d996579` (2.9.0a1 onwards), not from this diff, so R9 holds: a 2.8.3 client crashes on the first bundle (`'source' is an invalid keyword argument for Task`), and a 2.9 client kills a 2.8.3 server's Receiver and the run hangs. Seed it `unshaped` with a `ROADMAP.md` entry and both reproductions, and record that zone-dispatch's version handshake (its R5 and the new-client-vs-old-server ruling) is the intended clean failure, to be verified against 2.8.3 there. |
+
+Out of scope for cycle 2: everything except F1, F2 and the seed.

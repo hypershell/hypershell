@@ -3,7 +3,7 @@ slug: writeback-scoped-conditional
 title: Scoped, conditional result writeback
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/writeback-scoped-conditional
 base: develop
 current_phase: done
@@ -70,8 +70,7 @@ phases:
 review:
   last_reviewed_commit: '2569441'
   verdict: changes-requested
-  blocked_reason: 'Review cycle 1: F1 duplicate probe mislabels exit -1 redelivery
-    as stale (model.py, human gate); F2 stale-confirm seed misstates its defect'
+  blocked_reason: ''
   cycle: 1
 ---
 # TECH.md — Scoped, conditional result writeback
@@ -265,8 +264,9 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
       cls.completion_time.is_(None)).values({n: getattr(r, n) for n in cls.result_columns})
       .execution_options(synchronize_session=False)).rowcount == 1` → `APPLIED` (NULLs included);
       else `Session.execute(select(cls.id).where(cls.id == r.id, cls.schedule_time ==
-      r.schedule_time, cls.completion_time.isnot(None), cls.exit_status != CANCEL_STATUS))
-      .first()` → `DUPLICATE` if a row, else `STALE`;
+      r.schedule_time, cls.completion_time.isnot(None))).first()` → `DUPLICATE` if a row, else
+      `STALE` (review 1, F1: no `exit_status` term; every cancel restamps `schedule_time`, so a
+      cancelled row already fails the echo match);
       one `Session.commit()` after the loop; `Session.rollback()` and re-raise on any exception.
       One `execute` per row (no executemany, no `RETURNING`). Log each outcome at `trace` only;
       the Receiver owns the user-facing lines.
@@ -302,6 +302,13 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
       first dispatch's echo after revert and re-dispatch is refused through the Receiver.
 - [x] (Plan gate ruling 1.) `.github/workflows/tests.yml` `postgres` job (pg13, pg18) runs it
       next to `tests/test_upgrade_postgres.py`.
+- [x] Review-1 remediation (triage in `REVIEW.md`): F1 — drop the `CANCEL_STATUS` term from the
+      DUPLICATE probe; red-first `test_duplicate_result_with_cancel_status_value_is_ignored`
+      (`same-bundle`, `redelivered`): a repeated result for a row its own run completed with exit
+      `-1` logs `Ignored duplicate result`, and a result for a cancelled row still logs `Refused
+      stale result`. F2 — correct `issues/stale-confirm-hides-orphan.md` and its `ROADMAP.md`
+      entry to the reproduced mechanism. Seed the pre-existing 2.8.3 ↔ 2.9 incompatibility
+      (`issues/wire-compat-2-8.md`, `unshaped`, with a `ROADMAP.md` entry).
 - **Verify:** the frontmatter `verify:` — no `xfail` left; full `uv run pytest` (unit +
   integration, needs `uv sync`); then two CLI drives in throwaway sites, default and
   `--no-confirm`: 20 rows, 20 succeeded, none with a NULL `client_id`, and no stale or duplicate
@@ -334,8 +341,9 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
 
 ## Residuals (recorded, out of scope)
 
-- A stale confirm can rewrite `client_id` on a rescheduled row, hiding it from `revert_orphaned`;
-  a late confirm can overwrite a relay's leaf attribution. Needs the token on the Confirm wire.
+- A row whose confirmation has not landed is invisible to `revert_orphaned` (NULL `client_id`),
+  and a late confirm then names the evicted client (corrected in review 1, F2). A late confirm can
+  overwrite a relay's leaf attribution.
 - `revert_orphaned` selects then reverts unconditionally; a result committed in between is wiped.
 - Relay must echo the upstream `schedule_time` verbatim, at the same UTC offset.
 - `from_json_type` converts date-like `args` strings to datetimes (candidate seed).

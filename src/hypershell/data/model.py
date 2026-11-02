@@ -849,12 +849,13 @@ class Task(Entity):
         ).rowcount
         if matched == 1:
             return ResultOutcome.APPLIED
+        # NOTE: a cancel restamps schedule_time, so a cancelled row never matches here and its
+        # result is STALE; a run that itself exited with the cancel status value is a DUPLICATE.
         completed = Session.execute(
             select(cls.id)
             .where(cls.id == result.id,
                    cls.schedule_time == result.schedule_time,
-                   cls.completion_time.isnot(None),
-                   cls.exit_status != CANCEL_STATUS)
+                   cls.completion_time.isnot(None))
         ).first()
         return ResultOutcome.DUPLICATE if completed is not None else ResultOutcome.STALE
 

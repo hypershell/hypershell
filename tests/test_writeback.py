@@ -279,6 +279,46 @@ def test_duplicate_result_is_ignored(task_db, logs, how: str) -> None:
 
 
 @mark.unit
+@mark.parametrize('how', ['same-bundle', 'redelivered'])
+def test_duplicate_result_with_cancel_status_value_is_ignored(task_db, logs, how: str) -> None:
+    """A repeated result whose own run exited with the cancel status value is a duplicate, not stale.
+
+    A task terminated by a hang-up signal completes with the same exit status a cancel stamps. A
+    cancel always restamps the row's dispatch time, so a result for a cancelled row is still stale.
+    """
+    task_id = submit('echo hangup')
+    copy = finish(dispatch_one(task_id), CANCEL_STATUS, CLIENT_A)
+    confirm(CLIENT_A, [task_id])
+    if how == 'same-bundle':
+        receive([copy, copy])
+    else:
+        receive([copy])
+        first = row(task_id)
+        receive([copy])
+        assert row(task_id) == first
+    assert row(task_id)['exit_status'] == CANCEL_STATUS
+    assert len(completions(logs, task_id)) == 1
+    assert messages(logs, logging.WARNING).count(
+        f'Ignored duplicate result for task ({task_id}) from client ({CLIENT_A[1]}: {CLIENT_A[0]})') == 1
+    assert warnings_with(logs, 'stale') == []
+
+    cancelled_id = submit('echo cancelled')
+    cancelled_copy = dispatch_one(cancelled_id)
+    confirm(CLIENT_B, [cancelled_id])
+    Task.cancel(cancelled_id)
+    before = row(cancelled_id)
+    if before['schedule_time'] == plain(cancelled_copy.schedule_time):
+        pytest.fail('Cancel reused the dispatched schedule_time')
+    logs.clear()
+
+    receive([finish(cancelled_copy, CANCEL_STATUS, CLIENT_B)])
+
+    assert row(cancelled_id) == before
+    assert messages(logs, logging.WARNING) == [
+        f'Refused stale result for task ({cancelled_id}) from client ({CLIENT_B[1]}: {CLIENT_B[0]})']
+
+
+@mark.unit
 def test_non_result_columns_are_never_written(task_db, logs) -> None:
     """A returned copy differing in every non-result column changes none of them."""
     task_id = submit('echo columns')

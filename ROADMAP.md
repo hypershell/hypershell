@@ -224,12 +224,12 @@ waits rather than building one twice.
 separately by the writeback fix*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
 
-## A stale confirmation can hide a rescheduled task from orphan recovery
+## A task whose confirmation has not landed is invisible to orphan recovery
 
-Confirmations attribute rows by id alone and are not ordered against eviction. An evicted client's
-late confirmation can name it on a row now running elsewhere, so when that second client is evicted
-in turn, orphan recovery misses the row and it stays in flight until restart. Fencing confirmations
-needs the dispatch token on the confirmation wire, the same token results now carry.
+Orphan recovery finds an evicted client's rows by `client_id`, which only the client's confirmation
+sets, and confirmations are not ordered against eviction. A client evicted before its confirmation
+is applied leaves its rows in flight with a NULL `client_id`, never reverted or redispatched; a late
+confirmation then names the already-evicted client. Either way the row waits until restart.
 
 *Horizon: mid-term · Depends on: — · Refs: writeback fix (same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
