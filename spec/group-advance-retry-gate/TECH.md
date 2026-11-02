@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/group-advance-retry-gate
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-01'
 phases:
 - id: P1
   name: Red replays and unchanged-behaviour guards (tests only)
-  status: pending
+  status: done
   satisfies:
   - R4
   - R8
@@ -39,21 +39,22 @@ phases:
   hammerable: false
   hill: uphill
   verify: 'git diff --quiet c1d4470 -- tests/test_groups.py && ! grep -q xfail tests/test_retry_gate.py
-    && uv run pytest && .agents/factory/bin/temp_site.sh sh -c "printf ''%s\n'' ''echo 0 #HYPERSHELL:
-    n:0 group:0'' ''[ \$TASK_ATTEMPT -eq 3 ] && echo 1 #HYPERSHELL: n:1 group:0'' ''echo 2 #HYPERSHELL:
-    n:2 group:1'' > t.in && uv run hsx t.in -r 3 -N2 && test \$(uv run hs list -c) -eq 5 && test \$(uv
-    run hs list attempt -t n:1 -S) -eq 3 && test \$(uv run hs list group -t n:2 -S) -eq 1 && test \$(uv
-    run hs list -c -R) -eq 0" && .agents/factory/bin/temp_site.sh sh -c "printf ''%s\n'' ''echo 0 #HYPERSHELL:
-    n:0'' ''[ \$TASK_ATTEMPT -eq 3 ] && echo 1 #HYPERSHELL: n:1'' > t.in && uv run hsx t.in -r 3 -N2 &&
-    test \$(uv run hs list -c) -eq 4 && test \$(uv run hs list attempt -t n:1 -S) -eq 3 && test \$(uv
-    run hs list -c -R) -eq 0"'
+    && uv run pytest && .agents/factory/bin/temp_site.sh sh -c "printf ''%s\n'' ''echo
+    0 #HYPERSHELL: n:0 group:0'' ''[ \$TASK_ATTEMPT -eq 3 ] && echo 1 #HYPERSHELL:
+    n:1 group:0'' ''echo 2 #HYPERSHELL: n:2 group:1'' > t.in && uv run hsx t.in -r
+    3 -N2 && test \$(uv run hs list -c) -eq 5 && test \$(uv run hs list attempt -t
+    n:1 -S) -eq 3 && test \$(uv run hs list group -t n:2 -S) -eq 1 && test \$(uv run
+    hs list -c -R) -eq 0" && .agents/factory/bin/temp_site.sh sh -c "printf ''%s\n''
+    ''echo 0 #HYPERSHELL: n:0'' ''[ \$TASK_ATTEMPT -eq 3 ] && echo 1 #HYPERSHELL:
+    n:1'' > t.in && uv run hsx t.in -r 3 -N2 && test \$(uv run hs list -c) -eq 4 &&
+    test \$(uv run hs list attempt -t n:1 -S) -eq 3 && test \$(uv run hs list -c -R)
+    -eq 0"'
 review:
   last_reviewed_commit: ''
   verdict: none
   blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Don't advance a task group past a pending retry
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above
@@ -96,39 +97,39 @@ on it.
 `c1d4470`'s source, plus guards that pin today's behaviour of the paths that must not change.
 **No `src/` edit in this phase.**
 
-- [ ] Create `tests/test_retry_gate.py`; every test `@mark.unit`.
-- [ ] Fixture `task_db(tmp_path)`: file SQLite engine (`check_same_thread=False`),
+- [x] Create `tests/test_retry_gate.py`; every test `@mark.unit`.
+- [x] Fixture `task_db(tmp_path)`: file SQLite engine (`check_same_thread=False`),
       `Entity.metadata.create_all`; `Session.remove()` **then** `Session.configure(bind=engine)`;
       teardown `Session.remove()`, rebind to `hypershell.data.core.engine`, `engine.dispose()`.
       This keeps in-process queries off the developer's per-user database
       ([research 01](research/01-test-harness.md)).
-- [ ] Helper `fail(task_id, exit_status=1)` / `succeed(task_id)`: commit `exit_status` and
+- [x] Helper `fail(task_id, exit_status=1)` / `succeed(task_id)`: commit `exit_status` and
       `completion_time` through a separate session (`Session.session_factory()`), as the Receiver
       thread would.
-- [ ] Helper `inject_after_next(monkeypatch, action)`: one-shot wrapper on `Task.next` — call the
+- [x] Helper `inject_after_next(monkeypatch, action)`: one-shot wrapper on `Task.next` — call the
       real method; if it returned `[]`, run `action`; restore the original; return the result.
       (`load_bundle` calls `Task.next` with keywords only.)
-- [ ] Preconditions (e.g. "this LOAD scheduled attempt 2") use `pytest.fail(...)`, **never
+- [x] Preconditions (e.g. "this LOAD scheduled attempt 2") use `pytest.fail(...)`, **never
       `assert`**, so a broken replay can't masquerade as the expected failure.
-- [ ] Drive `Scheduler(queue=None, attempts=3, eager=eager, poll=0)` via `start()` then
+- [x] Drive `Scheduler(queue=None, attempts=3, eager=eager, poll=0)` via `start()` then
       `load_bundle()`; `poll=0` makes the hold's back-off `sleep(0)`. No sleeps, threads or timing.
-- [ ] `test_group_advance_waits_for_pending_retry`, `@mark.parametrize('eager', [False, True])`,
+- [x] `test_group_advance_waits_for_pending_retry`, `@mark.parametrize('eager', [False, True])`,
       `@mark.xfail(strict=True, raises=AssertionError, reason=<declarative: group advance skips a
       failure committed after Task.next>)`: failing task in group 0 + a group-1 task → attempt 2 in
       flight → inject `fail(attempt 2)` → `load_bundle()` returns LOAD, `current_group == 0`, no
       `Completed task group` / `Failed task group` record (`caplog.set_level(logging.DEBUG,
       logger='hypershell')`) → next `load_bundle()` returns PACK with one task (group 0, attempt 3,
       `previous_id` = attempt 2) → no group-1 row has `schedule_time`.
-- [ ] `test_stop_waits_for_pending_retry`, parametrized `eager` × `layout ∈ {no-groups,
+- [x] `test_stop_waits_for_pending_retry`, parametrized `eager` × `layout ∈ {no-groups,
       last-group}` (last-group: a succeeding task in group 0, the failing task in group 1), same
       strict `xfail`: attempt 2 in flight → inject `fail` → `load_bundle()` is not FINAL → next
       returns PACK with attempt 3 → `fail(attempt 3)` → `load_bundle()` returns FINAL.
-- [ ] Guards (no `xfail`; green now and after the fix): exhausted failure in group 0 with a group 1,
+- [x] Guards (no `xfail`; green now and after the fix): exhausted failure in group 0 with a group 1,
       `attempts ∈ {1, 3}` — non-`forever` → FINAL + `Failed task group 0` record + group 1
       unscheduled; `forever_mode=True` → LOAD, `current_group == 0`. Cancelled (`CANCEL_STATUS`)
       row in group 0 with a group 1, `attempts=3` → advances to group 1. Group-0 task fails
       attempt 1, attempt 2 succeeds → advances to group 1. Single succeeding group → FINAL.
-- [ ] Red record: run `uv run pytest -m unit --runxfail tests/test_retry_gate.py`; it **must
+- [x] Red record: run `uv run pytest -m unit --runxfail tests/test_retry_gate.py`; it **must
       fail**, on the replay cases only. Paste its short failure summary into the commit body.
 - **Verify:** `git diff --quiet c1d4470 -- src && uv run pytest -m unit -rxX tests/test_retry_gate.py`
   — exits 0 only if `src/` is `c1d4470`'s, every replay case fails by `AssertionError` (strict:
