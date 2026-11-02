@@ -19,3 +19,18 @@
   say to fast-forward it, or have Step 3 branch from `origin/develop` without upstream tracking.
   When it has diverged, STOP.
 - **Confidence:** high · **Effort:** small
+
+## F2 — No pattern for a phase whose deliverable is a test that must fail on the base commit
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** the GOAL requires the regression tests to fail on the base commit before the
+  fix. Step 6 requires every phase's `verify:` to be a command that succeeds, and gives no pattern
+  for showing that a test is red. The plan had to invent one: commit the tests with
+  `xfail(strict=True, raises=AssertionError)`, guard `src/` with `git diff --quiet <base> -- src`,
+  and remove the markers in the fix phase.
+- **Skill cause:** "fails before, passes after" is a standard requirement for a fix. Without a
+  stated pattern, each plan improvises one. A bare `! pytest …` inversion would also accept import
+  errors and broken fixtures as "red".
+- **Recommended fix:** add a short red-first recipe to Step 6, or to the `TECH.md` template, using
+  the strict-xfail-by-assertion marker, the base-diff guard, a `--runxfail` record in the commit
+  body, and marker removal in the fix phase.
+- **Confidence:** med · **Effort:** small
