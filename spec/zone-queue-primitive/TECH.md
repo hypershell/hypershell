@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_progress
+status: blocked
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
@@ -104,10 +104,12 @@ phases:
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: d3e00f982b5de608eb6587d789c5156103741d0e
+  last_reviewed_commit: 4904c97466d2de19e184699f05bdf41f7ede6bdf
   verdict: changes-requested
-  blocked_reason: ''
-  cycle: 3
+  blocked_reason: 'review cycle 4 (final): C5, C6 resolved; C7 fork re-sends handed-off
+    decrefs, C8 handed-off decref with no sender (both LOW, core/queue.py) need the
+    maintainer'
+  cycle: 4
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 

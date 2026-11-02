@@ -665,3 +665,320 @@ the feature again.
 Out of scope for cycle 4: everything else, including the observations already ruled (cycle 1 P3,
 cycle 2 C3(a), the client partial-connect hang) and the pre-existing behaviour seen identically on
 `b819de6`.
+
+## Review cycle 4 — changes-requested (2026-11-02)
+
+- **Reviewed commit:** 4904c97466d2de19e184699f05bdf41f7ede6bdf  ·  **Base:** `b819de6` (merge base with
+  `origin/develop`)  ·  **Date:** 2026-11-02
+- **Verdict:** changes-requested
+- **Cycle:** 4, the one further cycle the maintainer authorized past the ≤3 bound, scoped to C5 and
+  C6. It did not converge, so the feature stops here pending the maintainer's decision.
+- **Mode:** remediation check of C5 and C6 by the orchestrator, plus one fresh blind reviewer over
+  the delta `git diff d3e00f9..4904c97 -- . ':(exclude)spec/'`, with the full spec-excluded diff
+  `b819de6...4904c97` as context. The reviewer was not shown earlier cycles' findings. Findings
+  outside the delta, or restating a settled ruling, are Observations; the exception is a new HIGH or
+  CRITICAL defect in the delta's interaction with existing code.
+
+### Pre-flight
+
+- **Base resolution.** Graded against the merge base `b819de6`; the stale local `develop` was not
+  used.
+- **Build state.** `TECH.md` is `status: in_progress`, P1–P6 `done`, P7 `pending`. R9's multi-node
+  clause is pending external evidence: the foreman's matrix at `4904c97` is queued. Not a finding.
+- **Contract drift.** `git log --oneline b819de6..4904c97 -- spec/zone-queue-primitive/GOAL.md` shows
+  only the shaping commit `da987c2`.
+- **Since cycle 3:** `4904c97` only (C5 hand-off of same-process decrefs, C6 ROADMAP entry). It is
+  signed and carries no `Co-Authored-By` trailer.
+- **Working tree.** `share/man/man1/{hs,hsx,hyper-shell}.1` are modified in the worktree by another
+  agent and are in no commit. They were left alone; every run here used `git archive` extracts of
+  `4904c97`, `d3e00f9` and `b819de6`.
+
+### Cycle 3 findings: remediation check (orchestrator)
+
+**C5 — resolved.** The property in the ruling holds for every proxy a `QueueClient` makes: no thread
+of an in-process server blocks on a connection that only its own accept loop can answer, whatever
+thread the cyclic collector runs a proxy finalizer on.
+
+- **The argument (TECH P1) was read and attacked, not re-run.**
+  - The finalizer reads `_serving` when it runs. A server is listed before it binds and unlisted
+    only after its listener is closed. Listed means a `SimpleQueue.put`: no connection, lock or
+    thread start. A stock decref runs only for a port that no in-process listener holds at that
+    moment. No case was found where it reaches one.
+  - The decref sender is a client-side thread and holds no lock while it dials. A finalizer run on
+    the sender either hands off again or reaches no in-process server. So the accept loop's waits
+    (TLS handshake, `_lock`, a handler's start) never depend on themselves.
+  - Several servers in one process, ephemeral and fixed ports, and same-port restarts: a stock
+    decref that read `_serving` just before another server bound could reach that server. It then
+    waits on that server's accept loop, which another thread is starting and which no finalizer can
+    stall. That is a delay, not a deadlock.
+  - TLS: `secure_client` and `SecureListener.accept` take no lock, so the sender and the accept loop
+    share none.
+  - Remaining gaps:
+    - P4 below: the finalizer is swapped only after the stock proxy constructor returns.
+    - A proxy from another manager class keeps the stock finalizer. TECH's stated limit; HyperShell
+      makes none.
+- **Reviewer, by execution.** A profile hook forced a collection, with a dropped same-process client
+  pending, at four points:
+  - the accept loop (in `_admits`);
+  - a handler (in `Queue.put` under `serve_client`);
+  - the thread starting a same-port server, between its bind and the accept loop's start;
+  - the remote-shutdown stop thread, inside `stop()` under `_lock`.
+
+  Results:
+  - `4904c97`: 40 rounds × TLS on and off × 3.11–3.14, all passed. Every stock decref ran on
+    `hypershell-queue-decref`.
+  - `d3e00f9`: the accept-loop, starter and stop points deadlock, with the decref inline on the
+    stack.
+- **Cycle 3's probes**, against `4904c97` and `d3e00f9` as red control:
+  - Each run had its own process group and a bounded timeout.
+  - `p_gc.py` ran at threshold 50 × 200 rounds. It has no TLS mode, so a copy took a `tls`
+    argument; nothing else changed.
+  - `p_restart.py` ran 300 rounds.
+
+  | Python | build | `p_gc` no TLS | `p_gc` TLS | `p_restart` no TLS | `p_restart` TLS |
+  |---|---|---|---|---|---|
+  | 3.11.18 | d3e00f9 | hang, round 10 | OK | OK | hang, round 2 |
+  | 3.11.18 | 4904c97 | OK | OK | OK | OK |
+  | 3.12.16 | d3e00f9 | hang, round 4 | OK | hang, round 54 | hang, round 214 |
+  | 3.12.16 | 4904c97 | OK | OK | OK | OK |
+  | 3.13.18 | d3e00f9 | hang, round 5 | hang, round 56 | OK | OK |
+  | 3.13.18 | 4904c97 | OK | OK | OK | OK |
+  | 3.14.6 | d3e00f9 | hang, round 12 | hang, round 6 | OK | OK |
+  | 3.14.6 | 4904c97 | OK | OK | OK | OK |
+
+  - Red control: 10/16 runs hang, and every Python has at least one. The stacks are C5's:
+    `_serve_in_process` `:593` → `Thread.__init__` → `Finalize` → `_decref` → `answer_challenge`, and
+    `serve` `:457` waiting on a handler in `_decref`.
+  - Extended, feature only: `p_gc` at thresholds 10, 50 and 700 and `p_restart`, 400 rounds,
+    2 repeats each, on four Pythons with TLS on and off. 66/66 OK. One more run failed only with
+    `EADDRNOTAVAIL`: concurrent probes had exhausted the host's ephemeral ports. Its three re-runs
+    passed.
+  - Several servers in one process (orchestrator's `p_multi.py`: 4 lanes, ephemeral and same-port
+    restarts, short-lived clients dropped from many threads):
+    - `d3e00f9`: 8/8 runs stuck (C5).
+    - `4904c97`: 0/8 stalls. The live-client errors seen there are the Observation below.
+- **`tests/test_queue_gc.py`** (reviewer): `test_queue.py` + `test_queue_gc.py` 38 passed on each of
+  3.11–3.14. Against `d3e00f9` on 3.14, the two TLS stall probes fail, so the tests catch what they
+  target. `test_dropped_client_decref_reaches_server` and
+  `test_finalizer_hands_off_only_when_served_here` together passed 60/60 consecutive runs on 3.14.
+
+**C6 — resolved.**
+- `ROADMAP.md` has an entry for `issues/client-partial-connect-hang.md` in the form `AGENTS.md`
+  requires: a heading, problem prose, and the Horizon / Depends / Refs line. Its `**Seed:**` link
+  points at an existing file whose `status:` is `unshaped`.
+- It sits after the coordinator-resilience entry.
+- Every file in `issues/` is now referenced from `ROADMAP.md`.
+
+### Verification run
+
+- **Suite (orchestrator).** One venv per Python from the `4904c97` extract (`uv sync --frozen`):
+  - 3.11.18, 3.12.16, 3.13.18 and 3.14.6: **557 passed** each, run two at a time.
+  - `git diff --diff-filter=M b819de6...4904c97 -- tests/` is empty: no base test is modified.
+    `test_queue.py` was added on this branch.
+- **Repeats.** `test_shutdown_releases_port[no-tls,tls]` and `test_join_after_task_done`: 50/50
+  consecutive pytest runs on each of 3.11, 3.13 and 3.14 (150 test executions per Python).
+- **`parity --base b819de6 --feature 4904c97`: PASS.**
+  - Task tables are identical with TLS on and off, rc 0/[0, 0] on both builds.
+  - `--help` is byte-identical for `server`, `client`, `submit` and `cluster`.
+- **`compat --server 4904c97 --client b819de6`: PASS.** 200/200 tasks exit 0, rc 0/[0, 0], with TLS
+  on and off.
+- **A remote client's decref is the stock path (reviewer).**
+  - Setup: the server ran in a separate process, with clients from the `d3e00f9` and `4904c97`
+    venvs on 3.14 and 3.11, TLS on and off. Tracing used `setprofile` and logged
+    `ForkingPickler.dumps` and `send_bytes`.
+  - Once the one wrapper frame (`core/queue.py` `_decref`) is removed, the traces are identical:
+    the same thread (MainThread), the same `BaseProxy._decref` arguments, the same `Client` or
+    `secure_client` call, the same handshake sizes, and byte-identical decref messages.
+  - The server's object count goes 4 → 0 with both builds, and no sender starts.
+  - `b819de6`'s client-side code is AST-identical to `d3e00f9`'s.
+- **Private internals.**
+  - `unsupported_internals() == []` on 3.11–3.14 (reviewer and suite).
+  - The stdlib `_incref`, `_decref`, `_after_fork` and `Finalize.__init__`/`__call__` are identical
+    on 3.12–3.14.
+  - 3.11's `_decref` lacks `serial`; `*args` and the token-first check both cover it.
+- **`test_threads_drain_after_shutdown`** is not a base test (`git show b819de6:tests/test_queue.py`
+  fails; added in `bf0cae9`).
+  - The change excludes exactly one thread by name, the process-lifetime sender. Handler threads are
+    renamed by `accept_connection` and never take that name.
+  - In a fresh process the old count fails only because of the sender.
+  - The change does not weaken the check.
+- **Throughput gate (orchestrator).** `bench_queue.py gate --base b819de6 --feature 4904c97 --repeats 5`,
+  Python 3.14.6, start method `spawn`, frozen non-editable venvs from `git archive`: **PASS**. All 60
+  runs were clean: every server and client exited rc 0, and every task completed.
+  - **Load.** The gate ran alone: the reviewer had finished, no probe of this review was running,
+    and a psutil scan just before it found none. The 1-min load average was sampled every 30 s
+    (48 samples): min 2.2, median 3.8, max 17.6. The maximum came during the 32-client config,
+    mostly from its own clients. Runs were interleaved, so both builds shared the load.
+  - **Table.** Steady-state tasks/s (p10–p90 of completions), median [min–max]:
+
+  | config | base | feature | delta | tolerance | tree children b/f | tree FDs b/f | own FDs b/f | own threads b/f | tree RSS MB b/f |
+  |---|---|---|---|---|---|---|---|---|---|
+  | 4x4 b=1 tls | 280.6 [276.1–288.2] | 283.6 [273.2–292.7] | +3.0 | 19.5 | 2/0 | 117/23 | 53/23 | 7/19 | 199.5/95.6 |
+  | 4x4 b=1 no-tls | 285.7 [270.5–295.2] | 280.7 [276.7–290.5] | −5.0 | 24.7 | 2/0 | 117/24 | 52/23 | 7/19 | 194.6/91.7 |
+  | 16x1 b=1 tls | 282.0 [281.4–287.2] | 283.3 [280.7–288.2] | +1.3 | 14.1 | 2/0 | 153/59 | 53/59 | 7/55 | 202.3/98.7 |
+  | 16x1 b=1 no-tls | 285.0 [282.8–287.3] | 285.5 [279.7–287.5] | +0.5 | 14.2 | 2/0 | 153/59 | 52/59 | 7/55 | 196.3/93.1 |
+  | 4x4 b=50 tls | 934.5 [932.7–936.6] | 932.6 [930.3–934.2] | −1.9 | 46.7 | 2/0 | 117/22 | 52/22 | 7/19 | 204.1/100.1 |
+  | 32x1 b=1 tls | 286.3 [285.4–287.4] | 286.0 [280.2–291.9] | −0.3 | 14.3 | 2/0 | 201/107 | 52/108 | 7/103 | 206/102.7 |
+
+  - The largest drop is 4x4 b=1 no-tls, at −5.0 against a tolerance of 24.7; the ranges overlap.
+  - Tree RSS roughly halves.
+  - The server's own FDs and threads grow with clients, as before. They are reported, not gated,
+    under the cycle-1 P3 ruling.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `core/queue.py` `_InProcessServer`, `SecureManager._serve_in_process` | `test_start_creates_no_child[fork,spawn]` in the suite on 3.11–3.14; gate: tree children 2 → 0 | ✅ |
+| R2 | `QueueServer.start` (`queue.Queue`, same bounds), `QUEUE_EXPOSED` | suite (bounds, `Empty`/`Full` timeouts, `join`/`task_done`) on 3.11–3.14 | ✅ |
+| R3 | as R1 | round-trip tests TLS on and off; `compat` TLS on and off | ✅ |
+| R4 | as R1; per-listener TLS context; stock decref for remote clients | `test_queue_tls.py` unmodified and passing; `compat`; remote-decref trace identical to `d3e00f9` | ✅ |
+| R5 | `_InProcessServer.stop`, `_finalize_in_process`, `_decref` hand-off | C5 property held under forced collections on every server thread; probes above; 50/50 repeats of `test_shutdown_releases_port` on three Pythons | ✅ |
+| R6 | `tests/test_queue.py`, `test_queue_gc.py`, `test_queue_start.py`, `test_queue_limits.py` | collected, tagged and passing on 3.11–3.14; the new GC tests fail at `d3e00f9` | ✅ |
+| R7 | `tests/test_server_fsm.py` | suite on 3.11–3.14 | ✅ |
+| R8 | no existing test touched | no base test modified; suite; `parity`; `--help` byte-identical | ⚠️ C7, C8 (library-only edge cases in a serving process) |
+| R9 (local) | as R1 | gate (above): every median within tolerance, tree children 2 → 0, tree FDs and RSS lower in every config | ✅ |
+| R9 (multi-node vs 2.8.3) | `tests/cluster/` drive | **pending external evidence**: the foreman's matrix at `4904c97` is queued | ⏳ |
+
+Unmapped changes: none. The `AGENTS.md` lines document the hand-off (see C8 on their accuracy), and
+the `ROADMAP.md` entry is C6.
+
+### Findings
+
+No AGENTS.md invariant violation was found. Severity is set against exposure: none of these is on
+a path the CLI takes (`hs server`, `hs client`, `hsx`, `hs cluster` never fork a serving process,
+never reuse a port within one process, and keep their in-process client for the server's life).
+
+#### [LOW/CONFIRMED] C7 — A forked child re-sends the decrefs it inherits, and the server releases objects that live clients hold
+- **Where:** `src/hypershell/core/queue.py`:
+  - `:531`, the module-level `_decrefs` queue;
+  - `:564-570`, `_start_decref_sender`, which starts again in a forked child;
+  - `:835-836`, where `QueueClient.connect` starts the sender whenever the inherited `_serving` is
+    non-empty.
+- **Failure scenario:**
+  - A process that serves queues forks while handed-off decrefs are still waiting.
+  - When the child connects a `QueueClient`, its inherited `_serving` starts a sender in the child,
+    which sends the same decrefs again.
+  - The server's refcounts fall below the number of live proxies, and it disposes of queues that
+    clients in the parent still hold. Their next call fails with `RemoteError` (`KeyError`).
+  - At `d3e00f9` a decref runs synchronously, so a fork has nothing to inherit.
+- **Evidence:**
+  - Reviewer `p10/fork_dup.py`, TLS on, 3.14 and 3.11. A silent TCP peer in another process holds
+    up the inline TLS accept (pre-existing behaviour), so the sender backs up.
+  - Output: "waiting in the hand-off queue at fork: 3". After the child exits, 1 of 4 idents is
+    left, and the parent's live client gets `put on completed/heartbeat/confirmed FAILED
+    RemoteError ["KeyError: '…'"]`.
+  - Orchestrator re-run on 3.14: the same output.
+- **Exposure:** code that embeds the library and forks a serving process (e.g. a `fork`-context
+  `multiprocessing.Process`). The backlog has to exist at the fork; the reproduction made it with a
+  stall.
+- **Touches invariant / requirement:** R8 (no behaviour change); high-blast-radius `core/queue.py`.
+
+#### [LOW/CONFIRMED] C8 — A handed-off decref can wait for a sender that never starts
+- **Where:**
+  - `src/hypershell/core/queue.py:548`: the hand-off decides by port number alone, and hands off
+    everything while an ephemeral bind is listed as 0.
+  - `:835-836`: the sender starts only in `QueueClient.connect`, and only when `_serving` is
+    non-empty.
+  - `AGENTS.md:283-285`.
+- **Failure scenario:**
+  - A process connects a client to a server in another process before it serves anything, so no
+    sender starts.
+  - It then serves queues on the same port number on another address, or binds an ephemeral port
+    while that client's proxies are collected.
+  - That client's decrefs are queued and never sent. The other server keeps the referents, and the
+    stock decref's tidy-up of the dropping thread's cached connection never runs.
+  - `AGENTS.md` says that outside the hand-off "it is the stock decref"; here it is neither.
+- **Evidence:**
+  - Reviewer `p9/probe9.py` on 3.14, re-run by the orchestrator with the same result:
+    - `4904c97`: "remote server objects 1 s after the client was collected: 4; decrefs waiting: 4;
+      sender: None".
+    - `d3e00f9`: 0 objects left.
+- **Exposure:** an unusual library configuration. The cost is a server-side refcount leak and one
+  cached connection per thread. Correctness of the queues is unaffected.
+- **Touches invariant / requirement:** R8; the delta's own `AGENTS.md` text; high-blast-radius
+  `core/queue.py`.
+
+#### [LOW/PLAUSIBLE] P4 — The finalizer is swapped only after the stock proxy constructor returns
+- **Where:** `src/hypershell/core/queue.py:573` (`_defer_decref`), applied at `:837-840`.
+- **Failure scenario:**
+  - Inside the registered `_get_*` method the proxy is already increfed with the stock finalizer.
+    The method then sends its own decref on a fresh connection.
+  - If that connection fails while the server is alive, `connect()` raises, and the half-made proxy
+    keeps the stock finalizer, held by the traceback.
+  - If the cyclic collector later runs it on the accept loop, C5 recurs.
+  - `AGENTS.md:283-285` ("never connects to them from there") overclaims by this window.
+- **Evidence:**
+  - Reviewer `p6/probe7.py` with a `ConnectionResetError` injected on that one decref, on 3.14 with
+    TLS on and off: the watchdog fires; `hypershell-queue-server` is stuck in `_admits` → (gc) →
+    `BaseProxy._decref` → `answer_challenge`/`secure_client`; new clients hang.
+  - A natural trigger was not reproduced: `p6/probe8.py` with a lowered `RLIMIT_NOFILE` made 98
+    refusals, all on the first handshake.
+  - The window existed at `d3e00f9` too, where every proxy kept the stock finalizer, so this is an
+    incompleteness of the fix, not a regression.
+- **Touches invariant / requirement:** C5's property (narrow window); for the human.
+
+#### [LOW/PLAUSIBLE] P5 — The hand-off delays same-process decrefs past their server, onto a same-port successor
+- **Where:** `src/hypershell/core/queue.py:554-561` (one sender, one connection per decref, in
+  order).
+- **Failure scenario:**
+  - A decref collected while its own server is alive used to reach that server at once. Now it
+    waits for the sender.
+  - Under decref churn the sender falls behind. The decref then reaches whatever server holds the
+    port when it is sent, which can be a same-key successor in the same process.
+  - When the successor's queues reuse the old ids, it releases a live client's queue: the class in
+    the Observation below.
+- **Evidence:**
+  - Orchestrator `p_multi_attr.py`: 1,800 servers, 4 lanes, same-port restarts, 3.13 and 3.14, no
+    TLS. Collections ran only in one dedicated thread, so neither build can deadlock.
+  - Each decref that reached a server other than its issuer was attributed by when it was
+    collected:
+
+    | Python | build | stale, collected while own server listened | stale, collected after it stopped | live-client `RemoteError` |
+    |---|---|---|---|---|
+    | 3.13.18 | d3e00f9 | — | 4593 | 9 |
+    | 3.13.18 | 4904c97 | 2160 and 2882 | 1598 and 2746 | 43 and 43 |
+    | 3.14.6 | d3e00f9 | — | 4257 | 0 |
+    | 3.14.6 | 4904c97 | 2678 | 2220 | 22 |
+
+  - With normal collection thresholds the deferred share was 0–36 of about 3,200–3,500 stale
+    decrefs per run.
+  - The increase is statistical. No single failure was traced to a deferred decref.
+- **Touches invariant / requirement:** R5 (same-port restart in one process), R8; for the human.
+
+### Observations (not findings)
+
+- **Stale decrefs after a same-port, same-key restart in one process.**
+  - Mechanism: a dropped same-process client of the old server, collected after the new server
+    starts, sends decrefs under the old ids to the new server. When a new queue reuses an old id
+    (frequent in one address space), a live client's next call fails with `RemoteError`
+    (`KeyError`).
+  - It is outside the delta: it reproduces at `d3e00f9` (P5 table; reviewer's `stale_mech.py` shows
+    both builds send the stale decref).
+  - It was not seen at `b819de6`: 0 failures over about 1,500 servers per run, with 396–591 stale
+    decrefs. That build cannot reliably restart on the same port in one process either; a start
+    fails with `EOFError` from the child.
+  - So it comes with R5's new same-port restart. It needs the same key, the same port and live
+    clients on the successor:
+    - `run_local` uses a random key, and 150 `run_local` runs on one port passed;
+    - no CLI path restarts in-process.
+  - Recommended: the foreman seeds it.
+- The hand-off makes decref delivery asynchronous. In the collector-thread stress the feature run
+  took 103–158 s against 31 s at `d3e00f9` for the same work. No CLI path drops clients at that
+  rate, and the gate is unaffected.
+- **Pre-existing, identical on `b819de6`:** the TLS accept loop does its handshake inline, so a
+  silent TCP peer stalls every new connection, and now the decref sender too, until it disconnects.
+- **Process hygiene.**
+  - Concurrent probe runs exhausted the host's ephemeral ports once (`EADDRNOTAVAIL`). The affected
+    runs were discarded and re-run alone.
+  - The reviewer's first launch used a runner whose name shadowed a stdlib module. It failed on
+    import before starting anything.
+  - Nothing from this review is still running (psutil scan).
+
+### Human-gate triggers
+
+- **Triggered.** C7 and C8 are CONFIRMED in high-blast-radius `core/queue.py`. This is the final
+  authorized cycle, so the feature stops here. Remediation, deferral or acceptance of C7 and C8 (and
+  triage of P4 and P5) needs the maintainer's decision.
+- C5 and C6 are resolved. Every gate passed: suite, repeats, parity, compat and throughput.
+- P2, the multi-node evidence, is still pending.

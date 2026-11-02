@@ -23,6 +23,9 @@
 - `hs-review` Step 2 again, cycle 3: a fresh blind pass with executed evidence found a deadlock
   (REVIEW C5) that two earlier cycles and every phase gate had missed. The orchestrator's own suite
   run, which stalled the same way, corroborated it independently.
+- `hs-review` Step 2, cycle 4: a blind pass scoped to the remediation delta found two defects the
+  remediation's own red-first tests did not cover (REVIEW C7, C8). Its byte-level trace showed that a
+  remote client's decref is unchanged.
 
 ## Friction findings
 
@@ -131,7 +134,7 @@ is skipped by the parser):
   `--feature WORKTREE`. Mirror the rule in the TECH template's `verify:` guidance.
 - **Confidence:** high · **Effort:** small
 
-## F6 — hs-review grades `{base}...HEAD` with `{base}` a branch name, which a stale local ref breaks · seen again
+## F6 — hs-review grades `{base}...HEAD` with `{base}` a branch name, which a stale local ref breaks · seen again · seen again
 `origin=hs-review:step1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** A recurrence of `spec/group-advance-retry-gate/META.md` F3. `TECH.md` records
   `base: develop`; the local `develop` has merge base `aee41ae` with this branch, not the fork point
@@ -146,6 +149,8 @@ is skipped by the parser):
   branch's own diff. The stale local `develop` must not be used.
 - **Seen again (hs-review step1, cycle 3, 2026-11-02):** the foreman's brief had to pin the base to
   `b819de6` again; Step 1 still resolves `{base}` from the branch name.
+- **Seen again (hs-review step1, cycle 4, 2026-11-02):** the brief pinned the base to `b819de6` and
+  the delta to `d3e00f9..4904c97`; `TECH.md` still says `base: develop`, and local `develop` is stale.
 
 ## F7 — Remediation mode has no place to record the human-gate triage, nor a path for an accepted PLAUSIBLE finding
 `origin=hs-build:P1-remediation severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
@@ -199,7 +204,7 @@ is skipped by the parser):
   scenario is graded normally and cross-referenced to the ruling.
 - **Confidence:** med · **Effort:** small
 
-## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again
+## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again
 `origin=hs-build:P1-remediation-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
 - **What happened:** P1's `verify:` and Safety Principles' CLI drive both run
   `.agents/factory/bin/temp_site.sh`, whose cleanup is `trap 'rm -rf "$site"'`. Under a harness
@@ -215,6 +220,8 @@ is skipped by the parser):
 - **Seen again (hs-review step2, cycle 3, 2026-11-02):** the rubric's Reviewer conduct, which Step 2
   hands to the blind reviewer verbatim, tells it to drive the CLI through `temp_site.sh`. The brief
   had to override that with environment-isolated sites.
+- **Seen again (hs-review step2, cycle 4, 2026-11-02):** the blind brief again had to override the
+  rubric's `temp_site.sh` instruction with `HYPERSHELL_SITE`/`HYPERSHELL_DATABASE_FILE`/`HYPERSHELL_CONFIG_FILE=''`.
 
 ## F11 — Step 7's `git add -A` commits whatever else is in a shared worktree
 `origin=hs-build:P1-remediation-3 severity=medium category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
