@@ -20,6 +20,9 @@
   the seed's settled clarifications.
 - `hs-review` Step 2, the blind brief with its executed-evidence demand: base-versus-feature probes
   surfaced two same-process regressions (REVIEW C1, C2) that no phase gate exercised.
+- `hs-review` Step 2 again, cycle 3: a fresh blind pass with executed evidence found a deadlock
+  (REVIEW C5) that two earlier cycles and every phase gate had missed. The orchestrator's own suite
+  run, which stalled the same way, corroborated it independently.
 
 ## Friction findings
 
@@ -141,6 +144,8 @@ is skipped by the parser):
   the stale local `develop` (`222075b`). `origin/develop` has since moved on to `8cdf62a`, so even
   `origin/develop...HEAD` is no longer a usable literal; only the merge base `b819de6` grades the
   branch's own diff. The stale local `develop` must not be used.
+- **Seen again (hs-review step1, cycle 3, 2026-11-02):** the foreman's brief had to pin the base to
+  `b819de6` again; Step 1 still resolves `{base}` from the branch name.
 
 ## F7 — Remediation mode has no place to record the human-gate triage, nor a path for an accepted PLAUSIBLE finding
 `origin=hs-build:P1-remediation severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
@@ -172,6 +177,11 @@ is skipped by the parser):
   id. At hand-back, list any process still running from the scratch environments and report it.
   Name the base manager child as the known case.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-review step2, cycle 3, 2026-11-02):** the process-group rules still had to be
+  written into the reviewer brief by hand. With them, no drive was orphaned, but a background wait
+  loop outlived the reviewer's hand-back until the orchestrator asked for it to be stopped. The
+  hand-back check should cover background shells and monitors, not only drives; the orchestrator's
+  own monitors needed the same check.
 
 ## F9 — Cycle 2+ has no rule for a blind finding that re-raises an already-triaged one
 `origin=hs-review:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
@@ -202,3 +212,6 @@ is skipped by the parser):
   path, no `rm`), or move the cleanup into a Python helper that a sandbox permits, and say in
   hs-build Step 4 which form to use when `rm` is unavailable. The gate itself stays as strong.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-review step2, cycle 3, 2026-11-02):** the rubric's Reviewer conduct, which Step 2
+  hands to the blind reviewer verbatim, tells it to drive the CLI through `temp_site.sh`. The brief
+  had to override that with environment-isolated sites.

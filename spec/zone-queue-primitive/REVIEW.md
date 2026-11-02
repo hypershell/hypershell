@@ -431,3 +431,217 @@ own files are protected by the descriptor reserve of (b) alone, with (c)'s back-
 fallback (ERROR once, connections fail closed) is accepted, since building the context at start
 would change when the TLS materials are read. A client cut off partway through connecting hangs
 until eviction on both builds; it is seeded as `issues/client-partial-connect-hang.md`.
+
+## Review cycle 3 — changes-requested (2026-11-02)
+
+- **Reviewed commit:** d3e00f982b5de608eb6587d789c5156103741d0e  ·  **Base:** `b819de6` (merge base with
+  `origin/develop`)  ·  **Date:** 2026-11-02
+- **Verdict:** changes-requested
+- **Cycle:** 3 of ≤3. The bounded loop ends here without convergence, so this escalates to the
+  human. No further review↔build cycle runs without the maintainer's decision.
+- **Mode:** a fresh blind pass over the full spec-excluded diff (`git diff b819de6...d3e00f9 -- .
+  ':(exclude)spec/'`) by one blind reviewer, which was not shown earlier cycles' findings (no
+  `debate`, no `completeness` sub-pass). The orchestrator separately checked the cycle-2
+  remediation against the triage and its clarification, re-ran the C3 and C4 reproductions against
+  base, and ran the gates.
+
+### Pre-flight
+
+- **Base resolution.** The branch was graded against its merge base `b819de6`. The stale local
+  `develop` (`222075b`) was not used.
+- **Build state.** `TECH.md` is `status: in_progress`, P1–P6 `done`, P7 `pending`. R9's multi-node
+  clause is still pending external evidence: the foreman is running the matrix at `d3e00f9`.
+- **Contract drift.** `git log --oneline b819de6..HEAD -- spec/zone-queue-primitive/GOAL.md` shows
+  only the shaping commit `da987c2`. The contract did not move.
+- **Since cycle 2:** `d552903`, which builds C3(b), C3(c) and C4, and `d3e00f9`, which withdraws
+  C3(a), documents the open-file limit and seeds `issues/client-partial-connect-hang.md`.
+
+### Cycle 2 findings: remediation check (orchestrator)
+
+C3 drive, the reviewer's from cycle 2. The server runs with soft = hard `RLIMIT_NOFILE`. It serves
+`b819de6` clients with `-N 2`, 300 `echo` tasks, `--no-tls`, and is stopped at 90 s; clients are
+stopped 30 s after it. Python 3.14.6 frozen venvs; every process ran in its own session.
+
+| limit, clients | server | tasks done | clients exit 5 / hung | server log |
+|---|---|---|---|---|
+| 128, 44 | base | 206/300, 193/300 | 33 exited / 11 (codes not tallied); 28 / 16 | no error; two children (manager, tracker) |
+| 128, 44 | feature | 252/300, 198/300 | 36 exited / 8 (codes not tallied); 27 / 17 | one refusal WARNING; no `Too many open files`, no `unable to open database file`, no uncaught exception; 0 children |
+| 64, 24 | base | 288/300 | 22 / 2 | no error |
+| 64, 24 | feature | 294/300 | 23 / 1 | one refusal WARNING; nothing else |
+
+In cycle 2 the feature server died at 2.8 s (70/300) and completed 15/300, with its state machines
+dead. Both builds now hang at 90 s in every run, on clients that were admitted for some
+connections and then refused one. That is the client-side partial-connect hang, which is ruled out
+of scope and seeded.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| C3(b) · descriptor reserve | **resolved** | The drives above. `_admits` (`core/queue.py:468-481`) closes a connection whose descriptor is at or above soft limit − 32. Admitted clients carry on, and one WARNING names the limit. `test_server_keeps_its_files_at_the_open_file_limit` passes on 3.11–3.14 and 3/3 repeats under load. |
+| C3(c) · accept back-off | **resolved** | Accept made to fail with `EMFILE`, then `ENFILE`, with a peer pending: 4 attempts in 1 s each. The red-first record was about 750,000. In the drives the reserve kept real `EMFILE` away. |
+| C4 · TLS setup failure visible | **resolved** (fallback, as accepted) | `hs server --tls-cert '<none>'` plus two clients, default log level, on 3.14.6 and 3.11.18. Base: one accepter traceback ending `TLSError: TLSConfig.cert and TLSConfig.key are required for the server side`, after which the accepter is dead; one client exits 5 and the other hangs until it is killed at 20 s. Here: exactly one line, `ERROR [hypershell.core.queue] Queue server cannot set up TLS and refuses every connection (TLSError: …)`, no traceback, both clients exit 5. `test_server_cli_tls_context_failure_is_logged` asserts the line. |
+| C3(a) · raise the soft limit | **withdrawn** (clarification) | Absent: `src/` only reads the limit (`getrlimit`, `core/queue.py:374`) and never calls `setrlimit`. |
+| Python 3.11 | **verified** | Full suite 549 passed on 3.11.18; `unsupported_internals() == []`. |
+| P2 · multi-node evidence | pending external evidence | The foreman is running the matrix at `d3e00f9`. Not a finding. |
+
+### Verification run
+
+- **Suite (orchestrator)**, one venv per Python built from the worktree at `d3e00f9`:
+
+  | Python | result |
+  |---|---|
+  | 3.11.18 | 549 passed |
+  | 3.12.16 | 549 passed |
+  | 3.14.6 | 549 passed |
+  | 3.13.18, run 1 | 548 passed, 1 failed under heavy concurrent load. The failure was in `test_restart.py::test_restart_update_adds_novel_and_runs`, a stdout assertion in an unmodified test. It passed 8/8 alone and 12/12 as a file. |
+  | 3.13.18, run 2 | hung at `test_queue.py::test_shutdown_releases_port[no-tls]` with C5's signature (below); stopped. |
+
+  - **Reviewer:** 549 passed on 3.11.18, 3.13.18 and 3.14.6. On 3.12.16, the first run hung the same
+    way; the rerun passed 549.
+  - `test_queue_limits.py` + `test_queue_start.py`, 3 repeats: 15 passed each time.
+- **`parity` and `compat` (orchestrator).**
+  - `parity --base b819de6 --feature d3e00f9`: **PASS**. Task tables identical with TLS on and
+    off, rc 0/[0, 0]; `--help` byte-identical for `server`, `client`, `submit` and `cluster`.
+  - `compat --server d3e00f9 --client b819de6`: **PASS**, 200/200 with TLS on and off, on 3.11.18
+    and on 3.14.6.
+  - Reviewer: both PASS in both directions on 3.13.18. Its own grouped-retry drive gave identical
+    tables, rc 0/[0, 0].
+- **Throughput gate (orchestrator).** `bench_queue.py gate --base b819de6 --feature d3e00f9
+  --repeats 5`, run on Python 3.14.6 with start method `spawn`. Both builds are frozen,
+  non-editable venvs built from `git archive`. Result: **PASS**. All 60 runs were clean: every
+  server and client exited rc 0, and every task completed.
+  - **Load.** The reviewer had finished before the gate started, so the gate ran alone. The 1-min
+    load average was 3.7–6 for most of the run and reached about 30 during the 32-client config,
+    much of it from that config's own clients. No process that predated this review held a core.
+    Runs were interleaved, so both builds shared the load.
+  - **Table.** Steady-state tasks/s (p10–p90 of completions), median [min–max]:
+
+  | config | base | feature | delta | tolerance | tree children b/f | tree FDs b/f | own FDs b/f | own threads b/f |
+  |---|---|---|---|---|---|---|---|---|
+  | 4x4 b=1 tls | 265.2 [254.7–272.2] | 266.9 [264.1–271.4] | +1.7 | 17.5 | 2/0 | 117/23 | 52/23 | 7/19 |
+  | 4x4 b=1 no-tls | 271.4 [267.4–273.9] | 267.8 [266.1–278.4] | −3.6 | 13.6 | 2/0 | 117/24 | 52/23 | 7/19 |
+  | 16x1 b=1 tls | 268.2 [261.2–279.8] | 266.6 [250.8–273.6] | −1.6 | 22.8 | 2/0 | 153/60 | 52/59 | 7/55 |
+  | 16x1 b=1 no-tls | 267.9 [250.0–269.2] | 257.1 [251.1–265.2] | −10.8 | 19.2 | 2/0 | 153/59 | 53/59 | 7/55 |
+  | 4x4 b=50 tls | 759.0 [728.1–834.9] | 817.1 [714.0–840.4] | +58.1 | 126.4 | 2/0 | 116/22 | 51/22 | 7/19 |
+  | 32x1 b=1 tls | 257.3 [250.3–267.3] | 253.9 [251.7–263.6] | −3.4 | 17.0 | 2/0 | 202/107 | 52/107 | 7/103 |
+
+  - The largest drop is 16x1 b=1 no-tls, at −10.8 against a tolerance of 19.2; the two ranges
+    overlap.
+  - Tree RSS roughly halves, from ≈205 MB to ≈100 MB.
+  - The server's own FDs and threads grow with clients, as in earlier cycles. They are reported,
+    not gated, under the cycle-1 P3 ruling.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `core/queue.py` `_InProcessServer`, `SecureManager._serve_in_process` | reviewer probe: children 0 → 0 under fork and spawn, TLS on and off, 3.11 and 3.14; `hs server` tree: base 2 children, feature 0; `test_start_creates_no_child` | ✅ |
+| R2 | `QueueServer.start` (`queue.Queue`, same bounds), `QUEUE_EXPOSED` | reviewer probe: types, bounds (2/2/0/0), `Empty`/`Full` after 0.31 s remote, `join`/`task_done` | ✅ |
+| R3 | as R1 | round trip on all four queues, both directions, TLS on and off, 3.11 and 3.14 | ✅ |
+| R4 | as R1; per-listener TLS context | `test_queue_tls.py` unmodified and passing; `compat` both directions; C4 resolved | ✅ |
+| R5 | `_InProcessServer.stop`, `_finalize_in_process` | SIGUSR1 drain rc 0, SIGINT rc 4 on both builds, port free; stdio kept; same-port rebind | ⚠️ C5 (a same-port restart in one process can deadlock at start) |
+| R6 | `tests/test_queue.py`, `test_queue_start.py`, `test_queue_limits.py` | collected, tagged and passing on 3.11–3.14 | ⚠️ C5 (the port-reuse test can hang) |
+| R7 | `tests/test_server_fsm.py` | reviewer: data, timeout re-entry and sentinel halt for Receiver, Confirm and HeartMonitor; Scheduler post, re-entry on `Full`, halt on signal | ✅ |
+| R8 | no existing test touched | `git diff --diff-filter=M b819de6...d3e00f9 -- tests/` empty; suite; `parity`; `--help` byte-identical | ⚠️ C5 (a hung suite run is not a bounded exit) |
+| R9 (local) | as R1 | orchestrator gate (above); reviewer gate subset and `hsx` probe equal within spread | ✅ |
+| R9 (multi-node vs 2.8.3) | `tests/cluster/` drive | **pending external evidence**, run by the foreman at `d3e00f9` | ⏳ |
+
+Unmapped changes: none new. The reviewer listed the fail-fast start (`QueueServerError`, the
+`ServerThread.start` re-raise) and the descriptor admission control as changes with no R-ID. They
+implement the cycle-1 triage of C2 and P1 and the cycle-2 triage of C3(b) and C3(c), so they are
+covered by those rulings and are not scope creep. Earlier cycles' notes on `tests/bench`,
+`tests/cluster`, `issues/zone.md` and `ROADMAP.md` stand.
+
+### Findings
+
+No AGENTS.md invariant violation was found.
+
+#### [HIGH/CONFIRMED] C5 — A garbage-collected client proxy in the server's own process can deadlock the accept loop
+- **Where:** `src/hypershell/core/queue.py`: `serve` at `:457` (`with self._lock`) and `:462-463`
+  (handler `Thread.start()`); `handle_request` at `:491` (`with self._lock`); `_serve_in_process`
+  at `:593` (serve-thread `start()`).
+- **Failure scenario:**
+  - A `QueueClient` in the server's own process and its proxies refer to each other, so once the
+    client is dropped they wait for the cyclic GC.
+  - The GC runs their decref finalizer (`BaseProxy._decref`) in whichever thread triggers the
+    collection. The finalizer dials the server and blocks until it gets the challenge (or, with
+    TLS, the handshake).
+  - Only the accept loop can answer it. When the collecting thread is the accept loop itself, a
+    handler that holds `_lock` while the loop waits for it, or a thread being started by the loop
+    or by `_serve_in_process`, nothing ever accepts that connection.
+  - The server stops accepting for good, and `QueueServer.start()` can hang.
+  - At `b819de6` the manager child serves the queues and answers the decref, so the same sequence
+    completes.
+  - This is new behaviour, not the pre-existing TLS restart hang observed identically on base in
+    cycle 2: base passes every probe below, with TLS and without.
+- **Evidence:**
+  - Reviewer `p_gc.py`: each round a short-lived same-process client puts one item, then becomes
+    garbage.
+    - Feature: hung at round 7 (3.11), 60 (3.12) and 20 (3.14) at default GC thresholds, and at
+      round 3 on 3.13 with threshold 50. Base: 100 rounds OK at threshold 50.
+    - Stacks: `serve` `:463` → `Thread.start` → `Finalize` → `_decref` → `answer_challenge`; or a
+      handler at `:491` in `_decref` while `serve` waits at `:457`.
+  - Reviewer `p_restart.py`: the body of `test_shutdown_releases_port` in a loop.
+    - Feature: hung at round 111 (3.11, no TLS), 112 (3.11, TLS) and 10 (3.13, TLS). Base: 120
+      rounds OK, TLS on and off.
+    - Stack: main thread at `:593` in `Thread.start`; the new thread in `_decref` →
+      `secure_client`.
+  - Orchestrator re-run on the 3.14.6 frozen venvs: `p_gc.py` at threshold 50 hangs the feature at
+    round 12 (handler at `:491` in `_decref` → `answer_challenge`, `serve` at `:457`); base runs
+    200 rounds OK. `p_restart.py` ran 200 rounds without a hang on both builds there.
+  - Unprovoked:
+    - The orchestrator's second 3.13 suite run stalled for more than 10 minutes at
+      `test_shutdown_releases_port[no-tls]`.
+    - The reviewer's first 3.12 run stalled the same way.
+    - Each time the pytest process held a LISTEN socket and its own un-accepted ESTABLISHED
+      connection to it.
+- **Exposure:**
+  - No shipped CLI path was found that triggers it. `hs server`, `hsx` and `--no-db` keep their
+    in-process client alive for the server's lifetime, and `run_local` 50 times on one port did not
+    hang.
+  - Exposed:
+    - the Python API, wherever a client is created and dropped next to a `ServerThread`
+      (`ClientThread`, `submit_from(queue_config=…)`);
+    - R5's same-port restart in one process;
+    - the project's own suite: `test_shutdown_releases_port`, and `test_join_after_task_done`'s
+      throwaway client. That is a CI-hang risk on each of four Pythons.
+  - Severity: graded HIGH by the reviewer and kept here for the suite exposure. It would be MEDIUM
+    weighed on CLI exposure alone.
+- **Touches invariant / requirement:** R5, R6, R8 (bounded exit); high-blast-radius `core/queue.py`.
+
+#### [LOW/CONFIRMED] C6 — The new seed has no `ROADMAP.md` entry
+- **Where:** `issues/client-partial-connect-hang.md`; `ROADMAP.md`.
+- **Failure scenario:** `AGENTS.md` (the artifact table) requires one `ROADMAP.md` entry per issue,
+  written by whoever defers it. Every other seed in `issues/` has one; this seed has none, so the
+  ordered index does not list it.
+- **Evidence:** `grep -n client-partial-connect-hang ROADMAP.md` → nothing. A loop over `issues/*.md`
+  finds no other seed without a reference (reviewer and orchestrator).
+- **Touches invariant / requirement:** project convention (`AGENTS.md`); not core, no gate.
+
+### Observations (not findings)
+
+- **Covered by rulings (META F9):** none of the blind findings restates the cycle-1 P3 ruling, the
+  C3(a) withdrawal or the partial-connect-hang ruling.
+  - The reviewer noted that the seed's figures (feature 205/300 vs base 271/300 at limit 128) were
+    not reproduced. They vary from run to run: this cycle measured base 206 and 193, feature 252
+    and 198.
+  - The behaviour behind them is the client partial-connect hang, which is ruled out of scope and
+    seeded.
+- **Pre-existing, identical on both builds (reviewer):** a silent TCP peer on a TLS server blocks
+  every other client's connect until that peer closes, because the handshake runs in the accept
+  path.
+- The busy-port start now fails at once with rc 5 instead of hanging, per the cycle-1 C2 ruling.
+  `SIGINT` exits faster (0.1 s vs 1.1 s), a timing difference only.
+- **Commit trailer.** Commit `d552903` carries a `Co-Authored-By` trailer, against the convention in
+  `TECH.md`. Every commit on the branch is signed. Rewording a pushed commit is the foreman's call.
+- **Process hygiene.**
+  - The reviewer left one wait loop running and stopped it when asked.
+  - Three of the orchestrator's own monitor processes outlived their monitor. Signalling them was
+    refused inside the sandbox, and they were stopped outside it.
+  - Nothing from this review is still running.
+
+### Human-gate triggers
+
+- **Triggered.** C5 is CONFIRMED in high-blast-radius `core/queue.py`. This is cycle 3 of ≤3
+  without convergence, so the bounded loop stops here. Remediation, deferral or any further cycle
+  needs the maintainer's decision.
+- P2, the multi-node evidence, is still pending.

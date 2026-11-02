@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_progress
+status: blocked
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
@@ -104,10 +104,11 @@ phases:
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: 12af7fbab7cdc1fd391acf0e8320d40e311b3b2c
+  last_reviewed_commit: d3e00f982b5de608eb6587d789c5156103741d0e
   verdict: changes-requested
-  blocked_reason: ''
-  cycle: 2
+  blocked_reason: 'review cycle 3: C5 CONFIRMED in core/queue.py (GC decref deadlock);
+    human gate; bounded loop exhausted, escalated'
+  cycle: 3
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 
