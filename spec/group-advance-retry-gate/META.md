@@ -19,6 +19,11 @@
   say to fast-forward it, or have Step 3 branch from `origin/develop` without upstream tracking.
   When it has diverged, STOP.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-publish step1, 2026-11-01):** `hs-publish`'s injected "Commits vs develop" and
+  Step 1's drift check read local `develop`, still stale. Publish used `origin/develop` (`1f93c1f`,
+  one harness-only commit ahead of the fork point) for the drift note, a `git merge-tree` conflict
+  check (clean) and the commit list. The skill does not rebase, and squash merge tolerates the
+  one-commit lag, so the branch was not rebased.
 
 ## F2 — No pattern for a phase whose deliverable is a test that must fail on the base commit
 `origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
@@ -49,6 +54,9 @@
   `git log --oneline {base}..HEAD` belongs to this slug, and STOP if not. Use that SHA in Step 2
   and in the injected diffstat.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-publish step1, 2026-11-01):** `hs-publish` names the base as the branch
+  `develop` in its injected commit list and in Step 1, with the same stale-ref exposure. The
+  same fix applies: resolve `origin/{base}` (or a recorded base SHA) before any base comparison.
 
 ## F4 — Step 2 tells the blind reviewer to run the `verify` commands it is forbidden to read
 `origin=hs-review:step2 severity=low category=instruction status=open target=.agents/skills/hs-review/SKILL.md`

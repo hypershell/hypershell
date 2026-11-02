@@ -142,3 +142,27 @@ No CONFIRMED findings. One PLAUSIBLE item for human triage.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Human triage (2026-11-01)
+
+Recorded at publish, on the items this review left for a human.
+
+- **P1 (resumed run stops at START with a retry pending): out of scope.** It is not a defect in
+  this change. It predates the diff (the base gives the same FINAL), and it is outside the R1/R7
+  window, which opens only after `Task.next` returns nothing in LOAD. Deferred as
+  [`issues/restart-pending-retry.md`](../../issues/restart-pending-retry.md). The verdict stays
+  **approved**.
+- **GOAL amendment `fc5755b`** (R3 rewritten, R7 and R8 added) is the accepted contract. It is the
+  ruling made at the GOAL gate, logged in `GOAL.md` § Clarifications ("Stop path in scope").
+- **Eager mode lists a new retry row twice:** deferred as
+  [`issues/eager-retry-double-bundle.md`](../../issues/eager-retry-double-bundle.md).
+- **Late duplicate result resets `retried`** (found in plan research, `PLAN.md` risks item b):
+  deferred as [`issues/late-result-resets-retried.md`](../../issues/late-result-resets-retried.md).
+- **`invariants.md` §3 lag:** not fixed in this cycle. The next cycle that rewrites that section
+  picks it up; the PR names it as a known follow-up.
+
+The three seeds and their `ROADMAP.md` entries landed in `1c51ebb`, after the reviewed commit
+`9bb1442` and outside `spec/`. Following `hs-review`'s deferral mechanic, `review.last_reviewed_commit`
+is re-pinned to `1c51ebb` with `set_phase.py --reviewed-commit` (no verdict call, so `review.cycle`
+stays 1). `git diff --stat 9bb1442..1c51ebb -- . ':(exclude)spec/'` lists only `ROADMAP.md` and the
+three `issues/` files; no code changed after the review.

@@ -50,7 +50,7 @@ phases:
     test \$(uv run hs list attempt -t n:1 -S) -eq 3 && test \$(uv run hs list -c -R)
     -eq 0"'
 review:
-  last_reviewed_commit: 9bb144218c78bd06f0e958b848adc199324ca0ee
+  last_reviewed_commit: 1c51ebbc1b9ffd31816e16f84dacebd3b46efe9b
   verdict: approved
   blocked_reason: ''
   cycle: 1
