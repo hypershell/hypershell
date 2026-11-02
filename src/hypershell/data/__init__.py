@@ -27,9 +27,10 @@ from hypershell.core.logging import Logger
 from hypershell.core.config import config
 from hypershell.core.exceptions import handle_exception, DatabaseUninitialized, get_shared_exception_mapping
 from hypershell.core.pretty_print import format_bytes
-from hypershell.data.core import Session, engine, in_memory, schema, providers
+from hypershell.data.core import Session, engine, in_memory, schema, providers, TIMESCALE_ALIASES
 from hypershell.data.model import Entity, Task
 from hypershell.data.upgrade import upgrade_schema
+from hypershell.data import timescale
 
 # Public interface
 __all__ = [
@@ -51,6 +52,9 @@ DATABASE_PROVIDER: Final[str] = config.database.provider
 DATABASE_DIALECT: Final[str] = 'sqlite' if DATABASE_PROVIDER in ['sqlite', 'turso'] else 'postgres'
 """Either sqlite or postgres."""
 
+TIMESCALE: Final[bool] = DATABASE_PROVIDER in TIMESCALE_ALIASES
+"""Set if the provider is a TimescaleDB alias (PostgreSQL with the hypertable pass)."""
+
 DATABASE_HOST: Final[str] = config.database.get('host', 'localhost')
 """Database server hostname (default: localhost)."""
 
@@ -71,6 +75,8 @@ def upgradedb() -> list[str]:
 
 def initdb(optimize: bool = False) -> None:
     """Initialize database tables, or upgrade existing ones in place."""
+    if TIMESCALE:
+        timescale.prepare(engine)
     upgradedb()
     if optimize and DATABASE_DIALECT == 'sqlite':
         log.info(f'Optimizing database {DATABASE_SITE}')
@@ -79,6 +85,8 @@ def initdb(optimize: bool = False) -> None:
 
 def truncatedb() -> None:
     """Truncate database tables."""
+    if TIMESCALE:
+        timescale.prepare(engine)  # Refuse an unusable server before anything is dropped.
     # NOTE: We still might hang here if other sessions exist outside this app instance
     close_all_sessions()
     log.trace('Dropping all tables')

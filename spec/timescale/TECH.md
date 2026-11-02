@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/timescale
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -28,7 +28,7 @@ phases:
 - id: P2
   name: 'Environment interrogation before the schema step: extension, privilege, preload,
     version floor'
-  status: pending
+  status: done
   satisfies:
   - R5
   - R7
@@ -36,7 +36,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: grep -q 'def prepare' src/hypershell/data/timescale.py && grep -q 'class
     TimescaleError(SchemaUpgradeError)' src/hypershell/data/timescale.py && uv run
     pytest -rs -m unit tests/test_timescale.py && uv run pytest
@@ -249,22 +249,23 @@ feature code lands, so every later push is exercised against a real TimescaleDB.
 **Goal:** under a timescale alias, `initdb`/`truncatedb` refuse an unusable server with guidance and
 `runtime_error` *before* creating anything; a usable one passes through unchanged.
 
-- [ ] `src/hypershell/data/timescale.py` (new; SPDX header, `__all__`, `Logger.with_name`):
+- [x] `src/hypershell/data/timescale.py` (new; SPDX header, `__all__`, `Logger.with_name`):
       `TimescaleError(SchemaUpgradeError)`; `MIN_VERSION = (2, 22, 0)`, `POLICY_VERSION = (2, 25,
       0)`; `parse_version`; `gates(version, edition)`; message builders; `prepare(engine)` per PLAN
       §2.2 (probe ladder; `CREATE EXTENSION IF NOT EXISTS` on a dedicated AUTOCOMMIT connection,
       invalidated on error; SQLSTATE `42501` → privilege message; dropped connection or `must be
       preloaded` → preload message; `23505`/`42710` → re-probe).
-- [ ] `src/hypershell/data/__init__.py`: `TIMESCALE` constant; `prepare(engine)` first in `initdb()`
+- [x] `src/hypershell/data/__init__.py`: `TIMESCALE` constant; `prepare(engine)` first in `initdb()`
       and first in `truncatedb()`. No other function changes.
-- [ ] Unit tests: `parse_version` (`2.31.0`, `2.22.0-dev`, garbage → error); `gates` table (2.21.9
+- [x] Unit tests: `parse_version` (`2.31.0`, `2.22.0-dev`, garbage → error); `gates` table (2.21.9
       fail; 2.22.0/2.24.9 no policy; 2.25.0 full; apache → hypertable only); each message names the
       problem and the fix; `TimescaleError` is a `SchemaUpgradeError`; the preload/privilege error
       mapping with a stub driver error.
-- [ ] Integration: on plain entries, `hs initdb --yes` under `provider = timescale` exits
+- [x] Integration: on plain entries, `hs initdb --yes` under `provider = timescale` exits
       `runtime_error`, stderr names TimescaleDB and the fix, contains no `Traceback`, and the database
       has **no** tables afterwards. On community: a database from `template0` gets the extension
-      created and `initdb` succeeds (tables plain until P3).
+      created and `initdb` succeeds (tables plain until P3). *(Written as
+      `test_absent_fails_before_schema` and `test_extension_created`; proven only in CI, at P5.)*
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/data/timescale.py`, `src/hypershell/data/__init__.py`,
   `tests/test_timescale.py`.
