@@ -324,8 +324,8 @@ with compression and a policy, interrogating the environment rather than assumin
 *Horizon: mid-term · Depends on: soft — conforms to (or establishes) turso R4's per-provider seam ·
 Refs: **R1 is discharged** — `schema-upgrade-step` dropped the `previous_id`/`next_id` UNIQUE
 constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQLite databases keep
-them, forward-only), so the remaining work starts at R2*
-**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: shaped*
+them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
+**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: adopted:timescale*
 
 ---
 
