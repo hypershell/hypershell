@@ -1,117 +1,138 @@
 ---
 slug: timescale
-title: "TimescaleDB provider: hypertables out of the box (TS1)"
+title: 'TimescaleDB provider: hypertables out of the box (TS1)'
 kind: feature
 appetite: big
 status: in_progress
 branch: feature/timescale
 base: develop
-current_phase: P1
-last_updated: "2026-11-02"
+current_phase: P2
+last_updated: '2026-11-02'
 phases:
-  - id: P1
-    name: "CI lane: pinned TimescaleDB entries (Community, Apache, floor) and the scenario-module scaffold"
-    status: pending
-    satisfies: [R9, R8]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      grep -q 'timescale/timescaledb:2.31.0-pg18@sha256:0fcff5761363809d1242f2261a3482197b5a5337407f8b97a976fb174206d579' .github/workflows/tests.yml
-      && grep -q 'timescale/timescaledb:2.31.0-pg18-oss@sha256:cc00b0ede968b0c6e55212bd55a9a195726afe5a9e19dcf8af49a13334e92ff3' .github/workflows/tests.yml
-      && grep -q 'tests/test_timescale.py' .github/workflows/tests.yml
-      && uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/tests.yml'))"
-      && uv run pytest -rs tests/test_timescale.py
-      && uv run pytest
-  - id: P2
-    name: "Environment interrogation before the schema step: extension, privilege, preload, version floor"
-    status: pending
-    satisfies: [R5, R7]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      grep -q 'def prepare' src/hypershell/data/timescale.py
-      && grep -q 'class TimescaleError(SchemaUpgradeError)' src/hypershell/data/timescale.py
-      && uv run pytest -rs -m unit tests/test_timescale.py
-      && uv run pytest
-  - id: P3
-    name: "The idempotent pass: hypertable, columnstore, policy, drift, Apache and non-empty tiers"
-    status: pending
-    satisfies: [R2, R3, R4, R5, R7]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      ! grep -q 'not yet implemented' src/hypershell/data/core.py
-      && grep -q 'def converge' src/hypershell/data/timescale.py
-      && grep -q 'add_columnstore_policy' src/hypershell/data/timescale.py
-      && uv run pytest -rs tests/test_timescale.py
-      && uv run pytest
-  - id: P4
-    name: "Docs: TimescaleDB as a first-class database section"
-    status: pending
-    satisfies: [R8, R10]
-    depends_on: [P2]
-    parallel: true
-    hammerable: false
-    hill: uphill
-    verify: >-
-      grep -q 'to_uuidv7_boundary' docs/_include/database.rst
-      && grep -q 'Tiger Cloud' docs/_include/database.rst
-      && grep -q '0A000' docs/_include/database.rst
-      && grep -q 'max_background_workers' docs/_include/database.rst
-      && grep -q -i 'timescale' docs/_include/database_alt.rst
-      && uv run sphinx-build -E -b html -D extensions=sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.extlinks,sphinx.ext.viewcode,sphinxext.opengraph,sphinx_inline_tabs,sphinx_copybutton,sphinxcontrib.details.directive,sphinx_reredirects docs docs/_build 2>&1
-      | grep -i 'warning' | grep -v -e 'task_submit.rst' -e 'manual.rst' | (! grep .)
-  - id: P5
-    name: "CI evidence for the load-bearing slice (run B: external wait on the draft PR)"
-    status: pending
-    satisfies: [R2, R3, R4, R5, R7, R8, R9]
-    depends_on: [P3, P4]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      test "$(gh run list --branch feature/timescale --workflow tests.yml
-      --commit "$(git log -1 --format=%H -- . ':!spec')" --json conclusion
-      --jq '[.[] | select(.conclusion == "success")] | length')" -ge 1
-  - id: P6
-    name: "R6 (deferrable): the [database.timescale] override table, validation and drift"
-    status: pending
-    satisfies: [R6, R4, R10]
-    depends_on: [P5]
-    parallel: false
-    hammerable: true
-    hill: uphill
-    verify: >-
-      grep -q "pop('timescale'" src/hypershell/data/core.py
-      && grep -q 'compress_after' docs/_include/database.rst
-      && grep -q 'timescale' docs/_include/config_param_ref.rst
-      && uv run pytest -rs tests/test_timescale.py
-      && uv run pytest
-  - id: P7
-    name: "CI evidence for R6 (run B)"
-    status: pending
-    satisfies: [R6, R9]
-    depends_on: [P6]
-    parallel: false
-    hammerable: true
-    hill: uphill
-    verify: >-
-      test "$(gh run list --branch feature/timescale --workflow tests.yml
-      --commit "$(git log -1 --format=%H -- . ':!spec')" --json conclusion
-      --jq '[.[] | select(.conclusion == "success")] | length')" -ge 1
+- id: P1
+  name: 'CI lane: pinned TimescaleDB entries (Community, Apache, floor) and the scenario-module
+    scaffold'
+  status: done
+  satisfies:
+  - R9
+  - R8
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: grep -q 'timescale/timescaledb:2.31.0-pg18@sha256:0fcff5761363809d1242f2261a3482197b5a5337407f8b97a976fb174206d579'
+    .github/workflows/tests.yml && grep -q 'timescale/timescaledb:2.31.0-pg18-oss@sha256:cc00b0ede968b0c6e55212bd55a9a195726afe5a9e19dcf8af49a13334e92ff3'
+    .github/workflows/tests.yml && grep -q 'tests/test_timescale.py' .github/workflows/tests.yml
+    && uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/tests.yml'))"
+    && uv run pytest -rs tests/test_timescale.py && uv run pytest
+- id: P2
+  name: 'Environment interrogation before the schema step: extension, privilege, preload,
+    version floor'
+  status: pending
+  satisfies:
+  - R5
+  - R7
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: grep -q 'def prepare' src/hypershell/data/timescale.py && grep -q 'class
+    TimescaleError(SchemaUpgradeError)' src/hypershell/data/timescale.py && uv run
+    pytest -rs -m unit tests/test_timescale.py && uv run pytest
+- id: P3
+  name: 'The idempotent pass: hypertable, columnstore, policy, drift, Apache and non-empty
+    tiers'
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  - R4
+  - R5
+  - R7
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: '! grep -q ''not yet implemented'' src/hypershell/data/core.py && grep -q
+    ''def converge'' src/hypershell/data/timescale.py && grep -q ''add_columnstore_policy''
+    src/hypershell/data/timescale.py && uv run pytest -rs tests/test_timescale.py
+    && uv run pytest'
+- id: P4
+  name: 'Docs: TimescaleDB as a first-class database section'
+  status: pending
+  satisfies:
+  - R8
+  - R10
+  depends_on:
+  - P2
+  parallel: true
+  hammerable: false
+  hill: uphill
+  verify: grep -q 'to_uuidv7_boundary' docs/_include/database.rst && grep -q 'Tiger
+    Cloud' docs/_include/database.rst && grep -q '0A000' docs/_include/database.rst
+    && grep -q 'max_background_workers' docs/_include/database.rst && grep -q -i 'timescale'
+    docs/_include/database_alt.rst && uv run sphinx-build -E -b html -D extensions=sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.extlinks,sphinx.ext.viewcode,sphinxext.opengraph,sphinx_inline_tabs,sphinx_copybutton,sphinxcontrib.details.directive,sphinx_reredirects
+    docs docs/_build 2>&1 | grep -i 'warning' | grep -v -e 'task_submit.rst' -e 'manual.rst'
+    | (! grep .)
+- id: P5
+  name: 'CI evidence for the load-bearing slice (run B: external wait on the draft
+    PR)'
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  - R4
+  - R5
+  - R7
+  - R8
+  - R9
+  depends_on:
+  - P3
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test "$(gh run list --branch feature/timescale --workflow tests.yml --commit
+    "$(git log -1 --format=%H -- . ':!spec')" --json conclusion --jq '[.[] | select(.conclusion
+    == "success")] | length')" -ge 1
+- id: P6
+  name: 'R6 (deferrable): the [database.timescale] override table, validation and
+    drift'
+  status: pending
+  satisfies:
+  - R6
+  - R4
+  - R10
+  depends_on:
+  - P5
+  parallel: false
+  hammerable: true
+  hill: uphill
+  verify: grep -q "pop('timescale'" src/hypershell/data/core.py && grep -q 'compress_after'
+    docs/_include/database.rst && grep -q 'timescale' docs/_include/config_param_ref.rst
+    && uv run pytest -rs tests/test_timescale.py && uv run pytest
+- id: P7
+  name: CI evidence for R6 (run B)
+  status: pending
+  satisfies:
+  - R6
+  - R9
+  depends_on:
+  - P6
+  parallel: false
+  hammerable: true
+  hill: uphill
+  verify: test "$(gh run list --branch feature/timescale --workflow tests.yml --commit
+    "$(git log -1 --format=%H -- . ':!spec')" --json conclusion --jq '[.[] | select(.conclusion
+    == "success")] | length')" -ge 1
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — TimescaleDB provider: hypertables out of the box (TS1)
 
 The **context engine and finite-state machine** for building this feature. The YAML
@@ -193,24 +214,29 @@ Not touched: `data/model.py`, `data/upgrade.py`, `core/*`, `server.py`, `client.
 **Goal:** the TimescaleDB servers exist in CI and the existing upgrade tests pass on them before any
 feature code lands, so every later push is exercised against a real TimescaleDB.
 
-- [ ] `.github/workflows/tests.yml`, `postgres` job: replace the placeholder with three `include`
+- [x] `.github/workflows/tests.yml`, `postgres` job: replace the placeholder with three `include`
       entries (PLAN §2.7) carrying `timescale: community|apache` (empty on `pg13`/`pg18`). Pin
       `2.31.0-pg18@sha256:0fcff576…d579` and `2.31.0-pg18-oss@sha256:cc00b0ed…2ff3` in full.
       Resolve the floor entry: the highest released `2.24.x-pg17` tag and its index digest from
       `https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/<tag>` (`digest` field);
       record tag, digest and the date read in a comment above the entry.
-- [ ] Service `env`: add `TIMESCALEDB_TELEMETRY: 'off'`. Job `env`: `HS_TEST_TIMESCALE: ${{
+      **Resolved 2026-11-02:** the Hub tag listing (`…/tags/?name=2.24.`) holds only `2.24.0-*`
+      (no 2.24 patch release), so the floor is `2.24.0-pg17@sha256:8ab414f7f73fd47dfa643097f1a753e2ac009c70fcb0de5717d0e79d21e7b7d6`,
+      read from `https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/2.24.0-pg17`
+      (`digest`, an index over amd64/arm64/386/arm). The two 2.31.0 digests were re-read the same
+      day and match the plan.
+- [x] Service `env`: add `TIMESCALEDB_TELEMETRY: 'off'`. Job `env`: `HS_TEST_TIMESCALE: ${{
       matrix.timescale }}`. Run step: `pytest -v -rs tests/test_upgrade_postgres.py
       tests/test_timescale.py`. Update the job's header comment to say what the TimescaleDB entries
       run.
-- [ ] `tests/test_timescale.py` scaffold: module docstring (env contract, as in
+- [x] `tests/test_timescale.py` scaffold: module docstring (env contract, as in
       `test_upgrade_postgres.py`); `ADMIN_URL`, `TIMESCALE = os.getenv('HS_TEST_TIMESCALE', '')`;
       fixtures `admin`, `ts_database(template=None)` (throwaway, `DROP … WITH (FORCE)`), `ts_site(name,
       schema=None, provider='timescale')` setting `HYPERSHELL_DATABASE_*` (pattern of
       `test_upgrade_postgres.pg_site`; do not edit that module); markers `integration` / `unit`.
-- [ ] `test_server_matches_entry` (integration): with `TIMESCALE` set, `extversion` exists and
+- [x] `test_server_matches_entry` (integration): with `TIMESCALE` set, `extversion` exists and
       `timescaledb.license` equals `timescale` (community) or `apache` — fail, not skip, otherwise.
-- [ ] `test_v4_id_rejected` (integration, community/apache): on a scratch hypertable keyed by a UUID
+- [x] `test_v4_id_rejected` (integration, community/apache): on a scratch hypertable keyed by a UUID
       (`create_hypertable` by hand), inserting a UUIDv4 raises SQLSTATE `0A000` and inserting a v7
       id succeeds — the R8 failure mode, measured.
 - **Verify:** see frontmatter (local: workflow parses, pins present, module skips cleanly, SQLite
