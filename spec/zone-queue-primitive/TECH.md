@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
@@ -21,10 +21,10 @@ phases:
   parallel: false
   hammerable: false
   hill: downhill
-  verify: uv run pytest -v tests/test_queue.py tests/test_queue_start.py tests/test_queue_limits.py
-    tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh sh -c "seq 200 | uv
-    run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo {}' -N4 --no-tls &&
-    uv run hs list --count"
+  verify: uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
+    tests/test_queue_limits.py tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh
+    sh -c "seq 200 | uv run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo
+    {}' -N4 --no-tls && uv run hs list --count"
 - id: P2
   name: Swap the four queues to queue.Queue with a pinned method surface
   status: done
@@ -106,8 +106,7 @@ phases:
 review:
   last_reviewed_commit: d3e00f982b5de608eb6587d789c5156103741d0e
   verdict: changes-requested
-  blocked_reason: 'review cycle 3: C5 CONFIRMED in core/queue.py (GC decref deadlock);
-    human gate; bounded loop exhausted, escalated'
+  blocked_reason: ''
   cycle: 3
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
@@ -316,13 +315,120 @@ stdio. This is the core, small and novel slice: everything else builds on it.
       `TLSError: TLSConfig.cert and TLSConfig.key are required for the server side`. Here it ends
       `ERROR [hypershell.core.queue] Queue server cannot set up TLS and refuses every connection
       (TLSError: TLSConfig.cert and TLSConfig.key are required for the server side)`.
-- **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_start.py
+- **Remediation (review cycle 3; triage in [`REVIEW.md`](REVIEW.md)).** P1 was reopened for C5
+  and C6, under the maintainer's one further cycle.
+  - [x] **Red first** (source at `d3e00f9`): `tests/test_queue_gc.py` (new). The reviewer's two
+        probes become four bounded tests, TLS on and off: a short-lived same-process client
+        dropped as cyclic garbage each round (`p_gc`), and the body of
+        `test_shutdown_releases_port` in a loop (`p_restart`). Each runs 200 rounds in its own
+        process group under a lowered collection threshold (10 for the first; 200 and 300 in turn
+        for the second, where the stall shows most often). A `faulthandler` watchdog dumps every
+        stack and exits after 15 s on one round, so a stall fails the test instead of hanging the
+        suite; the test kills the group at 240 s as a backstop. Two more tests: a dropped
+        same-process client's decrefs still reach the server (its object count returns to 0), and
+        the finalizer's hand-off rule; plus `TestPrivateInternals.test_proxy_finalizer`.
+  - [x] **C5 — property:** no thread of the in-process server ever blocks on a connection that
+        only its own accept loop can answer, whatever thread the cyclic collector runs a proxy
+        finalizer on. **Mechanism:** a queue client's proxies get `_decref` as their finalizer in
+        place of the stock `BaseProxy._decref` (the `util.Finalize` that `_incref` registers keeps
+        its arguments; only its callback is swapped). `_decref` reads `_serving`, the ports of this
+        process's in-process servers. When the token's port is listed (or a server is binding an
+        ephemeral port), it hands the stock decref's arguments to a `SimpleQueue` and returns;
+        otherwise it runs the stock decref, unchanged, in the finalizer's thread. A daemon
+        `hypershell-queue-decref` thread sends handed-off decrefs with the stock decref, in order.
+        `QueueClient.connect` starts it when the process serves queues; the server never does.
+  - **Why the property holds,** for every thread the collector may pick:
+    1. A connection reaches an in-process server only at its port, and only while its listener is
+       open. `_serving` lists the server from before its bind (as the requested port, so 0 for an
+       ephemeral one, which matches every port) to after `_finalize_in_process` has closed its
+       listener (`stop()` first, then the entry is dropped). So the listing covers every moment a
+       connection could reach the server.
+    2. The finalizer reads `_serving` when it runs. The accept loop, each handler, and the stop
+       thread are started after the entry exists, and the thread that starts the server writes it
+       before binding, so a finalizer on any of them, or on the starting thread between the bind
+       and the start of the accept loop, sees the entry. It then only puts onto a `SimpleQueue`,
+       which never blocks and is documented safe to re-enter from a finalizer. It opens no
+       connection, takes no lock and starts no thread.
+    3. Nothing else in a finalizer on those threads connects to the server: the stock decref runs
+       there only for a port no in-process server listens on.
+    4. The decref sender waits on the accept loop, but it is a client-side thread, not a server
+       thread, and holds no lock while it connects; the accept loop never waits on it, and a
+       finalizer on the sender either hands off or reaches no in-process server. So no wait in
+       the accept loop (the TLS handshake, `_lock`, a handler's start) can depend, through a
+       finalizer, on the accept loop itself: a finalizer run on a server thread returns at once.
+       A peer that stalls a TLS handshake for other reasons still holds the accept loop, as on
+       base (cycle 3 observation, out of scope).
+    5. Remote clients: a process that serves no queues has an empty `_serving`, so the finalizer
+       is the stock decref in the same thread with the same arguments. Wire, auth and TLS are
+       untouched, and `b819de6` clients never run this code.
+  - **Scope and limits.** Proxies made by `QueueClient` are covered. A proxy from another manager
+    class pointed at an in-process server keeps the stock finalizer. A decref handed off in a
+    process where no client has connected since it began serving waits until one does. That needs
+    a proxy made before the server existed, so the decref names an object this server never
+    issued, or one a same-port server on another host keeps for its own lifetime anyway. Decrefs
+    handed off at interpreter exit may not be sent before the process ends, as the server is
+    stopping then too. The sender, not the dropping thread, now runs the stock decref's tidy-up of
+    its own cached connection; a thread's cached connection is closed when that thread ends or at
+    server shutdown (`_finalize_in_process` drops the cache), as before.
+  - [x] **Private internals.** `unsupported_internals()` adds three checks: `BaseProxy._incref`
+        sets `_close` to a `util.Finalize` of `BaseProxy._decref`; `BaseProxy._decref` takes the
+        token first (3.11 has six parameters, 3.12+ seven, adding `serial`); and `util.Finalize`
+        calls `_callback` with `_args`. `test_proxy_finalizer` checks them live. The swap also
+        checks that the callback is `BaseProxy._decref` before it replaces it, and the finalizer
+        falls back to the stock decref when the token has no `(host, port)` address.
+  - [x] `test_threads_drain_after_shutdown` (added on this branch, not a base test) leaves the
+        decref sender out of its count: the sender lives as long as the process, so the test
+        failed when it was the first in its process to connect a same-process client.
+  - [x] `AGENTS.md` (the server process hosts the manager) names the hand-off.
+  - [x] **C6:** `ROADMAP.md` entry for `issues/client-partial-connect-hang.md`, after the
+        coordinator-resilience entry it may be subsumed by.
+  - **Gate record (macOS; the source as provisional commit `23446e0`, since squashed).**
+    - **Red at `d3e00f9`** (the new tests against that source, 5 runs per probe, mode and Python, so
+      1000 rounds possible each): every failing run failed through its watchdog within 15.3–20.2 s,
+      and none hung. `dropped-client` failed 38/40 runs (no TLS 20/20, by round 82–168; TLS 18/20,
+      by round 35–108). `same-port-restart` failed 37/40 (no TLS 17/20, TLS 20/20, by round
+      1–164). The stacks are C5's: `serve` itself in `_decref` → `answer_challenge` (handler
+      start); a handler in `_decref` at its `_lock` release while `serve` waits on `_lock`; and
+      the starting thread in `_decref` inside `_serve_in_process`'s `Thread.start`. `test_finalizer_hands_off_only_when_served_here` fails there
+      (no `_decref`); `test_dropped_client_decref_reaches_server` passes there and here.
+    - **Green:** each of the four probe tests passed 5 runs of 200 rounds on each of 3.11.18,
+      3.12.16, 3.13.18 and 3.14.6 (1000 rounds each, 80/80 runs).
+    - `test_shutdown_releases_port` (TLS on and off) and `test_join_after_task_done`: **100/100**
+      consecutive pytest runs on each of the four.
+    - Full suite: **557 passed** on each of 3.11.18, 3.12.16, 3.13.18 and 3.14.6 (549 before, plus
+      the 8 new tests); `unsupported_internals() == []` on all four.
+    - `parity` vs `b819de6`: identical task tables TLS on and off, rc 0/[0, 0]; the four `--help`
+      outputs byte-identical. `compat` (server here, client `b819de6`): 200/200 TLS on and off.
+    - `hsx` drive in an isolated site (`HYPERSHELL_SITE`, `HYPERSHELL_DATABASE_FILE`,
+      `HYPERSHELL_CONFIG_FILE=''`; not `temp_site.sh`, META F10), 200 tasks TLS on and `--no-tls`:
+      rc 0, 200 distinct outputs each, 400 rows, 0 failed.
+    - Throughput gate, 5 interleaved repeats, 3.14.6 `spawn`: **PASS**, all 60 runs clean. Load:
+      1-min average 2.6 at the start, median 4.4 over the run, peak 17.8 during the 32-client
+      config; another agent's test run in a different worktree was sharing the host, and the
+      runs are interleaved so both builds shared it.
+
+      | config | base median [min-max] | feature median [min-max] | delta | tolerance | tree children b/f | tree FDs b/f | own threads b/f |
+      |---|---|---|---|---|---|---|---|
+      | 4x4 b=1 tls | 260.6 [254.3-276.2] | 268.2 [261.5-281.6] | +7.6 | 21.9 | 2/0 | 117/23 | 7/19 |
+      | 4x4 b=1 no-tls | 286.8 [279.8-289.9] | 280.8 [273.1-296.8] | -6.0 | 23.7 | 2/0 | 117/23 | 7/19 |
+      | 16x1 b=1 tls | 286.8 [283.9-288.9] | 287.4 [286.4-290.7] | +0.6 | 14.3 | 2/0 | 154/60 | 7/55 |
+      | 16x1 b=1 no-tls | 285.0 [283.8-288.7] | 286.2 [285.4-288.3] | +1.2 | 14.2 | 2/0 | 153/59 | 7/55 |
+      | 4x4 b=50 tls | 938.7 [938.2-939.4] | 940.5 [937.4-944.6] | +1.8 | 46.9 | 2/0 | 117/22 | 7/19 |
+      | 32x1 b=1 tls | 285.7 [281.9-290.2] | 283.9 [282.5-289.5] | -1.8 | 14.3 | 2/0 | 201/108 | 7/103 |
+
+    - **C3 re-check** (limit 64, 24 `b819de6` clients, 300 tasks, `--no-tls`, server stopped at
+      90 s): 276/300 done; clients 20 rc 5, 4 hung (the ruled-out partial-connect hang); server
+      log one refusal WARNING, no `Too many open files`, no `unable to open database file`, no
+      uncaught exception or traceback; 0 children. C3(b) holds, as at `d3e00f9` (294/300 there;
+      the count varies run to run).
+- **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
 - **Touches:** `src/hypershell/core/queue.py`, `src/hypershell/core/tls.py` (docstrings),
   `src/hypershell/core/logging.py` (docstring), `tests/test_queue.py` (new),
   `tests/test_queue_start.py` (new); remediation also `src/hypershell/server.py`
-  (`ServerThread.start`) and `AGENTS.md`; review-2 remediation `tests/test_queue_limits.py` (new).
+  (`ServerThread.start`) and `AGENTS.md`; review-2 remediation `tests/test_queue_limits.py` (new);
+  review-3 remediation `tests/test_queue_gc.py` (new) and `ROADMAP.md`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1

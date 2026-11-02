@@ -120,6 +120,19 @@ rather than documenting it as a hazard.
 and the relay's upstream connector inherits it; shares the `data/core.py` provider seam with turso*
 **Seed:** [`issues/coordinator-resilience-retry-backoff.md`](issues/coordinator-resilience-retry-backoff.md)
 
+## A client cut off partway through connecting hangs until evicted
+
+A client opens several queue connections as it starts. When the server accepts some and drops a
+later one, the thread that lost its connection dies with `EOFError`, but the client process keeps
+running and holds its confirmed tasks until the server evicts it (600 s by default). The client
+should exit promptly and non-zero so its tasks are recovered, or retry the connection within a
+bound. Seen at the open-file limit, where the server refuses new connections, with the same client
+behaviour on `b819de6`.
+
+*Horizon: near-term · Depends on: — · Refs: coordinator resilience (a reconnect path may subsume
+it); `spec/zone-queue-primitive/` (review cycle 2, C3)*
+**Seed:** [`issues/client-partial-connect-hang.md`](issues/client-partial-connect-hang.md)
+
 ## Ingest robustness: all-or-nothing submission, no length awareness
 
 One undecodable byte aborts a whole task file, and one malformed tag raises out of the loader after

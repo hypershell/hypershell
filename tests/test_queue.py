@@ -23,6 +23,7 @@ from multiprocessing.managers import Server, BaseManager, State
 from pytest import fixture, mark, raises, skip
 
 # Internal libs
+from hypershell.core import queue as queue_module
 from hypershell.core.queue import QueueServer, QueueClient, QueueConfig, make_sentinel, unsupported_internals
 from hypershell.core.tls import TLSConfig, ensure_default_materials, clear_process_context
 
@@ -136,6 +137,19 @@ class TestPrivateInternals:
             assert hasattr(manager, name), name
         assert manager._state.value == State.INITIAL
 
+    def test_proxy_finalizer(self) -> None:
+        """A client proxy's ``_close`` is a ``util.Finalize`` whose callback takes the token first.
+
+        The stock callback is ``BaseProxy._decref``; a queue client swaps it for its own only when it is.
+        """
+        with QueueServer(make_config()) as server:
+            client = connect('127.0.0.1', server.address[1])
+            for name in NAMES:
+                proxy = getattr(client, name)
+                assert isinstance(proxy._close, util.Finalize), name
+                assert proxy._close._callback is queue_module._decref, name
+                assert proxy._close._args[0] is proxy._token, name
+
     def test_finalize(self) -> None:
         """``util.Finalize`` accepts ``args`` and ``exitpriority``, and runs once."""
         calls = []
@@ -244,15 +258,19 @@ def test_same_thread_client_after_restart(host: str) -> None:
 @mark.unit
 def test_threads_drain_after_shutdown(tls: Optional[TLSConfig]) -> None:
     """Accept and handler threads are gone shortly after shutdown."""
-    baseline = threading.active_count()
+
+    def count() -> int:
+        # The decref sender a same-process client starts lives as long as the process does
+        return sum(thread.name != 'hypershell-queue-decref' for thread in threading.enumerate())
+
+    baseline = count()
     with QueueServer(make_config(tls=tls)) as server:
         clients = [connect('127.0.0.1', server.address[1], tls) for _ in range(5)]
         for client in clients:
             client.heartbeat.put(b'beat', timeout=WAIT)
         for _ in clients:
             server.heartbeat.get(timeout=WAIT)
-    assert wait_until(lambda: threading.active_count() <= baseline), \
-        [t.name for t in threading.enumerate()]
+    assert wait_until(lambda: count() <= baseline), [t.name for t in threading.enumerate()]
 
 
 QUEUE_METHODS = {'empty', 'full', 'get', 'get_nowait', 'join', 'put', 'put_nowait', 'qsize', 'task_done'}

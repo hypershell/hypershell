@@ -118,7 +118,7 @@ is skipped by the parser):
   prototypes there, not in `$TMPDIR`.
 - **Confidence:** med · **Effort:** small
 
-## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again
+## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again · seen again
 `origin=hs-build:P5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** P4's and P5's gates (`bench_queue.py … --feature HEAD`) build a venv from the
   committed `HEAD`. hs-build runs the gate in Step 4 and commits in Step 7, so the gate measured the
@@ -199,7 +199,7 @@ is skipped by the parser):
   scenario is graded normally and cross-referenced to the ruling.
 - **Confidence:** med · **Effort:** small
 
-## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run
+## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again
 `origin=hs-build:P1-remediation-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
 - **What happened:** P1's `verify:` and Safety Principles' CLI drive both run
   `.agents/factory/bin/temp_site.sh`, whose cleanup is `trap 'rm -rf "$site"'`. Under a harness
@@ -215,3 +215,16 @@ is skipped by the parser):
 - **Seen again (hs-review step2, cycle 3, 2026-11-02):** the rubric's Reviewer conduct, which Step 2
   hands to the blind reviewer verbatim, tells it to drive the CLI through `temp_site.sh`. The brief
   had to override that with environment-isolated sites.
+
+## F11 — Step 7's `git add -A` commits whatever else is in a shared worktree
+`origin=hs-build:P1-remediation-3 severity=medium category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** During this remediation another agent's docs build wrote into this worktree
+  (`share/man/man1/*.1`). Step 7's `git add -A` would have folded those edits into the phase
+  commit; the foreman had to forbid it and require staging by explicit path, with a
+  `git diff --cached --stat` check before committing.
+- **Skill cause:** Step 7 assumes the tree holds only this phase's work, and Step 1's clean-tree
+  check runs only at the start, so changes that appear mid-build are never noticed.
+- **Recommended fix:** In Step 7, stage the phase's files by path (the TECH "Touches" list plus the
+  spec files), then check `git diff --cached --stat` against that list and STOP on anything else;
+  re-run `git status --porcelain` before committing and report unexpected paths.
+- **Confidence:** high · **Effort:** small

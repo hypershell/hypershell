@@ -28,7 +28,7 @@ from multiprocessing import util, ProcessError
 from multiprocessing.managers import BaseManager, BaseProxy, Server, State, AutoProxy, listener_client
 from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener,
                                         answer_challenge, deliver_challenge, BUFSIZE)
-from queue import Queue
+from queue import Queue, SimpleQueue
 
 try:
     import resource
@@ -337,6 +337,11 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
      lambda: isinstance(BaseProxy._address_to_local, dict) and callable(BaseProxy._mutex.__enter__)),
     ('util.Finalize(args=, exitpriority=)',
      lambda: {'args', 'exitpriority'} <= set(_parameters(util.Finalize.__init__))),
+    ('BaseProxy._incref sets _close to a util.Finalize of BaseProxy._decref',
+     lambda: {'Finalize', 'BaseProxy', '_decref', '_close'} <= set(_names(BaseProxy._incref))),
+    ('BaseProxy._decref(token, ...)', lambda: _parameters(BaseProxy._decref)[0] == 'token'),
+    ('util.Finalize calls its _callback with its _args',
+     lambda: {'_callback', '_args'} <= set(_names(util.Finalize.__init__)) & set(_names(util.Finalize.__call__))),
 )
 
 
@@ -517,9 +522,67 @@ class _InProcessServer(Server):
             self._live.clear()
 
 
-def _finalize_in_process(server: _InProcessServer, state: State, addresses: Iterable[Tuple[str, int]]) -> None:
+# The port of each in-process queue server of this process, from before it binds until its listener
+# is closed; 0 while a server asking for an ephemeral port binds. Proxy finalizers read it without a
+# lock, so it is changed only by single dictionary operations.
+_serving: Dict[object, int] = {}
+
+# Decrefs that proxy finalizers hand off, and the one thread that sends them
+_decrefs: SimpleQueue = SimpleQueue()
+_decref_sender: Optional[threading.Thread] = None
+_decref_sender_lock = threading.Lock()
+
+
+def _decref(*args: Any) -> None:
+    """Finalizer of a queue client's proxy: the stock decref, unless an in-process server may answer it.
+
+    The cyclic garbage collector runs a proxy's finalizer in whichever thread triggers the collection,
+    including the threads of an in-process server, and the stock decref connects to the server and
+    waits for its accept loop. So a decref that may reach an in-process server of this process is
+    handed to the decref sender instead: ``SimpleQueue.put`` never blocks and is safe to re-enter.
+    Any other decref is the stock one, in the finalizer's thread.
+    """
+    address = getattr(args[0], 'address', None) if args else None
+    if isinstance(address, tuple):
+        ports = tuple(_serving.values())
+        if address[1] in ports or 0 in ports:
+            _decrefs.put(args)
+            return
+    BaseProxy._decref(*args)
+
+
+def _send_decrefs() -> None:
+    """Send handed-off decrefs, in order, for the life of the process."""
+    while True:
+        args = _decrefs.get()
+        try:
+            BaseProxy._decref(*args)
+        except Exception as error:  # The stock decref absorbs connection errors; keep sending
+            log.debug(f'Queue client decref failed: {error!r}')
+
+
+def _start_decref_sender() -> None:
+    """Start the decref sender, once per process (again in a forked child)."""
+    global _decref_sender
+    with _decref_sender_lock:
+        if _decref_sender is None or not _decref_sender.is_alive():
+            _decref_sender = threading.Thread(target=_send_decrefs, daemon=True, name='hypershell-queue-decref')
+            _decref_sender.start()
+
+
+def _defer_decref(proxy: BaseProxy) -> BaseProxy:
+    """Give `proxy` the finalizer :func:`_decref` in place of the stock one."""
+    close = getattr(proxy, '_close', None)
+    if isinstance(close, util.Finalize) and close._callback is BaseProxy._decref:
+        close._callback = _decref
+    return proxy
+
+
+def _finalize_in_process(server: _InProcessServer, state: State, addresses: Iterable[Tuple[str, int]],
+                         key: object) -> None:
     """Stop an in-process server and drop cached proxy connections to every address it answered on."""
     server.stop()
+    _serving.pop(key, None)
     state.value = State.SHUTDOWN
     with BaseProxy._mutex:
         for address in addresses:
@@ -581,10 +644,18 @@ class SecureManager(BaseManager):
             raise QueueServerError("This Python's multiprocessing internals are not supported: "
                                    + '; '.join(problems))
         host, port = self._address
+        # Listed before the bind, so a proxy finalizer never connects to this server (see _decref)
+        key = object()
+        _serving[key] = port
         try:
             server = _InProcessServer(registry, self._address, self._authkey, self._serializer, self._tls)
         except OSError as error:
+            del _serving[key]
             raise QueueServerError(f'Cannot listen on {host}:{port} ({error})') from error
+        except BaseException:
+            del _serving[key]
+            raise
+        _serving[key] = server.address[1]
         # Clients cache connections by the address they dial, which may name the host differently
         # (e.g., 'localhost') than the bound address does; both are dropped at shutdown.
         dialed = (host, server.address[1])
@@ -593,7 +664,7 @@ class SecureManager(BaseManager):
         threading.Thread(target=server.serve, daemon=True, name='hypershell-queue-server').start()
         self._state.value = State.STARTED
         self.shutdown = util.Finalize(self, _finalize_in_process, exitpriority=0,
-                                      args=(server, self._state, (dialed, server.address)))
+                                      args=(server, self._state, (dialed, server.address), key))
 
     def connect(self: SecureManager) -> None:
         """Install the local-process TLS context, then perform the manager handshake."""
@@ -751,16 +822,22 @@ class QueueClient(QueueInterface):
     _get_confirmed: Callable[[], Queue[bytes]]
 
     def connect(self: QueueClient) -> None:
-        """Connect to server using unique client ID for token generation."""
+        """Connect to server using unique client ID for token generation.
+
+        The proxies' finalizer is :func:`_decref`: in a process that serves queues itself, a decref
+        that may reach its own server is sent by the decref sender, which starts here.
+        """
         self.register('_get_scheduled')
         self.register('_get_completed')
         self.register('_get_heartbeat')
         self.register('_get_confirmed')
         super().connect()
-        self.scheduled = self._get_scheduled()
-        self.completed = self._get_completed()
-        self.heartbeat = self._get_heartbeat()
-        self.confirmed = self._get_confirmed()
+        if _serving:
+            _start_decref_sender()
+        self.scheduled = _defer_decref(self._get_scheduled())
+        self.completed = _defer_decref(self._get_completed())
+        self.heartbeat = _defer_decref(self._get_heartbeat())
+        self.confirmed = _defer_decref(self._get_confirmed())
         self.ready = True
 
     def __enter__(self: QueueClient) -> QueueClient:

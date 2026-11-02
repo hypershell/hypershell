@@ -645,3 +645,23 @@ No AGENTS.md invariant violation was found.
   without convergence, so the bounded loop stops here. Remediation, deferral or any further cycle
   needs the maintainer's decision.
 - P2, the multi-node evidence, is still pending.
+
+## Triage (human gate) — cycle 3
+
+Review did not converge within the bounded loop's three cycles, so the foreman stopped the run and
+escalated to the maintainer. On 2026-11-02 the maintainer authorized **one further cycle (4), scoped
+to C5 and C6 only**, and a pre-release cut from `develop` without this feature in the meantime. The
+human gate for C5 (high-blast-radius `core/queue.py`) was then passed by the foreman's ruling, as
+judge under that authorization. Remediation returns to `hs-build`, which reopens P1. Cycle 4 reviews
+the remediation and the diff since `d3e00f9`; it is the last cycle, and a non-converged cycle 4 stops
+the feature again.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| C5 · CONFIRMED | fix | **Property:** no thread of the in-process server (the accept loop, a connection handler, or a thread the server starts) ever blocks on a connection that only the server's own accept loop can answer, whatever thread the cyclic GC runs a proxy finalizer on. The build picks the mechanism; the obvious candidates are completing a same-process proxy's decref without dialing the listener, or keeping the accept loop free of handshakes, locks and thread starts that a finalizer can stall while deferring same-process decrefs off server threads. Whatever the mechanism, it must not change the wire, auth or TLS behaviour, a remote client's decref, or behaviour for `b819de6` clients (R4, R8). **Red-first tests:** the reviewer's two probes (a same-process client dropped to garbage each round under a low GC threshold, and the same-port stop and restart loop), turned into bounded tests that *fail* within a time limit instead of hanging, and that hang or fail at `d3e00f9`. **Gate before P1 closes:** each probe test passes ≥ 200 rounds on 3.11, 3.12, 3.13 and 3.14; `test_shutdown_releases_port` and `test_join_after_task_done` pass 100 consecutive runs on each of those versions; and the full suite, parity, compat and the throughput gate are re-run. |
+| C6 · CONFIRMED | fix | Add the `ROADMAP.md` entry for `issues/client-partial-connect-hang.md`, in the form AGENTS.md requires. |
+| P2 · PLAUSIBLE | pending external evidence | Unchanged. The foreman reruns the multi-node matrix (P7) at the remediated head; runs at `d3e00f9` are diagnostic only. |
+
+Out of scope for cycle 4: everything else, including the observations already ruled (cycle 1 P3,
+cycle 2 C3(a), the client partial-connect hang) and the pre-existing behaviour seen identically on
+`b819de6`.
