@@ -3,10 +3,10 @@ slug: schema-upgrade-step
 title: 'Open 2.8 databases in 2.9: an idempotent schema-upgrade step'
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -92,7 +92,7 @@ phases:
     docs docs/_build
 - id: P6
   name: 'PostgreSQL CI evidence (run B: external wait on a pushed branch)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -382,11 +382,22 @@ work on upgraded databases.
 **Goal:** the pushed branch's `Tests` workflow is green at HEAD, with both `postgres` matrix rows
 green. Because a missing template fails rather than skips, green means every PostgreSQL test ran.
 
-- [ ] **External wait.** The foreman pushes `fix/schema-upgrade-step`; `hs-build` never pushes.
-- [ ] Read the run (`gh run view <id> --log-failed` on red). If PostgreSQL behaviour differs from
+- [x] **External wait.** The foreman pushes `fix/schema-upgrade-step`; `hs-build` never pushes.
+- [x] Read the run (`gh run view <id> --log-failed` on red). If PostgreSQL behaviour differs from
   the plan, fix it in a new commit on this phase and ask for another push. The likely spots are
   `set_config` for `lock_timeout`, the SQLSTATEs under a race, and constraint names under a
   schema. Each such fix is a `TECH.md` amendment noted in the commit body.
+- **Evidence (run B, read by the foreman from GitHub Actions; no fix was needed):** workflow
+  `Tests` (`tests.yml`), run `41401695878`, on PR #69 at head `9aee1c7`, concluded `success`
+  with every check green:
+  - `PostgreSQL (pg13)` passed (1m22s) and `PostgreSQL (pg18)` passed (1m11s). In both, the
+    builder step logged `Built template databases: hs283 (7 tasks), hs290a1 (half-upgraded)`,
+    and pytest reported pg13 `27 passed in 33.04s` and pg18 `27 passed in 40.19s`. The module
+    collects 27 tests, so none skipped: every PostgreSQL test ran on both servers.
+  - `tests (3.11)` through `tests (3.14)`, the zero-build install on 3.11–3.14, and package
+    metadata & README render all passed.
+  - The gate's head `9aee1c7` is `git rev-parse HEAD` at verification time. The commit that
+    records this touches only `spec/`, so the run covers all of the code.
 - **Verify:** the latest `tests.yml` run on the branch is for `git rev-parse HEAD` and concluded
   `success`.
 - **Touches:** whatever the evidence requires. Expect `src/hypershell/data/upgrade.py` and

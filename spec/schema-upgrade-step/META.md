@@ -74,3 +74,10 @@ is skipped by the parser):
 - **Skill cause:** The phase gate and `AGENTS.md` §Docs give one build command with no fallback for restricted environments, and the sitemap extension adds a process-level requirement that has nothing to do with checking warnings.
 - **Recommended fix:** Load `sphinx_sitemap` only when building for publication (e.g. gated on an env var set by the docs host), or document the `-D extensions=…` form as the sandbox-safe warnings check.
 - **Confidence:** med · **Effort:** small
+
+## F6 — A CI-evidence gate pinned to `HEAD` goes red the moment the evidence is committed
+`origin=hs-build:P6 severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** P6's gate compares the latest `tests.yml` run's `headSha` with `git rev-parse HEAD`. It held at `9aee1c7`, but Step 7's state commit moves `HEAD`, so the gate re-run afterwards fails although no code changed. The skill also has no run-B procedure, so evidence fetched by someone else (the sandbox can't reach GitHub) went into the phase body by improvisation.
+- **Skill cause:** Steps 4–7 assume a gate that stays true after its own commit. Nothing covers an external-evidence phase: where the evidence goes, who may supply it, or how to gate on "the last code-changing commit".
+- **Recommended fix:** Add a run-B step to `hs-build`: record the run id, head sha and per-job results in the phase body, and gate on the last commit outside `spec/` (e.g. `git log -1 --format=%H -- . ':!spec'`), not `HEAD`. Pair with F3's `waits_on` field.
+- **Confidence:** med · **Effort:** small
