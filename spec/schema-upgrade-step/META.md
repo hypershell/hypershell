@@ -47,6 +47,7 @@ is skipped by the parser):
 - **Recommended fix:** In Step 3, branch with `git switch --no-track -c {branch} origin/develop` after the Step 1 fetch. In Step 1, accept a detached `HEAD` equal to `origin/develop` (or a fresh worktree created there) as satisfying the "on develop" pre-flight.
 - **Confidence:** high · **Effort:** small
 - **Seen again (hs-review:step1):** `hs-review` takes `{base}` from TECH `base: develop` and its injected diffstat runs against local `develop`, which had diverged from `origin/develop`; the review graded `git diff origin/develop...HEAD` by hand. The same fix applies: resolve `{base}` to `origin/{base}` after a fetch.
+- **Seen again (hs-review:step1, cycle 2):** the local `develop` (222075b) still differs from `origin/develop` (b819de6), so cycle 2 again used `origin/develop` wherever the skill says `{base}`: the contract-drift check, the diff and the diffstat.
 
 ## F2 — No guidance for carving one R-ID out of a shaped seed into a different cycle
 `origin=hs-feature:step4 severity=low category=missing-guidance status=open target=.agents/skills/hs-feature/SKILL.md`
@@ -96,4 +97,18 @@ is skipped by the parser):
 - **What happened:** The cycle-1 fix changed the PostgreSQL lock path in `upgrade.py` and added PostgreSQL tests that only CI can run. P6 (CI evidence for `9aee1c7`) stayed `done`, so the FSM would have reached `in_review` claiming PostgreSQL evidence that no longer covers the code. P6 was reopened to `pending` by judgement.
 - **Skill cause:** Step 1.3 says to reopen the phase(s) whose `satisfies` covers the failing R-IDs, and stops there. A downstream phase whose gate is external evidence about the code (not a re-runnable command) silently goes stale, and nothing prompts re-checking it.
 - **Recommended fix:** In Step 1.3, add: "also reopen any `done` phase whose verify reads evidence pinned to an earlier code commit (CI runs, external drives) when the fix touches the code it covers; leave it `pending` for the external wait."
+- **Confidence:** med · **Effort:** small
+
+## F9 — `temp_site.sh` cleans up with `rm -rf`, which the repo's own working rule forbids
+`origin=hs-review:step2 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** the review rules for this session forbid `rm -rf`, including inside helper scripts, so the reviewer could not run the CLI drives through `temp_site.sh` (its `EXIT` trap runs `rm -rf "$site"`). It set up the same isolation by hand for about 110 drives and left the sites under `$TMPDIR`.
+- **Skill cause:** the rubric, `hs-review` and `AGENTS.md` all route CLI drives through `temp_site.sh`, while `AGENTS.md` says "`del`, not `rm`". Running under `/bin/sh`, the helper's trap reaches `/bin/rm` and gets around the guard that rule relies on.
+- **Recommended fix:** make the cleanup follow the working rule. Use `del` when it is on `PATH`; otherwise leave the site under `$TMPDIR` and print its path. An opt-in flag could restore removal for CI.
+- **Confidence:** high · **Effort:** small
+
+## F10 — The rubric doesn't say whether a LOW CONFIRMED finding blocks
+`origin=hs-review:step4 severity=low category=instruction status=open target=.agents/factory/review-rubric.md`
+- **What happened:** cycle 2's only finding was a LOW, docs-only, CONFIRMED man-page drift. Following *Verdict & loop* ("CONFIRMED findings → blocked") as written forced changes-requested and a third cycle for a one-sentence fix.
+- **Skill cause:** the severity table calls a LOW coverage gap "non-blocking", but *Verdict & loop* and `hs-review` Step 4 route every CONFIRMED finding to `/hs-build`. They never say whether severity changes the route.
+- **Recommended fix:** state the rule explicitly in both places, either "every CONFIRMED finding blocks, whatever its severity" or a named exception for LOW docs-only findings, such as a fix recorded before `/hs-publish` with no new review cycle. Treat any exception as a change to the CONFIRMED-blocks gate and have a human decide it.
 - **Confidence:** med · **Effort:** small

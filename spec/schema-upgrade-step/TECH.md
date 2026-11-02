@@ -3,7 +3,7 @@ slug: schema-upgrade-step
 title: 'Open 2.8 databases in 2.9: an idempotent schema-upgrade step'
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/schema-upgrade-step
 base: develop
 current_phase: done
@@ -112,11 +112,10 @@ phases:
     --limit 1 --json headSha,conclusion --jq '.[0].headSha + " " + .[0].conclusion')"
     = "$(git rev-parse HEAD) success"
 review:
-  last_reviewed_commit: 1a466d6dbde524142a83059bb7f70299d7f016d0
+  last_reviewed_commit: 20a12cb495e11c29abac1b5aa00ce59e1c669599
   verdict: changes-requested
-  blocked_reason: 'C1 (R3): concurrent first start on a large SQLite DB fails with
-    a raw lock error'
-  cycle: 1
+  blocked_reason: 'C2 (R7 docs): man pages still call the upgrade lock brief and Postgres-only'
+  cycle: 2
 ---
 # TECH.md — Open 2.8 databases in 2.9: an idempotent schema-upgrade step
 

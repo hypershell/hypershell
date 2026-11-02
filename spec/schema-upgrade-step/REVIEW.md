@@ -153,3 +153,112 @@ Recorded by the foreman before the cycle-1 remediation build.
   only on a pre-2.9 SQLite database and is written silently elsewhere, per the amended *Retry model*
   in `AGENTS.md`. `.agents/factory/review-rubric.md`'s human-gate list names the amended invariant
   in place of "retry-chain UNIQUE".
+
+## Review cycle 2 — changes-requested (2026-11-02)
+
+- **Reviewed commit:** 20a12cb (code head ba4fe5e; 20a12cb touches only `spec/`)  ·  **Base:** `origin/develop` (b819de6)
+- **Mode:** a fresh blind pass over the full spec-excluded diff (`git diff origin/develop...HEAD -- . ':(exclude)spec/'`).
+  The reviewer was also handed cycle 1's C1 and P1 findings and the out-of-diff drift note, with the human
+  rulings on them, to verify by re-running the original scenarios. It got no `PLAN.md`/`TECH.md`/`META.md` content.
+- **Contract drift:** none. `git log origin/develop..HEAD -- spec/schema-upgrade-step/GOAL.md` lists only the
+  shaping commit 53bd6ee.
+- **Base:** `origin/develop` again, for the cycle-1 reason: the local `develop` (222075b) has diverged from it.
+
+### Verification run
+
+- `uv run pytest -rxX` (blind reviewer) → 535 passed, 30 skipped, 0 failed. The skips are the 29 PostgreSQL tests
+  (`HS_TEST_POSTGRES` unset; no local server) and `test_fixture_provenance`. The upgrade test files were then run
+  with `HS_TEST_REGEN_FIXTURE` pointing at a `hypershell==2.8.3` environment from PyPI → 53 passed, 29 skipped
+  (all PostgreSQL). Fixture sha256 matches `tests/fixtures/README.md`, and `strings` shows no host, user or path.
+- CLI drives ran in throwaway sites under `$TMPDIR`, with `temp_site.sh`'s isolation copied by hand.
+  The script itself was not run, because its `EXIT` trap runs `rm -rf` and this session forbids that.
+  - **Real half-upgraded database** (`origin/develop` code via `git archive`, run against a fixture copy):
+    `hs submit` → rc=5, `no such column: task.source`, `source` table left behind. Then HEAD `hs list --all`
+    → rc=0, 3 columns and 3 task indexes logged at INFO, no `Created table source`. The original 30 columns of
+    all 7 rows and the client rows are byte-identical before and after. A second start prints nothing on stderr.
+  - **R9 on a 2.8.3 copy:** `hsx --restart -r 2 -N2` → rc=0. It retried the pre-existing failure (attempt 3
+    chained to the old attempt-2 row) and a new failure twice; `hs list` shows all 12 rows. The SQLite
+    `UNIQUE (previous_id)` / `UNIQUE (next_id)` remain.
+  - **R4 by command line:** a wrapper that adds a NOT NULL column with no default → rc=5, one CRITICAL line
+    naming `task.weight`, schema unchanged, no traceback file. A nullable column and a `server_default=text('7')`
+    column are added and read NULL / 7 on old rows.
+  - **R3 mixed concurrency:** `hsx`, two `hs submit`s and `hs list` started together, 4 times each in delete and
+    WAL journal modes. There was exactly one upgrader every time and the step never failed. One `hs submit` failed
+    after the step; see *Out-of-diff context*.
+- **PostgreSQL, offline only.** The plan was compiled with the psycopg dialect against mocked 2.8.3,
+  half-upgraded and current inspectors. It produced the expected `ADD COLUMN`s, the two
+  `DROP CONSTRAINT IF EXISTS task_*_key`, and four `CREATE INDEX IF NOT EXISTS`. The current schema produced no
+  steps. `lock_timeout` is set transaction-locally, and a timeout (55P03) becomes a retried wait.
+- **External evidence, weighed but not reproduced:** GitHub Actions run 41409167940 of `tests.yml` at ba4fe5e
+  succeeded in every job. `PostgreSQL (pg13)` and `(pg18)` each logged
+  `Built template databases: hs283 (7 tasks), hs290a1 (half-upgraded)` and `29 passed`, and `tests (3.11–3.14)`
+  passed. `git diff --name-only ba4fe5e 20a12cb` lists only `spec/` files.
+- **Docs:** `sphinx-build -E -b html` without `sphinx_sitemap` → rc=0, with only the two known toctree warnings.
+  A `-b man` build diffed against `share/man/man1/` → see C2.
+
+### Cycle-1 findings
+
+| Finding | Status | Evidence |
+|---------|--------|----------|
+| C1: concurrent first start fails with a raw lock error | **Resolved** | The pre-check now runs under the bounded wait (`upgrade.py:113`, `:129-145`, `:368-386`). Same mechanism as cycle 1 (fixture copy under `BEGIN EXCLUSIVE` for 8 s, `hs list --count` started 0.5 s in). At HEAD: rc=0, prints `7`, one `INFO … Waiting for another session to release the database, likely a concurrent schema upgrade (5s elapsed)`, then the upgrade lines. The orchestrator's independent re-run gave the same result. Negative control at the cycle-1 head 375a55e: rc=5 with the raw `database is locked - [SQL: PRAGMA main.table_info("client")]`. With no contention there is no added wait (`test_repeat_check_does_not_wait`). |
+| P1: a long peer upgrade fails the waiter with a misleading message | **Resolved** | `LOCK_WAIT_SLICE` 30 s and `LOCK_WAIT_CEILING` 900 s (`upgrade.py:59-60`). At the real constants, a peer held `BEGIN IMMEDIATE` with the DDL applied for 75 s, longer than the old 60 s bound. HEAD logs INFO waits at 32 s and 64 s, then gives rc=0 and finds the schema current. 375a55e gives rc=5 at 64 s with "an older server still running?". Past a scaled ceiling (slice 0.5 s, ceiling 2 s): rc=5, one CRITICAL `gave up after 2 s waiting for …` plus the `lsof` hint, schema unchanged, no traceback file. The PostgreSQL equivalents ran only in CI. |
+| Out-of-diff drift (triaged to fix) | **Resolved** | With `retried` reset by `hs update` and then `hsx --restart`: a fresh 2.9 SQLite database writes a second retry row silently; an upgraded 2.8.3 copy raises `IntegrityError: UNIQUE constraint failed: task.previous_id`. That matches `ROADMAP.md`, both seeds, AGENTS.md *Retry model* and invariants §3. The rubric's gate list now names the `retried`-filter guard. |
+
+### Requirement → evidence matrix
+
+| R-ID | Verified how (cycle 2) | Status |
+|------|------------------------|--------|
+| R1 | `test_first_command` (7 commands × untouched/half-upgraded) and `test_first_command_server`; drives on the 2.8.3 fixture and the real half-upgraded database. PostgreSQL in CI (`test_first_use_without_initdb`). | ✅ |
+| R2 | Byte-identical before/after hashes of the old rows; new columns read NULL/NULL/0; `tag` keeps `"part": 0`; `test_rows_preserved`. | ✅ |
+| R3 | Silent second start; one INFO line per change; mixed concurrency in delete and WAL modes; C1 and P1 re-runs. | ✅ |
+| R4 | Command-line refusal and generic adds; `test_refusal_leaves_schema_unchanged`; `test_refusal_on_command_line`. | ✅ |
+| R5 | Fresh-site DDL has no UNIQUE; `test_initdb_truncate`; PostgreSQL `test_fresh_schema` in CI. | ✅ |
+| R6 | Offline-compiled DDL; CI `test_chain_constraints_dropped` (the second run is silent). | ✅ (CI-verified only) |
+| R7 | UNIQUE kept after the upgrade and through a retrying `hsx` run; `docs/_include/` wording correct. The man pages lag (C2). | ⚠️ docs (C2) |
+| R8 | Each claim checked against the source; the doubled-retry drive above. | ✅ |
+| R9 | End-to-end drive; provenance test green against real 2.8.3; suite green; docs build clean. | ✅ |
+
+There are no unmapped changes beyond those listed for cycle 1.
+
+### Findings
+
+#### [LOW/CONFIRMED] C2 — The man pages still describe the upgrade lock as brief and Postgres-only
+- **Where:** `share/man/man1/hs.1:2634`, `hsx.1:2634` and `hyper-shell.1:2634`. These are the branch's own hunks,
+  added in 9aee1c7.
+- **Failure scenario:** the man pages say the upgrade "on Postgres … drops the `UNIQUE` constraints …, and holds a
+  brief exclusive lock while it runs". 958577f amended the source paragraph (`docs/_include/database_alt.rst:14`)
+  to "It holds an exclusive lock while it runs (minutes, on a large database), and processes started meanwhile
+  wait for it", which is the lock behaviour that settles R3/P1. The man pages were not updated. So a user reading
+  `man hs` is told the lock is brief and Postgres-only, which the code no longer guarantees.
+- **Evidence:** a fresh `sphinx-build -b man` differs from the committed pages at exactly this sentence. The
+  orchestrator compared `grep -n "exclusive lock"` across the three pages and the `.rst`. The other man-page
+  drift (`--part`, `card`) is already on `origin/develop` and is not this branch's.
+- **Touches invariant / requirement:** R7 (database documentation). This is not an AGENTS.md invariant and not
+  in the high-blast-radius list. Docs only; no code impact.
+
+The reviewer dropped these under refutation: the scaled-ceiling message understating the wait; table creation on
+a fresh database logging at trace (that is initialization, not an upgrade); `server_default=false()` being refused
+as non-constant (gold-plating). It also noted a boundary and set it aside: `checkdb()`'s `has_table`
+(`data/__init__.py:91-95`) runs before the step. On SQLite it is reached only by `hs initdb --truncate/--rotate`,
+and it still fails raw under a held lock. `origin/develop` fails the same way at `Task.count()`, so this is not a
+regression, and it is not part of the step.
+
+### Out-of-diff context (not graded)
+
+- `Source.reserved` (`src/hypershell/data/model.py:1045-1057`, unchanged by the diff) is a get-or-create with no
+  conflict handling. Concurrent first `hs submit`s against an empty `source` table can both insert `<direct>`,
+  and one exits rc=5 with `IntegrityError: UNIQUE constraint failed: source.id` and a traceback file.
+  Reproduced with 6 concurrent submits: 1 in 20 runs on `origin/develop` with a fresh database; 2 in 20 at HEAD
+  with a fresh database; 2 in 10 at HEAD on an upgraded 2.8.3 copy. Every upgraded 2.8 database starts with an
+  empty `source` table, so the race now applies to them too. The upgrade step itself never failed. This is a
+  candidate seed for the human; it is not an R3 failure of the step.
+
+### Human-gate triggers
+
+- **Mandatory gate: not triggered.** C2 is in `share/man/`, outside the high-blast-radius list, and touches no
+  security or DB-lifecycle invariant.
+- **For the human:** C2 is a one-sentence fix in three man pages. The skill routes any CONFIRMED finding back to
+  `/hs-build`, so this costs a remediation build and a third review, the last one the bound allows. Whether a
+  LOW docs-only finding should cost a full cycle is your call. Also decide whether the `Source.reserved` race
+  above gets an `issues/` seed.
+- **Completeness sub-pass:** not run (not requested).
