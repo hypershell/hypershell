@@ -165,15 +165,15 @@ below are as of 2026-08-04 (latest then 2.27.2): **recheck them at plan time**.
   id-minting process** (anything running `submit`) needs the `uuid7` extra, not just the server.
 - **R9** *(load-bearing; Apache-edition coverage in CI deferrable)* — CI SHALL gain a TimescaleDB
   service job, using a pinned `timescale/timescaledb` image (Community edition). It SHALL run the
-  existing PostgreSQL upgrade tests against that image, and new tests for: a fresh `initdb`
+  existing PostgreSQL upgrade tests against that image, and a new TimescaleDB scenario module
+  covering R2–R8, including: a fresh `initdb`
   (hypertable, compression settings and policy present, asserted through the
   `timescaledb_information` views); an `initdb` re-run (idempotency); truncate-then-recreate;
   `vacuumdb` against a hypertable; the non-empty plain-table case (R5); and the extension-absent
   tier, run against plain PostgreSQL. The Apache-edition tier MAY be covered by unit-level seams if
   no Apache-only image is practical in CI; the plan decides and documents which. The SQLite suite
-  and the existing `postgres` job SHALL pass unchanged.
-  *(Narrowed from the seed's "the full test suite SHALL run green with a timescale provider"; open
-  for sign-off, see Clarifications.)*
+  and the existing `postgres` job SHALL pass unchanged. Running the whole suite against a server
+  database is out of scope (see Non-goals and Clarifications).
 
 **Documentation**
 
@@ -229,6 +229,12 @@ below are as of 2026-08-04 (latest then 2.27.2): **recheck them at plan time**.
   cover the transcript's "count failed tasks for all time" story. Revisit with benchmarks in
   the blog work, not here.
 
+*Added by this cycle.*
+
+- **Running the whole test suite against a server database.** Split out of the seed's R9 into its
+  own seed, [`issues/server-db-test-suite.md`](../../issues/server-db-test-suite.md) (ruling
+  2026-11-02, see Clarifications).
+
 ## Clarifications
 
 The seed's own clarifications (all resolved 2026-08-04: explicit pass, not an event hook; uniqueness
@@ -261,14 +267,21 @@ See [`issues/timescale.md`](../../issues/timescale.md).
   alignment memo, 2026-11-01). Not researched during shaping.
 - **2026-11-01 — Target: land as a 2.9.0 alpha before 2026-11-13** (maintainer, alignment memo,
   2026-11-01).
-- **[NEEDS CLARIFICATION: R9's "full test suite with a timescale provider".]** The seed asks for
-  the full suite to run green under a timescale provider. On `develop` the suite runs on SQLite only
-  (`conftest.py` sets `HYPERSHELL_DATABASE_FILE`), and the `postgres` job runs only
-  `test_upgrade_postgres.py`; there is no harness that points the whole suite at a server database.
-  Options: **(a)** the TimescaleDB job runs the upgrade tests plus a new TimescaleDB test module
-  with the R9 scenarios, as R9 is written above; **(b)** build a harness to run the whole suite
-  against a server database (PostgreSQL and TimescaleDB), a separate piece of work that likely
-  breaks the appetite. **Recommended: (a)**, with (b) filed as its own seed if wanted.
+- **2026-11-02 — R9: the TimescaleDB job runs the upgrade tests plus a new scenario module**
+  (foreman, as judge under the maintainer's delegation, 2026-11-02). The seed asked for the full
+  suite to run green under a timescale provider, but on `develop` the suite runs on SQLite only
+  (`conftest.py` sets `HYPERSHELL_DATABASE_FILE`) and the `postgres` job runs only
+  `test_upgrade_postgres.py`. Ruled option (a): the TimescaleDB CI job runs the upgrade tests plus a
+  new scenario module covering R2–R8, as R9 now reads. Running the whole suite against a server
+  database is its own `unshaped` seed,
+  [`issues/server-db-test-suite.md`](../../issues/server-db-test-suite.md), with a `ROADMAP.md`
+  entry.
+- **2026-11-02 — R6 deferral confirmed as drafted above** (foreman, as judge under the
+  maintainer's delegation, 2026-11-02). Deferring R6 drops only the `[database.timescale]` override
+  table; the zero-config defaults stay load-bearing under R2 and R3.
+- **2026-11-02 — The seed is adopted whole** (foreman, as judge under the maintainer's delegation,
+  2026-11-02). `issues/timescale.md` stays `adopted:timescale`. If R6 is cut at build, it returns
+  to the seed then.
 
 - **Note (for `hs-plan`):** *where the pass hangs.* `initdb()` and `truncatedb()` run it. `checkdb()`
   runs on every PostgreSQL start and already runs the schema step; the seed leaves it untouched

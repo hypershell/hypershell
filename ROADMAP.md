@@ -327,6 +327,17 @@ constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQ
 them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
 **Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: adopted:timescale*
 
+## The whole test suite on a server database
+
+The suite runs on SQLite only, and CI's PostgreSQL job runs just the upgrade tests, so the scheduler,
+writeback, retries and CLI are never exercised on PostgreSQL or TimescaleDB. A harness selected by
+an environment variable would run the whole suite against a server, isolated per test, with the
+SQLite-only tests marked and skipped. Split out of TimescaleDB's R9, which ships a dedicated
+TimescaleDB scenario module instead.
+
+*Horizon: mid-term · Depends on: — · Refs: split from `timescale` R9 (ruling 2026-11-02)*
+**Seed:** [`issues/server-db-test-suite.md`](issues/server-db-test-suite.md) · *status: unshaped*
+
 ---
 
 # Settled questions
