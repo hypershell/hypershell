@@ -115,7 +115,7 @@ is skipped by the parser):
   prototypes there, not in `$TMPDIR`.
 - **Confidence:** med · **Effort:** small
 
-## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again
+## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again
 `origin=hs-build:P5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** P4's and P5's gates (`bench_queue.py … --feature HEAD`) build a venv from the
   committed `HEAD`. hs-build runs the gate in Step 4 and commits in Step 7, so the gate measured the
@@ -188,3 +188,17 @@ is skipped by the parser):
   record it as "covered by ruling {id}"; it does not block. A finding that adds a new failure
   scenario is graded normally and cross-referenced to the ruling.
 - **Confidence:** med · **Effort:** small
+
+## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run
+`origin=hs-build:P1-remediation-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** P1's `verify:` and Safety Principles' CLI drive both run
+  `.agents/factory/bin/temp_site.sh`, whose cleanup is `trap 'rm -rf "$site"'`. Under a harness
+  that blocks `rm` (this build's brief forbade the script for that reason), the gate as written
+  cannot run. The build drove `hsx` by hand with `HYPERSHELL_SITE`, `HYPERSHELL_DATABASE_FILE` and
+  `HYPERSHELL_CONFIG_FILE=''` under `$TMPDIR` and left the sites there.
+- **Skill cause:** The non-negotiable CLI-drive gate depends on a destructive cleanup the skill
+  never offers an alternative to; the frontmatter `verify:` hard-codes it.
+- **Recommended fix:** Give `temp_site.sh` a keep-site mode (e.g. `TEMP_SITE_KEEP=1`, print the
+  path, no `rm`), or move the cleanup into a Python helper that a sandbox permits, and say in
+  hs-build Step 4 which form to use when `rm` is unavailable. The gate itself stays as strong.
+- **Confidence:** high · **Effort:** small

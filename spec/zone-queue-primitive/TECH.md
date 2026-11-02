@@ -6,12 +6,12 @@ appetite: big
 status: blocked
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P7
+current_phase: P1
 last_updated: '2026-11-02'
 phases:
 - id: P1
   name: 'In-process serve loop: no manager child, clean shutdown and port release'
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R4
@@ -21,9 +21,10 @@ phases:
   parallel: false
   hammerable: false
   hill: downhill
-  verify: uv run pytest -v tests/test_queue.py tests/test_queue_start.py tests/test_queue_tls.py
-    && .agents/factory/bin/temp_site.sh sh -c "seq 200 | uv run hsx -t 'echo {}' -N4
-    && seq 200 | uv run hsx -t 'echo {}' -N4 --no-tls && uv run hs list --count"
+  verify: uv run pytest -v tests/test_queue.py tests/test_queue_start.py tests/test_queue_limits.py
+    tests/test_queue_tls.py && .agents/factory/bin/temp_site.sh sh -c "seq 200 | uv
+    run hsx -t 'echo {}' -N4 && seq 200 | uv run hsx -t 'echo {}' -N4 --no-tls &&
+    uv run hs list --count"
 - id: P2
   name: Swap the four queues to queue.Queue with a pinned method surface
   status: done
@@ -105,8 +106,8 @@ phases:
 review:
   last_reviewed_commit: 12af7fbab7cdc1fd391acf0e8320d40e311b3b2c
   verdict: changes-requested
-  blocked_reason: 'review cycle 2: C3, C4 CONFIRMED in core/queue.py; human gate,
-    escalated (no convergence)'
+  blocked_reason: 'review-2 remediation: C3(a) awaits the foreman (a raised soft RLIMIT_NOFILE
+    is inherited by tasks in hsx and hs cluster); C3(b), C3(c), C4 built'
   cycle: 2
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
@@ -240,13 +241,81 @@ stdio. This is the core, small and novel slice: everything else builds on it.
         compiled names; no socket). `_serve_in_process` runs it before binding and raises
         `QueueServerError` ("…multiprocessing internals are not supported: …").
         `TestPrivateInternals` asserts it reports nothing and keeps the live checks.
+- **Remediation (review cycle 2; triage in [`REVIEW.md`](REVIEW.md)).** P1 was reopened for C3
+  and C4, and for a local Python 3.11 run.
+  - [x] **Red first** (source at `1ffa825`; 6 failed): `tests/test_queue_limits.py` (new) —
+        refusal past the reserve, TLS on and off (no `_open_file_limit` hook); accept back-off on
+        `EMFILE` and `ENFILE` (about 750,000 accepts in 1 s); and `hs server` under soft = hard
+        `RLIMIT_NOFILE` 64 (killed at 60 s, its log holding `Too many open files` and `unable to
+        open database file`). `tests/test_queue_start.py` gains `hs server --tls-cert '<none>'`
+        plus two clients under the default log level (no ERROR line).
+  - [ ] **C3(a)** — raise the soft `RLIMIT_NOFILE` at start. **Not built: needs clarification.**
+        The limit is per process and inherited. `hsx`, `hs cluster` and an embedding application
+        run the server in the process that also starts tasks or launchers, so every task would
+        inherit the raised soft limit (`ulimit -n` 256 → 10240 in a child, checked on this host).
+        That is a default-behaviour change below the limit.
+  - [x] **C3(b)** — the accept loop admits a connection only when its descriptor number is
+        below (soft limit − `RESERVE`, 32). Descriptors are allocated lowest-first, so admitted
+        connections never hold any of the top 32, and the server's own files can fail only once
+        they alone fill the reserve. A refused connection is closed at once; one WARNING
+        ("Refusing new queue connections: open files near the limit of N (32 kept for the
+        server)") per 60 s, DEBUG in between. No change below the threshold; none on Windows.
+  - [x] **C3(c)** — an accept failing with `EMFILE`/`ENFILE` sleeps `POLL` (0.25 s) before the
+        loop retries.
+  - [x] **C4** — fallback path. Building the context before "Server listening" would read the
+        cert and key at start; base and `12af7fb` read them on the first accept, so the preferred
+        path fails its own proviso. The listener logs the first build failure at ERROR ("Queue
+        server cannot set up TLS and refuses every connection (TLSError: …)") and every
+        connection still fails closed. `server.py` is untouched.
+  - [x] **Python 3.11:** full suite run locally (see the gate record below).
+  - **Gate record (macOS, spawn; the tree without C3(a), as provisional commit `09bc773`).**
+    - Full suite: **549 passed** on each of 3.14.6, 3.13.16, 3.12.13 and 3.11.18.
+      `unsupported_internals() == []` on 3.11.18.
+    - New tests repeated 12 times (all 15 in the limit and start files): 12/12 green.
+    - `hsx` drive in an isolated site, 200 tasks TLS on and `--no-tls`: rc 0, 200 distinct outputs
+      each, 400 rows, 0 failed.
+    - `parity` vs `b819de6`: identical task tables TLS on and off, rc 0/[0, 0]; four `--help`
+      outputs byte-identical. `compat` (server here, client `b819de6`): 200/200 TLS on and off.
+    - Throughput gate, 5 interleaved repeats: **PASS**, all 60 runs clean. The machine already
+      carried load from processes this build did not start (1-min load average 4.8 before the
+      gate, about 15 during it); they were left alone.
+
+      | config | base median [min-max] | feature median [min-max] | delta | tolerance | tree children b/f | tree FDs b/f |
+      |---|---|---|---|---|---|---|
+      | 4x4 b=1 tls | 262.8 [252.3-267.5] | 263.1 [244.9-270.5] | +0.3 | 25.6 | 2/0 | 117/23 |
+      | 4x4 b=1 no-tls | 250.5 [245.8-265.0] | 240.0 [235.9-255.4] | -10.5 | 19.5 | 2/0 | 116/24 |
+      | 16x1 b=1 tls | 248.0 [244.9-256.5] | 260.9 [242.2-265.5] | +12.9 | 23.3 | 2/0 | 153/60 |
+      | 16x1 b=1 no-tls | 261.9 [250.5-270.3] | 261.0 [257.0-271.2] | -0.9 | 19.8 | 2/0 | 153/59 |
+      | 4x4 b=50 tls | 791.7 [736.6-838.1] | 800.1 [781.4-825.7] | +8.4 | 101.5 | 2/0 | 116/22 |
+      | 32x1 b=1 tls | 256.6 [237.2-275.9] | 258.4 [245.6-270.0] | +1.8 | 38.7 | 2/0 | 202/107 |
+
+    - **C3 reproduction** (the reviewer's: server soft = hard `RLIMIT_NOFILE`, `b819de6` clients
+      with `-N 2`, 300 `echo` tasks, `--no-tls`, server bounded at 90 s, clients 30 s after):
+
+      | limit, clients | server | tasks done | server | clients | state machine died |
+      |---|---|---|---|---|---|
+      | 128, 44 | base | 271/300 | hung, killed at 90 s | 40 rc 5, 4 hung | no |
+      | 128, 44 | here | 205/300 | hung, killed at 90 s | 29 rc 5, 15 hung | **no** (cycle 2: yes, rc 5 at 2.8 s, 70/300) |
+      | 64, 24 | base | 270/300 | hung, killed at 90 s | 19 rc 5, 5 hung | no |
+      | 64, 24 | here | 276/300 | hung, killed at 90 s | 20 rc 5, 4 hung | **no** (cycle 2: yes, 15/300) |
+
+      The server log has one refusal WARNING and no `Too many open files`, `unable to open
+      database file` or uncaught exception. The run still does not finish, as on base: a client
+      admitted for some connections and refused for a later one loses its scheduler thread
+      (`EOFError`) and then hangs instead of exiting, holding confirmed tasks until the server
+      evicts it (600 s by default). That is client-side behaviour, unchanged here.
+    - **C4 reproduction** (`hs server … --tls-cert '<none>'` plus one client, default log level):
+      the client exits 5 on both builds. Base server output ends with an accepter-thread traceback,
+      `TLSError: TLSConfig.cert and TLSConfig.key are required for the server side`. Here it ends
+      `ERROR [hypershell.core.queue] Queue server cannot set up TLS and refuses every connection
+      (TLSError: TLSConfig.cert and TLSConfig.key are required for the server side)`.
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_start.py
-  tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
+  tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
 - **Touches:** `src/hypershell/core/queue.py`, `src/hypershell/core/tls.py` (docstrings),
   `src/hypershell/core/logging.py` (docstring), `tests/test_queue.py` (new),
   `tests/test_queue_start.py` (new); remediation also `src/hypershell/server.py`
-  (`ServerThread.start`) and `AGENTS.md`.
+  (`ServerThread.start`) and `AGENTS.md`; review-2 remediation `tests/test_queue_limits.py` (new).
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1

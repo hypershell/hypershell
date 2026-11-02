@@ -404,3 +404,21 @@ No AGENTS.md invariant violation was found.
   requires `Server._handle_request` and the other pinned privates, and a 3.11 that lacked one would
   refuse to start. 3.11 is not available locally, and CI could not be read from this session.
 - P2, the multi-node evidence, is still pending.
+
+## Triage (human gate) — cycle 2
+
+The human gate for C3 and C4 (high-blast-radius `core/queue.py`) was **passed by the foreman's
+ruling**, as judge under the maintainer's delegation, on 2026-11-02. Remediation returns to
+`hs-build`, which reopens P1. Cycle 3 is the last review cycle before the bounded loop stops, so
+the remediation stays inside the rulings below and adds nothing else.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| C3 · CONFIRMED | fix | The server process keeps its own files working when connections approach the open-file limit. Three parts, all in the in-process server: (a) at start, before binding, raise the soft `RLIMIT_NOFILE` toward the hard limit (bounded where the hard limit is unlimited or not settable, e.g. by the platform's per-process maximum); a refused raise is logged at DEBUG and is not an error. (b) Reserve a fixed headroom of descriptors for the server's own use: when an accepted connection would cross (soft limit − reserve), close it at once and log one rate-limited WARNING naming the limit; already-admitted clients are unaffected. (c) `EMFILE`/`ENFILE` from `accept` backs off (bounded sleep) instead of retrying in a tight loop. Red-first test: a server subprocess with soft and hard `RLIMIT_NOFILE` both lowered (so (a) is a no-op) and more clients than the headroom allows; the server's database and log keep working, no state machine dies, admitted clients' tasks complete, refused clients exit non-zero, and the server exits 0. No wire, auth, TLS or default-behaviour change below the limit (R8). |
+| C4 · CONFIRMED | fix | A server TLS context that cannot be built is visible to the operator at ERROR or above under default logging, as base made it visible. Preferred: build the server context before "Server listening" and fail through the C2 path (exit 5, one CRITICAL line), provided that does not change when TLS materials are read or generated for a working configuration (including `<auto>`). If it would, log the build failure at ERROR once and keep failing connections closed. Test asserts the operator-visible line. |
+| P2 · PLAUSIBLE | pending external evidence | Unchanged; the foreman reruns the multi-node matrix (P7) at the remediated head. Runs at `12af7fb` are diagnostic only. |
+| Python 3.11 | verify | The build runs the full suite under Python 3.11 locally before closing P1, so the start-time internals check is shown to pass there; CI confirms on the PR. |
+
+Not in scope for this remediation: the two pre-existing behaviours the reviewer observed identically
+on `b819de6` (same-port TLS restart hang; malformed `completed` result). The foreman seeds them as
+issues.

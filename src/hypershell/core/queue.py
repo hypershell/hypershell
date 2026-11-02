@@ -13,6 +13,8 @@ from types import TracebackType
 import io
 import os
 import ssl
+import time
+import errno
 import select
 import socket
 import struct
@@ -27,6 +29,11 @@ from multiprocessing.managers import BaseManager, BaseProxy, Server, State, Auto
 from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener,
                                         answer_challenge, deliver_challenge, BUFSIZE)
 from queue import Queue
+
+try:
+    import resource
+except ImportError:  # Not POSIX: no open-file limit to manage
+    resource = None
 
 # Internal libs
 from hypershell.core.config import default, config as _config
@@ -151,7 +158,8 @@ class SecureListener:
     of the stock listener so this class slots into :data:`listener_client`.
 
     A listener given its own configuration with :meth:`serve_with` builds its server context from
-    it and never reads the process-wide one; otherwise it uses the process-wide context.
+    it and never reads the process-wide one; otherwise it uses the process-wide context. When its own
+    context cannot be built, it says so once at ERROR and every connection fails closed.
     """
 
     def __init__(self: SecureListener,
@@ -175,6 +183,7 @@ class SecureListener:
         self._last_accepted = None
         self._tls: Optional[TLSConfig] = None
         self._context: Optional[ssl.SSLContext] = None
+        self._context_failed = False
         # `authkey` is part of the stock Listener interface but unused here; the manager
         # performs the challenge handshake explicitly after we hand back the connection.
         self._authkey = authkey
@@ -191,13 +200,21 @@ class SecureListener:
         """Use a server context built from `cfg` (on first accept) instead of the process-wide one."""
         self._tls = cfg
         self._context = None
+        self._context_failed = False
 
     def _server_context(self: SecureListener) -> ssl.SSLContext:
         """This listener's own server context when it has a configuration, else the process-wide one."""
         if self._tls is None:
             return get_server_context()
         if self._context is None:
-            self._context = build_server_context(self._tls)
+            try:
+                self._context = build_server_context(self._tls)
+            except Exception as error:
+                if not self._context_failed:
+                    self._context_failed = True
+                    log.error(f'Queue server cannot set up TLS and refuses every connection '
+                              f'({error.__class__.__name__}: {error})')
+                raise
         return self._context
 
     def accept(self: SecureListener) -> SecureConnection:
@@ -339,6 +356,24 @@ def unsupported_internals() -> List[str]:
 # Seconds between checks of the halt flag in the in-process accept loop
 POLL: Final[float] = 0.25
 
+# Descriptors the in-process server keeps free for its own files (database, logs) by refusing
+# new connections that would use them
+RESERVE: Final[int] = 32
+
+# Seconds between warnings about refused connections; refusals in between are logged at DEBUG
+REFUSAL_WARNING_INTERVAL: Final[float] = 60.0
+
+# Accept errors that mean the process (or system) is out of descriptors
+OUT_OF_DESCRIPTORS: Final[Tuple[int, ...]] = (errno.EMFILE, errno.ENFILE)
+
+
+def _open_file_limit() -> Optional[int]:
+    """The soft open-file limit of this process, or None when there is none."""
+    if resource is None:
+        return None
+    soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    return None if soft == resource.RLIM_INFINITY else soft
+
 
 def _listening_socket(listener) -> socket.socket:
     """The bound socket behind `listener`: our own for TLS, the stock listener's otherwise."""
@@ -375,6 +410,10 @@ class _InProcessServer(Server):
     The accept loop is our own: unlike ``serve_forever`` it never exits the process or touches
     ``sys.stdout``/``sys.stderr``, and :meth:`stop` releases the port and cuts live connections
     without waiting on any thread.
+
+    Connections never hold the last :data:`RESERVE` descriptors below the open-file limit: one that
+    would is closed at once, so the server's own files keep working. An accept that fails for want of
+    descriptors is retried after a pause.
     """
 
     def __init__(self: _InProcessServer, registry: Dict[str, tuple], address: Tuple[str, int],
@@ -393,6 +432,7 @@ class _InProcessServer(Server):
         self._halted = False
         self._live = set()
         self._lock = threading.Lock()
+        self._warned_at: Optional[float] = None
 
     def serve(self: _InProcessServer) -> None:
         """Accept connections until stopped, one daemon handler thread per connection."""
@@ -407,6 +447,12 @@ class _InProcessServer(Server):
                     except Exception as error:
                         # A failed accept (reset, handshake or TLS error, closed listener) drops that peer only.
                         log.debug(f'Queue server dropped a connection: {error!r}')
+                        if isinstance(error, OSError) and error.errno in OUT_OF_DESCRIPTORS:
+                            # The peer stays queued, so the socket stays readable: pause before retrying
+                            time.sleep(POLL)
+                        continue
+                    if not self._admits(conn):
+                        conn.close()
                         continue
                     with self._lock:
                         if self._halted:
@@ -418,6 +464,21 @@ class _InProcessServer(Server):
         except Exception as error:
             if not self._halted:
                 log.error(f'Queue server stopped accepting connections: {error!r}')
+
+    def _admits(self: _InProcessServer, conn) -> bool:
+        """Whether `conn` leaves the reserved descriptors free; a refusal warns at most once per interval."""
+        limit = _open_file_limit()
+        if limit is None or conn.fileno() < limit - RESERVE:
+            return True
+        message = (f'Refusing new queue connections: open files near the limit of {limit} '
+                   f'({RESERVE} kept for the server)')
+        now = time.monotonic()
+        if self._warned_at is None or now - self._warned_at >= REFUSAL_WARNING_INTERVAL:
+            self._warned_at = now
+            log.warning(message)
+        else:
+            log.debug(message)
+        return False
 
     def handle_request(self: _InProcessServer, conn) -> None:
         """Serve one connection, then forget and close it."""

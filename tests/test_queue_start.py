@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Starting a queue server: TLS isolation within one process, and failures surfaced at start."""
+"""Starting a queue server: TLS isolation within one process, and failures surfaced to the operator."""
 
 
 # Type annotations
@@ -11,13 +11,15 @@ from typing import Iterator, List, Optional
 # Standard libs
 import os
 import sys
+import time
 import errno
 import socket
 import secrets
 import textwrap
 import threading
 from pathlib import Path
-from subprocess import run
+from signal import SIGINT
+from subprocess import run, Popen, STDOUT, TimeoutExpired
 
 # External libs
 from cmdkit.app import exit_status
@@ -183,3 +185,40 @@ def test_server_cli_unsupported_internals_exits(temp_site: Path) -> None:
     assert len(lines) == 1, output
     assert 'multiprocessing internals are not supported' in lines[0], output
     assert 'Server listening' not in output
+
+
+@mark.integration
+def test_server_cli_tls_context_failure_is_logged(temp_site: Path) -> None:
+    """``hs server`` whose TLS context cannot be built says so once at ERROR under the default log level."""
+    site = Path(str(temp_site))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    key = secrets.token_hex(16)
+    env = {name: value for name, value in os.environ.items() if name != 'HYPERSHELL_LOGGING_LEVEL'}
+    address = ['-H', '127.0.0.1', '-p', str(port), '-k', key]
+    log_path = site / 'server.log'
+    with open(log_path, mode='w') as stream:
+        server = Popen(['hs', 'server', str(create_taskfile(site, ['echo a'])), *address, '--tls-cert', '<none>'],
+                       cwd=site, env=env, stdout=stream, stderr=STDOUT)
+    try:
+        deadline = time.monotonic() + DEADLINE
+        while 'Server listening' not in log_path.read_text() and server.poll() is None:
+            assert time.monotonic() < deadline, log_path.read_text()
+            time.sleep(0.1)
+        for _ in range(2):
+            client = run(['hs', 'client', *address], cwd=site, env=env, capture_output=True, text=True,
+                         timeout=DEADLINE)
+            assert client.returncode != exit_status.success, client.stdout + client.stderr
+    finally:
+        if server.poll() is None:
+            server.send_signal(SIGINT)
+        try:
+            server.wait(timeout=DEADLINE)
+        except TimeoutExpired:
+            server.kill()
+            server.wait()
+    output = log_path.read_text()
+    errors = [line for line in output.splitlines() if 'ERROR' in line]
+    assert len(errors) == 1, output
+    assert 'TLSConfig.cert and TLSConfig.key are required for the server side' in errors[0], output

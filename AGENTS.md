@@ -275,7 +275,11 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   install (`core/tls.py` `install_process_context`), so a same-process client with another TLS
   config cannot affect it. The wire, auth and TLS behaviour are those of the stock manager,
   unchanged. A failure to start serving (unsupported CPython internals, bind or listen error)
-  raises `QueueServerError` from `QueueServer.start`, which `ServerThread.start` re-raises.
+  raises `QueueServerError` from `QueueServer.start`, which `ServerThread.start` re-raises. Since
+  every connection's descriptor lives in the server process, the accept loop refuses a connection
+  that would use the last `RESERVE` descriptors below the soft open-file limit (one WARNING per
+  interval), so the database and logs keep working; a server TLS context that cannot be built is
+  logged once at ERROR and connections fail closed.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
   mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,
