@@ -72,6 +72,17 @@ row's owner and in-flight state closes the corruption without needing any new tr
 *Horizon: near-term · Depends on: — · Refs: prerequisite for relay (R5/R6 inherit the return path)*
 **Seed:** [`issues/writeback-scoped-conditional.md`](issues/writeback-scoped-conditional.md)
 
+## A late result can reopen a retried row
+
+One concrete path through the writeback hole above. An evicted client's late result writes
+`retried=False` and `next_id=None` back onto a row the scheduler has already retried, so the next
+`Task.next` tries a second retry with the same `previous_id` and hits the UNIQUE constraint. Found
+by reading, not yet reproduced; the seed asks for the test first. The scoped writeback probably
+closes it, in which case this retires with that cycle.
+
+*Horizon: near-term · Depends on: — · Refs: writeback fix (likely subsumes it)*
+**Seed:** [`issues/late-result-resets-retried.md`](issues/late-result-resets-retried.md)
+
 ## No process-group ownership; SIGTERM and Ctrl-C tear down without cleanup
 
 The kill escalation ladder is well built but targets only the `sh` wrapper, so walltime does not
@@ -147,6 +158,26 @@ over-large task to a fitter node — is answered by zones, not by fleet-capabili
 
 *Horizon: mid-term · Depends on: — · Refs: zone (for the routing half)*
 **Seed:** [`issues/resource-error-terminal-and-retry-defaults.md`](issues/resource-error-terminal-and-retry-defaults.md)
+
+## A restarted run stops before a pending retry
+
+`--restart` into a database whose only unfinished work is a retryable failure stops at START,
+because the "anything left?" check counts only incomplete rows. The retry is never made and the run
+exits 0. LOAD now holds a run open for a pending retry; START does not. Pre-existing, and found by
+the review of the group-advance fix.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/` (review P1)*
+**Seed:** [`issues/restart-pending-retry.md`](issues/restart-pending-retry.md)
+
+## Eager mode can bundle the same retry twice
+
+With eager retries and room left in the bundle, `Task.next` lists each new retry row twice: it
+creates the retry, then tops the bundle up with unscheduled rows, and the fresh retry is one of
+them. A client may receive the same task twice in one bundle. Whether it then runs twice is
+untested; the seed asks for that test first.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
+**Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
 ## Docs and runtime surfacing
 
