@@ -60,3 +60,17 @@ is skipped by the parser):
 - **Skill cause:** Step 6 and the TECH template define `depends_on` only between phases of the same FSM. They have no field or convention for a precondition outside the FSM, so `next_phase.py` reports P6 as actionable even though nothing local can make it pass. Neither the methodology nor the template mentions the run-A/run-B split.
 - **Recommended fix:** Add an optional phase field, e.g. `waits_on: "ci:<workflow>@HEAD" | "landed:<slug>"`. `next_phase.py` would report such a phase as `waiting`, not actionable, until the condition is checkable. Document the run-A/run-B split for CI-evidence phases in Step 6.
 - **Confidence:** med · **Effort:** medium
+
+## F4 — "Regenerate the man pages in the same commit" conflicts with man pages being a release-time rebuild
+`origin=hs-build:P5 severity=low category=missing-guidance status=open target=.agents/factory/invariants.md`
+- **What happened:** P5's checklist (from PLAN §2.7, citing invariants §12) says to regenerate `share/man/man1/*.1` with the help-text change. There is no in-repo command for it, and a full `sphinx-build -b man` also pulls in every doc change since the last release (the `card` format, `--part`, a new `.TH` date), because man pages are otherwise rebuilt only at release (`AGENTS.md`: `release` category, `/hs-release`). The build applied only this cycle's two hunks from the generated output to the three pages.
+- **Skill cause:** §12 names `docs/_include/*.rst` and `share/` completions as same-commit outputs but says nothing about man pages, and `hs-plan` has no guidance on whether a cycle touches them. The two policies (same-commit vs release rebuild) are never reconciled.
+- **Recommended fix:** State one rule in §12 and `AGENTS.md` §Docs: either man pages are release-only (cycles leave them alone) or a cycle patches only its own hunks. Name the build command (`sphinx-build -b man docs <out>`) where it applies.
+- **Confidence:** med · **Effort:** small
+
+## F5 — The docs verify gate can't run in a sandbox that forbids Unix-socket binds
+`origin=hs-build:P5 severity=low category=tooling status=open target=docs/conf.py`
+- **What happened:** `sphinx-build -E -b html docs docs/_build` failed at start-up: the `sphinx_sitemap` extension starts a `multiprocessing` manager, which binds a Unix socket, and the agent sandbox denies that. The gate was run as `sphinx-build -E -b html -D extensions=<the conf.py list minus sphinx_sitemap> docs <scratch dir>`; it reported only the two known toctree warnings.
+- **Skill cause:** The phase gate and `AGENTS.md` §Docs give one build command with no fallback for restricted environments, and the sitemap extension adds a process-level requirement that has nothing to do with checking warnings.
+- **Recommended fix:** Load `sphinx_sitemap` only when building for publication (e.g. gated on an env var set by the docs host), or document the `-D extensions=…` form as the sandbox-safe warnings check.
+- **Confidence:** med · **Effort:** small

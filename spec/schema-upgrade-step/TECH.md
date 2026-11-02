@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -76,7 +76,7 @@ phases:
 - id: P5
   name: Docs and the amended retry-model invariant (after group-advance-retry-gate
     lands)
-  status: pending
+  status: done
   satisfies:
   - R7
   - R8
@@ -344,7 +344,7 @@ work on upgraded databases.
 `group-advance-retry-gate` has landed on `develop` and this branch is rebased onto it. If
 `Task.query_retryable` is absent, STOP and report; don't write the R8 text against the old code.
 
-- [ ] In `AGENTS.md`:
+- [x] In `AGENTS.md`:
   - Replace the *Retry model* paragraph's first sentence with the PLAN §2.7 text. Keep the
     sibling's `attempts == max_retries + 1` and `CANCEL_STATUS` sentences.
   - Amend the `data/model.py` footgun bullet: drop "`previous_id`/`next_id` are UNIQUE", and state
@@ -353,18 +353,18 @@ work on upgraded databases.
   - Add a "Data layer specifics" bullet on `upgradedb()`: it runs from `initdb`/`checkdb`, adds
     only, logs INFO per change, and new columns must be nullable or carry a `server_default`.
   - Fix `InitDBApp`'s location at line 82.
-- [ ] `.agents/factory/invariants.md` §3 gets the same amendment, split into two bullets per
+- [x] `.agents/factory/invariants.md` §3 gets the same amendment, split into two bullets per
   [research/06](research/06-retry-guard.md#draft-invariant-text).
-- [ ] `docs/_include/database.rst` §Initialization (and `database_alt.rst`) describe:
+- [x] `docs/_include/database.rst` §Initialization (and `database_alt.rst`) describe:
   - the upgrade in place on first use, on both providers;
   - additions only, plus the one PostgreSQL constraint removal;
   - a brief exclusive lock on PostgreSQL;
   - pre-2.9 SQLite databases keeping the chain constraints, worded per PLAN §5 Q1. Default:
     "no effect on behaviour in normal operation".
-- [ ] `INITDB_HELP` and the `InitDBApp` docstring get one line on the upgrade on first use. In the
+- [x] `INITDB_HELP` and the `InitDBApp` docstring get one line on the upgrade on first use. In the
   same commit, regenerate `docs/_include/initdb_*.rst` and `share/man/man1/{hs,hsx,hyper-shell}.1`
   (AGENTS.md §Docs, invariants §12). The completions don't change.
-- [ ] `docs/api/data.rst` gets `upgradedb` and the sentence "API callers run `ensuredb()` first".
+- [x] `docs/api/data.rst` gets `upgradedb` and the sentence "API callers run `ensuredb()` first".
 - **Verify:**
   - the sibling's `query_retryable` exists;
   - no "UNIQUE chain" or "are UNIQUE." remains in `AGENTS.md` or `invariants.md`;

@@ -195,6 +195,7 @@ Usage:
 INITDB_HELP = f"""\
 {INITDB_USAGE}
   For SQLite this happens automatically.
+  An existing database from an earlier release is upgraded in place on first use.
   See also --initdb for the `hs cluster` command.
 
   The available special actions are mutually exclusive.
@@ -214,7 +215,7 @@ Options:
 
 
 class InitDBApp(Application):
-    """Initialize database (not needed for SQLite/Turso)."""
+    """Initialize or upgrade database (automatic for SQLite/Turso)."""
 
     interface = Interface(INITDB_PROGRAM, INITDB_USAGE, INITDB_HELP)
     ALLOW_NOARGS = True

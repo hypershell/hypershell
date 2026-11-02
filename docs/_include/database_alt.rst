@@ -8,6 +8,15 @@ This can be entirely through environment variables or within files.
 SQLite is automatically initialized upon opening the connection but
 Postgres must be explicitly initialized via ``hs initdb`` or at launch with
 the ``--initdb`` command-line option.
+An existing database created by an earlier release is upgraded in place on first use,
+for both SQLite and Postgres. The upgrade only adds missing tables, columns, and indexes and never
+rewrites existing tasks; on Postgres it also drops the ``UNIQUE`` constraints on the retry-chain
+columns, and holds a brief exclusive lock while it runs. A SQLite database created by an
+earlier release (2.8, or the 2.9.0a1 pre-release) keeps those constraints, with no effect on
+behaviour in normal operation. Only in the rare cases where a failed task could be retried
+twice (two servers on one database, which is not supported; a server killed while scheduling a
+retry; a task's ``retried`` flag reset after the fact) does it reject the second retry with an
+error, where a newer database records it.
 
 SQLite only needs the local file path.
 
