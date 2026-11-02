@@ -37,12 +37,17 @@ stdout" that cycle diagnosed, `"1"` missing from captured output, was this same 
 final attempt that would have printed `"1"` was never scheduled. Moving the test onto authoritative
 state is what exposed the defect as a row-count mismatch.
 
+The same window exists on the scheduler's **stop path**. When `Task.next` comes back empty,
+`load_bundle` first checks `Task.count_remaining() == 0`, which counts only incomplete rows, so a
+retryable failure committed in that gap sends a non-`forever` run to FINAL without its retry, in
+the last group or in a run with no groups at all.
+
 ## Outcome / vision
 
 A task group advances only after every retryable failure in it has been retried, whatever the
-timing between the scheduler and the result writeback. The integration test passes reliably
-without being touched. A deterministic unit test pins the interleaving, so the defect cannot
-return unnoticed.
+timing between the scheduler and the result writeback, and a run stops only once no retryable
+failure is pending. The integration test passes reliably without being touched. A deterministic unit test pins the interleaving, so the defect cannot
+return unnoticed. A second one pins the stop-path interleaving.
 
 ## Acceptance criteria (the contract)
 
@@ -53,18 +58,26 @@ return unnoticed.
 - **R2** — WHILE a group holds a failed task (non-zero `exit_status`, not `CANCEL_STATUS`) that
   has retries remaining and has not been retried, the server SHALL NOT advance to the next group.
   It SHALL NOT log `Completed task group N`, and it SHALL NOT treat the group as halted on failure.
-- **R3** — The failures that hold a group as "awaiting retry" SHALL be exactly the failures the
-  scheduler would select for retry under the same `attempts` value. A task the scheduler would
-  retry always holds its group, and a task that holds its group is always one the scheduler will
-  retry.
+- **R3** — One retryable-failure predicate SHALL govern both decisions, group advance and stop.
+  The failures that hold a group as "awaiting retry", or keep a run from stopping, SHALL be exactly
+  the failures the scheduler would select for retry under the same `attempts` value. A task the
+  scheduler would retry always holds its group and the run, and a task that holds either is always
+  one the scheduler will retry.
 - **R4** — A regression test tagged `unit` SHALL replay the R1 interleaving deterministically,
   without sleeps or timing. It SHALL fail on `c1d4470` and pass with the fix.
 - **R5** — Existing gating behaviour SHALL be unchanged: a group whose failures have exhausted
   their retries still stops the server (non-`forever`) or waits (`forever`); a cancelled task
   neither holds nor halts its group; runs with `attempts == 1` behave as before; and a group whose
-  retried task succeeds advances as before.
+  retried task succeeds advances as before; and runs with no failures reach FINAL exactly as
+  before.
 - **R6** — `tests/test_groups.py::test_group_failed_task_with_retries` SHALL pass unmodified,
   with 5 rows, across the CI matrix (Python 3.11–3.14).
+- **R7** — WHEN a task fails with retries remaining, and that failure is recorded after the
+  scheduler has found nothing to schedule but before it decides whether the run is finished, a
+  non-`forever` server SHALL still create and run that retry before reaching FINAL. This holds in
+  the last group and in runs without groups.
+- **R8** — A second regression test tagged `unit` SHALL replay the R7 (stop-path) interleaving
+  deterministically, without sleeps or timing. It SHALL fail on `c1d4470` and pass with the fix.
 
 ## Non-goals (no-gos)
 
@@ -74,7 +87,7 @@ return unnoticed.
 - Changing the stall-by-design behaviour for exhausted failures (AGENTS.md, "Group-gating can stall
   by design").
 - Reworking Scheduler/Receiver threading, transactions, or locking. The fix is in the gating
-  decision, not the concurrency model.
+  and stop decisions, not the concurrency model.
 - Making the run's exit status reflect abandoned or failed tasks
   (`issues/run-exit-status-failure-aware.md`).
 - Retry policy for never-ran sentinels (`issues/resource-error-terminal-and-retry-defaults.md`).
@@ -96,15 +109,10 @@ return unnoticed.
   the new hold uses the same value as `select_failed`, which is what R3 pins. `server.py`'s
   derivation of `attempts` and `select_failed` itself stay as they are. The `CANCEL_STATUS`
   exclusion is mandatory (AGENTS.md: every failure/retry query filters it).
-- **[NEEDS CLARIFICATION: The same window exists on the scheduler's stop path, and this GOAL
-  doesn't yet cover it. When `Task.next` returns nothing, `load_bundle` first checks
-  `Task.count_remaining() == 0` and goes to FINAL. `count_remaining` counts only incomplete rows.
-  So if a retryable failure is committed between `Task.next` and that check, in the last group or
-  in an ungrouped run, the server stops and the retry is lost. This is the same skipped retry, and
-  it reaches more users because most runs have no groups. It is a shaping-time reading of
-  `server.py` and has not been replayed. Should this cycle (a) also hold the stop check on a
-  retryable failure, which adds a requirement and a second regression test, or (b) leave it out,
-  with `hs-plan` confirming the window and recording it as an `issues/` seed?]**
+- **2026-11-01 — Stop path in scope** (foreman, as judge under the SC26 mandate; same defect class
+  as Q13a's "fix the gating predicate"): the scheduler's stop check SHALL NOT end a run while a
+  retryable failure is pending. Window verified by reading: `count_remaining` filters only
+  `completion_time IS NULL`.
 
 ## Related materials
 
