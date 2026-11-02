@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple
 # Standard libs
 import os
 import re
+import sys
 import time
 import socket
 import sqlite3
@@ -249,6 +250,114 @@ def test_concurrent_first_use(temp_site: Path, journal: str) -> None:
     assert len(upgraded) == 1, results
     assert sorted(stderr for _, _, stderr in results)[:count - 1] == [''] * (count - 1), results
     assert_schema_current(path)
+
+
+WAIT_LINE = re.compile(r'^INFO \[hypershell\.data\.upgrade\] Waiting for .+ \(\d+s elapsed\)$')
+SCALED_WAIT = ('import sys, hypershell\n'
+               'from hypershell.data import upgrade\n'
+               'upgrade.LOCK_WAIT_SLICE, upgrade.LOCK_WAIT_CEILING = {slice}, {ceiling}\n'
+               'sys.exit(hypershell.main([\'list\', \'--count\']))\n')
+
+
+def hold_lock(path: Path, mode: str) -> sqlite3.Connection:
+    """A raw connection holding `BEGIN {mode}` on the database (the caller ends the transaction)."""
+    conn = sqlite3.connect(str(path), isolation_level=None, timeout=0)
+    conn.execute(f'BEGIN {mode}')
+    return conn
+
+
+def finish(proc: Popen, timeout: float = 120) -> Tuple[int, List[str], List[str]]:
+    """Wait for `proc` and return its exit status and output lines, as `main_lines` does."""
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise
+    return (proc.returncode,
+            [line.strip() for line in stdout.decode().strip().split('\n')],
+            [line.strip() for line in stderr.decode().strip().split('\n')])
+
+
+@mark.integration
+def test_first_start_waits_out_exclusive_lock(temp_site: Path) -> None:
+    """A command started while a peer holds the database exclusively (past SQLite's default 5 s) waits, then succeeds."""
+    path = copy_fixture(temp_site)
+    holder = hold_lock(path, 'EXCLUSIVE')
+    try:
+        proc = Popen(['hs', 'list', '--count'], stdout=PIPE, stderr=PIPE, env=os.environ)
+        time.sleep(7)
+        alive = proc.poll() is None
+    finally:
+        holder.execute('ROLLBACK')
+        holder.close()
+    rc, stdout, stderr = finish(proc)
+    assert alive, stderr
+    assert (rc, stdout) == (exit_status.success, ['7']), stderr
+    assert upgrade_lines(stderr), stderr
+    assert_schema_current(path)
+
+
+@mark.integration
+def test_waits_for_slow_peer_upgrade(temp_site: Path) -> None:
+    """A peer upgrade that outlasts many wait slices is waited out, with one INFO line per slice; no error."""
+    from sqlalchemy import create_engine
+    from hypershell.data import upgrade
+    from hypershell.data.model import Entity
+    path = copy_fixture(temp_site)
+    engine = create_engine(f'sqlite:///{path}')
+    try:
+        with engine.connect() as conn:
+            steps = upgrade._plan(conn, Entity.metadata).steps
+    finally:
+        engine.dispose()
+    assert steps
+    holder = hold_lock(path, 'IMMEDIATE')
+    try:
+        for step in steps:
+            holder.execute(step.sql)
+        proc = Popen([sys.executable, '-c', SCALED_WAIT.format(slice=0.25, ceiling=60)],
+                     stdout=PIPE, stderr=PIPE, env=os.environ)
+        time.sleep(2)
+        holder.execute('COMMIT')
+    finally:
+        if holder.in_transaction:
+            holder.execute('ROLLBACK')
+        holder.close()
+    rc, stdout, stderr = finish(proc)
+    assert (rc, stdout) == (exit_status.success, ['7']), stderr
+    waits = [line for line in stderr if WAIT_LINE.match(line)]
+    assert len(waits) >= 2, stderr
+    assert upgrade_lines(stderr) == [], stderr
+    assert_schema_current(path)
+
+
+@mark.integration
+def test_gives_up_past_ceiling(temp_site: Path) -> None:
+    """A lock held past the wait ceiling fails with one accurate CRITICAL line, no traceback, schema unchanged."""
+    path = copy_fixture(temp_site)
+    before = sqlite_schema(path)
+    holder = hold_lock(path, 'IMMEDIATE')
+    try:
+        proc = Popen([sys.executable, '-c', SCALED_WAIT.format(slice=0.2, ceiling=1)],
+                     stdout=PIPE, stderr=PIPE, env=os.environ)
+        deadline = time.monotonic() + 15
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+    finally:
+        holder.execute('ROLLBACK')
+        holder.close()
+    rc, stdout, stderr = finish(proc)
+    assert rc == exit_status.runtime_error, stderr
+    assert stdout == ['']
+    assert stderr[-1] == (
+        f'CRITICAL [hypershell.task] SchemaUpgradeError: Cannot upgrade database schema: gave up after 1 s '
+        f'waiting for another session to release the database, likely a concurrent schema upgrade. '
+        f'Check which processes have {path} open (e.g., with lsof). '
+        f'The schema is unchanged; retry once the lock is released.')
+    assert stderr[:-1] and all(WAIT_LINE.match(line) for line in stderr[:-1]), stderr
+    assert list(Path(temp_site).rglob('exception-*.log')) == []
+    assert sqlite_schema(path) == before
 
 
 @mark.integration

@@ -3,10 +3,10 @@ slug: schema-upgrade-step
 title: 'Open 2.8 databases in 2.9: an idempotent schema-upgrade step'
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/schema-upgrade-step
 base: develop
-current_phase: done
+current_phase: P5
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -76,7 +76,7 @@ phases:
 - id: P5
   name: Docs and the amended retry-model invariant (after group-advance-retry-gate
     lands)
-  status: done
+  status: in_progress
   satisfies:
   - R7
   - R8
@@ -92,7 +92,7 @@ phases:
     docs docs/_build
 - id: P6
   name: 'PostgreSQL CI evidence (run B: external wait on a pushed branch)'
-  status: done
+  status: pending
   satisfies:
   - R1
   - R2
@@ -274,6 +274,26 @@ refused before any DDL.
 - **Touches:** `src/hypershell/data/upgrade.py` (new), `data/__init__.py`, `data/model.py`,
   `core/exceptions.py`, `tests/test_data/test_upgrade.py`, `tests/test_upgrade_cli.py`.
 
+### P2 remediation — review cycle 1 (C1, P1)
+
+Reopened by [`REVIEW.md`](REVIEW.md) cycle 1 (changes-requested) and its human triage. **Amends the
+lock design above:** the fixed `SQLITE_BUSY_TIMEOUT` (60 s) and `POSTGRES_LOCK_TIMEOUT` (30 s)
+are replaced by one sliced wait policy, `LOCK_WAIT_SLICE` (30 s) and `LOCK_WAIT_CEILING` (15 min).
+
+- [x] Red first: `tests/test_upgrade_cli.py` gains `test_first_start_waits_out_exclusive_lock`
+  (C1: `BEGIN EXCLUSIVE` held 7 s, `hs list --count` started meanwhile must succeed),
+  `test_waits_for_slow_peer_upgrade` and `test_gives_up_past_ceiling` (P1, scaled-down slice and
+  ceiling in a subprocess). All three fail on `375a55e`.
+- [x] `upgrade.py`: every lock wait in the step, the pre-check's reads included, is bounded by
+  one slice; when it runs out the attempt rolls back, logs `Waiting for … (Ns elapsed)` at INFO,
+  and retries, re-planning under the lock. The uncontended pre-check keeps the connection's own
+  busy timeout and sends nothing but the reflection. Past the ceiling, `SchemaUpgradeError` names
+  what was waited on (the database file on SQLite; the advisory lock or a table lock on
+  PostgreSQL) and how to find the holder. The "older server" guess is gone.
+- [x] PostgreSQL (CI-gated): `test_lock_timeout_is_actionable` retuned to the ceiling;
+  `test_waits_for_slow_peer_upgrade` and `test_gives_up_past_ceiling` added (advisory lock).
+- [x] `docs/_include/database.rst` and `database_alt.rst` describe the wait and the ceiling.
+
 ## Phase P3 — PostgreSQL: CI job, template builder, gated tests (run A)
 
 **Satisfies:** R1–R6, R9 on PostgreSQL · **Depends on:** P2
@@ -376,6 +396,14 @@ work on upgraded databases.
   `docs/_include/initdb_*.rst`, `docs/api/data.rst`, `share/man/man1/*.1`,
   `src/hypershell/data/__init__.py` (help text only).
 
+### P5 remediation — review cycle 1 (out-of-diff drift)
+
+- [ ] `ROADMAP.md`, `issues/late-result-resets-retried.md` and `issues/writeback-scoped-conditional.md`:
+  a doubled retry hits the UNIQUE constraint only on a pre-2.9 SQLite database and is written
+  silently elsewhere, per the amended *Retry model*.
+- [ ] `.agents/factory/review-rubric.md`: the human-gate list names the amended invariant (one retry
+  row per failure: the single Scheduler and the `retried` filter) in place of "retry-chain UNIQUE".
+
 ## Phase P6 — PostgreSQL CI evidence (run B)
 
 **Satisfies:** R1–R6, R9 on PostgreSQL · **Depends on:** P3, P4, P5
@@ -403,6 +431,10 @@ green. Because a missing template fails rather than skips, green means every Pos
   `success`.
 - **Touches:** whatever the evidence requires. Expect `src/hypershell/data/upgrade.py` and
   `tests/test_upgrade_postgres.py` only.
+- [ ] **Reopened by the cycle-1 remediation.** The P2 remediation changed the PostgreSQL lock
+  path (sliced `lock_timeout`, advisory-lock wait) and added two PostgreSQL tests, which have not
+  run anywhere: no local server. The run above no longer covers HEAD. The foreman pushes again;
+  expect `29 passed` per matrix row.
 
 ---
 

@@ -11,7 +11,8 @@ the ``--initdb`` command-line option.
 An existing database created by an earlier release is upgraded in place on first use,
 for both SQLite and Postgres. The upgrade only adds missing tables, columns, and indexes and never
 rewrites existing tasks; on Postgres it also drops the ``UNIQUE`` constraints on the retry-chain
-columns, and holds a brief exclusive lock while it runs. A SQLite database created by an
+columns. It holds an exclusive lock while it runs (minutes, on a large database), and processes
+started meanwhile wait for it. A SQLite database created by an
 earlier release (2.8, or the 2.9.0a1 pre-release) keeps those constraints, with no effect on
 behaviour in normal operation. Only in the rare cases where a failed task could be retried
 twice (two servers on one database, which is not supported; a server killed while scheduling a

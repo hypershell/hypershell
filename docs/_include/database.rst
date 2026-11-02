@@ -110,11 +110,12 @@ An existing database created by an earlier release is upgraded in place on first
 for both SQLite and Postgres; there is no separate migration step. The upgrade only adds what
 is missing (tables, columns, and indexes) and never drops or rewrites existing tasks. The one
 removal is on Postgres, where the ``UNIQUE`` constraints on the retry-chain columns
-(``previous_id`` and ``next_id``) are dropped. On Postgres the upgrade holds a brief exclusive
-lock on the tables while it adds columns and builds indexes; concurrent processes wait for it and
-then carry on. If another session holds a lock on the tables for too long (e.g., an older server
-left idle in a transaction), the upgrade fails with an error that says so and leaves the schema
-unchanged; stop that session and try again.
+(``previous_id`` and ``next_id``) are dropped. The upgrade holds an exclusive lock on the
+tables while it adds columns and builds indexes, which can take minutes on a large database.
+Processes started meanwhile wait for it, logging a line every 30 seconds, and then carry on.
+If the lock is still held after 15 minutes (e.g., by a session left idle in a transaction), the
+upgrade gives up with an error that names what it waited on and leaves the schema unchanged;
+find and stop that session, then try again.
 
 SQLite cannot drop a table constraint without rebuilding the table, so a SQLite database
 created by an earlier release (2.8, or the 2.9.0a1 pre-release) keeps those ``UNIQUE``

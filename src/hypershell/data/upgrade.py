@@ -13,10 +13,12 @@ The one removal it makes is the retired retry-chain uniqueness on PostgreSQL (se
 
 # Type annotations
 from __future__ import annotations
-from typing import Final, List, Optional, Tuple, FrozenSet
+from typing import Callable, Final, Iterator, List, Optional, Tuple, FrozenSet, TypeVar
 
 # Standard libs
 import re
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 # External libs
@@ -33,7 +35,7 @@ from hypershell.data.model import Entity
 
 # Public interface
 __all__ = ['upgrade_schema', 'SCHEMA_UPGRADE_LOCK_KEY', 'RETIRED_UNIQUE',
-           'SQLITE_BUSY_TIMEOUT', 'POSTGRES_LOCK_TIMEOUT', ]
+           'LOCK_WAIT_SLICE', 'LOCK_WAIT_CEILING', ]
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -49,10 +51,18 @@ SCHEMA_UPGRADE_LOCK_KEY: Final[int] = -4139901733377976503
 # rebuilding the table, so older SQLite databases keep them.
 RETIRED_UNIQUE: Final[FrozenSet[Tuple[str, str]]] = frozenset({('task', 'previous_id'), ('task', 'next_id')})
 
-# How long the step waits for a peer's lock: the SQLite write lock (milliseconds), and any
-# PostgreSQL lock the step needs (a PostgreSQL interval). Neither applies outside the step.
-SQLITE_BUSY_TIMEOUT: int = 60_000
-POSTGRES_LOCK_TIMEOUT: str = '30s'
+# How the step waits on a lock another session holds (seconds). Every lock wait in the step is
+# bounded by one slice. When a slice runs out the step rolls back, logs that it is still waiting,
+# and tries again, so a peer's long upgrade of a large table is waited out. Past the ceiling it
+# gives up with an error naming what it waited on. A lock dies with the session holding it, so
+# waiting cannot outlive a crashed peer. Neither bound applies outside the step.
+LOCK_WAIT_SLICE: float = 30.0
+LOCK_WAIT_CEILING: float = 900.0
+
+# What a lock wait is waiting on, for the log and for the error past the ceiling.
+WAIT_SQLITE: Final[str] = 'another session to release the database, likely a concurrent schema upgrade'
+WAIT_UPGRADE: Final[str] = 'a concurrent schema upgrade to finish'
+WAIT_TABLES: Final[str] = 'another session to release its lock on the tables'
 
 # A server default the database can apply to existing rows: a number, a quoted string,
 # NULL, TRUE, or FALSE (optionally in parentheses).
@@ -63,6 +73,17 @@ CONSTANT_DEFAULT: Final[re.Pattern] = re.compile(
 # Errors that mean a peer already applied the same change.
 DUPLICATE_MESSAGES: Final[Tuple[str, ...]] = ('duplicate column name', 'already exists')
 DUPLICATE_SQLSTATES: Final[FrozenSet[str]] = frozenset({'42701', '42P07', '23505'})
+
+
+T = TypeVar('T')
+
+
+class LockWait(Exception):
+    """A lock wait in the step ran out its slice; the attempt was rolled back."""
+
+    def __init__(self, waiting_for: str) -> None:
+        super().__init__(waiting_for)
+        self.waiting_for = waiting_for
 
 
 @dataclass(frozen=True)
@@ -89,8 +110,7 @@ def upgrade_schema(bind: Engine, metadata: MetaData = None) -> List[str]:
     place or when the change cannot be applied.
     """
     metadata = metadata if metadata is not None else Entity.metadata
-    with bind.connect() as conn:
-        plan = _plan(conn, metadata)
+    plan = _waiting(bind, lambda timeout: _check(bind, metadata, timeout), plain_first=True)
     if not plan.steps:
         log.trace('Database schema is current')
         return []
@@ -104,6 +124,25 @@ def upgrade_schema(bind: Engine, metadata: MetaData = None) -> List[str]:
         return _apply(bind, metadata)
     except DBAPIError as error:
         raise _wrap(error) from error
+
+
+def _check(bind: Engine, metadata: MetaData, timeout: Optional[float]) -> Plan:
+    """
+    The lock-free plan. A read blocked by a peer's lock waits at most `timeout` seconds; with
+    `timeout` None, SQLite keeps the connection's own busy timeout, so the uncontended check
+    sends nothing but the reflection.
+    """
+    with bind.connect() as conn:
+        if bind.dialect.name == 'sqlite':
+            if timeout is None:
+                with _waiting_for(WAIT_SQLITE):
+                    return _plan(conn, metadata)
+            with _sqlite_busy_timeout(conn, timeout), _waiting_for(WAIT_SQLITE):
+                return _plan(conn, metadata)
+        if bind.dialect.name == 'postgresql':
+            _set_lock_timeout(conn, LOCK_WAIT_SLICE if timeout is None else timeout)
+        with _waiting_for(WAIT_TABLES):
+            return _plan(conn, metadata)
 
 
 def _plan(conn: Connection, metadata: MetaData) -> Plan:
@@ -214,9 +253,9 @@ def _compile(element: object, conn: Connection) -> str:
 def _apply(bind: Engine, metadata: MetaData) -> List[str]:
     """Lock, re-plan, and apply the whole change in one transaction; log each change after commit."""
     if bind.dialect.name == 'sqlite':
-        plan = _apply_sqlite(bind, metadata)
+        plan = _waiting(bind, lambda timeout: _apply_sqlite(bind, metadata, timeout))
     else:
-        plan = _apply_transactional(bind, metadata)
+        plan = _waiting(bind, lambda timeout: _apply_transactional(bind, metadata, timeout))
     messages = [step.message for step in plan.steps]
     for message in messages:
         if plan.existing:
@@ -228,25 +267,34 @@ def _apply(bind: Engine, metadata: MetaData) -> List[str]:
     return messages
 
 
-def _apply_sqlite(bind: Engine, metadata: MetaData) -> Plan:
+def _apply_sqlite(bind: Engine, metadata: MetaData, timeout: float) -> Plan:
     """SQLite runs DDL in a transaction only under an explicit BEGIN, so the step issues its own."""
     with bind.connect() as conn:
         conn.execution_options(isolation_level='AUTOCOMMIT')
-        previous_timeout = conn.exec_driver_sql('PRAGMA busy_timeout').scalar()
-        conn.exec_driver_sql(f'PRAGMA busy_timeout = {int(SQLITE_BUSY_TIMEOUT)}')
-        committed = False
-        try:
-            _begin_sqlite(conn)
-            plan = _plan(conn, metadata)
-            for step in plan.steps:
-                conn.exec_driver_sql(step.sql)
-            conn.exec_driver_sql('COMMIT')
-            committed = True
-            return plan
-        finally:
-            if not committed:
-                _rollback_sqlite(conn)
-            conn.exec_driver_sql(f'PRAGMA busy_timeout = {int(previous_timeout)}')
+        with _sqlite_busy_timeout(conn, timeout), _waiting_for(WAIT_SQLITE):
+            committed = False
+            try:
+                _begin_sqlite(conn)
+                plan = _plan(conn, metadata)
+                for step in plan.steps:
+                    conn.exec_driver_sql(step.sql)
+                conn.exec_driver_sql('COMMIT')
+                committed = True
+                return plan
+            finally:
+                if not committed:
+                    _rollback_sqlite(conn)
+
+
+@contextmanager
+def _sqlite_busy_timeout(conn: Connection, timeout: float) -> Iterator[None]:
+    """Bound this connection's lock waits by `timeout` seconds, restoring its own setting after."""
+    previous = conn.exec_driver_sql('PRAGMA busy_timeout').scalar()
+    conn.exec_driver_sql(f'PRAGMA busy_timeout = {_milliseconds(timeout)}')
+    try:
+        yield
+    finally:
+        conn.exec_driver_sql(f'PRAGMA busy_timeout = {int(previous)}')
 
 
 def _begin_sqlite(conn: Connection) -> None:
@@ -269,17 +317,20 @@ def _rollback_sqlite(conn: Connection) -> None:
             log.debug(f'Rollback after failed schema upgrade: {_message(error)}')
 
 
-def _apply_transactional(bind: Engine, metadata: MetaData) -> Plan:
+def _apply_transactional(bind: Engine, metadata: MetaData, timeout: float) -> Plan:
     """Databases with transactional DDL: one transaction, serialized by an advisory lock on PostgreSQL."""
     with bind.connect() as conn:
         committed = False
         try:
             if bind.dialect.name == 'postgresql':
-                _lock_postgres(conn)
-            plan = _plan(conn, metadata)
-            for step in plan.steps:
-                conn.exec_driver_sql(step.sql)
-            conn.commit()
+                _set_lock_timeout(conn, timeout)
+                with _waiting_for(WAIT_UPGRADE):
+                    _lock_postgres(conn)
+            with _waiting_for(WAIT_TABLES):
+                plan = _plan(conn, metadata)
+                for step in plan.steps:
+                    conn.exec_driver_sql(step.sql)
+                conn.commit()
             committed = True
             return plan
         finally:
@@ -287,11 +338,71 @@ def _apply_transactional(bind: Engine, metadata: MetaData) -> Plan:
                 conn.rollback()
 
 
-def _lock_postgres(conn: Connection) -> None:
-    """Bound every lock wait in this transaction, then serialize with other upgraders."""
+def _set_lock_timeout(conn: Connection, timeout: float) -> None:
+    """Bound every PostgreSQL lock wait in this transaction by `timeout` seconds."""
     conn.execute(text('SELECT set_config(\'lock_timeout\', CAST(:timeout AS text), true)'),
-                 {'timeout': str(POSTGRES_LOCK_TIMEOUT)})
+                 {'timeout': f'{_milliseconds(timeout)}ms'})
+
+
+def _lock_postgres(conn: Connection) -> None:
+    """Serialize with other upgraders until this transaction ends."""
     conn.execute(text('SELECT pg_advisory_xact_lock(CAST(:key AS bigint))'), {'key': SCHEMA_UPGRADE_LOCK_KEY})
+
+
+def _milliseconds(timeout: float) -> int:
+    """A lock timeout in whole milliseconds, never zero (zero disables the timeout)."""
+    return max(1, int(timeout * 1000))
+
+
+@contextmanager
+def _waiting_for(what: str) -> Iterator[None]:
+    """Report a lock wait that ran out its slice as `LockWait`, naming what it waited on."""
+    try:
+        yield
+    except DBAPIError as error:
+        if _is_locked(error):
+            raise LockWait(what) from error
+        raise
+
+
+def _waiting(bind: Engine, attempt: Callable[[Optional[float]], T], plain_first: bool = False) -> T:
+    """
+    Run `attempt` with lock waits bounded by one slice, again after each slice that runs out,
+    logging each time, until `LOCK_WAIT_CEILING`; past it, raise `SchemaUpgradeError`.
+    With `plain_first`, the first attempt is given no timeout and keeps the connection's own.
+    """
+    start = time.monotonic()
+    plain = plain_first
+    while True:
+        remaining = LOCK_WAIT_CEILING - (time.monotonic() - start)
+        timeout = None if plain else min(LOCK_WAIT_SLICE, max(remaining, 0))
+        plain = False
+        try:
+            return attempt(timeout)
+        except LockWait as wait:
+            elapsed = time.monotonic() - start
+            if elapsed >= LOCK_WAIT_CEILING:
+                raise SchemaUpgradeError(_gave_up(bind, wait.waiting_for)) from wait
+            log.info(f'Waiting for {wait.waiting_for} ({elapsed:.0f}s elapsed)')
+
+
+def _gave_up(bind: Engine, what: str) -> str:
+    """The error past the wait ceiling: what was waited on, and how to find the holder."""
+    if bind.dialect.name == 'sqlite':
+        hint = f'Check which processes have {bind.url.database} open (e.g., with lsof).'
+    elif what == WAIT_UPGRADE:
+        hint = ('Find the upgrading session in pg_stat_activity, joined with pg_locks '
+                'where locktype = \'advisory\'.')
+    else:
+        hint = ('Find the session holding the lock in pg_stat_activity, joined with pg_locks '
+                '(e.g., one idle in transaction).')
+    return (f'Cannot upgrade database schema: gave up after {_duration(LOCK_WAIT_CEILING)} waiting for '
+            f'{what}. {hint} The schema is unchanged; retry once the lock is released.')
+
+
+def _duration(seconds: float) -> str:
+    """A wait bound for a message: minutes from one minute up, else seconds."""
+    return f'{seconds / 60:g} min' if seconds >= 60 else f'{seconds:g} s'
 
 
 def _sqlstate(error: DBAPIError) -> Optional[str]:
@@ -318,8 +429,4 @@ def _is_locked(error: DBAPIError) -> bool:
 
 def _wrap(error: DBAPIError) -> SchemaUpgradeError:
     """An actionable error for a failed upgrade; the transaction was rolled back."""
-    if _is_locked(error):
-        return SchemaUpgradeError('Cannot upgrade database schema: another session holds a lock on it '
-                                  '(an older server still running?). Stop it or retry. '
-                                  'The schema is unchanged.')
     return SchemaUpgradeError(f'Cannot upgrade database schema: {_message(error)}. The schema is unchanged.')

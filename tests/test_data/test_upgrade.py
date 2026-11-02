@@ -273,7 +273,7 @@ def test_repeat_check_does_not_wait(legacy_path: Path, monkeypatch) -> None:
     engine = sqlite_engine(legacy_path)
     upgrade_schema(engine)
     monkeypatch.setattr(hypershell.data, 'engine', engine)
-    monkeypatch.setattr(upgrade, 'SQLITE_BUSY_TIMEOUT', 100)
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_SLICE', 0.1)
     with Session(engine) as session:
         session.execute(text('UPDATE task SET waited = 1'))  # Uncommitted: holds the write lock.
         start = time.monotonic()

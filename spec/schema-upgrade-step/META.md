@@ -69,7 +69,7 @@ is skipped by the parser):
 - **Recommended fix:** State one rule in §12 and `AGENTS.md` §Docs: either man pages are release-only (cycles leave them alone) or a cycle patches only its own hunks. Name the build command (`sphinx-build -b man docs <out>`) where it applies.
 - **Confidence:** med · **Effort:** small
 
-## F5 — The docs verify gate can't run in a sandbox that forbids Unix-socket binds
+## F5 — The docs verify gate can't run in a sandbox that forbids Unix-socket binds · seen again
 `origin=hs-build:P5 severity=low category=tooling status=open target=docs/conf.py`
 - **What happened:** `sphinx-build -E -b html docs docs/_build` failed at start-up: the `sphinx_sitemap` extension starts a `multiprocessing` manager, which binds a Unix socket, and the agent sandbox denies that. The gate was run as `sphinx-build -E -b html -D extensions=<the conf.py list minus sphinx_sitemap> docs <scratch dir>`; it reported only the two known toctree warnings.
 - **Skill cause:** The phase gate and `AGENTS.md` §Docs give one build command with no fallback for restricted environments, and the sitemap extension adds a process-level requirement that has nothing to do with checking warnings.
@@ -89,3 +89,11 @@ is skipped by the parser):
 - **Skill cause:** The rubric copies invariant names instead of pointing at `invariants.md`, so an approved amendment there (R8 named only `AGENTS.md` and `invariants.md`) leaves the gate list stale.
 - **Recommended fix:** Rename the entry to the retry guard (`retried` filter + single Scheduler), or reference `invariants.md` sections instead of restating names. This renames the class; it does not weaken the gate.
 - **Confidence:** high · **Effort:** small
+- **Note (hs-build:P5 remediation):** the entry was renamed in this cycle at the foreman's direction; the structural fix (point at `invariants.md` instead of restating names) remains open.
+
+## F8 — Remediation mode reopens the failing phases but says nothing about evidence phases the fix invalidates
+`origin=hs-build:P2 severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** The cycle-1 fix changed the PostgreSQL lock path in `upgrade.py` and added PostgreSQL tests that only CI can run. P6 (CI evidence for `9aee1c7`) stayed `done`, so the FSM would have reached `in_review` claiming PostgreSQL evidence that no longer covers the code. P6 was reopened to `pending` by judgement.
+- **Skill cause:** Step 1.3 says to reopen the phase(s) whose `satisfies` covers the failing R-IDs, and stops there. A downstream phase whose gate is external evidence about the code (not a re-runnable command) silently goes stale, and nothing prompts re-checking it.
+- **Recommended fix:** In Step 1.3, add: "also reopen any `done` phase whose verify reads evidence pinned to an earlier code commit (CI runs, external drives) when the fix touches the code it covers; leave it `pending` for the external wait."
+- **Confidence:** med · **Effort:** small

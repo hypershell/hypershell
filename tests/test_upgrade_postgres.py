@@ -22,6 +22,7 @@ from typing import Callable, Dict, Iterator, List, Optional, Tuple
 import os
 import re
 import uuid
+import logging
 import threading
 from pathlib import Path
 
@@ -345,20 +346,88 @@ def test_failure_mid_step_rolls_back(pg_database, monkeypatch) -> None:
         engine.dispose()
 
 
+WAIT_MESSAGE = re.compile(r'^Waiting for .+ \(\d+s elapsed\)$')
+
+
+@fixture
+def upgrade_log() -> Iterator[List[Tuple[int, str]]]:
+    """(level, message) of every record the upgrade step logs."""
+    captured: List[Tuple[int, str]] = []
+
+    class ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append((record.levelno, record.getMessage()))
+
+    logger = logging.getLogger(upgrade.__name__)
+    handler, level = ListHandler(level=1), logger.level
+    logger.addHandler(handler)
+    logger.setLevel(1)
+    yield captured
+    logger.removeHandler(handler)
+    logger.setLevel(level)
+
+
 def test_lock_timeout_is_actionable(pg_database, monkeypatch) -> None:
-    """A third session holding `task` makes the step fail with an actionable error, schema unchanged."""
+    """A third session holding `task` past the wait ceiling fails the step with an accurate error, schema unchanged."""
     engine = database_engine(pg_database('hs283'))
-    monkeypatch.setattr(upgrade, 'POSTGRES_LOCK_TIMEOUT', '1s')
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_SLICE', 0.2)
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_CEILING', 1)
     holder = engine.connect()
     try:
         before = schema_signature(engine)
         holder.execute(text('SELECT 1 FROM task LIMIT 1'))  # Open transaction holding a lock on task.
-        with pytest.raises(SchemaUpgradeError, match='another session holds a lock'):
+        with pytest.raises(SchemaUpgradeError, match='gave up after 1 s waiting for another session to release '
+                                                     'its lock on the tables. Find the session'):
             upgrade_schema(engine)
         holder.rollback()
         assert schema_signature(engine) == before
     finally:
         holder.close()
+        engine.dispose()
+
+
+def test_waits_for_slow_peer_upgrade(pg_database, monkeypatch, upgrade_log) -> None:
+    """A peer upgrade that outlasts many wait slices is waited out, with one INFO line per slice; no error."""
+    engine = database_engine(pg_database('hs283'))
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_SLICE', 0.25)
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_CEILING', 60)
+    peer = engine.connect()
+    try:
+        upgrade._lock_postgres(peer)
+        steps = upgrade._plan(peer, Entity.metadata).steps
+        assert steps
+        for step in steps:
+            peer.exec_driver_sql(step.sql)
+        timer = threading.Timer(2, peer.commit)
+        timer.start()
+        assert upgrade_schema(engine) == []
+        timer.join()
+        waits = [message for level, message in upgrade_log if WAIT_MESSAGE.match(message)]
+        assert len(waits) >= 2, upgrade_log
+        assert all(level == logging.INFO for level, message in upgrade_log if WAIT_MESSAGE.match(message))
+        assert_schema_current(engine)
+    finally:
+        peer.close()
+        engine.dispose()
+
+
+def test_gives_up_past_ceiling(pg_database, monkeypatch, upgrade_log) -> None:
+    """A peer holding the upgrade lock past the wait ceiling fails the step with an accurate error, schema unchanged."""
+    engine = database_engine(pg_database('hs283'))
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_SLICE', 0.2)
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_CEILING', 1)
+    peer = engine.connect()
+    try:
+        before = schema_signature(engine)
+        upgrade._lock_postgres(peer)
+        with pytest.raises(SchemaUpgradeError, match='gave up after 1 s waiting for a concurrent schema upgrade '
+                                                     'to finish. Find the upgrading session'):
+            upgrade_schema(engine)
+        assert [level for level, message in upgrade_log if WAIT_MESSAGE.match(message)]
+        peer.rollback()
+        assert schema_signature(engine) == before
+    finally:
+        peer.close()
         engine.dispose()
 
 

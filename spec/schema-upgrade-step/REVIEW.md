@@ -130,3 +130,26 @@ CONFIRMED findings auto-loop to `hs-build`.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Human triage (2026-11-02)
+
+Recorded by the foreman before the cycle-1 remediation build.
+
+- **C1 (CONFIRMED): fix.** Every database touch in the upgrade step, the lock-free pre-check
+  included, either succeeds or waits under the same bounded-wait policy as P1; a lock contention
+  error is never surfaced raw. The pre-check stays lock-free when uncontended. Red first: a fixture
+  copy held under `BEGIN EXCLUSIVE` past SQLite's default 5 s, a second database-backed command
+  started meanwhile, which must succeed once the holder releases.
+- **P1 (PLAUSIBLE): accepted, fixed in the same pass.** R3 says neither process fails because of
+  the other, and an index build on a large PostgreSQL `task` table can outlast a fixed 30–60 s
+  bound. The waiter waits in bounded slices, logging one INFO line per slice, and re-plans once it
+  holds the lock. A generous ceiling (a module constant) stops a truly stuck holder from hanging a
+  process forever; only past it does the step fail, with an accurate message naming what it waited
+  on and how to find it, never the "older server" guess. Advisory transaction locks and SQLite file
+  locks die with their session, so waiting is safe. Tested with scaled-down timeouts: a peer that
+  finishes within the ceiling, and one past it (rc and no traceback, as R4's refusals).
+- **Out-of-diff drift: fix in this cycle.** `ROADMAP.md`, `issues/late-result-resets-retried.md`
+  and `issues/writeback-scoped-conditional.md` now say a doubled retry hits the UNIQUE constraint
+  only on a pre-2.9 SQLite database and is written silently elsewhere, per the amended *Retry model*
+  in `AGENTS.md`. `.agents/factory/review-rubric.md`'s human-gate list names the amended invariant
+  in place of "retry-chain UNIQUE".
