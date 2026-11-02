@@ -77,3 +77,31 @@ is skipped by the parser):
   R-IDs when that cycle lands, and to keep a `shaped` seed `shaped`. Fold in `schema-upgrade-step`
   F2 when this is fixed.
 - **Confidence:** high · **Effort:** small
+
+## F3 — No convention for a phase whose evidence is produced outside the repo
+`origin=hs-plan:step6 severity=medium category=missing-guidance status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** R9's multi-node clause can only be met by a run outside the repo. The work
+  splits into a "run A" phase, which builds the drive and hands it back, and a "run B" phase, which
+  collects the evidence. The FSM has no status or field for "waiting on external evidence", so a
+  convention was written into this `TECH.md` by hand: `blocked` with a fixed `blocked_reason`, not
+  counted against `attempts`, evidence committed under `spec/{slug}/evidence/`.
+- **Skill cause:** Step 6 and the TECH template assume that every phase's `verify:` can pass inside
+  one `hs-build` invocation. Neither says how to model an external wait, or whether `hs-review` may
+  run while such a phase is blocked.
+- **Recommended fix:** Add an "external wait" phase pattern to the TECH template and to `hs-build`:
+  a phase flag (e.g. `external: true`), the evidence location convention, the `blocked` semantics,
+  and whether review and publish may proceed past it.
+- **Confidence:** high · **Effort:** small
+
+## F4 — Research prototypes live in `$TMPDIR` and vanish before the build
+`origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The research subagents built working prototypes in `$TMPDIR`: a serve loop, a
+  benchmark harness, and a drive with a compare script. The briefs pointed at them. Those paths are
+  ephemeral and machine-local, so they were copied by hand into `research/prototypes/` to keep them
+  usable by `/hs-build`.
+- **Skill cause:** Step 3 says research is read-only and writes only `research/NN-topic.md`. It
+  says nothing about runnable prototypes, which a big-appetite plan often needs to keep.
+- **Recommended fix:** In Step 3, allow `research/prototypes/` for runnable research code, with
+  these rules: not collected by pytest, no internal identifiers, kept lean. Tell the briefs to save
+  prototypes there, not in `$TMPDIR`.
+- **Confidence:** med · **Effort:** small
