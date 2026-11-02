@@ -255,6 +255,18 @@ it.
 *Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
 **Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
 
+## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
+
+The 2.9 line added task columns that a 2.8.3 peer cannot read, and nothing on the wire names a
+version. A 2.8.3 client exits on its first bundle from a 2.9 server with a `TypeError`; a 2.9 client
+against a 2.8.3 server runs its tasks, but the server records no result and the run hangs. Every 2.9
+pre-release is affected. The fix is a clean, prompt version error in both directions, and a line in
+the 2.9.0 release notes; `zone-dispatch`'s version handshake is meant to be that error and should be
+verified against 2.8.3 there.
+
+*Horizon: near-term, before 2.9.0 · Depends on: zone (version handshake) · Refs: release notes*
+**Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
