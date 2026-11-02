@@ -3,7 +3,7 @@ slug: schema-upgrade-step
 title: 'Open 2.8 databases in 2.9: an idempotent schema-upgrade step'
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/schema-upgrade-step
 base: develop
 current_phase: done
