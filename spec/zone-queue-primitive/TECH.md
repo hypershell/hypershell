@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -53,7 +53,7 @@ phases:
   verify: uv run pytest -v tests/test_server_fsm.py
 - id: P4
   name: 'No-behaviour-change proof: workload test, base parity, b819de6 client compatibility'
-  status: pending
+  status: done
   satisfies:
   - R4
   - R8
@@ -61,7 +61,7 @@ phases:
   - P2
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -v && uv run python tests/bench/bench_queue.py parity --base
     b819de6 --feature HEAD && uv run python tests/bench/bench_queue.py compat --server
     HEAD --client b819de6
@@ -297,7 +297,7 @@ no existing test modified, unchanged help output, a grouped workload with a fail
 reaching the same final states as base, and `b819de6` clients completing a workload against the new
 server.
 
-- [ ] **`tests/test_queue_workload.py`** (`@mark.integration`), in a `temp_site`:
+- [x] **`tests/test_queue_workload.py`** (`@mark.integration`), in a `temp_site`:
   - Submit a grouped workload. Use `#HYPERSHELL: group:N` tags as in `tests/test_groups.py`.
     Include one task that fails on its first attempt and succeeds on retry, for example a marker
     file in the site (`test -f m || { touch m; exit 3; }`), with `-r 1`.
@@ -305,7 +305,7 @@ server.
   - Assert: every task reaches its expected final state (the retried task has 2 rows, attempt 2
     exits 0, attempt 1 is `retried`); no result is lost (rows and completion counts); and every
     process exits 0 within 60 s.
-- [ ] **`tests/bench/bench_queue.py`** (never collected). Adapt
+- [x] **`tests/bench/bench_queue.py`** (never collected). Adapt
       `research/prototypes/bench/bench.py`.
   - A venv builder per git ref: `git archive` into `$TMPDIR`, then `uv sync --frozen --no-dev
     --no-group docs --no-editable`. `HEAD` means the committed feature.
@@ -316,8 +316,12 @@ server.
     off). Require every task to exit 0 and every rc to be 0.
   - Use exit codes from `cmdkit.app.exit_status` where the harness imports hypershell; otherwise
     exit 0 or 1.
-- [ ] Check that `hs server|client|submit|cluster --help` output is byte-identical between the
+- [x] Check that `hs server|client|submit|cluster --help` output is byte-identical between the
       base venv and the feature venv. Make this part of `parity`.
+- **Built note.** `parity` runs the grouped/retry workload TLS on and off (10 rows each: 9 tasks
+  plus the retry) and checks the four `--help` outputs; `compat` runs 200 `echo` tasks TLS on and
+  off. `test_queue_workload.py` also asserts group ordering (each group's last completion precedes
+  the next group's first schedule) and the retry's `previous_id`/`next_id` link.
 - **Verify:** `uv run pytest -v` (the full suite), then `bench_queue.py parity` and `compat` (the
   frontmatter command). Also confirm that `git diff b819de6 --stat -- tests/` lists only new files.
 - **Touches:** `tests/test_queue_workload.py` (new), `tests/bench/bench_queue.py` (new).

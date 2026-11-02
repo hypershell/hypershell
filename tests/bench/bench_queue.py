@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Geoffrey Lentner
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Compare two builds of HyperShell on one host: final-state parity, client compatibility, throughput.
+
+Each build is a git ref, installed into its own locked, non-editable virtual environment
+(``git archive`` + ``uv sync --frozen``) under a work directory, so the code under test is frozen
+and neither build touches this checkout. ``HEAD`` means the committed tip of this checkout.
+Every run uses a fresh throwaway site and database, a free loopback port and a random key.
+
+Subcommands:
+
+    parity  --base REF --feature REF    Same grouped workload (with a retried failure) on both
+                                        builds, TLS on and off: identical normalised task tables,
+                                        clean exits, and byte-identical ``--help`` output.
+    compat  --server REF --client REF   A server from one build completes a workload with clients
+                                        from the other, TLS on and off.
+    gate    --base REF --feature REF    Throughput and footprint, interleaved and repeated.
+
+Never collected by pytest (no ``test_`` prefix). Run it with the project interpreter, which has
+``psutil``: ``uv run python tests/bench/bench_queue.py parity --base b819de6 --feature HEAD``.
+Exits 0 on success and 1 on any failure.
+"""
+
+
+# Type annotations
+from __future__ import annotations
+from typing import List, Dict, Any, Optional, Sequence, Tuple
+
+# Standard libs
+import io
+import os
+import sys
+import json
+import time
+import shutil
+import socket
+import sqlite3
+import secrets
+import tarfile
+import argparse
+import tempfile
+import threading
+import statistics
+import subprocess
+from pathlib import Path
+from datetime import datetime
+
+# External libs
+import psutil
+
+
+REPO = Path(__file__).resolve().parents[2]
+WAIT = 60.0
+HELP_COMMANDS = ('server', 'client', 'submit', 'cluster')
+
+
+def log(message: str) -> None:
+    """Progress line on stderr."""
+    print(message, file=sys.stderr, flush=True)
+
+
+def resolve(ref: str) -> str:
+    """Full commit id for `ref` in this repository."""
+    return subprocess.run(['git', '-C', str(REPO), 'rev-parse', '--verify', f'{ref}^{{commit}}'],
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
+def build(ref: str, workdir: Path) -> Path:
+    """A locked, non-editable virtual environment for `ref`, built once and reused by commit id."""
+    commit = resolve(ref)
+    venv = workdir / f'venv-{commit[:12]}'
+    if (venv / 'bin' / 'hs').exists():
+        return venv
+    src = workdir / f'src-{commit[:12]}'
+    if src.exists():
+        shutil.rmtree(src)
+    src.mkdir(parents=True)
+    log(f'building {ref} ({commit[:12]})')
+    archive = subprocess.run(['git', '-C', str(REPO), 'archive', '--format=tar', commit],
+                             check=True, capture_output=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        tar.extractall(src, filter='data')
+    env = {**os.environ, 'UV_PROJECT_ENVIRONMENT': str(venv)}
+    env.pop('VIRTUAL_ENV', None)
+    subprocess.run(['uv', 'sync', '--quiet', '--frozen', '--no-dev', '--no-group', 'docs', '--no-editable'],
+                   cwd=src, env=env, check=True)
+    return venv
+
+
+def free_port() -> int:
+    """An unused loopback port."""
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+def tree(proc: psutil.Process) -> List[psutil.Process]:
+    """`proc` and all of its descendants."""
+    try:
+        return [proc, *proc.children(recursive=True)]
+    except psutil.Error:
+        return [proc]
+
+
+def listening(pid: int, port: int) -> bool:
+    """True once a process in the tree rooted at `pid` listens on `port` (no probe connection)."""
+    try:
+        procs = tree(psutil.Process(pid))
+    except psutil.Error:
+        return False
+    for proc in procs:
+        try:
+            for conn in proc.net_connections(kind='tcp'):
+                if conn.status == psutil.CONN_LISTEN and conn.laddr.port == port:
+                    return True
+        except psutil.Error:
+            pass
+    return False
+
+
+class Sampler(threading.Thread):
+    """Peak footprint of a process and of its whole tree, sampled until stopped."""
+
+    KEYS = ('rss_mb', 'threads', 'fds', 'children', 'tree_rss_mb', 'tree_threads', 'tree_fds')
+
+    def __init__(self, pid: int, interval: float) -> None:
+        super().__init__(daemon=True)
+        self.proc = psutil.Process(pid)
+        self.interval = interval
+        self.done = threading.Event()
+        self.peak = dict.fromkeys(self.KEYS, 0.0)
+
+    def sample(self) -> Dict[str, float]:
+        procs = tree(self.proc)
+        own = procs[0]
+        values = dict(rss_mb=own.memory_info().rss / 2**20, threads=own.num_threads(), fds=own.num_fds(),
+                      children=len(procs) - 1, tree_rss_mb=0.0, tree_threads=0, tree_fds=0)
+        for proc in procs:
+            try:
+                values['tree_rss_mb'] += proc.memory_info().rss / 2**20
+                values['tree_threads'] += proc.num_threads()
+                values['tree_fds'] += proc.num_fds()
+            except psutil.Error:
+                pass
+        return values
+
+    def run(self) -> None:
+        while not self.done.is_set():
+            try:
+                for key, value in self.sample().items():
+                    self.peak[key] = max(self.peak[key], value)
+            except psutil.Error:
+                break
+            self.done.wait(self.interval)
+
+
+class Site:
+    """A throwaway HyperShell site with its own database, port and key."""
+
+    def __init__(self, workdir: Path, label: str, tls: bool, log_level: str = 'INFO') -> None:
+        self.path = Path(tempfile.mkdtemp(prefix=f'site-{label}-', dir=workdir))
+        self.port = free_port()
+        self.key = secrets.token_hex(16)
+        self.tls = tls
+        self.database = self.path / 'task.db'
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith('HYPERSHELL_')}
+        self.env.pop('VIRTUAL_ENV', None)
+        self.env.update(HYPERSHELL_CONFIG_FILE='', HYPERSHELL_SITE=str(self.path),
+                        HYPERSHELL_DATABASE_FILE=str(self.database), HYPERSHELL_LOGGING_LEVEL=log_level)
+
+    def tls_args(self) -> List[str]:
+        return [] if self.tls else ['--no-tls']
+
+    def run(self, venv: Path, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([str(venv / 'bin' / 'hs'), *args], cwd=self.path, env=self.env,
+                              capture_output=True)
+
+    def spawn(self, venv: Path, name: str, *args: str) -> subprocess.Popen:
+        with open(self.path / f'{name}.log', 'wb') as stream:
+            return subprocess.Popen([str(venv / 'bin' / 'hs'), *args], cwd=self.path, env=self.env,
+                                    stdout=subprocess.DEVNULL, stderr=stream)
+
+    def rows(self) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.database) as db:
+            db.row_factory = sqlite3.Row
+            return [dict(row) for row in db.execute('SELECT * FROM task')]
+
+
+def wait_all(server: subprocess.Popen, clients: Sequence[subprocess.Popen],
+             server_timeout: float, client_timeout: float) -> Tuple[Any, List[Any], float]:
+    """Exit codes of the server and its clients, each bounded; a process over its bound is killed."""
+    start = time.monotonic()
+    try:
+        server_rc = server.wait(timeout=server_timeout)
+    except subprocess.TimeoutExpired:
+        server.kill()
+        server_rc = 'timeout'
+    server_exit = time.monotonic()
+    client_rcs = []
+    for client in clients:
+        try:
+            client_rcs.append(client.wait(timeout=max(1.0, client_timeout - (time.monotonic() - server_exit))))
+        except subprocess.TimeoutExpired:
+            client.kill()
+            client_rcs.append('timeout')
+    return server_rc, client_rcs, server_exit - start
+
+
+def serve(site: Site, server_venv: Path, client_venv: Path, server_args: Sequence[str],
+          client_args: Sequence[str], clients: int, server_timeout: float = WAIT,
+          client_timeout: float = WAIT, sampler_interval: Optional[float] = None) -> Dict[str, Any]:
+    """Run `hs server --restart` over the site's database with `clients` loopback clients."""
+    start = time.monotonic()
+    server = site.spawn(server_venv, 'server', 'server', '--restart', '-H', 'localhost', '-p', str(site.port),
+                        '-k', site.key, *server_args, *site.tls_args())
+    sampler = None
+    if sampler_interval:
+        sampler = Sampler(server.pid, sampler_interval)
+        sampler.start()
+    deadline = time.monotonic() + WAIT
+    while not listening(server.pid, site.port):
+        if server.poll() is not None or time.monotonic() > deadline:
+            server.kill()
+            raise RuntimeError(f'server did not listen; see {site.path}/server.log')
+        time.sleep(0.05)
+    ready = time.monotonic()
+    procs = [site.spawn(client_venv, f'client-{index}', 'client', '-H', 'localhost', '-p', str(site.port),
+                        '-k', site.key, '-T', '60', *client_args, *site.tls_args())
+             for index in range(clients)]
+    server_rc, client_rcs, _ = wait_all(server, procs, server_timeout, client_timeout)
+    end = time.monotonic()
+    if sampler:
+        sampler.done.set()
+        sampler.join()
+    return dict(server_rc=server_rc, client_rcs=client_rcs, startup_s=ready - start, wall_s=end - start,
+                peak=({k: round(v, 1) for k, v in sampler.peak.items()} if sampler else None))
+
+
+def submit(site: Site, venv: Path, lines: Sequence[str]) -> None:
+    """Write the task file and submit it to the site's database."""
+    taskfile = site.path / 'tasks.in'
+    taskfile.write_text(''.join(f'{line}\n' for line in lines))
+    proc = site.run(venv, 'submit', '-f', str(taskfile), '-b', '5000', '-w', '1')
+    if proc.returncode != 0:
+        raise RuntimeError(f'submit failed: {proc.stderr.decode()[-2000:]}')
+
+
+def clean(result: Dict[str, Any]) -> bool:
+    """Every process exited 0."""
+    return result['server_rc'] == 0 and all(rc == 0 for rc in result['client_rcs'])
+
+
+# ---------------------------------------------------------------------------------------- parity
+
+
+def grouped_workload(site: Path) -> List[str]:
+    """Three groups; one task in the first group fails on its first attempt only."""
+    marker = site / 'retry.marker'
+    return [
+        'echo a0  #HYPERSHELL: group:0',
+        'echo a1  #HYPERSHELL: group:0',
+        'echo a2  #HYPERSHELL: group:0',
+        f'test -f {marker} || {{ touch {marker}; exit 3; }}  #HYPERSHELL: group:0',
+        'echo b0  #HYPERSHELL: group:1',
+        'echo b1  #HYPERSHELL: group:1',
+        'echo b2  #HYPERSHELL: group:1',
+        'echo c0  #HYPERSHELL: group:2',
+        'echo c1  #HYPERSHELL: group:2',
+    ]
+
+
+def normalise(site: Site, rows: List[Dict[str, Any]]) -> List[Tuple]:
+    """Final task states without ids, times or site paths."""
+    return sorted((row['args'].replace(str(site.path), '<site>'), row['group'], row['attempt'],
+                   row['exit_status'], bool(row['retried']), row['completion_time'] is not None)
+                  for row in rows)
+
+
+def run_parity_once(venv: Path, label: str, tls: bool, workdir: Path) -> Tuple[List[Tuple], Dict[str, Any]]:
+    site = Site(workdir, label, tls)
+    submit(site, venv, grouped_workload(site.path))
+    result = serve(site, venv, venv, ['-r', '1'], [], clients=2)
+    return normalise(site, site.rows()), result
+
+
+def help_text(venv: Path, workdir: Path) -> Dict[str, bytes]:
+    site = Site(workdir, 'help', True)
+    return {command: site.run(venv, command, '--help').stdout for command in HELP_COMMANDS}
+
+
+def cmd_parity(args: argparse.Namespace) -> bool:
+    base, feature = build(args.base, args.workdir), build(args.feature, args.workdir)
+    ok = True
+    for tls in (True, False):
+        table_base, result_base = run_parity_once(base, 'base', tls, args.workdir)
+        table_feature, result_feature = run_parity_once(feature, 'feature', tls, args.workdir)
+        same = table_base == table_feature
+        exits = clean(result_base) and clean(result_feature)
+        ok &= same and exits and len(table_feature) == 10
+        print(f'parity tls={"on" if tls else "off"}: rows {len(table_base)} vs {len(table_feature)}, '
+              f'identical={same}; rc base {result_base["server_rc"]}/{result_base["client_rcs"]} '
+              f'feature {result_feature["server_rc"]}/{result_feature["client_rcs"]}; wall s '
+              f'base {result_base["wall_s"]:.1f} feature {result_feature["wall_s"]:.1f} -> '
+              f'{"PASS" if same and exits else "FAIL"}')
+        if not same:
+            for row in sorted(set(table_base) ^ set(table_feature)):
+                print(f'  differs: {row}')
+    help_base, help_feature = help_text(base, args.workdir), help_text(feature, args.workdir)
+    for command in HELP_COMMANDS:
+        same = help_base[command] == help_feature[command] and len(help_base[command]) > 0
+        ok &= same
+        print(f'help hs {command}: {len(help_base[command])} bytes, identical={same} -> {"PASS" if same else "FAIL"}')
+    return ok
+
+
+# ---------------------------------------------------------------------------------------- compat
+
+
+def cmd_compat(args: argparse.Namespace) -> bool:
+    server_venv, client_venv = build(args.server, args.workdir), build(args.client, args.workdir)
+    ok = True
+    for tls in (True, False):
+        site = Site(args.workdir, 'compat', tls)
+        submit(site, server_venv, [f'echo {i}' for i in range(args.tasks)])
+        result = serve(site, server_venv, client_venv, [], [], clients=2)
+        rows = site.rows()
+        passed = (clean(result) and len(rows) == args.tasks
+                  and all(row['exit_status'] == 0 and row['completion_time'] is not None for row in rows))
+        ok &= passed
+        print(f'compat server={args.server} client={args.client} tls={"on" if tls else "off"}: '
+              f'{sum(row["exit_status"] == 0 for row in rows)}/{args.tasks} tasks exit 0, '
+              f'rc {result["server_rc"]}/{result["client_rcs"]}, wall {result["wall_s"]:.1f} s '
+              f'-> {"PASS" if passed else "FAIL"}')
+    return ok
+
+
+# ------------------------------------------------------------------------------------------ main
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[1], prog='bench_queue.py')
+    parser.add_argument('--workdir', type=Path,
+                        default=Path(os.environ.get('TMPDIR', tempfile.gettempdir())) / 'hypershell-bench')
+    commands = parser.add_subparsers(dest='command', required=True)
+    parity = commands.add_parser('parity')
+    parity.add_argument('--base', required=True)
+    parity.add_argument('--feature', required=True)
+    compat = commands.add_parser('compat')
+    compat.add_argument('--server', required=True)
+    compat.add_argument('--client', required=True)
+    compat.add_argument('--tasks', type=int, default=200)
+    args = parser.parse_args(argv)
+    args.workdir.mkdir(parents=True, exist_ok=True)
+    handler = {'parity': cmd_parity, 'compat': cmd_compat}[args.command]
+    return 0 if handler(args) else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
