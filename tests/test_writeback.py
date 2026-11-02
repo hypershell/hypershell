@@ -3,7 +3,7 @@
 
 """Deterministic replays of result writeback.
 
-These tests drive ``Receiver.update_tasks`` in-process against a throwaway SQLite database, with
+Apart from one command-line run, these tests drive ``Receiver.update_tasks`` in-process against a throwaway SQLite database, with
 no threads, queue or sleeps. A client's copy of a task is produced by ``Task.next`` and the real
 bundle codec; confirmation runs through ``Confirm.update_info``; eviction is
 ``Task.revert_orphaned``, exactly what the heartbeat monitor calls. Each replay places a returned
@@ -26,14 +26,16 @@ import pytest
 from pytest import mark, fixture
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
+from cmdkit.app import exit_status
 
 # Internal libs
 from hypershell.core.uuid import uuid
 from hypershell.client import ClientInfo
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
-from hypershell.data.model import Entity, Task, CANCEL_STATUS, serialize_tasks, deserialize_tasks
+from hypershell.data.model import Entity, Task, ResultOutcome, CANCEL_STATUS, serialize_tasks, deserialize_tasks
 from hypershell.server import Confirm, Receiver
+from tests import main, create_taskfile_echo, assert_output
 
 
 # The columns a client produces when it runs a task, and every other column of the task table.
@@ -178,8 +180,6 @@ def retries_of(task_id: str) -> int:
 # --- Late, duplicate and foreign results ------------------------------------------------------------
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='A late result from an evicted client overwrites the retry chain of its row')
 def test_late_result_after_retry_keeps_chain(task_db, logs) -> None:
     """An evicted client's late failure leaves the retried row and its single retry alone."""
     task_id = submit('false')
@@ -210,8 +210,6 @@ def test_late_result_after_retry_keeps_chain(task_db, logs) -> None:
 
 @mark.unit
 @mark.parametrize('case', ['reverted', 'same-client', 'other-client', 'completed-elsewhere'])
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='A result for a row no longer under its assignment is applied as a completion')
 def test_stale_result_is_refused(task_db, logs, case: str) -> None:
     """A result for a reverted, rescheduled or re-completed row changes nothing and is logged."""
     task_id = submit('echo stale')
@@ -241,8 +239,6 @@ def test_stale_result_is_refused(task_db, logs, case: str) -> None:
 
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='A result for a cancelled row overwrites its cancel status')
 def test_cancelled_row_keeps_cancel_status(task_db, logs) -> None:
     """A result for a cancelled row keeps the cancel status and its completion time."""
     task_id = submit('echo cancel')
@@ -263,8 +259,6 @@ def test_cancelled_row_keeps_cancel_status(task_db, logs) -> None:
 
 @mark.unit
 @mark.parametrize('how', ['same-bundle', 'redelivered'])
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='A repeated result counts as a second completion')
 def test_duplicate_result_is_ignored(task_db, logs, how: str) -> None:
     """A result already applied by its own assignment is ignored, distinctly from a stale one."""
     task_id = submit('echo duplicate')
@@ -285,8 +279,6 @@ def test_duplicate_result_is_ignored(task_db, logs, how: str) -> None:
 
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='A returned copy overwrites every column, not only its results')
 def test_non_result_columns_are_never_written(task_db, logs) -> None:
     """A returned copy differing in every non-result column changes none of them."""
     task_id = submit('echo columns')
@@ -323,8 +315,6 @@ def test_non_result_columns_are_never_written(task_db, logs) -> None:
 
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='A returned copy overwrites the server scheduling stamps')
 def test_foreign_attribution_is_applied(task_db, logs) -> None:
     """A result returned under another client's name applies, and keeps the server's stamps."""
     task_id = submit('echo foreign')
@@ -397,3 +387,80 @@ def test_in_memory_receiver_writes_nothing(task_db, logs) -> None:
     machine.update_tasks()
     assert len(completions(logs, copy.id)) == 1
     assert Task.count() == 0
+
+
+# --- The fence itself -------------------------------------------------------------------------------
+
+@mark.unit
+def test_result_columns_are_fixed() -> None:
+    """Exactly the client-produced columns are result columns; every other column is not."""
+    assert Task.result_columns == RESULT_COLUMNS
+    assert set(Task.columns) - set(Task.result_columns) == {
+        'id', 'group', 'args', 'submit_id', 'submit_time', 'submit_host', 'cores', 'memory', 'timeout',
+        'server_id', 'server_host', 'schedule_time', 'attempt', 'retried', 'previous_id', 'next_id',
+        'source', 'fingerprint', 'part', 'tag',
+    }
+
+
+@mark.unit
+def test_missing_row_is_refused(task_db, logs) -> None:
+    """A result for a task that is not in the database is refused and logged, not raised."""
+    copy = Task.new(args='echo missing')
+    copy.schedule_time = datetime.now().astimezone()
+
+    receive([finish(copy, 0, CLIENT_A)])
+
+    assert Task.count() == 0
+    assert completions(logs, copy.id) == []
+    assert len(warnings_with(logs, 'stale', copy.id, CLIENT_A[0])) == 1
+
+
+@mark.unit
+def test_unscheduled_token_is_refused(task_db, logs) -> None:
+    """A result carrying no schedule_time never matches a reverted row."""
+    task_id = submit('echo unscheduled')
+    copy = dispatch_one(task_id)
+    confirm(CLIENT_A, [task_id])
+    Task.revert_orphaned(CLIENT_A[0])
+    before = row(task_id)
+    if before['schedule_time'] is not None:
+        pytest.fail(f'Task ({task_id}) was not reverted')
+    copy.schedule_time = None
+
+    receive([finish(copy, 0, CLIENT_A)])
+
+    assert row(task_id) == before
+    assert completions(logs, task_id) == []
+    assert len(warnings_with(logs, 'stale', task_id, CLIENT_A[0])) == 1
+
+
+@mark.unit
+def test_echoed_token_matches_after_round_trip(task_db) -> None:
+    """The schedule_time a client echoes through the wire matches exactly; one microsecond off does not."""
+    task_id = submit('echo token')
+    copy = dispatch_one(task_id)
+    before = row(task_id)
+    shifted = deserialize_tasks(serialize_tasks([finish(copy, 0, CLIENT_A)]))[0]
+    shifted.schedule_time = shifted.schedule_time + timedelta(microseconds=1)
+
+    assert Task.apply_results([shifted]) == [ResultOutcome.STALE]
+    assert row(task_id) == before
+
+    echoed = deserialize_tasks(serialize_tasks([copy]))[0]
+    assert Task.apply_results([echoed]) == [ResultOutcome.APPLIED]
+    assert results_in(row(task_id)) == results_of(copy)
+
+
+@mark.integration
+def test_cluster_no_confirm_with_db(temp_site: Path) -> None:
+    """A database-backed cluster without confirmation applies and attributes every result."""
+    taskfile = create_taskfile_echo(temp_site, count=4)
+    rc, stdout, stderr = main(['hs', 'cluster', taskfile, '--no-confirm'])
+    assert rc == exit_status.success
+    assert stdout == '\n'.join(map(str, range(4)))
+    assert_output(r'\[hypershell.server\] Completed task', stderr, 4)
+    assert 'stale result' not in stderr
+    assert 'duplicate result' not in stderr
+    assert main(['hs', 'list', '-c']) == (exit_status.success, '4', '')
+    assert main(['hs', 'list', '-c', '-S']) == (exit_status.success, '4', '')
+    assert main(['hs', 'list', '-c', '-w', 'client_id == null']) == (exit_status.success, '0', '')

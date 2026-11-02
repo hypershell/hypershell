@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/writeback-scoped-conditional
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -28,7 +28,7 @@ phases:
   verify: git diff --quiet d996579 -- src && uv run pytest -m unit -rxX tests/test_writeback.py
 - id: P2
   name: 'Fenced writeback: result columns only, current assignment only'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -147,6 +147,8 @@ change and no wire change**, so the #69 upgrade step is not involved. See PLAN �
 | `AGENTS.md` | § Task lifecycle contract | R10 prose (P3) |
 | `.agents/factory/invariants.md` | §3 Retry model | R10 prose (P3) |
 | `tests/test_writeback.py` | new | P1, P2 |
+| `tests/test_writeback_postgres.py` | new | P2 (plan gate ruling 1) |
+| `.github/workflows/tests.yml` | `postgres` job's test step | P2: also runs `tests/test_writeback_postgres.py` |
 
 **Unchanged by design:** `Entity.update_all`, `Entity.update`, `Task.next`, `revert_all`,
 `revert_orphaned`, `revert_interrupted`, `cancel_all`, `Confirm.*`, `HeartMonitor.*`,
@@ -250,12 +252,12 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
 **Goal:** the replays go green with the full suite unchanged; CLI runs in default and
 `--no-confirm` modes behave as today.
 
-- [ ] `data/model.py`: `ResultOutcome(Enum)` with `APPLIED`, `DUPLICATE`, `STALE`, docstring
+- [x] `data/model.py`: `ResultOutcome(Enum)` with `APPLIED`, `DUPLICATE`, `STALE`, docstring
       stating what each means; add to `__all__`.
-- [ ] `data/model.py`: `Task.result_columns: Final[Tuple[str, ...]]` = the 13 names above, with a
+- [x] `data/model.py`: `Task.result_columns: Final[Tuple[str, ...]]` = the 13 names above, with a
       declarative comment: the columns a client produces when it runs a task; a returned result
       writes these and nothing else.
-- [ ] `data/model.py`: `Task.apply_results(cls, results: List[Task]) -> List[ResultOutcome]`, per
+- [x] `data/model.py`: `Task.apply_results(cls, results: List[Task]) -> List[ResultOutcome]`, per
       PLAN §2.3:
       a `None` `schedule_time` is `STALE` with no query (`column == None` renders `IS NULL`);
       `Session.execute(update(cls).where(cls.id == r.id, cls.schedule_time == r.schedule_time,
@@ -267,7 +269,7 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
       one `Session.commit()` after the loop; `Session.rollback()` and re-raise on any exception.
       One `execute` per row (no executemany, no `RETURNING`). Log each outcome at `trace` only;
       the Receiver owns the user-facing lines.
-- [ ] `server.py` `Receiver.update_tasks`: if `in_memory`, unchanged. Otherwise zip
+- [x] `server.py` `Receiver.update_tasks`: if `in_memory`, unchanged. Otherwise zip
       `self.tasks` with `Task.apply_results(self.tasks)`: `APPLIED` → today's three effects
       (debug `Completed task (…)`, non-zero warning, `--failures` print), in today's order;
       `STALE` → `log.warning(f'Refused stale result for task ({task.id}) from client
@@ -275,7 +277,7 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
       result for task ({task.id}) from client ({task.client_host}: {task.client_id})')`. Still
       returns `ReceiverState.UNLOAD`. Declarative comment: a result applies only to the dispatch
       that produced it.
-- [ ] `tests/test_writeback.py`: remove every `xfail` marker. Add:
+- [x] `tests/test_writeback.py`: remove every `xfail` marker. Add:
       `test_result_columns_are_fixed` (`Task.result_columns` equals the literal 13-tuple, and
       `set(Task.columns) - set(Task.result_columns)` equals the literal 20-name set);
       `test_missing_row_is_refused` (copy for an id not in the DB → no exception, stale WARNING);
@@ -288,14 +290,24 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
       `main(['hs', 'cluster', create_taskfile_echo(temp_site, count=4), '--no-confirm'])` → rc 0,
       four `[hypershell.server] Completed task` lines, no `stale result`/`duplicate result` line,
       and `main(['hs', 'list', '-c', '-w', 'client_id == null'])` reads `0`.
-- [ ] Do **not** touch `Entity.update_all`, Confirm, revert, cancel, `client.py`, `task.py`, or
+- [x] Do **not** touch `Entity.update_all`, Confirm, revert, cancel, `client.py`, `task.py`, or
       any existing test file.
+- [x] (Plan gate ruling 1.) `tests/test_writeback_postgres.py`, `@mark.integration`, skipped
+      without `HS_TEST_POSTGRES`, with the upgrade tests' admin-engine and throwaway-database
+      pattern. Per session time zone (`UTC`, `Asia/Kolkata`): a real dispatch's aware
+      `schedule_time` survives the bundle's JSON and `apply_results` returns `APPLIED`, ±1 µs
+      returns `STALE`, a repeat returns `DUPLICATE`; stored stamps at offsets on both sides of UTC
+      with microseconds 0, 1, 212078 and 999999 round-trip and match exactly, ±1 µs refused; a
+      first dispatch's echo after revert and re-dispatch is refused through the Receiver.
+- [x] (Plan gate ruling 1.) `.github/workflows/tests.yml` `postgres` job (pg13, pg18) runs it
+      next to `tests/test_upgrade_postgres.py`.
 - **Verify:** the frontmatter `verify:` — no `xfail` left; full `uv run pytest` (unit +
   integration, needs `uv sync`); then two CLI drives in throwaway sites, default and
   `--no-confirm`: 20 rows, 20 succeeded, none with a NULL `client_id`, and no stale or duplicate
-  line in the server's log.
+  line in the server's log. **Plus (ruling 1): the PostgreSQL round-trip test passes in CI** on
+  the PR (pg13 and pg18); it cannot run in the local gate, which skips it.
 - **Touches:** `src/hypershell/data/model.py`, `src/hypershell/server.py`,
-  `tests/test_writeback.py`.
+  `tests/test_writeback.py`, `tests/test_writeback_postgres.py`, `.github/workflows/tests.yml`.
 
 ## Phase P3 — Lifecycle contract prose: result writeback is fenced
 **Satisfies:** R10, R7 · **Depends on:** P2
