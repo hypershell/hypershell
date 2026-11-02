@@ -3,7 +3,7 @@ slug: schema-upgrade-step
 title: 'Open 2.8 databases in 2.9: an idempotent schema-upgrade step'
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/schema-upgrade-step
 base: develop
 current_phase: done
@@ -112,7 +112,7 @@ phases:
     --limit 1 --json headSha,conclusion --jq '.[0].headSha + " " + .[0].conclusion')"
     = "$(git rev-parse HEAD) success"
 review:
-  last_reviewed_commit: 20a12cb495e11c29abac1b5aa00ce59e1c669599
+  last_reviewed_commit: be27e5dbbf120a48c119e75f245dc50517a61eae
   verdict: changes-requested
   blocked_reason: 'C2 (R7 docs): man pages still call the upgrade lock brief and Postgres-only'
   cycle: 2
@@ -402,6 +402,15 @@ work on upgraded databases.
   silently elsewhere, per the amended *Retry model*.
 - [x] `.agents/factory/review-rubric.md`: the human-gate list names the amended invariant (one retry
   row per failure: the single Scheduler and the `retried` filter) in place of "retry-chain UNIQUE".
+
+### P5 remediation — review cycle 2 (C2)
+
+- [x] `share/man/man1/{hs,hsx,hyper-shell}.1`: the upgrade-lock sentence matches
+  `docs/_include/database_alt.rst` (an exclusive lock on both providers, minutes on a large
+  database, processes started meanwhile wait). Patch only this sentence's hunk from a
+  `sphinx-build -b man`, and check it byte for byte against the regenerated pages.
+- [x] No other "brief exclusive lock" or similar stale upgrade-lock wording remains in `share/`,
+  `docs/` or `src/`.
 
 ## Phase P6 — PostgreSQL CI evidence (run B)
 

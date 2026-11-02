@@ -63,10 +63,11 @@ is skipped by the parser):
 - **Recommended fix:** Add an optional phase field, e.g. `waits_on: "ci:<workflow>@HEAD" | "landed:<slug>"`. `next_phase.py` would report such a phase as `waiting`, not actionable, until the condition is checkable. Document the run-A/run-B split for CI-evidence phases in Step 6.
 - **Confidence:** med · **Effort:** medium
 
-## F4 — "Regenerate the man pages in the same commit" conflicts with man pages being a release-time rebuild
+## F4 — "Regenerate the man pages in the same commit" conflicts with man pages being a release-time rebuild · seen again
 `origin=hs-build:P5 severity=low category=missing-guidance status=open target=.agents/factory/invariants.md`
 - **What happened:** P5's checklist (from PLAN §2.7, citing invariants §12) says to regenerate `share/man/man1/*.1` with the help-text change. There is no in-repo command for it, and a full `sphinx-build -b man` also pulls in every doc change since the last release (the `card` format, `--part`, a new `.TH` date), because man pages are otherwise rebuilt only at release (`AGENTS.md`: `release` category, `/hs-release`). The build applied only this cycle's two hunks from the generated output to the three pages.
 - **Skill cause:** §12 names `docs/_include/*.rst` and `share/` completions as same-commit outputs but says nothing about man pages, and `hs-plan` has no guidance on whether a cycle touches them. The two policies (same-commit vs release rebuild) are never reconciled.
+- **Seen again (cycle-2 remediation):** the cycle-1 remediation amended `database_alt.rst`'s lock sentence but not the man pages patched from it, and review cycle 2 caught the drift (C2). A patch-only rule needs a check that the patched hunks still match a fresh `-b man` build whenever their source `.rst` changes.
 - **Recommended fix:** State one rule in §12 and `AGENTS.md` §Docs: either man pages are release-only (cycles leave them alone) or a cycle patches only its own hunks. Name the build command (`sphinx-build -b man docs <out>`) where it applies.
 - **Confidence:** med · **Effort:** small
 

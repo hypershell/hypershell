@@ -262,3 +262,17 @@ regression, and it is not part of the step.
   LOW docs-only finding should cost a full cycle is your call. Also decide whether the `Source.reserved` race
   above gets an `issues/` seed.
 - **Completeness sub-pass:** not run (not requested).
+
+### Human triage (2026-11-02)
+
+Recorded by the foreman before the cycle-2 remediation build.
+
+- **C2 (CONFIRMED, LOW): fix.** The man pages' upgrade-lock sentence is brought into agreement with
+  `docs/_include/database_alt.rst:14` by the same patch-only method P5 used: only this sentence's
+  hunk from a `sphinx-build -b man` is applied to `hs.1`, `hsx.1` and `hyper-shell.1`. A full
+  man-page rebuild carries unrelated unreleased doc changes and is release work. Any other stale
+  "brief lock" wording in `share/`, `docs/` or `src/` is fixed the same way.
+- **Out-of-diff `Source.reserved` race: deferred.** Pre-existing on `origin/develop` and outside the
+  step. Seeded as [`issues/source-reserved-race.md`](../../issues/source-reserved-race.md)
+  (`status: unshaped`) with its `ROADMAP.md` Part I entry in be27e5d, committed before
+  `review.last_reviewed_commit` was re-pinned to it, per the deferral mechanic.
