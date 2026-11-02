@@ -422,3 +422,12 @@ the remediation stays inside the rulings below and adds nothing else.
 Not in scope for this remediation: the two pre-existing behaviours the reviewer observed identically
 on `b819de6` (same-port TLS restart hang; malformed `completed` result). The foreman seeds them as
 issues.
+
+**Clarification (2026-11-02, at build).** C3(a) was withdrawn by the foreman at build on
+2026-11-02. The open-file limit is per process and inherited: `hsx`, `hs cluster` and an
+application that embeds the server run it in the process that also starts tasks or launchers, so a
+raised soft limit would reach every task, a default-behaviour change below the limit. The server's
+own files are protected by the descriptor reserve of (b) alone, with (c)'s back-off. The C4
+fallback (ERROR once, connections fail closed) is accepted, since building the context at start
+would change when the TLS materials are read. A client cut off partway through connecting hangs
+until eviction on both builds; it is seeded as `issues/client-partial-connect-hang.md`.

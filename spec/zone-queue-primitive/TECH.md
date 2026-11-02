@@ -3,15 +3,15 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P1
+current_phase: P7
 last_updated: '2026-11-02'
 phases:
 - id: P1
   name: 'In-process serve loop: no manager child, clean shutdown and port release'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R4
@@ -106,8 +106,7 @@ phases:
 review:
   last_reviewed_commit: 12af7fbab7cdc1fd391acf0e8320d40e311b3b2c
   verdict: changes-requested
-  blocked_reason: 'review-2 remediation: C3(a) awaits the foreman (a raised soft RLIMIT_NOFILE
-    is inherited by tasks in hsx and hs cluster); C3(b), C3(c), C4 built'
+  blocked_reason: ''
   cycle: 2
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
@@ -249,11 +248,12 @@ stdio. This is the core, small and novel slice: everything else builds on it.
         `RLIMIT_NOFILE` 64 (killed at 60 s, its log holding `Too many open files` and `unable to
         open database file`). `tests/test_queue_start.py` gains `hs server --tls-cert '<none>'`
         plus two clients under the default log level (no ERROR line).
-  - [ ] **C3(a)** — raise the soft `RLIMIT_NOFILE` at start. **Not built: needs clarification.**
-        The limit is per process and inherited. `hsx`, `hs cluster` and an embedding application
-        run the server in the process that also starts tasks or launchers, so every task would
-        inherit the raised soft limit (`ulimit -n` 256 → 10240 in a child, checked on this host).
-        That is a default-behaviour change below the limit.
+  - [x] **C3(a)** — raise the soft `RLIMIT_NOFILE` at start: **withdrawn** by the foreman at build
+        (2026-11-02; clarification in [`REVIEW.md`](REVIEW.md)). The limit is per process and
+        inherited. `hsx`, `hs cluster` and an embedding application run the server in the process
+        that also starts tasks or launchers, so every task would inherit the raised soft limit
+        (`ulimit -n` 256 → 10240 in a child, checked on this host): a default-behaviour change
+        below the limit. The reserve of (b) alone protects the server's own files.
   - [x] **C3(b)** — the accept loop admits a connection only when its descriptor number is
         below (soft limit − `RESERVE`, 32). Descriptors are allocated lowest-first, so admitted
         connections never hold any of the top 32, and the server's own files can fail only once
@@ -268,6 +268,12 @@ stdio. This is the core, small and novel slice: everything else builds on it.
         server cannot set up TLS and refuses every connection (TLSError: …)") and every
         connection still fails closed. `server.py` is untouched.
   - [x] **Python 3.11:** full suite run locally (see the gate record below).
+  - **Documented constraint: the open-file limit.** The server does not raise its open-file limit.
+    Every queue connection holds a descriptor in the server process, so the soft limit bounds the
+    connections one server can hold (about (soft limit − 32 − its own files) / 3 clients). At the
+    limit, new connections are refused with one WARNING per minute, while admitted clients, the
+    state machines, the database and the logs carry on. A client refused partway through
+    connecting hangs until eviction, as on base (`issues/client-partial-connect-hang.md`).
   - **Gate record (macOS, spawn; the tree without C3(a), as provisional commit `09bc773`).**
     - Full suite: **549 passed** on each of 3.14.6, 3.13.16, 3.12.13 and 3.11.18.
       `unsupported_internals() == []` on 3.11.18.
