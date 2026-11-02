@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -80,14 +80,14 @@ phases:
 - id: P6
   name: 'Multi-node drive, run A: build the cluster-agnostic drive and hand it back
     (external wait follows)'
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on:
   - P5
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: sh tests/cluster/smoke.sh
 - id: P7
   name: 'Multi-node drive, run B: collect and judge the external evidence against
@@ -368,7 +368,7 @@ process count and FDs are no higher.
 this phase, `hs-build` **stops and hands back** what the foreman needs to submit. This is an
 external wait.
 
-- [ ] **`tests/cluster/build_archive.sh`** (POSIX sh). Takes `HSA_REF` (a git ref: `2.8.3`,
+- [x] **`tests/cluster/build_archive.sh`** (POSIX sh). Takes `HSA_REF` (a git ref: `2.8.3`,
       `b819de6` or the feature head), `HSA_PYTHON` (e.g. `3.12`), optional `HSA_PLATFORM` (to
       cross-build for the nodes) and `HSA_OUT`. It produces one `tar.gz` containing:
   - a relocatable standalone interpreter (`python/`);
@@ -377,7 +377,7 @@ external wait.
   - `LABEL`.
 
   The archive holds no absolute paths and no console scripts.
-- [ ] **`tests/cluster/drive.sh`** (POSIX sh). Adapt `research/prototypes/bench/drive.sh` to the
+- [x] **`tests/cluster/drive.sh`** (POSIX sh). Adapt `research/prototypes/bench/drive.sh` to the
       PLAN §2.6 interface, with only `HSD_*` variables. Changes from the prototype:
   - **Remove every host-name record:** no `hostname` field, and `server.ready` holds only the port.
     `HSD_CLIENT_INDEX` is required for clients.
@@ -386,7 +386,7 @@ external wait.
   - Unpack once per node behind a `mkdir` lock.
   - Keep logs node-local, copying them to results only on failure.
   - Bound every wait (`HSD_WAIT`, `HSD_TIMEOUT`, `HSD_IDLE`).
-- [ ] **`tests/cluster/compare.py`** (stdlib only). Usage: `RESULTS --baseline L --candidate L
+- [x] **`tests/cluster/compare.py`** (stdlib only). Usage: `RESULTS --baseline L --candidate L
       [--control L]`. Group runs by (TLS, N, T, M, bundle), then:
   - **Results identical:** the same histogram across every run and label, rows = M, 0 incomplete,
     and every rc 0.
@@ -394,13 +394,13 @@ external wait.
     exit 2, "insufficient runs").
   - **Footprint:** tree children and FDs ≤ baseline.
   - Exit 0 or 1 accordingly.
-- [ ] **`tests/cluster/smoke.sh`**, the local rehearsal:
+- [x] **`tests/cluster/smoke.sh`**, the local rehearsal:
   - Build the archive for `HEAD` (and, when `HSD_SMOKE_BASELINE` is set, for `b819de6` too).
   - Run one server and two clients as separate node-local dirs under `$TMPDIR` with a shared
     results dir, TLS on and off, M=2000.
   - Assert `compare.py` passes its identical-results check, and that a grep for
     `$(hostname)`/`$USER` finds nothing in the results.
-- [ ] **Hand-back:** put the run-A brief in the commit body and the `hs-build` report:
+- [x] **Hand-back:** put the run-A brief in the commit body and the `hs-build` report:
   - the archive commands for `2.8.3`, `b819de6` and the feature head;
   - the variable table;
   - the run matrix: TLS on; N ∈ {16, 128, ≥256 up to the ceiling}; M ≥ 20000; ≥3 runs per label,
@@ -409,6 +409,17 @@ external wait.
     `spec/zone-queue-primitive/evidence/cluster/<run_id>/`, never logs.
 
   Then mark P6 done and stop.
+- **Built notes.**
+  - The archive also carries `REVISION` (the commit id). `drive.sh` unpacks once per node and
+    archive (`hsd-pkg-<archive name>` under `HSD_LOCAL`) and byte-compiles there, so a cross-built
+    archive (`HSA_PLATFORM`, no `.pyc`) still imports from bytecode. Per-run state lives in
+    `hsd-<run_id>`.
+  - `compare.py` also requires one client record per expected client, takes `--results-only`
+    (used by the smoke), and exits 2 on fewer than three runs for any label it judges.
+  - `server.crt` in the shared run dir carries the server node's host name in its SAN: it is a
+    transport file, never evidence. Only `server.json` and `client-*.json` are copied.
+  - `build_archive.sh` needs the package index plus the standalone-Python downloads (uv's release
+    mirror or GitHub). The run-A hand-off is in the P6 commit body.
 - **Verify:** `sh tests/cluster/smoke.sh`.
 - **Touches:** `tests/cluster/build_archive.sh`, `tests/cluster/drive.sh`,
   `tests/cluster/compare.py`, `tests/cluster/smoke.sh` (all new).
