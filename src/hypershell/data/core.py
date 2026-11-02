@@ -27,7 +27,7 @@ from hypershell.core.logging import Logger, stream_handler
 from hypershell.core.exceptions import display_critical, write_traceback
 
 # Public interface
-__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', 'providers']
+__all__ = ['DatabaseURL', 'engine', 'Session', 'config', 'in_memory', 'schema', 'providers', 'TIMESCALE_ALIASES']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -182,9 +182,10 @@ providers = {
     'timescaledb': 'postgresql+psycopg',
 }
 
-# TimescaleDB is PostgreSQL under the hood; these aliases route to the postgres backend but
-# additionally gate the optional `uuid7` extra (below) so `uuid()` yields a time-ordered
-# UUIDv7 for Source.id — the lever TimescaleDB compression uses to prune chunks at scale.
+# TimescaleDB is PostgreSQL under the hood; these aliases route to the postgres backend, and
+# `hs initdb` converts the `task` table to a hypertable partitioned by its id (data/timescale.py).
+# They also gate the optional `uuid7` extra (below) so `uuid()` yields a time-ordered UUIDv7:
+# chunk routing rejects any other UUID version, so every process that mints ids needs it.
 TIMESCALE_ALIASES = ('timescale', 'timescaledb')
 
 
@@ -224,13 +225,11 @@ if config.provider == 'turso':
 
 if config.provider in TIMESCALE_ALIASES:
     try:
-        import uuid_utils  # noqa: F401 (guarantees uuid() -> UUIDv7 for a time-ordered Source.id)
+        import uuid_utils  # noqa: F401 (guarantees uuid() -> UUIDv7, the hypertable's partition key)
     except ImportError:
         display_critical('Missing optional dependency "uuid-utils" (the "uuid7" extra) needed for TimescaleDB',
                          module=__name__)
         sys.exit(exit_status.runtime_error)
-    log.warning('TimescaleDB provider selected: automatic hypertable management (post-create_all hook) '
-                'is not yet implemented — the schema is created as plain PostgreSQL tables')
 
 
 def get_url() -> DatabaseURL | str:

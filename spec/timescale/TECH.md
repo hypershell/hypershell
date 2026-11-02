@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/timescale
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -43,7 +43,7 @@ phases:
 - id: P3
   name: 'The idempotent pass: hypertable, columnstore, policy, drift, Apache and non-empty
     tiers'
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -54,7 +54,7 @@ phases:
   - P2
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: '! grep -q ''not yet implemented'' src/hypershell/data/core.py && grep -q
     ''def converge'' src/hypershell/data/timescale.py && grep -q ''add_columnstore_policy''
     src/hypershell/data/timescale.py && uv run pytest -rs tests/test_timescale.py
@@ -275,25 +275,27 @@ feature code lands, so every later push is exercised against a real TimescaleDB.
 **Goal:** `hs initdb` under a timescale alias converges `task` to hypertable + columnstore + policy,
 idempotently, honestly at every tier; the placeholder warning is gone.
 
-- [ ] `timescale.py`: `Settings` + `DEFAULTS`; `converge(engine, schema, settings) -> list[str]`
+- [x] `timescale.py`: `Settings` + `DEFAULTS`; `converge(engine, schema, settings) -> list[str]`
       per PLAN §2.3 — one transaction under `upgrade._waiting` / `_set_lock_timeout` /
       `_lock_postgres`; schema-qualified `<task>`; probes and statements per research 01
       §Recommendation, **never `migrate_data`**, `create_default_indexes => false`; interval
       comparisons done in SQL; 0A000 `is not empty` → non-empty warning; unexpected `DBAPIError` →
       rollback + `TimescaleError`.
-- [ ] `data/__init__.py`: `converge(engine, schema, DEFAULTS)` after `upgradedb()` in `initdb()` and
+- [x] `data/__init__.py`: `converge(engine, schema, DEFAULTS)` after `upgradedb()` in `initdb()` and
       after `create_all` in `truncatedb()`.
-- [ ] `data/core.py`: delete the placeholder `log.warning`; keep the `uuid_utils` guard; add
+- [x] `data/core.py`: delete the placeholder `log.warning`; keep the `uuid_utils` guard; add
       `TIMESCALE_ALIASES` to `__all__`.
-- [ ] Integration (community): fresh; re-run ×2 (no INFO lines from `hypershell.data.timescale`, one
+- [x] Integration (community): fresh; re-run ×2 (no INFO lines from `hypershell.data.timescale`, one
       job); `--truncate`; tasks run via `hs cluster`, one chunk compressed by hand
       (`compress_chunk`), then `hs list` and `hs initdb --vacuum --yes`; empty plain table from a
       `postgres`-provider `initdb` → converted; non-empty plain table and the `hs283` template →
       warning, `success`, still plain, rows intact; drift (chunk interval changed by hand; policy
       re-added with another `after`) → restored with INFO; named schema; two concurrent `hs initdb`
       → one job. Apache: hypertable, `compression_enabled = false`, no job, edition warning, re-run
-      quiet. Floor: columnstore on, no job, warning naming 2.25.0.
-- [ ] Unit: column normalization (`'id  desc'` = `'id DESC'`), decision helpers that do not need SQL.
+      quiet. Floor: columnstore on, no job, warning naming 2.25.0. *(Written as the
+      `test_fresh_initdb` … `test_concurrent_initdb` scenarios, each asserting the tier the server
+      reports; proven only in CI, at P5. Re-runs allow the tier WARNING each time and assert no INFO.)*
+- [x] Unit: column normalization (`'id  desc'` = `'id DESC'`), decision helpers that do not need SQL.
 - **Verify:** see frontmatter. **CI gate:** P5.
 - **Touches:** `src/hypershell/data/timescale.py`, `src/hypershell/data/__init__.py`,
   `src/hypershell/data/core.py`, `tests/test_timescale.py`.

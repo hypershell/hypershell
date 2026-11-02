@@ -78,6 +78,8 @@ def initdb(optimize: bool = False) -> None:
     if TIMESCALE:
         timescale.prepare(engine)
     upgradedb()
+    if TIMESCALE:
+        timescale.converge(engine, schema, timescale.DEFAULTS)
     if optimize and DATABASE_DIALECT == 'sqlite':
         log.info(f'Optimizing database {DATABASE_SITE}')
         Session.execute(text('PRAGMA optimize'))
@@ -93,6 +95,8 @@ def truncatedb() -> None:
     Entity.metadata.drop_all(engine)
     log.trace('Creating all tables')
     Entity.metadata.create_all(engine)
+    if TIMESCALE:
+        timescale.converge(engine, schema, timescale.DEFAULTS)
     log.warning('Truncated database')
 
 

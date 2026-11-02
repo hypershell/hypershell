@@ -19,11 +19,14 @@ the extension run, and the server must not offer the extension.
 
 # Type annotations
 from __future__ import annotations
-from typing import Callable, Iterator, List, Optional
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 # Standard libs
 import os
+import re
 import uuid
+import threading
+from datetime import timedelta
 from pathlib import Path
 
 # External libs
@@ -37,12 +40,14 @@ from sqlalchemy.exc import DBAPIError
 # Internal libs
 from hypershell.core.exceptions import SchemaUpgradeError
 from hypershell.data import timescale
-from hypershell.data.timescale import TimescaleError, gates, parse_version, extension_error
-from tests import main_lines
+from hypershell.data.timescale import (TimescaleError, Gates, Settings, gates, parse_version, extension_error,
+                                       normalize_columns)
+from tests import main, main_lines
 
 
 ADMIN_URL: Optional[str] = os.getenv('HS_TEST_POSTGRES')
 TIMESCALE: str = os.getenv('HS_TEST_TIMESCALE', '')
+TEMPLATES = frozenset(name for name in os.getenv('HS_TEST_POSTGRES_TEMPLATES', '').split(',') if name)
 EDITIONS = {'community': 'timescale', 'apache': 'apache'}  # HS_TEST_TIMESCALE -> timescaledb.license
 
 needs_server = mark.skipif(not ADMIN_URL, reason='set HS_TEST_POSTGRES to a PostgreSQL admin URL to run these tests')
@@ -70,6 +75,8 @@ def ts_database(admin: Engine) -> Iterator[Callable[[Optional[str]], str]]:
     created: List[str] = []
 
     def make(template: Optional[str] = None) -> str:
+        if template not in (None, 'template0') and template not in TEMPLATES:
+            pytest.fail(f'Template {template} not listed in HS_TEST_POSTGRES_TEMPLATES')
         name = f't_{uuid.uuid4().hex[:16]}'
         clause = f' TEMPLATE {template}' if template else ''
         with admin.connect() as conn:
@@ -174,6 +181,85 @@ def extension_installed(engine: Engine) -> Optional[str]:
     """The TimescaleDB extension's version in a database, or None."""
     with engine.connect() as conn:
         return conn.execute(text('SELECT extversion FROM pg_extension WHERE extname = \'timescaledb\'')).scalar()
+
+
+PASS_LINE = re.compile(r'^(INFO|WARNING) \[hypershell\.data\.timescale\] ')
+WEEK, FOUR_WEEKS = timedelta(days=7), timedelta(days=28)
+
+
+def server_gates(engine: Engine) -> Gates:
+    """What the server under test supports, from its extension version and license."""
+    with engine.connect() as conn:
+        version = conn.execute(text('SELECT extversion FROM pg_extension WHERE extname = \'timescaledb\'')).scalar()
+        license = conn.execute(text('SELECT current_setting(\'timescaledb.license\', true)')).scalar()
+    assert version, 'TimescaleDB extension missing from the test database'
+    return gates(parse_version(version), license)
+
+
+def shape(engine: Engine, schema: str = 'public') -> Dict[str, object]:
+    """The TimescaleDB shape of `task`, read from the timescaledb_information views."""
+    params = {'schema': schema, 'table': f'{schema}.task'}
+    with engine.connect() as conn:
+        enabled = conn.execute(text('SELECT compression_enabled FROM timescaledb_information.hypertables '
+                                    'WHERE hypertable_schema = :schema AND hypertable_name = \'task\''),
+                               params).first()
+        if enabled is None:
+            return {'hypertable': False}
+        column, interval = conn.execute(text(
+            'SELECT column_name, COALESCE(time_interval, integer_interval * INTERVAL \'1 microsecond\') '
+            'FROM timescaledb_information.dimensions WHERE hypertable_schema = :schema '
+            'AND hypertable_name = \'task\' AND dimension_number = 1'), params).one()
+        settings = None
+        if enabled[0]:  # Read only where the columnstore is on (an Apache-only server has none).
+            settings = conn.execute(text('SELECT segmentby, orderby '
+                                         'FROM timescaledb_information.hypertable_columnstore_settings '
+                                         'WHERE hypertable = CAST(:table AS regclass)'), params).first()
+        jobs = conn.execute(text('SELECT CAST(config->>\'compress_after\' AS interval) '
+                                 'FROM timescaledb_information.jobs WHERE proc_name = \'policy_compression\' AND hypertable_schema = :schema '
+                                 'AND hypertable_name = \'task\''), params).scalars().all()
+    return {'hypertable': True, 'column': column, 'interval': interval, 'columnstore': bool(enabled[0]),
+            'segmentby': normalize_columns(settings[0]) if settings else None,
+            'orderby': normalize_columns(settings[1]) if settings else None,
+            'jobs': list(jobs)}
+
+
+def assert_converged(engine: Engine, schema: str = 'public', interval: timedelta = WEEK,
+                     after: timedelta = FOUR_WEEKS) -> Dict[str, object]:
+    """`task` has every part of the shape the server supports, and nothing it does not."""
+    allowed = server_gates(engine)
+    state = shape(engine, schema)
+    assert state['hypertable'], f'{schema}.task is not a hypertable'
+    assert (state['column'], state['interval']) == ('id', interval), state
+    assert state['columnstore'] == allowed.columnstore, state
+    if allowed.columnstore:
+        assert (state['segmentby'], state['orderby']) == ('client_id', 'id desc'), state
+    assert state['jobs'] == ([after] if allowed.policy else []), state
+    return state
+
+
+def pass_lines(stderr: List[str], level: str = None) -> List[str]:
+    """Lines the hypertable pass logged at INFO or WARNING (or only `level`)."""
+    return [line for line in stderr if PASS_LINE.match(line) and (level is None or line.startswith(level))]
+
+
+def assert_tier_warnings(engine: Engine, stderr: List[str]) -> None:
+    """The edition and policy refusals are logged exactly when the server calls for them."""
+    allowed = server_gates(engine)
+    warnings = pass_lines(stderr, 'WARNING')
+    assert any('Apache-only edition' in line for line in warnings) == (not allowed.columnstore), stderr
+    assert any('fixed in TimescaleDB 2.25.0' in line for line in warnings) == (
+        allowed.columnstore and not allowed.policy), stderr
+
+
+def task_rows(engine: Engine, schema: str = 'public') -> List[Tuple[str, str]]:
+    """Every task's id and args."""
+    with engine.connect() as conn:
+        return sorted((str(id), args) for id, args in conn.execute(text(f'SELECT id, args FROM {schema}.task')))
+
+
+def is_hypertable(engine: Engine) -> bool:
+    """True if `public.task` is a hypertable."""
+    return shape(engine)['hypertable']
 
 
 # --------------------------------------------------------------------------------------------------
@@ -304,4 +390,248 @@ def test_extension_created(ts_database, ts_site) -> None:
     assert rc == exit_status.success, stderr
     assert extension_installed(engine) is not None
     assert any('Created extension timescaledb' in line for line in stderr), stderr
-    assert inspect(engine).has_table('task')
+    assert_converged(engine)
+
+
+# --------------------------------------------------------------------------------------------------
+# The hypertable pass after the schema step
+
+
+@mark.unit
+@mark.parametrize('left, right', [
+    ('id  desc', 'id DESC'),
+    ('id DESC NULLS FIRST', 'id DESC'),
+    ('id ASC NULLS LAST', 'id'),
+    ('client_id,  id', 'client_id, id'),
+    ('', None),
+])
+def test_normalize_columns_equal(left: str, right: Optional[str]) -> None:
+    """Spacing, case, and explicit defaults do not count as drift."""
+    assert normalize_columns(left) == normalize_columns(right)
+
+
+@mark.unit
+@mark.parametrize('left, right', [
+    ('id DESC', 'id'),
+    ('id DESC NULLS LAST', 'id DESC'),
+    ('id NULLS FIRST', 'id'),
+    ('client_id', 'client_id, id'),
+])
+def test_normalize_columns_differ(left: str, right: str) -> None:
+    """A different column, direction, or NULLS placement is drift."""
+    assert normalize_columns(left) != normalize_columns(right)
+
+
+@mark.unit
+def test_default_settings() -> None:
+    """Zero configuration: one-week chunks, client_id/id DESC columnstore, policy after four weeks."""
+    assert timescale.DEFAULTS == Settings(chunk_interval='1 week', columnstore=True, segmentby='client_id',
+                                          orderby='id DESC', policy=True, compress_after='4 weeks')
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_fresh_initdb(ts_database, ts_site) -> None:
+    """A new database gets the whole shape the server supports, and the tier warnings it calls for."""
+    engine = ts_site(ts_database())
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert_converged(engine)
+    assert_tier_warnings(engine, stderr)
+    assert any(line.endswith('Converted table task to a hypertable partitioned by id (1 week chunks)')
+               for line in pass_lines(stderr, 'INFO')), stderr
+    for name in ('client', 'source'):
+        with engine.connect() as conn:
+            assert conn.execute(text('SELECT count(*) FROM timescaledb_information.hypertables '
+                                     'WHERE hypertable_name = :name'), {'name': name}).scalar() == 0
+    assert not any('not yet implemented' in line for line in stderr)
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_rerun_is_quiet(ts_database, ts_site) -> None:
+    """Re-running initdb, and launching with --initdb, change nothing and log no change."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    state = assert_converged(engine)
+    for argv in (['hs', 'initdb', '--yes'], ['hs', 'initdb', '--yes'],
+                 ['hs', 'submit', '--initdb', 'echo', 'one'], ['hs', 'submit', '--initdb', 'echo', 'two']):
+        rc, _, stderr = main_lines(argv)
+        assert rc == exit_status.success, stderr
+        assert pass_lines(stderr, 'INFO') == [], stderr
+        assert_tier_warnings(engine, stderr)
+        assert shape(engine) == state
+    assert main_lines(['hs', 'list', '--count'])[:2] == (exit_status.success, ['2'])
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_truncate_recreates(ts_database, ts_site) -> None:
+    """Truncating drops the hypertable and its policy; the pass recreates both, one policy only."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    assert main_lines(['hs', 'submit', 'echo', 'one'])[0] == exit_status.success
+    rc, _, stderr = main_lines(['hs', 'initdb', '--truncate', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert_converged(engine)
+    assert main_lines(['hs', 'list', '--count'])[:2] == (exit_status.success, ['0'])
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success and pass_lines(stderr, 'INFO') == [], stderr
+    assert_converged(engine)
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_run_compress_list_vacuum(ts_database, ts_site) -> None:
+    """Tasks run on the hypertable; with a chunk in the columnstore, list, vacuum, and initdb still work."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    for n in range(4):
+        assert main_lines(['hs', 'submit', 'echo', f'task-{n}'])[0] == exit_status.success
+    rc, stdout, stderr = main(['hs', 'cluster', '--restart', '-N2', '-b1', '-w1', '--no-tls'])
+    assert rc == exit_status.success, stderr
+    assert sorted(stdout.split()) == [f'task-{n}' for n in range(4)]
+    if server_gates(engine).columnstore:
+        with engine.connect() as conn:
+            compressed = conn.execute(text('SELECT compress_chunk(c) FROM show_chunks(\'task\') c')).all()
+            conn.commit()
+        assert compressed
+    assert main_lines(['hs', 'list', '--count'])[:2] == (exit_status.success, ['4'])
+    assert main_lines(['hs', 'list', '--remaining', '--count'])[:2] == (exit_status.success, ['0'])
+    assert main_lines(['hs', 'submit', 'echo', 'late'])[0] == exit_status.success
+    rc, _, stderr = main_lines(['hs', 'initdb', '--vacuum', '--yes'])
+    assert rc == exit_status.success, stderr
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success and pass_lines(stderr, 'INFO') == [], stderr
+    assert_converged(engine)
+    assert main_lines(['hs', 'list', '--count'])[:2] == (exit_status.success, ['5'])
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_empty_plain_table_converted(ts_database, ts_site) -> None:
+    """An empty plain task table from a postgres-provider initdb is converted."""
+    name = ts_database()
+    engine = ts_site(name, provider='postgres')
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    assert not is_hypertable(engine)
+    ts_site(name)
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert_converged(engine)
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_nonempty_plain_table_untouched(ts_database, ts_site) -> None:
+    """A plain task table holding rows is left plain, with a warning, and initdb succeeds."""
+    name = ts_database()
+    engine = ts_site(name, provider='postgres')
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    assert main_lines(['hs', 'submit', 'echo', 'kept'])[0] == exit_status.success
+    before = task_rows(engine)
+    ts_site(name)
+    for _ in range(2):
+        rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+        assert rc == exit_status.success, stderr
+        assert any('holds rows and is a plain table' in line for line in pass_lines(stderr, 'WARNING')), stderr
+        assert pass_lines(stderr, 'INFO') == [], stderr
+    assert not is_hypertable(engine)
+    assert task_rows(engine) == before
+    assert main_lines(['hs', 'list', '--count'])[:2] == (exit_status.success, ['1'])
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_legacy_database_upgraded_not_converted(ts_database, ts_site) -> None:
+    """A 2.8.3 database (UUIDv4 ids) opened under the timescale provider is upgraded, left plain, and works."""
+    engine = ts_site(ts_database('hs283'))
+    before = task_rows(engine)
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert any('holds rows and is a plain table' in line for line in pass_lines(stderr, 'WARNING')), stderr
+    assert not is_hypertable(engine)
+    assert task_rows(engine) == before
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT count(*) FROM information_schema.columns '
+                                 'WHERE table_name = \'task\' AND column_name = \'source\'')).scalar() == 1
+    assert main_lines(['hs', 'list', '--count'])[:2] == (exit_status.success, ['7'])
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_drift_restored(ts_database, ts_site) -> None:
+    """A chunk interval, columnstore setting, or policy changed by hand is put back, with INFO naming each."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    allowed = server_gates(engine)
+    with engine.connect() as conn:
+        conn.execute(text('SELECT set_chunk_time_interval(\'task\', INTERVAL \'1 day\')'))
+        if allowed.columnstore:
+            conn.execute(text('ALTER TABLE task SET (timescaledb.orderby = \'id ASC\')'))
+        if allowed.policy:
+            conn.execute(text('CALL remove_columnstore_policy(\'task\')'))
+            conn.execute(text('CALL add_columnstore_policy(\'task\', after => INTERVAL \'2 weeks\')'))
+        conn.commit()
+    drifted = shape(engine)
+    assert drifted['interval'] == timedelta(days=1)
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    info = pass_lines(stderr, 'INFO')
+    assert any('Changed the chunk interval of task from' in line and 'to 1 week' in line for line in info), stderr
+    assert any('Changed the columnstore settings of task' in line for line in info) == allowed.columnstore, stderr
+    assert any('Replaced the columnstore policy on task' in line for line in info) == allowed.policy, stderr
+    assert_converged(engine)
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success and pass_lines(stderr, 'INFO') == [], stderr
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_named_schema(ts_database, ts_site) -> None:
+    """With database.schema set, the hypertable is made there and nothing is created in public."""
+    name = ts_database()
+    with database_engine(name, isolation_level='AUTOCOMMIT').connect() as conn:
+        conn.execute(text('CREATE SCHEMA jobs'))
+    engine = ts_site(name, schema='jobs')
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert_converged(engine, schema='jobs')
+    assert inspect(engine).get_table_names(schema='public') == []
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success and pass_lines(stderr, 'INFO') == [], stderr
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_concurrent_initdb(ts_database, ts_site) -> None:
+    """Concurrent initdb runs all succeed; exactly one converts the table, and one policy results."""
+    engine = ts_site(ts_database())
+    count = 3
+    barrier = threading.Barrier(count)
+    results: List[Optional[Tuple[int, str, str]]] = [None] * count
+
+    def worker(i: int) -> None:
+        barrier.wait()
+        results[i] = main(['hs', 'initdb', '--yes'])
+
+    threads = [threading.Thread(target=worker, args=(i, )) for i in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=180)
+    if any(result is None for result in results):
+        pytest.fail('a worker did not finish')
+    assert [rc for rc, _, _ in results] == [exit_status.success] * count, results
+    assert len([stderr for _, _, stderr in results if 'Converted table task' in stderr]) == 1, results
+    assert_converged(engine)
