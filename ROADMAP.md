@@ -50,6 +50,16 @@ already implements comment semantics correctly.
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md)
 
+## Date-like task arguments are turned into datetimes on the wire
+
+The bundle decoder converts any string that parses as an ISO date into a datetime, whatever field
+it is in. A task whose argument line is `2026-11-02` or `20261102`, an ordinary `hsx` input, reaches
+the client as a datetime, template expansion fails on it, and the task is recorded as a template
+error without running. Decoding by declared column type, not by guessing, removes the class.
+
+*Horizon: near-term · Depends on: — · Refs: found by the writeback fix's research*
+**Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md)
+
 ## Unguarded task start kills the executor and poisons the task
 
 An `OSError` while opening capture files or spawning the subprocess propagates out of the FSM and
@@ -213,6 +223,37 @@ waits rather than building one twice.
 *Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half is closed
 separately by the writeback fix*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
+
+## A stale confirmation can hide a rescheduled task from orphan recovery
+
+Confirmations attribute rows by id alone and are not ordered against eviction. An evicted client's
+late confirmation can name it on a row now running elsewhere, so when that second client is evicted
+in turn, orphan recovery misses the row and it stays in flight until restart. Fencing confirmations
+needs the dispatch token on the confirmation wire, the same token results now carry.
+
+*Horizon: mid-term · Depends on: — · Refs: writeback fix (same token); relay*
+**Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
+
+## A late confirmation can overwrite the executing client's attribution
+
+Confirmations and results are applied by separate threads in no fixed order. A confirmation applied
+after the result rewrites the completed row's attribution with the confirming client's id. Harmless
+for ordinary clients; wrong for relay, which confirms under its own id and returns results
+attributed to the leaf client that ran them. Conditioning the confirmation on an incomplete row
+needs no wire change.
+
+*Horizon: near-term, before relay · Depends on: — · Refs: relay (return path, leaf attribution)*
+**Seed:** [`issues/late-confirm-overwrites-attribution.md`](issues/late-confirm-overwrites-attribution.md)
+
+## Orphan recovery can discard a result that lands while it runs
+
+Reverting an evicted client's tasks reads the in-flight rows, then reverts them by id in a separate,
+unconditional statement. A legitimate result committed in between is wiped and the task runs again,
+with no sign to the operator. Making the revert conditional on the row still being in flight closes
+it.
+
+*Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
+**Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
 
 ## `rotatedb` lost-update window
 
