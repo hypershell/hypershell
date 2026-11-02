@@ -35,3 +35,10 @@
 - **Skill cause:** The skill's commit recipe assumes the tree holds only this phase's work. Step 1 checks for a clean tree, but untracked files that are deliberately left alone defeat that check, and the recipe then stages them.
 - **Recommended fix:** Change Step 7 to `git add <paths the phase touched> spec/{slug}/TECH.md [spec/{slug}/META.md]`, taking the paths from the phase's **Touches** line, and note that `bundle` stages the union.
 - **Confidence:** high · **Effort:** small
+
+## F5 — The blind diff's base is a mutable branch name, so a stale local `develop` grades the wrong range
+`origin=hs-review:step1 severity=medium category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** Step 1 resolves `{base}` from TECH's `base: develop`. The injected diffstat and the Step 2 diff command both use `develop...HEAD`. In this worktree the local `develop` is stale, so the reviewer would have been given a diff over the wrong range. The foreman had to pin the base SHA (`origin/develop` at plan time) by hand before the blind pass.
+- **Skill cause:** the skill takes the base as a branch name and never checks whether that ref is current. The plan's real base, the commit the branch was cut from, is recorded nowhere in TECH, so the diff can silently include unrelated commits or miss some. That is a blind-diff integrity gap.
+- **Recommended fix:** have `hs-plan`/`hs-build` record `base_sha` in TECH's frontmatter, then make Step 1 and the injected diffstat use `git merge-base origin/{base} HEAD` (or `base_sha`). Step 1 should stop and report when local `{base}` differs from `origin/{base}`. This strengthens the blind-review gate; it does not weaken it.
+- **Confidence:** high · **Effort:** small

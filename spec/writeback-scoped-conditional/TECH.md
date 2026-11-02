@@ -3,7 +3,7 @@ slug: writeback-scoped-conditional
 title: Scoped, conditional result writeback
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/writeback-scoped-conditional
 base: develop
 current_phase: done
@@ -68,10 +68,11 @@ phases:
     && grep -q "only its result columns" .agents/factory/invariants.md && uv run pytest
     -m unit -q tests/test_writeback.py
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: '2569441'
+  verdict: changes-requested
+  blocked_reason: 'Review cycle 1: F1 duplicate probe mislabels exit -1 redelivery
+    as stale (model.py, human gate); F2 stale-confirm seed misstates its defect'
+  cycle: 1
 ---
 # TECH.md — Scoped, conditional result writeback
 
