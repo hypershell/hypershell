@@ -41,7 +41,7 @@ is skipped by the parser):
 <!-- Real findings are appended below this line by the lifecycle skills. -->
 
 ## F1 — `kind` taxonomy has no slot for a pure docs (or ci/test) change
-`origin=hs-feature:step2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-feature/SKILL.md`
+`origin=hs-feature:step2 severity=medium category=missing-guidance status=applied target=.agents/skills/hs-feature/SKILL.md`
 - **What happened:** This task is a pure documentation cleanup. The skill's Argument Parsing and branch
   mapping only enumerate `fix | feature | refactor`, and Step 7 sets the commit `{category}` to `fix`
   or `feature`. AGENTS.md, by contrast, calls the category set open and lists `docs` explicitly. I had
@@ -58,7 +58,7 @@ is skipped by the parser):
 - **Confidence:** high · **Effort:** small
 
 ## F2 — research-depth gate keys off appetite/kind, missing GOAL-flagged unknowns
-`origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+`origin=hs-plan:step3 severity=low category=missing-guidance status=applied target=.agents/skills/hs-plan/SKILL.md`
 - **What happened:** This GOAL is `appetite: small, kind: docs`, which Step 3 tells me to treat as
   "skip the fan-out, do a couple of targeted reads." But the GOAL explicitly deferred a real external
   unknown to `/hs-plan` (the redirect mechanism / docs hosting / hypershell.org URL map). Following the

@@ -6,7 +6,7 @@
 > freedom for the plan. Edit requirements here; do **not** silently drift them during build.
 
 - **slug:** {slug}
-- **kind:** feature | fix | refactor
+- **kind:** feature | fix | refactor | docs | …  ·  *the `AGENTS.md` commit category (an open set).*
 - **appetite:** small | big  ·  *small caps research + phase count; a one-sentence change may skip
   the lifecycle entirely.*
 

@@ -7,7 +7,7 @@ status: done
 branch: feature/task-slot
 base: develop
 current_phase: done
-last_updated: '2026-07-20'
+last_updated: '2026-11-01'
 phases:
 - id: P1
   name: Wire slot/count through the client executor (env vars + template placeholders)
@@ -57,7 +57,9 @@ review:
   last_reviewed_commit: 9d03047e7fc7589ac81439340ed4813c642e1545
   verdict: changes-requested
   blocked_reason: 'R7 docs incomplete: task-env reference (_alt) + man pages omit
-    TASK_SLOT/TASK_SLOT_COUNT; templates.rst --no-db claim is wrong'
+    TASK_SLOT/TASK_SLOT_COUNT; templates.rst --no-db claim is wrong · reconciled 2026-11-01:
+    both remediated before landing (87f7bcd carries them; pre-squash branch commit
+    bcdbc72); no review cycle 2 recorded, verdict never approved'
   cycle: 1
 ---
 # TECH.md — Expose a per-executor TASK_SLOT to tasks

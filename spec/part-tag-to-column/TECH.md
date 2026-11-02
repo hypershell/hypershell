@@ -7,7 +7,7 @@ status: done
 branch: feature/part-tag-to-column
 base: develop
 current_phase: done
-last_updated: '2026-07-31'
+last_updated: '2026-11-01'
 phases:
 - id: P1
   name: 'Data layer: `part` column (visible) + rotatedb via column + same-commit initdb
@@ -42,7 +42,9 @@ review:
   last_reviewed_commit: a3af53941279b9e0d79d81cdb522b1274f04933a
   verdict: changes-requested
   blocked_reason: 'R8 partial: part omitted from NORMAL_MODE_TEMPLATE (hs info / bare
-    hs list)'
+    hs list) · reconciled 2026-11-01: remediated before landing (5b21bcd adds part:
+    {part} + test_part_in_normal_view; pre-squash branch commit e595cbe); no review
+    cycle 2 recorded, verdict never approved'
   cycle: 1
 ---
 # TECH.md — Promote `part` from a bookkeeping tag to a first-class column

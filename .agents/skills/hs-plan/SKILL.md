@@ -81,6 +81,10 @@ escalate.
   `server.py`, `client.py`, …) — regardless of `appetite`/`kind`. Step 2 already surfaced which
   invariants the change touches; a "small" edit to those files still needs the exact contracts pinned
   before design, or a lean plan gets them subtly wrong.
+  **Exception — GOAL-deferred unknowns:** when `GOAL.md` explicitly hands an open question to
+  `/hs-plan` (e.g. a Clarifications or Related-materials note that "the mechanism is a `/hs-plan`
+  decision"), run a fan-out scoped to those questions — one brief each — regardless of
+  `appetite`/`kind`. A lean plan would otherwise guess the very criterion the GOAL left open.
   (An explicit `skip research` argument stays a human override and still skips.)
 - **`appetite: big`:** identify the *rabbit holes* — the scary unknowns that could blow the appetite
   (unfamiliar code paths, algorithmic choices, external tech, perf at scale, dialect differences).
@@ -157,8 +161,8 @@ Likely sources here: the research fan-out mechanics (Step 3), the invariant-gate
 git add -A spec/{slug}      # PLAN.md + TECH.md, plus research/ and META.md when present (research/ is omitted on the lean path)
 git commit -m "[{category}] Plan {slug}: design + phased roadmap"
 ```
-`{category}` = the same category as the shape commit (`hs-feature` Step 7) — normally `{kind}`
-(`fix`|`feature`|`refactor`), or a more specific AGENTS.md category (e.g. `docs`) when it fits.
+`{category}` = the same category as the shape commit (`hs-feature` Step 7) — `{kind}`
+(`fix`|`feature`|`refactor`|`docs`|…, the open AGENTS.md set).
 **No `Co-Authored-By` trailer.** Do not push.
 
 ### Step 9 — Report & hand off
