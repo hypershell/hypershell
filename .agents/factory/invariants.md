@@ -55,9 +55,13 @@ subsystems.
   `Task.query_retryable`'s `retried IS FALSE` (under `select_failed`), **not** by the schema.
   Unguarded, each yielding a second retry with the same `previous_id`: two servers on one database
   (unsupported, no row locks, so new tasks double-schedule too); a kill between the retry insert
-  and the `retried` mark (two commits); a reset `retried` (late full-row writeback by an evicted
-  client, `hs task update`). Pre-2.9 SQLite DBs keep the `UNIQUE` constraints (forward-only, no
-  table rebuild): never tripped in normal operation, an `IntegrityError` in those cases.
+  and the `retried` mark (two commits); a reset `retried` (`hs task update`). Pre-2.9 SQLite DBs
+  keep the `UNIQUE` constraints (forward-only, no table rebuild): never tripped in normal
+  operation, an `IntegrityError` in those cases.
+- A returned result writes only its result columns (`Task.result_columns`), and only for its
+  current assignment: the row's `schedule_time` as dispatched, while `completion_time` is NULL
+  (`Task.apply_results`). A stale or duplicate result is logged and dropped, so a late result from
+  an evicted client cannot reopen a retried or cancelled row.
 - `attempts == max_retries + 1`; this relationship spans `server.py`,
   `Task.query_retryable`/`select_failed`/`count_retryable`, and `Task.increment_group` — change
   them together. Every one of those queries keeps the `CANCEL_STATUS` filter (§2).
