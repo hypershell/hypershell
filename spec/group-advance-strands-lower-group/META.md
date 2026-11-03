@@ -36,3 +36,45 @@
   deliberate exclusion, is seeded from `templates/ISSUE.md` with a `ROADMAP.md` entry and linked
   from the non-goal. In Step 7, add the `git add issues/{new}.md ROADMAP.md` case.
 - **Confidence:** med · **Effort:** small
+
+## F3 — `verify:` guidance has no guard against a command that never returns
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** This fix is for a hang. On the base commit its CLI drives and its integration test can run
+  forever, the integration suite has no per-test timeout, and `timeout(1)` is not installed on the host. Every
+  `verify:` therefore defines its own one-line Python kill timer (new session, `os.killpg` after N seconds),
+  which makes the frontmatter long and repetitive. The port-trial script repeats it a sixth time.
+- **Skill cause:** Steps 4 and 6 steer verification toward driving `hs`/`hsx` and running integration tests, but
+  they say nothing about bounding those commands. The factory has no helper for doing so, so each plan reinvents one
+  and a plan that forgets hangs `hs-build`.
+- **Recommended fix:** Add `.agents/factory/bin/kt` (or `with_timeout.py`): it runs a command in its own process
+  group and kills the group on expiry with exit 124. Add one line to Step 6 and the TECH template: every `verify:`
+  that runs pytest integration tests or `hs`/`hsx` goes through it.
+- **Confidence:** high · **Effort:** small
+
+## F4 — The high-blast-radius exception calls for parallel subagents even at `appetite: small`
+`origin=hs-plan:step3 severity=low category=steering status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The change touches `data/model.py` and `server.py`, so Step 3 requires the full fan-out. Step
+  3 describes that fan-out as parallel subagents and allows the planner to write the briefs one after another only
+  when subagents are unavailable. For a small fix, the foreman directed the proportionate form: three briefs the
+  planner writes itself, in sequence, as #68 did. That form departs from the skill's text.
+- **Skill cause:** The exception sets *whether* research runs but not *how much*. It borrows the `appetite: big`
+  mechanics, so the practice the factory actually follows reads as non-compliance.
+- **Recommended fix:** In the high-blast-radius exception, add: at `appetite: small`, the planner may write the
+  briefs itself, in sequence (same paths, same digest), and should prefer that unless a topic needs an
+  independent read.
+- **Confidence:** med · **Effort:** small
+
+## F5 — No pattern for proving a fix ports to a patch branch
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** R9 requires this cycle's `src/` and `tests/` diff to port to 2.8.3 after #68. The skill and
+  the template have no phase shape for that. The plan invented a trial: a scripted detached `origin/master`
+  worktree, #68 applied with one scripted conflict resolution, then this cycle applied with `git apply -3`, then
+  the group tests and removal of the worktree. The script is committed under `spec/` because `verify:` needs a
+  file to call. The plan also had to tell the builder where edits may sit so the 3-way apply stays clean.
+- **Skill cause:** The lifecycle assumes a cycle lands only on `develop`. Patch ports reach `/hs-release` with no
+  earlier proof, though two consecutive fixes (#68 and this one) needed one.
+- **Recommended fix:** Add an optional "port trial" phase pattern to the TECH template and Step 6: a
+  `.agents/factory/bin/port_trial.sh <target-ref> <prereq-commit>…` that builds a detached worktree, applies the
+  diffs path-limited to `src/` and `tests/`, runs named tests under a kill timer, and always removes the worktree.
+  Add a note on keeping edits clear of lines that differ on the target.
+- **Confidence:** med · **Effort:** medium
