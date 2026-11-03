@@ -228,6 +228,19 @@ The plan gate is **passed** with these rulings and conditions.
   4. Measure the parity wall-time difference (+3 s on 10 tasks) and record where it goes.
   5. No Z1 re-merge until the foreman says Z1's new head has landed.
 
+- **Rebase attempt under ruling 1, 2026-11-03.** The three ruled hunks resolved as ruled (P1). The
+  rebase then stopped at P4 (`1e2b937`) on two more textual hunks, outside the ruling:
+  `data/model.py` `__all__` (writeback's `'ResultOutcome'` vs P4 adding `'zone_name'` to the same
+  line) and `server.py`'s model import line (writeback adds `ResultOutcome`; P4 adds `Zone`,
+  `DEFAULT_ZONE_ID`, `DEFAULT_ZONE_NAME`). Aborted per the ruling; the branch is unchanged on
+  `30993b8`, so ruling 2's test edit and the post-rebase suites wait for the rebase.
+- **Parity wall time (ruling 4), measured.** Not the 2 s request wait. Five interleaved repeats at the
+  default log level: time to first schedule 0.36 s vs 0.68 s (2.8.3), the shutdown tail is the same
+  (4.16 vs 4.07 s), but the scheduling span is 6.47 s vs 3.47 s. Every held-group step (the retry,
+  and each group advance) takes ~2.0 s instead of ~1.0 s: a cut during the scheduler's back-off
+  wakes it early, it finds nothing, and the doubled poll puts it into a 2 s wait in which the
+  awaited result lands; results never wake the scheduler. Reported, not fixed.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling
