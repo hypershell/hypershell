@@ -1297,3 +1297,22 @@ No AGENTS.md invariant violation was found.
   by C9. Every gate passed: suite on four Pythons, `test_queue_gc.py` repeats, parity, compat and
   throughput.
 - P2, the multi-node evidence, is still pending.
+
+## Triage (human gate) — cycle 5
+
+Cycle 5 did not converge: C7 is resolved, C8's stranding is resolved, and C9 (MEDIUM, CONFIRMED)
+shows that the address match itself is the fragile part, because C8 and C9 are two faces of
+deciding "is this my server?" from addresses. The foreman stopped and escalated. On 2026-11-02 the
+maintainer chose to **replace the address match with a thread-based rule**, with **one further
+review (cycle 6)** scoped to that change and a **pre-agreed fallback**: if cycle 6 finds only LOW or
+MEDIUM defects with library-only exposure (no shipped CLI path), they are seeded with `ROADMAP.md`
+entries and the feature proceeds to publish without another cycle. A HIGH or CRITICAL finding, or
+any finding reachable from a shipped CLI path, stops the feature.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| C9 · CONFIRMED | fix by redesign | **Rule:** a queue client's proxy decref is handed off to the `hypershell-queue-decref` sender if and only if the finalizer runs (a) on a thread the in-process queue server owns (the accept loop, a connection handler, any thread the server starts), or (b) on any thread while it is inside the server's start or stop critical section (a thread-local marker set for the duration). Every other decref is the stock path on the finalizing thread, byte for byte. **No address, port or name matching anywhere**, so remove `_serving`'s address use, `_note_dialed` and `_served_here`'s address logic. The sender's lifecycle (started by the server before it can accept; C7's `register_at_fork` reset in the child) stays. **Property:** no server-owned thread, and no thread inside start/stop, ever dials a listener, so C5 holds by construction whatever the client's address, resolution or TLS mode. TECH P1's argument is rewritten to this rule. **Red-first tests:** C9's reproduction (a same-process TLS client of a multi-address name, with a GC forced on a server thread) fails at `43d2d85` and passes after the change, plus the existing C5, C7 and C8 tests. Forced-GC at the accept loop, a handler, the starter and stop: ≥ 200 rounds on each of 3.11–3.14, TLS on and off. |
+| C8 (re-read) | covered | Under the thread rule, a remote client's decref finalized on a non-server thread is stock (no stranding, no leak). A decref finalized on a server thread for a *remote* server goes to the sender and is delivered, so nothing leaks. Keep C8's test. |
+| Observation · forked child keeps the listener | seed | `unshaped`, with a `ROADMAP.md` entry and the reviewer's reproduction (port not re-bindable after shutdown, unlike `b819de6`). |
+| Observation · stale cached connection after a same-port restart under another name | fold | Append to the existing same-port restart seed (`issues/queue-stale-decref-same-port-restart.md`) as a second symptom. |
+| P2 · PLAUSIBLE | pending external evidence | Unchanged; the foreman runs the multi-node matrix at the remediated head once the test cluster is back from maintenance. |

@@ -9,6 +9,12 @@ server threads included. Each probe runs in its own process with a lowered colle
 collections are frequent. A watchdog ends a probe that stalls, so a stall fails the test within its
 time limit instead of hanging the suite.
 
+A forced-collection probe runs one collection, with a dropped same-process client pending, on each
+part of the server side in turn: the accept loop, a handler, the thread starting a server between its
+bind and its accept loop, and the stop thread inside ``stop()``. It runs with clients dialing a plain
+address, and with TLS clients dialing a name that resolves to an address that fails first and then the
+server's.
+
 Two more probes check that each decref is sent once, to the server that issued the reference: a
 client of a server in another process on an in-process server's port number, and a forked child of
 a serving process.
@@ -30,12 +36,12 @@ import threading
 import subprocess
 import faulthandler
 import multiprocessing
-from queue import SimpleQueue
+from queue import Queue, SimpleQueue
 from types import SimpleNamespace
-from multiprocessing.managers import BaseProxy
+from multiprocessing.managers import BaseProxy, dispatch
 
 # External libs
-from pytest import fixture, mark, skip
+from pytest import fixture, mark, raises, skip
 
 # Internal libs
 from hypershell.core import queue as queue_module
@@ -59,6 +65,16 @@ ROUND_LIMIT = 15
 
 # Seconds the whole probe process may take before the test ends its process group
 PROBE_LIMIT = 240
+
+# Rounds of the forced-collection probe in the suite (each round forces a collection at every point)
+FORCED_ROUNDS = 10
+
+# The server-side points at which the forced-collection probe runs a collection
+POINTS = ('accept', 'handler', 'starter', 'stop')
+
+# A name the forced-collection probe resolves, in-process, to an address that fails at once and then
+# to the server's address (a name with two IPv4 addresses whose first does not serve the port)
+MULTI_ADDRESS = 'queue-multi-address.test'
 
 
 @fixture(scope='module')
@@ -137,20 +153,18 @@ def test_dropped_client_decref_reaches_server(tls: Optional[TLSConfig]) -> None:
 
 
 @mark.unit
-def test_finalizer_hands_off_only_when_served_here(monkeypatch) -> None:
-    """A decref for an address an in-process server listens on is handed off; any other is the stock one."""
+def test_finalizer_hands_off_only_server_side(monkeypatch) -> None:
+    """A decref finalized on a server thread, inside a server's start or stop, or in a TLS client's
+    handshake, is handed off; any other is the stock one, on the finalizing thread, whatever address its
+    token names."""
     calls = []
     monkeypatch.setattr(BaseProxy, '_decref', staticmethod(lambda *args: calls.append(args)))
     handed_off = SimpleQueue()
     monkeypatch.setattr(queue_module, '_decrefs', handed_off)
-    monkeypatch.setattr(queue_module, '_serving', {})
-    monkeypatch.setattr(queue_module, '_dialed', {})
-    queue_module._note_dialed(('localhost', 50001))
-    queue_module._note_dialed(('192.0.2.1', 50001))  # TEST-NET-1: never an address of this host
-    assert queue_module._dialed == {('localhost', 50001): ('127.0.0.1', True),
-                                    ('192.0.2.1', 50001): ('192.0.2.1', False)}
-    here = SimpleNamespace(address=('localhost', 50001), id='1')
-    remote = SimpleNamespace(address=('192.0.2.1', 50001), id='2')
+    monkeypatch.setattr(queue_module, '_server_side', {})
+    monkeypatch.setattr(queue_module, '_decref_sender', threading.current_thread())  # Stands in for a sender
+    tokens = [SimpleNamespace(address=address, id=str(i)) for i, address in
+              enumerate([('localhost', 50001), ('192.0.2.1', 50001), ('unresolvable.test', 50001), '/a/path'])]
 
     def handed(token: SimpleNamespace) -> bool:
         """Run the finalizer on `token`: True if it handed the decref off, False if it ran the stock one."""
@@ -162,24 +176,66 @@ def test_finalizer_hands_off_only_when_served_here(monkeypatch) -> None:
         assert handed_off.get_nowait() == (token, 'rest')
         return True
 
-    def serving(*listeners: tuple) -> None:
-        queue_module._serving.clear()
-        for listener in listeners:
-            queue_module._serving[object()] = listener
+    assert not any(handed(token) for token in tokens)
+    queue_module._mark()
+    queue_module._mark()  # A server thread inside stop(): marked twice
+    assert all(handed(token) for token in tokens)
+    queue_module._unmark()
+    assert all(handed(token) for token in tokens)
+    queue_module._unmark()
+    assert not any(handed(token) for token in tokens) and queue_module._server_side == {}
 
-    assert not handed(here) and not handed(remote)
-    serving(('127.0.0.1', 50002))
-    assert not handed(here) and not handed(remote)
-    serving(('127.0.0.1', 50001))
-    assert handed(here) and not handed(remote)
-    serving(('0.0.0.0', 50001))  # The wildcard address answers at every address of this host
-    assert handed(here) and not handed(remote)
-    serving(('127.0.0.1', 0))  # A server binding an ephemeral port there may take any port
-    assert handed(here) and not handed(remote)
-    serving(('192.0.2.7', 50001))  # The same port number at another address
-    assert not handed(here) and not handed(remote)
-    unknown = SimpleNamespace(address=('unrecorded', 50001), id='3')  # Never recorded: the port decides
-    assert handed(unknown) and not handed(SimpleNamespace(address=('unrecorded', 50002), id='4'))
+    # A server thread is marked before the threading module's start-up code runs on it, which is what
+    # releases the thread waiting in start(), and until it ends
+    seen = []
+
+    class Probe(queue_module._ServerThread):
+        def _bootstrap_inner(self) -> None:
+            seen.append(threading.get_ident() in queue_module._server_side)
+            super()._bootstrap_inner()
+
+    thread = Probe(target=lambda: seen.append(all(handed(token) for token in tokens)), name='test-server-side')
+    thread.start()
+    thread.join()
+    assert seen == [True, True] and queue_module._server_side == {} and thread.daemon
+
+    # A TLS client is on the server side until its handshake ends, which an accept loop waits on
+    monkeypatch.setattr(queue_module, 'get_tls_config', lambda: None)
+    monkeypatch.setattr(queue_module, 'get_client_context', lambda: None)
+
+    def refuse(address: tuple) -> None:
+        seen.append(all(handed(token) for token in tokens))
+        raise ConnectionRefusedError(address)
+
+    monkeypatch.setattr(socket, 'create_connection', refuse)
+    with raises(ConnectionRefusedError):
+        queue_module.secure_client(('localhost', 50001))
+    assert seen == [True, True, True] and queue_module._server_side == {}
+
+    # A process with no sender (a forked child that serves nothing) hands nothing off
+    monkeypatch.setattr(queue_module, '_decref_sender', None)
+    queue_module._mark()
+    try:
+        assert not any(handed(token) for token in tokens)
+    finally:
+        queue_module._unmark()
+
+
+@mark.unit
+def test_forced_collection_on_server_side_never_stalls(tls_args: List[str]) -> None:
+    """A collection forced at each server-side point, with a dropped same-process client pending, returns."""
+    run_probe('forced-collection', tls_args, FORCED_ROUNDS, '127.0.0.1')
+
+
+@mark.unit
+def test_multi_address_name_never_stalls(tls_materials: tuple[str, str]) -> None:
+    """The same, for TLS clients that dial a name whose first address fails and whose second is the server's.
+
+    A TLS client tries each address a name resolves to, so it reaches the server at the second.
+    """
+    if failing_address() is None:
+        skip('no address here fails a connection at once')
+    run_probe('forced-collection', list(tls_materials), FORCED_ROUNDS, MULTI_ADDRESS)
 
 
 @mark.unit
@@ -214,7 +270,8 @@ def test_same_port_restart_never_stalls(tls_args: List[str]) -> None:
     run_probe('same-port-restart', tls_args)
 
 
-# The probes, run as ``python test_queue_gc.py NAME ROUNDS [CERT KEY]`` by the tests above.
+# The probes, run as ``python test_queue_gc.py NAME ROUNDS [OPTIONS] [CERT KEY]`` by the tests above
+# (``forced-collection`` takes the address its clients dial).
 
 
 def probe_config(port: int = 0, tls: Optional[TLSConfig] = None, host: str = '127.0.0.1') -> QueueConfig:
@@ -371,7 +428,11 @@ def probe_fork(rounds: int, tls_files: List[str]) -> None:
             silent = socket.create_connection(('127.0.0.1', port))
             time.sleep(0.5)
             del dropped
-            gc.collect()
+            queue_module._mark()  # Collected on the server side, so the decrefs are handed off
+            try:
+                gc.collect()
+            finally:
+                queue_module._unmark()
             wait_until(lambda: queue_module._decrefs.qsize() >= 3)
             waiting = queue_module._decrefs.qsize()
             print(f'decrefs waiting at the fork: {waiting}', flush=True)
@@ -393,6 +454,126 @@ def probe_fork(rounds: int, tls_files: List[str]) -> None:
                     failed.append(f'{name}: {error!r}')
             print(f'objects after the child exited: {left}; failed puts: {failed}', flush=True)
             assert left == 4 and not failed
+
+
+def failing_address() -> Optional[str]:
+    """An IPv4 address that is not this host's and to which a connection fails at once, if there is one."""
+    for address in ('0.0.0.1', '169.254.1.1'):
+        try:
+            socket.create_connection((address, 9), timeout=1).close()
+        except socket.timeout:
+            continue
+        except OSError:
+            return address
+    return None
+
+
+def resolve_multi_address(first: str) -> None:
+    """Resolve :data:`MULTI_ADDRESS` in this process as a resolver does a name with two IPv4 addresses:
+    ``getaddrinfo`` answers `first`, then 127.0.0.1, and ``gethostbyname`` answers `first`."""
+    getaddrinfo, gethostbyname = socket.getaddrinfo, socket.gethostbyname
+
+    def multi_getaddrinfo(host, *args, **kwargs):
+        if host != MULTI_ADDRESS:
+            return getaddrinfo(host, *args, **kwargs)
+        return [*getaddrinfo(first, *args, **kwargs), *getaddrinfo('127.0.0.1', *args, **kwargs)]
+
+    def multi_gethostbyname(host: str) -> str:
+        return first if host == MULTI_ADDRESS else gethostbyname(host)
+
+    socket.getaddrinfo = multi_getaddrinfo
+    socket.gethostbyname = multi_gethostbyname
+
+
+# The point at which the forced-collection probe runs its next collection, if any
+armed: List[str] = []
+
+
+def collect_at(point: str) -> None:
+    """Run a collection here if the probe armed `point`."""
+    if armed == [point]:
+        armed.clear()
+        gc.collect()
+
+
+def install_collection_points() -> None:
+    """Have the server side call :func:`collect_at` at each of :data:`POINTS`."""
+    server_class = queue_module._InProcessServer
+    admits, init, listening_socket = server_class._admits, server_class.__init__, queue_module._listening_socket
+    put = Queue.put
+
+    def admits_after_collecting(self, conn) -> bool:
+        collect_at('accept')  # Only the accept loop admits connections
+        return admits(self, conn)
+
+    def put_after_collecting(self, *args, **kwargs) -> None:
+        collect_at('handler')  # The probe puts onto the served queues only through clients
+        put(self, *args, **kwargs)
+
+    def init_then_collect(self, *args, **kwargs) -> None:
+        init(self, *args, **kwargs)
+        collect_at('starter')  # Bound and listening; the accept loop is not running yet
+
+    def listening_socket_after_collecting(listener):
+        if threading.current_thread().name == 'hypershell-queue-stop':
+            collect_at('stop')  # Inside stop(), under the server's lock
+        return listening_socket(listener)
+
+    server_class._admits = admits_after_collecting
+    server_class.__init__ = init_then_collect
+    queue_module._listening_socket = listening_socket_after_collecting
+    Queue.put = put_after_collecting
+
+
+def dropped_client(port: int, tls: Optional[TLSConfig], dial: str) -> None:
+    """Connect a client, use it, and leave it as cyclic garbage."""
+    client = QueueClient(probe_config(port, tls, dial))
+    client.connect()
+    client.heartbeat.put(b'dropped', timeout=WAIT)
+    client.cycle = client
+
+
+def probe_forced_collection(rounds: int, dial: str, tls: Optional[TLSConfig]) -> None:
+    """Each round, at each point in turn, a dropped same-process client is pending when a collection is
+    forced there. Clients dial `dial`; servers bind 127.0.0.1. Collections run only where forced."""
+    if dial == MULTI_ADDRESS:
+        resolve_multi_address(failing_address())
+    install_collection_points()
+    gc.disable()
+    for i in range(rounds):
+        for point in POINTS:
+            arm_watchdog(f'round {i} point {point}')
+            server = QueueServer(probe_config(tls=tls))
+            server.start()
+            port = server.address[1]
+            live = QueueClient(probe_config(port, tls, dial))
+            live.connect()
+            dropped_client(port, tls, dial)
+            armed.append(point)
+            if point == 'accept':
+                QueueClient(probe_config(port, tls, dial)).connect()
+            elif point == 'handler':
+                live.confirmed.put(b'handled', timeout=WAIT)
+            elif point == 'starter':
+                server.shutdown()
+                server = QueueServer(probe_config(port, tls))
+                server.start()
+                # A new connection, which only the new server's accept loop can answer
+                QueueClient(probe_config(port, tls, dial)).connect()
+            else:
+                conn = live._Client(live._address, authkey=live._authkey)
+                dispatch(conn, None, 'shutdown')
+                conn.close()
+                wait_until(lambda: not armed and not any(thread.name == 'hypershell-queue-stop'
+                                                         for thread in threading.enumerate()), ROUND_LIMIT)
+            assert not armed, f'no collection ran at {point}'
+            del live
+            server.shutdown()
+            gc.collect()
+            # Shutdown drops cached connections under the bind host only, so a later server that reuses
+            # the port would get this thread's stale one (issues/queue-stale-decref-same-port-restart.md)
+            with BaseProxy._mutex:
+                BaseProxy._address_to_local.pop((dial, port), None)
 
 
 PROBES = {'dropped-client': probe_dropped_client, 'same-port-restart': probe_same_port_restart}
@@ -418,6 +599,9 @@ def main(argv: List[str]) -> None:
         probe_shared_port(int(rounds), int(port), host, tls_files)
     elif name == 'fork':
         probe_fork(int(rounds), rest)
+    elif name == 'forced-collection':
+        dial, *tls_files = rest
+        probe_forced_collection(int(rounds), dial, tls_from(tls_files))
     else:
         PROBES[name](int(rounds), tls_from(rest))
     faulthandler.cancel_dump_traceback_later()

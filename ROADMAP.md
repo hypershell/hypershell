@@ -237,7 +237,7 @@ accept loop can then stall it. Seen only with an injected failure; the window pr
 
 ## Handed-off decrefs can outlive their server and reach a same-port successor
 
-A same-process decref waits for the one sender thread, which under churn falls behind, so it can
+A handed-off decref waits for the one sender thread, which under churn falls behind, so it can
 reach a successor server on the same port instead of its own and release a live client's queue.
 Seen statistically under same-port restart stress in one process; no CLI path restarts that way.
 
@@ -249,11 +249,23 @@ Seen statistically under same-port restart stress in one process; no CLI path re
 
 A dropped client of a stopped in-process server, collected after a same-key successor starts on
 the same port, sends its decrefs to the successor, which can release a queue a live client holds.
-It came with the in-process server's same-port restart; no CLI path uses the same key and port.
+A client that dials the restarted server by another name than its bind host can also reuse a
+connection cached for the old server. It came with the in-process server's same-port restart; no
+CLI path uses the same key and port.
 
 *Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
 `spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
 **Seed:** [`issues/queue-stale-decref-same-port-restart.md`](issues/queue-stale-decref-same-port-restart.md)
+
+## A forked child of a serving process keeps the queue server's port
+
+A child forked from a process that serves queues in-process inherits the listening socket, so after
+the server shuts down the port cannot be bound again and new clients hang until the child exits. No
+CLI path forks a serving process; only library use sees it.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 5, Observations)*
+**Seed:** [`issues/queue-forked-child-keeps-listener.md`](issues/queue-forked-child-keeps-listener.md)
 
 ## Merged output is interleave-corruptible
 
