@@ -38,9 +38,9 @@ jobs:
         run: uv run --python ${{ matrix.python-version }} pytest -v
 
   # Upgrades PostgreSQL databases that released hypershell versions created (2.8.3, and the
-  # half-upgraded state 2.9.0a1 leaves) in place. The PostgreSQL tests skip without
-  # HS_TEST_POSTGRES and fail if a listed template is missing, so a green run here means every
-  # one of them ran.
+  # half-upgraded state 2.9.0a1 leaves) in place, and matches returned results to their dispatch
+  # on PostgreSQL. The PostgreSQL tests skip without HS_TEST_POSTGRES and fail if a listed
+  # template is missing, so a green run here means every one of them ran.
   #
   # The TimescaleDB entries run the same upgrade tests on TimescaleDB servers, plus the
   # TimescaleDB scenarios in tests/test_timescale.py (hypertable, columnstore and policy under
@@ -102,7 +102,7 @@ jobs:
           PG_CONTAINER: ${{ job.services.postgres.id }}
 
       - name: Run PostgreSQL tests
-        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_timescale.py
+        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py
 
   # Guards zero-conflict installability: a full install of the default extras must succeed using
   # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g., greenlet, pyyaml) that
