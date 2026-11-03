@@ -59,10 +59,10 @@ phases:
     \ 'remove', '--force', trial], check=True)\n    subprocess.run(['git', 'worktree',\
     \ 'prune'], check=True)\nsys.exit(rc)\""
 review:
-  last_reviewed_commit: 0afe639dd1cdd23bdb6ed8b8da26c45717e97c9a
+  last_reviewed_commit: 2e1b53eac431fff55b0bbd25aa8b42b71e1de5b4
   verdict: approved
   blocked_reason: ''
-  cycle: 1
+  cycle: 2
 ---
 # TECH.md — TLS client reaches the server on the address family it listens on
 

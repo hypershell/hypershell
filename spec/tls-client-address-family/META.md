@@ -82,9 +82,16 @@ is skipped by the parser):
 - **Recommended fix:** Use `del` when it is on `PATH`, else `rm -rf`, or leave the site in `$TMPDIR` and print its path. Keep the env isolation unchanged.
 - **Confidence:** high · **Effort:** small
 
-## F5 — No route for an orchestrator that is already the fresh blind context
+## F5 — No route for an orchestrator that is already the fresh blind context · seen again (hs-review:step-2, cycle 2)
 `origin=hs-review:step-2 severity=low category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** The foreman spawned this session as the blind reviewer and told it to run the skill as written. Step 2 says to delegate to a fresh subagent, the agent harness says not to re-delegate the whole assignment, and the portability fallback covers only "subagents unavailable". The pass ran inline, by judgment.
 - **Skill cause:** The skill assumes the orchestrator is a non-blind session, and it does not say when an inline pass is allowed.
 - **Recommended fix:** Allow the inline correctness pass whenever the session has not read `PLAN.md`, `TECH.md` content, `research/` or `META.md`, and require REVIEW.md to say which mode ran. This does not weaken blindness. It states the condition delegation exists to secure.
+- **Confidence:** med · **Effort:** small
+
+## F6 — No review mode for a delta that lands after an approved verdict
+`origin=hs-review:step-3 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** Cycle 1 approved, then a CI follow-up changed one test file. The foreman scoped cycle 2 to that delta (`{last_reviewed_commit}..HEAD`, spec-excluded) and asked for a check that `src/` was unchanged. Step 3 names only two modes for a later cycle: a fresh blind pass over the full `{base}...HEAD` diff, or verification of the named findings' remediation. There were no findings to remediate, so REVIEW.md had to describe a third mode in its own words.
+- **Skill cause:** The skill assumes a later cycle follows `changes-requested`. It has no route for re-review after `approved`, when commits land past `review.last_reviewed_commit`. Nor does it give the diff command for that case.
+- **Recommended fix:** Add a "delta" mode to Step 3: diff `{last_reviewed_commit}..HEAD -- . ':(exclude)spec/'`, require a stated check of which product paths the delta touches, and fall back to a full pass when it touches a high-blast-radius file. Name the mode in the section header line.
 - **Confidence:** med · **Effort:** small

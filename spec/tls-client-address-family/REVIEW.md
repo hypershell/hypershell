@@ -163,3 +163,122 @@ human can weigh them for the 2.8.4 notes.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Review cycle 2 — approved (2026-11-03)
+
+- **Reviewed commit:** `2e1b53e`  ·  **Base:** `develop`  ·  **Scope:** the follow-up delta
+  `0f90aac..2e1b53e`, spec-excluded
+- **Verdict:** approved
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`
+
+**Mode.** Neither of the two modes the skill names. Cycle 1 approved `0afe639`. A CI follow-up then
+changed the test file only, and the foreman scoped this cycle to that delta:
+`git diff 0f90aac..2e1b53e -- . ':(exclude)spec/'`. As in cycle 1, the pass ran inline in a fresh
+reviewer context. It read `GOAL.md`, the delta, the whole test file, `secure_client` at head and at
+`b31c66e`, the rubric, `invariants.md`, the REVIEW template and this file. It did not read
+`PLAN.md`, `research/`, `TECH.md` content (only its frontmatter, for `base`, `kind`, `status` and
+`review`), or the follow-up commit's body. It read `META.md` only after the verdict was formed: the
+`## F` headings and F5, to number and place its meta-notes. The brief gave the CI symptom neutrally.
+One Linux run on 3.12 failed at setup, in `assert_trap_armed`, with `ConnectionRefusedError`.
+
+**Scope check.** `git diff --stat 0f90aac..2e1b53e -- . ':(exclude)spec/'` lists only
+`tests/test_queue_address_family.py` (+29 −5). `git diff 0afe639..2e1b53e -- src/` is empty. The
+cycle-1 verdict on the product change is untouched.
+
+**What changed.** `IPv6Resetter` now counts a connection as soon as it accepts it. It then waits in
+`_await_peer` (`tests/test_queue_address_family.py:146-157`) until the peer sends or closes, bounded
+by stop and by `TIMEOUT` (10 s), before the `SO_LINGER` 0 reset. A failing `setsockopt` no longer
+ends the serve thread (`:141-144`). Both arming dials pass `all_errors=True` (`:214`, `:370-371`).
+
+### Verification run
+
+All runs used the frozen offline environments (CPython 3.11.18, 3.12.16, 3.13.18 and 3.14.10), with
+`PYTHONPATH` pointed at trees exported by `git archive` into a scratch directory. There were four
+trees: head (`2e1b53e`), prefix (head with `queue.py` from `b31c66e`), old-test (head with the test
+file from `0f90aac`), and a master trial (`origin/master` 2.8.3 plus the branch's `queue.py`,
+`conftest.py` and test-file diff). Every run had its own process group and a kill timer. The host is
+macOS. No Linux host was reachable from this session: there is no container runtime, and cluster
+tools were out of bounds for this review.
+
+- **The CI failure, reproduced on the old trap (3.12).** A probe drove the real `assert_trap_armed`
+  path (the resolver shim, then `create_connection(..., timeout=10, all_errors=True)`) against each
+  resetter. The old trap failed 1 of 2,000 dials on an idle host, and 597 of 2,000 with four
+  CPU-bound threads contending for the GIL. Every failure was
+  `[ConnectionResetError, ConnectionRefusedError]`. The `::1` attempt reached the trap, but the
+  reset arrived before the client read its connect result, and the IPv4 fallback was refused.
+  Without `all_errors`, `create_connection` raises only the last error, so this is the CI
+  signature. The new trap failed 0 of 2,000 idle and 0 of 1,000 under contention. A widened-window
+  probe repeated CPython's timeout-mode steps (non-blocking connect, a 0.3 s pause, then
+  `SO_ERROR`). It read `ECONNRESET` in 20 of 20 trials on the old trap and 0 in 20 of 20 on the new.
+- **Linux determinism follows from the mechanism; it was not run here.** On Linux, an established
+  socket that receives a reset also gets `ECONNRESET`, and CPython reads `SO_ERROR` after the poll,
+  so the old race exists there in the same form. The new trap can reset only after the peer has
+  sent or closed, which a client can do only after its connect has returned, or after 10 s. Nothing
+  in the new code depends on the platform. The one platform difference is that macOS can refuse
+  `SO_LINGER` on a connection the peer has already closed, and the new code catches that.
+- **Red without the fix (3.12, prefix tree).** `test_tls_client_skips_ipv6_listener` failed 40 of 40
+  runs with `ConnectionResetError` in the TLS handshake (`do_handshake`, under `wrap_socket` at
+  `queue.py:221`). `test_cluster_skips_ipv6_listener[tls]` failed 40 of 40 with exit status 5
+  (`ConnectionResetError`). The cleartext twins passed. The pre-fix client still lands on `::1`,
+  sends its ClientHello, and is reset.
+- **Masking probes (two mutants of the fixed client).**
+  - (a) It dials through the resolver, then waits for the peer to speak first and never sends. The
+    in-process test went red after 10.08 s, with `ConnectionResetError` at the trap's bound. The
+    `hs cluster` `[tls]` test went red at its 180 s bound. Its run logged `ConnectionResetError`,
+    did not exit, and was killed.
+  - (b) It lands on `::1`, closes without sending, then dials IPv4 correctly. It went red at once
+    on `assert trap.count == baseline` (2 == 1).
+  - The count now moves at accept, before the wait, so a landing shows sooner than it did before.
+- **Wait, stop and close paths** (a probe of the new resetter).
+  - A silent peer is counted within 1 s and reset at 10.05 s.
+  - `close()` with a silent peer held returns in 0.08 s. The thread is dead, the peer sees the
+    reset, and the listening socket is closed.
+  - An idle `close()` takes 0.10 s. A peer that sends is reset at once.
+  - 500 dial-and-close cycles leave the process's file descriptors (4 → 4) and threads (1 → 1)
+    unchanged.
+  - A second connection queued behind a silent one is counted only after the first one's 10 s
+    bound. That cannot hide a landing, because the first is already counted.
+- **`all_errors=True`.** `socket.create_connection` accepts it on 3.11.18, 3.12.16, 3.13.18 and
+  3.14.10. Supported Python is 3.11–3.14 on both `develop` and `master` (`requires-python = ">=3.11"`,
+  CI matrix 3.11–3.14). The keyword changes only the failure report, an `ExceptionGroup` that names
+  each address tried. The success path is unchanged. The subprocess dial runs under the same
+  interpreter.
+- **Loop, 3.12.** The file ran 220 times in a row: 220 green, 8 passed each time, no skips. The
+  contention probe ran alongside for part of the loop.
+- **Other Pythons.** 8 passed once each on 3.11, 3.13 and 3.14.
+- **R6 trial.** The branch's three-file diff `b31c66e..2e1b53e` applies cleanly to `origin/master`
+  (2.8.3), and the test file passes there (8 passed, 3.12).
+- **Full suite, serial, 3.12.** 639 passed, 64 skipped (PostgreSQL and TimescaleDB tests that need a
+  server, and one upgrade fixture), the same counts as cycle 1.
+
+### Requirement → evidence matrix (this delta)
+
+| R-ID | Touched by | Verified how | Status |
+|------|------------|--------------|--------|
+| R3 | `tests/test_queue_address_family.py:100-162` (trap), `:206-217` and `:365-374` (arming dials) | Arming is deterministic: the old trap failed 597 of 2,000 dials under contention, the new one 0 of 1,000. Red before the fix in 40 of 40 runs (both TLS trap tests) and green after it in 220 of 220. The skip path is unchanged. | ✅ |
+| R6 | The test file must still cherry-pick onto `master` and pass there | Trial apply onto `origin/master` is clean, and the file passes there (8 passed) | ✅ |
+| R1, R2, R4, R5, R7 | Not touched: `src/` and `tests/conftest.py` are unchanged since `0afe639` | The cycle-1 evidence stands. Full suite green. | ✅ |
+
+Unmapped changes (possible scope creep): none. The delta is test-only hardening of the R3 test.
+
+### Findings
+
+None. No CONFIRMED and no PLAUSIBLE findings. Examined and dropped:
+
+- **A trap that waits could mask a client that lands on `::1` and goes silent.** It does not.
+  Mutant (a) goes red in both trap tests, and the count moves at accept. The only cost is time: the
+  in-process test now takes 10 s to fail instead of failing at once.
+- **Head-of-line hold.** The trap serves one connection at a time, so a silent peer delays counting
+  the next for up to 10 s. Every arming dial closes at once, and a held trap implies a landing that
+  is already counted, so no assertion can read a stale count.
+- **Linux was not run.** The case rests on the kernel's reset semantics, the same on both
+  platforms, and on a reproduction of the exact CI signature on macOS. If a Linux runner fails
+  again, `all_errors=True` now names the error for each address.
+- **For the human, outside this delta:** under mutant (a), `hs cluster` logged the fatal
+  `ConnectionResetError` but did not exit until it was killed at 180 s. This is product behaviour
+  seen only with a contrived client, and was not pursued. Compare cycle 1's note that
+  `hs server --bind ::1` does not exit.
+
+### Human-gate triggers
+
+- Not triggered. The delta touches no high-blast-radius file and has no CONFIRMED finding.
