@@ -1002,3 +1002,298 @@ Remediation returns to `hs-build`, which reopens P1. A non-converged cycle 5 sto
 
 Every seed added gets its `ROADMAP.md` entry in the same commit (C6's rule). Out of scope for cycle 5:
 everything outside the C7/C8 diff, and every ruling already made.
+
+## Review cycle 5 — changes-requested (2026-11-02)
+
+- **Reviewed commit:** 43d2d85696dbbbf20550ba7c9a52559677e20ad2  ·  **Base:** `b819de6` (merge base with
+  `origin/develop`)  ·  **Date:** 2026-11-02
+- **Verdict:** changes-requested
+- **Cycle:** 5, the last exception to the bounded loop the maintainer authorized, scoped to the C7/C8
+  remediation diff. It did not converge, so the feature stops here pending the maintainer's decision.
+- **Mode:** remediation check of C7 and C8 by the orchestrator, including an attempt to break TECH
+  P1's argument (items 1–8), plus one fresh blind reviewer over the delta
+  `git diff aa55e86..43d2d85 -- . ':(exclude)spec/'`, with the full spec-excluded diff
+  `b819de6...43d2d85` as context. The reviewer was not shown earlier cycles' findings. Findings
+  outside the delta, or restating a settled ruling, are Observations.
+
+### Pre-flight
+
+- **Base resolution.** Graded against the merge base `b819de6`; the stale local `develop` was not
+  used.
+- **Build state.** `TECH.md` is `status: in_progress`, P1–P6 `done`, P7 `pending`. R9's multi-node
+  clause waits on the foreman's matrix at `43d2d85`. Not a finding.
+- **Contract drift.** `git log --oneline b819de6..43d2d85 -- spec/zone-queue-primitive/GOAL.md` shows
+  only the shaping commit `da987c2`.
+- **Since cycle 4:** `43d2d85` only. It is signed and carries no `Co-Authored-By` trailer.
+- **Working tree.** Clean. Every run used `git archive` extracts of `43d2d85`, `aa55e86`, `d3e00f9`
+  and `b819de6`, with one `uv sync --frozen` venv per commit and Python.
+- **Environment.** On this host, connections to the host's own non-loopback addresses are
+  intercepted by a local network filter (they connect and never reach the listener), so every
+  reachability probe ran over loopback and the wildcard address. Probes that must bind a second
+  address bind the LAN address but never connect to it.
+
+### Cycle 4 findings: remediation check (orchestrator)
+
+**C7 — resolved, as ruled.**
+- `os.register_at_fork(after_in_child=_forget_after_fork)` (`core/queue.py:620-634`) gives a forked
+  child an empty listing, a new queue, no sender and a new lock. The parent's waiting decrefs are
+  never sent from the child, and the child's own proxies follow the normal rules.
+- The red-first test `test_forked_child_never_resends_decrefs` is bounded (watchdog and process-group
+  backstop) and skipped where `fork` is unavailable.
+- **Reproduction, rebuilt from cycle 4's prose** (`fork`): a serving process drops a client while its
+  decrefs wait, forks a `fork`-context child that connects, uses and drops a client, and then the
+  parent's live client is checked. TLS on: the backlog is made by a silent TCP peer holding the
+  inline TLS accept, as in cycle 4. TLS off: the probe holds the parent's sender at a gate.
+
+  | build | 3.11.18 | 3.12.16 | 3.13.18 | 3.14.6 |
+  |---|---|---|---|---|
+  | `aa55e86` (red control), TLS on and off | fail ×2 | fail ×2 | fail ×2 | fail ×2 |
+  | `43d2d85`, TLS on and off | pass ×2 | pass ×2 | pass ×2 | pass ×2 |
+
+  - Red signature on every Python: "decrefs waiting at the fork: 3"; the child inherits a listing of 1
+    and 3 waiting decrefs and starts a sender; after it exits, 1 of 4 objects is left and the live
+    client's `completed`, `heartbeat` and `confirmed` puts fail with `RemoteError`.
+  - Feature: the child inherits a listing of 0 and nothing waiting; 4 objects are left and every put
+    succeeds.
+- **A forked child that itself serves queues** (`fork --child-serves`), 4 Pythons × TLS on and off,
+  8/8 pass. The child's first server starts its own sender. A collection forced on the child's own
+  accept loop, with a dropped same-process client pending, returns. The child's server ends with 0
+  objects once its clients are dropped. The parent's live client keeps 4 objects and working puts.
+
+**C8 — the stranding is resolved; the full-address match is not exact (C9).**
+- **Never stranded: holds.** `_serve_in_process` starts the sender (`:713`) before it lists its server
+  (`:715`), nothing is handed off while nothing is listed, and the sender loops for the life of the
+  process. `QueueClient.connect` no longer starts it.
+- **Reproduction, rebuilt from cycle 4's prose** (`c8`): a client of a server in another process at
+  `127.0.0.1:P` connects before this process serves anything, then is collected while this process
+  serves. 4 Pythons × TLS on and off; "left" is the other server's object count 1 s later.
+
+  | this process serves | `aa55e86` (red control) | `43d2d85` | stock decref ran on (`43d2d85`) |
+  |---|---|---|---|
+  | `P` at the LAN address | 4 left, 4 waiting, no sender (8/8) | 0 left (8/8) | the finalizing thread |
+  | `P` at the wildcard address | 4 left, 4 waiting, no sender (8/8) | 0 left (8/8) | the sender |
+  | an ephemeral bind at the wildcard address, collected mid-bind | 4 left, 4 waiting, no sender (8/8) | 0 left (8/8) | the sender |
+  | an ephemeral bind at `127.0.0.1`, collected mid-bind | 4 left, 4 waiting, no sender (8/8) | 0 left (8/8) | the sender |
+  | `P` at the LAN address, the dialed host unresolved at connect | n/a | 0 left (8/8) | the sender |
+
+- **"The stock path, on the finalizing thread, for any address this process does not serve":**
+  - Holds for a resolvable address at another IP (row 1) and for a process that serves nothing
+    (`remote`, 16/16 on both builds): the stock decref runs on the dropping thread, nothing is
+    handed off, and no sender thread exists.
+  - Rows 2–5 are wider than the reach, which TECH P1 item 2 states as a design choice: a wildcard
+    listener beside another process's specific bind (macOS allows it), a bind in progress at port 0,
+    and an unresolved host all hand off. Each decref is still delivered. See Observations.
+- **The port-only fallback does not reintroduce C8.** An unresolved or unrecorded host matches on
+  its port alone, but a sender is alive whenever anything is listed, so the decref is delivered
+  (row 5). A real client reaches the fallback only when `gethostbyname` fails where the connect
+  succeeded: a transient resolver failure, or a TLS client of an IPv4-mapped literal or an
+  AAAA-only name. `create_connection` reaches the IPv4 listener through `::ffff:127.0.0.1`, and the
+  record is `None`. "Unrecorded" cannot happen for a proxy that carries the hand-off finalizer.
+- **`AGENTS.md`** was corrected, but it now overstates the match ("matched on the full address"); C9.
+- **Red-first test** `test_shared_port_number_leaks_nothing`: on macOS it falls back to the wildcard
+  address, so there it checks delivery, not the stock path; only Linux (`127.0.0.2`) exercises the
+  stock path.
+
+**TECH P1's argument, attacked item by item.**
+- **Item 1 (the listing covers every address a connection can reach): holds.** The pre-bind entry
+  resolves the host as the bind does (`''` → `0.0.0.0`), and after the bind the entry is the bound
+  address.
+- **Item 2 (the record is "the same resolution the stock connect uses"): fails for TLS.**
+  `_note_dialed` records `gethostbyname`, the name's first IPv4 address. `secure_client` dials with
+  `socket.create_connection`, which tries every address the name resolves to, in order. A TLS
+  client of a name with several addresses can reach an in-process server at an address the record
+  does not name. That is C9.
+- **Items 3–5: hold** wherever item 2 does.
+- **Item 6: holds** (the C8 table).
+- **Item 7: holds** (the C7 table and the serving child).
+- **Item 8: holds.** In a process that serves nothing, the finalizer is the stock decref on the same
+  thread with the same arguments. The only addition is one name lookup and one probe bind per
+  connect.
+- **Several servers in one process: no stall.** Three extra servers at `127.0.0.1`, the wildcard
+  address and `localhost` each had a dropped client pending at every forced collection.
+- **IPv6.**
+  - Both builds' listeners are AF_INET only, and an `::1` bind fails cleanly on the feature with
+    nothing listed.
+  - `localhost`, dual-stack here, matches.
+- **The sender started before listing: holds** (by reading). A collection during
+  `_start_decref_sender` sees nothing of the new server listed, and any other listed server already
+  started the sender.
+
+**C5 still holds for every configuration it was ruled on; C9 is the exception.**
+- **Probe:** the cycle-4 probe rebuilt (`gc4`). With collection disabled elsewhere, one collection is
+  forced, with a dropped same-process client pending, at each of the four points: the accept loop
+  (`_admits`), a handler (server-side `Queue.put`), the starting thread between its bind and its
+  accept loop (same-port restart), and the remote-shutdown stop thread inside `stop()` under `_lock`.
+- **Address forms, 10 rounds each:**
+  - bind and dial `127.0.0.1`;
+  - `localhost` both sides;
+  - wildcard bind, dial `127.0.0.1` or `localhost`;
+  - bind `127.0.0.1`, dial `0.0.0.0`;
+  - bind `''`, dial `localhost`;
+  - dial `::ffff:127.0.0.1` (TLS only);
+  - three extra servers.
+- **`43d2d85`:**
+  - 240/240 runs pass: 4 Pythons × 4 points × the address forms × TLS on and off.
+  - Every stock decref ran on the main thread or on `hypershell-queue-decref`.
+- **Red control `d3e00f9` (3.14):** the accept, starter and stop points stall with the decref inline
+  (6/8); the handler point passes.
+- **`aa55e86` baseline (3.11, 3.14):** 16/16 pass.
+- **`tests/test_queue_gc.py`:** passes in each full suite, and 20/20 consecutive runs on each of
+  3.11.18 and 3.14.6 (below).
+
+### Verification run
+
+- **Suite (orchestrator).** `43d2d85` extract, venv activated, two Pythons at a time: 3.11.18,
+  3.12.16, 3.13.18 and 3.14.6 each **560 passed**. `git diff --diff-filter=M b819de6...43d2d85 --
+  tests/` is empty: no base test is modified.
+- **`tests/test_queue_gc.py` repeats:** 20/20 consecutive runs (10 passed each) on each of 3.11.18
+  and 3.14.6, the two run side by side after the suites.
+- **`parity --base b819de6 --feature 43d2d85`: PASS.** Task tables identical with TLS on and off,
+  rc 0/[0, 0] on both builds; `--help` byte-identical for `server`, `client`, `submit` and
+  `cluster`.
+- **`compat --server 43d2d85 --client b819de6`: PASS.** 200/200 tasks exit 0, rc 0/[0, 0], TLS on
+  and off.
+- **Throughput gate (orchestrator).** `bench_queue.py gate --base b819de6 --feature 43d2d85 --repeats
+  5`, Python 3.14.6, start method `spawn`, frozen non-editable venvs from `git archive`: **PASS**, all
+  60 runs clean.
+  - **Load.** The gate started at a 1-min load average of 4.05, below the bound of 6. Sampled every
+    30 s (52 samples): min 4.05, median 6.83, max 30.82. The peaks were other agents' builds; this
+    review's only concurrent work was single-process probes (the orchestrator's and the blind
+    reviewer's). Runs were interleaved, so both builds shared the load.
+
+  | config | base | feature | delta | tolerance | tree children b/f | tree FDs b/f | own threads b/f | tree RSS MB b/f |
+  |---|---|---|---|---|---|---|---|---|
+  | 4x4 b=1 tls | 250.7 [224.5–273.2] | 264.9 [239.1–275.2] | +14.2 | 48.7 | 2/0 | 117/23 | 7/20 | 199.4/95.7 |
+  | 4x4 b=1 no-tls | 267.3 [263.9–277.9] | 263.6 [259.5–267.7] | −3.7 | 14.0 | 2/0 | 117/23 | 7/20 | 194.5/91.6 |
+  | 16x1 b=1 tls | 276.6 [251.1–280.3] | 276.5 [262.6–281.6] | −0.1 | 29.2 | 2/0 | 153/59 | 7/56 | 203.5/99.6 |
+  | 16x1 b=1 no-tls | 262.0 [248.7–271.8] | 264.7 [252.3–269.3] | +2.7 | 23.1 | 2/0 | 153/60 | 7/56 | 196.6/93.7 |
+  | 4x4 b=50 tls | 818.9 [788.0–842.5] | 818.6 [772.9–827.0] | −0.3 | 54.5 | 2/0 | 116/22 | 7/20 | 204.2/100.3 |
+  | 32x1 b=1 tls | 247.0 [239.5–259.4] | 251.0 [242.5–273.8] | +4.0 | 31.3 | 2/0 | 201/107 | 7/104 | 207/103.4 |
+
+  Steady-state tasks/s, median [min–max]. The server's own threads include the decref sender, which
+  the server now starts (20 in 4x4). They are reported, not gated (cycle-1 P3 ruling).
+- **Seeds.** `ROADMAP.md` has an entry for each of the three new seeds
+  (`queue-proxy-finalizer-swap-window`, `queue-decref-handoff-delay`,
+  `queue-stale-decref-same-port-restart`), each with a heading, problem prose, the Horizon / Depends
+  / Refs line and a `**Seed:**` link to an existing `status: unshaped` file. Every file in `issues/`
+  is referenced from `ROADMAP.md`. The blind reviewer graded the three as prose and found them
+  accurate.
+
+### Requirement → evidence matrix (the delta)
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `_serve_in_process`, the hand-off | suite on 3.11–3.14; gate: tree children 2 → 0 | ⚠️ C9 (a stall of the in-process server, TLS client of a multi-address name) |
+| R4 | stock decref when nothing is listed | `remote` probe, 16/16; `compat` TLS on and off; `test_queue_tls.py` unmodified | ✅ |
+| R5 | sender before listing; `register_at_fork` | C7 and C8 tables; same-port-restart starter point, 240/240 | ✅ |
+| R6 | `test_queue_gc.py` (two new probes, rewritten rule test) | tagged `unit`; red at `aa55e86`, green at `43d2d85` | ✅ |
+| R8 | no base test touched | suite; `parity`; `--help` byte-identical | ⚠️ C9 (library-only) |
+| R9 (local) | as R1 | gate above | ✅ |
+| R9 (multi-node vs 2.8.3) | `tests/cluster/` drive | **pending external evidence**: the foreman's matrix at `43d2d85` | ⏳ |
+
+Unmapped changes: none. The three seeds and their `ROADMAP.md` entries are the cycle-4 triage's
+deferrals.
+
+### Findings
+
+No AGENTS.md invariant violation was found.
+
+#### [MEDIUM/CONFIRMED] C9 — The address match can be narrower than the reach: a TLS client of a multi-address name brings back C5's stall
+- **Where:** `src/hypershell/core/queue.py`:
+  - `:563-566`, `_note_dialed`: it records `socket.gethostbyname(host)`, the name's first IPv4
+    address only.
+  - `:569-582`, `_served_here`: it matches that one address against the listing.
+  - `:598`: the stock decref runs inline when the match fails.
+  - `:257`, `secure_client`: it dials with `socket.create_connection`, which tries every address
+    the name resolves to, in order.
+  - `AGENTS.md:283-288` ("matched on the full address").
+- **Failure scenario:**
+  - A same-process client dials a host name with two IPv4 addresses, with TLS (the default).
+  - The first address does not serve the port and fails fast (refused, or unreachable). The second
+    is an in-process server bound to that address, or to the wildcard address when the first is
+    not this host's.
+  - The connection reaches the in-process server. The record names the first address, so
+    `_served_here` is False.
+  - When the cyclic collector runs the dropped client's proxy finalizers on a server thread, the
+    stock decref dials the server from that thread: C5's self-deadlock. A DNS round-robin answer
+    that differs between the connect and the record does the same, TLS or not (by reading).
+  - At `aa55e86` the match was by port, so these decrefs were handed off.
+- **Evidence:** the host's resolver cannot be changed here (no hosts-file edit), so the name's
+  answer is supplied in-process: `getaddrinfo` returns both addresses and `gethostbyname` the first,
+  as a real resolver does for two A records. The code under test is unmodified.
+  - **Orchestrator, forced collection** (`gc4`, 3 rounds, TLS). Two configurations: a wildcard bind
+    dialed as [`169.254.1.1`, `127.0.0.1`], and a bind at `127.0.0.1` dialed as [`169.254.1.1`,
+    `127.0.0.1`].
+    - `43d2d85`, every Python: the accept, starter and stop points stall (24/24). The handler point
+      passes (8/8).
+    - The accept loop's stack: `serve` → `_admits` → (gc) → `Finalize` → `queue.py:598 _decref` →
+      `BaseProxy._decref` → `secure_client` → `do_handshake`.
+    - `aa55e86`: 32/32 pass.
+  - **Blind reviewer**, independently (bind `127.0.0.1`, name [LAN address, `127.0.0.1`]):
+    - Forced: stall on `43d2d85` with 3.11, 3.13 and 3.14; `aa55e86` passes.
+    - **Natural collection, no forced collection** (the suite's `probe_dropped_client` shape,
+      threshold 10): `43d2d85` stalls at round 66 on 3.13. The orchestrator's re-run on 3.14 stalled
+      at round 66 too:
+      - a handler, in `handle_request` (`:496`) → (gc) → `_decref:598` → `secure_client` →
+        `answer_challenge`, waits for its decref connection;
+      - the accept loop, which accepted that connection, waits at `serve:462` on `_lock`;
+      - new clients hang in `connect`.
+    - `aa55e86`: 200/200 rounds on 3.13 and 3.14.
+- **Exposure:** library use only. The only CLI path with an in-process client, the local `hs
+  cluster`, dials `('localhost', port)`, which the bind and the record resolve alike. It needs TLS,
+  a multi-address name and a same-process client collected as cyclic garbage on a server thread.
+  - Rated MEDIUM, a bug on an edge path: it is C5's stall (HIGH at cycle 3) on a narrow
+    configuration.
+  - CONFIRMED although the resolver answer is simulated. Unlike P4's injected fault, the code under
+    test runs unmodified and the simulation stands in for a host's resolver configuration. Two
+    independent reproductions, one with natural collection.
+- **Touches invariant / requirement:** the C5 property and its ruling ("whatever thread the cyclic
+  GC runs a proxy finalizer on"); R1, R8; the C8 ruling's full-address clause; high-blast-radius
+  `core/queue.py`.
+- **Not prescribed, for the build:** the record could hold every IPv4 address the name resolves to,
+  as `create_connection` would try them, or fall back to the port for a name with more than one.
+  Round-robin needs a decision.
+
+### Observations (not findings)
+
+- **Wider than the reach** (C8 table, rows 2–5): a decref for an address another process serves is
+  handed off rather than run on the finalizing thread when this process listens on the same port
+  at the wildcard address beside that process's specific bind, binds port 0 at the same or the
+  wildcard address, or could not resolve the host. It is delivered (0 left), so C8 does not recur.
+  The ruling's "on the finalizing thread" is met only for non-matching addresses. TECH P1 item 2
+  chose this for safety. The judge decides whether the wording or the code yields.
+- **A forked child keeps the in-process server's port** (outside the delta: identical at `aa55e86`).
+  - Repro: a `fork`-context child of a serving process inherits the listening socket. While the
+    child lives after the server shuts down, the port cannot be re-bound (`EADDRINUSE`), and a new
+    client connects and then gets no reply.
+  - `b819de6`: the re-bind succeeds and the connect is refused.
+  - This is R5's port release. HyperShell never forks a serving process: it launches tasks and
+    clients with `subprocess` and exec, and the socket is `O_CLOEXEC`. Library-only.
+  - Recommended: the foreman seeds it.
+- **A same-port restart leaves a stale cached connection under another name** (outside the delta:
+  identical at `aa55e86`).
+  - `_finalize_in_process` drops cached proxy connections only under the bind host and the bound
+    address.
+  - A same-process client that dials the server by another name (bind `127.0.0.1`, dial
+    `localhost`; or bind the wildcard, dial `127.0.0.1`) reuses its thread's connection to the old
+    server after a same-port restart. Its next proxy call fails with `EOFError`.
+  - No CLI path restarts in-process. Recommended: fold into `queue-stale-decref-same-port-restart`.
+- **Already recorded** (cycle 4, not restated as findings): the inline TLS handshake on the accept
+  loop; the stale decref after a same-key restart (seeded).
+- **Process hygiene.** Every probe, suite and bench ran in its own process group under a timeout.
+  - An early fork probe hung its child on a `faulthandler` watchdog inherited across the fork; the
+    group was killed and the probe disarmed the watchdog for the fork. The blind reviewer hit the
+    same once.
+  - The first suite attempt ran without the venv on `PATH`; its CLI tests could not find `hs`.
+    Discarded and re-run.
+  - A psutil scan after the last run found nothing from this review still running.
+
+### Human-gate triggers
+
+- **Triggered.** C9 is CONFIRMED in high-blast-radius `core/queue.py`, inside the delta and new in
+  it. This was the last authorized exception to the bounded loop, so the feature stops here. Fixing,
+  deferring or accepting C9 needs the maintainer's decision.
+- C7 is resolved as ruled. C8's stranding is resolved, and its full-address clause is broken only
+  by C9. Every gate passed: suite on four Pythons, `test_queue_gc.py` repeats, parity, compat and
+  throughput.
+- P2, the multi-node evidence, is still pending.

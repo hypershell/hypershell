@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_progress
+status: blocked
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
@@ -104,10 +104,12 @@ phases:
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: 4904c97466d2de19e184699f05bdf41f7ede6bdf
+  last_reviewed_commit: 43d2d85696dbbbf20550ba7c9a52559677e20ad2
   verdict: changes-requested
-  blocked_reason: ''
-  cycle: 4
+  blocked_reason: 'review cycle 5 (final exception): C7 resolved, C8 stranding resolved;
+    C9 (MEDIUM, core/queue.py) a TLS client of a multi-address name escapes the address
+    match and restores the C5 stall; needs the maintainer'
+  cycle: 5
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 

@@ -108,7 +108,7 @@ is skipped by the parser):
   `pending-external` status in the REVIEW template's matrix that neither approves nor fails the
   clause, and a Step 1 rule that proceeds past a phase carrying the external-wait flag.
 
-## F4 — Research prototypes live in `$TMPDIR` and vanish before the build · seen again
+## F4 — Research prototypes live in `$TMPDIR` and vanish before the build · seen again · seen again
 `origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
 - **What happened:** The research subagents built working prototypes in `$TMPDIR`: a serve loop, a
   benchmark harness, and a drive with a compare script. The briefs pointed at them. Those paths are
@@ -125,6 +125,10 @@ is skipped by the parser):
   reviewer's probes in `$TMPDIR`; they were gone when the build started. The red-first tests were
   rebuilt from REVIEW.md's prose, which was detailed enough this time. `hs-review` Step 2 could keep
   a CONFIRMED finding's reproduction in the spec (e.g. `spec/{slug}/review/`), under the same rules.
+- **Seen again (hs-review step3, cycle 5, 2026-11-02):** the brief asked to re-run cycle 4's
+  reproductions, and the cycle-4 reviewer's probes were gone, so the orchestrator rebuilt them from
+  REVIEW.md's prose. This cycle's probes, including C9's, live in `$TMPDIR` again, because Step 3
+  lets the orchestrator write only `REVIEW.md`, `TECH.md` and `META.md`.
 
 ## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again · seen again · seen again
 `origin=hs-build:P5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
@@ -139,7 +143,7 @@ is skipped by the parser):
   `--feature WORKTREE`. Mirror the rule in the TECH template's `verify:` guidance.
 - **Confidence:** high · **Effort:** small
 
-## F6 — hs-review grades `{base}...HEAD` with `{base}` a branch name, which a stale local ref breaks · seen again · seen again
+## F6 — hs-review grades `{base}...HEAD` with `{base}` a branch name, which a stale local ref breaks · seen again · seen again · seen again
 `origin=hs-review:step1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** A recurrence of `spec/group-advance-retry-gate/META.md` F3. `TECH.md` records
   `base: develop`; the local `develop` has merge base `aee41ae` with this branch, not the fork point
@@ -156,6 +160,8 @@ is skipped by the parser):
   `b819de6` again; Step 1 still resolves `{base}` from the branch name.
 - **Seen again (hs-review step1, cycle 4, 2026-11-02):** the brief pinned the base to `b819de6` and
   the delta to `d3e00f9..4904c97`; `TECH.md` still says `base: develop`, and local `develop` is stale.
+- **Seen again (hs-review step1, cycle 5, 2026-11-02):** the brief again pinned the base to
+  `b819de6`, this time with the delta `aa55e86..43d2d85`.
 
 ## F7 — Remediation mode has no place to record the human-gate triage, nor a path for an accepted PLAUSIBLE finding
 `origin=hs-build:P1-remediation severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
@@ -209,7 +215,7 @@ is skipped by the parser):
   scenario is graded normally and cross-referenced to the ruling.
 - **Confidence:** med · **Effort:** small
 
-## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again
+## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again · seen again
 `origin=hs-build:P1-remediation-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
 - **What happened:** P1's `verify:` and Safety Principles' CLI drive both run
   `.agents/factory/bin/temp_site.sh`, whose cleanup is `trap 'rm -rf "$site"'`. Under a harness
@@ -227,6 +233,7 @@ is skipped by the parser):
   had to override that with environment-isolated sites.
 - **Seen again (hs-review step2, cycle 4, 2026-11-02):** the blind brief again had to override the
   rubric's `temp_site.sh` instruction with `HYPERSHELL_SITE`/`HYPERSHELL_DATABASE_FILE`/`HYPERSHELL_CONFIG_FILE=''`.
+- **Seen again (hs-review step2, cycle 5, 2026-11-02):** the same override, in the blind brief again.
 
 ## F11 — Step 7's `git add -A` commits whatever else is in a shared worktree
 `origin=hs-build:P1-remediation-3 severity=medium category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
@@ -240,3 +247,21 @@ is skipped by the parser):
   spec files), then check `git diff --cached --stat` against that list and STOP on anything else;
   re-run `git status --porcelain` before committing and report unexpected paths.
 - **Confidence:** high · **Effort:** small
+
+## F12 — The rubric does not say how to classify a reproduction whose trigger is simulated configuration rather than an injected fault
+`origin=hs-review:step3 severity=medium category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** The finding (REVIEW C9) needs a host name with two A records. Neither this
+  review nor the blind reviewer could add one to the host's resolver, so both supplied the name's
+  answer in-process and ran the code under test unmodified. They reproduced the stall, one run
+  with natural collections. Cycle 4 had classed P4, an injected connection failure,
+  PLAUSIBLE. Which side of that line C9 falls on decides whether it auto-loops, and the
+  orchestrator had to argue it in the finding.
+- **Skill cause:** The refutation protocol defines CONFIRMED as "reproduced with observed wrong
+  behaviour". It is silent on what may be simulated: the code under test, the environment around
+  it, or neither.
+- **Recommended fix:** In the rubric's refutation protocol, add one rule. A reproduction that runs
+  the code under test unmodified, with only the environment simulated (resolver answers, clock,
+  peer behaviour), counts as CONFIRMED when the simulated environment is a valid configuration;
+  the simulation must be named in the evidence. A reproduction that injects a fault into the code
+  path stays PLAUSIBLE unless the fault occurs naturally.
+- **Confidence:** med · **Effort:** small
