@@ -20,6 +20,7 @@ knows what **not** to change. One line each, naming the skill/step. Skip the sec
 nothing stands out.
 
 - <what helped, and in which skill/step>
+- hs-review rubric, "grade a seed as prose": it surfaced cycle 1's F4, a new seed misdescribing CI as the diff leaves it.
 
 ## Friction findings
 
@@ -109,4 +110,19 @@ is skipped by the parser):
 - **Recommended fix:** One canonical sandbox-safe docs gate (e.g. a factory script that filters
   Sphinx `WARNING:` lines only, minus the listed pre-existing ones) that `hs-plan` cites instead of
   an inline pipeline; add the `pkg_resources` warning to `AGENTS.md` § Docs.
+- **Confidence:** high · **Effort:** small
+
+## F5 — hs-review Step 2 hands the blind reviewer `git log --oneline`, which leaks plan intent · seen again
+`origin=hs-review:step2 severity=high category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** Step 2 says to give the reviewer `git log --oneline {base}..HEAD` with the diff.
+  On this branch the subjects include "Record timescale plan gate rulings" and per-phase build
+  subjects naming each design step ("P5: CI fixture — close template databases to TimescaleDB's
+  scheduler"). That is the author's how, exactly what the `spec/` exclusion keeps out. The
+  foreman had to override the skill ("no commit subjects, no `git log`"), as in another cycle's
+  META F6.
+- **Skill cause:** the curated-input list contradicts the skill's own blindness rule. The diff is
+  filtered, but the commit log is not.
+- **Recommended fix:** remove `git log` from Step 2's reviewer inputs and say why in the Safety
+  Principles. Have the orchestrator keep the log to itself for the contract-drift check.
+  `review-rubric.md`'s "What the reviewer sees" should list the log as excluded.
 - **Confidence:** high · **Effort:** small

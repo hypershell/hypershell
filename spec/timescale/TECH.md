@@ -3,7 +3,7 @@ slug: timescale
 title: 'TimescaleDB provider: hypertables out of the box (TS1)'
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/timescale
 base: develop
 current_phase: done
@@ -130,10 +130,11 @@ phases:
     "$(git log -1 --format=%H -- . ':!spec')" --json conclusion --jq '[.[] | select(.conclusion
     == "success")] | length')" -ge 1
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 77d34bd87a257cd96ac1e3dd1d476491e1969c62
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: F1-F2 (R4/R6 orderby convergence, segmentby/orderby
+    validation), F3-F4 (docs/seed accuracy)'
+  cycle: 1
 ---
 # TECH.md — TimescaleDB provider: hypertables out of the box (TS1)
 
