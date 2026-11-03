@@ -581,6 +581,8 @@ class Task(Entity):
         Check the current group and increment if necessary with explanation.
         We assume all tasks in `previous_group` have already been scheduled (see Task.next()).
         A group is held while it has incomplete tasks or failures still awaiting retry.
+        The next group is the lowest group holding incomplete tasks, which may be lower than
+        `previous_group` when tasks are submitted late.
         """
         # Incomplete tasks are counted before retryable failures, so a result written back between
         # the two checks is always seen by the second. Retryable failures are counted before
@@ -611,16 +613,20 @@ class Task(Entity):
             return TaskGroupInfo(previous_group,
                                  f'at least {failed} tasks exceeding allowed retries, example: {example.id}',
                                  False)
-        next_group = (
-            Session.query(Task.group)
-            .order_by(Task.group)
-            .filter(Task.group > previous_group)
-            .first()
-        )
-        if not next_group:
+        # The next group is chosen in one query, so rows committed while the checks above ran are
+        # never skipped; it is lower than the previous group when tasks were submitted late.
+        next_group = cls.lowest_incomplete_group()
+        if next_group is None:
             return TaskGroupInfo(previous_group, f'no task groups remain')
+        elif next_group == previous_group:
+            return TaskGroupInfo(previous_group, f'new tasks submitted')
         else:
-            return TaskGroupInfo(next_group[0])
+            return TaskGroupInfo(next_group)
+
+    @classmethod
+    def lowest_incomplete_group(cls: Type[Task]) -> Optional[int]:
+        """The smallest group holding a task that has not completed, or None."""
+        return Session.query(func.min(cls.group)).filter(cls.completion_time.is_(None)).scalar()
 
     @classmethod
     def select_new(cls: Type[Task], limit: int, group: int = None) -> List[Task]:

@@ -147,8 +147,6 @@ def scheduled_in_group(group: int) -> int:
 # --- Rows committed while the scheduler chooses its next group ------------------------------------
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='The next group is chosen past rows committed while the current group is checked')
 def test_next_group_sees_rows_committed_during_check(task_db: Engine, monkeypatch: pytest.MonkeyPatch,
                                                      caplog: pytest.LogCaptureFixture) -> None:
     """Rows committed in the current group while the next group is chosen are run before moving on."""
@@ -200,8 +198,6 @@ def test_next_group_sees_rows_committed_during_check(task_db: Engine, monkeypatc
 # --- A lower group arriving after a higher group has started ---------------------------------------
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='The scheduler only moves to higher groups, so a late lower group is never run')
 @mark.parametrize('forever_mode', [False, True])
 def test_late_lower_group_runs_after_current(task_db: Engine, caplog: pytest.LogCaptureFixture,
                                              forever_mode: bool) -> None:
@@ -238,8 +234,6 @@ def test_late_lower_group_runs_after_current(task_db: Engine, caplog: pytest.Log
 # --- Input in ascending order that begins below the default group ----------------------------------
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='An empty-database start schedules into group 0 before lower groups arrive')
 def test_ascending_input_below_zero_runs_in_order(task_db: Engine, caplog: pytest.LogCaptureFixture) -> None:
     """Groups committed after an empty-database start run in ascending order, with no warning."""
     caplog.set_level(logging.DEBUG, logger='hypershell')
@@ -255,8 +249,6 @@ def test_ascending_input_below_zero_runs_in_order(task_db: Engine, caplog: pytes
 # --- Restarting a database left with a lower group unscheduled -------------------------------------
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError,
-            reason='A restart starts in the higher group and never moves down to the lower one')
 def test_restart_runs_stranded_lower_group(task_db: Engine, caplog: pytest.LogCaptureFixture) -> None:
     """A restart runs a lower group left unscheduled behind a completed higher group."""
     caplog.set_level(logging.DEBUG, logger='hypershell')

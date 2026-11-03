@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -28,7 +28,7 @@ phases:
     -rxX tests/test_group_order.py
 - id: P2
   name: Atomic next-group choice, late-lower warning, provisional first group
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -260,10 +260,10 @@ guard that is green before and after. **No `src/` edit in this phase.**
 **Goal:** the P1 replays go green, with #68's gates and everything else unchanged. The change is
 coupled core and is made as one edit.
 
-- [ ] `data/model.py`: add `Task.lowest_incomplete_group() -> Optional[int]`, which is
+- [x] `data/model.py`: add `Task.lowest_incomplete_group() -> Optional[int]`, which is
       `Session.query(func.min(Task.group)).filter(Task.completion_time.is_(None)).scalar()`.
       Its docstring says it is the smallest group holding a task that has not completed, or None.
-- [ ] `Task.increment_group`: keep the three gates and their order verbatim. Replace the last
+- [x] `Task.increment_group`: keep the three gates and their order verbatim. Replace the last
       query with `lowest_incomplete_group()`:
   - `None` returns `'no task groups remain'`, as today.
   - `== previous_group` returns `TaskGroupInfo(previous_group, '<n> new tasks submitted')`, or a
@@ -273,7 +273,7 @@ coupled core and is made as one edit.
   Update the docstring: the method may now move to a lower group. Add a declarative comment that
   the next group is chosen in one query, so rows committed during the checks are not skipped,
   and that it may be lower when tasks arrive late.
-- [ ] `server.py` `Scheduler`:
+- [x] `server.py` `Scheduler`:
   - Add the annotations and the `__init__` attributes `first_group_pending = False`,
     `highest_started_group = None` and `last_scheduled_group = None`. Place them before
     `current_group` (port placement).
@@ -288,11 +288,11 @@ coupled core and is made as one edit.
     `highest_started_group`, then updates both attributes and clears `first_group_pending`. The
     message names both groups and contains `after task group` (PLAN §2.2).
   - **Do not touch the stop branch**, `increment_group`'s call site, or the back-off.
-- [ ] `tests/test_group_order.py`: remove the four `xfail` markers.
-- [ ] Pre-check the port. Run `git diff b31c66e -- src > "$TMPDIR/cyc.diff"`, then
+- [x] `tests/test_group_order.py`: remove the four `xfail` markers.
+- [x] Pre-check the port. Run `git diff b31c66e -- src > "$TMPDIR/cyc.diff"`, then
       `git merge-tree` to confirm `server.py`'s hunks don't overlap or touch 2.8.3's differing
       lines. The P5 trial is the authority. This is only an early warning.
-- [ ] Do **not** touch `tests/test_groups.py`, `tests/test_retry_gate.py` or any integration
+- [x] Do **not** touch `tests/test_groups.py`, `tests/test_retry_gate.py` or any integration
       test.
 - **Verify:** the frontmatter `verify:`.
   - `tests/test_groups.py` and `tests/test_retry_gate.py` are identical to `b31c66e`, and there
@@ -443,6 +443,15 @@ scratch directory for each run.
 - The guard `test_restart_on_halted_group_still_halts` passed.
 
 Verify (3.12): `1 passed, 5 xfailed`, rc 0.
+
+**P2.** The empty-database start and the late-lower warning live in two new `Scheduler`
+methods, `next_tasks()` and `mark_group_started()`, placed after `load_bundle`, where both
+branches are identical. `load_bundle` changes only the `Task.next` assignment (now
+`self.tasks = self.next_tasks()`) and the first line inside `if self.tasks:`. The same-group
+reason from `increment_group` is `new tasks submitted`. A `git merge-file` pre-check of each
+`src/` file onto `origin/master` (with #68's `model.py`) is conflict-free. Verify (3.12):
+unit tests `28 passed`; the restart drive exits 0 with `Completed task group 1 - starting task
+group 0`, 0 remaining, the group-0 task succeeded, and no late warning.
 
 ---
 

@@ -127,6 +127,9 @@ class Scheduler(StateMachine):
     poll: float
     poll_max: float
     startup_phase: bool
+    first_group_pending: bool
+    highest_started_group: Optional[int]
+    last_scheduled_group: Optional[int]
     current_group: Optional[int]
     submitter: Optional[SubmitThread]
 
@@ -150,6 +153,9 @@ class Scheduler(StateMachine):
         self.poll = SERVER_POLL_MIN
         self.poll_max = poll
         self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
+        self.first_group_pending = False
+        self.highest_started_group = None
+        self.last_scheduled_group = None
         self.current_group = None
         self.submitter = submitter
 
@@ -198,6 +204,7 @@ class Scheduler(StateMachine):
                 log.info(f'Reverted {tasks_interrupted} previously interrupted tasks')
         else:
             log.info('Empty database - waiting for initial tasks')
+            self.first_group_pending = True
         group_info = Task.current_group()
         log.debug(f'Starting with task group {group_info.value} ({group_info.reason})')
         self.current_group = group_info.value
@@ -208,11 +215,9 @@ class Scheduler(StateMachine):
         if check_signal() in (SIGUSR1, SIGUSR2):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
             return SchedulerState.FINAL
-        self.tasks = Task.next(limit=self.bundlesize,
-                               attempts=self.attempts,
-                               eager=self.eager,
-                               group=self.current_group)
+        self.tasks = self.next_tasks()
         if self.tasks:
+            self.mark_group_started()
             self.startup_phase = False
             self.poll = SERVER_POLL_MIN
             return SchedulerState.PACK
@@ -242,6 +247,31 @@ class Scheduler(StateMachine):
             log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
             time.sleep(self.poll)
             return SchedulerState.LOAD
+
+    def next_tasks(self: Scheduler) -> List[Task]:
+        """Select the next tasks to schedule from the current group."""
+        if self.first_group_pending:
+            # On an empty-database start no task is scheduled into a group chosen before any task
+            # existed: the first group is the lowest one holding tasks, once there are any.
+            first_group = Task.lowest_incomplete_group()
+            if first_group is None:
+                return []
+            self.current_group = first_group
+        return Task.next(limit=self.bundlesize,
+                         attempts=self.attempts,
+                         eager=self.eager,
+                         group=self.current_group)
+
+    def mark_group_started(self: Scheduler) -> None:
+        """Record that the current group has scheduled tasks, warning if a higher group started first."""
+        group = self.current_group
+        if group != self.last_scheduled_group:
+            highest = self.highest_started_group
+            if highest is not None and group < highest:
+                log.warning(f'Starting task group {group} after task group {highest} (tasks submitted late)')
+            self.highest_started_group = group if highest is None else max(group, highest)
+            self.last_scheduled_group = group
+        self.first_group_pending = False
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
         """Pack tasks into bundle (list)."""
