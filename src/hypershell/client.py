@@ -57,7 +57,7 @@ from cmdkit.cli import Interface, ArgumentError
 from cmdkit.config import Namespace, Configuration
 
 # Internal libs
-from hypershell.data.model import Task, serialize_tasks, deserialize_tasks
+from hypershell.data.model import Task, serialize_tasks, deserialize_tasks, zone_name
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import default, config, load_task_env, SSH_GROUPS
@@ -1483,7 +1483,7 @@ APP_USAGE = f"""\
 Usage:
   hs client [-h] [-H ADDR] [-p PORT] [-k KEY] [-N THREADS] [-C CORES] [-M MEMORY]   
             [--template CMD] [-d DELAY] [-T TIMEOUT] [-W TIMEOUT] [-b SIZE] [-S WAIT] [-w WAIT]
-            [--capture | [-o PATH] [-e PATH]] [--no-confirm] [--monitor]
+            [--capture | [-o PATH] [-e PATH]] [--no-confirm] [--monitor] [--zone NAME]
             [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
   Launch client directly, run tasks in parallel.\
@@ -1507,6 +1507,7 @@ Options:
   -t, --template      CMD   Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
   -b, --bundlesize    SIZE  Bundle size to request and return (default: server's).
   -w, --bundlewait    SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+      --zone          NAME  Run only tasks of this zone (default: tasks without a zone).
   -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
   -k, --auth          KEY   Cryptographic key to connect to server.
@@ -1560,6 +1561,9 @@ class ClientApp(Application):
 
     delay_start: float = DEFAULT_DELAY
     interface.add_argument('-d', '--delay-start', type=float, default=delay_start)
+
+    zone: Optional[str] = None
+    interface.add_argument('--zone', default=None)
 
     task_timeout: Optional[int] = config.task.timeout or None
     client_timeout: Optional[int] = config.client.timeout or None
@@ -1636,7 +1640,8 @@ class ClientApp(Application):
                        task_timeout=self.task_timeout,
                        task_signalwait=self.task_signalwait,
                        ratelimit=self.ratelimit,
-                       tls=self.tls)
+                       tls=self.tls,
+                       zone=self.zone)
         except gaierror:
             raise HostAddressInfo(f'Could not resolve host \'{self.host}\'')
 
@@ -1644,6 +1649,11 @@ class ClientApp(Application):
         """Check for logical errors in command-line arguments."""
         if self.capture and (self.output_path or self.errors_path):
             raise ArgumentError('Cannot specify --capture with either --output or --errors')
+        if self.zone is not None:
+            try:
+                self.zone = zone_name(self.zone)
+            except ValueError as error:
+                raise ArgumentError(str(error)) from error
         if self.client_timeout is not None and self.client_timeout <= 0:
             raise ArgumentError('Client --timeout should be positive integer')
         if self.task_timeout is not None and self.task_timeout <= 0:

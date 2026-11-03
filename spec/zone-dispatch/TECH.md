@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-dispatch
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -63,7 +63,7 @@ phases:
 - id: P4
   name: 'Zones end to end: --zone on submit, task submit, client and cluster; per-zone
     pools'
-  status: pending
+  status: done
   satisfies:
   - R6
   - R9
@@ -432,7 +432,7 @@ one version error.
 registration and zone-loss unstaging; the held-group log line. A loopback mixed-zone run
 completes with every task run only by a client of its zone.
 
-- [ ] **Red first:**
+- [x] **Red first:**
   - `tests/test_zone_dispatch.py` (`@mark.unit`):
     - Requests register demand.
     - The scheduler fills only demanded zones, and the default zone always.
@@ -453,20 +453,35 @@ completes with every task run only by a client of its zone.
   - CLI: `--zone` parse and missing-value cases added to the `OPTION_PAIR` tables in
     `test_submit.py` and `test_cluster.py`; `--zone` with `-q` / `--no-db` is a usage error; an
     empty or control-character name is a usage error.
-- [ ] `core/dispatch.py`: per-zone pools, the demand map, `forget` → unstage marking.
-- [ ] `server.py`:
+- [x] `core/dispatch.py`: per-zone pools, the demand map, `forget` → unstage marking.
+- [x] `server.py`:
   - `Scheduler` loops the demanded zones.
   - `Zone.ensure(default)` at start in DB mode.
   - The held-group log.
   - The zone-loss unstage via `Task.revert_all`.
-- [ ] `client.py`: `--zone` (shared validator) and the zone in the request.
-- [ ] `submit.py`: `--zone` (DB mode; `GatedSource.zone_id`; `submit_one`); rejected with `-q`.
-- [ ] `task.py`: `hs task submit --zone`.
-- [ ] `cluster/__init__.py`, `local.py`, `remote.py` (remote and autoscale), `ssh.py`
+- [x] `client.py`: `--zone` (shared validator) and the zone in the request.
+- [x] `submit.py`: `--zone` (DB mode; `GatedSource.zone_id`; `submit_one`); rejected with `-q`.
+- [x] `task.py`: `hs task submit --zone`.
+- [x] `cluster/__init__.py`, `local.py`, `remote.py` (remote and autoscale), `ssh.py`
       (`shlex.quote`): `--zone` propagation and cluster-submit stamping; rejected with `--no-db`.
-- [ ] Docs and completions (same commit):
+- [x] Docs and completions (same commit):
   - `submit_usage/help`, `task_submit_usage/help`, `client_usage/help`, `cluster_usage/help`.
   - bash `_hs_submit`, `_hs_task_submit`, `_hs_client`, `_hs_cluster`; zsh likewise.
+- **Build notes (amendments, 2026-11-02):**
+  - P2 already built the dispatcher zone-generic (demand map, per-zone pools and cut, forget and
+    unstage marking), so `test_request_registers_demand`, `test_zoned_request_gets_only_its_zone`,
+    `test_scheduler_fills_demanded_zones_only`, the unstage tests and `test_new_zone_wakes_the_scheduler`
+    were green on arrival; red on P3 were the held-group line, the CLI (`--zone` parse, usage
+    errors, stamping) and the mixed-zone workload.
+  - The shared name check is `zone_name()` in `data/model.py`, beside `zone_id()` (amended touch):
+    a name is stripped, non-empty, at most 256 characters and printable.
+  - The held-group line counts a zone's unscheduled tasks of the group (plus, for the default
+    zone, its staged rows) and fires once per (group, zone) for a zone no client serves. The
+    default zone is reported only while some client serves another zone, so a run without zones
+    logs nothing new.
+  - `Zone.ensure('default')` runs in `Scheduler.start` (the scheduler thread, DB mode only).
+  - Sphinx: the build runs outside the sandbox (an extension binds a local socket); its two
+    warnings (`cli/task_submit.rst`, `manual.rst` not in a toctree) are not from this phase.
 - **Touches:** `core/dispatch.py`, `server.py`, `client.py`, `submit.py`, `task.py`,
   `cluster/{__init__,local,remote,ssh}.py`, `tests/test_zone_dispatch.py`,
   `tests/test_zone_workload.py`, `tests/test_submit.py`, `tests/test_cluster.py`,

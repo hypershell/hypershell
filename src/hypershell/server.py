@@ -58,6 +58,7 @@ from queue import Empty as QueueEmpty, Full as QueueFull
 # External libs
 from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
+from sqlalchemy import func
 
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -71,7 +72,8 @@ from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEO
 from hypershell.core.dispatch import Dispatcher
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
-from hypershell.data.model import Task, Client, ResultOutcome, serialize_tasks, deserialize_tasks
+from hypershell.data.model import (Task, Client, Zone, ResultOutcome, serialize_tasks, deserialize_tasks,
+                                   DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
 from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE
 from hypershell.client import ClientInfo
@@ -160,6 +162,7 @@ class Scheduler(StateMachine):
         self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
         self.current_group = None
         self.submitter = submitter
+        self.held = set()
 
     @property
     def dispatcher(self: Scheduler) -> Dispatcher:
@@ -199,6 +202,7 @@ class Scheduler(StateMachine):
     def start(self: Scheduler) -> SchedulerState:
         """Initial setup then jump to LOAD state."""
         log.debug('Started (scheduler)')
+        Zone.ensure(DEFAULT_ZONE_NAME)
         if self.forever_mode:
             log.info('Scheduler will run forever')
         if (total_tasks := Task.count()) > 0:
@@ -267,6 +271,7 @@ class Scheduler(StateMachine):
                 log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
                 self.current_group = group_info.value
                 return SchedulerState.LOAD
+            self.report_held(group_info.value)
             self.poll = min(self.poll_max, 2 * self.poll)
             log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
             self.dispatcher.wait_need(generation, timeout=self.poll)
@@ -281,6 +286,33 @@ class Scheduler(StateMachine):
                 log.trace(f'Scheduled task ({task.id})')
         self.loaded = []
         return SchedulerState.LOAD
+
+    def report_held(self: Scheduler, group: int) -> None:
+        """Log, once per zone, that `group` waits on tasks of a zone no client serves.
+
+        A zone counts when it has tasks of the group not yet scheduled and no client asking for
+        it. The default zone counts only while some client serves another zone, so a run without
+        zones logs nothing new.
+        """
+        waiting = dict(Task.query(Task.zone, func.count(Task.id))
+                       .filter(Task.group == group)
+                       .filter(Task.schedule_time.is_(None))
+                       .group_by(Task.zone).all())
+        if None in waiting:
+            waiting[DEFAULT_ZONE_ID] = waiting.pop(None) + self.dispatcher.staged(DEFAULT_ZONE_ID)
+        elif self.dispatcher.staged(DEFAULT_ZONE_ID):
+            waiting[DEFAULT_ZONE_ID] = self.dispatcher.staged(DEFAULT_ZONE_ID)
+        zoned = any(self.dispatcher.clients(zone) for zone in waiting if zone != DEFAULT_ZONE_ID)
+        idle = [zone for zone in waiting if (group, zone) not in self.held and not self.dispatcher.clients(zone)
+                and (zone != DEFAULT_ZONE_ID or zoned or self.dispatcher.zoned())]
+        if not idle:
+            return
+        names = Zone.names_for_ids([zone for zone in idle if zone != DEFAULT_ZONE_ID])
+        names[DEFAULT_ZONE_ID] = DEFAULT_ZONE_NAME
+        for zone in idle:
+            self.held.add((group, zone))
+            log.info(f'Task group {group} waiting on zone {names.get(zone, zone)}: '
+                     f'{waiting[zone]} tasks, no client serving it')
 
     def revert_unstaged(self: Scheduler) -> None:
         """Revert the rows staged for zones whose last client is gone, so another run can take them."""

@@ -201,6 +201,10 @@ class RemoteCluster(Thread):
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
 
+        zone (str, optional):
+            Zone whose tasks the clients run (default: the default zone).
+            Tasks this cluster submits are placed in the same zone.
+
     Example:
         >>> from hypershell.cluster import RemoteCluster
         >>> cluster = RemoteCluster.new(
@@ -248,7 +252,8 @@ class RemoteCluster(Thread):
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: int = None,
                  from_json: bool = False,
-                 tls: Optional[TLSConfig] = None) -> None:
+                 tls: Optional[TLSConfig] = None,
+                 zone: Optional[str] = None) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         # In JSON mode the template is expanded submit-side by the server; remote clients
@@ -299,6 +304,8 @@ class RemoteCluster(Thread):
             # TLS material is resolved by each client from its own site/config (identical to
             # the server's on a shared filesystem); only the disabled state must be propagated.
             client_args.append('--no-tls')
+        if zone is not None:
+            client_args.extend(['--zone', zone])
         target = HOSTNAME if bind[0] == '0.0.0.0' else bind[0]
         self.client_argv = [
             *launcher, *launcher_args, remote_exe, 'client',
@@ -728,6 +735,10 @@ class AutoScalingCluster(Thread):
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
 
+        zone (str, optional):
+            Zone whose tasks the clients run (default: the default zone).
+            Tasks this cluster submits are placed in the same zone.
+
     Example:
         >>> from hypershell.cluster import AutoScalingCluster
         >>> cluster = AutoScalingCluster.new(
@@ -783,6 +794,7 @@ class AutoScalingCluster(Thread):
                  max_size: int = DEFAULT_AUTOSCALE_MAX_SIZE,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
+                 zone: Optional[str] = None,
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
@@ -829,6 +841,8 @@ class AutoScalingCluster(Thread):
             # TLS material is resolved by each client from its own site/config (identical to
             # the server's on a shared filesystem); only the disabled state must be propagated.
             client_args.append('--no-tls')
+        if zone is not None:
+            client_args.extend(['--zone', zone])
         launcher.extend([
             *launcher_args, remote_exe, 'client',
             '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),

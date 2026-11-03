@@ -27,7 +27,7 @@ from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
-from hypershell.data.model import Source, STDIN_SOURCE_ID
+from hypershell.data.model import Source, Zone, STDIN_SOURCE_ID, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
 from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
@@ -55,7 +55,7 @@ APP_USAGE = """\
 Usage:
   hs cluster [-h] [FILE | --from-json SPEC | --restart | --forever] [--repeat | --update] [-N NUM] [-t CMD] [-b SIZE] [-w SEC]
              [-c NUM] [-m MEM] [-W SEC] [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
-             [-H ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor]
+             [-H ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor] [--zone NAME]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
              [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]
              [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
@@ -82,6 +82,7 @@ Options:
   -p, --port           PORT     Port number (default: {DEFAULT_PORT}).
   -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait     SEC      Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+      --zone           NAME     Zone of the submitted tasks and of every client (default: none).
   -r, --max-retries    NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
       --eager                   Schedule failed tasks before new tasks.
       --no-db                   Disable database (submit directly to clients).
@@ -151,6 +152,9 @@ class ClusterApp(Application):
 
     delay_start: float = DEFAULT_DELAY
     interface.add_argument('-d', '--delay-start', type=float, default=delay_start)
+
+    zone: Optional[str] = None
+    interface.add_argument('--zone', default=None)
 
     eager_mode: bool = config.server.eager
     max_retries: int = DEFAULT_ATTEMPTS - 1
@@ -282,7 +286,7 @@ class ClusterApp(Application):
                  task_timeout=self.task_timeout, task_signalwait=self.task_signalwait,
                  cores=self.cores, memory=self.memory, client_cores=self.client_cores,
                  client_memory=self.client_memory, ratelimit=self.ratelimit,
-                 from_json=bool(self.from_json), tls=self.tls)
+                 from_json=bool(self.from_json), tls=self.tls, zone=self.zone)
 
     def run_local(self: ClusterApp, **options) -> None:
         """Run local cluster."""
@@ -354,6 +358,13 @@ class ClusterApp(Application):
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.in_memory:
             raise ArgumentError('Cannot restart without database (given --no-db)')
+        if self.zone is not None:
+            if self.in_memory:
+                raise ArgumentError('Cannot use --zone without database (given --no-db)')
+            try:
+                self.zone = zone_name(self.zone)
+            except ValueError as error:
+                raise ArgumentError(str(error)) from error
         if self.output_path and self.mode != 'local':
             raise ArgumentError('Cannot specify -o/--output PATH with remote clients')
         if self.errors_path and self.mode != 'local':
@@ -499,13 +510,13 @@ class ClusterApp(Application):
             self.warn_gating_no_effect('<stdin>')
             source_id = Source.reserved(STDIN_SOURCE_ID).id
             name = '<stdin>' if stream is sys.stdin else os.path.abspath(self.filepath)
-            return GatedSource(stream, source_id, name=name)
+            return GatedSource(stream, source_id, name=name, zone_id=self.zone_id)
         path = os.path.abspath(self.filepath)
         fingerprint, count = source_fingerprint_and_count(path)  # DEFAULT_TEMPLATE (raw-line split)
         log.info(f'Found {count} tasks in {path} (md5={fingerprint})')
         source_id, skip = apply_source_gate(path, fingerprint, count, repeat=self.repeat_mode,
                                             update=self.update_mode, restart=self.restart_mode)
-        return GatedSource(stream, source_id, skip_fingerprints=skip, name=path)
+        return GatedSource(stream, source_id, skip_fingerprints=skip, name=path, zone_id=self.zone_id)
 
     def prepare_json_source(self: ClusterApp) -> Iterable[dict]:
         """Resolve the Source and apply the re-submission gate to a ``--from-json`` source.
@@ -525,11 +536,16 @@ class ClusterApp(Application):
         if key is None:
             self.warn_gating_no_effect('<stdin>')
             source_id = Source.reserved(STDIN_SOURCE_ID).id
-            return GatedSource(records, source_id, name='<stdin>')
+            return GatedSource(records, source_id, name='<stdin>', zone_id=self.zone_id)
         log.info(f'Found {len(records)} tasks in {key} (md5={fingerprint})')
         source_id, skip = apply_source_gate(key, fingerprint, len(records), repeat=self.repeat_mode,
                                             update=self.update_mode, restart=self.restart_mode)
-        return GatedSource(records, source_id, skip_fingerprints=skip, name=key)
+        return GatedSource(records, source_id, skip_fingerprints=skip, name=key, zone_id=self.zone_id)
+
+    @cached_property
+    def zone_id(self: ClusterApp) -> Optional[str]:
+        """Id of the cluster's zone, recorded in the database (None without --zone)."""
+        return None if self.zone is None else Zone.ensure(self.zone)
 
     def warn_gating_no_effect(self: ClusterApp, kind: str) -> None:
         """Note that re-submission gating flags are inert for exempt sources."""

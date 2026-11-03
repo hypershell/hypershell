@@ -41,7 +41,7 @@ __all__ = [
     'Task', 'Client', 'Source', 'Zone', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
     'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
-    'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id',
+    'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id', 'zone_name',
 ]
 
 # Initialize logger
@@ -90,6 +90,22 @@ DEFAULT_ZONE_NAME: Final[str] = 'default'
 # Namespace of name-derived zone ids. It must never change: every release, and every process,
 # derives the same id from the same name, so resolving a name needs no lookup and cannot race.
 ZONE_NAMESPACE: Final[PyUUID] = PyUUID('6f1c9b4e-2a57-5d0e-9b3a-7e5f0c8d2a41')
+
+
+# Longest zone name accepted (characters).
+ZONE_NAME_MAX: Final[int] = 256
+
+
+def zone_name(value: str) -> str:
+    """A zone name as given by a user, stripped; raises ValueError if empty, too long, or not printable."""
+    name = str(value).strip()
+    if not name:
+        raise ValueError('Zone name must not be empty')
+    if len(name) > ZONE_NAME_MAX:
+        raise ValueError(f'Zone name must be at most {ZONE_NAME_MAX} characters')
+    if not name.isprintable():
+        raise ValueError('Zone name must not contain control characters')
+    return name
 
 
 def zone_id(name: Optional[str]) -> str:

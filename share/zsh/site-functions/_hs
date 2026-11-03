@@ -341,6 +341,7 @@ function _hs_task_submit() {
     _arguments -s -S \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
         '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
+        '--zone[Zone of the task]:zone:' \
         '(-)--[End of options; task arguments follow]' \
         '*::task arguments:_normal'
 }
@@ -477,6 +478,7 @@ function _hs_submit() {
         '(-m --memory)'{-m,--memory}'[Required memory per task]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
         '(-W --timeout)'{-W,--timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
         '(-g --group)'{-g,--group}'[Task group for dependency management]:group:' \
+        '--zone[Zone of the submitted tasks]:zone:' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Number of lines to buffer]:size:(1 10 100 1000)' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
         '(--update)--repeat[Re-submit a known file again as a new source]' \
@@ -497,6 +499,7 @@ function _hs_client() {
         '(-N --num-threads)'{-N,--num-threads}'[Number executor threads, 0=auto (default: 1)]:threads:_hs_thread_counts' \
         '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Bundle size to request and return (default: from server)]:size:(1 10 100 1000)' \
+        '--zone[Run only tasks of this zone]:zone:' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
         '(-H --host)'{-H,--host}'[Hostname for server (default: localhost)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (default: 50001)]:port:_hs_ports' \
@@ -569,6 +572,7 @@ function _hs_cluster() {
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '--zone[Zone of the submitted tasks and of every client]:zone:' \
         '(-r --max-retries)'{-r,--max-retries}'[Auto-retry failed tasks (default: 0)]:retries:(1 2 3 4 5 6)' \
         '--eager[Schedule failed tasks before new tasks]' \
         '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries (default: 30)]:seconds:(1 2 5 10 30)' \

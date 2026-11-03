@@ -383,6 +383,11 @@ class Dispatcher:
         with self.lock:
             return sum(1 for z, _ in self.demand.values() if z == zone)
 
+    def zoned(self: Dispatcher) -> bool:
+        """Whether any client serves a zone other than the default zone."""
+        with self.lock:
+            return any(zone != DEFAULT_ZONE_ID for zone, _ in self.demand.values())
+
     def zone_name(self: Dispatcher, zone: str) -> Optional[str]:
         """Name a client used for `zone`, if any client has asked for it."""
         with self.lock:

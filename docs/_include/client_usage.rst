@@ -2,5 +2,5 @@
     ``[-N NUM]`` ``[-t TEMPLATE]`` ``[-b SIZE]`` ``[-w SEC]`` ``[-H ADDR]`` ``[-p PORT]``
     ``[-k KEY]`` ``[--capture | [-o PATH] [-e PATH]]`` ``[--no-confirm]``
     ``[-d SEC]`` ``[-T SEC]`` ``[-W SEC]`` ``[-S SEC]`` ``[-R NUM]``
-    ``[-C NUM]`` ``[-M MEM]`` ``[--monitor]``
+    ``[-C NUM]`` ``[-M MEM]`` ``[--monitor]`` ``[--zone NAME]``
     ``[--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]``

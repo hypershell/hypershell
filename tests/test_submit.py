@@ -77,6 +77,7 @@ OPTION_PAIR: Final[Dict[str, str]] = {
     '-b': '-b/--bundlesize', '--bundlesize': '-b/--bundlesize',
     '-w': '-w/--bundlewait', '--bundlewait': '-w/--bundlewait',
     '-t': '-t/--tag', '--tag': '-t/--tag',
+    '--zone': '--zone',
 }
 
 

@@ -191,6 +191,10 @@ class SSHCluster(Thread):
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
 
+        zone (str, optional):
+            Zone whose tasks the clients run (default: the default zone).
+            Tasks this cluster submits are placed in the same zone.
+
     Example:
         >>> from hypershell.cluster import SSHCluster
         >>> cluster = SSHCluster.new(
@@ -241,7 +245,8 @@ class SSHCluster(Thread):
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: int = None,
                  from_json: bool = False,
-                 tls: Optional[TLSConfig] = None) -> None:
+                 tls: Optional[TLSConfig] = None,
+                 zone: Optional[str] = None) -> None:
         """Initialize server and client threads."""
         if nodelist is None:
             raise AttributeError('Expected nodelist')
@@ -293,6 +298,9 @@ class SSHCluster(Thread):
             # TLS material is resolved by each client from its own site/config (identical to
             # the server's on a shared filesystem); only the disabled state must be propagated.
             client_args.append('--no-tls')
+        if zone is not None:
+            # The remote shell re-parses the command line, so the name is quoted.
+            client_args.extend(['--zone', shlex.quote(zone)])
         self.client_argv = [
             [*launcher, *launcher_args, host, *launcher_env, remote_exe, 'client', '-H', HOSTNAME,
              '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),

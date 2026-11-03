@@ -50,7 +50,7 @@ from hypershell.core.types import smart_coerce, JSONData, to_json_type
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, Source, JSON, CANCEL_STATUS
+from hypershell.data.model import Task, Source, Zone, JSON, CANCEL_STATUS, zone_name
 from hypershell.data import ensuredb, DATABASE_DIALECT
 
 # Public interface
@@ -62,7 +62,7 @@ log = Logger.with_name(__name__)
 
 
 SUBMIT_PROGRAM = 'hs task submit'
-SUBMIT_SYNOPSIS = f'{SUBMIT_PROGRAM} [-h] [-t TAG [TAG...]] -- ARGS...'
+SUBMIT_SYNOPSIS = f'{SUBMIT_PROGRAM} [-h] [-t TAG [TAG...]] [--zone NAME] -- ARGS...'
 SUBMIT_USAGE = f"""\
 Usage:
   {SUBMIT_SYNOPSIS}
@@ -77,6 +77,7 @@ Arguments:
 
 Options:
   -t, --tag    TAG...    Assign tags as `key:value`.
+      --zone   NAME      Zone of the task; only clients of this zone run it.
   -h, --help             Show this message and exit.\
 """
 
@@ -93,15 +94,24 @@ class TaskSubmitApp(Application):
     taglist: List[str] = []
     interface.add_argument('-t', '--tag', nargs='+', dest='taglist')
 
+    zone: Optional[str] = None
+    interface.add_argument('--zone', default=None)
+
     exceptions = {
         **get_shared_exception_mapping(__name__)
     }
 
     def run(self: TaskSubmitApp) -> None:
         """Submit task to database."""
+        if self.zone is not None:
+            try:
+                self.zone = zone_name(self.zone)
+            except ValueError as error:
+                raise ArgumentError(str(error)) from error
         ensuredb()
         self.check_tags()
-        task = Task.new(args=' '.join(self.argv), tag=self.tags)
+        zone = None if self.zone is None else Zone.ensure(self.zone)
+        task = Task.new(args=' '.join(self.argv), tag=self.tags, zone=zone)
         Task.add(task)
         print(task.id)
 

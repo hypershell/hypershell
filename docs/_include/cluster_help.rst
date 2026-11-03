@@ -116,6 +116,13 @@ Options
     With ``--no-db`` enabled, there is no scheduler and instead the `submit` thread publishes
     bundles directly to the queue.
 
+``--zone`` *NAME*
+    Zone of the submitted tasks and of every client the cluster launches (default: none).
+
+    The tasks read from *FILE* (or ``--from-json``) are placed in this zone, and each client is
+    launched with the same ``--zone``, so it runs them. Zones are recorded in the database, so
+    ``--zone`` cannot be used with ``--no-db``.
+
 ``--initdb``
     Auto-initialize database.
 

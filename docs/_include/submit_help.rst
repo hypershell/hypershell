@@ -118,6 +118,14 @@ Options
     All tasks default to group 0 for backwards compatibility. Users can organize tasks into
     multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups execute first.
 
+``--zone`` *NAME*
+    Zone of the submitted tasks (default: none, the reserved default zone).
+
+    Only a client launched with the same ``--zone`` runs these tasks; a client given no
+    ``--zone`` runs only tasks without one. Zone names are arbitrary text (``default`` names the
+    default zone). Zones are recorded in the database, so ``--zone`` cannot be used with
+    ``--queue``. Zone is placement only: task groups still run in order across all zones.
+
 ``--initdb``
     Auto-initialize database.
 

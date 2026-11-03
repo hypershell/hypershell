@@ -40,6 +40,13 @@ Options
 
     See also ``--bundlesize``.
 
+``--zone`` *NAME*
+    Run only tasks of this zone (default: none, tasks without a zone).
+
+    The client names its zone when it requests work, and the server replies with tasks of that
+    zone only. A client given no ``--zone`` (or ``--zone default``) runs only tasks submitted
+    without one. See ``--zone`` on `submit`.
+
 ``-H``, ``--host`` *ADDR*
     Hostname or IP address to connect with server (default: localhost).
 
