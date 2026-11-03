@@ -496,7 +496,7 @@ function _hs_client() {
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
         '(-N --num-threads)'{-N,--num-threads}'[Number executor threads, 0=auto (default: 1)]:threads:_hs_thread_counts' \
         '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
-        '(-b --bundlesize)'{-b,--bundlesize}'[Bundle size for finished tasks]:size:(1 10 100 1000)' \
+        '(-b --bundlesize)'{-b,--bundlesize}'[Bundle size to request and return (default: from server)]:size:(1 10 100 1000)' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
         '(-H --host)'{-H,--host}'[Hostname for server (default: localhost)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (default: 50001)]:port:_hs_ports' \

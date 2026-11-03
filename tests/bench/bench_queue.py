@@ -14,7 +14,8 @@ Subcommands:
 
     parity  --base REF --feature REF    Same grouped workload (with a retried failure) on both
                                         builds, TLS on and off: identical normalised task tables,
-                                        clean exits, and byte-identical ``--help`` output.
+                                        groups run in order, clean exits, and byte-identical
+                                        ``--help`` output (unless ``--skip-help``).
     compat  --server REF --client REF   A server from one build completes a workload with clients
                                         from the other, TLS on and off.
     gate    --base REF --feature REF    Throughput and footprint, interleaved and repeated.
@@ -279,11 +280,24 @@ def normalise(site: Site, rows: List[Dict[str, Any]]) -> List[Tuple]:
                   for row in rows)
 
 
+def group_order(rows: List[Dict[str, Any]]) -> bool:
+    """Every task of each group completed before any task of the next group was scheduled."""
+    groups = sorted({row['group'] for row in rows})
+    for earlier, later in zip(groups, groups[1:]):
+        done = [row['completion_time'] for row in rows if row['group'] == earlier]
+        started = [row['schedule_time'] for row in rows if row['group'] == later]
+        if None in done or None in started or max(done) > min(started):
+            return False
+    return True
+
+
 def run_parity_once(venv: Path, label: str, tls: bool, workdir: Path) -> Tuple[List[Tuple], Dict[str, Any]]:
     site = Site(workdir, label, tls)
     submit(site, venv, grouped_workload(site.path))
     result = serve(site, venv, venv, ['-r', '1'], [], clients=2)
-    return normalise(site, site.rows()), result
+    rows = site.rows()
+    result['group_order'] = group_order(rows)
+    return normalise(site, rows), result
 
 
 def help_text(venv: Path, workdir: Path) -> Dict[str, bytes]:
@@ -299,15 +313,20 @@ def cmd_parity(args: argparse.Namespace) -> bool:
         table_feature, result_feature = run_parity_once(feature, 'feature', tls, args.workdir)
         same = table_base == table_feature
         exits = clean(result_base) and clean(result_feature)
-        ok &= same and exits and len(table_feature) == 10
+        ordered = result_base['group_order'] and result_feature['group_order']
+        ok &= same and exits and ordered and len(table_feature) == 10
         print(f'parity tls={"on" if tls else "off"}: rows {len(table_base)} vs {len(table_feature)}, '
-              f'identical={same}; rc base {result_base["server_rc"]}/{result_base["client_rcs"]} '
-              f'feature {result_feature["server_rc"]}/{result_feature["client_rcs"]}; wall s '
-              f'base {result_base["wall_s"]:.1f} feature {result_feature["wall_s"]:.1f} -> '
-              f'{"PASS" if same and exits else "FAIL"}')
+              f'identical={same}; group order base {result_base["group_order"]} '
+              f'feature {result_feature["group_order"]}; rc base {result_base["server_rc"]}/'
+              f'{result_base["client_rcs"]} feature {result_feature["server_rc"]}/{result_feature["client_rcs"]}; '
+              f'wall s base {result_base["wall_s"]:.1f} feature {result_feature["wall_s"]:.1f} -> '
+              f'{"PASS" if same and exits and ordered else "FAIL"}')
         if not same:
             for row in sorted(set(table_base) ^ set(table_feature)):
                 print(f'  differs: {row}')
+    if args.skip_help:
+        print('help: skipped (--skip-help)')
+        return ok
     help_base, help_feature = help_text(base, args.workdir), help_text(feature, args.workdir)
     for command in HELP_COMMANDS:
         same = help_base[command] == help_feature[command] and len(help_base[command]) > 0
@@ -441,6 +460,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parity = commands.add_parser('parity')
     parity.add_argument('--base', required=True)
     parity.add_argument('--feature', required=True)
+    parity.add_argument('--skip-help', action='store_true', help='do not compare --help output')
     compat = commands.add_parser('compat')
     compat.add_argument('--server', required=True)
     compat.add_argument('--client', required=True)

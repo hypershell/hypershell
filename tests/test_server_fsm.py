@@ -15,6 +15,7 @@ from typing import Iterator
 from pathlib import Path
 
 # Standard libs
+import json
 import time
 from queue import Queue
 from types import SimpleNamespace
@@ -29,10 +30,11 @@ import hypershell.server
 import hypershell.core.signal
 from hypershell.core.signal import SIGUSR1
 from hypershell.core.queue import QueueServer, QueueClient, QueueConfig, make_sentinel
+from hypershell.core.dispatch import Dispatcher, PROTOCOL
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
-from hypershell.data.model import Entity, Task, serialize_tasks, deserialize_tasks
+from hypershell.data.model import Entity, Task, serialize_tasks, deserialize_tasks, DEFAULT_ZONE_ID
 from hypershell.client import ClientInfo
 from hypershell.server import (Scheduler, SchedulerState, SchedulerThread,
                                Confirm, ConfirmState, ConfirmThread,
@@ -84,6 +86,12 @@ def task_db(tmp_path: Path) -> Iterator[Engine]:
 def bundle(*args: str) -> bytes:
     """A packed bundle of new tasks."""
     return serialize_tasks([Task.new(args=arg) for arg in args])
+
+
+def request(dispatcher, wait: float = 0.0, size: int = 1) -> dict:
+    """One work request from client c1 (local dispatcher or remote proxy), decoded."""
+    return json.loads(dispatcher.request(json.dumps({'protocol': PROTOCOL, 'client': 'c1', 'host': 'h1',
+                                                     'zone': None, 'size': size, 'wait': wait})))
 
 
 def assert_halts(thread, timeout: float = WAIT) -> None:
@@ -178,14 +186,16 @@ class TestHeartMonitor:
         assert list(monitor.beats) == ['c1']
 
     def test_signals_clients(self, queues) -> None:
+        queues.dispatcher = Dispatcher()
         monitor = HeartMonitor(queue=queues, evict_after=10, in_memory=True)
         queues.heartbeat.put(Heartbeat.new(uuid='c1', host='h1').pack())
         monitor.get_next()
         monitor.update_client()
+        assert request(queues.dispatcher)['shutdown'] is False
         monitor.should_signal = True
         assert monitor.switch_mode() is HeartbeatState.SIGNAL
         assert monitor.signal_clients() is HeartbeatState.SWITCH
-        assert queues.scheduled.get_nowait() == make_sentinel()
+        assert request(queues.dispatcher)['shutdown'] is True
         assert queues.scheduled.empty()
 
     def test_halts_on_sentinel(self, queues) -> None:
@@ -209,23 +219,25 @@ class TestScheduler:
     """The scheduler posts bundles on ``scheduled``."""
 
     def test_posts_bundle(self, queues) -> None:
+        queues.dispatcher = Dispatcher()
         scheduler = Scheduler(queue=queues)
-        scheduler.tasks = [Task.new(args='echo a')]
-        assert scheduler.pack_bundle() is SchedulerState.POST
-        assert scheduler.post_bundle() is SchedulerState.LOAD
-        assert [task.args for task in deserialize_tasks(queues.scheduled.get_nowait())] == ['echo a']
+        scheduler.loaded = [(DEFAULT_ZONE_ID, [Task.new(args='echo a')])]
+        assert scheduler.pack_bundle() is SchedulerState.LOAD
+        assert [task['args'] for task in request(queues.dispatcher)['tasks']] == ['echo a']
 
     def test_reenters_on_timeout(self, queues) -> None:
+        queues.dispatcher = Dispatcher()
+        queues.dispatcher.stage(DEFAULT_ZONE_ID, [('occupied-1', '{"id": "occupied-1"}'),
+                                                  ('occupied-2', '{"id": "occupied-2"}')])
         scheduler = Scheduler(queue=queues)
-        queues.scheduled.put(b'occupied')
-        scheduler.tasks = [Task.new(args='echo a')]
-        scheduler.pack_bundle()
         start = time.monotonic()
-        assert scheduler.post_bundle() is SchedulerState.POST
+        assert scheduler.load_bundle() is SchedulerState.LOAD
         assert time.monotonic() - start < TIMEOUT + 1.0
-        assert queues.scheduled.get_nowait() == b'occupied'
-        assert scheduler.post_bundle() is SchedulerState.LOAD
-        assert [task.args for task in deserialize_tasks(queues.scheduled.get_nowait())] == ['echo a']
+        assert [task['id'] for task in request(queues.dispatcher)['tasks']] == ['occupied-1']
+        scheduler.loaded = [(DEFAULT_ZONE_ID, [Task.new(args='echo a')])]
+        assert scheduler.pack_bundle() is SchedulerState.LOAD
+        assert [task['id'] for task in request(queues.dispatcher)['tasks']] == ['occupied-2']
+        assert [task['args'] for task in request(queues.dispatcher)['tasks']] == ['echo a']
 
     def test_halts_on_signal(self, queues, monkeypatch) -> None:
         scheduler = Scheduler(queue=queues)
@@ -263,7 +275,7 @@ class TestThroughQueueServer:
         client.heartbeat.put(Heartbeat.new(uuid='c1', host='h1').pack(), timeout=WAIT)
         assert wait_for(lambda: list(thread.machine.beats) == ['c1'])
         thread.signal_clients()
-        assert client.scheduled.get(timeout=WAIT) == make_sentinel()
+        assert wait_for(lambda: request(client.dispatcher)['shutdown'] is True)
         client.heartbeat.put(Heartbeat.new(uuid='c1', host='h1', state=ClientState.FINISHED).pack(), timeout=WAIT)
         assert wait_for(lambda: not thread.machine.beats)
         client.heartbeat.put(make_sentinel(), timeout=WAIT)
@@ -274,7 +286,7 @@ class TestThroughQueueServer:
         Task.add_all([Task.new(args=f'echo {i}') for i in range(3)])
         thread = SchedulerThread(queue=server, bundlesize=1, forever_mode=True, poll=1)
         thread.start()
-        received = [deserialize_tasks(client.scheduled.get(timeout=WAIT))[0].args for _ in range(3)]
+        received = [request(client.dispatcher, wait=WAIT)['tasks'][0]['args'] for _ in range(3)]
         assert sorted(received) == ['echo 0', 'echo 1', 'echo 2']
         monkeypatch.setattr(hypershell.core.signal, 'RECEIVED', SIGUSR1)
         assert_halts(thread, timeout=2 * WAIT)

@@ -42,6 +42,7 @@ from hypershell.core.types import NoneType, serialize
 from hypershell.core.tls import (TLSConfig, install_process_context, build_server_context,
                                  get_server_context, get_client_context, get_tls_config,
                                  verify_peer_fingerprint, from_namespace as _tls_from_namespace)
+from hypershell.core.dispatch import Dispatcher, PROTOCOL
 
 # Public interface
 __all__ = [
@@ -49,7 +50,7 @@ __all__ = [
     'SENTINEL', 'make_sentinel',
     'SecureConnection', 'SecureListener', 'secure_client', 'SecureManager',
     'QueueConfig', 'QueueInterface', 'QueueServer', 'QueueClient',
-    'QueueServerError', 'unsupported_internals',
+    'QueueServerError', 'QueueVersionError', 'unsupported_internals', 'PROTOCOL', 'DISPATCH_EXPOSED',
 ]
 
 # Initialize logger
@@ -298,6 +299,10 @@ def _child_bootstrap(cfg: Optional[TLSConfig], user_init, user_initargs) -> None
 
 class QueueServerError(RuntimeError):
     """The queue server could not start serving."""
+
+
+class QueueVersionError(RuntimeError):
+    """The server and this client do not speak the same work-request protocol."""
 
 
 def _parameters(func: Callable[..., Any]) -> List[str]:
@@ -825,13 +830,25 @@ QUEUE_EXPOSED: Final[Tuple[str, ...]] = ('empty', 'full', 'get', 'get_nowait', '
                                          'put', 'put_nowait', 'qsize', 'task_done')
 
 
-def _provider(obj: Any) -> Callable[[], Any]:
+# Methods a remote client may call on the dispatcher.
+DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', )
+
+
+def _provider(obj: Any) -> Callable[..., Any]:
     """Registry callable handing the manager `obj`; lock-free, since it runs under the server's mutex."""
-    return lambda: obj
+    return lambda *args: obj
 
 
 class QueueServer(QueueInterface):
     """Server for managing queue, served from within the calling process."""
+
+    dispatcher: Dispatcher
+
+    def __init__(self: QueueServer, config: QueueConfig) -> None:
+        """Initialize queue interface and the dispatcher that serves work requests."""
+        super().__init__(config)
+        self.dispatcher = Dispatcher(queuesize=config.size, bundlemax=_config.server.bundlemax,
+                                     max_wait=DEFAULT_REMOTE_TIMEOUT)
 
     def start(self: QueueServer,
               initializer: Optional[Callable[..., Any]] = None,
@@ -849,6 +866,8 @@ class QueueServer(QueueInterface):
         # would otherwise serve each other's queues.
         registry = {f'_get_{name}': (_provider(getattr(self, name)), QUEUE_EXPOSED, None, AutoProxy)
                     for name in ('scheduled', 'completed', 'heartbeat', 'confirmed')}
+        registry['_get_dispatch'] = (_provider(self.dispatcher), DISPATCH_EXPOSED, None, AutoProxy)
+        self.dispatcher.attach(self.scheduled)
         if initializer is not None:
             initializer(*initargs)
         self._serve_in_process(registry)
@@ -866,6 +885,9 @@ class QueueServer(QueueInterface):
     def _get_confirmed(self: QueueServer) -> Queue[bytes]:
         return self.confirmed
 
+    def _get_dispatch(self: QueueServer) -> Dispatcher:
+        return self.dispatcher
+
     def __enter__(self: QueueServer) -> QueueServer:
         """Start the server."""
         self.start()
@@ -876,6 +898,7 @@ class QueueServer(QueueInterface):
                  exc_val: Optional[Exception],
                  exc_tb: Optional[TracebackType]) -> None:
         """Shutdown the server."""
+        self.dispatcher.finish()
         self.shutdown()
 
 
@@ -886,24 +909,38 @@ class QueueClient(QueueInterface):
     _get_completed: Callable[[], Queue[bytes]]
     _get_heartbeat: Callable[[], Queue[bytes]]
     _get_confirmed: Callable[[], Queue[bytes]]
+    _get_dispatch: Callable[[], Any]
+    _dispatcher: Optional[BaseProxy] = None
 
     def connect(self: QueueClient) -> None:
         """Connect to server using unique client ID for token generation.
 
-        The proxies' finalizer is :func:`_decref`: in a process that serves queues itself, a decref
-        for an address one of its own servers listens on is sent by the decref sender.
+        The first queue is created with this client's work-request protocol, so a server that does
+        not speak it is found before anything else is done. The proxies' finalizer is
+        :func:`_decref`: in a process that serves queues itself, a decref for an address one of its
+        own servers listens on is sent by the decref sender.
         """
         self.register('_get_scheduled')
         self.register('_get_completed')
         self.register('_get_heartbeat')
         self.register('_get_confirmed')
+        self.register('_get_dispatch')
         super().connect()
         _note_dialed(self._address)
-        self.scheduled = _defer_decref(self._get_scheduled())
+        self._dispatcher_lock = threading.Lock()
+        self.scheduled = _defer_decref(self._get_scheduled(PROTOCOL))
         self.completed = _defer_decref(self._get_completed())
         self.heartbeat = _defer_decref(self._get_heartbeat())
         self.confirmed = _defer_decref(self._get_confirmed())
         self.ready = True
+
+    @property
+    def dispatcher(self: QueueClient) -> BaseProxy:
+        """The server's dispatcher, created on first use (only a client that requests work holds one)."""
+        with self._dispatcher_lock:
+            if self._dispatcher is None:
+                self._dispatcher = _defer_decref(self._get_dispatch())
+            return self._dispatcher
 
     def __enter__(self: QueueClient) -> QueueClient:
         """Connect to server."""

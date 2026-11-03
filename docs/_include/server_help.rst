@@ -32,7 +32,8 @@ Options
     The default value allows for greater concurrency and responsiveness on small scales. This is
     used by the `submit` thread to accumulate bundles for either database commits and/or publishing
     to the queue. If a database is in use, the scheduler thread selects tasks from the database in
-    batches of this size.
+    batches of this size. It is also the size of the bundle given to a client that advertises no
+    size of its own (a client's ``-b`` is its advertised size).
 
     Using larger bundles is a good idea for large distributed workflows; specifically, it is best
     to coordinate bundle size with the number of executors in use by each client.

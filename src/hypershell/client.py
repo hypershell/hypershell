@@ -36,6 +36,7 @@ from types import TracebackType
 # Standard libs
 import os
 import sys
+import json
 import time
 import random
 import functools
@@ -53,7 +54,7 @@ from multiprocessing import AuthenticationError, cpu_count
 # External libs
 from cmdkit.app import Application, exit_status
 from cmdkit.cli import Interface, ArgumentError
-from cmdkit.config import Namespace
+from cmdkit.config import Namespace, Configuration
 
 # Internal libs
 from hypershell.data.model import Task, serialize_tasks, deserialize_tasks
@@ -69,7 +70,9 @@ from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2, S
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
-from hypershell.core.queue import QueueClient, QueueConfig, DEFAULT_REMOTE_TIMEOUT, DEFAULT_LOCAL_TIMEOUT
+from hypershell.core.queue import (QueueClient, QueueConfig, QueueVersionError, PROTOCOL,
+                                   DEFAULT_REMOTE_TIMEOUT, DEFAULT_LOCAL_TIMEOUT)
+from hypershell.core.dispatch import build_version
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 
@@ -79,7 +82,7 @@ __all__ = ['run_client', 'ClientThread', 'ClientApp', 'ClientInfo',
            'DEFAULT_NUM_THREADS', 'DEFAULT_NUM_TASKS',  # DEFAULT_NUM_TASKS for backwards compatibility
            'DEFAULT_DELAY', 'DEFAULT_SIGNALWAIT',
            'DEFAULT_HEARTRATE', 'DEFAULT_HOST', 'DEFAULT_PORT', 'DEFAULT_AUTH',
-           'set_client_standalone']
+           'set_client_standalone', 'advertised_size']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -143,7 +146,7 @@ class ClientInfo:
 class SchedulerState(State, Enum):
     """Finite states for scheduler."""
     START = 0
-    GET_REMOTE = 1
+    REQUEST = 1
     UNPACK = 2
     PUT_CONFIRM = 3
     POP_TASK = 4
@@ -153,14 +156,16 @@ class SchedulerState(State, Enum):
 
 
 class ClientScheduler(StateMachine):
-    """Receive task bundles from server and schedule locally."""
+    """Request task bundles from server and schedule locally."""
 
     queue: QueueClient
     local: Queue[Optional[Task]]
-    bundle: bytes
+    bundle: List[dict]
     client_info: Optional[bytes]
     no_confirm: bool
     timeout: Optional[timedelta]
+    bundlesize: Optional[int]
+    zone: Optional[str]
 
     previous_received: datetime
 
@@ -174,10 +179,14 @@ class ClientScheduler(StateMachine):
                  queue: QueueClient,
                  local: Queue[Optional[Task]],
                  no_confirm: bool = False,
-                 timeout: int = None) -> None:
-        """Assign remote queue client and local task queue."""
+                 timeout: int = None,
+                 bundlesize: Optional[int] = None,
+                 zone: Optional[str] = None) -> None:
+        """Assign remote queue client and local task queue; `bundlesize` is the size advertised (or None)."""
         self.queue = queue
         self.local = local
+        self.bundlesize = bundlesize
+        self.zone = zone
         self.bundle = []
         self.tasks = []
         self.client_info = None
@@ -189,7 +198,7 @@ class ClientScheduler(StateMachine):
     def actions(self: ClientScheduler) -> Dict[SchedulerState, Callable[[], SchedulerState]]:
         return {
             SchedulerState.START: self.start,
-            SchedulerState.GET_REMOTE: self.get_remote,
+            SchedulerState.REQUEST: self.request_bundle,
             SchedulerState.UNPACK: self.unpack_bundle,
             SchedulerState.PUT_CONFIRM: self.put_confirm,
             SchedulerState.POP_TASK: self.pop_task,
@@ -198,37 +207,43 @@ class ClientScheduler(StateMachine):
         }
 
     def start(self: ClientScheduler) -> SchedulerState:
-        """Jump to GET_REMOTE state."""
+        """Jump to REQUEST state."""
         timeout_label = self.timeout or 'no'
         log.debug(f'Started (scheduler: {timeout_label} timeout)')
-        return SchedulerState.GET_REMOTE
+        return SchedulerState.REQUEST
 
-    def get_remote(self: ClientScheduler) -> SchedulerState:
-        """Get the next task bundle from the server."""
+    def request_text(self: ClientScheduler) -> str:
+        """The work request: who this client is, the zone it serves and the size it asks for."""
+        return json.dumps({'protocol': PROTOCOL, 'client': INSTANCE, 'host': HOSTNAME, 'zone': self.zone,
+                           'size': self.bundlesize, 'wait': DEFAULT_REMOTE_TIMEOUT})
+
+    def request_bundle(self: ClientScheduler) -> SchedulerState:
+        """Request the next task bundle from the server (the server bounds the wait)."""
         if (signal := check_signal()) in (SIGUSR1, SIGUSR2) and CLIENT_STANDALONE_MODE:
             log.warning(f'Signal interrupt ({SIGNAL_MAP[signal]})')
             return SchedulerState.FINAL
-        try:
-            self.bundle = self.queue.scheduled.get(timeout=DEFAULT_REMOTE_TIMEOUT)
-            self.queue.scheduled.task_done()
+        reply = json.loads(self.queue.dispatcher.request(self.request_text()))
+        if 'error' in reply:
+            raise QueueVersionError(f'Server refused the work request: {reply.get("message")} '
+                                    f'(server {reply.get("server_version")}, client {build_version()})')
+        if reply['tasks']:
+            self.bundle = reply['tasks']
             self.previous_received = datetime.now()
             return SchedulerState.UNPACK
-        except QueueEmpty:
-            waited = datetime.now() - self.previous_received
-            if self.timeout is None or waited < self.timeout:
-                return SchedulerState.GET_REMOTE
-            else:
-                log.debug(f'Timeout reached ({waited})')
-                return SchedulerState.FINAL
+        if reply.get('shutdown'):
+            log.debug('Disconnect received')
+            return SchedulerState.FINAL
+        waited = datetime.now() - self.previous_received
+        if self.timeout is None or waited < self.timeout:
+            return SchedulerState.REQUEST
+        else:
+            log.debug(f'Timeout reached ({waited})')
+            return SchedulerState.FINAL
 
     def unpack_bundle(self: ClientScheduler) -> SchedulerState:
         """Unpack latest bundle of tasks."""
-        self.tasks = deserialize_tasks(self.bundle)
-        if self.tasks is not None:
-            log.debug(f'Received {len(self.tasks)} tasks ({HOSTNAME}: {INSTANCE})')
-        else:
-            log.debug('Disconnect received')
-            return SchedulerState.FINAL
+        self.tasks = [Task.from_json(record) for record in self.bundle]
+        log.debug(f'Received {len(self.tasks)} tasks ({HOSTNAME}: {INSTANCE})')
         if not self.no_confirm:
             self.client_info = ClientInfo.from_tasks(self.tasks).pack()
             return SchedulerState.PUT_CONFIRM
@@ -250,7 +265,7 @@ class ClientScheduler(StateMachine):
             self.task = self.tasks.pop(0)
             return SchedulerState.PUT_LOCAL
         except IndexError:
-            return SchedulerState.GET_REMOTE
+            return SchedulerState.REQUEST
 
     def put_local(self: ClientScheduler) -> SchedulerState:
         """Put latest task on the local task queue."""
@@ -274,10 +289,13 @@ class ClientSchedulerThread(Thread):
                  queue: QueueClient,
                  local: Queue[Optional[bytes]],
                  no_confirm: bool = False,
-                 timeout: Optional[int] = None) -> None:
+                 timeout: Optional[int] = None,
+                 bundlesize: Optional[int] = None,
+                 zone: Optional[str] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-client-scheduler')
-        self.machine = ClientScheduler(queue=queue, local=local, no_confirm=no_confirm, timeout=timeout)
+        self.machine = ClientScheduler(queue=queue, local=local, no_confirm=no_confirm, timeout=timeout,
+                                       bundlesize=bundlesize, zone=zone)
 
     def run_with_exceptions(self: ClientSchedulerThread) -> None:
         """Run machine."""
@@ -295,6 +313,21 @@ DEFAULT_BUNDLESIZE: Final[int] = default.client.bundlesize
 
 DEFAULT_BUNDLEWAIT: Final[int] = default.client.bundlewait
 """Default waiting period before forcing task bundle push."""
+
+
+def advertised_size(value: Optional[int], base: Configuration = config) -> Optional[int]:
+    """
+    The bundle size a client advertises to the server, or None to let the server choose.
+
+    An explicit `value` (the command line) is advertised; otherwise the configured
+    ``submit.bundlesize`` is, when any layer above the built-in default sets it (a file or the
+    environment), even to the default's value. The built-in default advertises nothing.
+    """
+    if value is not None:
+        return value
+    if base.which('submit', 'bundlesize') not in (None, 'default'):
+        return base.submit.bundlesize
+    return None
 
 
 class CollectorState(State, Enum):
@@ -1096,8 +1129,9 @@ class ClientThread(Thread):
             See :const:`DEFAULT_NUM_THREADS`.
 
         bundlesize (int optional):
-            Size of task bundles returned to server.
-            See :const:`DEFAULT_BUNDLESIZE`.
+            Size of task bundles requested from and returned to server. When None (the default),
+            no size is advertised, the server uses its own, and finished tasks are returned in
+            bundles of :const:`DEFAULT_BUNDLESIZE`.
 
         bundlewait (int optional):
             Waiting period in seconds before forcing return of task bundle to server.
@@ -1164,6 +1198,9 @@ class ClientThread(Thread):
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
 
+        zone (str, optional):
+            Name of the zone whose tasks this client runs (default: the default zone).
+
     Example:
         >>> from hypershell.client import ClientThread
         >>> client = ClientThread.new(num_threads=16, address=('localhost', 54321),
@@ -1188,7 +1225,7 @@ class ClientThread(Thread):
 
     def __init__(self: ClientThread,
                  num_threads: int = DEFAULT_NUM_THREADS,
-                 bundlesize: int = DEFAULT_BUNDLESIZE,
+                 bundlesize: Optional[int] = None,
                  bundlewait: int = DEFAULT_BUNDLEWAIT,
                  address: Tuple[str, int] = (DEFAULT_HOST, DEFAULT_PORT),
                  auth: str = DEFAULT_AUTH,
@@ -1206,9 +1243,11 @@ class ClientThread(Thread):
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: int = None,
-                 tls: Optional[TLSConfig] = None) -> None:
+                 tls: Optional[TLSConfig] = None,
+                 zone: Optional[str] = None) -> None:
         """Initialize queue manager and child threads."""
         super().__init__(name='hypershell-client')
+        advertised, bundlesize = bundlesize, bundlesize or DEFAULT_BUNDLESIZE
         set_resources(cores, memory)
         if num_threads == 0:
             num_threads = CPU_COUNT
@@ -1220,7 +1259,8 @@ class ClientThread(Thread):
         self.inbound = Queue(maxsize=bundlesize)
         self.outbound = Queue(maxsize=bundlesize)
         self.scheduler = ClientSchedulerThread(queue=self.client, local=self.inbound,
-                                               no_confirm=no_confirm, timeout=client_timeout)
+                                               no_confirm=no_confirm, timeout=client_timeout,
+                                               bundlesize=advertised, zone=zone)
         self.heartbeat = ClientHeartbeatThread(queue=self.client, heartrate=heartrate)
         self.collector = ClientCollectorThread(queue=self.client, local=self.outbound,
                                                bundlesize=bundlesize, bundlewait=bundlewait)
@@ -1300,7 +1340,7 @@ class ClientThread(Thread):
 
 
 def run_client(num_threads: int = DEFAULT_NUM_THREADS,
-               bundlesize: int = DEFAULT_BUNDLESIZE,
+               bundlesize: Optional[int] = None,
                bundlewait: int = DEFAULT_BUNDLEWAIT,
                address: Tuple[str, int] = (DEFAULT_HOST, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
@@ -1318,7 +1358,8 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
                task_timeout: int = None,
                task_signalwait: int = DEFAULT_SIGNALWAIT,
                ratelimit: int = None,
-               tls: Optional[TLSConfig] = None) -> None:
+               tls: Optional[TLSConfig] = None,
+               zone: Optional[str] = None) -> None:
     """
     Run client until disconnect signal received or `client_timeout` reached.
 
@@ -1328,8 +1369,9 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
             See :const:`DEFAULT_NUM_THREADS`.
 
         bundlesize (int optional):
-            Size of task bundles returned to server.
-            See :const:`DEFAULT_BUNDLESIZE`.
+            Size of task bundles requested from and returned to server. When None (the default),
+            no size is advertised, the server uses its own, and finished tasks are returned in
+            bundles of :const:`DEFAULT_BUNDLESIZE`.
 
         bundlewait (int optional):
             Waiting period in seconds before forcing return of task bundle to server.
@@ -1396,6 +1438,9 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
 
+        zone (str, optional):
+            Name of the zone whose tasks this client runs (default: the default zone).
+
     Example:
         >>> from hypershell.client import run_client
         >>> run_client(num_threads=16, address=('localhost', 54321),
@@ -1423,7 +1468,8 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
                               task_timeout=task_timeout,
                               task_signalwait=task_signalwait,
                               ratelimit=ratelimit,
-                              tls=tls)
+                              tls=tls,
+                              zone=zone)
     try:
         thread.join()
     except Exception:
@@ -1458,7 +1504,7 @@ APP_HELP = f"""\
 Options:
   -N, --num-threads   NUM   Number executor threads, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template      CMD   Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
-  -b, --bundlesize    SIZE  Bundle size for finished tasks (default: {DEFAULT_BUNDLESIZE}).
+  -b, --bundlesize    SIZE  Bundle size to request and return (default: server's).
   -w, --bundlewait    SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
   -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
@@ -1505,7 +1551,7 @@ class ClientApp(Application):
     template: str = DEFAULT_TEMPLATE
     interface.add_argument('-t', '--template', default=template)
 
-    bundlesize: int = config.submit.bundlesize
+    bundlesize: Optional[int] = None  # Advertised only when given (see advertised_size)
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
@@ -1571,7 +1617,7 @@ class ClientApp(Application):
             self.check_args()
             self.enable_tls()
             run_client(num_threads=self.num_threads,
-                       bundlesize=self.bundlesize,
+                       bundlesize=advertised_size(self.bundlesize),
                        bundlewait=self.bundlewait,
                        address=(self.host, self.port),
                        auth=self.auth,

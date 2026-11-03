@@ -17,7 +17,14 @@ Options
     See section on `templates`.
 
 ``-b``, ``--bundlesize`` *SIZE*
-    Size of task bundle (default: 1).
+    Size of task bundle to request from the server and to return results in (default: the
+    server's).
+
+    When given (on the command line, by ``HYPERSHELL_SUBMIT_BUNDLESIZE``, or in a configuration
+    file as ``submit.bundlesize``), the client advertises this size and the server replies with
+    up to this many tasks, never more than its cap (``server.bundlemax``). When not given, the
+    client advertises no size and the server uses its own ``--bundlesize``; finished tasks are then
+    returned in bundles of the built-in default (1).
 
     Using larger bundles is a good idea for large distributed workflows; specifically, it is best
     to coordinate bundle size with the number of executors in use by each client.

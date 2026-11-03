@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-dispatch
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -30,7 +30,7 @@ phases:
 - id: P2
   name: Request callable, staging and the client request loop (default zone, homogeneous
     path)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -310,7 +310,7 @@ behaves as today.
 filled by the scheduler. Only the default zone is served: `--zone` arrives in P4. A plain `hsx`
 run behaves as today. This is the core, novel slice.
 
-- [ ] **Red first:**
+- [x] **Red first:**
   - `tests/test_dispatch.py` (`@mark.unit`, no DB; fake rows as JSON text):
     - Cut size equals the advertised size; `None` gives the server's `-b`; clamped to `cap`.
     - Partial reply when fewer are ready.
@@ -336,35 +336,53 @@ run behaves as today. This is the core, novel slice.
       the rows.
     - `hs server --no-db` + `hs submit -q` + a client.
     - Every task completes once, with group order preserved.
-- [ ] `core/dispatch.py` (new): `Staging` / `Dispatcher` (PLAN §2.1–2.2), `PROTOCOL = 1`,
+- [x] `core/dispatch.py` (new): `Staging` / `Dispatcher` (PLAN §2.1–2.2), `PROTOCOL = 1`,
       `request`, `stage`, `finish`, `forget`, `take_unstaged`, `cap`.
-- [ ] `core/queue.py`:
+- [x] `core/queue.py`:
   - The `_get_dispatch` registry entry.
   - `QueueClient` registers it and creates it first, wrapped by `_defer_decref`.
   - `_get_scheduled` is created with `PROTOCOL` by the new client; the server side still accepts
     the no-argument form in this phase (the refusal is P3).
-- [ ] `server.py`:
+- [x] `server.py`:
   - `Scheduler` PACK/POST → STAGE (fill rule, `need.wait`, wake on new zone).
   - `HeartMonitor.signal_clients` → `dispatcher.finish()`.
   - `dispatcher.forget` on client finish and eviction (separate lines).
   - Leftover unstage after the heart monitor joins.
   - `in_memory` wiring.
   - The `-b` help text.
-- [ ] `core/config.py`: `server.bundlemax = 1000`.
-- [ ] `client.py`:
+- [x] `core/config.py`: `server.bundlemax = 1000`.
+- [x] `client.py`:
   - `GET_REMOTE` → `REQUEST`.
   - UNPACK from JSON dicts.
   - The advertise rule (N4).
   - `-b` default `None` and help text.
   - `ClientThread`/`run_client` take `zone=None`, unused until P4.
-- [ ] `tests/test_server_fsm.py`: re-point the five N3 tests at the dispatcher; nothing else.
-- [ ] `tests/bench/bench_queue.py`: `parity` gains `--skip-help` and the group-order check from
+- [x] `tests/test_server_fsm.py`: re-point the five N3 tests at the dispatcher; nothing else.
+- [x] `tests/bench/bench_queue.py`: `parity` gains `--skip-help` and the group-order check from
       `test_queue_workload.py`.
-- [ ] Docs (R13, same commit): `client_help.rst`, `client_desc.rst`, `server_help.rst`,
+- [x] Docs (R13, same commit): `client_help.rst`, `client_desc.rst`, `server_help.rst`,
       `server_desc.rst`, `config_param_ref.rst` (`server.bundlemax`, client `-b`); the zsh `_hs`
       client `-b` description.
-- [ ] `AGENTS.md` (Architecture, Queue transport, Shutdown ordering) and `invariants.md` §6
+- [x] `AGENTS.md` (Architecture, Queue transport, Shutdown ordering) and `invariants.md` §6
       prose: dispatcher and `finish()` (PLAN §3 deviation row 5). Flag it in the commit body.
+- **Build notes (amendments, 2026-11-02):**
+  - The client's dispatcher proxy is created on first use (`QueueClient.dispatcher`), not first
+    in `connect()`. `tests/test_queue_gc.py` (not one of the five N3 tests) pins four server
+    objects per connected client; a client that never requests work (live submit, queue tests)
+    now holds no dispatcher reference, and the requesting client still keeps three persistent
+    connections. `connect()` creates `_get_scheduled(PROTOCOL)` first instead, which is where P3
+    detects a server without the protocol (old providers take no argument).
+  - `QueueVersionError` is defined here because the client's error-reply path raises it; P3
+    adds the connect-time mapping and its tests.
+  - `Dispatcher.stage` skips an id already staged: eager selection can list a new retry row
+    twice (`issues/eager-retry-double-bundle.md`), and a pool must never hold one row twice.
+  - The invariant prose is its own commit (plan gate ruling), before this one.
+  - In memory, `QueueServer.start` attaches `scheduled` to the dispatcher as its inbound queue.
+  - The scheduler's states are START, LOAD, PACK, FINAL (POST is gone; PACK now encodes the
+    loaded chunks and stages them, and LOAD leaves the loaded rows in `Scheduler.tasks`), not a
+    new STAGE state: `tests/test_retry_gate.py` (#68, not an N3 test) drives `load_bundle` on a
+    queue-less scheduler and expects PACK. A scheduler built without a queue server stages into
+    a dispatcher of its own, so those replays run unmodified.
 - **Touches:** `core/dispatch.py` (new), `core/queue.py`, `core/config.py`, `server.py`,
   `client.py`, `tests/test_dispatch.py`, `tests/test_client_request.py`,
   `tests/test_dispatch_workload.py`, `tests/test_server_fsm.py`, `tests/bench/bench_queue.py`,
