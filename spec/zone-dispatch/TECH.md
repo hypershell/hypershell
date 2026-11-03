@@ -126,7 +126,7 @@ phases:
     feature
 - id: P8
   name: (Deferrable) Show zone by name in hs list, hs info and the card
-  status: pending
+  status: done
   satisfies:
   - R12
   depends_on:
@@ -592,14 +592,19 @@ cluster; this phase only builds and smoke-tests locally.
 **Satisfies:** R12 · **Depends on:** P4 · cut to Z3 cleanly if the cycle overruns
 **Goal:** users never need the raw zone id.
 
-- [ ] **Red first:** `tests/test_zone_display.py` (`@mark.unit`, `temp_site`):
+- [x] **Red first:** `tests/test_zone_display.py` (`@mark.unit`, `temp_site`):
   - `hs info` normal view shows `zone: gpu (<id>)` and `zone: default` for unzoned tasks.
   - The card shows the zone row.
   - `hs list` plain/table/json/csv and `hs info --json` / `-x zone` show the name.
   - `Task.to_json()` is unchanged.
-- [ ] `task.py`: `resolve_zone`, `format_task_fields`, the normal template, the card submission
+- [x] `task.py`: `resolve_zone`, `format_task_fields`, the normal template, the card submission
       region, and the list printers.
-- [ ] `data/model.py`: `Zone.names_for_ids`, if not already added in P1.
+- [x] `data/model.py`: `Zone.names_for_ids`, if not already added in P1.
+- **Build notes (2026-11-02):** `Zone.names_for_ids` landed in P1, so `data/model.py` is untouched
+  here. The normal view prints `zone: NAME (ID)` for a named zone and `zone: default` for NULL;
+  the card adds a `zone` row to the submission region; `hs list` plain/table/json/csv and
+  `hs info --json`/`--yaml`/`-x zone` print the name (an id with no zone row prints as the id).
+  `Task.to_json()` and the task environment (`TASK_ZONE`, the id) are unchanged.
 - **Touches:** `task.py`, `data/model.py`, `tests/test_zone_display.py`.
 
 ---
