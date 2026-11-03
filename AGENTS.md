@@ -286,8 +286,9 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   decided by thread, never by address: every thread an in-process server starts (accept loop,
   handlers, stop, the sender), any thread inside a server's start or stop, any thread in a TLS
   handshake with a queue server (the accept loop runs it inline), and any thread that `threading`
-  has not registered as started (a new thread before its mark). Every other decref is the stock
-  one, on the finalizing thread. A forked child drops the marks and waiting decrefs it inherits.
+  has not registered as started: a new thread before its mark, one past its unregistration, or one
+  that `threading` did not start (an entry left under a reused identifier by an ended thread does not
+  count). Every other decref is the stock one, on the finalizing thread. A forked child drops the marks and waiting decrefs it inherits.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
   mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,

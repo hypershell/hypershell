@@ -1622,3 +1622,20 @@ without a seventh blind review**. The foreman rules as judge under that authoriz
 | Finding | Ruling | Disposition |
 |---|---|---|
 | C10 · CONFIRMED | fix, narrow | In `_decref`, when a sender exists, also hand off a decref finalized on a thread that `threading` has not yet registered as started (it is still bootstrapping: its ident is not in `threading._active`, or `current_thread()` is a dummy for it). Deferring is always safe because the sender delivers it, and this closes the window before the `_ServerThread` mark on every Python. No other behavioural change. If the check needs another CPython private, add it to `unsupported_internals()` and its test. **Red-first:** the cycle-6 reviewer's 3.12 reproductions (the forced collection at a new thread's first instruction, and the SQLite fetchall-thread stall) fail at `bc2ed52` on 3.12 and pass after the fix. **Targeted gates:** `tests/test_queue_gc.py` and `tests/test_queue.py` pass 50 consecutive runs on 3.12; the full suite passes 3 consecutive runs on 3.12 and once on each of 3.11, 3.13 and 3.14; parity and compat pass against `b819de6`. The foreman verifies the evidence before publish in place of a seventh review cycle, and REVIEW.md records that the fix landed on the maintainer's ruling without a blind re-review. |
+
+## Quick review of the C10 fix (scoped, blind)
+
+The maintainer chose option (a) for C10, a narrow fix without a seventh blind review cycle. On
+2026-11-03 the maintainer added this quick review, blind and scoped to the C10 fix's diff (`371d1ec`),
+on top of that. **Verdict: approve**, with six findings. The foreman ruled on each as judge.
+
+| # | Finding | Ruling |
+|---|---|---|
+| 1 | LOW. `_not_started` misses a stale non-dummy entry: on 3.12, when `threading` is first imported on a thread it did not start and that thread ends, `_active` keeps that thread's `_MainThread` under its identifier; a new thread that reuses it reads as started at its first instruction, reopening C10's window for a `_ServerThread`. | Fix: also count the entry as not started when its native identifier is not the calling thread's, where threads have native identifiers. Red first on the reviewer's probe, made a subprocess test. |
+| 2 | LOW. On a thread `threading` did not start (and a main thread known only by a `_DummyThread`), every decref is handed off once the process has served, decrefs for remote servers included, and the stock `tls.connection.close()` then runs on the sender. Not reachable from the CLI. | Document only: the `_decref` docstring and TECH's "Scope and limits". No code change. |
+| 3 | NIT. The `_INTERNALS` registry check would pass on a CPython that registers a thread from the parent side. | Fix: also require `'_active' not in _names(threading.Thread.start)`. |
+| 4 | NIT. `AGENTS.md` describes the unregistered-thread rule as "a new thread before its mark" only; `test_thread_registry`'s docstring says a reused identifier never maps to a `Thread` that `threading` started, which finding 1 contradicts. | Fix both texts. |
+| 5 | NIT. `test_collection_scheduled_elsewhere_never_stalls` cannot exercise its target outside 3.12 (0 landings on 3.13). | Fix: skip it outside 3.12, saying why. |
+| 6 | Not new. A same-port successor receives the old server's decrefs. | Already seeded in `issues/queue-stale-decref-same-port-restart.md`; no change, recorded only. |
+
+The work and its evidence are recorded in TECH.md under P1 ("Follow-up: quick review of the C10 fix").

@@ -351,8 +351,10 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
      lambda: {'_callback', '_args'} <= set(_names(util.Finalize.__init__)) & set(_names(util.Finalize.__call__))),
     ('Thread.start runs Thread._bootstrap() first on the new thread',
      lambda: '_bootstrap' in _names(threading.Thread.start) and _parameters(threading.Thread._bootstrap) == ['self']),
-    ('threading._active maps the identifier of each thread that threading has started to its Thread',
-     lambda: isinstance(threading._active, dict) and '_active' in _names(threading.Thread._bootstrap_inner)),
+    ('threading._active maps the identifier of each thread that threading has started to its Thread, '
+     'which the new thread registers itself',
+     lambda: (isinstance(threading._active, dict) and '_active' in _names(threading.Thread._bootstrap_inner)
+              and '_active' not in _names(threading.Thread.start))),
     ('threading._DummyThread is the Thread of a thread that threading did not start',
      lambda: issubclass(threading._DummyThread, threading.Thread)),
 )
@@ -552,6 +554,9 @@ _decrefs: SimpleQueue = SimpleQueue()
 _decref_sender: Optional[threading.Thread] = None
 _decref_sender_lock = threading.Lock()
 
+# Whether threads here have native identifiers (``Thread.native_id`` and ``threading.get_native_id``)
+_NATIVE_IDS: Final[bool] = hasattr(threading, 'get_native_id')
+
 
 def _mark() -> None:
     """Mark the calling thread as on the server side until a matching :func:`_unmark`."""
@@ -597,7 +602,12 @@ def _decref(*args: Any) -> None:
 
     A thread that :mod:`threading` has not yet registered as started is still in its start-up, which
     may be a server thread's before its mark (a collection another thread scheduled can run there), so
-    its decref is handed off too, as is one on a thread that :mod:`threading` did not start.
+    its decref is handed off too, as is one on a thread that :mod:`threading` did not start (see
+    :func:`_not_started`). So once this process has served, every decref finalized on a thread that
+    :mod:`threading` did not start, or on a main thread that it knows only by a ``_DummyThread``, is
+    handed off, including a decref for a server in another process. The sender then runs the whole
+    stock decref, whose closing of a cached connection (``tls.connection.close()``) reads the sender's
+    thread-local connection, not the finalizing thread's.
     """
     if _decref_sender is not None:
         ident = threading.get_ident()
@@ -609,9 +619,20 @@ def _decref(*args: Any) -> None:
 
 def _not_started(ident: int) -> bool:
     """Whether :mod:`threading` has not registered thread `ident` as one it started (it is still
-    starting, or :mod:`threading` did not start it). Reads the registry without its lock, and adds nothing to it."""
+    starting, or :mod:`threading` did not start it). Reads the registry without its lock, and adds nothing to it.
+
+    An entry under `ident` may be stale: one left by an ended thread whose identifier the OS has reused,
+    such as the ``_DummyThread`` of a thread :mod:`threading` did not start, or, on 3.11 and 3.12, the
+    ``_MainThread`` of a thread that first imported :mod:`threading` and has ended. :mod:`threading` sets a
+    thread's native identifier before it registers the thread, so an entry whose native identifier is not
+    the calling thread's is not the calling thread's own. Two live threads fail that match as well, and
+    hand off: on 3.11 and 3.12 the thread that forked, in the child (:mod:`threading` keeps its parent's
+    native identifier there), and from 3.13 a main thread whose entry :mod:`threading` made on another thread.
+    """
     thread = threading._active.get(ident)
-    return thread is None or isinstance(thread, threading._DummyThread)
+    if thread is None or isinstance(thread, threading._DummyThread):
+        return True
+    return _NATIVE_IDS and getattr(thread, 'native_id', None) != threading.get_native_id()
 
 
 def _send_decrefs() -> None:

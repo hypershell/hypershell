@@ -18,7 +18,9 @@ server's.
 Two probes place a collection on a new server thread before anything else has run on it. One forces
 it at the thread's first instruction. In the other, a thread fetching rows from SQLite schedules
 collections and, on Python 3.12, whichever thread next checks for pending work runs them; each one that
-lands on a new server thread that early frees a dropped same-process client.
+lands on a new server thread that early frees a dropped same-process client. A third finalizes a
+decref at the first instruction of a new thread whose identifier still maps to the stale entry of an
+ended thread, which threading left when that thread first imported it.
 
 Two more probes check that each decref is sent once, to the server that issued the reference: a
 client of a server in another process on an in-process server's port number, and a forked child of
@@ -341,9 +343,39 @@ def test_collection_scheduled_elsewhere_never_stalls(tls_args: List[str]) -> Non
     runs the collection, which can be a new server thread at its first instruction. The probe frees
     the client only when a collection lands there; it never forces one.
     """
+    if sys.version_info[:2] != (3, 12):
+        skip('only on Python 3.12 do threads share one flag for pending collections; elsewhere none '
+             'that another thread schedules lands on a new server thread before its mark')
     output = run_probe('scheduled-elsewhere', tls_args, LANDINGS)
     if sys.version_info[:2] == (3, 12) and ', 0 freed a client' in output:
         skip('inconclusive: no collection landed on a new server thread before its mark')
+
+
+@mark.unit
+def test_stale_registry_entry_hands_off() -> None:
+    """A decref finalized at the first instruction of a new thread is handed off when the thread's
+    identifier still maps to the stale ``_MainThread`` of an ended thread that first imported threading.
+
+    On Python 3.11 and 3.12 threading registers the thread that first imports it as the main thread,
+    under that thread's identifier, and the entry outlives the thread. The probe runs in a new
+    interpreter without site (whose start-up files import threading), imports threading first on a
+    thread that threading did not start, and starts threads until one reuses that identifier.
+    """
+    command = [sys.executable, '-S', '-c', STALE_ENTRY_PROBE]
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            start_new_session=True, text=True)
+    try:
+        output, _ = proc.communicate(timeout=PROBE_LIMIT)
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+    assert proc.returncode == 0, f'probe exited {proc.returncode}:\n{tail(output)}'
+    if 'no stale entry' in output:
+        skip('threading registers the main thread under its own identifier on this Python')
+    if 'not reused' in output:
+        skip('inconclusive: no new thread reused the identifier of the ended thread')
+    assert 'handed off: True' in output, tail(output)
 
 
 # The probes, run as ``python test_queue_gc.py NAME ROUNDS [OPTIONS] [CERT KEY]`` by the tests above
@@ -762,6 +794,61 @@ def probe_scheduled_elsewhere(landings: int, tls: Optional[TLSConfig]) -> None:
     print(f'after {i} rounds: {seen["landed"]} landed, {seen["freed"]} freed a client', flush=True)
     arm_watchdog('shutdown')
     server.shutdown()
+
+
+# Run as ``python -S -c STALE_ENTRY_PROBE`` by test_stale_registry_entry_hands_off: threading must be
+# imported first on a thread that threading did not start, so neither site nor this module may run before it
+STALE_ENTRY_PROBE = '''
+import sys, time, _thread
+ready = _thread.allocate_lock()
+ready.acquire()
+importer = {}
+
+def first_import():
+    import threading
+    importer['ident'] = _thread.get_ident()
+    ready.release()
+
+_thread.start_new_thread(first_import, ())
+ready.acquire()
+while _thread._count():
+    time.sleep(0.01)
+time.sleep(0.1)
+
+import site
+site.main()
+import threading
+from multiprocessing.managers import BaseProxy
+from hypershell.core import queue as queue_module
+
+stale = threading._active.get(importer['ident'])
+print('entry of the ended thread:', type(stale).__name__, flush=True)
+if stale is None or isinstance(stale, threading._DummyThread):
+    print('no stale entry')
+    sys.exit(0)
+
+stock = []
+BaseProxy._decref = staticmethod(lambda *args: stock.append(args))
+queue_module._decref_sender = object()  # Stands in for a sender, as in a process that has served
+handed = []
+
+class Probe(threading.Thread):
+    def _bootstrap(self):
+        if threading.get_ident() == importer['ident']:
+            queue_module._decref('token')
+            handed.append(not stock and queue_module._decrefs.get_nowait() == ('token', ))
+        super()._bootstrap()
+
+for i in range(1000):
+    thread = Probe(target=lambda: None)
+    thread.start()
+    thread.join()
+    if handed:
+        print(f'thread {i} reused the identifier; handed off: {handed[0]}')
+        break
+else:
+    print('identifier not reused')
+'''
 
 
 PROBES = {'dropped-client': probe_dropped_client, 'same-port-restart': probe_same_port_restart,

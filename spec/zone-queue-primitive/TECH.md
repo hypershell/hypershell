@@ -363,6 +363,20 @@ stdio. This is the core, small and novel slice: everything else builds on it.
          unchanged; and a registered thread that holds no mark gets the stock decref, as before. The
          check reads one dict entry; it takes no lock, allocates nothing the collector tracks and
          never adds to the registry (it does not call `current_thread()`).
+         **Stale entries** (the C10 quick-review follow-up, finding 1). An entry under the thread's
+         identifier may be another, ended thread's: besides a `_DummyThread`, on 3.11 and 3.12 the
+         `_MainThread` that `threading` registers for the thread that first imports it, under that
+         thread's identifier, outlives it. A new thread that reuses the identifier would read as
+         registered at its first instruction. So an entry whose native identifier (`native_id`) is
+         not the calling thread's (`threading.get_native_id()`) counts as not started too, on
+         platforms that give threads native identifiers. On 3.11–3.14, `_bootstrap_inner` sets the
+         native identifier before it registers the thread (as do `_MainThread` and `_DummyThread`),
+         so a thread that `threading` registered on that thread matches its own entry. Two live
+         threads do not match, and hand off: on 3.11 and 3.12 the thread that forked, in the child
+         (`threading._after_fork` resets its identifier but not its native identifier; 3.13+ does
+         both), and from 3.13 a main thread whose `_MainThread` was made on another thread (it is
+         filed under the main thread's identifier with the importing thread's native identifier).
+         Both take effect only with a sender, so only in a process (or forked child) that serves.
        - (b) **Start and stop.** A thread is marked while it is inside a server's start
          (`_serve_in_process`, from just before the bind until the accept loop's `Thread.start()`
          returns) or stop (`_InProcessServer.stop`, its whole body, so all the time it holds
@@ -441,6 +455,15 @@ stdio. This is the core, small and novel slice: everything else builds on it.
     - **Cached connections.** The sender, not the dropping thread, runs the stock decref's tidy-up of
       its own cached connection for a handed-off decref. A thread's cached connection is closed when
       that thread ends or at server shutdown (`_finalize_in_process` drops the cache), as before.
+    - **Threads `threading` did not start** (C10 quick review, finding 2). Once the process has
+      served (a sender is set), every decref finalized on a thread that `threading` did not start,
+      or on a main thread that `threading` knows only by a `_DummyThread`, is handed off, decrefs for
+      servers in other processes included. The sender then runs the whole stock decref, so its
+      `tls.connection.close()` reads the sender's thread-local connection, not the finalizing
+      thread's, which stays cached until that thread ends or the cache is dropped. Not reachable
+      from the CLI: HyperShell's own threads are `threading` threads, and the CLI imports `threading`
+      on its main thread before it starts any. The same holds for the two live threads that fail the
+      native-identifier match (item 1(a), stale entries).
     - **The sender's life.** The process's first server starts the sender, and it lives as long as
       the process. A server start that fails at the bind leaves it running (and nothing of the
       server).
@@ -451,7 +474,9 @@ stdio. This is the core, small and novel slice: everything else builds on it.
         checks that the callback is `BaseProxy._decref` before it replaces it. *(The review-5
         remediation adds a fourth check, on `Thread._bootstrap`; the finalizer no longer reads the
         token. The review-6 remediation adds two, on `threading._active` and
-        `threading._DummyThread`, with `test_thread_registry` checking them live.)*
+        `threading._DummyThread`, with `test_thread_registry` checking them live. The C10 quick-review
+        follow-up also requires that `Thread.start` does not name `_active`, so the new thread
+        registers itself.)*
   - [x] `test_threads_drain_after_shutdown` (added on this branch, not a base test) leaves the
         decref sender out of its count: the sender lives as long as the process, so the test
         failed when it was the first in its process to connect a same-process client.
@@ -730,6 +755,54 @@ stdio. This is the core, small and novel slice: everything else builds on it.
       changes no `src/` file (it adds the records and the `test_thread_registry` fix below).
     - **Throughput gate:** not run, by the triage; the multi-node runs on the test cluster cover
       throughput (P7).
+- **Follow-up: quick review of the C10 fix** (scoped, blind; verdict approve; rulings in
+  [`REVIEW.md`](REVIEW.md)). P1 was reopened with `set_phase.py` for the foreman's rulings on its six
+  findings, and closed again. No parity, compat or throughput rerun: no CLI path reaches the change.
+  - [x] **Red first** (finding 1). `test_stale_registry_entry_hands_off` in `tests/test_queue_gc.py`
+        turns the reviewer's probe into a test. It runs in a new interpreter with `-S` (a venv's
+        start-up `.pth` files import `threading`), imports `threading` first on a `_thread` thread,
+        waits for that thread to end, then runs `site.main()` and imports HyperShell. It starts
+        threads until one reuses the ended thread's identifier and, at that thread's first
+        instruction, calls `_decref` with a sender stand-in and a stubbed stock decref. It skips where
+        there is no stale entry (3.13+, which registers the main thread under its own identifier) or,
+        as inconclusive, if no identifier is reused in 1000 threads; neither happened on 3.11 or 3.12.
+  - [x] **Finding 1 — stale entries.** `_not_started` also returns true when the entry's
+        `native_id` is not `threading.get_native_id()`, where threads have native identifiers
+        (`_NATIVE_IDS`, from the public `hasattr(threading, 'get_native_id')`, so no new private; the
+        public `Thread.native_id` reads the same `_native_id`). From the 3.11.18, 3.12.16, 3.13.18 and
+        3.14.10 sources: `_bootstrap_inner` sets the native identifier before it registers the thread
+        in `_active`, as `_MainThread` and `_DummyThread` do (item 1(a), stale entries). Two live
+        threads were found not to match, both in cases no CLI path reaches and both handing off,
+        which is safe: on 3.11 and 3.12 the thread that forked, in the child (`_after_fork` does not
+        refresh its native identifier; a forked-child check: child main `_not_started` true on
+        3.11/3.12, false on 3.13/3.14, a new child thread false on all four); and on 3.13+ a main
+        thread whose `_MainThread` another thread made. Each takes effect only with a sender.
+  - [x] **Finding 2 — documented.** The `_decref` docstring and "Scope and limits" ("Threads
+        `threading` did not start"). No code change.
+  - [x] **Finding 3.** The registry check in `_INTERNALS` also requires
+        `'_active' not in _names(threading.Thread.start)` (false on all four Pythons, so
+        `unsupported_internals() == []` still).
+  - [x] **Finding 4.** `AGENTS.md` names all three cases of the unregistered-thread rule.
+        `test_thread_registry`'s docstring no longer claims a reused identifier never maps to a
+        `Thread` that `threading` started; its checks accept a native-identifier mismatch as
+        unregistered, as `_not_started` does, and check that a registered thread's entry carries its
+        own native identifier.
+  - [x] **Finding 5.** `test_collection_scheduled_elsewhere_never_stalls` skips outside 3.12, saying
+        why: only there do threads share one flag for pending collections.
+  - **Finding 6:** not new (`issues/queue-stale-decref-same-port-restart.md`); no change.
+  - **Gate record (macOS; per-Python frozen dev venvs built with `uv sync --frozen` against
+    standalone 3.11.18, 3.12.16, 3.13.18 and 3.14.10 interpreters, each pytest run in an isolated
+    site, in its own process group under a timeout).**
+    - **Red at `80ae464`** (the new test module against that source): `test_stale_registry_entry_hands_off`
+      failed 5/5 runs on 3.12.16 and 5/5 on 3.11.18, each with the first new thread reusing the
+      identifier ("handed off: False"). **Green** (the working tree): 5/5 on each.
+    - **`tests/test_queue_gc.py` + `tests/test_queue.py`, 3.12.16:** **20/20** consecutive runs pass
+      (50 passed each; in run 16, 49 passed and `test_shared_port_number_leaks_nothing` skipped on
+      its own guard, no second local address free on the port, while the full suites ran alongside).
+    - **Full suite** (side by side with the 20), once each: 3.12.16 **569 passed**; 3.11.18 **565
+      passed, 4 skipped** (the first-instruction and scheduled-elsewhere tests); 3.13.18 and 3.14.10
+      **566 passed, 3 skipped** each (scheduled-elsewhere, and the stale-entry test: no stale entry).
+      No gate was restarted.
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
@@ -740,7 +813,8 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   review-3 remediation `tests/test_queue_gc.py` (new) and `ROADMAP.md`; review-4 remediation
   `tests/test_queue_start.py`, `ROADMAP.md` and three seeds in `issues/`; review-5 remediation
   `tests/test_queue_gc.py`, `AGENTS.md`, `ROADMAP.md`, one new seed and two amended seeds in `issues/`;
-  review-6 remediation `tests/test_queue_gc.py`, `tests/test_queue.py` and `AGENTS.md`.
+  review-6 remediation `tests/test_queue_gc.py`, `tests/test_queue.py` and `AGENTS.md`; the C10
+  quick-review follow-up the same three.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1
