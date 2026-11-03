@@ -241,6 +241,19 @@ The plan gate is **passed** with these rulings and conditions.
   wakes it early, it finds nothing, and the doubled poll puts it into a 2 s wait in which the
   awaited result lands; results never wake the scheduler. Reported, not fixed.
 
+- **Foreman rulings (judge), 2026-11-03, second set.**
+  1. The union ruling covers every rebase hunk that is only import lines or `__all__` entries where
+     both sides add names (including P4's `data/model.py` `__all__` and `server.py` model import):
+     resolve as the union, nothing else in the hunk. A hunk touching logic, a signature or a test
+     body stops the rebase. Then rebase onto `ebd2534`, make the `test_result_columns_are_fixed`
+     edit as ruled, and run 3.14, 3.11 and P5 parity.
+  2. The scheduling-span regression (~2.0 s instead of ~1.0 s per retry or group advance) is in
+     scope: fix it minimally inside Z2's code, either by not counting an early wake that finds
+     nothing as an empty poll, or by waking the scheduler on a result. Never touch writeback's
+     `Receiver`, `Confirm` or `update_all`. Red-first: a deterministic latency test on a small
+     workload, bounded against 2.8.3's behaviour; P5 parity wall within ~0.5 s of 2.8.3.
+  3. Commit signed at the next clean boundary; FSM stays at P6.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling
