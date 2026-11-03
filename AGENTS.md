@@ -226,7 +226,10 @@ table rebuild. Normal operation never trips them; in the three cases above they 
 **Group-gating can stall by design:** `increment_group` won't advance while the current group
 has incomplete tasks or failures still awaiting retry, so one permanently-failing task halts the
 group (and, in non-`forever` mode, the server). This is intended; don't "fix" it without
-understanding it.
+understanding it. Once the group clears, the next group is the smallest one with incomplete
+tasks, which may be lower when tasks arrive late. File input to `hs cluster`/`hs server` is
+submitted in full (the whole file) before the scheduler starts, so its groups run in order. Stream
+input is best effort: a late lower group runs after the current one, with a warning.
 
 ## Concurrency model (read before touching `server.py`, `client.py`, `core/fsm.py|thread.py|signal.py`)
 

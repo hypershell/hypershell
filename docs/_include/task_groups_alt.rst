@@ -16,5 +16,12 @@ exhausted), scheduling halts with a critical message; under ``--forever`` the sc
 warns and waits for those tasks to be cleared or reverted (see ``hs update``). Use
 ``--max-retries`` and ``--eager`` to tune retry behavior within a group.
 
+A task file given to ``hs cluster`` or ``hs server`` is read in full before scheduling begins, so
+its groups run in ascending order whatever order the file lists them in. Input on standard input
+or a pipe is scheduled as it arrives, which is best effort: a lower group that arrives after a
+higher group has started runs once the current group finishes, and *HyperShell* logs a warning
+naming both groups. Clients launched with ``-T``/``--timeout`` may reach that timeout and exit
+while a large task file is still being read.
+
 Filter or update tasks by group with the ``-g``/``--group`` option of ``hs list`` and
 ``hs update``.

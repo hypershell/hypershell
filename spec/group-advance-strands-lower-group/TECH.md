@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -78,7 +78,7 @@ phases:
     err.log"'
 - id: P4
   name: Group-order docs, AGENTS.md and invariants
-  status: pending
+  status: done
   satisfies:
   - R10
   depends_on:
@@ -357,7 +357,7 @@ Stream input, `--no-db`, `--forever` and bare `--restart` are unchanged.
 **Goal:** the three texts state how file input and stream input order their groups. The CLI help
 is unchanged.
 
-- [ ] `docs/_include/task_groups_alt.rst`: add a short paragraph after "The server advances
+- [x] `docs/_include/task_groups_alt.rst`: add a short paragraph after "The server advances
   through groups automatically…", in the file's voice (first-person plural, `*HyperShell*`
   italics):
   - A task file given to `hs cluster`/`hs server` is read in full before scheduling begins, so
@@ -367,7 +367,7 @@ is unchanged.
     with a warning.
   - Optionally, one sentence on `-T/--timeout` versus a long file read (PLAN §5 risk 2, if the
     foreman keeps it).
-- [ ] `AGENTS.md` § Task lifecycle contract, the "Group-gating can stall by design" paragraph:
+- [x] `AGENTS.md` § Task lifecycle contract, the "Group-gating can stall by design" paragraph:
   - the next group is the smallest one with incomplete tasks, and may be lower when tasks arrive
     late;
   - file input is ingested whole first, so its groups run in order;
@@ -375,9 +375,9 @@ is unchanged.
     warning.
 
   Keep it terse.
-- [ ] `.agents/factory/invariants.md` §3, the group-gating bullet: the same three facts, in
+- [x] `.agents/factory/invariants.md` §3, the group-gating bullet: the same three facts, in
   lockstep with `AGENTS.md`.
-- [ ] No change to `docs/_include/*_help.rst`, `*_usage.rst` or `share/`. No Sphinx or man build.
+- [x] No change to `docs/_include/*_help.rst`, `*_usage.rst` or `share/`. No Sphinx or man build.
 - **Verify:** the frontmatter `verify:`.
   - Each of the three files mentions the whole file being read first (`whole file`,
     `entire file` or `in full`), `best effort`, and `warning`.
@@ -461,6 +461,11 @@ database. Verify (3.12): `tests/test_group_order.py tests/test_groups.py` `27 pa
 run (no rerun); the unsorted-file drive ran groups `-1 0 1` by `schedule_time`, 0 remaining, no
 late warning. A separate file drive logged `Waiting for task file to be submitted before
 scheduling`.
+
+**P4.** The three texts carry the file-order and stream-best-effort statements, and the docs carry
+the one `-T/--timeout` sentence the foreman's ruling asked for (accepted risk). Verify passed. The
+foreman's plan-gate ruling on PLAN §5 risk 1 is recorded as a seed,
+`issues/stream-run-stops-before-input-ends.md`, with its `ROADMAP.md` entry.
 
 ---
 

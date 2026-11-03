@@ -215,6 +215,19 @@ a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
 `issues/ingest-robustness.md` (same ingest path)*
 **Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
 
+## A run fed by a pipe can stop before the pipe ends
+
+`hs cluster` and `hs server` given stream input can reach FINAL and exit 0 while the stream is
+still feeding tasks. Once the first bundle is scheduled, the stop branch no longer asks whether the
+submitter is still reading, so a pause in the input longer than the committed work ends the run
+and later tasks are never scheduled. `(echo 'echo a'; sleep 8; echo 'echo b') | hsx -N1` runs only
+`echo a`. File input is immune once it is submitted in full first. The likely fix is one conjunct
+on `develop`; 2.8.x lacks the submitter reference it needs. Pre-existing, and found by the plan of
+the group-order fix.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (PLAN §5 risk 1)*
+**Seed:** [`issues/stream-run-stops-before-input-ends.md`](issues/stream-run-stops-before-input-ends.md) · *status: unshaped*
+
 ## Concurrent first submits can collide on the reserved source row
 
 `Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
