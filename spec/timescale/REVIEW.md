@@ -411,3 +411,122 @@ the integration scenarios exercise.
 | F6 · CONFIRMED | fix | `database.rst:393-395`: state precisely, with the version floors and upstream refs the review cites, which TimescaleDB features work on UUIDv7 hypertables (show/drop chunks 2.23.0, continuous aggregates 2.24.0, retention policies 2.25.0). Drop the tiered-storage claim (managed-offering only; not a shipped claim). |
 | F7 · CONFIRMED | fix | Correct `issues/server-db-test-suite.md:19-22` ("three modules"; writeback's PostgreSQL test is not SQLite-only), its `ROADMAP.md` entry, and the `tests.yml:49-50` comment (say exactly which integration tests the plain entries run). |
 | F8 · CONFIRMED | fix docs + seed | Make `database.rst` (:162, :199-200, :212-213) describe what the code does today: which commands run the TimescaleDB pass (`hs initdb`, and any start path that actually calls it, which you must verify), and that `hs server --initdb` does not run it. Do **not** change `server.py`. Seed the pre-existing `--initdb`/`auto_initdb` defect as `unshaped`, with a `ROADMAP.md` entry and the code reference, as a correctness issue. |
+
+## Review cycle 3 — approved (2026-11-03)
+
+- **Reviewed commit:** `41d99ff`  ·  **Base:** `6f216d0` (`origin/develop`)  ·  **Date:** 2026-11-03
+- **Verdict:** approved
+- **Cycle:** 3 of ≤3 — mirrors `review.cycle` in `TECH.md`. The loop converged on its last cycle.
+- **Mode:** a fresh blind pass over `git diff 6f216d0...41d99ff -- . ':(exclude)spec/'`, with no
+  `git log` and no commit subjects (META F5). The orchestrator then checked the cycle-2
+  remediation against the triage above and verified the documented start paths against the code.
+- **Contract drift:** none. `GOAL.md` changed only in `7ff9155` (shaping) and `caf7007` (the
+  2026-11-02 shaping rulings).
+- **TimescaleDB evidence:** given, not re-run (no local server). Run `41587822550` at `cd3f96f`:
+  14/14 checks green. `timescale`, `timescale-oss` and `timescale-floor` each had 137 passed and 1
+  skipped, with both `test_invalid_setting_exits` cases and `test_configured_columns_converge`
+  PASSED. `pg13` and `pg18` each had 122 passed and 16 skipped (TECH P5/P7). Nothing outside
+  `spec/` changed between `cd3f96f` and `41d99ff` (`git diff --stat` empty), so the run covers the
+  reviewed code. The counts fit the module: 75 unit and 20 integration tests; the plain entries
+  run 4 integration cases and skip 16, and the TimescaleDB entries skip only the absent-extension
+  case.
+
+### Verification run
+
+| Command | Result |
+|---|---|
+| SQLite suite, Python 3.14, fresh venv (`uv sync --frozen`, `pytest -q`) | 631 passed, 64 skipped |
+| SQLite suite, Python 3.12, fresh venv | 631 passed, 64 skipped |
+| `pytest -rs tests/test_timescale.py` (local, no server) | 75 passed, 20 skipped (all integration) |
+| `pytest --collect-only -m 'not unit and not integration' tests/test_timescale.py` | 0 of 95 collected: every test is marked |
+| Sphinx html build into a scratch dir | only the 2 pre-existing toctree warnings (`task_submit.rst`, `manual.rst`), plus the known `pkg_resources` UserWarning (META F4) |
+| Orchestrator CLI drive, provider `timescale`, dead port, `hs initdb --yes` | `orderby = "client_id DESC"` → rc 3, CRITICAL naming `client_id`; `segmentby = "id"` → rc 3 naming `id`; `segmentby = "\"group\""` with `orderby = "group DESC"` → rc 3; `segmentby = "id"` with `orderby = "submit_time DESC"`, and `orderby = "submit_time DESC"` alone, pass validation and fail only on the connection (rc 5) |
+| Orchestrator start-path probe (stubs record which data-layer helper each launch calls, then exit) | see *Start paths* below |
+| Reviewer: `tests/test_timescale.py`, own venv with the `postgres` and `uuid7` extras | 75 passed, 20 skipped; 0 of 95 unmarked |
+| Reviewer: CLI drive, overlapping `orderby` under `hs config get database.provider` | rc 3 before connecting: validation stops every command at startup |
+| Reviewer: fake connection driving the real `_Pass.run()` on paths CI never reaches (Apache; 2.24 floor with policy on and off; another partition column; columnstore off but enabled; failed last policy run; non-empty plain table; missing settings row) | the documented change or warning on every path, no crash |
+| Reviewer: upstream checks | CHANGELOG: #8746 in 2.23.0, #8939 in 2.24.0, #9102 in 2.25.0, PostgreSQL 15 dropped in 2.29.0; `trusted = true` in `timescaledb.control.in` at 2.31.0; the three image digests match the Docker Hub tag API |
+
+### Cycle-2 remediation (orchestrator)
+
+| Finding | Remediated? | Evidence |
+|---|---|---|
+| F5 segmentby/orderby overlap | ✅ | `_check_disjoint` (`timescale.py:122-135`) runs last in `Settings.from_config` (`:118`). It compares the configured-or-default segmentby with `effective_orderby(segmentby, orderby)` (`:372`), which applies F1's append rule, so the check runs on the effective lists. Both natural configs are refused at startup with one message naming the column. Unit tests: `test_settings_column_in_both_lists` (4 cases, quoted forms included) and `test_settings_lists_disjoint_by_default`. The same-list guard `test_settings_duplicate_column` stays green. `test_invalid_setting_exits[orderby]` PASSED on all five CI entries. CLI drive above. |
+| F6 version per feature | ✅ | `database.rst:397-412` gives show/drop chunks 2.23.0 (#8746), continuous aggregates 2.24.0 (#8939) and retention policies 2.25.0 (#9102), each linked. A grep finds no tiered-storage claim anywhere in the docs. |
+| F7 seed, ROADMAP and comment prose | ✅ | `issues/server-db-test-suite.md:19-27` and `ROADMAP.md:396-408` now say three modules. They describe the writeback module as the data-layer match on the server and leave only the end-to-end writeback as SQLite-only. The comment at `tests.yml:45-54` names the three integration tests the plain entries run, which fits the markers and the 122/16 counts. |
+| F8 start paths, plus the seed | ✅ | `database.rst:162-164`, `:199-203` and `:213-217` name `hs initdb` (with or without `--truncate`), `hs submit --initdb` and `hs cluster --initdb` as the only paths that initialize, and say that `hs server` does not, even with `--initdb`. `server.py` is unchanged. The seed `issues/server-initdb-ignored.md` (`status: unshaped`) and its entry at `ROADMAP.md:271-281` cite the code correctly: `server.py:1343-1346` and `:1381`, `submit.py:1373`, `cluster/__init__.py:543`. The defect is on the base, and its origin is `70bcc63` (2023-04-03), which replaced the flag check with a bare `ensuredb()`. |
+
+### Start paths (orchestrator, code and probe)
+
+The probe ran under provider `timescale` against a dead port, with `initdb`, `checkdb` and
+`truncatedb` stubbed.
+
+| Launch | Helper | Code |
+|---|---|---|
+| `hs initdb --yes` | `initdb` (`prepare` → `upgradedb` → `converge`) | `data/__init__.py:87-96` |
+| `hs initdb --truncate --yes` | `checkdb`, then `truncatedb` (`prepare` → drop/create → `converge`) | `data/__init__.py:99-111`; the probe reached `checkdb`, and `truncatedb` was checked by reading, because the confirm prompt's `Task.count()` needs a server |
+| `hs submit --initdb …` | `initdb` | `submit.py:1373-1374` |
+| `hs cluster --initdb …` | `initdb` | `cluster/__init__.py:543-544` |
+| `hs server --initdb --forever`, `hs server --initdb FILE` | `checkdb` | `server.py:1381` calls `ensuredb()` without `auto_init` and never reads the flag at `:1343-1346`; `ensuredb` (`data/__init__.py:121`) runs `checkdb` on a server dialect |
+| `hs server`, `hs submit`, `hs cluster` without the flag; `hs list --count`; `hs task info` | `checkdb` | `ensuredb` / `check_database` / `__enter__` |
+
+The docs' start-path claims hold.
+
+### Requirement → evidence matrix (blind reviewer, orchestrator-checked)
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R2 | `initdb`/`truncatedb` wiring behind `TIMESCALE`; placeholder removed; CI `test_fresh_initdb` | ✅ |
+| R3 | modern vocabulary; `test_default_settings`; CI `assert_converged` | ✅ |
+| R4 | CI rerun, truncate, drift, configured-drift and concurrency scenarios; the reviewer's fake pass; the interval `COALESCE` checked against `views.sql` at 2.22.0, 2.24.0 and 2.31.0 | ✅ |
+| R5 | `prepare` unit tests; CI absent, `-oss`, non-empty and legacy scenarios; `trusted = true` upstream | ✅ |
+| R6 | unit tests for invalid, unknown, duplicate and both-lists cases; CLI rc 3 at startup; months intervals checked upstream | ✅ (F5 fixed) |
+| R7 | `test_gates`; upstream #8505 and #9045; CI `timescale-floor` | ✅ |
+| R8 | CI `test_v4_id_rejected`; upstream `utils.c` SQLSTATE `0A000` | ✅ |
+| R9 | the five entries; digests; run `41587822550`; skip counts consistent | ✅ (F7 fixed) |
+| R10 | Sphinx clean; upstream version facts; start-path claims against the code | ✅ (F6, F8 fixed) |
+
+Unmapped changes (possible scope creep): none. The `server-initdb-ignored` seed and its ROADMAP
+entry are the deferral record the cycle-2 triage required. The `server-db-test-suite` seed follows
+the 2026-11-02 R9 ruling.
+
+### Findings
+
+None. The blind reviewer reported no finding after refutation, and the orchestrator's checks found
+none.
+
+**Observations (not findings):**
+- These older `--initdb` lines are untouched by this diff and are listed in the seeded defect
+  (`issues/server-initdb-ignored.md`): `database.rst:94` and `:106-107`, `database_alt.rst:9-10`,
+  and `server_help.rst:109-116`. The diff does not make them worse. On the same page,
+  `database.rst:106-107` disagrees with the TimescaleDB section about `hs server` until the seed
+  lands. Its R3 covers that.
+- `_check_disjoint` also refuses an overlap when `columnstore = false`, where the lists are never
+  applied. That matches the other list checks and the docs ("stops every command at startup").
+- "Only `hs initdb` (with or without `--truncate`)" leaves out `hs initdb --vacuum`, which runs no
+  pass. Read in context, it is not a misstatement.
+
+**Dropped after refutation (reviewer):**
+- months intervals (upstream counts a month as 30 days on both the dimension and policy paths);
+- `orderby` column types without `<` (every `task` type has one);
+- huge interval values (speculative);
+- `timescale` popped from the config under other providers (mirrors `pragmas`);
+- `*_env`/`*_eval` keys refused (loud, and the same as `pragmas`);
+- "one transaction" wording (the concurrency claim holds);
+- `hs initdb --vacuum`;
+- "highest 2.24.x tag" (the version is right and the digest is correct);
+- "another edition fails the scenarios" (the job fails as intended);
+- the seed's "in one of them" (true of `test_run_compress_list_vacuum`);
+- the 2.22–2.24 warning wording when a policy was added by hand;
+- continuous aggregates at 2.24.0 (support landed then; a real-time fix followed in 2.25.2).
+
+### Human-gate triggers
+
+- Not triggered. No finding is CONFIRMED. The diff touches no high-blast-radius file
+  (`data/model.py`, `server.py`, `client.py`, `core/*` and `cluster/remote|ssh.py` are unchanged)
+  and no security or DB-lifecycle invariant.
+- The `§1–§11` invariants: no violation found.
+
+### Next step
+
+`/hs-publish`. The review loop converged at cycle 3 of 3.

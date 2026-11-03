@@ -128,4 +128,21 @@ is skipped by the parser):
   `review-rubric.md`'s "What the reviewer sees" should list the log as excluded.
 - **Seen again at review cycle 2 (hs-review:step2):** the foreman again overrode Step 2. The
   blind reviewer got the spec-excluded diff command and no `git log` or commit subjects.
+- **Seen again at review cycle 3 (hs-review:step2):** the same override, a third time.
 - **Confidence:** high · **Effort:** small
+
+## F6 — The rubric's mandated CLI-drive tool, `temp_site.sh`, cleans up with `rm -rf`, so the review brief had to hand-roll site isolation
+`origin=hs-review:step2 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** Step 2 and `review-rubric.md` tell the reviewer to drive the CLI through
+  `.agents/factory/bin/temp_site.sh`. Its `trap 'rm -rf "$site"' EXIT` breaks the operating rules
+  this cycle ran under (no `rm -rf`, scratch under a fixed `$TMPDIR` path, process groups with
+  timeouts), and the foreman barred the script. The brief therefore spelled out the isolation by
+  hand: `HYPERSHELL_CONFIG_FILE`, `HYPERSHELL_SITE`, `HYPERSHELL_DATABASE_FILE`,
+  `HYPERSHELL_SERVER_PORT`, the site as cwd, and `UV_PROJECT`. It also had to say that the
+  `timescale` provider needs a venv with the `postgres` extra, which the default sync lacks.
+- **Skill cause:** the skill names a single tool for its executed-evidence spine and gives no
+  fallback, and the tool's cleanup assumes a shell where `rm -rf` is allowed.
+- **Recommended fix:** give `temp_site.sh` a keep-the-site mode (or a `--root DIR` with no
+  deletion), and have it print the env block it sets. Add a fallback to the rubric's "Reviewer
+  conduct" listing those variables, and name the extras a server provider needs.
+- **Confidence:** med · **Effort:** small

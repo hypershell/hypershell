@@ -135,11 +135,10 @@ phases:
     "$(git log -1 --format=%H -- . ':!spec')" --json conclusion --jq '[.[] | select(.conclusion
     == "success")] | length')" -ge 1
 review:
-  last_reviewed_commit: 30a3efba32dcd6f4dcadbeb627569e08fb80f672
-  verdict: changes-requested
-  blocked_reason: 'review cycle 2: F5 (R6 segmentby/orderby overlap passes validation),
-    F6-F8 (docs/seed/CI-comment accuracy)'
-  cycle: 2
+  last_reviewed_commit: 41d99ffa435c0a164ce2538d118471825ac44a9d
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — TimescaleDB provider: hypertables out of the box (TS1)
 
