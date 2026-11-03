@@ -341,6 +341,7 @@ def test_non_result_columns_are_never_written(task_db, logs) -> None:
     copy.next_id = uuid()
     copy.source = uuid()
     copy.fingerprint = 'f' * 64
+    copy.zone = uuid()
     copy.part = before['part'] + 3
     copy.tag = {'mutated': 'yes'}
     for name in OTHER_COLUMNS:

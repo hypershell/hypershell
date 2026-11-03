@@ -271,6 +271,12 @@ The plan gate is **passed** with these rulings and conditions.
   TLS on and off. Five-repeat parity timing (load elevated): wall median 9.12 s vs 2.8.3's 11.86 s;
   scheduling span 3.83 vs 4.43 s; shutdown tail 3.69 vs 4.06 s.
 
+- **Foreman ruling (judge), 2026-11-03, third.** The second and last bounded writeback-test
+  exception, beside `test_result_columns_are_fixed`: `test_non_result_columns_are_never_written`
+  gains `copy.zone = uuid()` among its hand-changed non-result columns (`task.zone` has no foreign
+  key). Same rationale: `zone` is server-held, never a result column; the test's intent is unchanged.
+  After it: full suite 737 passed, 47 skipped on both 3.14 and 3.11.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling
