@@ -67,3 +67,24 @@ is skipped by the parser):
   `spec/{slug}/` explicitly, and run `git status --porcelain` before committing to confirm nothing else
   changed.
 - **Confidence:** med · **Effort:** small
+
+## F3 — A GOAL criterion whose evidence lives in TECH.md has no route past review blindness
+`origin=hs-review:step-2 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** R6 requires `TECH.md` to state how the cherry-pick check was made, but the blind pass may not read `TECH.md`. The skill names no way to grade that criterion, so the orchestrator ran one narrow grep after the blind pass and recorded it in REVIEW.md.
+- **Skill cause:** Step 2 forbids `TECH.md` to the reviewer, and Step 3 gives the orchestrator no step for R-IDs that point at `TECH.md`. hs-feature also lets such an R-ID be shaped.
+- **Recommended fix:** Add a Step 3 rule. For an R-ID whose evidence is a statement in `TECH.md`, the orchestrator greps for that statement only after the blind pass returns, and records it in REVIEW.md. Optionally, hs-feature should steer such R-IDs toward the commit or PR body. Blindness is unchanged, because the reviewer still never reads `TECH.md`.
+- **Confidence:** high · **Effort:** small
+
+## F4 — temp_site.sh deletes with `rm -rf`, against AGENTS.md's `del, not rm` rule
+`origin=hs-review:step-2 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** The rubric tells the reviewer to drive the CLI through `temp_site.sh`. Its exit trap runs `rm -rf "$site"`, which this environment forbids, so the reviewer reproduced its isolation by hand in each probe.
+- **Skill cause:** Factory tooling breaks the repository's own environment rule (AGENTS.md: "`del`, not `rm`").
+- **Recommended fix:** Use `del` when it is on `PATH`, else `rm -rf`, or leave the site in `$TMPDIR` and print its path. Keep the env isolation unchanged.
+- **Confidence:** high · **Effort:** small
+
+## F5 — No route for an orchestrator that is already the fresh blind context
+`origin=hs-review:step-2 severity=low category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** The foreman spawned this session as the blind reviewer and told it to run the skill as written. Step 2 says to delegate to a fresh subagent, the agent harness says not to re-delegate the whole assignment, and the portability fallback covers only "subagents unavailable". The pass ran inline, by judgment.
+- **Skill cause:** The skill assumes the orchestrator is a non-blind session, and it does not say when an inline pass is allowed.
+- **Recommended fix:** Allow the inline correctness pass whenever the session has not read `PLAN.md`, `TECH.md` content, `research/` or `META.md`, and require REVIEW.md to say which mode ran. This does not weaken blindness. It states the condition delegation exists to secure.
+- **Confidence:** med · **Effort:** small
