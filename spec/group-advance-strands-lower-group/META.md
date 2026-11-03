@@ -113,3 +113,19 @@
 - **Recommended fix:** In the port-trial pattern proposed in F5, sync with `--no-group docs` (and run with the
   same flag), so the trial needs only what the tests import.
 - **Confidence:** med · **Effort:** small
+
+## F9 — The review's base resolves to local `develop`, which can grade the wrong diff
+`origin=hs-review:step1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** In this checkout, local `develop` (222075b) is stale, and the cycle's base
+  b31c66e is not an ancestor of it. The skill gets its base from `TECH.md` (`base: develop`) and
+  builds both the injected diffstat and the blind reviewer's diff with `develop...HEAD`, which spans
+  87 files instead of the cycle's 12. The review graded the right diff only because the foreman
+  pinned `origin/develop` b31c66e. Related to F1, which is the same stale ref in `hs-feature`.
+- **Skill cause:** Step 1 and Step 2 name a branch, not a pinned commit, and nothing checks that
+  the base is an ancestor of HEAD. A stale ref silently hands the blind reviewer unrelated
+  commits.
+- **Recommended fix:** Resolve `{base}` to `origin/develop` after a fetch, or to the branch's
+  recorded fork point. In the Step 1 pre-flight, add `git merge-base --is-ancestor {base} HEAD`,
+  and stop if `git diff --stat {base}...HEAD` touches commits outside `{base}..HEAD`. Inject the
+  diffstat against that same ref. This tightens the blind-review input and weakens no gate.
+- **Confidence:** high · **Effort:** small

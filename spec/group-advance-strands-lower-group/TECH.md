@@ -3,7 +3,7 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/group-advance-strands-lower-group
 base: develop
 current_phase: done
@@ -118,10 +118,11 @@ phases:
     echo ''One rerun of the failed tests (known TLS localhost flake): record both
     runs''; kt 2400 pytest -q -l --lf ; }; }'
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 31d8771
+  verdict: changes-requested
+  blocked_reason: 'Review cycle 1: F1 groups out of order on a finished database (R3,
+    R4); F2 file run with client -T hangs (R2); human gate (server.py)'
+  cycle: 1
 ---
 # TECH.md — Run task groups in order, and never strand a late one
 
