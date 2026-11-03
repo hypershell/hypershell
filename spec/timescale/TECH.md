@@ -3,10 +3,10 @@ slug: timescale
 title: 'TimescaleDB provider: hypertables out of the box (TS1)'
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/timescale
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -80,7 +80,7 @@ phases:
 - id: P5
   name: 'CI evidence for the load-bearing slice (run B: external wait on the draft
     PR)'
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -94,7 +94,7 @@ phases:
   - P4
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   attempts: 1
   verify: test "$(gh run list --branch feature/timescale --workflow tests.yml --commit
     "$(git log -1 --format=%H -- . ':!spec')" --json conclusion --jq '[.[] | select(.conclusion
@@ -117,7 +117,7 @@ phases:
     && uv run pytest -rs tests/test_timescale.py && uv run pytest
 - id: P7
   name: CI evidence for R6 (run B)
-  status: pending
+  status: done
   satisfies:
   - R6
   - R9
@@ -125,7 +125,7 @@ phases:
   - P6
   parallel: false
   hammerable: true
-  hill: uphill
+  hill: downhill
   verify: test "$(gh run list --branch feature/timescale --workflow tests.yml --commit
     "$(git log -1 --format=%H -- . ':!spec')" --json conclusion --jq '[.[] | select(.conclusion
     == "success")] | length')" -ge 1
@@ -347,9 +347,10 @@ idempotently, honestly at every tier; the placeholder warning is gone.
 **Goal:** the draft PR's `Tests` workflow is green on the last code commit, with every TimescaleDB
 entry having run its scenarios (the module fails rather than skips when `HS_TEST_TIMESCALE` is set).
 
-- [ ] Foreman pushes and opens/updates the draft PR. Record run id, head sha and per-entry results
+- [x] Foreman pushes and opens/updates the draft PR. Record run id, head sha and per-entry results
       (`pg13`, `pg18`, `timescale`, `timescale-oss`, `timescale-floor`, SQLite matrix) here.
-- [ ] If a scenario fails: reopen P3 (or P2) per `hs-build` remediation; do not patch tests to pass.
+- [x] If a scenario fails: reopen P3 (or P2) per `hs-build` remediation; do not patch tests to pass.
+      *(No scenario failed. The one block was the template fixture below, fixed at `8f367d0`.)*
 - *(Attempt 1, run 41546097979 at `9c853d0`, red; the first block at P5 on this cause. `pg13` and
   `pg18` passed. All three TimescaleDB entries failed before any test ran, in the template-building
   step: `CREATE DATABASE hs290a1 TEMPLATE hs283` → `source database "hs283" is being accessed by
@@ -370,6 +371,18 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
   `timescaledb`, so the plain entries run the same SQL as before. Test clones from `template1`
   and `template0` were never exposed: both are templates, and neither is named as a TEMPLATE source
   that allows connections.)*
+- **Evidence (run B, read by the foreman from GitHub Actions; `hs-build` has no `gh` and did not
+  re-run the gate):** workflow `Tests` (`tests.yml`), run `41548945416`, on draft PR #71 at head
+  `8f367d0`, concluded `success` with all 14 checks green. `8f367d0` is the last commit outside
+  `spec/` (the gate's target) and contains every code commit, P6 `9c853d0` and the P5 fixture fix
+  included; the commit recording this touches only `spec/`.
+  - `PostgreSQL (timescale-floor)`: 98 passed, 1 skipped. `PostgreSQL (timescale-oss)`: 98
+    passed, 1 skipped. The skip in both is `test_absent_fails_before_schema`, which needs a server
+    without TimescaleDB.
+  - `PostgreSQL (timescale)`: passed.
+  - `PostgreSQL (pg18)`: 84 passed, 15 skipped (the TimescaleDB-only scenarios skip without
+    `HS_TEST_TIMESCALE`). `PostgreSQL (pg13)`: passed.
+  - `tests (3.11)` through `tests (3.14)`, the zero-build install, and package metadata passed.
 - **Verify:** see frontmatter (gates on the last commit outside `spec/`, not `HEAD`).
 
 ## Phase P6 — R6: `[database.timescale]` (deferrable — cut here if over appetite)
@@ -404,7 +417,12 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
 
 ## Phase P7 — CI evidence for R6 (run B)
 **Satisfies:** R6, R9 · **Depends on:** P6
-- [ ] As P5, for the R6 commit.
+- [x] As P5, for the R6 commit.
+- **Evidence:** the same run as P5. Run `41548945416` at `8f367d0`, which contains P6 `9c853d0`,
+  concluded `success` with all 14 checks green. The R6 integration scenarios ran in the three
+  TimescaleDB entries: `timescale-floor` and `timescale-oss` each 98 passed, 1 skipped
+  (`test_absent_fails_before_schema`), and `timescale` passed. They skip in `pg18` (84 passed,
+  15 skipped) without `HS_TEST_TIMESCALE`. Per-entry detail is under P5.
 - **Verify:** see frontmatter.
 
 ---
