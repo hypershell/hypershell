@@ -190,6 +190,18 @@ untested; the seed asks for that test first.
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
+## An unsorted inline task file can run a higher group first
+
+`hs cluster FILE` and `hs server FILE` schedule while the file is still being ingested. A file that
+lists group 1 before group 0 used to hang about half the time with group 0 stranded. The fix in
+`group-advance-strands-lower-group` makes the server go back for a late lower group, with a warning,
+so the run finishes, but group 1 can now finish before group 0 starts. Every small hold that
+restores the documented ascending order delays the first dispatch for some files already in
+ascending order. Pre-existing since task groups were added.
+
+*Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: that cycle's GOAL Q1*
+**Seed:** [`issues/group-order-unsorted-inline-file.md`](issues/group-order-unsorted-inline-file.md) · *status: unshaped*
+
 ## Concurrent first submits can collide on the reserved source row
 
 `Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
@@ -406,6 +418,16 @@ TimescaleDB scenario module instead.
 
 *Horizon: mid-term · Depends on: — · Refs: split from `timescale` R9 (ruling 2026-11-02)*
 **Seed:** [`issues/server-db-test-suite.md`](issues/server-db-test-suite.md) · *status: unshaped*
+
+## A hung integration test costs the whole CI job timeout
+
+Integration tests run commands in process with no per-test time limit, so a hang runs the CI job to
+its `timeout-minutes` and the log names no failing test. `group-advance-strands-lower-group` hit
+this with a hang in about 1–3% of grouped runs under load. A per-test limit would turn a hang into
+a fast, named failure.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/`*
+**Seed:** [`issues/integration-test-hang-timeout.md`](issues/integration-test-hang-timeout.md) · *status: unshaped*
 
 ---
 
