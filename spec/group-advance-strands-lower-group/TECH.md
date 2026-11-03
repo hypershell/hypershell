@@ -3,10 +3,10 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -95,7 +95,7 @@ phases:
     docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
 - id: P5
   name: 2.8.4 port trial and final gate
-  status: pending
+  status: done
   satisfies:
   - R9
   - R7
@@ -391,11 +391,11 @@ is unchanged.
 pass the whole `develop` suite. **No `src/` or `tests/` edit in this phase.** If the trial shows a
 conflict, fix the placement in P2's or P3's files under a P5 amendment note, and rerun.
 
-- [ ] R9 static checks (in `verify:`):
+- [x] R9 static checks (in `verify:`):
   - the only `src/` files changed since `b31c66e` are `data/model.py` and `server.py`;
   - no added or removed line touches `mapped_column`, `__tablename__`, `add_argument`, `_HELP`
     or `_USAGE`.
-- [ ] Run [`port-trial.sh`](port-trial.sh) under `kt 2400`. It works in a detached `origin/master`
+- [x] Run [`port-trial.sh`](port-trial.sh) under `kt 2400`. It works in a detached `origin/master`
       worktree under the main checkout's `.worktrees/`, resolved from
       `git rev-parse --git-common-dir`.
   - It applies #68's `src/` and `tests/` diff and resolves its one known conflict, the stop
@@ -406,14 +406,14 @@ conflict, fix the placement in P2's or P3's files under a P5 amendment note, and
     `tests/test_retry_gate.py` and `tests/test_groups.py` under its own `kt 1200`, with the
     one-rerun flake rule.
   - It removes the worktree on exit and checks that `master` did not move.
-- [ ] If `port-trial.sh` is killed (exit 124), its exit trap does not run. Remove the leftover
+- [x] If `port-trial.sh` is killed (exit 124), its exit trap does not run. Remove the leftover
       worktree with `git worktree remove --force <main>/.worktrees/port-2.8.4-trial` and
       `git worktree prune` before retrying. Never touch the `master` branch, never cherry-pick
       onto it, and never push.
-- [ ] If `uv sync --frozen` cannot build the 2.8.3 environment here (no network or cache), stop
+- [x] If `uv sync --frozen` cannot build the 2.8.3 environment here (no network or cache), stop
       and report an environment fault. Do not mark the phase done.
-- [ ] Full `develop` suite under `kt 2400`, with the one-rerun flake rule.
-- [ ] Build record: paste the trial's applied-file list, its pytest summary, and the full
+- [x] Full `develop` suite under `kt 2400`, with the one-rerun flake rule.
+- [x] Build record: paste the trial's applied-file list, its pytest summary, and the full
       suite's summary (plus any rerun) into the commit body and below.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/group-advance-strands-lower-group/TECH.md` (state and build record) only.
@@ -466,6 +466,34 @@ scheduling`.
 the one `-T/--timeout` sentence the foreman's ruling asked for (accepted risk). Verify passed. The
 foreman's plan-gate ruling on PLAN §5 risk 1 is recorded as a seed,
 `issues/stream-run-stops-before-input-ends.md`, with its `ROADMAP.md` entry.
+
+**P5 (port trial and final gate).**
+- R9 static checks passed: `src/` changes are exactly `data/model.py` and `server.py`, and no added
+  or removed line touches `mapped_column`, `__tablename__`, `add_argument`, `_HELP` or `_USAGE`.
+- `port-trial.sh` on `origin/master` at `4d5771b` (2.8.3), unedited:
+  - #68 conflicted only in `src/hypershell/server.py` (`model.py` applied cleanly). The script's
+    resolution replaced the one conflict block in `load_bundle`'s stop branch with 2.8.3's
+    `... and not self.startup_phase` plus #68's
+    `Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0`
+    conjunct and its two-line comment. No markers remained.
+  - This cycle applied with no conflict: `M src/hypershell/data/model.py`,
+    `M src/hypershell/server.py`, `A tests/test_group_order.py` (with #68's
+    `A tests/test_retry_gate.py`).
+  - Tests (`test_group_order.py`, `test_retry_gate.py`, `test_groups.py`): `49 passed`, no rerun.
+  - The worktree was removed, and `master` did not move.
+- **Environment substitution for the trial.** With no network, `uv sync --frozen` first failed on
+  `jinja2` (from the default `docs` group), which was not in the offline cache. The trial then ran
+  with `UV_NO_GROUP=docs`, `UV_OFFLINE=1`, a local uv cache and a local CPython 3.12, and the
+  environment placed outside the repo through `UV_PROJECT_ENVIRONMENT`. The script was not edited,
+  and it still ran `uv sync --frozen` and `uv run --frozen pytest` against 2.8.3's lock.
+- Full `develop` suite, first run, no rerun: 3.12 `647 passed, 64 skipped`; 3.14 `647 passed, 64
+  skipped`; 3.11 `647 passed, 64 skipped`.
+- 3.13: `1 failed, 646 passed, 64 skipped`. The failure was
+  `tests/test_upgrade_cli.py::test_waits_for_slow_peer_upgrade` (`assert len(waits) >= 2`, with
+  no wait line in the child's stderr). That is not the TLS signature, so it is a finding. The test
+  holds the lock for a fixed 2 s after starting a child interpreter, and on that slow run (13 min)
+  the child had not started waiting before the lock was released. The rerun (`--lf`) gave `1
+  passed`. This cycle touches no upgrade code.
 
 ---
 

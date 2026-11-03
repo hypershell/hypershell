@@ -78,3 +78,38 @@
   diffs path-limited to `src/` and `tests/`, runs named tests under a kill timer, and always removes the worktree.
   Add a note on keeping edits clear of lines that differ on the target.
 - **Confidence:** med · **Effort:** medium
+
+## F6 — Step 7 stages with `git add -A`, against the explicit-path rule
+`origin=hs-build:P1 severity=medium category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** Step 7's commit block is `git add -A`, and Step 6 says the meta-note "rides in this
+  phase's atomic `git add -A` commit". This cycle's TECH conventions and the foreman both require staging by
+  explicit path. Every phase was staged by path instead. The main checkout and sibling worktrees routinely hold
+  untracked files that belong to other work, so `-A` is the riskier default.
+- **Skill cause:** The skill hard-codes `-A` and never mentions staging by path, so a builder following it
+  literally contradicts the plan's own convention.
+- **Recommended fix:** Change Step 7 to `git add <paths the phase touched> spec/{slug}/TECH.md` (plus
+  `META.md` when written), naming the phase's `Touches:` list as the source, and drop `-A` from Step 6.
+- **Confidence:** high · **Effort:** small
+
+## F7 — `set_phase.py` rewraps every `verify:` on its first write
+`origin=hs-build:P1 severity=low category=tooling status=open target=.agents/factory/bin/set_phase.py`
+- **What happened:** The first status change (P1 to done) produced a 90-line diff of `TECH.md`, because the
+  YAML dump re-folded every phase's long `verify:` scalar at a different width. The strings were unchanged, but
+  that had to be confirmed by parsing old and new frontmatter. The noise lands in the phase commit and hides the
+  real two-field change.
+- **Skill cause:** The script regenerates the frontmatter with the dumper's default width, while `hs-plan`
+  wrote it at another. Nothing keeps the two consistent.
+- **Recommended fix:** Dump with a fixed, very large `width` (no folding), in both `set_phase.py` and whatever
+  `hs-plan` uses to write the frontmatter, so a state change touches only its own lines.
+- **Confidence:** high · **Effort:** small
+
+## F8 — The port trial's `uv sync --frozen` also needs the docs group
+`origin=hs-build:P5 severity=low category=tooling status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** On a host with no network, `uv sync --frozen` for 2.8.3 failed on `jinja2` (pulled in by
+  the default `docs` group's Sphinx), which was not in the offline cache. The trial needs only the dev group.
+  It ran with `UV_NO_GROUP=docs` set in the environment, with no script edit. Relates to F5.
+- **Skill cause:** The trial pattern syncs every default group, so it depends on documentation tooling it never
+  runs.
+- **Recommended fix:** In the port-trial pattern proposed in F5, sync with `--no-group docs` (and run with the
+  same flag), so the trial needs only what the tests import.
+- **Confidence:** med · **Effort:** small
