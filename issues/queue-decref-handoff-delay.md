@@ -12,9 +12,11 @@ lane: public
 
 ## Problem
 
-In a process that serves queues in-process, a decref for an address its own server listens on is
-handed to one sender thread (`core/queue.py` `_decref`, `_send_decrefs`), which sends them in order,
-one connection each. A decref collected while its own server is alive used to reach that server at
+In a process that serves queues in-process, a decref finalized on the server side is handed to one
+sender thread (`core/queue.py` `_decref`, `_send_decrefs`), which sends them in order, one connection
+each. (Since the review-5 remediation the server side is decided by thread. The measurements below
+were taken under the earlier rule, which handed off every decref for an address the process served,
+on any thread.) A decref collected while its own server is alive used to reach that server at
 once; now it waits for the sender. Under decref churn the sender falls behind, and a decref then
 reaches whatever server holds the port when it is sent, which can be a same-key successor in the
 same process. When the successor's queues reuse the old object ids, it releases a queue that a live

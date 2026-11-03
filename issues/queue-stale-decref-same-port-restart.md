@@ -30,8 +30,20 @@ It needs the same key, the same port and live clients on the successor. There is
 `run_local` uses a random key (150 `run_local` runs on one port passed), and no CLI path restarts a
 server in-process.
 
+**Second symptom: a stale cached connection under another name** (REVIEW cycle 5, Observations;
+identical at `aa55e86` and `43d2d85`). At shutdown, `_finalize_in_process` drops the cached proxy
+connections only under the server's bind host and its bound address. A same-process client that
+dials the server by another name (bind `127.0.0.1` and dial `localhost`, or bind the wildcard address
+and dial `127.0.0.1`) keeps its thread's cached connection to the old server. After a same-port
+restart, a new client's proxies in that thread reuse it, and the next proxy call fails
+(`EOFError` or `ConnectionResetError`). Reviewer's reproduction: start a server on an ephemeral port at the bind host, connect a
+client by the other name and use it, shut the server down, start a new one on the same port, connect
+a new client by the other name in the same thread, and put one item. The put fails; it still does
+after the review-5 remediation. Dialing the bind host itself works.
+
 **Untested:** a server that tags the objects it issues per lifetime, so that a stale id cannot name
-a new object.
+a new object; for the second symptom, dropping cached connections by the server's port, or per
+client, rather than by the names the server knows.
 
 ## Why it was deferred
 
@@ -42,7 +54,8 @@ hand-off's delay makes it more frequent:
 
 ## Outcome / vision
 
-A decref sent to a server never releases an object that server did not issue to that client.
+A decref sent to a server never releases an object that server did not issue to that client, and a
+client of a restarted server never reuses a connection to its predecessor.
 
 ## Sketch of the acceptance criteria
 
@@ -50,8 +63,11 @@ A decref sent to a server never releases an object that server did not issue to 
   against the previous server SHALL NOT release an object of the new one.
 - **R2** — A test SHALL reproduce the restart with a dropped old client and a live new one and
   assert the live client's queues keep working.
+- **R3** — WHEN a same-process client dials a restarted server by a name other than its bind host,
+  its proxy calls SHALL NOT use a connection cached for the previous server.
 
 ## Notes
 
 - Related: `spec/zone-queue-primitive/` (REVIEW cycle 4 Observations and P5).
 - Found by: `zone-queue-primitive` review cycle 4, 2026-11-02; seeded by the review-4 remediation.
+  Second symptom found by review cycle 5 and folded in by the review-5 remediation.

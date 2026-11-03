@@ -26,6 +26,9 @@
 - `hs-review` Step 2, cycle 4: a blind pass scoped to the remediation delta found two defects the
   remediation's own red-first tests did not cover (REVIEW C7, C8). Its byte-level trace showed that a
   remote client's decref is unchanged.
+- `hs-review` Step 2, cycle 6: the blind reviewer and the orchestrator reached the same defect
+  (REVIEW C10) by different executed methods, a forced collection at a new thread's first
+  instruction and natural collections, and graded its exposure the same way independently.
 
 ## Friction findings
 
@@ -108,7 +111,7 @@ is skipped by the parser):
   `pending-external` status in the REVIEW template's matrix that neither approves nor fails the
   clause, and a Step 1 rule that proceeds past a phase carrying the external-wait flag.
 
-## F4 — Research prototypes live in `$TMPDIR` and vanish before the build · seen again
+## F4 — Research prototypes live in `$TMPDIR` and vanish before the build · seen again · seen again
 `origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
 - **What happened:** The research subagents built working prototypes in `$TMPDIR`: a serve loop, a
   benchmark harness, and a drive with a compare script. The briefs pointed at them. Those paths are
@@ -125,8 +128,12 @@ is skipped by the parser):
   reviewer's probes in `$TMPDIR`; they were gone when the build started. The red-first tests were
   rebuilt from REVIEW.md's prose, which was detailed enough this time. `hs-review` Step 2 could keep
   a CONFIRMED finding's reproduction in the spec (e.g. `spec/{slug}/review/`), under the same rules.
+- **Seen again (hs-review step3, cycle 5, 2026-11-02):** the brief asked to re-run cycle 4's
+  reproductions, and the cycle-4 reviewer's probes were gone, so the orchestrator rebuilt them from
+  REVIEW.md's prose. This cycle's probes, including C9's, live in `$TMPDIR` again, because Step 3
+  lets the orchestrator write only `REVIEW.md`, `TECH.md` and `META.md`.
 
-## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again · seen again · seen again
+## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again · seen again · seen again · seen again · seen again
 `origin=hs-build:P5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** P4's and P5's gates (`bench_queue.py … --feature HEAD`) build a venv from the
   committed `HEAD`. hs-build runs the gate in Step 4 and commits in Step 7, so the gate measured the
@@ -138,8 +145,10 @@ is skipped by the parser):
   provisional commit (amended on red) or name the working tree; or have the harness accept
   `--feature WORKTREE`. Mirror the rule in the TECH template's `verify:` guidance.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-build P1 review-5 remediation, 2026-11-02):** parity, compat and the throughput
+  gate ran against the signed phase commit, which was then amended to record their results.
 
-## F6 — hs-review grades `{base}...HEAD` with `{base}` a branch name, which a stale local ref breaks · seen again · seen again
+## F6 — hs-review grades `{base}...HEAD` with `{base}` a branch name, which a stale local ref breaks · seen again · seen again · seen again
 `origin=hs-review:step1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** A recurrence of `spec/group-advance-retry-gate/META.md` F3. `TECH.md` records
   `base: develop`; the local `develop` has merge base `aee41ae` with this branch, not the fork point
@@ -156,6 +165,8 @@ is skipped by the parser):
   `b819de6` again; Step 1 still resolves `{base}` from the branch name.
 - **Seen again (hs-review step1, cycle 4, 2026-11-02):** the brief pinned the base to `b819de6` and
   the delta to `d3e00f9..4904c97`; `TECH.md` still says `base: develop`, and local `develop` is stale.
+- **Seen again (hs-review step1, cycle 5, 2026-11-02):** the brief again pinned the base to
+  `b819de6`, this time with the delta `aa55e86..43d2d85`.
 
 ## F7 — Remediation mode has no place to record the human-gate triage, nor a path for an accepted PLAUSIBLE finding
 `origin=hs-build:P1-remediation severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
@@ -172,7 +183,7 @@ is skipped by the parser):
   treating accepted PLAUSIBLE rows like CONFIRMED ones.
 - **Confidence:** high · **Effort:** small
 
-## F8 — Reviewer conduct covers the git tree, not the processes a base-build drive leaves behind
+## F8 — Reviewer conduct covers the git tree, not the processes a base-build drive leaves behind · seen again
 `origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.agents/factory/review-rubric.md`
 - **What happened:** Some of the blind reviewer's base-versus-feature drives timed out. It killed
   the base servers by process id, and their manager children and resource trackers survived as
@@ -192,6 +203,9 @@ is skipped by the parser):
   loop outlived the reviewer's hand-back until the orchestrator asked for it to be stopped. The
   hand-back check should cover background shells and monitors, not only drives; the orchestrator's
   own monitors needed the same check.
+- **Seen again (hs-review step2, cycle 6, 2026-11-03):** the process-group, timeout and psutil-scan
+  rules came from the foreman's brief and were again copied into the blind brief by hand; the rubric
+  still has none of them.
 
 ## F9 — Cycle 2+ has no rule for a blind finding that re-raises an already-triaged one
 `origin=hs-review:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
@@ -209,7 +223,7 @@ is skipped by the parser):
   scenario is graded normally and cross-referenced to the ruling.
 - **Confidence:** med · **Effort:** small
 
-## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again
+## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again · seen again · seen again · seen again · seen again
 `origin=hs-build:P1-remediation-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
 - **What happened:** P1's `verify:` and Safety Principles' CLI drive both run
   `.agents/factory/bin/temp_site.sh`, whose cleanup is `trap 'rm -rf "$site"'`. Under a harness
@@ -227,8 +241,13 @@ is skipped by the parser):
   had to override that with environment-isolated sites.
 - **Seen again (hs-review step2, cycle 4, 2026-11-02):** the blind brief again had to override the
   rubric's `temp_site.sh` instruction with `HYPERSHELL_SITE`/`HYPERSHELL_DATABASE_FILE`/`HYPERSHELL_CONFIG_FILE=''`.
+- **Seen again (hs-review step2, cycle 5, 2026-11-02):** the same override, in the blind brief again.
+- **Seen again (hs-build P1 review-5 remediation, 2026-11-02):** the `hsx` drive again ran in
+  environment-isolated sites instead of `temp_site.sh`.
+- **Seen again (hs-review step2, cycle 6, 2026-11-03):** the blind brief again overrode the rubric's
+  `temp_site.sh` instruction with environment-isolated sites.
 
-## F11 — Step 7's `git add -A` commits whatever else is in a shared worktree
+## F11 — Step 7's `git add -A` commits whatever else is in a shared worktree · seen again · seen again
 `origin=hs-build:P1-remediation-3 severity=medium category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** During this remediation another agent's docs build wrote into this worktree
   (`share/man/man1/*.1`). Step 7's `git add -A` would have folded those edits into the phase
@@ -240,3 +259,59 @@ is skipped by the parser):
   spec files), then check `git diff --cached --stat` against that list and STOP on anything else;
   re-run `git status --porcelain` before committing and report unexpected paths.
 - **Confidence:** high · **Effort:** small
+- **Seen again (hs-build P1 review-5 remediation, 2026-11-02):** the foreman's brief again required
+  explicit-path staging in place of Step 7's `git add -A`.
+
+## F12 — The rubric does not say how to classify a reproduction whose trigger is simulated configuration rather than an injected fault
+`origin=hs-review:step3 severity=medium category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** The finding (REVIEW C9) needs a host name with two A records. Neither this
+  review nor the blind reviewer could add one to the host's resolver, so both supplied the name's
+  answer in-process and ran the code under test unmodified. They reproduced the stall, one run
+  with natural collections. Cycle 4 had classed P4, an injected connection failure,
+  PLAUSIBLE. Which side of that line C9 falls on decides whether it auto-loops, and the
+  orchestrator had to argue it in the finding.
+- **Skill cause:** The refutation protocol defines CONFIRMED as "reproduced with observed wrong
+  behaviour". It is silent on what may be simulated: the code under test, the environment around
+  it, or neither.
+- **Recommended fix:** In the rubric's refutation protocol, add one rule. A reproduction that runs
+  the code under test unmodified, with only the environment simulated (resolver answers, clock,
+  peer behaviour), counts as CONFIRMED when the simulated environment is a valid configuration;
+  the simulation must be named in the evidence. A reproduction that injects a fault into the code
+  path stays PLAUSIBLE unless the fault occurs naturally.
+- **Confidence:** med · **Effort:** small
+
+## F13 — Remediation mode has no path for a triage ruling whose own acceptance criteria fail
+`origin=hs-build:P1-remediation-5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** The cycle-5 ruling prescribed a mechanism (the thread rule) and acceptance
+  criteria (the existing C5 tests pass). Built exactly as ruled, the C5 test
+  `test_dropped_client_never_stalls_server[tls]` stalled in 2 of 14 runs: the accept loop's inline
+  TLS handshake waits on a client thread that the ruled rule leaves off the server side. The build
+  had to choose between stopping and extending the ruled rule by one case. It extended the rule,
+  flagged the extension in TECH and in the commit, and left ratification to the judge.
+- **Skill cause:** Step 3 lets the build amend `TECH.md` freely and stops only on a `GOAL.md`
+  contradiction. It says nothing about a triage ruling, which sits between the two: binding like a
+  contract on the mechanism, but falsifiable by its own tests.
+- **Recommended fix:** In Step 3 remediation mode, add a rule. When a ruled fix fails the ruling's
+  own acceptance criteria, implement the smallest extension that meets them, without changing wire,
+  auth or the remote-client contract. Mark the extension in `TECH.md` and in the commit body as
+  "beyond the ruling", with the red evidence of the ruling as written. Report it first in the final
+  report for the judge to ratify or reject. Any extension that would touch those surfaces is a STOP.
+- **Confidence:** med · **Effort:** small
+
+## F14 — Step 4 has no route for a maintainer's pre-agreed fallback on a cycle's findings
+`origin=hs-review:step4 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** The cycle-5 triage authorized cycle 6 with a pre-agreed fallback: LOW or MEDIUM
+  findings with library-only exposure are seeded and the feature proceeds to publish; anything else
+  stops it. Step 4 routes every CONFIRMED finding to `changes-requested` and `blocked`, and its only
+  other route, the deferral exception, needs pre-existing behaviour, which a finding new in the delta
+  is not. The orchestrator recorded the mechanical verdict and left the fallback to the judge, with
+  the classification argued in REVIEW.md.
+- **Skill cause:** Step 4 knows two dispositions, block or defer pre-existing behaviour. A human
+  ruling that pre-commits the disposition of a class of findings has no home, so the recorded verdict
+  and the agreed outcome can disagree.
+- **Recommended fix:** In Step 4, when the latest `Triage` section states a pre-agreed fallback,
+  have the orchestrator classify each CONFIRMED finding against it (severity, CLI-reachable or
+  library-only, with reasons). It still records `changes-requested`, and names in REVIEW.md's
+  Human-gate section whether the fallback's conditions are met, so the judge applies it in one step
+  (seed, `ROADMAP.md` entry, verdict flip) rather than re-deriving it.
+- **Confidence:** med · **Effort:** small

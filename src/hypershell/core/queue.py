@@ -254,18 +254,25 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
     Matches the signature of :func:`multiprocessing.connection.Client` so it slots in as a
     drop-in replacement. Opens a TLS connection, optionally verifies the peer fingerprint,
     then performs the BaseManager challenge/response handshake over the encrypted channel.
+
+    Until the TLS handshake ends the calling thread is on the server side (see :func:`_decref`): a
+    queue server runs the handshake on its accept loop, which waits on this thread meanwhile.
     """
     cfg = get_tls_config()
     ctx = get_client_context()
-    raw = socket.create_connection(address)
+    _mark()
     try:
-        servername = (cfg.servername if cfg is not None and cfg.servername else None)
-        if servername is None and ctx.check_hostname:
-            servername = address[0] if isinstance(address, tuple) else None
-        ssl_sock = ctx.wrap_socket(raw, server_hostname=servername)
-    except Exception:
-        raw.close()
-        raise
+        raw = socket.create_connection(address)
+        try:
+            servername = (cfg.servername if cfg is not None and cfg.servername else None)
+            if servername is None and ctx.check_hostname:
+                servername = address[0] if isinstance(address, tuple) else None
+            ssl_sock = ctx.wrap_socket(raw, server_hostname=servername)
+        except Exception:
+            raw.close()
+            raise
+    finally:
+        _unmark()
     if cfg is not None:
         verify_peer_fingerprint(ssl_sock, cfg)
     conn = SecureConnection(ssl_sock)
@@ -364,6 +371,14 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
     ('BaseProxy._decref(token, ...)', lambda: _parameters(BaseProxy._decref)[0] == 'token'),
     ('util.Finalize calls its _callback with its _args',
      lambda: {'_callback', '_args'} <= set(_names(util.Finalize.__init__)) & set(_names(util.Finalize.__call__))),
+    ('Thread.start runs Thread._bootstrap() first on the new thread',
+     lambda: '_bootstrap' in _names(threading.Thread.start) and _parameters(threading.Thread._bootstrap) == ['self']),
+    ('threading._active maps the identifier of each thread that threading has started to its Thread, '
+     'which the new thread registers itself',
+     lambda: (isinstance(threading._active, dict) and '_active' in _names(threading.Thread._bootstrap_inner)
+              and '_active' not in _names(threading.Thread.start))),
+    ('threading._DummyThread is the Thread of a thread that threading did not start',
+     lambda: issubclass(threading._DummyThread, threading.Thread)),
     ('Server.serve_client takes no mutex', lambda: 'mutex' not in _names(Server.serve_client)),
     ('Server._handle_request turns an exception into #TRACEBACK',
      lambda: '#TRACEBACK' in Server._handle_request.__code__.co_consts and 'format_exc' in _names(Server._handle_request)),
@@ -499,8 +514,7 @@ class _InProcessServer(Server):
                             conn.close()
                             break
                         self._live.add(conn)
-                    threading.Thread(target=self.handle_request, args=(conn, peer), daemon=True,
-                                     name='hypershell-queue-handler').start()
+                    _ServerThread(target=self.handle_request, args=(conn, peer), name='hypershell-queue-handler').start()
         except Exception as error:
             if not self._halted:
                 log.error(f'Queue server stopped accepting connections: {error!r}')
@@ -541,100 +555,123 @@ class _InProcessServer(Server):
         with self._lock:
             # The requesting connection is left to its handler so the reply can be sent.
             self._live.discard(c)
-        threading.Thread(target=self.stop, daemon=True, name='hypershell-queue-stop').start()
+        _ServerThread(target=self.stop, name='hypershell-queue-stop').start()
 
     def stop(self: _InProcessServer) -> None:
-        """Stop accepting, release the port and cut live connections. Idempotent; never blocks."""
-        with self._lock:
-            # Swept under the lock: a listed connection is not yet closed, so its descriptor
-            # cannot have been reused.
-            if self._halted:
-                return
-            self._halted = True
-            try:
-                _listening_socket(self.listener).shutdown(socket.SHUT_RDWR)
-            except (OSError, AttributeError):
-                pass
-            self.listener.close()
-            for conn in self._live:
-                _cut(conn)
-            self._live.clear()
+        """Stop accepting, release the port and cut live connections. Idempotent; never blocks.
+
+        The calling thread is on the server side throughout (see :func:`_decref`).
+        """
+        _mark()
+        try:
+            with self._lock:
+                # Swept under the lock: a listed connection is not yet closed, so its descriptor
+                # cannot have been reused.
+                if self._halted:
+                    return
+                self._halted = True
+                try:
+                    _listening_socket(self.listener).shutdown(socket.SHUT_RDWR)
+                except (OSError, AttributeError):
+                    pass
+                self.listener.close()
+                for conn in self._live:
+                    _cut(conn)
+                self._live.clear()
+        finally:
+            _unmark()
 
 
-# The address of each in-process queue server's listener in this process, as (IPv4 address, port),
-# from before it binds until it is closed. The port is 0 while a server asking for an ephemeral port
-# binds, and the address is None when its host name did not resolve (either matches more widely, see
-# _served_here). Proxy finalizers read it without a lock, so it is changed only by single dictionary
-# operations.
-_serving: Dict[object, Tuple[Optional[str], int]] = {}
-
-# For each address a queue client has connected to: the IPv4 address it resolved to (None if it did
-# not) and whether that address is one of this host's. Recorded on connect, read by proxy finalizers.
-_dialed: Dict[Tuple[str, int], Tuple[Optional[str], bool]] = {}
-
-# The wildcard bind address, on which a listener answers at every address of this host
-ANY_ADDRESS: Final[str] = '0.0.0.0'
+# Threads on the server side, by identifier, with the number of marks each holds: every thread an
+# in-process queue server starts, for its whole life; any thread while it is inside a server's start or
+# stop; and any thread while it is in a TLS handshake with a queue server, which the server's accept loop
+# waits on. Each thread changes only its own entry; proxy finalizers read it without a lock.
+_server_side: Dict[int, int] = {}
 
 # Decrefs that proxy finalizers hand off, and the one thread that sends them
 _decrefs: SimpleQueue = SimpleQueue()
 _decref_sender: Optional[threading.Thread] = None
 _decref_sender_lock = threading.Lock()
 
-
-def _ipv4(host: str) -> Optional[str]:
-    """The IPv4 address that binding or connecting to `host` uses, or None if it does not resolve."""
-    try:
-        return socket.gethostbyname(host)
-    except (OSError, UnicodeError):
-        return None
+# Whether threads here have native identifiers (``Thread.native_id`` and ``threading.get_native_id``)
+_NATIVE_IDS: Final[bool] = hasattr(threading, 'get_native_id')
 
 
-def _is_own_address(ip: str) -> bool:
-    """Whether `ip` is an address of this host (a socket can bind it); True unless known otherwise."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            probe.bind((ip, 0))
-    except OSError as error:
-        return error.errno != errno.EADDRNOTAVAIL
-    return True
+def _mark() -> None:
+    """Mark the calling thread as on the server side until a matching :func:`_unmark`."""
+    ident = threading.get_ident()
+    _server_side[ident] = _server_side.get(ident, 0) + 1
 
 
-def _note_dialed(address: Tuple[str, int]) -> None:
-    """Record where `address`, which a queue client has just connected to, resolves."""
-    ip = _ipv4(address[0])
-    _dialed[address] = (ip, ip is None or _is_own_address(ip))
+def _unmark() -> None:
+    """Remove one mark of the calling thread."""
+    ident = threading.get_ident()
+    marks = _server_side.get(ident, 0) - 1
+    if marks > 0:
+        _server_side[ident] = marks
+    else:
+        _server_side.pop(ident, None)
 
 
-def _served_here(address: Tuple[str, int]) -> bool:
-    """Whether a connection to `address` may reach a listener of an in-process server of this process.
+class _ServerThread(threading.Thread):
+    """A daemon thread of an in-process queue server, on the server side from its first statement to its last."""
 
-    It may when it names a listed port (any port while one binds an ephemeral port) at the listener's
-    own address, or at any of this host's addresses when the listener is bound to the wildcard
-    address. An address that did not resolve, or was never recorded, matches on its port alone.
-    """
-    ip, own = _dialed.get(address, (None, True))
-    port = address[1]
-    for host, listening in tuple(_serving.values()):
-        if listening in (port, 0) and (ip is None or host is None or host == ip
-                                       or (own and ANY_ADDRESS in (host, ip))):
-            return True
-    return False
+    def __init__(self: _ServerThread, target: Callable[..., Any], name: str, args: Tuple[Any, ...] = ()) -> None:
+        super().__init__(target=target, args=args, name=name, daemon=True)
+
+    def _bootstrap(self: _ServerThread) -> None:
+        # Marked before the threading start-up code, which is what releases the thread waiting in start().
+        # A collection that runs here before the mark finds the thread not yet registered (see _decref).
+        _server_side[threading.get_ident()] = 1
+        try:
+            super()._bootstrap()
+        finally:
+            _unmark()
 
 
 def _decref(*args: Any) -> None:
-    """Finalizer of a queue client's proxy: the stock decref, unless an in-process server may answer it.
+    """Finalizer of a queue client's proxy: the stock decref, unless it runs on the server side.
 
-    The cyclic garbage collector runs a proxy's finalizer in whichever thread triggers the collection,
-    including the threads of an in-process server, and the stock decref connects to the server and
-    waits for its accept loop. So a decref for an address an in-process server of this process listens
-    on is handed to the decref sender instead: ``SimpleQueue.put`` never blocks and is safe to
-    re-enter. Any other decref is the stock one, in the finalizer's thread.
+    The cyclic garbage collector runs a proxy's finalizer in whichever thread triggers the collection, and
+    the stock decref connects to the proxy's server and waits for its answer. On a thread of an in-process
+    server, a thread inside a server's start or stop, or a thread in a TLS handshake that an accept loop
+    waits on, that answer can depend on the waiting thread itself. There the decref is handed to the decref
+    sender instead: ``SimpleQueue.put`` never blocks and is safe to re-enter. Every other decref is the
+    stock one, in the finalizer's thread.
+
+    A thread that :mod:`threading` has not yet registered as started is still in its start-up, which
+    may be a server thread's before its mark (a collection another thread scheduled can run there), so
+    its decref is handed off too, as is one on a thread that :mod:`threading` did not start (see
+    :func:`_not_started`). So once this process has served, every decref finalized on a thread that
+    :mod:`threading` did not start, or on a main thread that it knows only by a ``_DummyThread``, is
+    handed off, including a decref for a server in another process. The sender then runs the whole
+    stock decref, whose closing of a cached connection (``tls.connection.close()``) reads the sender's
+    thread-local connection, not the finalizing thread's.
     """
-    address = getattr(args[0], 'address', None) if args else None
-    if isinstance(address, tuple) and len(address) == 2 and _served_here(address):
-        _decrefs.put(args)
-        return
+    if _decref_sender is not None:
+        ident = threading.get_ident()
+        if ident in _server_side or _not_started(ident):
+            _decrefs.put(args)
+            return
     BaseProxy._decref(*args)
+
+
+def _not_started(ident: int) -> bool:
+    """Whether :mod:`threading` has not registered thread `ident` as one it started (it is still
+    starting, or :mod:`threading` did not start it). Reads the registry without its lock, and adds nothing to it.
+
+    An entry under `ident` may be stale: one left by an ended thread whose identifier the OS has reused,
+    such as the ``_DummyThread`` of a thread :mod:`threading` did not start, or, on 3.11 and 3.12, the
+    ``_MainThread`` of a thread that first imported :mod:`threading` and has ended. :mod:`threading` sets a
+    thread's native identifier before it registers the thread, so an entry whose native identifier is not
+    the calling thread's is not the calling thread's own. Two live threads fail that match as well, and
+    hand off: on 3.11 and 3.12 the thread that forked, in the child (:mod:`threading` keeps its parent's
+    native identifier there), and from 3.13 a main thread whose entry :mod:`threading` made on another thread.
+    """
+    thread = threading._active.get(ident)
+    if thread is None or isinstance(thread, threading._DummyThread):
+        return True
+    return _NATIVE_IDS and getattr(thread, 'native_id', None) != threading.get_native_id()
 
 
 def _send_decrefs() -> None:
@@ -652,18 +689,18 @@ def _start_decref_sender() -> None:
     global _decref_sender
     with _decref_sender_lock:
         if _decref_sender is None or not _decref_sender.is_alive():
-            _decref_sender = threading.Thread(target=_send_decrefs, daemon=True, name='hypershell-queue-decref')
+            _decref_sender = _ServerThread(target=_send_decrefs, name='hypershell-queue-decref')
             _decref_sender.start()
 
 
 def _forget_after_fork() -> None:
-    """In a forked child, drop the parent's servers, waiting decrefs and sender, none of which are its own.
+    """In a forked child, drop the parent's server-side marks, waiting decrefs and sender, none of which are its own.
 
     The parent sends its own decrefs; sending them again from the child would release objects that
     the parent's clients still hold.
     """
     global _decrefs, _decref_sender, _decref_sender_lock
-    _serving.clear()
+    _server_side.clear()
     _decrefs = SimpleQueue()
     _decref_sender = None
     _decref_sender_lock = threading.Lock()
@@ -681,11 +718,9 @@ def _defer_decref(proxy: BaseProxy) -> BaseProxy:
     return proxy
 
 
-def _finalize_in_process(server: _InProcessServer, state: State, addresses: Iterable[Tuple[str, int]],
-                         key: object) -> None:
+def _finalize_in_process(server: _InProcessServer, state: State, addresses: Iterable[Tuple[str, int]]) -> None:
     """Stop an in-process server and drop cached proxy connections to every address it answered on."""
     server.stop()
-    _serving.pop(key, None)
     state.value = State.SHUTDOWN
     with BaseProxy._mutex:
         for address in addresses:
@@ -747,29 +782,26 @@ class SecureManager(BaseManager):
             raise QueueServerError("This Python's multiprocessing internals are not supported: "
                                    + '; '.join(problems))
         host, port = self._address
-        # The sender runs before anything is listed, so a decref handed off for this server is sent.
-        # Listed before the bind, so a proxy finalizer never connects to this server (see _decref).
+        # The sender runs before anything is on the server side, so every decref handed off is sent.
+        # From the bind until the accept loop runs, a proxy finalizer here hands off (see _decref).
         _start_decref_sender()
-        key = object()
-        _serving[key] = (_ipv4(host), port)
+        _mark()
         try:
             server = _InProcessServer(registry, self._address, self._authkey, self._serializer, self._tls)
         except OSError as error:
-            del _serving[key]
             raise QueueServerError(f'Cannot listen on {host}:{port} ({error})') from error
-        except BaseException:
-            del _serving[key]
-            raise
-        _serving[key] = server.address
+        else:
+            _ServerThread(target=server.serve, name='hypershell-queue-server').start()
+        finally:
+            _unmark()
         # Clients cache connections by the address they dial, which may name the host differently
         # (e.g., 'localhost') than the bound address does; both are dropped at shutdown.
         dialed = (host, server.address[1])
         self._address = server.address
         self._process = None
-        threading.Thread(target=server.serve, daemon=True, name='hypershell-queue-server').start()
         self._state.value = State.STARTED
         self.shutdown = util.Finalize(self, _finalize_in_process, exitpriority=0,
-                                      args=(server, self._state, (dialed, server.address), key))
+                                      args=(server, self._state, (dialed, server.address)))
 
     def connect(self: SecureManager) -> None:
         """Install the local-process TLS context, then perform the manager handshake."""
@@ -971,8 +1003,8 @@ class QueueClient(QueueInterface):
 
         The first queue is created with this client's work-request protocol, so a server that does
         not speak it is found before anything else is done. The proxies' finalizer is
-        :func:`_decref`: in a process that serves queues itself, a decref for an address one of its
-        own servers listens on is sent by the decref sender.
+        :func:`_decref`: in a process that serves queues itself, a decref finalized on the server
+        side is sent by the decref sender.
         """
         self.register('_get_scheduled')
         self.register('_get_completed')
@@ -980,7 +1012,6 @@ class QueueClient(QueueInterface):
         self.register('_get_confirmed')
         self.register('_get_dispatch')
         super().connect()
-        _note_dialed(self._address)
         self._dispatcher_lock = threading.Lock()
         try:
             self.scheduled = _defer_decref(self._get_scheduled(PROTOCOL))

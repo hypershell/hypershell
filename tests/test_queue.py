@@ -13,6 +13,7 @@ import sys
 import time
 import queue
 import socket
+import _thread
 import threading
 import multiprocessing as mp
 from multiprocessing import util
@@ -149,6 +150,47 @@ class TestPrivateInternals:
                 assert isinstance(proxy._close, util.Finalize), name
                 assert proxy._close._callback is queue_module._decref, name
                 assert proxy._close._args[0] is proxy._token, name
+
+    def test_thread_registry(self) -> None:
+        """``threading._active`` lists a thread from its start-up code on, not at its first instruction,
+        with its native identifier already set, and gives a thread that :mod:`threading` did not start a
+        ``_DummyThread``.
+
+        An identifier the OS has reused may still map to a stale entry of an ended thread: the
+        ``_DummyThread`` of a thread that :mod:`threading` did not start or, on 3.11 and 3.12, the
+        ``_MainThread`` of a thread that first imported :mod:`threading`. A stale entry does not carry
+        the calling thread's native identifier.
+        """
+        def unregistered() -> bool:
+            entry = threading._active.get(threading.get_ident())
+            return (entry is None or isinstance(entry, threading._DummyThread)
+                    or entry.native_id != threading.get_native_id())
+
+        def registered() -> bool:
+            entry = threading._active.get(threading.get_ident())
+            return entry is thread and entry.native_id == threading.get_native_id()
+
+        seen = []
+
+        class Probe(threading.Thread):
+            def _bootstrap(self) -> None:
+                seen.append(unregistered())
+                super()._bootstrap()
+
+        thread = Probe(target=lambda: seen.append(registered()))
+        thread.start()
+        thread.join()
+        assert seen == [True, True] and threading._active.get(thread.ident) is not thread
+
+        done = threading.Event()
+
+        def foreign() -> None:
+            seen.append(unregistered())
+            seen.append(isinstance(threading.current_thread(), threading._DummyThread))
+            done.set()
+
+        _thread.start_new_thread(foreign, ())
+        assert done.wait(5) and seen[2:] == [True, True]
 
     def test_finalize(self) -> None:
         """``util.Finalize`` accepts ``args`` and ``exitpriority``, and runs once."""

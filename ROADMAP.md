@@ -281,6 +281,18 @@ verified against 2.8.3 there.
 GOAL, not the zone seed's R5) · Refs: release notes*
 **Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
 
+## `hs server --initdb` never initializes the database
+
+`hs server` accepts `--initdb`, but `ServerApp.run` calls `ensuredb()` without it
+(`src/hypershell/server.py:1381`; the flag is defined at `:1343-1346` and never read), so on
+PostgreSQL and TimescaleDB the server only checks the schema and refuses a database that was never
+initialized; under the `timescale` provider the hypertable pass never runs from it. `hs submit` and
+`hs cluster` honour the same flag. The docs and the server's own help still promise it.
+Pre-existing since 2023 (`70bcc63`).
+
+*Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
+**Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: unshaped*
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
@@ -303,7 +315,7 @@ accept loop can then stall it. Seen only with an injected failure; the window pr
 
 ## Handed-off decrefs can outlive their server and reach a same-port successor
 
-A same-process decref waits for the one sender thread, which under churn falls behind, so it can
+A handed-off decref waits for the one sender thread, which under churn falls behind, so it can
 reach a successor server on the same port instead of its own and release a live client's queue.
 Seen statistically under same-port restart stress in one process; no CLI path restarts that way.
 
@@ -315,12 +327,36 @@ Seen statistically under same-port restart stress in one process; no CLI path re
 
 A dropped client of a stopped in-process server, collected after a same-key successor starts on
 the same port, sends its decrefs to the successor, which can release a queue a live client holds.
-It came with the in-process server's same-port restart; no CLI path uses the same key and port.
+A client that dials the restarted server by another name than its bind host can also reuse a
+connection cached for the old server. It came with the in-process server's same-port restart; no
+CLI path uses the same key and port.
 
 *Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
 `spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
 **Seed:** [`issues/queue-stale-decref-same-port-restart.md`](issues/queue-stale-decref-same-port-restart.md)
 
+## A forked child of a serving process keeps the queue server's port
+
+A child forked from a process that serves queues in-process inherits the listening socket, so after
+the server shuts down the port cannot be bound again and new clients hang until the child exits. No
+CLI path forks a serving process; only library use sees it.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 5, Observations)*
+**Seed:** [`issues/queue-forked-child-keeps-listener.md`](issues/queue-forked-child-keeps-listener.md)
+
+## Server-owned queue proxies without reference counting
+
+The in-process queue server closes its "finalizer dials the server" stalls with thread rules that
+rest on CPython timing and private internals. The shared queues live as long as the server, so a
+client's proxies for them may not need reference counting at all. Proxies built as server-owned
+never send a decref, which would make the stall impossible by construction and could let the
+hand-off machinery retire. It needs a check of server-side refcount bookkeeping across reconnects
+first.
+
+*Horizon: mid-term · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
+**Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
 
 ## `hs client -b` reads the submit section's key, not the client section's
 
@@ -435,8 +471,22 @@ with compression and a policy, interrogating the environment rather than assumin
 *Horizon: mid-term · Depends on: soft — conforms to (or establishes) turso R4's per-provider seam ·
 Refs: **R1 is discharged** — `schema-upgrade-step` dropped the `previous_id`/`next_id` UNIQUE
 constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQLite databases keep
-them, forward-only), so the remaining work starts at R2*
-**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: shaped*
+them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
+**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: adopted:timescale*
+
+## The whole test suite on a server database
+
+The suite runs on SQLite only. CI's PostgreSQL job runs three modules across five entries: the
+upgrade tests, the writeback's result-to-dispatch match at the data layer
+(`tests/test_writeback_postgres.py`) and the TimescaleDB scenarios (`tests/test_timescale.py`). The
+rest of the suite never runs on a server, so the scheduler, the writeback end to end, retries and
+most of the CLI are never exercised on PostgreSQL or TimescaleDB. A harness selected by
+an environment variable would run the whole suite against a server, isolated per test, with the
+SQLite-only tests marked and skipped. Split out of TimescaleDB's R9, which ships a dedicated
+TimescaleDB scenario module instead.
+
+*Horizon: mid-term · Depends on: — · Refs: split from `timescale` R9 (ruling 2026-11-02)*
+**Seed:** [`issues/server-db-test-suite.md`](issues/server-db-test-suite.md) · *status: unshaped*
 
 ---
 

@@ -126,3 +126,287 @@ after the fact. In those cases an older SQLite database rejects the second retry
 where a newer one records it.
 
 See also the :ref:`command-line interface <cli_initdb>` for ``hs initdb``.
+
+-------------------
+
+TimescaleDB
+-----------
+
+|
+
+`TimescaleDB <https://github.com/timescale/timescaledb>`_ is a PostgreSQL extension for
+time-series data. It splits a large table into *chunks* by time (a *hypertable*) and can convert
+older chunks into a compressed, column-oriented *columnstore*. A long-lived *HyperShell* database
+fits this shape well: tasks arrive in time order, recent tasks are read and updated constantly,
+and old tasks are kept for history but rarely touched.
+
+Select it with the ``timescale`` provider (``timescaledb`` is an alias). It connects exactly like
+PostgreSQL and needs both the ``postgres`` and the ``uuid7`` extras (see :ref:`install`).
+
+.. admonition:: Install with TimescaleDB support
+    :class: note
+
+    .. code-block:: shell
+
+        uv tool install 'hypershell[postgres,uuid7]'
+
+.. admonition:: Configuration file with TimescaleDB
+    :class: note
+
+    .. code-block:: toml
+
+        [database]
+        provider = "timescale"
+        database = "hypershell"
+
+Then initialize the database with ``hs initdb``, or launch ``hs submit`` or ``hs cluster`` with
+``--initdb``, which runs the same initialization. There is nothing else to run. ``hs server`` does
+not initialize the database, even with ``--initdb``; run ``hs initdb`` before launching it.
+
+|
+
+What initialization does
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Before it creates any table, ``hs initdb`` checks the server. The ``timescaledb`` extension must
+be installed on the server; if it is not yet created in the database we create it (the
+database owner may do so, no superuser needed). We fail with a message naming the problem and the fix,
+and create nothing, when the server does not offer the extension, when the role may not create
+it, when the server does not preload its library (``shared_preload_libraries``), or when the
+extension is older than 2.22.0.
+
+After the usual schema step, we bring the ``task`` table to its TimescaleDB shape:
+
+* **Hypertable.** ``task`` becomes a hypertable partitioned by its ``id`` column, in chunks of
+  one week. The ``client`` and ``source`` tables stay plain tables.
+* **Columnstore.** The columnstore is enabled, segmented by ``client_id`` and ordered by
+  ``id DESC``, so a compressed chunk keeps each client's tasks together, newest first.
+* **Policy.** A columnstore policy converts chunks older than four weeks.
+
+This is equivalent to the following statements, which you therefore never need to run:
+
+.. admonition:: What ``hs initdb`` does for you
+    :class: note
+
+    .. code-block:: sql
+
+        SELECT create_hypertable('task', by_range('id', INTERVAL '1 week'));
+        ALTER TABLE task SET (timescaledb.enable_columnstore = true,
+                              timescaledb.segmentby = 'client_id',
+                              timescaledb.orderby = 'id DESC');
+        CALL add_columnstore_policy('task', after => INTERVAL '4 weeks');
+
+Each step is checked first and applied only where something is missing, so running
+``hs initdb`` again, launching ``hs submit`` or ``hs cluster`` with ``--initdb`` every time, or
+truncating the database with ``hs initdb --truncate`` always arrives at the same state, with one
+policy. A database already in shape logs nothing. Initialization runs in one transaction,
+serialized with the schema step, so concurrent launches are safe.
+
+If someone changed the chunk interval, the columnstore settings, or the policy's interval by hand,
+the next ``hs initdb`` puts them back to the configured values (see *Tuning* below) and logs each
+change. A new chunk interval applies to new
+chunks only, and new columnstore settings apply to chunks converted from then on; existing chunks
+keep theirs (recompress them by hand if needed). Turning the columnstore off is never done for
+you; ``hs initdb`` warns instead. If the policy's last run failed, ``hs initdb`` warns and points
+to ``timescaledb_information.job_stats``.
+
+Only ``hs initdb`` (with or without ``--truncate``), and ``hs submit`` or ``hs cluster`` launched
+with ``--initdb``, run this initialization. Every other command, including ``hs server`` with or
+without ``--initdb`` and ``hs submit`` or ``hs cluster`` without it, runs only the schema step, as
+for PostgreSQL, and stops on a database that was never initialized. Run ``hs initdb`` after
+upgrading *HyperShell* or TimescaleDB.
+
+|
+
+Tuning
+^^^^^^
+
+The defaults suit most sites; zero configuration is the norm. To change them, add a ``timescale``
+table to the ``[database]`` section. Each key is optional and falls back to its default.
+
+.. admonition:: Configuration file with TimescaleDB settings
+    :class: note
+
+    .. code-block:: toml
+
+        [database]
+        provider = "timescale"
+        database = "hypershell"
+
+        [database.timescale]
+        chunk_interval = "1 day"
+        compress_after = "2 weeks"
+
+==================  ===============  ==========================================================
+Key                 Default          Meaning
+==================  ===============  ==========================================================
+``chunk_interval``  ``"1 week"``     Time span of each chunk of ``task``.
+``columnstore``     ``true``         Enable the columnstore on ``task``.
+``segmentby``       ``"client_id"``  Columns that group rows in a compressed chunk
+                                     (comma-separated task columns, each once, or ``""`` for none).
+``orderby``         ``"id DESC"``    Order of rows in a compressed chunk
+                                     (``<column> [ASC|DESC] [NULLS FIRST|LAST]``, comma-separated,
+                                     each column once). TimescaleDB appends ``id DESC`` when
+                                     neither list names ``id``.
+``policy``          ``true``         Keep a columnstore policy on ``task``.
+``compress_after``  ``"4 weeks"``    Age at which the policy converts a chunk.
+==================  ===============  ==========================================================
+
+Intervals are a positive whole number and a unit, from ``microseconds`` to ``months``
+(e.g., ``"12 hours"``). Columns are task columns by name, quoted for you where SQL needs it
+(``group``, for instance). An invalid value, an unknown or repeated column, an unknown key, or
+``policy = true`` with ``columnstore = false`` stops every command at startup with a message
+naming the key. So does a column named in both ``segmentby`` and ``orderby``, defaults included,
+since TimescaleDB cannot use one column for both segmenting and ordering:
+``orderby = "client_id DESC"`` needs a ``segmentby`` without ``client_id``, and
+``segmentby = "id"`` needs an ``orderby`` without ``id``.
+
+Changes take effect at the next ``hs initdb``, which applies them as described above: a new
+``chunk_interval`` applies to new chunks only, new ``segmentby`` or ``orderby`` to chunks converted
+from then on, and a new ``compress_after`` replaces the policy. Setting ``policy = false`` removes
+an existing policy. Setting ``columnstore = false`` (with ``policy = false``) stops ``hs initdb``
+from enabling the columnstore, but does not disable one that is already on; it warns instead.
+
+|
+
+Why the task identifier is the partition key
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+With the ``uuid7`` extra, every task identifier is a
+`UUIDv7 <https://www.rfc-editor.org/rfc/rfc9562#name-uuid-version-7>`_, whose leading 48 bits are
+the time it was created, in milliseconds. Since TimescaleDB 2.22.0 a hypertable can be partitioned
+directly by such a column: the timestamp inside the id decides the chunk. So the primary key
+carries row identity, creation time, and chunk routing in one value, and we need no separate time
+column. A lookup or update by ``id`` needs only one chunk, and a range of ids is a range of
+time, which lets PostgreSQL skip every chunk outside it (*chunk exclusion*).
+
+.. important::
+
+    **Every process that creates tasks needs the** ``uuid7`` **extra**, not only the server:
+    anything running ``hs submit``, ``hs cluster`` or ``hsx``, or using the library to submit
+    tasks. TimescaleDB routes each row by the timestamp inside its id and rejects any other UUID
+    version: inserting a UUIDv4 fails with SQLSTATE ``0A000`` (``... is not a version 7 UUID``),
+    and the error aborts the whole ``INSERT``, so one bad id loses the entire bundle of tasks
+    submitted with it. *HyperShell* refuses to start under the ``timescale`` provider without
+    the extra.
+
+|
+
+Support matrix
+^^^^^^^^^^^^^^
+
+=====================  =============================================================================
+TimescaleDB            Behavior
+=====================  =============================================================================
+before 2.22.0          ``hs initdb`` fails: partitioning by a UUIDv7 column is not available.
+2.22.0 – 2.24.x        Hypertable and columnstore; **no policy**. These releases accept the policy,
+                       but every run of it fails on a UUID-partitioned table, so we skip it and warn.
+2.25.0 and later       Everything above. Tested in CI on 2.31.0 (and on 2.24.0 for the gate).
+=====================  =============================================================================
+
+Current TimescaleDB releases support PostgreSQL 16, 17 and 18 (2.29.0 dropped PostgreSQL 15).
+
+TimescaleDB comes in two editions, and ``hs initdb`` reads which one the server runs
+(``timescaledb.license``):
+
+* **Community** (``timescaledb.license = 'timescale'``, the Timescale License): everything above.
+  This is what the official ``timescale/timescaledb`` container images and the TimescaleDB
+  packages ship.
+* **Apache** (``timescaledb.license = 'apache'``, Apache-2.0 only, e.g. the ``-oss`` images):
+  hypertables, but no columnstore and no policy. We create the hypertable and skip the rest, with
+  a warning each time.
+
+Where you run PostgreSQL matters. Self-hosted servers can use the official packages or container
+images. *Tiger Cloud* is the managed service from the makers of TimescaleDB. Several other
+managed PostgreSQL offerings do not ship the extension at all, and some ship only the Apache
+edition (as of August 2026); check your provider's list of extensions before choosing the
+``timescale`` provider there.
+
+The project's naming has moved over time: *TimescaleDB* is the extension; the company, formerly
+Timescale, is *TigerData* since 2025; and *Tiger Cloud* is its managed service.
+
+|
+
+Querying by time
+^^^^^^^^^^^^^^^^
+
+TimescaleDB adds functions for UUIDv7 values (since 2.22.0). To filter tasks by time, compare the
+``id`` against a boundary id built from a timestamp with ``to_uuidv7_boundary()``. To show when a
+task was created, read the timestamp back out with ``uuid_timestamp()``.
+
+.. admonition:: Tasks created in the last day, with their creation time
+    :class: note
+
+    .. code-block:: sql
+
+        SELECT uuid_timestamp(id) AS created, args, exit_status
+          FROM task
+         WHERE id >= to_uuidv7_boundary(now() - INTERVAL '1 day')
+         ORDER BY id;
+
+.. warning::
+
+    Filter on ``id`` itself, as above. A predicate on a function of the id, such as
+    ``WHERE uuid_timestamp(id) > now() - INTERVAL '1 day'``, cannot use chunk exclusion and scans
+    every chunk, compressed ones included.
+
+|
+
+Background workers
+^^^^^^^^^^^^^^^^^^
+
+Policies run as TimescaleDB background jobs. The server needs one worker for the launcher, one
+scheduler for each database that has the extension, and one more for each job while it runs, all
+counted against ``timescaledb.max_background_workers`` (default 16), which in turn must fit within
+PostgreSQL's ``max_worker_processes``. When the workers run out, a database's scheduler does not
+start and its policies silently never run: the server log notes it once, and ``hs initdb`` cannot
+see it. If many databases on one server use the extension, raise
+``timescaledb.max_background_workers`` (and ``max_worker_processes``) and restart the server. See
+the TimescaleDB documentation on configuring background workers.
+
+|
+
+Converting an existing table
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``hs initdb`` converts ``task`` only while it is empty. A plain ``task`` table that already holds
+tasks (for example, a database created by an earlier release, or under the ``postgres`` provider)
+is left as it is: ``hs initdb`` succeeds, upgrades the schema, and warns. Everything keeps working
+on the plain table.
+
+To convert it yourself, stop every *HyperShell* process using the database and run:
+
+.. admonition:: Convert a populated task table by hand
+    :class: note
+
+    .. code-block:: sql
+
+        SELECT create_hypertable('task', by_range('id', INTERVAL '1 week'),
+                                 create_default_indexes => false, migrate_data => true);
+
+then run ``hs initdb`` to add the columnstore and its policy. Be aware that:
+
+* It copies every row into chunks in a single transaction, holding an exclusive lock on ``task``
+  throughout; on a large table this takes a long time and needs room for a second copy.
+* It aborts, converting nothing, if any task id is not a UUIDv7. Databases written without the
+  ``uuid7`` extra (e.g., by releases before 2.9 with only the ``postgres`` extra) hold UUIDv4 ids
+  and cannot be converted in place; start a new database instead.
+
+|
+
+Beyond the defaults
+^^^^^^^^^^^^^^^^^^^
+
+We set up only what every *HyperShell* database benefits from. Data retention and continuous
+aggregates are left to you, through TimescaleDB directly. On a hypertable partitioned by a UUIDv7
+column, as ``task`` is, these need a newer TimescaleDB than the 2.22.0 floor:
+
+* ``show_chunks`` and ``drop_chunks`` given a time or an interval (``older_than``,
+  ``newer_than``): 2.23.0 (`#8746 <https://github.com/timescale/timescaledb/pull/8746>`_).
+* Continuous aggregates: 2.24.0
+  (`#8939 <https://github.com/timescale/timescaledb/pull/8939>`_).
+* Retention policies (``add_retention_policy``): 2.25.0
+  (`#9102 <https://github.com/timescale/timescaledb/pull/9102>`_).
+
+See the TimescaleDB
+`changelog <https://github.com/timescale/timescaledb/blob/main/CHANGELOG.md>`_ for these releases.
