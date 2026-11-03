@@ -277,6 +277,62 @@ The plan gate is **passed** with these rulings and conditions.
   key). Same rationale: `zone` is server-held, never a result column; the test's intent is unchanged.
   After it: full suite 737 passed, 47 skipped on both 3.14 and 3.11.
 
+- **Merge of Z1 final + develop `b31c66e` (2026-11-03).** `git merge --no-ff ec75169` (Z1 final
+  `7dd85c1` with develop `b31c66e`), signed, as merge commit `a040e1d`. Three files conflicted;
+  every other file merged without a conflict.
+  - `src/hypershell/core/queue.py` (foreman ruling 1: Z1's thread rule is authoritative):
+    - `_INTERNALS` is the union: Z1's three thread checks, then this cycle's six work-request pins.
+    - The accept loop starts each handler as
+      `_ServerThread(target=self.handle_request, args=(conn, peer), name='hypershell-queue-handler')`,
+      so the handler that logs `Client too old` is on the server side from its first statement.
+    - `QueueClient.connect` keeps `_dispatcher_lock`, the `_get_scheduled(PROTOCOL)` /
+      `QueueVersionError` handshake and the protocol sentence of its docstring. The docstring's
+      hand-off sentence takes Z1's thread-rule wording.
+    - Ported to the thread rule: `connect`'s `_note_dialed(self._address)` call is dropped (Z1
+      removed address matching), as is the docstring's address wording. This cycle starts no other
+      thread in a queue server: the dispatcher's `request` runs on the handler thread (a
+      `_ServerThread`), and the lazy client-side dispatcher proxy is wrapped by `_defer_decref`
+      like the four queues.
+  - `.github/workflows/tests.yml` (ruling 2): the PostgreSQL job runs
+    `tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py
+    tests/test_zone_postgres.py`. Every matrix entry and job of both sides is kept. The three
+    TimescaleDB entries run the same line. `tests/test_zone_postgres.py` fits there: it builds plain
+    tables through `upgrade_schema`, as the upgrade and writeback modules do, and the `timescale`
+    provider's hypertable pass is not on that path.
+  - `ROADMAP.md` (ruling 3): every entry is kept. Z1's two queue entries come first (forked child
+    keeps the listener; server-owned proxies without reference counting), then this cycle's
+    (`hs client -b` reads the submit section's key).
+- **Gates on `a040e1d`** (macOS; frozen dev venvs from `uv sync --frozen --offline` against
+  standalone 3.11.18, 3.12.16, 3.13.18 and 3.14.10, from a `git archive` extract; each pytest run in
+  an isolated site, in its own process group under a timeout). `unsupported_internals() == []` on
+  all four.
+  - **Full suite**, once each, the four side by side: 3.11.18 **817 passed, 71 skipped**; 3.12.16
+    **821 passed, 67 skipped**; 3.13.18 and 3.14.10 **818 passed, 70 skipped** each. On each
+    Python, 66 of the skips are database tests with no PostgreSQL server configured (test_upgrade_postgres
+    29, test_timescale 20, test_writeback_postgres 14, test_zone_postgres 3), and 1 is the 2.8.3
+    fixture regeneration. The rest are Z1's queue probes: on 3.11, the first-instruction (no
+    `sys.monitoring`) and scheduled-elsewhere probes, 2 each; on 3.13 and 3.14, the
+    scheduled-elsewhere probe (2) and the stale-entry test (1).
+  - **`tests/test_queue_gc.py` + `tests/test_queue.py`, 3.12.16:** **10/10** consecutive runs pass,
+    54 passed each, none skipped.
+  - **Zone and dispatch modules, 3.12.16:** 98 passed, 3 skipped (test_zone_postgres, no
+    server). test_zone_model 11, test_zone_dispatch 16, test_zone_workload 1, test_zone_display 9,
+    test_dispatch 28, test_dispatch_version 4, test_dispatch_workload 7, test_client_request 8,
+    test_cluster_compare 14.
+  - **Local smoke** (`sh tests/cluster/smoke.sh`, `HSD_SMOKE_KEEP=1`; feature archive on Python
+    3.13.18): homogeneous TLS on and off, 2000 tasks, identical results, PASS. Zoned rehearsal
+    (`default:40,cpu:30,gpu:30`, 3 groups, one retry per zone, 4 clients, TLS) judged with
+    `compare.py --zoned feature`: zones default 122, cpu 91, gpu 91, 304 rows, 4 retried, PASS.
+    `smoke: PASS`, with no host or user name in the results.
+  - **`parity` vs `b819de6`** (`--skip-help`, since this cycle changes client help): identical
+    task tables and groups in order, TLS on and off, rc 0/[0, 0] on both builds.
+  - **Compat vs `b819de6`**, as `skew` (which replaced `compat` in P3), TLS on and off. A `b819de6`
+    client against this server exits rc 5 in 0.4 s and is logged `Client too old` once, while a new
+    client finishes 200/200. A new client against a `b819de6` server exits rc 5 in 0.3 s with one
+    CRITICAL `QueueVersionError`. PASS.
+  - No follow-up commit was needed. `tests/test_groups.py::test_group_starts_based_on_previous_scheduled_tasks`
+    passed in every full suite.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling
