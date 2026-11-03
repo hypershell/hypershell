@@ -12,16 +12,20 @@ replayed without sleeps, threads or timing.
 
 # Type annotations
 from __future__ import annotations
-from typing import Iterator, List, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
 from pathlib import Path
 
 # Standard libs
+import os
+import sys
+import json
 import logging
 from datetime import datetime
 
 # External libs
 import pytest
 from pytest import mark, fixture
+from cmdkit.app import exit_status
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
@@ -29,7 +33,8 @@ from sqlalchemy.engine import Engine
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
 from hypershell.data.model import Entity, Task
-from hypershell.server import Scheduler, SchedulerState
+from hypershell.server import Scheduler, SchedulerState, is_file_input
+from tests import main, create_taskfile
 
 
 LATE_GROUP_MESSAGE = 'after task group'
@@ -280,3 +285,87 @@ def test_restart_on_halted_group_still_halts(task_db: Engine, caplog: pytest.Log
     assert scheduler.load_bundle() is SchedulerState.FINAL
     assert any(record.getMessage().startswith('Failed task group 0') for record in caplog.records)
     assert scheduled_in_group(1) == 0
+
+
+# --- File input is submitted whole before scheduling --------------------------------------------
+
+class Wrapper:
+    """A source that carries the stream it wraps as `iterable`."""
+
+    def __init__(self, iterable: Any) -> None:
+        self.iterable = iterable
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.iterable)
+
+
+@mark.unit
+@mark.parametrize('kind, expected', [
+    ('file', True), ('list', True), ('tuple', True),
+    ('stdin', False), ('pipe', False), ('generator', False),
+    ('wrapped-file', True), ('wrapped-pipe', False),
+])
+def test_file_input_classification(tmp_path: Path, kind: str, expected: bool) -> None:
+    """A seekable file, a list or a tuple is file input; standard input, a pipe or a generator is not."""
+    taskfile = tmp_path / 'task.in'
+    taskfile.write_text('echo 0\n')
+    handles = []
+    try:
+        if kind in ('file', 'wrapped-file'):
+            handles.append(open(taskfile, mode='r'))
+            source = handles[-1]
+        elif kind in ('pipe', 'wrapped-pipe'):
+            read_fd, write_fd = os.pipe()
+            handles.append(os.fdopen(write_fd, mode='w'))
+            handles.append(os.fdopen(read_fd, mode='r'))
+            source = handles[-1]
+        elif kind == 'list':
+            source = ['echo 0']
+        elif kind == 'tuple':
+            source = ('echo 0', )
+        elif kind == 'stdin':
+            source = sys.stdin
+        else:
+            source = (line for line in ['echo 0'])
+        if kind.startswith('wrapped-'):
+            source = Wrapper(source)
+        assert is_file_input(source) is expected
+    finally:
+        for handle in handles:
+            handle.close()
+
+
+def task_times(groups: List[int]) -> Dict[int, Tuple[List[datetime], List[datetime]]]:
+    """Schedule and completion times of every task, by group, from `hs list --json`."""
+    rc, stdout, _ = main(['hs', 'list', '--json'])
+    if rc != exit_status.success:
+        pytest.fail(f'hs list --json exited {rc}')
+    times = {group: ([], []) for group in groups}
+    for record in json.loads(stdout):
+        if record['schedule_time'] is None or record['completion_time'] is None:
+            pytest.fail(f'Task not completed: {record["id"]}')
+        times[record['group']][0].append(datetime.fromisoformat(record['schedule_time']))
+        times[record['group']][1].append(datetime.fromisoformat(record['completion_time']))
+    return times
+
+
+@mark.integration
+@mark.parametrize('layout', [[1, 0, 1, 0], [0, -1, 0, -1]], ids=['1-0', '0-(-1)'])
+def test_cluster_runs_unsorted_file_in_group_order(temp_site: Path, layout: List[int]) -> None:
+    """A task file that lists a higher group first still runs its groups in ascending order."""
+    tasks = [f'echo {n}  #HYPERSHELL: n:{n} group:{group}' for n, group in enumerate(layout)]
+    taskfile = create_taskfile(temp_site, tasks)
+    rc, _, stderr = main(['hs', 'cluster', str(taskfile), '-N2'])
+    assert rc == exit_status.success
+
+    # Results are read from the database, which is authoritative; task stdout is best effort.
+    rc, stdout, _ = main(['hs', 'list', '-c', '-S'])
+    assert rc == exit_status.success and stdout == str(len(tasks))
+
+    groups = sorted(set(layout))
+    times = task_times(groups)
+    for lower, higher in zip(groups, groups[1:]):
+        assert max(times[lower][1]) <= min(times[higher][0])
+        assert stderr.count(f'Completed task group {lower} - starting task group {higher}') == 1
+    assert stderr.count('Completed task group') == len(groups) - 1
+    assert LATE_GROUP_MESSAGE not in stderr

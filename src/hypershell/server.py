@@ -46,6 +46,7 @@ from typing import List, Dict, Tuple, Iterable, IO, Optional, Callable, Type, Fi
 from types import TracebackType
 
 # Standard libs
+import io
 import sys
 import time
 from enum import Enum
@@ -75,7 +76,7 @@ from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT
 from hypershell.client import ClientInfo
 
 # Public interface
-__all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp',
+__all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp', 'is_file_input',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
            'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
@@ -904,15 +905,20 @@ class ServerThread(Thread):
             time.sleep(0.1)
 
     def start_threads(self: ServerThread) -> None:
-        """Start child threads."""
+        """Start child threads; with file input, scheduling starts once the whole file is submitted."""
         if self.submitter is not None:
             self.submitter.start()
-        if self.scheduler is not None:
-            self.scheduler.start()
         if self.confirm is not None:
             self.confirm.start()
         self.heartmonitor.start()
         self.receiver.start()
+        if self.scheduler is not None:
+            if self.submitter is not None and is_file_input(self.submitter.source):
+                # The scheduler sees every group in the file before it chooses the first one,
+                # so the file's groups run in ascending order whatever order they are listed.
+                log.info('Waiting for task file to be submitted before scheduling')
+                self.wait_submitter()
+            self.scheduler.start()
 
     def wait_submitter(self: ServerThread) -> None:
         """Wait on task submission to complete."""
@@ -952,7 +958,9 @@ class ServerThread(Thread):
         if self.submitter is not None:
             self.submitter.stop(wait=wait, timeout=timeout)
         if self.scheduler is not None:
-            self.scheduler.stop(wait=wait, timeout=timeout)
+            # A scheduler not yet started, because a task file is still being submitted, has
+            # nothing to join.
+            self.scheduler.stop(wait=wait and self.scheduler.ident is not None, timeout=timeout)
         self.heartmonitor.stop(wait=wait, timeout=timeout)
         self.queue.completed.put(make_sentinel())
         self.receiver.stop(wait=wait, timeout=timeout)
@@ -960,6 +968,24 @@ class ServerThread(Thread):
             self.queue.confirmed.put(make_sentinel())
             self.confirm.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
+
+
+def is_file_input(source: Iterable[str | dict]) -> bool:
+    """True if `source` is a whole task file: a seekable file (not standard input), or a list or tuple.
+
+    Standard input, pipes, FIFOs, process substitution and other iterables are streams, which
+    are scheduled as they arrive.
+    """
+    # A gated source carries the stream it wraps as `iterable`.
+    inner = getattr(source, 'iterable', source)
+    if isinstance(inner, (list, tuple)):
+        return True
+    if isinstance(inner, io.IOBase) and inner is not sys.stdin:
+        try:
+            return inner.seekable()
+        except (OSError, ValueError):
+            return False
+    return False
 
 
 def serve_from(source: Iterable[str],

@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -53,7 +53,7 @@ phases:
     -S -t n:0) -eq 1 && ! grep -q ''after task group'' err.log"'
 - id: P3
   name: File input is ingested before the scheduler starts
-  status: pending
+  status: done
   satisfies:
   - R3
   - R8
@@ -312,14 +312,14 @@ coupled core and is made as one edit.
 **Goal:** `hs cluster FILE` and `hs server FILE` run an unsorted file's groups in ascending order.
 Stream input, `--no-db`, `--forever` and bare `--restart` are unchanged.
 
-- [ ] `server.py`: add the module function `is_file_input(source) -> bool`, with a docstring
+- [x] `server.py`: add the module function `is_file_input(source) -> bool`, with a docstring
       (PLAN §2.3).
   - Unwrap with `inner = getattr(source, 'iterable', source)`, with a declarative comment that a
     gated source carries the stream it wraps as `iterable`. Do not import `GatedSource`.
   - Return true for a `list` or `tuple`, and for an `io.IOBase` that is not `sys.stdin` and
     whose `seekable()` is true. Return false otherwise.
   - Export it if `server.py` keeps an `__all__`.
-- [ ] `ServerThread.start_threads`: start the submitter, then confirm, heartmonitor and receiver.
+- [x] `ServerThread.start_threads`: start the submitter, then confirm, heartmonitor and receiver.
   Then, if `self.scheduler is not None`:
   - if `self.submitter is not None and is_file_input(self.submitter.source)`, log INFO
     (`Waiting for task file to be submitted before scheduling`, or similar) and call
@@ -327,10 +327,10 @@ Stream input, `--no-db`, `--forever` and bare `--restart` are unchanged.
   - then `self.scheduler.start()`.
 
   `__init__` is not touched (port placement).
-- [ ] `ServerThread.stop`: `self.scheduler.stop(wait=wait and self.scheduler.ident is not None,
+- [x] `ServerThread.stop`: `self.scheduler.stop(wait=wait and self.scheduler.ident is not None,
       timeout=timeout)`. Add a declarative comment that a scheduler not yet started, because a
       file is still being ingested, has nothing to join.
-- [ ] `tests/test_group_order.py`, two additions:
+- [x] `tests/test_group_order.py`, two additions:
   - `test_file_input_classification` (`unit`, parametrized). A seekable temp file opened `'r'`,
     a list and a tuple give True. `sys.stdin`, an `os.pipe()` read end (via `os.fdopen`) and a
     generator give False. A tiny local wrapper with `.iterable` set to the temp file gives True,
@@ -344,7 +344,7 @@ Stream input, `--no-db`, `--forever` and bare `--restart` are unchanged.
     - `Completed task group L - starting task group H` appears exactly once, for the ascending
       pair, and there is no `after task group`.
     - It must not depend on timing: no sleeps and no repetition.
-- [ ] Never run the integration test against `b31c66e` without `kt`. It can hang there.
+- [x] Never run the integration test against `b31c66e` without `kt`. It can hang there.
 - **Verify:** the frontmatter `verify:`.
   - `tests/test_group_order.py` and `tests/test_groups.py` pass, with the one-rerun flake rule.
   - **Unsorted-file CLI drive:** groups listed `1, 0, -1, 1, 0, -1` through `hsx t.in -N2`. By
@@ -452,6 +452,15 @@ reason from `increment_group` is `new tasks submitted`. A `git merge-file` pre-c
 `src/` file onto `origin/master` (with #68's `model.py`) is conflict-free. Verify (3.12):
 unit tests `28 passed`; the restart drive exits 0 with `Completed task group 1 - starting task
 group 0`, 0 remaining, the group-0 task succeeded, and no late warning.
+
+**P3.** `is_file_input` sits before `serve_from`, and `import io` and the `__all__` entry sit where
+both branches match; the `git merge-file` pre-check of `server.py` onto `origin/master` stays
+conflict-free. The integration test checks success from `hs list -c -S` rather than task stdout,
+which the suite treats as best effort; the plan's "every task printed" is met through the
+database. Verify (3.12): `tests/test_group_order.py tests/test_groups.py` `27 passed` on the first
+run (no rerun); the unsorted-file drive ran groups `-1 0 1` by `schedule_time`, 0 remaining, no
+late warning. A separate file drive logged `Waiting for task file to be submitted before
+scheduling`.
 
 ---
 
