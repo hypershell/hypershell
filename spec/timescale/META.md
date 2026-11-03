@@ -21,6 +21,7 @@ nothing stands out.
 
 - <what helped, and in which skill/step>
 - hs-review rubric, "grade a seed as prose": it surfaced cycle 1's F4, a new seed misdescribing CI as the diff leaves it.
+- hs-review Step 3, cycle 2+ defaulting to a fresh blind pass over the whole diff: it found a cross-list overlap that cycle 1 had dropped (F5), and seed prose that the base merge made stale again (F7).
 
 ## Friction findings
 
@@ -125,4 +126,6 @@ is skipped by the parser):
 - **Recommended fix:** remove `git log` from Step 2's reviewer inputs and say why in the Safety
   Principles. Have the orchestrator keep the log to itself for the contract-drift check.
   `review-rubric.md`'s "What the reviewer sees" should list the log as excluded.
+- **Seen again at review cycle 2 (hs-review:step2):** the foreman again overrode Step 2. The
+  blind reviewer got the spec-excluded diff command and no `git log` or commit subjects.
 - **Confidence:** high · **Effort:** small
