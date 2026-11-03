@@ -199,6 +199,22 @@ The plan gate is **passed** with these rulings and conditions.
 - **Cluster drive — condition.** The test-cluster job class allows at most 4 nodes and 1 h. Node 0 runs the server and nodes 1–3 run clients. Run 2's mixed zones put several client processes per node, each with its own `--zone` and advertised size. Mixed zones are labels, not nodes, so ≥ 4 client *processes* across 3 nodes meets the plan's intent. Run 1 and Run 2 are separate jobs, each guarded to finish inside 54 minutes.
 - **Base — condition.** The build runs on an integration base (Z1's final head with `origin/develop` merged in), and `writeback-scoped-conditional` is merged in when it lands. P1's "writeback TECH present" check reads it from that base. Once Z1 and writeback have both landed on `develop`, the foreman rebases this branch onto `develop` before review.
 
+## Build status (2026-11-03)
+
+- **Re-merge after writeback landed.** `integ/zone-dispatch-base` = `ebd2534` (signed merge of
+  `origin/develop` `6f216d0`). Rebasing this branch onto it stops at P1 with textual conflicts in
+  `src/hypershell/data/model.py` (the `from enum import Enum` / `from uuid import ...` import lines;
+  the `__all__` line where writeback adds `'ResultOutcome'` and Z2 adds the zone names) and in
+  `.github/workflows/tests.yml` (both cycles append a PostgreSQL test file to the same pytest line).
+  Per the foreman's rule the rebase was aborted unresolved; the branch still sits on `30993b8`.
+- **[NEEDS CLARIFICATION] after that rebase:** writeback's `tests/test_writeback.py::
+  test_result_columns_are_fixed` pins the literal set of 20 non-result columns; Z2 adds `zone`
+  (server-held, never a result column), so that existing test fails until `zone` joins its set.
+  The ruling allows no other existing test to change.
+- **P6:** code committed, phase `in_progress`. The local smoke (`sh tests/cluster/smoke.sh`) was not
+  run here: it and `build_archive.sh` delete their scratch with `rm -rf`, which this build may not
+  run. The foreman runs it, with `HSD_SMOKE_KEEP=1` to keep results.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling

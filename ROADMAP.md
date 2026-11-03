@@ -321,6 +321,18 @@ It came with the in-process server's same-port restart; no CLI path uses the sam
 `spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
 **Seed:** [`issues/queue-stale-decref-same-port-restart.md`](issues/queue-stale-decref-same-port-restart.md)
 
+
+## `hs client -b` reads the submit section's key, not the client section's
+
+`hs client` takes its `-b`/`-w` defaults from `submit.bundlesize`/`submit.bundlewait`, while the
+configuration reference documents `[client]`. Since zone-dispatch a client advertises an explicit
+`-b` as the size it requests, so a `submit.bundlesize` set for `hs submit` is advertised by every
+client too.
+
+*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
+`spec/zone-dispatch/` (plan gate ruling N4)*
+**Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
+
 ## Merged output is interleave-corruptible
 
 Concurrent executors write to one shared file description with no line discipline, so long lines
