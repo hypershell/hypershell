@@ -50,6 +50,16 @@ already implements comment semantics correctly.
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md)
 
+## Date-like task arguments are turned into datetimes on the wire
+
+The bundle decoder converts any string that parses as an ISO date into a datetime, whatever field
+it is in. A task whose argument line is `2026-11-02` or `20261102`, an ordinary `hsx` input, reaches
+the client as a datetime, template expansion fails on it, and the task is recorded as a template
+error without running. Decoding by declared column type, not by guessing, removes the class.
+
+*Horizon: near-term · Depends on: — · Refs: found by the writeback fix's research*
+**Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md)
+
 ## Unguarded task start kills the executor and poisons the task
 
 An `OSError` while opening capture files or spawning the subprocess propagates out of the FSM and
@@ -213,6 +223,50 @@ waits rather than building one twice.
 *Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half is closed
 separately by the writeback fix*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
+
+## A task whose confirmation has not landed is invisible to orphan recovery
+
+Orphan recovery finds an evicted client's rows by `client_id`, which only the client's confirmation
+sets, and confirmations are not ordered against eviction. A client evicted before its confirmation
+is applied leaves its rows in flight with a NULL `client_id`, never reverted or redispatched; a late
+confirmation then names the already-evicted client. Either way the row waits until restart.
+
+*Horizon: mid-term · Depends on: — · Refs: writeback fix (same token); relay*
+**Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
+
+## A late confirmation can overwrite the executing client's attribution
+
+Confirmations and results are applied by separate threads in no fixed order. A confirmation applied
+after the result rewrites the completed row's attribution with the confirming client's id. Harmless
+for ordinary clients; wrong for relay, which confirms under its own id and returns results
+attributed to the leaf client that ran them. Conditioning the confirmation on an incomplete row
+needs no wire change.
+
+*Horizon: near-term, before relay · Depends on: — · Refs: relay (return path, leaf attribution)*
+**Seed:** [`issues/late-confirm-overwrites-attribution.md`](issues/late-confirm-overwrites-attribution.md)
+
+## Orphan recovery can discard a result that lands while it runs
+
+Reverting an evicted client's tasks reads the in-flight rows, then reverts them by id in a separate,
+unconditional statement. A legitimate result committed in between is wiped and the task runs again,
+with no sign to the operator. Making the revert conditional on the row still being in flight closes
+it.
+
+*Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
+**Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
+
+## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
+
+The 2.9 line added task columns that a 2.8.3 peer cannot read, and nothing on the wire names a
+version. A 2.8.3 client exits on its first bundle from a 2.9 server with a `TypeError`; a 2.9 client
+against a 2.8.3 server runs its tasks, but the server records no result and the run hangs. Every 2.9
+pre-release is affected. The fix is a clean, prompt version error in both directions, and a line in
+the 2.9.0 release notes; `zone-dispatch`'s version handshake is meant to be that error and should be
+verified against 2.8.3 there.
+
+*Horizon: near-term, before 2.9.0 · Depends on: `zone-dispatch`'s version handshake (R5 of its
+GOAL, not the zone seed's R5) · Refs: release notes*
+**Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
 
 ## `rotatedb` lost-update window
 

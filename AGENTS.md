@@ -212,8 +212,12 @@ retry row with the same `previous_id`:
 - two servers on one database, which is unsupported: no query takes row locks, so new tasks
   double-schedule too;
 - a process killed between the retry insert and the `retried` mark, which are separate commits;
-- a reset `retried` flag, from a late full-row writeback by an evicted client or from
-  `hs task update`.
+- a reset `retried` flag, from `hs task update`.
+
+A returned result writes only its result columns (`Task.result_columns`), and only for its current
+assignment: the row's `schedule_time` as dispatched, while `completion_time` is NULL
+(`Task.apply_results`). A stale or duplicate result is logged and dropped, so a late result from an
+evicted client cannot reopen a retried or cancelled row.
 
 Pre-2.9 SQLite databases keep `UNIQUE` on both columns, because SQLite cannot drop them without a
 table rebuild. Normal operation never trips them; in the three cases above they raise
