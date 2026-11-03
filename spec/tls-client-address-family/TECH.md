@@ -269,3 +269,57 @@ fix). Port exactly three paths, as this trial did: `src/hypershell/core/queue.py
 5. Amend this file if reality diverges (`set_phase.py`; note it in the commit body). STOP only on a
    `GOAL.md` contradiction.
 6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[fix]` commit; stop and report.
+
+---
+
+## CI follow-up (2026-11-03)
+
+**Failure.** On the PR's CI run, the Linux `ubuntu-latest` job on Python 3.12.16 (serial pytest)
+errored at setup of `test_tls_client_skips_ipv6_listener`: `assert_trap_armed` raised
+`ConnectionRefusedError: [Errno 111]` from `socket.create_connection(('localhost', port))`. The same
+file passed on 3.11, 3.13 and 3.14 in that run. The product change was not involved: the error is in
+the fixture's arming dial, before any `hypershell` code runs.
+
+**Cause (CONFIRMED by local reproduction): the resetter's reset raced the arming dial's own
+`connect()`.** `IPv6Resetter._serve` reset each connection the moment `accept()` returned. With a
+timeout set, `socket.connect` is a non-blocking connect, then a poll, then a read of `SO_ERROR`. The
+resetter thread can accept and send its RST in that gap. `SO_ERROR` then holds `ECONNRESET`, so the
+dial to `::1` fails, although it landed on the resetter. `create_connection` moves on to
+`127.0.0.1`, where nothing listens yet, and raises only the last error, `ConnectionRefusedError`.
+"Refused" therefore did not mean that nothing accepted on `::1`. Reproduced on macOS by dialling the
+unchanged resetter 3,000 times back to back under the shim, with `all_errors=True` to see every
+address's error. 61 dials failed on 3.12.16 and 73 on 3.14.10, every one as `ConnectionResetError`
+on `::1` then `ConnectionRefusedError` on IPv4. Every dial, failed or not, was counted by the
+resetter. The race is timing-dependent, not Linux- or 3.12-specific; one arming dial per trap setup
+makes it rare in a single run, which is why it had not shown locally. The other candidates were
+ruled out by reading the code. The resolver patch is applied before arming. The listener is closed
+only in `close()` and the bind error path; an exiting serve thread would leave it open and still
+completing handshakes. `ipv6_resetter()` binds `::1` and redraws on `EADDRINUSE`, and binding and
+listening finish before the dial.
+
+**Fix (`tests/test_queue_address_family.py` only; `git diff 0afe639 -- src/` is empty).**
+- `IPv6Resetter` counts a connection as soon as it is accepted, then waits for the peer to send or
+  close before the `SO_LINGER (1, 0)` reset. The wait is bounded: a 0.1 s receive poll that also
+  checks the stop event, up to `TIMEOUT`. A peer that has sent or closed has already returned from
+  `connect()`, so the reset can no longer fail the dial. The trap's effect on a client is unchanged:
+  the pre-fix TLS client sends its ClientHello and is reset.
+- The arming dials (`assert_trap_armed` and the `hs cluster` subprocess check) pass
+  `all_errors=True` (Python ≥ 3.11, the floor on `develop` and `master`). A failed arm now reports
+  every address's error, not only the IPv4 refusal.
+
+**Gates** (frozen offline environments from `/tmp/claude-501/tlsaf-review/venv`, overlaid on trees
+exported to `/tmp/claude-501/tlsaf-ci/src/`; every pytest in its own process group under a kill
+timer):
+- Stress, the same 3,000-dial loop on the fixed resetter: 0 failures on 3.12.16 and on 3.14.10, with
+  all 3,000 counted (before: 61 and 73).
+- The file 200 times in a row on 3.12.16: 200 of 200 runs `8 passed`. And 50 times on 3.14.10: 50 of
+  50 runs `8 passed`.
+- Full suite once on each, serial as CI runs it: 3.12.16 and 3.14.10, each `639 passed, 64 skipped`.
+  The skips are the PostgreSQL, TimescaleDB and fixture-regeneration gates; none is in this file.
+- Red/green, re-proved on 3.12.16 and 3.14.10. The `prefix` tree has `core/queue.py` from
+  `origin/develop` `b31c66e`, so the client is the pre-fix one. It gives `3 failed, 5 passed`:
+  `test_tls_client_skips_ipv6_listener` (`ConnectionResetError` in the TLS handshake, in the test
+  body, not at setup), `test_cluster_skips_ipv6_listener[tls]` (`hs cluster` exit 5,
+  `ConnectionResetError`) and `test_no_ipv4_address_fails_promptly`. The `head` tree gives
+  `8 passed`. The red errors are now `ConnectionResetError` where the build saw `BrokenPipeError`,
+  because the reset follows the ClientHello instead of preceding it.

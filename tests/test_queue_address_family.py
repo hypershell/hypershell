@@ -102,6 +102,11 @@ class IPv6Resetter:
 
     Stands in for an unrelated local process holding the server's port number on IPv6.
     Counts the connections it receives so a test can prove nothing reached it.
+
+    The reset waits until the peer sends or closes (bounded). A reset sent straight after
+    ``accept()`` can reach the client before its own ``connect()`` has collected the result:
+    the dial then fails with ``ConnectionResetError`` on ``::1`` and falls through to IPv4,
+    although it landed here. Once the peer has sent or closed, its ``connect()`` has returned.
     """
 
     def __init__(self: IPv6Resetter, sock: socket.socket) -> None:
@@ -129,10 +134,27 @@ class IPv6Resetter:
                 continue
             except OSError:
                 return
-            with conn:
-                conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
             with self._lock:
                 self._count += 1
+            with conn:
+                self._await_peer(conn)
+                try:
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+                except OSError:
+                    pass
+
+    def _await_peer(self: IPv6Resetter, conn: socket.socket) -> None:
+        """Return once the peer sends or closes, or on stop, or after :data:`TIMEOUT` seconds."""
+        conn.settimeout(0.1)
+        deadline = time.monotonic() + TIMEOUT
+        while not self._stop.is_set() and time.monotonic() < deadline:
+            try:
+                conn.recv(1)
+                return
+            except socket.timeout:
+                continue
+            except OSError:
+                return
 
     def close(self: IPv6Resetter) -> None:
         self._stop.set()
@@ -185,10 +207,11 @@ def assert_trap_armed(resetter: IPv6Resetter) -> int:
     """An unrestricted dial to ``('localhost', port)`` must land on the resetter.
 
     Proves the forced resolver order took effect on this host. Returns the resetter's
-    count afterwards, the baseline every later assertion compares against.
+    count afterwards, the baseline every later assertion compares against. A failed dial
+    reports the error from every address tried (``all_errors``), not only the last.
     """
     before = resetter.count
-    with socket.create_connection(('localhost', resetter.port), timeout=TIMEOUT):
+    with socket.create_connection(('localhost', resetter.port), timeout=TIMEOUT, all_errors=True):
         pass
     assert wait_for(lambda: resetter.count > before), 'trap not armed: dial missed the ::1 listener'
     return resetter.count
@@ -344,7 +367,8 @@ def test_cluster_skips_ipv6_listener(temp_site: Path, tmp_path: Path, tls_option
         rc, stdout, stderr = run_bounded([sys.executable, '-c', (
             'import socket, sitecustomize, sys; '
             'assert sitecustomize.__file__.startswith(sys.argv[1]), sitecustomize.__file__; '
-            'socket.create_connection(("localhost", int(sys.argv[2])), timeout=10).close()'
+            'socket.create_connection(("localhost", int(sys.argv[2])), timeout=10,'
+            ' all_errors=True).close()'
         ), str(shim), str(resetter.port)], env, TIMEOUT)
         assert rc == 0, stderr
         assert wait_for(lambda: resetter.count > before), 'trap not armed in subprocess'
