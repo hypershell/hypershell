@@ -320,3 +320,14 @@ None. F3 is prose only and touches no core file and no security or DB-lifecycle 
   the confirmation is open there, and its unconfirmed-row case involves no confirmation at all.
   Optionally, also update line 28's "Not reproduced".
 - Cycle 3 is the last under the bound. The judge may scope it to verifying F3.
+
+## Triage (human gate) — cycle 2
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| F3 · CONFIRMED | fix | Correct `issues/late-confirm-overwrites-attribution.md:53-54` so it agrees with the corrected stale-confirm seed: no confirmation reaches the row in that case, and the token question is left to `/hs-plan`. Also fix line 28's "Not reproduced", since review reproduced it. |
+| Observation · orphan-revert seed | fix (prose) | State precisely which result columns survive a revert (3 of 13, as review found) instead of "cleared". |
+| Observation · stale-confirm seed | fix (prose) | Qualify "A is not evicted again" with "unless A reconnects". |
+| Observation · wire seed ROADMAP | fix (prose) | Point "Depends on" at zone-dispatch's version handshake by name, rather than only at `issues/zone.md`. |
+
+Cycle 3 is scoped to these prose fixes only.

@@ -24,9 +24,10 @@ it. `writeback-scoped-conditional` made that leaf attribution a result column th
 attribution with the relay's own id, and the completed row records the wrong executing client.
 
 Evidence: found by reading during `writeback-scoped-conditional`'s research
-(`spec/writeback-scoped-conditional/research/02-callers-concurrency-tests.md` §2). **Not
-reproduced**. **Pre-existing** in `develop` (today the Receiver writes `client_id` from the copy
-too, so the same overwrite happens).
+(`spec/writeback-scoped-conditional/research/02-callers-concurrency-tests.md` §2). **Reproduced**
+in-process during that fix's review (cycle 2, `spec/writeback-scoped-conditional/REVIEW.md`): a late
+confirmation moved a completed row's attribution to the holder. **Pre-existing** in `develop` (today
+the Receiver writes `client_id` from the copy too, so the same overwrite happens).
 
 ## Why it was deferred
 
@@ -50,6 +51,8 @@ confirmation can rewrite it.
 
 - **Relay-facing.** Carry this to relay's shaping alongside its return-path note.
 - A cheap partial fix needs no wire change: condition the confirmation's update on
-  `completion_time IS NULL`. The stale-confirmation case in
-  `issues/stale-confirm-hides-orphan.md` needs the dispatch token on the wire.
+  `completion_time IS NULL`. It is a separate defect from `issues/stale-confirm-hides-orphan.md`,
+  where the row is stranded before any confirmation is applied, so no confirmation reaches it.
+  Whether that seed's recovery needs the dispatch token on the confirmation, or a bound on how long
+  a dispatched row may stay unconfirmed, is left to its `/hs-plan`.
 - Found by: `writeback-scoped-conditional` plan research, 2026-11-02.

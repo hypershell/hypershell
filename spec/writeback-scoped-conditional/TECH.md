@@ -3,7 +3,7 @@ slug: writeback-scoped-conditional
 title: Scoped, conditional result writeback
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/writeback-scoped-conditional
 base: develop
 current_phase: done
@@ -70,7 +70,7 @@ phases:
 review:
   last_reviewed_commit: 36a4e67
   verdict: changes-requested
-  blocked_reason: 'review cycle 2: F3 seed prose (LOW)'
+  blocked_reason: ''
   cycle: 2
 ---
 # TECH.md — Scoped, conditional result writeback
@@ -309,6 +309,13 @@ assertion** on `d996579`, plus guards that pin today's behaviour where it must n
       stale result`. F2 — correct `issues/stale-confirm-hides-orphan.md` and its `ROADMAP.md`
       entry to the reproduced mechanism. Seed the pre-existing 2.8.3 ↔ 2.9 incompatibility
       (`issues/wire-compat-2-8.md`, `unshaped`, with a `ROADMAP.md` entry).
+- [x] Review-2 remediation (triage in `REVIEW.md`; seed prose only, no code): F3 —
+      `issues/late-confirm-overwrites-attribution.md` no longer says the stale-confirm case needs
+      the dispatch token (no confirmation reaches that row; the token question is that seed's
+      `/hs-plan`), and its evidence line records review's reproduction. Observations —
+      `orphan-revert-loses-result.md` names the 3 of 13 result columns a revert leaves;
+      `stale-confirm-hides-orphan.md` qualifies "A is not evicted again" with "unless A reconnects";
+      the wire-compat `ROADMAP.md` entry depends on `zone-dispatch`'s version handshake by name.
 - **Verify:** the frontmatter `verify:` — no `xfail` left; full `uv run pytest` (unit +
   integration, needs `uv sync`); then two CLI drives in throwaway sites, default and
   `--no-confirm`: 20 rows, 20 succeeded, none with a NULL `client_id`, and no stale or duplicate

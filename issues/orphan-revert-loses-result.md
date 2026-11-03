@@ -19,10 +19,10 @@ separate statement. Nothing re-checks that the rows are still in flight at the m
 reverted.
 
 If the evicted client's legitimate result is committed by the Receiver between the select and the
-revert, the revert wipes it: the result columns are cleared, the row returns to the unscheduled
-pool, and the task runs a second time. The work and its recorded result are lost, and the operator
-sees no sign of it. On SQLite the window is real because the driver opens the write transaction
-only at the update.
+revert, the revert wipes it: `revert_all` nulls 10 of the 13 result columns (only `csvpath`,
+`cores_max` and `memory_max` survive), the row returns to the unscheduled pool, and the task runs a
+second time. The work and its recorded result are lost, and the operator sees no sign of it. On
+SQLite the window is real because the driver opens the write transaction only at the update.
 
 Evidence: found by reading during `writeback-scoped-conditional`'s research
 (`spec/writeback-scoped-conditional/research/02-callers-concurrency-tests.md` §3). **Not

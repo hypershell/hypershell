@@ -264,7 +264,8 @@ pre-release is affected. The fix is a clean, prompt version error in both direct
 the 2.9.0 release notes; `zone-dispatch`'s version handshake is meant to be that error and should be
 verified against 2.8.3 there.
 
-*Horizon: near-term, before 2.9.0 · Depends on: zone (version handshake) · Refs: release notes*
+*Horizon: near-term, before 2.9.0 · Depends on: `zone-dispatch`'s version handshake (its R5; see
+`issues/zone.md`) · Refs: release notes*
 **Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
 
 ## `rotatedb` lost-update window

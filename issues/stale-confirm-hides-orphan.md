@@ -24,8 +24,10 @@ it received a task but before its confirmation is applied:
 
 1. `revert_orphaned(A)` skips the row, whose `client_id` is still NULL. The row stays in flight:
    `schedule_time` set, no `completion_time`, and `Task.next` never dispatches it again.
-2. If A's confirmation is applied afterwards, it names the already-evicted A on the row. A is not
-   evicted again, and evicting any other client does not select the row either.
+2. If A's confirmation is applied afterwards, it names the already-evicted A on the row. Unless A
+   reconnects, it is not evicted again, and evicting any other client does not select the row
+   either. (A reconnected A re-registers through the heartbeat, then either completes the row or
+   is evicted again, which reverts it.)
 
 Either way the row stays in flight with nobody running it until the server restarts and
 `revert_interrupted` picks it up. In a long or `--forever` run that can be a long time, and the group
