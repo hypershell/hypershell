@@ -54,3 +54,16 @@ is skipped by the parser):
   file/contract, which may be written inline) satisfies it; the parallel `appetite: big` fan-out is for when
   the mechanism is also unknown. This keeps the trigger itself and does not weaken the gate.
 - **Confidence:** med · **Effort:** small
+
+## F2 — hs-build commits with `git add -A` while plans and conventions say stage by explicit path
+`origin=hs-build:P1 severity=low category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** Step 7 prescribes `git add -A` (and Step 6 says the META note "rides in this
+  phase's atomic `git add -A` commit"), while this cycle's `TECH.md` Conventions, written by `hs-plan`,
+  say "Stage by explicit path". The builder had to pick one; it staged by explicit path.
+- **Skill cause:** two factory documents give opposite staging rules for the same commit. `git add -A`
+  also sweeps in any stray untracked file in the worktree, which the clean-tree pre-flight only checks
+  at the start of the run.
+- **Recommended fix:** in Step 7 (and the Step 6 reference), stage the phase's `Touches:` paths plus
+  `spec/{slug}/` explicitly, and run `git status --porcelain` before committing to confirm nothing else
+  changed.
+- **Confidence:** med · **Effort:** small

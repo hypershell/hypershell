@@ -3,10 +3,10 @@ slug: tls-client-address-family
 title: TLS client reaches the server on the address family it listens on
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/tls-client-address-family
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -32,14 +32,14 @@ phases:
     \ 'auto'], 2400))\""
 - id: P2
   name: 'R6 trial: path-limited 3-way apply onto a detached origin/master worktree'
-  status: pending
+  status: done
   satisfies:
   - R6
   depends_on:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: "uv run python -c \"import os, signal, subprocess, sys, threading\npaths\
     \ = ['src/hypershell/core/queue.py', 'tests/conftest.py', 'tests/test_queue_address_family.py']\n\
     common = subprocess.check_output(['git', 'rev-parse', '--path-format=absolute',\
@@ -211,8 +211,8 @@ SQLite file directly.
 **Goal:** show that the fix's code paths apply to `master` (2.8.3) without conflict, and that the new
 tests pass there, without touching the `master` branch.
 
-- [ ] `git fetch origin` so `origin/master` and `origin/develop` are current (read-only).
-- [ ] Run the frontmatter `verify:`. It:
+- [x] `git fetch origin` so `origin/master` and `origin/develop` are current (read-only).
+- [x] Run the frontmatter `verify:`. It:
   - adds a **detached** worktree of `origin/master` at `<main checkout>/.worktrees/r6-trial-tls-client-address-family`
     (derived from `git rev-parse --git-common-dir`; no branch is created);
   - pipes `git diff origin/develop...HEAD -- src/hypershell/core/queue.py tests/conftest.py tests/test_queue_address_family.py`
@@ -222,8 +222,8 @@ tests pass there, without touching the `master` branch.
   - runs the new file and `tests/test_queue_tls.py` there with `-rs`, in a process group with a 900 s
     kill timer;
   - in `finally`, removes the trial worktree (`git worktree remove --force`) and prunes.
-- [ ] Confirm `git worktree list` no longer shows the trial.
-- [ ] Record the outcome below under **R6 check** (method, `origin/master` sha, pass/skip counts), then
+- [x] Confirm `git worktree list` no longer shows the trial.
+- [x] Record the outcome below under **R6 check** (method, `origin/master` sha, pass/skip counts), then
       mark P2 done.
 - **Why path-limited, not a whole-commit cherry-pick:** branch commits (and the eventual squash on
   `develop`) also change `spec/tls-client-address-family/`, `ROADMAP.md` and `issues/`. None exist on
@@ -233,7 +233,30 @@ tests pass there, without touching the `master` branch.
 
 ### R6 check
 
-*Method and result recorded here by P2:* not yet run.
+**Checked by trial apply, not by diff inspection** (2026-11-03). `origin/master` at `4d5771b`
+(2.8.3), `origin/develop` at `b31c66e`, after `git fetch origin`.
+
+- **Method:** the frontmatter `verify:`, run from the feature worktree at P1's commit. It added a
+  detached worktree of `origin/master` under the main checkout's `.worktrees/` (no branch), piped
+  `git diff origin/develop...HEAD -- src/hypershell/core/queue.py tests/conftest.py
+  tests/test_queue_address_family.py` into `git -C <trial> apply --3way --index`, ran the tests there,
+  and removed the trial in `finally`, then pruned. `queue.py` and `conftest.py` applied cleanly by
+  3-way merge; the new test file, having no base blob, applied directly. No conflict.
+- **Environment:** an overlay. The feature worktree's frozen environment per interpreter, with
+  `PYTHONPATH=<trial>/src`. `hypershell` imported from `<trial>/src/hypershell/__init__.py`, both in
+  the test interpreter and in the interpreter the `hs` console script runs (which the `hs cluster`
+  test drives), so the CLI under test was `master`'s code plus the fix.
+- **Result:** `tests/test_queue_address_family.py` and `tests/test_queue_tls.py` on the trial:
+  **47 passed, 0 skipped** on 3.12.16 (the `verify:` as written) and again on 3.14.10 (a repeat of
+  the same steps that also printed the import paths). The trap tests ran, none skipped.
+- **Clean-up:** `git worktree list` showed no trial afterwards, after both runs.
+
+**For the 2.8.4 release (path-limited port).** The squash commit of this fix on `develop` will not
+cherry-pick onto `master` whole: it also carries `spec/tls-client-address-family/`, and possibly
+`ROADMAP.md` and `issues/`, none of which exist on `master` (modify/delete conflicts unrelated to the
+fix). Port exactly three paths, as this trial did: `src/hypershell/core/queue.py`,
+`tests/conftest.py` and `tests/test_queue_address_family.py`, e.g. `git diff <base>..<squash> --
+<those paths> | git apply --3way --index` on the release branch.
 
 ---
 
