@@ -351,6 +351,10 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
      lambda: {'_callback', '_args'} <= set(_names(util.Finalize.__init__)) & set(_names(util.Finalize.__call__))),
     ('Thread.start runs Thread._bootstrap() first on the new thread',
      lambda: '_bootstrap' in _names(threading.Thread.start) and _parameters(threading.Thread._bootstrap) == ['self']),
+    ('threading._active maps the identifier of each thread that threading has started to its Thread',
+     lambda: isinstance(threading._active, dict) and '_active' in _names(threading.Thread._bootstrap_inner)),
+    ('threading._DummyThread is the Thread of a thread that threading did not start',
+     lambda: issubclass(threading._DummyThread, threading.Thread)),
 )
 
 
@@ -573,7 +577,7 @@ class _ServerThread(threading.Thread):
 
     def _bootstrap(self: _ServerThread) -> None:
         # Marked before the threading start-up code, which is what releases the thread waiting in start().
-        # Nothing before the mark allocates an object the collector tracks.
+        # A collection that runs here before the mark finds the thread not yet registered (see _decref).
         _server_side[threading.get_ident()] = 1
         try:
             super()._bootstrap()
@@ -590,11 +594,24 @@ def _decref(*args: Any) -> None:
     waits on, that answer can depend on the waiting thread itself. There the decref is handed to the decref
     sender instead: ``SimpleQueue.put`` never blocks and is safe to re-enter. Every other decref is the
     stock one, in the finalizer's thread.
+
+    A thread that :mod:`threading` has not yet registered as started is still in its start-up, which
+    may be a server thread's before its mark (a collection another thread scheduled can run there), so
+    its decref is handed off too, as is one on a thread that :mod:`threading` did not start.
     """
-    if _decref_sender is not None and threading.get_ident() in _server_side:
-        _decrefs.put(args)
-        return
+    if _decref_sender is not None:
+        ident = threading.get_ident()
+        if ident in _server_side or _not_started(ident):
+            _decrefs.put(args)
+            return
     BaseProxy._decref(*args)
+
+
+def _not_started(ident: int) -> bool:
+    """Whether :mod:`threading` has not registered thread `ident` as one it started (it is still
+    starting, or :mod:`threading` did not start it). Reads the registry without its lock, and adds nothing to it."""
+    thread = threading._active.get(ident)
+    return thread is None or isinstance(thread, threading._DummyThread)
 
 
 def _send_decrefs() -> None:

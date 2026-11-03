@@ -133,7 +133,7 @@ is skipped by the parser):
   REVIEW.md's prose. This cycle's probes, including C9's, live in `$TMPDIR` again, because Step 3
   lets the orchestrator write only `REVIEW.md`, `TECH.md` and `META.md`.
 
-## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again · seen again · seen again · seen again
+## F5 — A `verify:` that builds `HEAD` measures the previous commit, since hs-build verifies before it commits · seen again · seen again · seen again · seen again · seen again · seen again
 `origin=hs-build:P5 severity=medium category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** P4's and P5's gates (`bench_queue.py … --feature HEAD`) build a venv from the
   committed `HEAD`. hs-build runs the gate in Step 4 and commits in Step 7, so the gate measured the
@@ -223,7 +223,7 @@ is skipped by the parser):
   scenario is graded normally and cross-referenced to the ruling.
 - **Confidence:** med · **Effort:** small
 
-## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again · seen again · seen again · seen again
+## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again · seen again · seen again · seen again · seen again
 `origin=hs-build:P1-remediation-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
 - **What happened:** P1's `verify:` and Safety Principles' CLI drive both run
   `.agents/factory/bin/temp_site.sh`, whose cleanup is `trap 'rm -rf "$site"'`. Under a harness
@@ -247,7 +247,7 @@ is skipped by the parser):
 - **Seen again (hs-review step2, cycle 6, 2026-11-03):** the blind brief again overrode the rubric's
   `temp_site.sh` instruction with environment-isolated sites.
 
-## F11 — Step 7's `git add -A` commits whatever else is in a shared worktree · seen again
+## F11 — Step 7's `git add -A` commits whatever else is in a shared worktree · seen again · seen again
 `origin=hs-build:P1-remediation-3 severity=medium category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** During this remediation another agent's docs build wrote into this worktree
   (`share/man/man1/*.1`). Step 7's `git add -A` would have folded those edits into the phase

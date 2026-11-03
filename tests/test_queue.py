@@ -13,6 +13,7 @@ import sys
 import time
 import queue
 import socket
+import _thread
 import threading
 import multiprocessing as mp
 from multiprocessing import util
@@ -149,6 +150,39 @@ class TestPrivateInternals:
                 assert isinstance(proxy._close, util.Finalize), name
                 assert proxy._close._callback is queue_module._decref, name
                 assert proxy._close._args[0] is proxy._token, name
+
+    def test_thread_registry(self) -> None:
+        """``threading._active`` lists a thread from its start-up code on, not at its first instruction,
+        and gives a thread that :mod:`threading` did not start a ``_DummyThread``.
+
+        An identifier the OS has reused may still map to the ``_DummyThread`` of an ended thread that
+        :mod:`threading` did not start, never to a ``Thread`` it started (those remove themselves).
+        """
+        def unregistered() -> bool:
+            entry = threading._active.get(threading.get_ident())
+            return entry is None or isinstance(entry, threading._DummyThread)
+
+        seen = []
+
+        class Probe(threading.Thread):
+            def _bootstrap(self) -> None:
+                seen.append(unregistered())
+                super()._bootstrap()
+
+        thread = Probe(target=lambda: seen.append(threading._active.get(threading.get_ident()) is thread))
+        thread.start()
+        thread.join()
+        assert seen == [True, True] and threading._active.get(thread.ident) is not thread
+
+        done = threading.Event()
+
+        def foreign() -> None:
+            seen.append(unregistered())
+            seen.append(isinstance(threading.current_thread(), threading._DummyThread))
+            done.set()
+
+        _thread.start_new_thread(foreign, ())
+        assert done.wait(5) and seen[2:] == [True, True]
 
     def test_finalize(self) -> None:
         """``util.Finalize`` accepts ``args`` and ``exitpriority``, and runs once."""

@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
@@ -106,9 +106,7 @@ phases:
 review:
   last_reviewed_commit: bc2ed5258a6ca5244ff0f78ad200fa6672fa5d41
   verdict: changes-requested
-  blocked_reason: 'Review cycle 6: C10 (HIGH, library-only) - on Python 3.12 a new
-    server thread can run a collection before its mark; the pre-agreed fallback is
-    not met as graded; maintainer decision'
+  blocked_reason: ''
   cycle: 6
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
@@ -343,13 +341,28 @@ stdio. This is the core, small and novel slice: everything else builds on it.
     review-5 remediation to the thread rule the cycle-5 triage ruled; item 1(c) extends the ruling,
     see below):
     1. **The server side.** `_server_side` maps a thread identifier to a count of marks; a thread
-       holding a mark is on the server side. Marks are placed in three ways:
+       holding a mark is on the server side, and so is a thread that `threading` has not registered
+       as started (see (a)). Marks are placed in three ways:
        - (a) **Threads a server starts.** The accept loop, each connection handler, the stop thread
          and the decref sender are `_ServerThread`s. `_ServerThread._bootstrap` marks the thread as
          its first statement and unmarks it as its last. The mark precedes the `threading` start-up
          code (`_bootstrap_inner`), and that code is what releases the thread waiting in
-         `Thread.start()`. So a server thread is marked before anything can wait on it, and before
-         it allocates an object the collector tracks.
+         `Thread.start()`. So a server thread is marked before anything can wait on it.
+         **Before the mark** (the review-6 remediation, C10). A collection can still run at the
+         thread's first instruction, ahead of the mark: on 3.12 the eval breaker is shared by all
+         threads, so a collection that another thread scheduled runs at the first breaker check of
+         whichever thread next holds the GIL. `_decref` therefore also hands off on a thread that
+         `threading` has not registered as started: its identifier is absent from
+         `threading._active`, or maps to a `_DummyThread` (a stand-in `threading` gives a thread it
+         did not start, which can linger under an identifier the OS has since reused). `threading`
+         registers a thread in `_bootstrap_inner`, after the mark (and removes it there before the
+         unmark). So a server thread is unregistered from its first instruction to its mark, and
+         marked from then to its last statement: it is on the server side throughout. That closes the
+         window on every Python, by construction rather than by where collections run. As with a
+         mark, this applies only while a sender is set, so a process that serves no queues is
+         unchanged; and a registered thread that holds no mark gets the stock decref, as before. The
+         check reads one dict entry; it takes no lock, allocates nothing the collector tracks and
+         never adds to the registry (it does not call `current_thread()`).
        - (b) **Start and stop.** A thread is marked while it is inside a server's start
          (`_serve_in_process`, from just before the bind until the accept loop's `Thread.start()`
          returns) or stop (`_InProcessServer.stop`, its whole body, so all the time it holds
@@ -417,12 +430,12 @@ stdio. This is the core, small and novel slice: everything else builds on it.
       inside the stock constructor keeps the stock finalizer (REVIEW cycle 4 P4, seeded as
       `issues/queue-proxy-finalizer-swap-window.md`). A proxy from another manager class pointed at
       an in-process server also keeps the stock finalizer.
-    - **The mark of a new server thread** is its first statement. On 3.11 a collection runs only at
-      an allocation the collector tracks, and none precedes the mark. From 3.12 a collection runs at
-      an eval-breaker check instead. On 3.12 that breaker is shared by all threads, so a collection
-      that another thread scheduled can in principle run at the first one or two checks of a new
-      server thread, before its mark. That window is not covered by construction there. The
-      four-point probe never landed in it (below).
+    - **The mark of a new server thread** is its first statement. On 3.12 a collection that another
+      thread scheduled can run at a new server thread's first eval-breaker check, before its mark
+      (REVIEW cycle 6, C10: it stalled the suite's same-port restart test once in 21 runs). This was
+      a known limit until the review-6 remediation; it is now closed by item 1(a): a thread not yet
+      registered by `threading` hands off. `test_collection_at_first_instruction_never_stalls` and
+      `test_collection_scheduled_elsewhere_never_stalls` cover it.
     - **Exit.** Decrefs handed off at interpreter exit may not be sent before the process ends, as
       the server is stopping then too.
     - **Cached connections.** The sender, not the dropping thread, runs the stock decref's tidy-up of
@@ -437,7 +450,8 @@ stdio. This is the core, small and novel slice: everything else builds on it.
         calls `_callback` with `_args`. `test_proxy_finalizer` checks them live. The swap also
         checks that the callback is `BaseProxy._decref` before it replaces it. *(The review-5
         remediation adds a fourth check, on `Thread._bootstrap`; the finalizer no longer reads the
-        token.)*
+        token. The review-6 remediation adds two, on `threading._active` and
+        `threading._DummyThread`, with `test_thread_registry` checking them live.)*
   - [x] `test_threads_drain_after_shutdown` (added on this branch, not a base test) leaves the
         decref sender out of its count: the sender lives as long as the process, so the test
         failed when it was the first in its process to connect a same-process client.
@@ -641,6 +655,81 @@ stdio. This is the core, small and novel slice: everything else builds on it.
 
       The server's own threads are unchanged from `43d2d85` (20 in 4x4): the thread rule adds no
       thread.
+- **Remediation (review cycle 6; triage in [`REVIEW.md`](REVIEW.md)).** P1 was reopened for C10
+  (HIGH, library-only) under the maintainer's option (a): a narrow fix verified by targeted checks,
+  without a seventh blind review. The foreman verifies the evidence before publish.
+  - [x] **Red first** (source at `bc2ed52`, Python 3.12.16), in `tests/test_queue_gc.py`:
+        - `test_collection_at_first_instruction_never_stalls` (TLS on and off; skipped on 3.11, which
+          has no `sys.monitoring`). The cycle-6 blind reviewer's forced reproduction: a
+          `sys.monitoring` `PY_START` hook on `_ServerThread._bootstrap` runs one collection at a new
+          server thread's first instruction, with a dropped same-process client pending. Each round
+          does it on a new handler, then on the accept loop of a server started again on the same
+          port. 5 rounds.
+        - `test_collection_scheduled_elsewhere_never_stalls` (TLS on and off). The orchestrator's
+          SQLite reproduction: a thread runs `fetchall` over 300,000 rows while the main thread
+          connects same-process clients (threshold 500). Nothing is forced. A `gc.callbacks` hook
+          spots a collection that starts on a new server thread before its mark, and hands that very
+          collection a parked client to free (held only by a new cycle; its proxies' back-references
+          to it are cleared, as in the orchestrator's `--young` variant). It ends after 20 clients are
+          freed so, or after 10 s; on 3.12 it waits up to 40 s for the first, and the test skips as
+          inconclusive if none lands. On 3.11, 3.13 and 3.14 no collection lands there, and it runs
+          the 10 s.
+        - `test_finalizer_hands_off_only_server_side` gains two cases: a thread at its first
+          instruction, before `threading` registers it, hands off, and the same thread once
+          registered and unmarked does not; a thread that `threading` did not start hands off, before
+          and after `current_thread()` gives it a `_DummyThread`.
+        - Each probe runs in its own process group under the module's watchdog (15 s a round), so a
+          stall fails within its limit.
+  - [x] **C10 — hand off before the mark.** `_decref`, when a sender exists, also hands off when
+        `_not_started(ident)`: the thread's identifier is absent from `threading._active`, or maps to
+        a `_DummyThread` (item 1(a)). Nothing else changes: the marks, the sender, fork, and the stock
+        decref in a process with no sender are as they were.
+  - [x] **Private internals:** two more checks in `unsupported_internals()`: `threading._active` is a
+        dict that `Thread._bootstrap_inner` fills, and `threading._DummyThread` is a `Thread`.
+        `TestPrivateInternals.test_thread_registry` checks them live: at its first instruction a
+        thread is absent from `threading._active` (or meets a stale `_DummyThread` there), in its
+        target it is present as itself, and a thread that `threading` did not start gets a
+        `_DummyThread`.
+  - [x] `AGENTS.md`: the server side includes a thread that `threading` has not registered as started.
+  - **Gate record (macOS; the source as committed in this phase's commit).**
+    - **Red at `bc2ed52`** (the new test module against that source, 3.12.16), 5 consecutive runs:
+      all four probe tests failed in every run (20/20), each through its watchdog, and the rule test
+      failed in every run (5/5). Stacks are C10's: a new handler in `_bootstrap` (`:574`) →
+      `_decref` (`:597`) → `BaseProxy._decref` → `answer_challenge` (no TLS) or `do_handshake`
+      (TLS), with the accept loop in `serve` (`:476`) → `Thread.start` → `wait`. The same-port point,
+      run alone: the new accept loop in `_bootstrap` → `_decref`, with the starting thread in
+      `_serve_in_process` (`:717`) → `Thread.start`, TLS on and off.
+    - **Green, 3.12.16.** The SQLite probe reaches its 20 freed clients in 3–5 s (305–457 rounds).
+      The cycle-6 probes, unmodified, against this source: `premark_forced.py` handler and
+      same-port restart, TLS on and off, 4/4 pass; `zqp6_window.py` 30 s, cyclic ×2 and `--young`
+      ×1, 3/3 pass with 1,830–1,988 collections landing before the mark each (at `bc2ed52` the same
+      cyclic run stalled 3 of 4).
+    - **A first gate attempt was stopped** after runs 2 and 3 of the 50 failed one test, the new
+      `test_thread_registry`, not the fix: a thread started with `_thread.start_new_thread` found its
+      identifier already in `threading._active`, under the stale `_DummyThread` of an earlier ended
+      thread (the very case the fix's `_DummyThread` clause covers). The test now accepts an absent
+      or `_DummyThread` entry, as `_not_started` does, and both gates were restarted from run 1.
+    - **A second attempt was stopped** at run 42 of the 50 (41 passed; the six full-suite runs had
+      passed): `test_collection_scheduled_elsewhere_never_stalls[tls]` found no landing in its 10 s
+      (211 rounds) and failed its own coverage assertion. No stall. TLS rounds are slower (about 19
+      a second) and landed 10–21 times in 10 s over six probe runs. The probe now waits up to 40 s
+      for a first landing on 3.12 and the test skips if none comes; both gates restarted again.
+    - **`tests/test_queue_gc.py` + `tests/test_queue.py`, 3.12.16:** **50/50** consecutive runs
+      pass (49 passed each, none skipped; 43–58 s a run). The first 8 ran alongside the end of the
+      second attempt's loop, which ran on to its run 50 (all pass) before it was noticed; load only.
+    - **Full suite** (run side by side with the 50): 3.12.16 **568 passed** in each of 3
+      consecutive runs; 3.11.18 **566 passed, 2 skipped** (the first-instruction test, no
+      `sys.monitoring`); 3.13.18 and 3.14.10 **568 passed** each (563 before, plus the four new probe
+      tests and `test_thread_registry`). `unsupported_internals() == []` on all four.
+    - **`hsx` drive** in an isolated site (`HYPERSHELL_SITE`, `HYPERSHELL_DATABASE_FILE`,
+      `HYPERSHELL_CONFIG_FILE=''`), 200 tasks with TLS on and with `--no-tls`: rc 0, 200 distinct
+      outputs each, 400 rows, 0 failed.
+    - `parity` vs `b819de6`: identical task tables TLS on and off, rc 0/[0, 0]; the four `--help`
+      outputs byte-identical. `compat` (server here, client `b819de6`): 200/200 TLS on and off.
+      Both ran against the phase commit before it was amended to record them (META F5); the amend
+      changes no `src/` file (it adds the records and the `test_thread_registry` fix below).
+    - **Throughput gate:** not run, by the triage; the multi-node runs on the test cluster cover
+      throughput (P7).
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
@@ -650,7 +739,8 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   (`ServerThread.start`) and `AGENTS.md`; review-2 remediation `tests/test_queue_limits.py` (new);
   review-3 remediation `tests/test_queue_gc.py` (new) and `ROADMAP.md`; review-4 remediation
   `tests/test_queue_start.py`, `ROADMAP.md` and three seeds in `issues/`; review-5 remediation
-  `tests/test_queue_gc.py`, `AGENTS.md`, `ROADMAP.md`, one new seed and two amended seeds in `issues/`.
+  `tests/test_queue_gc.py`, `AGENTS.md`, `ROADMAP.md`, one new seed and two amended seeds in `issues/`;
+  review-6 remediation `tests/test_queue_gc.py`, `tests/test_queue.py` and `AGENTS.md`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1

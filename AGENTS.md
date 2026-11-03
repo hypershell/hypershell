@@ -284,8 +284,9 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   has made a proxy, a decref finalized on the server side goes to the `hypershell-queue-decref`
   thread, which the process's first server starts (`core/queue.py` `_decref`). The server side is
   decided by thread, never by address: every thread an in-process server starts (accept loop,
-  handlers, stop, the sender), any thread inside a server's start or stop, and any thread in a TLS
-  handshake with a queue server (the accept loop runs it inline). Every other decref is the stock
+  handlers, stop, the sender), any thread inside a server's start or stop, any thread in a TLS
+  handshake with a queue server (the accept loop runs it inline), and any thread that `threading`
+  has not registered as started (a new thread before its mark). Every other decref is the stock
   one, on the finalizing thread. A forked child drops the marks and waiting decrefs it inherits.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`

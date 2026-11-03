@@ -1610,3 +1610,15 @@ No AGENTS.md invariant violation was found.
 - C9 is resolved. The suite on four Pythons, parity, compat and throughput passed. The
   `test_queue_gc.py` repeats passed 20/20 on 3.14 and 19/20 on 3.12, the one failure being C10.
 - P2, the multi-node evidence, is still pending.
+
+## Triage (human gate) — cycle 6
+
+Cycle 6 confirmed the thread rule on 3.11, 3.13 and 3.14, but found C10 (HIGH, CONFIRMED,
+library-only): on 3.12 a collection scheduled by another thread can run inside a new
+`_ServerThread._bootstrap` before its mark. The pre-agreed fallback excluded HIGH, so the foreman
+stopped. On 2026-11-03 the maintainer chose option (a): **a narrow fix verified by targeted checks,
+without a seventh blind review**. The foreman rules as judge under that authorization.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| C10 · CONFIRMED | fix, narrow | In `_decref`, when a sender exists, also hand off a decref finalized on a thread that `threading` has not yet registered as started (it is still bootstrapping: its ident is not in `threading._active`, or `current_thread()` is a dummy for it). Deferring is always safe because the sender delivers it, and this closes the window before the `_ServerThread` mark on every Python. No other behavioural change. If the check needs another CPython private, add it to `unsupported_internals()` and its test. **Red-first:** the cycle-6 reviewer's 3.12 reproductions (the forced collection at a new thread's first instruction, and the SQLite fetchall-thread stall) fail at `bc2ed52` on 3.12 and pass after the fix. **Targeted gates:** `tests/test_queue_gc.py` and `tests/test_queue.py` pass 50 consecutive runs on 3.12; the full suite passes 3 consecutive runs on 3.12 and once on each of 3.11, 3.13 and 3.14; parity and compat pass against `b819de6`. The foreman verifies the evidence before publish in place of a seventh review cycle, and REVIEW.md records that the fix landed on the maintainer's ruling without a blind re-review. |

@@ -15,6 +15,11 @@ bind and its accept loop, and the stop thread inside ``stop()``. It runs with cl
 address, and with TLS clients dialing a name that resolves to an address that fails first and then the
 server's.
 
+Two probes place a collection on a new server thread before anything else has run on it. One forces
+it at the thread's first instruction. In the other, a thread fetching rows from SQLite schedules
+collections and, on Python 3.12, whichever thread next checks for pending work runs them; each one that
+lands on a new server thread that early frees a dropped same-process client.
+
 Two more probes check that each decref is sent once, to the server that issued the reference: a
 client of a server in another process on an in-process server's port number, and a forked child of
 a serving process.
@@ -32,6 +37,9 @@ import sys
 import time
 import signal
 import socket
+import sqlite3
+import _thread
+import weakref
 import threading
 import subprocess
 import faulthandler
@@ -72,6 +80,19 @@ FORCED_ROUNDS = 10
 # The server-side points at which the forced-collection probe runs a collection
 POINTS = ('accept', 'handler', 'starter', 'stop')
 
+# Rounds of the first-instruction probe (each round collects at a new handler and a new accept loop)
+FIRST_INSTRUCTION_ROUNDS = 5
+
+# Clients the scheduled-elsewhere probe frees on a new server thread before its mark, and the seconds it
+# waits for them at most (none land on Pythons whose threads each check their own pending work). On 3.12
+# it waits up to LANDING_CAP seconds for the first one.
+LANDINGS = 20
+LANDING_LIMIT = 10
+LANDING_CAP = 40
+
+# Rows the scheduled-elsewhere probe's SQLite thread fetches at a time
+ROWS = 300_000
+
 # A name the forced-collection probe resolves, in-process, to an address that fails at once and then
 # to the server's address (a name with two IPv4 addresses whose first does not serve the port)
 MULTI_ADDRESS = 'queue-multi-address.test'
@@ -97,8 +118,8 @@ def tail(output: str, lines: int = 60) -> str:
     return '\n'.join(output.splitlines()[-lines:])
 
 
-def run_probe(name: str, tls_args: List[str], rounds: int = ROUNDS, *options: str) -> None:
-    """Run probe `name` in its own process group and assert it finished every round."""
+def run_probe(name: str, tls_args: List[str], rounds: int = ROUNDS, *options: str) -> str:
+    """Run probe `name` in its own process group, assert it finished every round, and return its output."""
     command = [sys.executable, os.path.abspath(__file__), name, str(rounds), *options, *tls_args]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True, text=True)
@@ -114,6 +135,7 @@ def run_probe(name: str, tls_args: List[str], rounds: int = ROUNDS, *options: st
             proc.wait()
     assert proc.returncode == 0 and f'OK {rounds}' in output, \
         f'probe {name} exited {proc.returncode}:\n{tail(output)}'
+    return output
 
 
 @fixture(params=['no-tls', 'tls'])
@@ -154,9 +176,9 @@ def test_dropped_client_decref_reaches_server(tls: Optional[TLSConfig]) -> None:
 
 @mark.unit
 def test_finalizer_hands_off_only_server_side(monkeypatch) -> None:
-    """A decref finalized on a server thread, inside a server's start or stop, or in a TLS client's
-    handshake, is handed off; any other is the stock one, on the finalizing thread, whatever address its
-    token names."""
+    """A decref finalized on a server thread, inside a server's start or stop, in a TLS client's
+    handshake, or on a thread that threading has not registered as started, is handed off; any other is
+    the stock one, on the finalizing thread, whatever address its token names."""
     calls = []
     monkeypatch.setattr(BaseProxy, '_decref', staticmethod(lambda *args: calls.append(args)))
     handed_off = SimpleQueue()
@@ -198,6 +220,32 @@ def test_finalizer_hands_off_only_server_side(monkeypatch) -> None:
     thread.start()
     thread.join()
     assert seen == [True, True] and queue_module._server_side == {} and thread.daemon
+
+    # Any thread is on the server side until threading registers it as started, so a collection at a
+    # server thread's first instruction, before its mark, hands off. Once registered and unmarked, it is not.
+    class Starting(threading.Thread):
+        def _bootstrap(self) -> None:
+            seen.append(all(handed(token) for token in tokens))
+            super()._bootstrap()
+
+    thread = Starting(target=lambda: seen.append(not any(handed(token) for token in tokens)))
+    thread.start()
+    thread.join()
+    assert seen[2:] == [True, True] and queue_module._server_side == {}
+    del seen[2:]
+
+    # So is a thread that threading did not start, before and after it has a stand-in Thread
+    done = threading.Event()
+
+    def foreign() -> None:
+        seen.append(all(handed(token) for token in tokens))
+        threading.current_thread()
+        seen.append(all(handed(token) for token in tokens))
+        done.set()
+
+    _thread.start_new_thread(foreign, ())
+    assert done.wait(WAIT) and seen[2:] == [True, True]
+    del seen[2:]
 
     # A TLS client is on the server side until its handshake ends, which an accept loop waits on
     monkeypatch.setattr(queue_module, 'get_tls_config', lambda: None)
@@ -268,6 +316,34 @@ def test_dropped_client_never_stalls_server(tls_args: List[str]) -> None:
 def test_same_port_restart_never_stalls(tls_args: List[str]) -> None:
     """Each round serves a dropped same-process client, shuts down, and starts again on the same port."""
     run_probe('same-port-restart', tls_args)
+
+
+@mark.unit
+def test_collection_at_first_instruction_never_stalls(tls_args: List[str]) -> None:
+    """A collection at the first instruction of a new server thread, with a dropped same-process client
+    pending, returns: on a new handler, and on the accept loop of a server started again on the same port.
+
+    That is before the thread can mark itself as on the server side. From Python 3.12 a collection that
+    another thread scheduled can run there; the probe puts one there with :mod:`sys.monitoring`.
+    """
+    if not hasattr(sys, 'monitoring'):
+        skip('sys.monitoring is new in Python 3.12')
+    run_probe('first-instruction', tls_args, FIRST_INSTRUCTION_ROUNDS)
+
+
+@mark.unit
+def test_collection_scheduled_elsewhere_never_stalls(tls_args: List[str]) -> None:
+    """Collections that a thread fetching rows from SQLite schedules, and that a new server thread runs
+    before its mark, each free a dropped same-process client there without stalling the server.
+
+    ``fetchall`` makes a tracked tuple per row and releases the interpreter lock around each step. On
+    Python 3.12 every thread shares one flag for pending collections, so the next thread to check it
+    runs the collection, which can be a new server thread at its first instruction. The probe frees
+    the client only when a collection lands there; it never forces one.
+    """
+    output = run_probe('scheduled-elsewhere', tls_args, LANDINGS)
+    if sys.version_info[:2] == (3, 12) and ', 0 freed a client' in output:
+        skip('inconclusive: no collection landed on a new server thread before its mark')
 
 
 # The probes, run as ``python test_queue_gc.py NAME ROUNDS [OPTIONS] [CERT KEY]`` by the tests above
@@ -576,7 +652,120 @@ def probe_forced_collection(rounds: int, dial: str, tls: Optional[TLSConfig]) ->
                 BaseProxy._address_to_local.pop((dial, port), None)
 
 
-PROBES = {'dropped-client': probe_dropped_client, 'same-port-restart': probe_same_port_restart}
+def probe_first_instruction(rounds: int, tls: Optional[TLSConfig]) -> None:
+    """Each round, a dropped same-process client is pending when a collection runs at the first
+    instruction of a new server thread: a handler of a new connection, then the accept loop of a server
+    started again on the same port. Collections run only there."""
+    monitoring = sys.monitoring
+    tool = next(tool for tool in range(6) if monitoring.get_tool(tool) is None)
+    first = queue_module._ServerThread._bootstrap.__code__
+
+    def collect_first(code, offset) -> None:
+        if code is first:
+            collect_at('first')
+
+    monitoring.use_tool_id(tool, 'queue-gc-probe')
+    monitoring.register_callback(tool, monitoring.events.PY_START, collect_first)
+    monitoring.set_local_events(tool, first, monitoring.events.PY_START)
+    gc.disable()
+    for i in range(rounds):
+        for point in ('handler', 'accept'):
+            arm_watchdog(f'round {i} point {point}')
+            server = QueueServer(probe_config(tls=tls))
+            server.start()
+            port = server.address[1]
+            dropped_client(port, tls, '127.0.0.1')
+            if point == 'handler':
+                armed.append('first')
+            else:
+                server.shutdown()
+                armed.append('first')
+                server = QueueServer(probe_config(port, tls))
+                server.start()
+            # A new connection, which only the (new) accept loop and a new handler can answer
+            QueueClient(probe_config(port, tls)).connect()
+            assert not armed, f'no collection ran at {point}'
+            server.shutdown()
+            gc.collect()
+            with BaseProxy._mutex:
+                BaseProxy._address_to_local.pop(('127.0.0.1', port), None)
+
+
+def fetch_rows(stop: threading.Event) -> None:
+    """Fetch every row of a large SQLite table, over and over, until `stop` is set."""
+    db = sqlite3.connect(':memory:')
+    db.execute('create table t (x integer)')
+    db.execute(f'with recursive c(x) as (select 1 union all select x + 1 from c limit {ROWS}) '
+               f'insert into t select x from c')
+    while not stop.is_set():
+        db.execute('select x from t').fetchall()
+
+
+def probe_scheduled_elsewhere(landings: int, tls: Optional[TLSConfig]) -> None:
+    """Same-process clients connect, and so start handlers, while a SQLite thread schedules collections.
+    When a collection starts on a new server thread before its mark, a parked client becomes garbage
+    that this very collection frees, there. Ends once `landings` clients are freed so, or at the limit."""
+    first = queue_module._ServerThread._bootstrap.__code__
+    parked: List[QueueClient] = []
+    freeing: dict = {}
+    seen = {'landed': 0, 'freed': 0}
+
+    def on_collection(phase: str, info: dict) -> None:
+        ident = threading.get_ident()
+        if phase == 'stop':
+            ref = freeing.pop(ident, None)
+            if ref is not None and ref() is None:
+                seen['freed'] += 1
+            return
+        try:
+            caller = sys._getframe(1).f_code
+        except ValueError:  # No Python frame on this thread
+            return
+        if caller is not first or ident in queue_module._server_side:
+            return
+        seen['landed'] += 1
+        try:
+            client = parked.pop()
+        except IndexError:
+            return
+        freeing[ident] = weakref.ref(client)
+        holder = [client]  # Its only holder: a new cycle, which this collection frees
+        holder.append(holder)
+
+    server = QueueServer(probe_config(tls=tls))
+    server.start()
+    port = server.address[1]
+    stop = threading.Event()
+    threading.Thread(target=fetch_rows, args=(stop, ), daemon=True).start()
+    gc.set_threshold(500, 1, 1)
+    gc.callbacks.append(on_collection)
+    start = time.monotonic()
+    shared = sys.version_info[:2] == (3, 12)  # Threads share one flag for pending collections
+    i = 0
+    while seen['freed'] < landings and (time.monotonic() - start < LANDING_LIMIT or
+                                        (shared and not seen['freed'] and time.monotonic() - start < LANDING_CAP)):
+        if i % 100 == 0:
+            print(f'round {i}: landed {seen["landed"]} freed {seen["freed"]}', flush=True)
+        faulthandler.dump_traceback_later(ROUND_LIMIT, exit=True)
+        client = QueueClient(probe_config(port, tls))
+        client.connect()
+        client.heartbeat.put(b'beat', timeout=WAIT)
+        assert server.heartbeat.get(timeout=WAIT) == b'beat'
+        if len(parked) < 2:
+            for name in ('scheduled', 'completed', 'heartbeat', 'confirmed'):
+                getattr(client, name)._manager = None  # Nothing but its holder keeps the client alive
+            parked.append(client)
+        del client
+        i += 1
+    gc.callbacks.remove(on_collection)
+    stop.set()
+    print(f'after {i} rounds: {seen["landed"]} landed, {seen["freed"]} freed a client', flush=True)
+    arm_watchdog('shutdown')
+    server.shutdown()
+
+
+PROBES = {'dropped-client': probe_dropped_client, 'same-port-restart': probe_same_port_restart,
+          'first-instruction': probe_first_instruction, 'scheduled-elsewhere': probe_scheduled_elsewhere}
 
 
 def tls_from(tls_files: List[str]) -> Optional[TLSConfig]:
