@@ -331,3 +331,109 @@ None. F3 is prose only and touches no core file and no security or DB-lifecycle 
 | Observation · wire seed ROADMAP | fix (prose) | Point "Depends on" at zone-dispatch's version handshake by name, rather than only at `issues/zone.md`. |
 
 Cycle 3 is scoped to these prose fixes only.
+
+## Review cycle 3 — changes-requested (2026-11-02)
+
+- **Reviewed commit:** `b941ec9`  ·  **Base:** `d996579` (`origin/develop`)  ·  **Date:** 2026-11-02
+- **Verdict:** changes-requested (one CONFIRMED finding, LOW, one seed's prose; no code)
+- **Cycle:** 3 of ≤3. The bound is reached, so this goes to the human.
+- **Mode:** scoped by the judge to the cycle-2 remediation diff, which is prose only.
+  - The orchestrator checked each triage item against `git diff 6c3ff01..b941ec9`.
+  - One fresh blind reviewer covered `git diff 36a4e67..b941ec9 -- . ':(exclude)spec/'`. It was
+    not shown earlier findings or commit subjects (META F6). It could read `GOAL.md`, but nothing
+    else under `spec/`. It was asked one question: is the prose accurate against the code?
+- **Contract drift:** none. `GOAL.md` still has only `456abde` and `a044f7e`.
+
+### Verification run
+
+- **Code unchanged:** `git diff --name-only 36a4e67..b941ec9 -- src tests` is empty. Cycle 2's
+  code verdict stands.
+- **`tests/test_writeback.py`**, run once on 3.14.6 as a sanity check: 21 passed.
+- **Blind reviewer's probes** were in-process, with one fresh SQLite file per scenario:
+  - **P1:** `revert_all` on a completed row nulls 10 result columns and keeps `csvpath`,
+    `cores_max` and `memory_max`.
+  - **P2:** a result attributed to C is APPLIED to a row confirmed to H. H's late
+    `Confirm.update_info` then rewrites `client_id`/`client_host` to H.
+  - **P3:** a dispatch, then `revert_orphaned(A)` with no confirmation, leaves the row in flight
+    with `client_id` NULL, and `Task.next` returns `[]`. A's late `Confirm.update_info` then sets
+    `client_id == A` on that row, and `revert_orphaned(B)` leaves it in flight.
+  - **P3c and P3d:** a re-registered A that is evicted again gets the row reverted. A's own result
+    on the stranded row is APPLIED.
+
+### Cycle-2 remediation
+
+- **F3: partly fixed.**
+  - The claim that the stale-confirm case "needs the dispatch token on the wire" is gone. The token
+    question is now left to that seed's `/hs-plan`, as in its Notes.
+  - The new clause that replaces it contradicts the sibling seed (F4 below).
+- **`late-confirm-overwrites-attribution.md:27-30` ("Reproduced"): fixed and accurate.**
+  - Cycle 2 records the reproduction.
+  - Blind probe P2 reproduced it again.
+  - The cited `REVIEW.md` path exists.
+- **Orphan-revert columns: fixed and accurate.**
+  - `Task.result_columns` has 13 entries (`model.py:365-379`).
+  - `revert_all` (`model.py:754-772`) nulls `client_id`, `client_host`, `command`, `start_time`,
+    `completion_time`, `exit_status`, `outpath`, `errpath`, `waited` and `duration`. `csvpath`,
+    `cores_max` and `memory_max` survive.
+  - Blind probe P1 agrees.
+- **Stale-confirm qualifier: fixed and accurate.**
+  - `check_clients` scans only `self.beats` and pops an evicted client (`server.py:635-649`).
+  - `update_client` re-registers an unknown uuid (`server.py:593-610`).
+  - The fence applies A's result to an unreverted row (`model.py:836-848`).
+  - Blind probes P3c and P3d agree.
+- **Wire-seed `ROADMAP.md` pointer: fixed as ruled.**
+  - It now names `zone-dispatch`'s version handshake and its R5. That is R5 of
+    `spec/zone-dispatch/GOAL.md` on the zone-dispatch branch.
+  - The trailing "see `issues/zone.md`" is an Observation below.
+
+### Findings
+
+#### F4 · LOW · CONFIRMED — The F3 rewrite says no confirmation reaches the stranded row; the sibling seed says one does
+- **Where:** `issues/late-confirm-overwrites-attribution.md:54-55` (Notes): "where the row is
+  stranded before any confirmation is applied, so no confirmation reaches it."
+- **Failure scenario:**
+  - `issues/stale-confirm-hides-orphan.md` disagrees in two places:
+    - Step 2 (`:27-28`) and R1(b) (`:57-58`) say A's late confirmation *is* applied to the
+      stranded row and names A.
+    - Its R3 (`:61-62`) is about exactly that confirmation.
+  - The clause covers only interleaving (a). Read as written, it settles the token question
+    against (b) in the same sentence that hands that question to `/hs-plan`.
+  - Whoever shapes either seed still gets two accounts that do not agree. That is F3's failure
+    mode, smaller.
+- **Evidence:**
+  - `Confirm.update_info` (`server.py:361-365`) calls `Task.update_all`, a by-id bulk update with
+    no condition.
+  - Blind probe P3 shows the late confirmation setting `client_id == A` on the stranded row.
+  - The orchestrator found the same contradiction independently, before the blind report came
+    back.
+- **Touches:** one seed's prose. No code, no core file, no invariant.
+
+### Requirement → evidence matrix
+
+Carried from cycle 2 unchanged: there has been no change under `src/` or `tests/` since `36a4e67`,
+and `tests/test_writeback.py` is green at `b941ec9`. R9's PostgreSQL round trip is still CI on
+PR #70.
+
+### Observations (not findings)
+
+- **`ROADMAP.md:267-268`, "(its R5; see `issues/zone.md`)".** The blind reviewer reported this as
+  a finding. It is recorded here instead, because the cycle-2 ruling asked to name the handshake
+  "rather than only" point at `issues/zone.md`, which keeps that file as a pointer.
+  - `issues/zone.md` never mentions a version handshake. Its own R5 is the `--zone` label, so a
+    reader who follows "see" lands on the wrong R5.
+  - The named target is correct, but it exists only on a local branch until zone-dispatch lands.
+    That was already noted in cycle 2.
+  - "(its R5 in `spec/zone-dispatch/GOAL.md`; seed `issues/zone.md`)" would remove the ambiguity.
+
+### Human-gate triggers
+
+None. F4 is prose only and touches no core file and no security or DB-lifecycle invariant.
+
+### Remediation for `hs-build`, if the human sends it back
+
+- **F4:** make line 54-55 agree with both of the sibling's interleavings. For example: "It is a
+  separate defect from `issues/stale-confirm-hides-orphan.md`, where the row is stranded before
+  its confirmation is applied; a confirmation that lands afterwards names the evicted client but
+  does not recover the row."
+- Optionally, apply the Observation's wording to `ROADMAP.md:267-268`.
+- This is cycle 3 of ≤3. The loop has not converged, so the next step is the human's call.

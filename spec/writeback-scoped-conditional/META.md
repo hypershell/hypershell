@@ -21,6 +21,7 @@
 - **Skill cause:** The wrapper is the only sanctioned isolation route, and it couples isolation with deletion. The skill offers no fallback for a harness that permits the isolation but not the cleanup.
 - **Recommended fix:** Give `temp_site.sh` a keep-site mode (for example `TEMP_SITE_KEEP=1` skips the trap and prints the path), and mention it in Step 4 and the TECH template as the portable form.
 - **Confidence:** med · **Effort:** small
+- **Seen again (hs-review cycle 3, Step 2):** `hs-review` Step 2 and the rubric's *Reviewer conduct* steer the blind reviewer to the same script. The first brief passed that on, and a correction had to follow. The same keep-site mode fixes both; name it there too.
 
 ## F3 — A verify gate that only CI can turn green has no place in the FSM
 `origin=hs-build:P2 severity=medium category=missing-guidance status=open target=.claude/skills/hs-build/SKILL.md`
