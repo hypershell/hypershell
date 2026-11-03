@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:group-advance-strands-lower-group
 kind: fix
 appetite: small
 lane: public

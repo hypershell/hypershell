@@ -200,7 +200,7 @@ restores the documented ascending order delays the first dispatch for some files
 ascending order. Pre-existing since task groups were added.
 
 *Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: that cycle's GOAL Q1*
-**Seed:** [`issues/group-order-unsorted-inline-file.md`](issues/group-order-unsorted-inline-file.md) · *status: unshaped*
+**Seed:** [`issues/group-order-unsorted-inline-file.md`](issues/group-order-unsorted-inline-file.md) · *status: adopted:group-advance-strands-lower-group*
 
 ## Concurrent first submits can collide on the reserved source row
 
