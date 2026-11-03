@@ -289,6 +289,16 @@ cheap now; the mechanism is reworked by the turso rotation work anyway.
 *Horizon: mid-term, low priority · Depends on: — · Refs: turso R8–R11*
 **Seed:** [`issues/rotatedb-lost-update-window.md`](issues/rotatedb-lost-update-window.md)
 
+## The server cannot listen on IPv6
+
+Both transports listen on IPv4 only, so a server is unreachable on an IPv6-only host or network and
+an IPv6 bind address fails. Not a fidelity defect, but recorded here because the TLS address-family
+fix aligns the client with the IPv4-only listener rather than widening it; dual-stack serving would
+have to move both ends together.
+
+*Horizon: long-term · Depends on: — · Refs: `spec/tls-client-address-family/`*
+**Seed:** [`issues/ipv6-server-listener.md`](issues/ipv6-server-listener.md)
+
 ## Merged output is interleave-corruptible
 
 Concurrent executors write to one shared file description with no line discipline, so long lines
