@@ -26,6 +26,9 @@
 - `hs-review` Step 2, cycle 4: a blind pass scoped to the remediation delta found two defects the
   remediation's own red-first tests did not cover (REVIEW C7, C8). Its byte-level trace showed that a
   remote client's decref is unchanged.
+- `hs-review` Step 2, cycle 6: the blind reviewer and the orchestrator reached the same defect
+  (REVIEW C10) by different executed methods, a forced collection at a new thread's first
+  instruction and natural collections, and graded its exposure the same way independently.
 
 ## Friction findings
 
@@ -180,7 +183,7 @@ is skipped by the parser):
   treating accepted PLAUSIBLE rows like CONFIRMED ones.
 - **Confidence:** high · **Effort:** small
 
-## F8 — Reviewer conduct covers the git tree, not the processes a base-build drive leaves behind
+## F8 — Reviewer conduct covers the git tree, not the processes a base-build drive leaves behind · seen again
 `origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.agents/factory/review-rubric.md`
 - **What happened:** Some of the blind reviewer's base-versus-feature drives timed out. It killed
   the base servers by process id, and their manager children and resource trackers survived as
@@ -200,6 +203,9 @@ is skipped by the parser):
   loop outlived the reviewer's hand-back until the orchestrator asked for it to be stopped. The
   hand-back check should cover background shells and monitors, not only drives; the orchestrator's
   own monitors needed the same check.
+- **Seen again (hs-review step2, cycle 6, 2026-11-03):** the process-group, timeout and psutil-scan
+  rules came from the foreman's brief and were again copied into the blind brief by hand; the rubric
+  still has none of them.
 
 ## F9 — Cycle 2+ has no rule for a blind finding that re-raises an already-triaged one
 `origin=hs-review:step3 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
@@ -217,7 +223,7 @@ is skipped by the parser):
   scenario is graded normally and cross-referenced to the ruling.
 - **Confidence:** med · **Effort:** small
 
-## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again · seen again · seen again
+## F10 — The verify gates require `temp_site.sh`, which a harness that blocks `rm` cannot run · seen again · seen again · seen again · seen again · seen again · seen again
 `origin=hs-build:P1-remediation-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
 - **What happened:** P1's `verify:` and Safety Principles' CLI drive both run
   `.agents/factory/bin/temp_site.sh`, whose cleanup is `trap 'rm -rf "$site"'`. Under a harness
@@ -238,6 +244,8 @@ is skipped by the parser):
 - **Seen again (hs-review step2, cycle 5, 2026-11-02):** the same override, in the blind brief again.
 - **Seen again (hs-build P1 review-5 remediation, 2026-11-02):** the `hsx` drive again ran in
   environment-isolated sites instead of `temp_site.sh`.
+- **Seen again (hs-review step2, cycle 6, 2026-11-03):** the blind brief again overrode the rubric's
+  `temp_site.sh` instruction with environment-isolated sites.
 
 ## F11 — Step 7's `git add -A` commits whatever else is in a shared worktree · seen again
 `origin=hs-build:P1-remediation-3 severity=medium category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
@@ -288,4 +296,22 @@ is skipped by the parser):
   auth or the remote-client contract. Mark the extension in `TECH.md` and in the commit body as
   "beyond the ruling", with the red evidence of the ruling as written. Report it first in the final
   report for the judge to ratify or reject. Any extension that would touch those surfaces is a STOP.
+- **Confidence:** med · **Effort:** small
+
+## F14 — Step 4 has no route for a maintainer's pre-agreed fallback on a cycle's findings
+`origin=hs-review:step4 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** The cycle-5 triage authorized cycle 6 with a pre-agreed fallback: LOW or MEDIUM
+  findings with library-only exposure are seeded and the feature proceeds to publish; anything else
+  stops it. Step 4 routes every CONFIRMED finding to `changes-requested` and `blocked`, and its only
+  other route, the deferral exception, needs pre-existing behaviour, which a finding new in the delta
+  is not. The orchestrator recorded the mechanical verdict and left the fallback to the judge, with
+  the classification argued in REVIEW.md.
+- **Skill cause:** Step 4 knows two dispositions, block or defer pre-existing behaviour. A human
+  ruling that pre-commits the disposition of a class of findings has no home, so the recorded verdict
+  and the agreed outcome can disagree.
+- **Recommended fix:** In Step 4, when the latest `Triage` section states a pre-agreed fallback,
+  have the orchestrator classify each CONFIRMED finding against it (severity, CLI-reachable or
+  library-only, with reasons). It still records `changes-requested`, and names in REVIEW.md's
+  Human-gate section whether the fallback's conditions are met, so the judge applies it in one step
+  (seed, `ROADMAP.md` entry, verdict flip) rather than re-deriving it.
 - **Confidence:** med · **Effort:** small

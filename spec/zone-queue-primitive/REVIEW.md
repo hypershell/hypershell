@@ -1316,3 +1316,297 @@ any finding reachable from a shipped CLI path, stops the feature.
 | Observation · forked child keeps the listener | seed | `unshaped`, with a `ROADMAP.md` entry and the reviewer's reproduction (port not re-bindable after shutdown, unlike `b819de6`). |
 | Observation · stale cached connection after a same-port restart under another name | fold | Append to the existing same-port restart seed (`issues/queue-stale-decref-same-port-restart.md`) as a second symptom. |
 | P2 · PLAUSIBLE | pending external evidence | Unchanged; the foreman runs the multi-node matrix at the remediated head once the test cluster is back from maintenance. |
+
+### Foreman's note — ratification of (c), 2026-11-03
+
+> The build extended the ruled thread rule with case (c). `secure_client` marks its thread from TCP
+> connect until the TLS handshake returns, so a decref finalized inside a same-process client's own
+> handshake is deferred. With (a)+(b) alone, the existing C5 test stalled 2 of 14 runs: the client's
+> stock decref dialed the server whose accept loop was waiting on that very handshake. (c) applies
+> only when a sender exists, i.e. in a process that serves queues. It changes nothing for a process
+> that serves no queues, and nothing in wire, auth or TLS. The foreman ratifies (c) as within the
+> ruling's property (no in-process thread blocks on a connection only this process's accept loop can
+> answer). It is in scope for cycle 6.
+
+## Review cycle 6 — changes-requested (2026-11-03)
+
+- **Reviewed commit:** bc2ed5258a6ca5244ff0f78ad200fa6672fa5d41  ·  **Base:** `b819de6` (merge base with
+  `origin/develop`)  ·  **Date:** 2026-11-03
+- **Verdict:** changes-requested. One finding, C10 (HIGH, CONFIRMED, library-only): on Python 3.12
+  a new server thread can run a collection before its mark. It stalled the suite's own same-port
+  restart test once in 21 runs on 3.12. Graded HIGH, it does not meet the cycle-5 triage's
+  pre-agreed fallback, so the feature stops pending the maintainer. Weighed on CLI exposure alone it
+  would be MEDIUM, which would meet it (see Human-gate triggers).
+- **Cycle:** 6, the further cycle the maintainer authorized at the cycle-5 triage, scoped to the
+  thread-based decref redesign.
+- **Mode:** a remediation check of C9 and of the thread rule ((a), (b) and the ratified (c)) by the
+  orchestrator, including an attempt to break TECH P1's rewritten argument, plus one fresh blind
+  reviewer over the delta `git diff 49b4409..bc2ed52 -- . ':(exclude)spec/'`, with the full
+  spec-excluded diff `b819de6...bc2ed52` as context. The reviewer was not shown earlier findings or
+  commit subjects. Findings outside the delta, or restating a settled ruling, are Observations.
+
+### Pre-flight
+
+- **Base resolution.** Graded against the merge base `b819de6`; the stale local `develop` was not
+  used.
+- **Build state.** `TECH.md` is `status: in_progress`, P1–P6 `done`, P7 `pending`. R9's multi-node
+  clause still waits on the foreman's matrix. Not a finding.
+- **Contract drift.** `git log --oneline b819de6..bc2ed52 -- spec/zone-queue-primitive/GOAL.md` shows
+  only the shaping commit `da987c2`.
+- **Since cycle 5:** `bc2ed52` only. It is signed and carries no `Co-Authored-By` trailer.
+  `git diff --diff-filter=M b819de6...bc2ed52 -- tests/` is empty: no base test is modified.
+- **Working tree.** Clean apart from this review's own edits. Every run used `git archive` extracts of
+  `bc2ed52`, `43d2d85`, `aa55e86` and `b819de6`, with one `uv sync --frozen` venv per commit and
+  Python (3.11.18, 3.12.16, 3.13.18, 3.14.10).
+- **Environment.** As in cycle 5, connections to the host's own non-loopback addresses are
+  intercepted here, so every reachability probe ran over loopback and the wildcard address.
+
+### Cycle 5 findings: remediation check (orchestrator)
+
+**C9 — resolved.** The address match is gone: `_serving`, `_dialed`, `_note_dialed` and
+`_served_here` are removed, and `_decref` (`core/queue.py:594`) reads only the calling thread's marks
+and whether a sender exists.
+- **Red control.** C9's configuration (`gc4`, TLS, a name resolved in-process to `0.0.0.1` then
+  `127.0.0.1`; the code under test unmodified), 20 rounds per point:
+
+  | build | accept | handler | starter | stop |
+  |---|---|---|---|---|
+  | `43d2d85`, 3.11–3.14 | stall ×4 | pass ×4 | stall ×4 | stall ×4 |
+  | `bc2ed52`, 3.11–3.14 | pass ×4 | pass ×4 | pass ×4 | pass ×4 |
+
+  The `43d2d85` stalls are C9's, at round 0. At 200 rounds, `bc2ed52` passes the same configuration
+  on every point and Python (`gc4` matrix below).
+- **C8 (re-read by the cycle-5 triage): holds.** A client of a server in another process, collected
+  on an unmarked thread of a serving process, runs the stock decref there (`c8` at the wildcard
+  address: "stock decref ran on MainThread", 0 left). Collected mid-bind, inside the start's mark, it
+  is handed off and delivered (`c8 --ephemeral`, wildcard and `127.0.0.1`: sender, 0 left). 4 Pythons
+  × TLS on and off, 24/24.
+
+**The thread rule, attacked (TECH P1 items 1–8).**
+- **Item 1(a), threads a server starts: fails on 3.12 (C10).** The mark is `_bootstrap`'s first
+  statement (`:577`), and the argument rests on "nothing before the mark allocates an object the
+  collector tracks". That is the 3.11 trigger (a collection runs at the allocating thread's own
+  allocation). On 3.12 the eval breaker is shared by all threads, so a collection that another
+  thread scheduled runs at the first eval-breaker check of whichever thread next holds the GIL. That
+  can be the `RESUME` of a new server thread's `_bootstrap` (`:574`), before the mark. On 3.13 and
+  3.14 the breaker is per thread, and the window is closed. TECH names this window as a known limit
+  on 3.12 that the probes never landed in; this cycle provoked it into C5's stall, and the suite's own
+  same-port restart test hit it once with no provocation.
+- **Item 1(b), start and stop: holds.** `gc4` starter and stop points (below). Nested: `stop()`
+  called from a handler (marks on the handler 1 → 1 around it; a forced collection there hands off),
+  and a second server started from a handler, with a collection forced between its bind and its
+  accept loop while a dropped client of an earlier server on the same port is pending (handler
+  marks 2; no stall). 4 Pythons × TLS on and off, 8/8.
+- **Item 1(c), the TLS handshake (ratified above): holds.** A collection forced inside a same-process
+  TLS client's connect, with a dropped client of another process's server pending: handed off and
+  delivered (0 left), 4/4 Pythons. In a process that serves nothing it is the stock decref on the
+  dialing thread (no sender, 0 left), 4/4; and when that client is mid-handshake with the very server
+  the decref dials, both `bc2ed52` and `b819de6` stall the same way across processes on 3.14 (the base TLS
+  handshake stall, out of scope).
+- **Items 2–4: hold, with item 1(a)'s exception.** The waits are as listed. The handler-start wait
+  (`serve` → `Thread.start()`, `:476`) is where C10's stall forms; the starting thread's wait on the
+  accept loop's start (`:717`) is the other place, reached by a same-port restart (the suite's own
+  failure, and the blind reviewer's `accept-restart`).
+- **Item 5 (the sender): holds.** It is marked, nothing server-side waits on it.
+- **Item 6 (nothing stranded): holds.** `_serve_in_process` starts the sender before its mark
+  (`:710`), and `_decref` hands off only while a sender is set. Remote decrefs collected on a server
+  thread (the accept loop, a handler) are delivered by the sender: 0 left in every round, 4 Pythons
+  × TLS on and off, 16/16.
+- **Item 7 (fork): holds.** The cycle-5 fork probe, adapted as the remediation's C7 test is (the
+  parent's waiting decrefs are made by a collection inside a mark): 3–4 decrefs waiting at the fork,
+  the child inherits 0 marks, 0 waiting and no sender, and the parent's live client keeps 4 objects
+  with every put working. A child that serves starts its own sender; a collection forced on its own
+  accept loop hands off, and its server ends with 0 objects. 4 Pythons × TLS on and off, 16/16.
+- **Item 8 (remote clients): holds.** A process that serves nothing: the finalizer is `_decref`, the
+  stock decref runs on the dropping thread, nothing is handed off, there is no sender thread and
+  nothing is recorded (`remote`, 8/8).
+- **Marks balance.** At the end of every probe above, every mark belongs to a live `_ServerThread`
+  with a count of 1 (52/52 checks).
+- **Several servers in one process, and address forms:** see the `forms` matrix below.
+
+### Verification run
+
+- **Suite (orchestrator).** `bc2ed52` extract, venv on `PATH`, two Pythons at a time: 3.11.18,
+  3.12.16, 3.13.18 and 3.14.10 each **563 passed**.
+- **`tests/test_queue_gc.py` repeats,** 20 consecutive runs each, 3.12.16 and 3.14.10 side by side:
+  - 3.14: 20/20 (13 passed each).
+  - **3.12: 19/20.** Run 2 failed `test_same_port_restart_never_stalls[tls]`: its watchdog fired in
+    round 138 with C10's stacks (below). 20 more runs of that test (TLS on and off) passed on each of
+    3.12 and 3.13, so the rate on 3.12 is about 1 in 21 runs of the TLS case.
+- **`parity --base b819de6 --feature bc2ed52`: PASS.** Task tables identical with TLS on and off, rc
+  0/[0, 0] on both builds; `--help` byte-identical for `server`, `client`, `submit` and `cluster`.
+- **`compat --server bc2ed52 --client b819de6`: PASS.** 200/200 tasks exit 0, rc 0/[0, 0], TLS on and
+  off.
+- **Forced-collection matrices, `bc2ed52`.**
+  - The remediation's `gc4` matrix rebuilt (the cycle-5 probe `zqp5_probe.py gc4`, unmodified), 200
+    rounds per point, each of 3.11–3.14: TLS on and off at `127.0.0.1` (32 runs) and C9's
+    configuration (16 runs); plus the test module's own forced-collection probe at `127.0.0.1`, TLS on
+    and off, and the multi-address name (12 runs). **60/60 pass**, 12,000 rounds.
+  - Address forms and several servers (`gc4`, 10 rounds per point): `127.0.0.1`; `localhost` both
+    sides; wildcard bind dialed as `127.0.0.1` and as `localhost`; bind `127.0.0.1`, dial `0.0.0.0`;
+    bind `''`, dial `localhost`; three extra servers (at `127.0.0.1`, the wildcard address and
+    `localhost`, each with a dropped client pending at every collection); and `::ffff:127.0.0.1`
+    (TLS). 4 Pythons × 4 points × TLS on and off: **240/240 pass**.
+  - Every stock decref in both matrices ran on the main thread or on `hypershell-queue-decref`.
+- **Throughput gate (orchestrator).** `bench_queue.py gate --base b819de6 --feature bc2ed52 --repeats
+  5`, Python 3.14.6, start method `spawn`, frozen non-editable venvs from `git archive`: **PASS**, all
+  60 runs clean.
+  - **Load.** The gate started at a 1-min load average of 4.87, below the bound of 6. Sampled every
+    30 s (54 samples): min 4.87, median 8.5, max 32.8. During the two 4x4 b=1 configs (17 samples):
+    min 4.87, median 5.5, max 6.8, against a median of 5.29 over the build's gate. The later peaks
+    came from this review's single-process window probes, the blind reviewer's probes and another
+    worktree's test run; runs were interleaved, so both builds shared the load.
+  - **The build's 4x4 no-TLS margin (−14.1 against 14.2) did not reproduce:** −3.7 against 21.0,
+    with the base's median 12.2 lower than in the build's run and the feature's 1.8 lower.
+
+  | config | base | feature | delta | tolerance | tree children b/f | tree FDs b/f | own threads b/f | tree RSS MB b/f |
+  |---|---|---|---|---|---|---|---|---|
+  | 4x4 b=1 tls | 264.0 [246.8–277.4] | 268.4 [252.9–279.3] | +4.4 | 30.6 | 2/0 | 117/23 | 7/20 | 197.7/95.9 |
+  | 4x4 b=1 no-tls | 270.8 [265.6–273.1] | 267.1 [257.3–278.3] | −3.7 | 21.0 | 2/0 | 117/23 | 7/20 | 193.5/92.0 |
+  | 16x1 b=1 tls | 271.0 [218.8–285.0] | 244.8 [224.6–259.4] | −26.2 | 66.2 | 2/0 | 153/60 | 7/56 | 202.0/99.9 |
+  | 16x1 b=1 no-tls | 217.0 [212.5–236.3] | 220.7 [211.2–263.5] | +3.7 | 52.3 | 2/0 | 153/59 | 7/56 | 196.7/93.9 |
+  | 4x4 b=50 tls | 800.6 [754.0–865.8] | 836.4 [765.1–855.1] | +35.8 | 111.8 | 2/0 | 116/22 | 7/20 | 202.5/100.2 |
+  | 32x1 b=1 tls | 248.4 [214.0–269.5] | 239.1 [222.6–264.2] | −9.3 | 55.5 | 2/0 | 201/107 | 7/104 | 206.6/103.8 |
+
+  Steady-state tasks/s, median [min–max]. The 16x1 and 32x1 spreads, and so their tolerances, are
+  wide: those configs ran during the load peaks. Server threads unchanged from `43d2d85` (20 in 4x4).
+
+### Requirement → evidence matrix (the delta)
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `_ServerThread`, marks, `_decref` | suite on 3.11–3.14; gate: tree children 2 → 0; C9 red control | ⚠️ C10 (a stall of the in-process server, Python 3.12, library use) |
+| R4 | `secure_client` adds marks only; stock decref with no sender | `compat` TLS on and off; `test_queue_tls.py` unmodified; `remote`, 8/8 | ✅ |
+| R5 | `stop()` marked; sender before any mark; `register_at_fork` | starter and stop points; nested probe; fork probes, 16/16 | ⚠️ C10: on 3.12 a same-port restart can hang in `start()` (1 in 21 runs of the suite's TLS restart test) |
+| R6 | `test_queue_gc.py` (forced-collection, multi-address, rule test) | tagged `unit`, bounded; red at `43d2d85`, green here | ⚠️ the forced points all fall after the mark, so C10's window is untested; `test_same_port_restart_never_stalls[tls]` is flaky on 3.12 |
+| R8 | no base test touched | suite; `parity`; `--help` byte-identical | ⚠️ C10 (library-only) |
+| R9 (local) | as R1 | gate above | ✅ |
+| R9 (multi-node vs 2.8.3) | `tests/cluster/` drive | **pending external evidence** | ⏳ |
+
+Unmapped changes: none. The new seed and the two amended seeds are the cycle-5 triage's
+dispositions; the blind reviewer graded them as prose and reproduced both described behaviours.
+
+### Findings
+
+No AGENTS.md invariant violation was found.
+
+#### [HIGH/CONFIRMED] C10 — On Python 3.12 a collection can run on a new server thread before its mark, bringing back C5's stall
+- **Where:** `src/hypershell/core/queue.py`:
+  - `:574-577`, `_ServerThread._bootstrap`: the mark is the first statement, after the function's
+    entry (`RESUME`) and the `threading.get_ident()` call, both eval-breaker checks on 3.12. The
+    comment at `:575-576` holds on 3.11 and 3.13+, not on 3.12.
+  - `:594-597`, `_decref`: an unmarked thread runs the stock decref.
+  - `:476`, `serve`: the accept loop waits in `Thread.start()` for the new handler.
+  - `:717`, `_serve_in_process`: the starting thread waits likewise for the accept loop.
+- **Failure scenario:**
+  - Python 3.12. A same-process `QueueClient` is dropped as cyclic garbage while its server serves.
+  - A collection scheduled by one thread is run by a new server thread at its first eval-breaker
+    check. This is most frequent when another thread allocates tracked objects and releases the GIL
+    inside one C call, with no eval-breaker check in between: SQLite's `fetchall` does this (a row
+    tuple per row, the GIL released around each step), as the server's own database thread does
+    through SQLAlchemy. The suite's same-port restart test hit it without any such thread.
+  - The accept loop admits a connection and starts a handler. When the handler first gets the GIL it
+    runs the pending collection at `_bootstrap`'s entry, before its mark.
+  - The dropped client's finalizers run the stock decref, which dials this server. The accept loop is
+    in `Thread.start()` waiting for that same handler: no connection is ever served again, and new
+    clients hang in `connect`.
+  - The same can happen to a new accept loop, which the starting thread waits on, when a dropped
+    client of an earlier server on the same port is pending (a same-port restart).
+- **Evidence:**
+  - **The suite's own test, natural collection, no probe scaffolding.** `test_same_port_restart_never_stalls[tls]`
+    on 3.12 stalled in round 138 of one run in 21 (the `gc20` repeats above). Stacks: the main thread
+    in `probe_same_port_restart` → `QueueServer.start` → `_serve_in_process` (`:717`) →
+    `Thread.start` → `wait`; the new accept loop in `_bootstrap` (`:574`) → `util.Finalize` →
+    `_decref` (`:597`) → `BaseProxy._decref` → `secure_client` (`:267`) → `do_handshake`. A dropped
+    client of the previous server on that port was collected on the new accept loop before its mark;
+    its stock decref dialed the new server, whose accept loop it was. 0 of 20 on 3.13 and 0 of 20 on
+    3.14.
+  - **Orchestrator, natural collection with a driver** (`zqp6_window.py`: a thread running SQLite `fetchall`, the
+    main thread connecting same-process clients, `gc.set_threshold(500, 1, 1)`; a `gc.callbacks` hook
+    only records where each collection lands, and parks each used client so that a collection always
+    has one pending; nothing in `hypershell` is patched):
+
+    | build, Python | dropped client | stalled runs | pre-mark collections per run |
+    |---|---|---|---|
+    | `bc2ed52`, 3.12, no TLS | cyclic (`client.cycle = client`) | 3/4 | 123–4,107 |
+    | `bc2ed52`, 3.12, TLS | cyclic | 0/4 | 294–1,292 (0–9 with garbage pending) |
+    | `bc2ed52`, 3.12, no TLS / TLS | freed by the next collection of any generation | 2/2 / 1/2 | 42–573 |
+    | `bc2ed52`, 3.12, without the SQLite thread | cyclic | 0/2 | 0 |
+    | `bc2ed52`, 3.11, 3.13, 3.14, TLS on and off | both | 0/12 | 0 |
+    | `43d2d85`, 3.12, TLS on and off | both | 0/4 | (address match) |
+
+    The "freed by any collection" variant clears the proxies' back-reference to their client, so a
+    young holder decides when it is collected; the decision under test is unchanged. Each stall's
+    stacks: the handler in `_bootstrap` (`:574`) → `util.Finalize` → `_decref` (`:597`) →
+    `BaseProxy._decref` → `Client` → `answer_challenge` (no TLS), or → `secure_client` (`:267`) →
+    `do_handshake` (TLS); the accept loop in `serve` (`:476`) → `Thread.start` → `wait`; the main
+    thread in `connect`.
+  - **Blind reviewer, independently:**
+    - Forced at the new thread's first instruction (a `sys.monitoring` PY_START hook calls
+      `gc.collect()` once; the code under test unmodified), 3.12: the handler stalls with TLS and
+      without, with the same stacks; a same-port restart variant hangs inside `QueueServer.start()`.
+      `43d2d85` passes all three.
+    - Natural landings with a SQLite thread (collections that ran on a new server thread before its
+      mark, per handler starts): 3.12 at threshold 50, 3 of 31,060; at threshold 5, 598 of 20,240;
+      3.11, 3.13 and 3.14, 0 of 21,000–31,000. Its natural stall attempts (2,170 rounds) did not stall.
+    - The delta's tests pass on 3.12 (their forced points all come after the mark).
+- **Exposure: library-only.** Reasoning:
+  - A stall needs a same-process `QueueClient` whose proxies are finalized while its server still
+    accepts connections, on Python 3.12.
+  - `hs server`, `hs client`, `hs submit` and the ssh, remote and autoscaling clusters have no
+    same-process client of their own server, so `_decref` never runs on a server thread there.
+  - `hsx` and the local `hs cluster` hold a server and a same-process client (the `ClientThread`; in
+    `--no-db` mode also the `LiveSubmitThread`'s client). `LocalCluster` and `ServerThread` keep both
+    `QueueClient`s referenced until the server has joined, so their decrefs reach only a stopped server.
+  - Library routes: R5's same-port restart in one process (no CLI path restarts in-process); an
+    application that drops a client of its own in-process server; `run_local()` called twice in one
+    process on the same port (the first run's client, collected during the second run, dials the
+    second server).
+- **Severity: HIGH,** by two tests. R5's own scenario, a new server on the same port in the same
+  process, can hang in `start()` on 3.12, so R5 is intermittently unmet there. And the project's suite
+  is exposed: the new `test_same_port_restart_never_stalls[tls]` fails on about 1 in 21 runs on 3.12
+  (bounded by its watchdog, so a red CI job rather than a hang). Cycle 3 kept C5 HIGH for its suite
+  exposure, noting it "would be MEDIUM weighed on CLI exposure alone"; the same holds here. The blind
+  reviewer graded C10 MEDIUM before the suite failure surfaced. It is new in the delta: at `43d2d85`
+  the address match handed these decrefs off on every thread, and at `b819de6` the queues are served
+  by a separate process.
+- **Touches invariant / requirement:** the C5 property and its cycle-5 ruling ("C5 holds by
+  construction"); R1, R5, R8; R6's coverage; high-blast-radius `core/queue.py`.
+- **Not prescribed, for the build:** mark the new thread from the thread that starts it, or treat a
+  thread that is still bootstrapping as on the server side (the blind reviewer's suggestion: its
+  identifier is not yet in `threading._active`).
+
+### Observations (not findings)
+
+- **The base TLS handshake stall, on both builds.** A collection inside a TLS client's handshake, in a
+  process that serves nothing, whose stock decref dials the same remote server: `bc2ed52` and
+  `b819de6` both stall across processes (3.14). (c) does not apply there (no sender), as TECH states.
+  Pre-existing; out of scope.
+- **One sender for every server-side decref.** On server threads, decrefs for servers in other
+  processes are now handed to the same sender, so a slow remote target delays in-process decrefs
+  queued behind it. Delay only; the `queue-decref-handoff-delay` seed's territory.
+- **The seeds read true.** The blind reviewer reproduced `queue-forked-child-keeps-listener` (re-bind
+  `EADDRINUSE` and no reply while the child lives; `b819de6` re-binds and refuses) and the second
+  symptom in `queue-stale-decref-same-port-restart` (bind `127.0.0.1`, dial `localhost`: `EOFError`).
+  Both `unshaped`; the `ROADMAP.md` links resolve.
+- **Process hygiene.** Every probe, suite and bench ran in its own process group under a timeout.
+  - One run of the nested probe (no TLS, 3.14) ended on its own assertion, the handler hook not
+    reached in round 3, with no stall; three reruns and the matrix's eight runs passed. A probe
+    artifact, not counted.
+  - The window probe's repeated runs shared one log name, so the per-run record is the matrix output.
+  - A psutil scan after the last run found nothing from this review, or from the blind reviewer,
+    still running.
+
+### Human-gate triggers
+
+- **Triggered.** C10 is CONFIRMED in high-blast-radius `core/queue.py`, inside the delta and new in
+  it.
+- **The pre-agreed fallback (cycle-5 triage) is not met as graded.** C10 is library-only (no shipped
+  CLI path reaches it, a classification the blind reviewer reached independently), but it is graded
+  HIGH for R5 and the suite exposure on 3.12, and a HIGH finding stops the feature. If the maintainer
+  weighs it on CLI exposure alone, as cycle 3 said C5 would have been (MEDIUM), the fallback applies:
+  seed C10 with a `ROADMAP.md` entry and proceed to publish. Before publishing on that basis, the
+  3.12 flake in `test_same_port_restart_never_stalls[tls]` should be dealt with, since CI runs 3.12.
+- C9 is resolved. The suite on four Pythons, parity, compat and throughput passed. The
+  `test_queue_gc.py` repeats passed 20/20 on 3.14 and 19/20 on 3.12, the one failure being C10.
+- P2, the multi-node evidence, is still pending.

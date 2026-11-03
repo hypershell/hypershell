@@ -3,11 +3,11 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_progress
+status: blocked
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: P7
-last_updated: '2026-11-02'
+last_updated: '2026-11-03'
 phases:
 - id: P1
   name: 'In-process serve loop: no manager child, clean shutdown and port release'
@@ -104,10 +104,12 @@ phases:
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: 43d2d85696dbbbf20550ba7c9a52559677e20ad2
+  last_reviewed_commit: bc2ed5258a6ca5244ff0f78ad200fa6672fa5d41
   verdict: changes-requested
-  blocked_reason: ''
-  cycle: 5
+  blocked_reason: 'Review cycle 6: C10 (HIGH, library-only) - on Python 3.12 a new
+    server thread can run a collection before its mark; the pre-agreed fallback is
+    not met as graded; maintainer decision'
+  cycle: 6
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 
