@@ -208,7 +208,7 @@ class Scheduler(StateMachine):
             self.first_group_pending = True
         group_info = Task.current_group()
         log.debug(f'Starting with task group {group_info.value} ({group_info.reason})')
-        self.current_group = group_info.value
+        self.current_group = self.starting_group(group_info.value)
         return SchedulerState.LOAD
 
     def load_bundle(self: Scheduler) -> SchedulerState:
@@ -273,6 +273,32 @@ class Scheduler(StateMachine):
             self.highest_started_group = group if highest is None else max(group, highest)
             self.last_scheduled_group = group
         self.first_group_pending = False
+
+    def starting_group(self: Scheduler, group: int) -> int:
+        """
+        The task group to start in, given the most recently scheduled `group`.
+
+        That group is kept while it holds failures still to be retried or halted on. Otherwise the
+        start is the lowest group holding incomplete tasks, so new tasks on a database whose earlier
+        work finished at a higher group run in ascending order. With no incomplete tasks yet, the
+        first group is chosen once tasks arrive, as on an empty database.
+        """
+        if self.first_group_pending:
+            return group
+        if Task.count_remaining(group=group) == 0:
+            # With every task in the group complete, increment_group holds the group while a
+            # failure awaits retry, and halts it on a failure that has used its retries.
+            held = Task.increment_group(group, attempts=self.attempts, eager=self.eager)
+            if not held.viable or Task.count_retryable(self.attempts, group=group, eager=self.eager) > 0:
+                return group
+        lowest = Task.lowest_incomplete_group()
+        if lowest is None:
+            log.debug('No incomplete tasks - first task group chosen once tasks arrive')
+            self.first_group_pending = True
+            return group
+        if lowest != group:
+            log.debug(f'Moving to task group {lowest} (lowest group with incomplete tasks)')
+        return lowest
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
         """Pack tasks into bundle (list)."""
@@ -919,6 +945,17 @@ class ServerThread(Thread):
                 log.info('Waiting for task file to be submitted before scheduling')
                 self.wait_submitter()
             self.scheduler.start()
+
+    def wait_scheduling(self: ServerThread) -> None:
+        """Wait until scheduling starts, which for file input is once the whole file is submitted.
+
+        Clients started after this never idle while a task file is read. If the server stops
+        first, its error (if any) is raised here.
+        """
+        while self.scheduler is not None and self.scheduler.ident is None and self.is_alive():
+            time.sleep(0.1)
+        if not self.is_alive():
+            self.join()
 
     def wait_submitter(self: ServerThread) -> None:
         """Wait on task submission to complete."""

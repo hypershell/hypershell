@@ -192,12 +192,12 @@ untested; the seed asks for that test first.
 
 ## An unsorted inline task file can run a higher group first
 
-`hs cluster FILE` and `hs server FILE` schedule while the file is still being ingested. A file that
-lists group 1 before group 0 used to hang about half the time with group 0 stranded. The fix in
-`group-advance-strands-lower-group` makes the server go back for a late lower group, with a warning,
-so the run finishes, but group 1 can now finish before group 0 starts. Every small hold that
-restores the documented ascending order delays the first dispatch for some files already in
-ascending order. Pre-existing since task groups were added.
+`hs cluster FILE` and `hs server FILE` used to schedule while the file was still being ingested,
+so a file that listed group 1 before group 0 hung about half the time with group 0 stranded.
+`group-advance-strands-lower-group` reads a task file in full before scheduling begins, so its
+groups run in ascending order whatever order the file lists them in. The cost, accepted by the
+maintainer, is that a large file's first task waits until the whole file is in. Pre-existing since
+task groups were added.
 
 *Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: that cycle's GOAL Q1*
 **Seed:** [`issues/group-order-unsorted-inline-file.md`](issues/group-order-unsorted-inline-file.md) · *status: adopted:group-advance-strands-lower-group*
@@ -227,6 +227,16 @@ the group-order fix.
 
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (PLAN §5 risk 1)*
 **Seed:** [`issues/stream-run-stops-before-input-ends.md`](issues/stream-run-stops-before-input-ends.md) · *status: unshaped*
+
+## An empty task file never finishes
+
+`hsx` given an empty task file never exits: the server logs `Empty database - waiting for initial
+tasks` and waits for tasks that cannot arrive. The stop branch of `Scheduler.load_bundle` needs at
+least one task in the database, so a run that submits none never reaches FINAL. The same holds
+before and after `group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 1)*
+**Seed:** [`issues/empty-task-file-hangs.md`](issues/empty-task-file-hangs.md) · *status: unshaped*
 
 ## Concurrent first submits can collide on the reserved source row
 

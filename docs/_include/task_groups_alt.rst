@@ -20,8 +20,10 @@ A task file given to ``hs cluster`` or ``hs server`` is read in full before sche
 its groups run in ascending order whatever order the file lists them in. Input on standard input
 or a pipe is scheduled as it arrives, which is best effort: a lower group that arrives after a
 higher group has started runs once the current group finishes, and *HyperShell* logs a warning
-naming both groups. Clients launched with ``-T``/``--timeout`` may reach that timeout and exit
-while a large task file is still being read.
+naming both groups. The clients that ``hs cluster`` launches start once the file is read, so
+their ``-T``/``--timeout`` clock does not run while it is read. A client connected to
+``hs server`` whose ``-T``/``--timeout`` is shorter than the time to read the file reaches that
+timeout and exits before any task is scheduled, and the server then waits for new clients.
 
 Filter or update tasks by group with the ``-g``/``--group`` option of ``hs list`` and
 ``hs update``.

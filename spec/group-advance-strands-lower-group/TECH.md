@@ -3,10 +3,10 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: done
+current_phase: P5
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -90,12 +90,12 @@ phases:
   verify: ( for f in docs/_include/task_groups_alt.rst AGENTS.md .agents/factory/invariants.md;
     do grep -qiE 'best[- ]effort' "$f" && grep -qi 'warning' "$f" && grep -qiE 'whole
     file|entire file|in full' "$f" || { echo "R10 statement missing in $f"; exit 1;
-    }; done ) && git diff --quiet b31c66e -- share src/hypershell/__init__.py src/hypershell/cluster
+    }; done ) && git diff --quiet b31c66e -- share src/hypershell/__init__.py src/hypershell/cluster/__init__.py
     docs/_include/cluster_help.rst docs/_include/cluster_usage.rst docs/_include/server_help.rst
     docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
 - id: P5
   name: 2.8.4 port trial and final gate
-  status: done
+  status: in_progress
   satisfies:
   - R9
   - R7
@@ -110,8 +110,9 @@ phases:
   hill: uphill
   verify: 'kt() { uv run python -c ''import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
     if r<0 else r)'' "$@"; }; test "$(git diff --name-only b31c66e -- src | tr ''\n''
-    '' '')" = ''src/hypershell/data/model.py src/hypershell/server.py '' && ! git
-    diff b31c66e -- src | grep -E ''^[-+].*(mapped_column|__tablename__|add_argument|_HELP|_USAGE)''
+    '' '')" = ''src/hypershell/client.py src/hypershell/cluster/local.py src/hypershell/cluster/remote.py
+    src/hypershell/cluster/ssh.py src/hypershell/data/model.py src/hypershell/server.py
+    '' && ! git diff b31c66e -- src | grep -E ''^[-+].*(mapped_column|__tablename__|add_argument|_HELP|_USAGE)''
     && kt 2400 sh spec/group-advance-strands-lower-group/port-trial.sh && { kt 2400
     pytest -q -l > "${TMPDIR:-/tmp}/hs-p5.log" 2>&1 && tail -n 3 "${TMPDIR:-/tmp}/hs-p5.log"
     || { tail -n 40 "${TMPDIR:-/tmp}/hs-p5.log"; grep -E ''^(FAILED|ERROR)'' "${TMPDIR:-/tmp}/hs-p5.log";
@@ -295,6 +296,18 @@ coupled core and is made as one edit.
       lines. The P5 trial is the authority. This is only an early warning.
 - [x] Do **not** touch `tests/test_groups.py`, `tests/test_retry_gate.py` or any integration
       test.
+- [x] Review-1 remediation, F1 (triage in `REVIEW.md`). `Scheduler.start` keeps its line that
+      reports `Task.current_group()` and takes its start from `starting_group(group)`:
+  - the most recently scheduled group, while it holds a failure awaiting retry or one that has used
+    its retries (`increment_group` holds or halts it), so the halted-restart path is unchanged;
+  - otherwise the lowest group with incomplete tasks;
+  - with none, the provisional first group (`first_group_pending`), as on an empty database.
+
+  `starting_group` sits after `mark_group_started` (port placement). Red first, on `31d8771`'s
+  `src`: `test_new_file_after_finished_run_runs_in_order[False|True]` (the reviewer's replay: an
+  ascending file on a database whose earlier run finished groups 0-2) and
+  `test_tasks_after_finished_run_start_at_lowest_group` (`forever`, the tasks arrive after the
+  start).
 - **Verify:** the frontmatter `verify:`.
   - `tests/test_groups.py` and `tests/test_retry_gate.py` are identical to `b31c66e`, and there
     is no `xfail` in the new file.
@@ -346,6 +359,17 @@ Stream input, `--no-db`, `--forever` and bare `--restart` are unchanged.
       pair, and there is no `after task group`.
     - It must not depend on timing: no sleeps and no repetition.
 - [x] Never run the integration test against `b31c66e` without `kt`. It can hang there.
+- [x] Review-1 remediation, F2 (narrow ruling). `ServerThread.wait_scheduling()` returns once the
+      scheduler has started, and raises the server's error if it stopped first. `LocalCluster`,
+      `RemoteCluster`, `AutoScalingCluster` and `SSHCluster` call it between `server.start()` and
+      launching their clients, so for file input no client they manage starts before the file is
+      in. `ClientScheduler.start` restarts the idle clock, since `LocalCluster` builds its client
+      before the file is read. `RemoteCluster.stop` and `SSHCluster.stop` handle no client having
+      been launched. Every edit sits where 2.8.3 has the same lines.
+- [x] Red first, on `31d8771`'s `src`: `test_cluster_clients_with_timeout_wait_for_file`
+      (`integration`): `hs cluster FILE -N2 -T1 --no-tls` on 6,000 tasks (bundles of one, so the
+      read takes several times the client timeout), under a 180 s kill timer; after the fix rc 0
+      and every task succeeded.
 - **Verify:** the frontmatter `verify:`.
   - `tests/test_group_order.py` and `tests/test_groups.py` pass, with the one-rerun flake rule.
   - **Unsorted-file CLI drive:** groups listed `1, 0, -1, 1, 0, -1` through `hsx t.in -N2`. By
@@ -379,6 +403,13 @@ is unchanged.
 - [x] `.agents/factory/invariants.md` §3, the group-gating bullet: the same three facts, in
   lockstep with `AGENTS.md`.
 - [x] No change to `docs/_include/*_help.rst`, `*_usage.rst` or `share/`. No Sphinx or man build.
+- [x] Review-1 remediation. F2: the `-T`/`--timeout` sentence says that `hs cluster` starts its
+      clients once the file is read, and that a `hs server FILE` client with a shorter timeout exits
+      before any task is scheduled while the server waits for new clients. F3: `ROADMAP.md` and
+      `issues/group-order-unsorted-inline-file.md` state the ingest-first resolution. The empty
+      task file hang is seeded as `issues/empty-task-file-hangs.md` with its `ROADMAP.md` entry. The
+      verify's unchanged list names `src/hypershell/cluster/__init__.py` (the CLI) in place of the
+      whole `cluster` package, which F2 edits.
 - **Verify:** the frontmatter `verify:`.
   - Each of the three files mentions the whole file being read first (`whole file`,
     `entire file` or `in full`), `best effort`, and `warning`.
@@ -416,6 +447,8 @@ conflict, fix the placement in P2's or P3's files under a P5 amendment note, and
 - [x] Full `develop` suite under `kt 2400`, with the one-rerun flake rule.
 - [x] Build record: paste the trial's applied-file list, its pytest summary, and the full
       suite's summary (plus any rerun) into the commit body and below.
+- [ ] Review-1 remediation: the static check's `src/` list adds `client.py` and the three cluster
+      launchers (F2). Rerun the port trial and the full suite on 3.11, 3.12, 3.13 and 3.14.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/group-advance-strands-lower-group/TECH.md` (state and build record) only.
 
@@ -495,6 +528,32 @@ foreman's plan-gate ruling on PLAN §5 risk 1 is recorded as a seed,
   holds the lock for a fixed 2 s after starting a child interpreter, and on that slow run (13 min)
   the child had not started waiting before the lock was released. The rerun (`--lf`) gave `1
   passed`. This cycle touches no upgrade code.
+
+**Review-1 remediation (triage in `REVIEW.md`), P2–P4.** Same environment substitution as above.
+- **F1, how the ruling is read.** Taken literally, "incomplete rows" in the last scheduled group
+  would keep the reviewer's replay at group 2: the new file's group-2 row is incomplete, and
+  `Task.revert_interrupted` has already cleared any in-flight mark before the group is chosen.
+  That replay could then never go green, and R10's "groups run in ascending order" would stay
+  false. So the hold that matters for a restart, failures to retry or halt on, keeps the last
+  group; incomplete rows lead to the lowest group with incomplete tasks, which is the last group
+  itself unless a lower one also has some. The halted-restart guard is unchanged and green.
+- **F1 red** (3.12, `src` at `31d8771`): `test_new_file_after_finished_run_runs_in_order[False]`,
+  `[True]` and `test_tasks_after_finished_run_start_at_lowest_group` failed, each with
+  `assert [2, 0, 1] == [0, 1, 2]`. **Green:** `-m unit tests/test_group_order.py
+  tests/test_retry_gate.py` `39 passed`.
+- **F2 red** (3.12, `src` at `31d8771`): `test_cluster_clients_with_timeout_wait_for_file` failed,
+  `hs cluster did not finish within 180 seconds` (killed by its timer). **Green:** passed in 51.9 s.
+- `tests/test_groups.py` is unmodified and passes. Its
+  `test_group_starts_based_on_previous_scheduled_tasks` matches `Starting with task group 5` on the
+  line that reports `Task.current_group()`, which `Scheduler.start` keeps; a separate debug line
+  names a different start group.
+- Verify (3.12): P2 rc 0 (`39 passed`; the restart drive ran group 0 with no late warning); P3
+  rc 0 (`31 passed`, no rerun; the unsorted drive ran `-1 0 1`); P4 rc 0.
+- CLI drives (3.12, `--no-tls`, throwaway sites): two ascending files in turn, `--repeat` of the
+  same file, `hs submit` then `hsx --restart`, and an ascending pipe after a finished run all ran
+  `0 1 2` after the earlier `0 1 2`, with no late warning. A halted group still halts under
+  `--restart` (CRITICAL, the higher group not run). A bad tag exits rc 5 in 0.3 s. `--launcher=env
+  -H 127.0.0.1 -T1` on 3,000 tasks: rc 0, all succeeded. `--no-db` and a pipe run.
 
 ---
 

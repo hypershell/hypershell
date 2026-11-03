@@ -177,3 +177,16 @@ entries are deferrals that `GOAL.md` references.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Triage (human gate) — cycle 1
+
+Cycle 1 (`ef0c653`, reviewing `31d8771`) found two HIGH findings in `server.py`, which triggers the human gate. Under the run's mandate the foreman acts as judge at every gate. These rulings date from 2026-11-03.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| F1 · HIGH · CONFIRMED | fix | `Scheduler.start` takes the last scheduled group as its starting group only while that group still has unfinished work (incomplete rows, retryable failures, or exhausted failures to halt on). Otherwise it takes `Task.lowest_incomplete_group()`. The halted-restart path (R6/R7 guard) is unchanged. **Red first:** the reviewer's deterministic replay (two ascending grouped files run in turn on one database) becomes a unit test that fails at `31d8771`. The R10 docs sentences must be true afterwards. |
+| F2 · HIGH · CONFIRMED | fix, narrow | For file input, `hs cluster` starts the clients it manages (local, and any launcher or remote path it owns) only once the scheduler has started, so their `-T` idle clock never runs during ingest. This keeps "a command that succeeds today still succeeds" for `hs cluster FILE -T`. External clients of `hs server FILE` with a `-T` shorter than the ingest remain the accepted cost of the maintainer's ingest-first ruling. The docs sentence must say accurately what happens to them: they time out and the server waits for new clients. It must not say "may time out" and stop there. The per-group-count alternative is ruled out because the source gate is not on 2.8.3 (R9). **Red first:** an integration test, `hsx FILE -N2 -T <short>` on a file large enough that ingest outlasts `-T`, kill-timered, that hangs or fails at `31d8771` and exits 0 with every task completed after the fix. Size it so it runs in under about 60 s. If `hs cluster`'s client launch can't be deferred without touching code 2.8.3 lacks, stop and report. |
+| F3 · LOW · CONFIRMED | fix | Restate `ROADMAP.md` and `issues/group-order-unsorted-inline-file.md` to match ingest-first. |
+| Note: an empty task file hangs `hsx` (on HEAD and on base) | defer | Seed `issues/empty-task-file-hangs.md` (unshaped, fix, small, public) with a ROADMAP entry. |
+
+Gates for cycle 2: P1's red tests plus the two new red tests pass. `test_groups.py`, `test_retry_gate.py` and `test_group_order.py` pass. The full suite passes once on each of 3.11, 3.12, 3.13 and 3.14. `port-trial.sh` passes, and the new diff applies to 2.8.3 + #68 without conflict.

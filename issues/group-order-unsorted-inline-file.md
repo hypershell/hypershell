@@ -14,24 +14,26 @@ lane: public
 
 The docs say groups are "scheduled in ascending order: every task in the active group must reach a
 terminal state before any task in the next group is scheduled" (`docs/_include/task_groups_alt.rst`).
-`hs cluster FILE` and `hs server FILE` ingest the file on a submitter thread while the scheduler is
-already running, so the scheduler only sees the groups whose rows have been committed. When a file
-lists group 1 before group 0, the scheduler can start group 1 before any group-0 row exists.
+Before `group-advance-strands-lower-group`, `hs cluster FILE` and `hs server FILE` ingested the file
+on a submitter thread while the scheduler was already running, so the scheduler only saw the groups
+whose rows had been committed. When a file listed group 1 before group 0, the scheduler could start
+group 1 before any group-0 row existed, and the run either ran in order or hung forever with group 0
+stranded (about half of runs with no load).
 
-Before `group-advance-strands-lower-group`, such a run either ran in order or hung forever, with
-group 0 stranded (about half of runs with no load). That cycle makes the server go back and run a
-lower group whose tasks arrive late, with a WARNING (its R1, R4). The run no longer hangs, but
-group 1 can now finish before group 0 starts. For a user who relies on groups as coarse
-dependencies, that is a wrong order that only a warning reports. The same holds for a group below
-the starting group that arrives after the starting group has begun, whatever the file order.
+That cycle adopts this seed with the full hold below: a task file given to `hs cluster` or
+`hs server` is read in full before scheduling begins, so its groups run in ascending order whatever
+order the file lists them in. The cost, accepted by the maintainer (its GOAL Q1), is that a large
+file's first task waits until the whole file is in. The cycle's return to a late lower group, with a
+WARNING (its R1, R5), remains for input it cannot read ahead: a stream into `hs cluster`/`hs server`,
+or a later `hs submit`.
 
-`hs submit FILE` followed by `hs server` is not affected: every row is present before scheduling
-starts, and `Task.current_group` picks the lowest group.
+On a fresh database, `hs submit FILE` followed by `hs server` was not affected: every row is present
+before scheduling starts, and the server starts at the lowest group.
 
 ## Why it was deferred
 
 Every small change considered either leaves part of the case open or costs files in ascending
-order, which the fix cycle otherwise leaves alone. Shaping recorded three options
+order. Shaping recorded three options, and the cycle took the second, the full hold
 (`spec/group-advance-strands-lower-group/GOAL.md`, Q1):
 
 - A startup hold in `Scheduler.load_bundle`: while nothing has been scheduled, wait for
@@ -67,4 +69,6 @@ that are already in ascending order.
 ## Notes
 
 - Related: `spec/group-advance-strands-lower-group/` (GOAL Q1, R4, R9, R10).
+- Adopted with the full hold, which gives up this sketch's R2: an ascending file's first task
+  now waits for the whole file (GOAL Q1, the named cost of its R3).
 - Found by: `group-advance-strands-lower-group` shaping (2026-11-03).

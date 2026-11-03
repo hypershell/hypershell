@@ -20,7 +20,8 @@ import os
 import sys
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+from subprocess import run, PIPE, TimeoutExpired
 
 # External libs
 import pytest
@@ -34,7 +35,7 @@ from hypershell.data import core as data_core
 from hypershell.data.core import Session
 from hypershell.data.model import Entity, Task
 from hypershell.server import Scheduler, SchedulerState, is_file_input
-from tests import main, create_taskfile
+from tests import main, create_taskfile, create_taskfile_echo
 
 
 LATE_GROUP_MESSAGE = 'after task group'
@@ -287,6 +288,47 @@ def test_restart_on_halted_group_still_halts(task_db: Engine, caplog: pytest.Log
     assert scheduled_in_group(1) == 0
 
 
+# --- A database whose earlier work finished at a higher group --------------------------------------
+
+def commit_finished(*groups: int) -> None:
+    """Commit one successful task per entry in `groups`, scheduled in that order an hour ago."""
+    then = datetime.now().astimezone() - timedelta(hours=1)
+    commit_rows([Task.new(args=f'echo done {i}', group=group, attempt=1, exit_status=0,
+                          schedule_time=then + timedelta(seconds=i),
+                          completion_time=then + timedelta(seconds=i, milliseconds=500))
+                 for i, group in enumerate(groups)])
+
+
+@mark.unit
+@mark.parametrize('restart_mode', [False, True])
+def test_new_file_after_finished_run_runs_in_order(task_db: Engine, caplog: pytest.LogCaptureFixture,
+                                                   restart_mode: bool) -> None:
+    """A new file on a database whose earlier run finished at a higher group runs in ascending order."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    commit_finished(0, 1, 2)
+    commit_tasks(0, 1, 2)
+    scheduler = make_scheduler(restart_mode=restart_mode)
+
+    order, reached_final = run_until_final(scheduler)
+    assert order == [0, 1, 2]
+    assert reached_final
+    assert late_group_warnings(caplog) == []
+
+
+@mark.unit
+def test_tasks_after_finished_run_start_at_lowest_group(task_db: Engine, caplog: pytest.LogCaptureFixture) -> None:
+    """Tasks committed after a start on finished work run from their lowest group, with no warning."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    commit_finished(0, 1, 2)
+    scheduler = make_scheduler(forever_mode=True)
+    commit_tasks(0, 1, 2)
+
+    order, reached_final = run_until_final(scheduler, limit=20)
+    assert order == [0, 1, 2]
+    assert not reached_final
+    assert late_group_warnings(caplog) == []
+
+
 # --- File input is submitted whole before scheduling --------------------------------------------
 
 class Wrapper:
@@ -369,3 +411,23 @@ def test_cluster_runs_unsorted_file_in_group_order(temp_site: Path, layout: List
         assert stderr.count(f'Completed task group {lower} - starting task group {higher}') == 1
     assert stderr.count('Completed task group') == len(groups) - 1
     assert LATE_GROUP_MESSAGE not in stderr
+
+
+CLIENT_TIMEOUT_TASKS = 6000
+"""Tasks in a file that takes several times the client timeout to read (bundles of one)."""
+
+
+@mark.integration
+def test_cluster_clients_with_timeout_wait_for_file(temp_site: Path) -> None:
+    """Clients with an idle timeout shorter than the file read still run every task, then exit."""
+    taskfile = create_taskfile_echo(temp_site, CLIENT_TIMEOUT_TASKS)
+    env = {**os.environ, 'HYPERSHELL_LOGGING_LEVEL': 'INFO'}
+    try:
+        proc = run(['hs', 'cluster', str(taskfile), '-N2', '-T1', '--no-tls', '-o', os.devnull],
+                   stdout=PIPE, stderr=PIPE, env=env, timeout=180)
+    except TimeoutExpired:
+        pytest.fail('hs cluster did not finish within 180 seconds')
+    assert proc.returncode == exit_status.success
+
+    rc, stdout, _ = main(['hs', 'list', '-c', '-S'])
+    assert rc == exit_status.success and stdout == str(CLIENT_TIMEOUT_TASKS)
