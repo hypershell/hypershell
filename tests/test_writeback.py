@@ -438,8 +438,9 @@ def test_result_columns_are_fixed() -> None:
     assert set(Task.columns) - set(Task.result_columns) == {
         'id', 'group', 'args', 'submit_id', 'submit_time', 'submit_host', 'cores', 'memory', 'timeout',
         'server_id', 'server_host', 'schedule_time', 'attempt', 'retried', 'previous_id', 'next_id',
-        'source', 'fingerprint', 'part', 'tag',
+        'source', 'fingerprint', 'zone', 'part', 'tag',
     }
+    assert 'zone' not in Task.result_columns
 
 
 @mark.unit
