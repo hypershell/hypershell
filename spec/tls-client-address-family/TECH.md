@@ -3,7 +3,7 @@ slug: tls-client-address-family
 title: TLS client reaches the server on the address family it listens on
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/tls-client-address-family
 base: develop
 current_phase: done
