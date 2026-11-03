@@ -97,7 +97,7 @@ phases:
 - id: P6
   name: 'Multi-node drive, run A: zone knobs in the drive, local smoke, hand back
     (external wait follows)'
-  status: pending
+  status: in_progress
   satisfies:
   - R1
   - R4
@@ -538,7 +538,7 @@ processes or open descriptors, and parity holds against 2.8.3.
 multi-node run plus a homogeneous throughput run, and hand the drive back. The foreman runs the
 cluster; this phase only builds and smoke-tests locally.
 
-- [ ] `tests/cluster/drive.sh` knobs (environment only, generic):
+- [x] `tests/cluster/drive.sh` knobs (environment only, generic):
   - Server: `HSD_ZONES` (e.g. `default:50,cpu:25,gpu:25`, the task mix by zone), `HSD_GROUPS`,
     `HSD_RETRIES`, `HSD_CAP` (`server.bundlemax`).
   - Client: `HSD_ZONE`, `HSD_CLIENT_ADVERTISE` (1 = pass `-b`, 0 = omit it), `HSD_CLIENT_LOG`
@@ -546,12 +546,12 @@ cluster; this phase only builds and smoke-tests locally.
   - Zoned tasks check a per-client zone marker and exit 7 when run in the wrong zone, so a
     cross-zone run shows in the exit histogram without per-task data leaving the node.
   - Every `HSD_FAIL_EVERY`-th task fails on attempt 1 only.
-- [ ] Records (no host, user or path):
+- [x] Records (no host, user or path):
   - `server.json` gains per-zone task counts, retry rows whose zone differs from their parent
     (must be 0), evictions, rows unfinished, and a group-order flag.
   - `client-N.json` gains its zone, advertised size (or null), tasks received, largest bundle,
     and exit-7 count.
-- [ ] `tests/cluster/compare.py`:
+- [x] `tests/cluster/compare.py`:
   - `--zoned LABEL` checks:
     - every task completed;
     - zero exit-7;
@@ -562,7 +562,7 @@ cluster; this phase only builds and smoke-tests locally.
   - `--min-ratio R` for throughput, judged only on homogeneous runs with
     `HSD_CLIENT_ADVERTISE=0` against the 2.8.3 baseline.
   - Run grouping keys on zones, cap and advertise, so modes never pool.
-- [ ] `tests/cluster/smoke.sh`: add a local zoned rehearsal: 2 zones + default, 4 clients (2
+- [x] `tests/cluster/smoke.sh`: add a local zoned rehearsal: 2 zones + default, 4 clients (2
       advertise, 2 don't), `HSD_TASKS=300`, one retry per zone. `compare.py --zoned` on it must
       pass.
 - [ ] Hand back to the foreman the run matrix it must execute (all 3 builds via
@@ -578,7 +578,38 @@ cluster; this phase only builds and smoke-tests locally.
        repeat (so the 64 advertiser is capped).
      - ≥ 2 repeats.
   3. Results go under `spec/zone-dispatch/evidence/cluster/` (JSON only, scrubbed).
-- **Touches:** `tests/cluster/{drive.sh,compare.py,smoke.sh}`.
+- **Build notes (2026-11-02):**
+  - Unset `HSD_ZONES` leaves the task file exactly as before, so 2.8.3 and 2.9.0a2 archives run the
+    homogeneous drive unchanged. With zones, each zone's file is submitted with `--zone` (feature
+    archives only), and every HSD_FAIL_EVERY-th task *of each zone* fails; with `HSD_RETRIES` it
+    fails on attempt 1 only (`$TASK_ATTEMPT`). A wrong-zone run appends to the client's
+    node-local mismatch file and exits 7; the client record counts those lines (`exit7`).
+  - `HSD_CLIENT_ADVERTISE=1` (the default) keeps today's `-b`; `HSD_CAP` exports
+    `HYPERSHELL_SERVER_BUNDLEMAX` to the server. `received`/`largest` need `HSD_CLIENT_LOG=DEBUG`.
+  - `compare.py` keys groups on zones, groups, retries, cap and whether clients advertise; a
+    homogeneous group with retries expects `rows = M + retried`. Unit tests on synthetic records:
+    `tests/test_cluster_compare.py` (14).
+  - Plan gate layout (4 nodes, 1 h class): node 0 server, nodes 1-3 clients; Run 1 and Run 2 are
+    separate jobs, each guarded to finish inside 54 minutes.
+- **Hand-back: how the foreman runs it** (all archives from `build_archive.sh`: labels `2.8.3`,
+  `2.9.0a2`, `feature`; same `HSD_RESULTS`; distinct `HSD_RUN_ID` per run; `HSD_TLS=1`,
+  `HSD_HOST` the server node's name, `HSD_LOCAL` node-local scratch):
+  1. **Run 1 job — homogeneous throughput.** Per run: server on node 0 with `HSD_ROLE=server
+     HSD_TASKS=20000 HSD_FAIL_EVERY=100 HSD_BUNDLESIZE=1 HSD_CLIENTS=3 HSD_THREADS=16
+     HSD_TIMEOUT=300`; one client per node 1-3 with `HSD_ROLE=client HSD_CLIENT_INDEX=1..3
+     HSD_THREADS=16 HSD_CLIENT_ADVERTISE=0`. Interleave labels 2.8.3, 2.9.0a2, feature, three
+     repeats each (9 runs); abort the remaining runs if the job passes 54 minutes.
+  2. **Run 2 job — heterogeneous zoned, feature only.** Server: `HSD_ZONES=default:40,cpu:30,gpu:30
+     HSD_GROUPS=3 HSD_RETRIES=1 HSD_FAIL_EVERY=50 HSD_TASKS=20000 HSD_BUNDLESIZE=4 HSD_CLIENTS=6
+     HSD_TIMEOUT=600`. Two client processes per node, each `HSD_CLIENT_LOG=DEBUG HSD_THREADS=8`:
+     node 1 `cpu` (ADVERTISE=1, CLIENT_BUNDLESIZE=1) and `gpu` (ADVERTISE=0); node 2 `cpu`
+     (ADVERTISE=0) and `gpu` (ADVERTISE=1, CLIENT_BUNDLESIZE=16); node 3 unzoned (ADVERTISE=1,
+     CLIENT_BUNDLESIZE=64) and unzoned (ADVERTISE=0); `HSD_ZONE` set for the zoned ones, distinct
+     `HSD_CLIENT_INDEX`. Two repeats, the second with `HSD_CAP=32` (caps the 64 advertiser).
+  3. Judge (P7's verify): `uv run python tests/cluster/compare.py spec/zone-dispatch/evidence/cluster
+     --baseline 2.8.3 --candidate feature --control 2.9.0a2 --min-ratio 0.95 --zoned feature`
+     after copying both jobs' JSON (scrubbed: `smoke.sh`'s host/user grep) into that directory.
+- **Touches:** `tests/cluster/{drive.sh,compare.py,smoke.sh}`, `tests/test_cluster_compare.py` (new).
 
 ## Phase P7 — Multi-node drive, run B
 **Satisfies:** R1, R4, R14 · **Depends on:** P5, P6
