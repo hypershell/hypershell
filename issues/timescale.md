@@ -1,5 +1,5 @@
 ---
-status: shaped
+status: adopted:timescale
 kind: feature
 appetite: medium
 lane: public
@@ -17,6 +17,10 @@ shaped-as: timescale
 > Promotion should re-confirm the scope against current `develop` and cite anything that has
 > drifted since this was written, then adopt it largely as written — do **not** re-litigate the
 > resolved clarifications.
+>
+> **Adopted into a cycle (2026-11-01).** R1 was discharged by `schema-upgrade-step` (#69); R2–R10
+> are carried by [`spec/timescale/`](../spec/timescale/GOAL.md) (TS1), under the same R-IDs, and
+> that GOAL is now the contract. If TS1 defers a piece (R6 is deferrable), it comes back here.
 
 - **slug:** timescale
 - **kind:** feature
