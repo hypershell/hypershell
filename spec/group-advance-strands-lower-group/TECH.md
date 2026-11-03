@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-03'
 phases:
 - id: P1
   name: Red replays and the halted-restart guard (tests only)
-  status: pending
+  status: done
   satisfies:
   - R8
   - R1
@@ -24,7 +24,8 @@ phases:
   hammerable: false
   hill: uphill
   verify: kt() { uv run python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
-    if r<0 else r)' "$@"; }; git diff --quiet b31c66e -- src && kt 300 pytest -m unit -rxX tests/test_group_order.py
+    if r<0 else r)' "$@"; }; git diff --quiet b31c66e -- src && kt 300 pytest -m unit
+    -rxX tests/test_group_order.py
 - id: P2
   name: Atomic next-group choice, late-lower warning, provisional first group
   status: pending
@@ -43,12 +44,13 @@ phases:
   hill: uphill
   verify: 'kt() { uv run python -c ''import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
     if r<0 else r)'' "$@"; }; git diff --quiet b31c66e -- tests/test_groups.py tests/test_retry_gate.py
-    && ! grep -q xfail tests/test_group_order.py && kt 600 pytest -m unit tests/test_group_order.py tests/test_retry_gate.py
-    && kt 300 .agents/factory/bin/temp_site.sh sh -c "printf ''%s\n'' ''echo 1 #HYPERSHELL: n:1 group:1''
-    > a.in && uv run hs submit -f a.in && uv run hsx --restart -N1 --no-tls && printf ''%s\n'' ''echo
-    0 #HYPERSHELL: n:0 group:0'' > b.in && uv run hs submit -f b.in && uv run hsx --restart -N1 --no-tls
-    2> err.log && test \$(uv run hs list -c -R) -eq 0 && test \$(uv run hs list -c -S -t n:0) -eq 1 &&
-    ! grep -q ''after task group'' err.log"'
+    && ! grep -q xfail tests/test_group_order.py && kt 600 pytest -m unit tests/test_group_order.py
+    tests/test_retry_gate.py && kt 300 .agents/factory/bin/temp_site.sh sh -c "printf
+    ''%s\n'' ''echo 1 #HYPERSHELL: n:1 group:1'' > a.in && uv run hs submit -f a.in
+    && uv run hsx --restart -N1 --no-tls && printf ''%s\n'' ''echo 0 #HYPERSHELL:
+    n:0 group:0'' > b.in && uv run hs submit -f b.in && uv run hsx --restart -N1 --no-tls
+    2> err.log && test \$(uv run hs list -c -R) -eq 0 && test \$(uv run hs list -c
+    -S -t n:0) -eq 1 && ! grep -q ''after task group'' err.log"'
 - id: P3
   name: File input is ingested before the scheduler starts
   status: pending
@@ -62,15 +64,18 @@ phases:
   hammerable: false
   hill: uphill
   verify: 'kt() { uv run python -c ''import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
-    if r<0 else r)'' "$@"; }; { kt 1200 pytest -q -l tests/test_group_order.py tests/test_groups.py >
-    "${TMPDIR:-/tmp}/hs-p3.log" 2>&1 && tail -n 3 "${TMPDIR:-/tmp}/hs-p3.log" || { tail -n 40 "${TMPDIR:-/tmp}/hs-p3.log";
-    grep -E ''^(FAILED|ERROR)'' "${TMPDIR:-/tmp}/hs-p3.log"; echo ''One rerun of the failed tests (known
-    TLS localhost flake): record both runs''; kt 1200 pytest -q -l --lf tests/test_group_order.py tests/test_groups.py;
-    }; } && kt 300 .agents/factory/bin/temp_site.sh sh -c "printf ''%s\n'' ''echo a #HYPERSHELL: group:1''
-    ''echo b #HYPERSHELL: group:0'' ''echo c #HYPERSHELL: group:-1'' ''echo d #HYPERSHELL: group:1'' ''echo
-    e #HYPERSHELL: group:0'' ''echo f #HYPERSHELL: group:-1'' > t.in && uv run hsx t.in -N2 --no-tls 2>
-    err.log && test \"\$(uv run hs list group -s schedule_time | uniq | tr ''\n'' '' '')\" = ''-1 0 1
-    '' && test \$(uv run hs list -c -R) -eq 0 && ! grep -q ''after task group'' err.log"'
+    if r<0 else r)'' "$@"; }; { kt 1200 pytest -q -l tests/test_group_order.py tests/test_groups.py
+    > "${TMPDIR:-/tmp}/hs-p3.log" 2>&1 && tail -n 3 "${TMPDIR:-/tmp}/hs-p3.log" ||
+    { tail -n 40 "${TMPDIR:-/tmp}/hs-p3.log"; grep -E ''^(FAILED|ERROR)'' "${TMPDIR:-/tmp}/hs-p3.log";
+    echo ''One rerun of the failed tests (known TLS localhost flake): record both
+    runs''; kt 1200 pytest -q -l --lf tests/test_group_order.py tests/test_groups.py;
+    }; } && kt 300 .agents/factory/bin/temp_site.sh sh -c "printf ''%s\n'' ''echo
+    a #HYPERSHELL: group:1'' ''echo b #HYPERSHELL: group:0'' ''echo c #HYPERSHELL:
+    group:-1'' ''echo d #HYPERSHELL: group:1'' ''echo e #HYPERSHELL: group:0'' ''echo
+    f #HYPERSHELL: group:-1'' > t.in && uv run hsx t.in -N2 --no-tls 2> err.log &&
+    test \"\$(uv run hs list group -s schedule_time | uniq | tr ''\n'' '' '')\" =
+    ''-1 0 1 '' && test \$(uv run hs list -c -R) -eq 0 && ! grep -q ''after task group''
+    err.log"'
 - id: P4
   name: Group-order docs, AGENTS.md and invariants
   status: pending
@@ -82,11 +87,12 @@ phases:
   parallel: true
   hammerable: false
   hill: uphill
-  verify: ( for f in docs/_include/task_groups_alt.rst AGENTS.md .agents/factory/invariants.md; do grep
-    -qiE 'best[- ]effort' "$f" && grep -qi 'warning' "$f" && grep -qiE 'whole file|entire file|in full'
-    "$f" || { echo "R10 statement missing in $f"; exit 1; }; done ) && git diff --quiet b31c66e -- share
-    src/hypershell/__init__.py src/hypershell/cluster docs/_include/cluster_help.rst docs/_include/cluster_usage.rst
-    docs/_include/server_help.rst docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
+  verify: ( for f in docs/_include/task_groups_alt.rst AGENTS.md .agents/factory/invariants.md;
+    do grep -qiE 'best[- ]effort' "$f" && grep -qi 'warning' "$f" && grep -qiE 'whole
+    file|entire file|in full' "$f" || { echo "R10 statement missing in $f"; exit 1;
+    }; done ) && git diff --quiet b31c66e -- share src/hypershell/__init__.py src/hypershell/cluster
+    docs/_include/cluster_help.rst docs/_include/cluster_usage.rst docs/_include/server_help.rst
+    docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
 - id: P5
   name: 2.8.4 port trial and final gate
   status: pending
@@ -103,12 +109,14 @@ phases:
   hammerable: false
   hill: uphill
   verify: 'kt() { uv run python -c ''import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
-    if r<0 else r)'' "$@"; }; test "$(git diff --name-only b31c66e -- src | tr ''\n'' '' '')" = ''src/hypershell/data/model.py
-    src/hypershell/server.py '' && ! git diff b31c66e -- src | grep -E ''^[-+].*(mapped_column|__tablename__|add_argument|_HELP|_USAGE)''
-    && kt 2400 sh spec/group-advance-strands-lower-group/port-trial.sh && { kt 2400 pytest -q -l > "${TMPDIR:-/tmp}/hs-p5.log"
-    2>&1 && tail -n 3 "${TMPDIR:-/tmp}/hs-p5.log" || { tail -n 40 "${TMPDIR:-/tmp}/hs-p5.log"; grep -E
-    ''^(FAILED|ERROR)'' "${TMPDIR:-/tmp}/hs-p5.log"; echo ''One rerun of the failed tests (known TLS localhost
-    flake): record both runs''; kt 2400 pytest -q -l --lf ; }; }'
+    if r<0 else r)'' "$@"; }; test "$(git diff --name-only b31c66e -- src | tr ''\n''
+    '' '')" = ''src/hypershell/data/model.py src/hypershell/server.py '' && ! git
+    diff b31c66e -- src | grep -E ''^[-+].*(mapped_column|__tablename__|add_argument|_HELP|_USAGE)''
+    && kt 2400 sh spec/group-advance-strands-lower-group/port-trial.sh && { kt 2400
+    pytest -q -l > "${TMPDIR:-/tmp}/hs-p5.log" 2>&1 && tail -n 3 "${TMPDIR:-/tmp}/hs-p5.log"
+    || { tail -n 40 "${TMPDIR:-/tmp}/hs-p5.log"; grep -E ''^(FAILED|ERROR)'' "${TMPDIR:-/tmp}/hs-p5.log";
+    echo ''One rerun of the failed tests (known TLS localhost flake): record both
+    runs''; kt 2400 pytest -q -l --lf ; }; }'
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -190,25 +198,25 @@ Nothing needs cluster jobs. Cross-matrix evidence comes from hosted CI after pub
 **Goal:** commit deterministic replays that fail **by assertion** on `b31c66e`'s source, plus a
 guard that is green before and after. **No `src/` edit in this phase.**
 
-- [ ] Create `tests/test_group_order.py`, with every test in this phase `@mark.unit`. Its module
+- [x] Create `tests/test_group_order.py`, with every test in this phase `@mark.unit`. Its module
       docstring says the tests drive `Scheduler.load_bundle` in-process against a throwaway
       SQLite file and commit other writers' rows through a separate session.
-- [ ] Copy `tests/test_retry_gate.py`'s `task_db` fixture and its separate-session write
+- [x] Copy `tests/test_retry_gate.py`'s `task_db` fixture and its separate-session write
       helpers: `succeed(task_id)`, `fail(task_id, exit_status=1)`, and
       `commit_tasks(*groups) -> List[str]`, which adds `Task.new` rows through
       `Session.session_factory()` and returns their ids. The file must not import from another
       test module.
-- [ ] Add `make_scheduler(**options)`. It builds `Scheduler(queue=None, poll=0, attempts=1, …)`,
+- [x] Add `make_scheduler(**options)`. It builds `Scheduler(queue=None, poll=0, attempts=1, …)`,
       requires `start()` to return LOAD, and otherwise calls `pytest.fail`.
-- [ ] Add `run_until_final(scheduler, limit=40)`. It drives `load_bundle()` and records each
+- [x] Add `run_until_final(scheduler, limit=40)`. It drives `load_bundle()` and records each
       bundle's groups in order. It completes each bundle with `succeed` and stops on FINAL. It
       returns `(order, reached_final)` and never loops unbounded.
-- [ ] Preconditions use `pytest.fail(...)`, never `assert`, so a broken replay cannot pass as the
+- [x] Preconditions use `pytest.fail(...)`, never `assert`, so a broken replay cannot pass as the
       expected failure. Assertions about the fixed behaviour use `assert`.
-- [ ] Capture the late-lower-group warning with
+- [x] Capture the late-lower-group warning with
       `caplog.set_level(logging.DEBUG, logger='hypershell')` and match the records whose message
       contains `after task group`.
-- [ ] `test_next_group_sees_rows_committed_during_check`. Add `strict=True`,
+- [x] `test_next_group_sees_rows_committed_during_check`. Add `strict=True`,
       `raises=AssertionError` and a declarative reason as `xfail` options.
   - Setup: `commit_tasks(0, 2)`, then start, so the scheduler is in group 0. The first bundle
     must be the group-0 row (precondition). Succeed it.
@@ -218,28 +226,28 @@ guard that is green before and after. **No `src/` edit in this phase.**
   - Run one `load_bundle()`. The injection must have fired (precondition).
   - Assert `scheduler.current_group == 0`, then that the next bundle is the new group-0 row.
   - `run_until_final` then gives order `[0, 1, 2]` and FINAL, with no late-lower warning.
-- [ ] `test_late_lower_group_runs_after_current`: strict `xfail` as above, and
+- [x] `test_late_lower_group_runs_after_current`: strict `xfail` as above, and
       `@mark.parametrize('forever_mode', [False, True])`.
   - Setup: `commit_tasks(1)`, then start, so the scheduler is in group 1. The first bundle is
     group 1 (precondition). Then `commit_tasks(0)`, and succeed the group-1 row.
   - Drive at most 10 passes. Assert the group-0 row is scheduled, and exactly one late-lower
     record that names groups 0 and 1.
   - Not `forever`: succeed it and assert FINAL. `forever`: assert no FINAL in those passes.
-- [ ] `test_ascending_input_below_zero_runs_in_order`: strict `xfail`.
+- [x] `test_ascending_input_below_zero_runs_in_order`: strict `xfail`.
   - Setup: an empty database, then start, so the start group is provisional. Then
     `commit_tasks(-1, -1, 0)` before any `load_bundle`.
   - `run_until_final` gives order `[-1, -1, 0]` and FINAL, with no late-lower warning.
-- [ ] `test_restart_runs_stranded_lower_group`: strict `xfail`.
+- [x] `test_restart_runs_stranded_lower_group`: strict `xfail`.
   - Setup: build the hung database. Add a group-1 row with `schedule_time` and a successful
     completion, and an unscheduled group-0 row.
   - `make_scheduler(restart_mode=True)`, then `run_until_final` gives `[0]` and FINAL, with no
     late-lower warning (nothing started this run before group 0).
-- [ ] `test_restart_on_halted_group_still_halts`: a guard, with no `xfail`.
+- [x] `test_restart_on_halted_group_still_halts`: a guard, with no `xfail`.
   - Setup: a group-0 row scheduled and failed (`exit_status=1`, attempt 1, `attempts=1`), and an
     unscheduled group-1 row. `make_scheduler(restart_mode=True)`.
   - The next `load_bundle()` returns FINAL with a `Failed task group 0` record, and the group-1
     row has no `schedule_time`.
-- [ ] Red record. Run `kt 300 pytest -m unit --runxfail tests/test_group_order.py` (with `kt`
+- [x] Red record. Run `kt 300 pytest -m unit --runxfail tests/test_group_order.py` (with `kt`
       defined as in `verify:`). It **must fail**, on the four replays only, and every case must
       fail by `AssertionError`. Paste its short summary into the commit body.
 - **Verify:** the frontmatter `verify:`. It checks `git diff --quiet b31c66e -- src`, then runs
@@ -409,6 +417,32 @@ conflict, fix the placement in P2's or P3's files under a P5 amendment note, and
       suite's summary (plus any rerun) into the commit body and below.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/group-advance-strands-lower-group/TECH.md` (state and build record) only.
+
+
+---
+
+## Build record
+
+**Environment substitution (every phase).** The build host has no network, so `uv run` cannot
+resolve the project environment. Each verify ran with `uv run ` removed and a frozen, offline
+environment's interpreter first on `PATH` instead. Each environment was built from this
+worktree's `uv.lock` with `uv sync --frozen --offline` against a local uv cache and a local
+CPython (3.11, 3.12, 3.13, 3.14), into a directory outside the repo
+(`UV_PROJECT_ENVIRONMENT`), so the project is installed editable from this worktree. The verify
+strings themselves are unchanged. `HYPERSHELL_*` variables were cleared and `TMPDIR` pointed at a
+scratch directory for each run.
+
+**P1 (red first, on `b31c66e`'s `src`).** `pytest -m unit --runxfail tests/test_group_order.py`
+(3.12): `5 failed, 1 passed`. Every failure is an `AssertionError`:
+- `test_next_group_sees_rows_committed_during_check`: `assert scheduler.current_group == 0`
+  gave `1 == 0`.
+- `test_late_lower_group_runs_after_current[False]` and `[True]`: the group-0 row was never
+  scheduled (`[] == [(0, …)]`).
+- `test_ascending_input_below_zero_runs_in_order`: order `[0]`, expected `[-1, -1, 0]`.
+- `test_restart_runs_stranded_lower_group`: order `[]`, expected `[0]`.
+- The guard `test_restart_on_halted_group_still_halts` passed.
+
+Verify (3.12): `1 passed, 5 xfailed`, rc 0.
 
 ---
 
