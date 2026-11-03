@@ -215,6 +215,19 @@ The plan gate is **passed** with these rulings and conditions.
   run here: it and `build_archive.sh` delete their scratch with `rm -rf`, which this build may not
   run. The foreman runs it, with `HSD_SMOKE_KEEP=1` to keep results.
 
+- **Foreman rulings (judge), 2026-11-03.**
+  1. Rebase onto `ebd2534`, resolving the three textual hunks only: keep both import lines in
+     `data/model.py`; `__all__` is the union (`'ResultOutcome'` plus the zone names); the workflow's
+     PostgreSQL line runs `tests/test_upgrade_postgres.py tests/test_writeback_postgres.py
+     tests/test_zone_postgres.py`, in that order. Any other conflicting hunk stops the build.
+  2. `tests/test_writeback.py::test_result_columns_are_fixed` is the one writeback-test edit, beside
+     the N3 five: `zone` joins its pinned set of non-result columns, and it asserts
+     `'zone' not in Task.result_columns`. `Task.result_columns` stays writeback's 13.
+  3. P6's local smoke is skipped; the foreman runs the cluster drive on the second test cluster.
+     The P1 PostgreSQL CI check is read on the PR.
+  4. Measure the parity wall-time difference (+3 s on 10 tasks) and record where it goes.
+  5. No Z1 re-merge until the foreman says Z1's new head has landed.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling
