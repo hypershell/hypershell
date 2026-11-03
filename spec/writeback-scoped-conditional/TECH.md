@@ -3,7 +3,7 @@ slug: writeback-scoped-conditional
 title: Scoped, conditional result writeback
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/writeback-scoped-conditional
 base: develop
 current_phase: done
