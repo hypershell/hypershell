@@ -261,6 +261,16 @@ The plan gate is **passed** with these rulings and conditions.
   `tests/test_dispatch_workload.py::test_retry_and_group_advance_latency` (retry 2.00 s at the
   previous head; bound 1.5 s, against 2.8.3's ~1.0 s), green three runs in a row.
 
+- **After the rebase onto `ebd2534` (2026-11-03).** Hunks resolved: the three ruled at P1, then the
+  P4 `data/model.py` `__all__` and `server.py` model-import hunks as unions (second ruling 1); no
+  other hunk conflicted. Full suite 3.14 and 3.11: 736 passed, 47 skipped, 1 failed each, both
+  `tests/test_writeback.py::test_non_result_columns_are_never_written`: [NEEDS CLARIFICATION] its
+  body mutates every non-result column it lists by hand, then fails its own precondition because
+  `zone` (now in that computed set) was not mutated. Passing needs a test-body edit
+  (`copy.zone = uuid()`), which no ruling allows. P5 parity: identical tables and group order,
+  TLS on and off. Five-repeat parity timing (load elevated): wall median 9.12 s vs 2.8.3's 11.86 s;
+  scheduling span 3.83 vs 4.43 s; shutdown tail 3.69 vs 4.06 s.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling
