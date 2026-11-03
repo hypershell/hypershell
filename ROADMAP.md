@@ -268,6 +268,18 @@ verified against 2.8.3 there.
 GOAL, not the zone seed's R5) · Refs: release notes*
 **Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
 
+## `hs server --initdb` never initializes the database
+
+`hs server` accepts `--initdb`, but `ServerApp.run` calls `ensuredb()` without it
+(`src/hypershell/server.py:1381`; the flag is defined at `:1343-1346` and never read), so on
+PostgreSQL and TimescaleDB the server only checks the schema and refuses a database that was never
+initialized; under the `timescale` provider the hypertable pass never runs from it. `hs submit` and
+`hs cluster` honour the same flag. The docs and the server's own help still promise it.
+Pre-existing since 2023 (`70bcc63`).
+
+*Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
+**Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: unshaped*
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
@@ -383,10 +395,11 @@ them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
 
 ## The whole test suite on a server database
 
-The suite runs on SQLite only. CI's PostgreSQL job runs the upgrade tests and the TimescaleDB
-scenarios (`tests/test_timescale.py`) across five entries, but the rest of the suite never runs on a
-server, so the scheduler, writeback, retries and most of the CLI are never exercised on PostgreSQL
-or TimescaleDB. A harness selected by
+The suite runs on SQLite only. CI's PostgreSQL job runs three modules across five entries: the
+upgrade tests, the writeback's result-to-dispatch match at the data layer
+(`tests/test_writeback_postgres.py`) and the TimescaleDB scenarios (`tests/test_timescale.py`). The
+rest of the suite never runs on a server, so the scheduler, the writeback end to end, retries and
+most of the CLI are never exercised on PostgreSQL or TimescaleDB. A harness selected by
 an environment variable would run the whole suite against a server, isolated per test, with the
 SQLite-only tests marked and skipped. Split out of TimescaleDB's R9, which ships a dedicated
 TimescaleDB scenario module instead.

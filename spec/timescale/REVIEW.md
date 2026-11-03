@@ -402,3 +402,12 @@ Orchestrator: the seed's "in one of them, `hs submit`, `hs cluster` and `hs list
 
 Then cycle 3, the last before escalation. The CI evidence needs a re-run only if F5 changes code
 the integration scenarios exercise.
+
+## Triage — cycle 2 (foreman, as judge under the maintainer's delegation, 2026-11-03)
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| F5 · CONFIRMED | fix | Validate `segmentby` and `orderby` **together** at startup: a column may not appear in both, mirroring TimescaleDB's check (cite `compression_settings.c`). The check runs on the *effective* lists: the configured or default segmentby, and the effective orderby after F1's append rule. That way both natural cases are refused at startup with one clear message naming the column, rc as for other config errors: `orderby = "client_id DESC"` with the default segmentby, and `segmentby = "id"` with the default orderby. Red-first unit tests for both, plus a same-list duplicate guard staying green. |
+| F6 · CONFIRMED | fix | `database.rst:393-395`: state precisely, with the version floors and upstream refs the review cites, which TimescaleDB features work on UUIDv7 hypertables (show/drop chunks 2.23.0, continuous aggregates 2.24.0, retention policies 2.25.0). Drop the tiered-storage claim (managed-offering only; not a shipped claim). |
+| F7 · CONFIRMED | fix | Correct `issues/server-db-test-suite.md:19-22` ("three modules"; writeback's PostgreSQL test is not SQLite-only), its `ROADMAP.md` entry, and the `tests.yml:49-50` comment (say exactly which integration tests the plain entries run). |
+| F8 · CONFIRMED | fix docs + seed | Make `database.rst` (:162, :199-200, :212-213) describe what the code does today: which commands run the TimescaleDB pass (`hs initdb`, and any start path that actually calls it, which you must verify), and that `hs server --initdb` does not run it. Do **not** change `server.py`. Seed the pre-existing `--initdb`/`auto_initdb` defect as `unshaped`, with a `ROADMAP.md` entry and the code reference, as a correctness issue. |

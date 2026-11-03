@@ -159,8 +159,9 @@ PostgreSQL and needs both the ``postgres`` and the ``uuid7`` extras (see :ref:`i
         provider = "timescale"
         database = "hypershell"
 
-Then initialize the database as usual, with ``hs initdb`` or ``--initdb`` at launch.
-There is nothing else to run.
+Then initialize the database with ``hs initdb``, or launch ``hs submit`` or ``hs cluster`` with
+``--initdb``, which runs the same initialization. There is nothing else to run. ``hs server`` does
+not initialize the database, even with ``--initdb``; run ``hs initdb`` before launching it.
 
 |
 
@@ -196,10 +197,10 @@ This is equivalent to the following statements, which you therefore never need t
         CALL add_columnstore_policy('task', after => INTERVAL '4 weeks');
 
 Each step is checked first and applied only where something is missing, so running
-``hs initdb`` again, launching with ``--initdb`` every time, or truncating the database with
-``hs initdb --truncate`` always arrives at the same state, with one policy. A database already in
-shape logs nothing. Initialization runs in one transaction, serialized with the schema step, so
-concurrent launches are safe.
+``hs initdb`` again, launching ``hs submit`` or ``hs cluster`` with ``--initdb`` every time, or
+truncating the database with ``hs initdb --truncate`` always arrives at the same state, with one
+policy. A database already in shape logs nothing. Initialization runs in one transaction,
+serialized with the schema step, so concurrent launches are safe.
 
 If someone changed the chunk interval, the columnstore settings, or the policy's interval by hand,
 the next ``hs initdb`` puts them back to the configured values (see *Tuning* below) and logs each
@@ -209,8 +210,11 @@ keep theirs (recompress them by hand if needed). Turning the columnstore off is 
 you; ``hs initdb`` warns instead. If the policy's last run failed, ``hs initdb`` warns and points
 to ``timescaledb_information.job_stats``.
 
-Other commands (``hs cluster``, ``hs server``, ``hs submit`` without ``--initdb``) only run the
-schema step, as for PostgreSQL; run ``hs initdb`` after upgrading *HyperShell* or TimescaleDB.
+Only ``hs initdb`` (with or without ``--truncate``), and ``hs submit`` or ``hs cluster`` launched
+with ``--initdb``, run this initialization. Every other command, including ``hs server`` with or
+without ``--initdb`` and ``hs submit`` or ``hs cluster`` without it, runs only the schema step, as
+for PostgreSQL, and stops on a database that was never initialized. Run ``hs initdb`` after
+upgrading *HyperShell* or TimescaleDB.
 
 |
 
@@ -252,7 +256,10 @@ Intervals are a positive whole number and a unit, from ``microseconds`` to ``mon
 (e.g., ``"12 hours"``). Columns are task columns by name, quoted for you where SQL needs it
 (``group``, for instance). An invalid value, an unknown or repeated column, an unknown key, or
 ``policy = true`` with ``columnstore = false`` stops every command at startup with a message
-naming the key.
+naming the key. So does a column named in both ``segmentby`` and ``orderby``, defaults included,
+since TimescaleDB cannot use one column for both segmenting and ordering:
+``orderby = "client_id DESC"`` needs a ``segmentby`` without ``client_id``, and
+``segmentby = "id"`` needs an ``orderby`` without ``id``.
 
 Changes take effect at the next ``hs initdb``, which applies them as described above: a new
 ``chunk_interval`` applies to new chunks only, new ``segmentby`` or ``orderby`` to chunks converted
@@ -390,6 +397,16 @@ then run ``hs initdb`` to add the columnstore and its policy. Be aware that:
 Beyond the defaults
 ^^^^^^^^^^^^^^^^^^^
 
-We set up only what every *HyperShell* database benefits from. Data retention
-(``add_retention_policy``), continuous aggregates, and tiered storage are left to you, through
-TimescaleDB directly; they work on the ``task`` hypertable like any other.
+We set up only what every *HyperShell* database benefits from. Data retention and continuous
+aggregates are left to you, through TimescaleDB directly. On a hypertable partitioned by a UUIDv7
+column, as ``task`` is, these need a newer TimescaleDB than the 2.22.0 floor:
+
+* ``show_chunks`` and ``drop_chunks`` given a time or an interval (``older_than``,
+  ``newer_than``): 2.23.0 (`#8746 <https://github.com/timescale/timescaledb/pull/8746>`_).
+* Continuous aggregates: 2.24.0
+  (`#8939 <https://github.com/timescale/timescaledb/pull/8939>`_).
+* Retention policies (``add_retention_policy``): 2.25.0
+  (`#9102 <https://github.com/timescale/timescaledb/pull/9102>`_).
+
+See the TimescaleDB
+`changelog <https://github.com/timescale/timescaledb/blob/main/CHANGELOG.md>`_ for these releases.

@@ -115,7 +115,24 @@ class Settings:
         if settings.policy and not settings.columnstore:
             raise ConfigurationError('Invalid database.timescale: policy = true needs columnstore = true '
                                      '(the policy converts chunks to the columnstore); set policy = false')
+        _check_disjoint(settings)
         return settings
+
+
+def _check_disjoint(settings: Settings) -> None:
+    """
+    Refuse a column named in both segmentby and orderby, as TimescaleDB does when the settings are
+    applied ("cannot use column … for both ordering and segmenting", `ts_compression_settings_update`
+    in `src/ts_catalog/compression_settings.c`, 2.22.0 through 2.31.0). The lists compared are the
+    ones the pass applies: segmentby as configured or by default, and the orderby TimescaleDB stores.
+    """
+    segmentby = _column_names(settings.segmentby)
+    for name in _column_names(effective_orderby(settings.segmentby, settings.orderby)):
+        if name in segmentby:
+            raise ConfigurationError(f'Invalid database.timescale: column {name} is in both '
+                                     f'segmentby = {settings.segmentby!r} and orderby = {settings.orderby!r} '
+                                     f'(TimescaleDB cannot use a column for both segmenting and ordering); '
+                                     f'name it in only one')
 
 
 SETTINGS_KEYS: Final[Tuple[str, ...]] = ('chunk_interval', 'columnstore', 'segmentby', 'orderby',

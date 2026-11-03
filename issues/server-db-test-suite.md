@@ -16,12 +16,15 @@ The test suite runs on SQLite only. `tests/conftest.py` isolates every test on a
 file by setting `HYPERSHELL_DATABASE_FILE`, and nothing lets the suite point at a server database
 instead. CI's `postgres` job (`.github/workflows/tests.yml`) has five entries: plain PostgreSQL 13
 and 18, and three TimescaleDB images (Community and Apache-only 2.31.0, and Community 2.24.0,
-which predates the columnstore policy fix). Each runs two modules:
-`tests/test_upgrade_postgres.py`, against legacy template databases, and `tests/test_timescale.py`,
-whose scenarios drive `hs initdb` and, in one of them, `hs submit`, `hs cluster` and `hs list`. The
-rest of the suite never runs on a server database: the scheduler, the writeback, retries, groups,
-`restart` and most of the CLI are exercised on SQLite only, while PostgreSQL and TimescaleDB are
-supported providers with different locking, typing and transaction behaviour.
+which predates the columnstore policy fix). Each runs three modules:
+`tests/test_upgrade_postgres.py`, against legacy template databases;
+`tests/test_writeback_postgres.py`, which matches a returned result to its dispatch on the server
+(the `schedule_time` echo and the conditional update, at the data layer); and
+`tests/test_timescale.py`, whose scenarios drive `hs initdb` and, in one of them, `hs submit`,
+`hs cluster` and `hs list`. The rest of the suite never runs on a server database: the scheduler,
+the writeback end to end through server and client, retries, groups, `restart` and most of the CLI
+are exercised on SQLite only, while PostgreSQL and TimescaleDB are supported providers with
+different locking, typing and transaction behaviour.
 
 ## Why it was deferred
 

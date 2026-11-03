@@ -3,10 +3,10 @@ slug: timescale
 title: 'TimescaleDB provider: hypertables out of the box (TS1)'
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/timescale
 base: develop
-current_phase: done
+current_phase: P5
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -23,8 +23,10 @@ phases:
   verify: grep -q 'timescale/timescaledb:2.31.0-pg18@sha256:0fcff5761363809d1242f2261a3482197b5a5337407f8b97a976fb174206d579'
     .github/workflows/tests.yml && grep -q 'timescale/timescaledb:2.31.0-pg18-oss@sha256:cc00b0ede968b0c6e55212bd55a9a195726afe5a9e19dcf8af49a13334e92ff3'
     .github/workflows/tests.yml && grep -q 'tests/test_timescale.py' .github/workflows/tests.yml
-    && uv run python -c "import yaml; yaml.safe_load(open('.github/workflows/tests.yml'))"
-    && uv run pytest -rs tests/test_timescale.py && uv run pytest
+    && grep -q 'test_invalid_setting_exits' .github/workflows/tests.yml && grep -q
+    'three modules' issues/server-db-test-suite.md && uv run python -c "import yaml;
+    yaml.safe_load(open('.github/workflows/tests.yml'))" && uv run pytest -rs tests/test_timescale.py
+    && uv run pytest
 - id: P2
   name: 'Environment interrogation before the schema step: extension, privilege, preload,
     version floor'
@@ -71,16 +73,18 @@ phases:
   hammerable: false
   hill: downhill
   attempts: 2
-  verify: grep -q 'to_uuidv7_boundary' docs/_include/database.rst && grep -q 'Tiger
-    Cloud' docs/_include/database.rst && grep -q '0A000' docs/_include/database.rst
-    && grep -q 'max_background_workers' docs/_include/database.rst && grep -q -i 'timescale'
-    docs/_include/database_alt.rst && uv run sphinx-build -E -b html -D extensions=sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.extlinks,sphinx.ext.viewcode,sphinxext.opengraph,sphinx_inline_tabs,sphinx_copybutton,sphinxcontrib.details.directive,sphinx_reredirects
+  verify: grep -q 'to_uuidv7_boundary' docs/_include/database.rst && grep -q 'pull/9102'
+    docs/_include/database.rst && ! grep -qi 'tiered' docs/_include/database.rst &&
+    grep -q 'server-initdb-ignored' ROADMAP.md && grep -q 'Tiger Cloud' docs/_include/database.rst
+    && grep -q '0A000' docs/_include/database.rst && grep -q 'max_background_workers'
+    docs/_include/database.rst && grep -q -i 'timescale' docs/_include/database_alt.rst
+    && uv run sphinx-build -E -b html -D extensions=sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.extlinks,sphinx.ext.viewcode,sphinxext.opengraph,sphinx_inline_tabs,sphinx_copybutton,sphinxcontrib.details.directive,sphinx_reredirects
     docs docs/_build 2>&1 | grep -i 'warning' | grep -v -e 'task_submit.rst' -e 'manual.rst'
     -e 'pkg_resources is deprecated' -e '^build succeeded' | (! grep .)
 - id: P5
   name: 'CI evidence for the load-bearing slice (run B: external wait on the draft
     PR)'
-  status: done
+  status: in_progress
   satisfies:
   - R2
   - R3
@@ -112,12 +116,13 @@ phases:
   parallel: false
   hammerable: true
   hill: downhill
-  verify: grep -q "pop('timescale'" src/hypershell/data/core.py && grep -q 'compress_after'
-    docs/_include/database.rst && grep -q 'timescale' docs/_include/config_param_ref.rst
-    && uv run pytest -rs tests/test_timescale.py && uv run pytest
+  verify: grep -q "pop('timescale'" src/hypershell/data/core.py && grep -q 'def _check_disjoint'
+    src/hypershell/data/timescale.py && grep -q 'compress_after' docs/_include/database.rst
+    && grep -q 'timescale' docs/_include/config_param_ref.rst && uv run pytest -rs
+    tests/test_timescale.py && uv run pytest
 - id: P7
   name: CI evidence for R6 (run B)
-  status: done
+  status: pending
   satisfies:
   - R6
   - R9
@@ -204,7 +209,8 @@ These resolve PLAN §5's two `[NEEDS CLARIFICATION]` items and bind the build.
 | `docs/_include/database_alt.rst` | P4 | short TimescaleDB paragraph (man-page source) |
 | `docs/install.rst` | P4 | `uuid7` extra: required on every id-minting host under TimescaleDB |
 | `docs/_include/config_param_ref.rst` | P4, P6 | `.provider` names `timescale`; `[timescale]` table (P6) |
-| `issues/server-db-test-suite.md`, `ROADMAP.md` | review-1 | F4: the `postgres` job as it now runs |
+| `issues/server-db-test-suite.md`, `ROADMAP.md` | review-1, review-2 | F4, F7: the `postgres` job as it now runs |
+| `issues/server-initdb-ignored.md`, `ROADMAP.md` | review-2 | F8: **new** seed for the pre-existing `hs server --initdb` defect |
 | `spec/timescale/*` | all | state |
 
 Not touched: `data/model.py`, `data/upgrade.py`, `core/*`, `server.py`, `client.py`, `submit.py`,
@@ -243,6 +249,16 @@ feature code lands, so every later push is exercised against a real TimescaleDB.
 - [x] `test_v4_id_rejected` (integration, community/apache): on a scratch hypertable keyed by a UUID
       (`create_hypertable` by hand), inserting a UUIDv4 raises SQLSTATE `0A000` and inserting a v7
       id succeeds — the R8 failure mode, measured.
+- [x] **Review-2 F7 (reopened 2026-11-03).** After the `develop` merge the `postgres` job runs three
+      modules, and its prose said otherwise. The `tests.yml` comment now says the TimescaleDB entries
+      run the upgrade and writeback tests too, and names what the plain entries run from
+      `tests/test_timescale.py`: its unit tests and the three integration tests marked only
+      `needs_server` (or `needs_server` + `without_timescale`): `test_server_matches_entry`,
+      `test_absent_fails_before_schema` and `test_invalid_setting_exits`. The
+      `server-db-test-suite` seed says "three modules" and describes `test_writeback_postgres.py`
+      (the result-to-dispatch match at the data layer); what stays SQLite-only is the writeback
+      end to end through server and client. Its `ROADMAP.md` entry says the same. Verify gate
+      tightened (`--verify`) to grep the comment and the seed.
 - **Verify:** see frontmatter (local: workflow parses, pins present, module skips cleanly, SQLite
   suite green). **CI gate (run B, informal here):** all five `postgres` entries green on the draft
   PR, including the unchanged upgrade tests on the TimescaleDB images.
@@ -348,6 +364,25 @@ idempotently, honestly at every tier; the placeholder warning is gone.
       target name) — it feeds the man pages at release.
 - [x] `docs/install.rst`: the `uuid7` bullet says TimescaleDB requires it on every host that submits.
 - [x] `docs/_include/config_param_ref.rst`: `.provider` lists `timescale` (alias `timescaledb`).
+- [x] **Review-2 F6, F8 (reopened 2026-11-03).** F6: *Beyond the defaults* no longer says retention,
+      continuous aggregates and tiered storage "work on the `task` hypertable like any other". It
+      names the release each needs on a UUIDv7-partitioned hypertable, above the 2.22.0 floor:
+      `show_chunks`/`drop_chunks` with time arguments 2.23.0 (#8746), continuous aggregates 2.24.0
+      (#8939), retention policies 2.25.0 (#9102), from upstream `CHANGELOG.md` at 2.31.0 (read
+      2026-11-03). Tiered storage is dropped (a managed-offering feature; GOAL non-goal). F8: the
+      three new passages now say what the code does. Verified by a probe under the `timescale`
+      provider that records which of `initdb`/`checkdb` each start path calls (dead port, nothing
+      connected): `hs initdb` → `initdb`; `hs initdb --truncate` → `checkdb` (where the probe stops; the code
+      then calls `truncatedb`, which runs the pass); `hs submit --initdb` and `hs cluster --initdb` → `initdb`; `hs server
+      --initdb` (file or `--forever`), `hs server`, `hs submit`, `hs cluster`, `hs task submit` →
+      `checkdb`. So the docs name `hs initdb` and `hs submit`/`hs cluster` with `--initdb`, and say
+      `hs server` does not initialize even with `--initdb`. `server.py` is unchanged; the defect
+      is seeded as `issues/server-initdb-ignored.md` (`unshaped`, `kind: fix`) with a Part I
+      `ROADMAP.md` entry. The older lines it also makes untrue (`database.rst:94`, `:106-107`,
+      `database_alt.rst:9-10`, `server_help.rst`) are pre-existing and listed in the seed, not
+      changed here. Also for F5: the settings validation note names the cross-list refusal. Verify
+      gate tightened (`--verify`) to grep the #9102 link, the absence of "tiered", and the ROADMAP
+      seed link.
 - **Verify:** see frontmatter (Sphinx without `sphinx_sitemap`, sandbox-safe; only the pre-existing
   toctree warnings allowed). **Amended at build (attempts 2):** the planned filter matched Sphinx's
   own `build succeeded, 2 warnings.` summary and the pre-existing `pkg_resources is deprecated`
@@ -412,6 +447,12 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
     `test_configured_columns_converge` PASSED. `pg13` and `pg18`: 115 passed, 16 skipped (the
     TimescaleDB scenarios skip without `HS_TEST_TIMESCALE`). (`ab7adb4` is an empty commit that
     tried to re-trigger CI before the conflict was found.)
+- [ ] **Review-2 remediation (reopened 2026-11-03).** F5 changes `Settings.from_config`, which every
+      configured integration scenario crosses, and adds a `test_invalid_setting_exits` case. The
+      foreman pushes the remediation head and records the new run: all five `postgres` entries and
+      the SQLite matrix green, with both `test_invalid_setting_exits` cases passing in every entry
+      and `test_configured_columns_converge` passing (not skipped) in `timescale`, `timescale-oss`
+      and `timescale-floor`.
 - **Verify:** see frontmatter (gates on the last commit outside `spec/`, not `HEAD`).
 
 ## Phase P6 — R6: `[database.timescale]` (deferrable — cut here if over appetite)
@@ -455,6 +496,26 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
       table and its validation note. CLI drive: `segmentby = "client_id, client_id"` exits
       `bad_config` (3) with one CRITICAL line before connecting; `client_id, group` /
       `group DESC` passes validation and reaches the connection.
+- [x] **Review-2 F5 (reopened 2026-11-03).** A column may not be named in both `segmentby` and
+      `orderby`: TimescaleDB refuses it when the settings are applied ("cannot use column … for both
+      ordering and segmenting", `ts_compression_settings_update`, `src/ts_catalog/compression_settings.c`,
+      2.22.0 through 2.31.0). `_check_disjoint` runs at the end of `Settings.from_config` on the lists
+      the pass applies: segmentby as configured or by default, and `effective_orderby` (F1's append
+      rule, which only appends `id` when neither list names it, so it never adds an overlap). It
+      raises `ConfigurationError` naming the column and both values, so every command stops at
+      startup with `bad_config` (3), like any other invalid setting. Red-first at `be8b7be`:
+      `test_settings_column_in_both_lists` (4 cases: `orderby = "client_id DESC"` with the default
+      segmentby, `segmentby = "id"` with the default orderby, a quoted name across lists, `group`)
+      failed "DID NOT RAISE"; green after. `test_settings_duplicate_column` (same-list guard) and the
+      new `test_settings_lists_disjoint_by_default` stay green throughout. Amended:
+      `test_group_column_emitted_quoted` named `group` in both lists, a config TimescaleDB refuses;
+      it is now parametrized with `group` in segmentby and in orderby separately, and
+      `FakeColumnstore` models the upstream cross-list refusal. `test_invalid_setting_exits` gains
+      the `orderby = "client_id DESC"` case (CI: every `postgres` entry). CLI drive (dead port): at
+      `be8b7be` both natural configs passed validation and reached the connection (rc 5); now each
+      exits 3 with one CRITICAL line naming the column, and `orderby = "id DESC, id"` still exits 3
+      with "each column once". This supersedes the review-1 note above that `client_id, group` /
+      `group DESC` passes validation.
 - **If cut:** add a dated Clarification to `GOAL.md`, move R6 to Non-goals, return it to
   `issues/timescale.md`, mark P6/P7 `blocked` with the reason, and drop the config-reference bullet
   from R10's evidence (GOAL Clarifications, 2026-11-01).
@@ -472,6 +533,8 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
   15 skipped) without `HS_TEST_TIMESCALE`. Per-entry detail is under P5.
 - [x] **Review-1 remediation:** the same new run as P5 covers the F1/F2 changes to the R6 code
   (run `41581150777` at `a9ab876`; see P5).
+- [ ] **Review-2 remediation (reopened 2026-11-03):** the same new run as P5 covers the F5 change
+  to the R6 validation.
 - **Verify:** see frontmatter.
 
 ---

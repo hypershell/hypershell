@@ -777,6 +777,8 @@ class FakeColumnstore:
     - `ALTER TABLE … SET (timescaledb.segmentby = …, timescaledb.orderby = …)` parses each option as
       raw SQL (`GROUP BY <text>`, `ORDER BY <text>`), so a bare reserved word is a syntax error, and
       refuses a column named twice (`src/with_clause/alter_table_with_clause.c`).
+    - A column in both lists is refused (`ts_compression_settings_update`,
+      `src/ts_catalog/compression_settings.c`).
     - A partition column named in neither list is appended to orderby, descending, nulls first
       (`add_time_to_order_by_if_not_included`, `tsl/src/compression/create.c`).
     - `timescaledb_information.hypertable_columnstore_settings` shows segmentby as the bare names
@@ -820,6 +822,10 @@ class FakeColumnstore:
         for names in (segmentby, [name for name, _, _ in orderby]):
             if len(set(names)) != len(names):
                 raise DBAPIError(sql, {}, DriverError('duplicate column name', '42701'))
+        for name, _, _ in orderby:
+            if name in segmentby:
+                raise DBAPIError(sql, {}, DriverError(f'cannot use column "{name}" for both ordering and '
+                                                      f'segmenting', '42601'))
         if 'id' not in segmentby and 'id' not in [name for name, _, _ in orderby]:
             orderby.append(('id', True, True))
         self.enabled, self.segmentby, self.orderby = True, segmentby, orderby
@@ -883,16 +889,20 @@ def test_orderby_without_id_converges() -> None:
 
 
 @mark.unit
-def test_group_column_emitted_quoted() -> None:
-    """The task column `group` (a reserved word) is accepted and emitted as a quoted identifier."""
-    settings = Settings.from_config({'segmentby': 'client_id, group', 'orderby': 'group DESC'})
-    assert settings.segmentby == 'client_id, group' and settings.orderby == 'group DESC'
+@mark.parametrize('table, emitted, view', [
+    ({'segmentby': 'client_id, group'}, 'timescaledb.segmentby = \'client_id, "group"\'',
+     ('client_id,group', 'id DESC')),
+    ({'orderby': 'group DESC'}, 'timescaledb.orderby = \'"group" DESC, id DESC\'',
+     ('client_id', '"group" DESC,id DESC')),
+])
+def test_group_column_emitted_quoted(table, emitted: str, view: Tuple[str, str]) -> None:
+    """The task column `group` (a reserved word) is accepted in either list and emitted as a quoted identifier."""
+    settings = Settings.from_config(table)
     conn = FakeColumnstore()
     assert len(run_pass(conn, settings)) == 1
     alter, = conn.alters()
-    assert 'timescaledb.segmentby = \'client_id, "group"\'' in alter, alter
-    assert 'timescaledb.orderby = \'"group" DESC' in alter, alter
-    assert conn.view() == ('client_id,group', '"group" DESC,id DESC')
+    assert emitted in alter, alter
+    assert conn.view() == view
     assert run_pass(conn, settings) == []
     assert len(conn.alters()) == 1
 
@@ -909,6 +919,35 @@ def test_settings_duplicate_column(table, named: str) -> None:
     with pytest.raises(ConfigurationError, match='expected') as caught:
         Settings.from_config(table)
     assert named in str(caught.value) and 'once' in str(caught.value)
+
+
+@mark.unit
+@mark.parametrize('table, column', [
+    ({'orderby': 'client_id DESC'}, 'client_id'),
+    ({'segmentby': 'id'}, 'id'),
+    ({'segmentby': 'client_id, "submit_host"', 'orderby': 'submit_host, id DESC'}, 'submit_host'),
+    ({'segmentby': 'group', 'orderby': '"group" DESC'}, 'group'),
+])
+def test_settings_column_in_both_lists(table, column: str) -> None:
+    """
+    A column named in both segmentby and orderby is refused at validation, as TimescaleDB refuses
+    it ("cannot use column … for both ordering and segmenting"), whether each list is configured or
+    the default: `orderby = "client_id DESC"` meets the default segmentby, `segmentby = "id"` the
+    default orderby.
+    """
+    with pytest.raises(ConfigurationError) as caught:
+        Settings.from_config(table)
+    message = str(caught.value)
+    assert f'column {column} ' in message and 'segmentby' in message and 'orderby' in message, message
+
+
+@mark.unit
+def test_settings_lists_disjoint_by_default() -> None:
+    """The defaults, and lists that share no column, pass the check across the two lists."""
+    assert Settings.from_config({}) == timescale.DEFAULTS
+    assert Settings.from_config({'segmentby': 'submit_host', 'orderby': 'client_id DESC'}) == Settings(
+        segmentby='submit_host', orderby='client_id DESC')
+    assert Settings.from_config({'segmentby': ''}) == Settings(segmentby='')
 
 
 @mark.unit
@@ -957,14 +996,19 @@ def write_config(path: Path, lines: List[str]) -> None:
 
 @mark.integration
 @needs_server
-def test_invalid_setting_exits(ts_database, ts_site, tmp_path: Path) -> None:
+@mark.parametrize('lines, tokens', [
+    (['chunk_interval = "soon"'], ('database.timescale.chunk_interval', 'soon')),
+    (['orderby = "client_id DESC"'], ('column client_id ', 'segmentby', 'orderby')),
+])
+def test_invalid_setting_exits(ts_database, ts_site, tmp_path: Path, lines: List[str],
+                               tokens: Tuple[str, ...]) -> None:
     """An invalid setting stops every command at startup with bad_config, naming the key, before connecting."""
     engine = ts_site(ts_database())
-    write_config(tmp_path / 'config.toml', ['chunk_interval = "soon"'])
+    write_config(tmp_path / 'config.toml', lines)
     rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
     assert rc == exit_status.bad_config, stderr
     output = '\n'.join(stderr)
-    assert 'database.timescale.chunk_interval' in output and 'soon' in output
+    assert all(token in output for token in tokens), output
     assert 'Traceback' not in output
     assert inspect(engine).get_table_names() == []
 

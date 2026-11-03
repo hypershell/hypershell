@@ -42,13 +42,16 @@ jobs:
   # on PostgreSQL. The PostgreSQL tests skip without HS_TEST_POSTGRES and fail if a listed
   # template is missing, so a green run here means every one of them ran.
   #
-  # The TimescaleDB entries run the same upgrade tests on TimescaleDB servers, plus the
-  # TimescaleDB scenarios in tests/test_timescale.py (hypertable, columnstore and policy under
+  # The TimescaleDB entries run the same upgrade and writeback tests on TimescaleDB servers, plus
+  # the TimescaleDB scenarios in tests/test_timescale.py (hypertable, columnstore and policy under
   # the `timescale` provider). HS_TEST_TIMESCALE names the edition the server must report
   # (community or apache); with it set, a server without TimescaleDB or with another edition
-  # fails the scenarios rather than skipping them. The plain entries run only the scenario for a
-  # server without the extension. Images are pinned by tag and index digest (Docker Hub tag API,
-  # https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/<tag>, read 2026-11-02).
+  # fails the scenarios rather than skipping them. The plain entries run tests/test_timescale.py
+  # too: its unit tests and the three integration tests that need a server but not TimescaleDB
+  # (test_server_matches_entry, test_absent_fails_before_schema and test_invalid_setting_exits);
+  # its TimescaleDB scenarios skip there. Images are pinned by tag and index digest (Docker Hub
+  # tag API, https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/<tag>, read
+  # 2026-11-02).
   postgres:
     name: PostgreSQL (${{ matrix.name }})
     runs-on: ubuntu-latest
