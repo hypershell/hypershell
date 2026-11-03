@@ -36,6 +36,7 @@ from cmdkit.app import exit_status
 from cmdkit.config import ConfigurationError
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import DBAPIError
 
 # Internal libs
@@ -366,6 +367,112 @@ def test_extension_error_mapping() -> None:
     assert isinstance(error, TimescaleError) and 'out of shared memory' in str(error) and '\'jobs\'' in str(error)
 
 
+class FakeResult:
+    """The one value a probe returns."""
+
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+    def scalar(self) -> object:
+        return self.value
+
+    def first(self) -> object:
+        return self.value
+
+
+class FakeServer:
+    """
+    Stand-in engine for `prepare`: the version the server offers, the version created in the
+    database, and whether the server preloads the TimescaleDB library. Records every statement.
+    """
+
+    url = make_url('postgresql+psycopg://user@localhost/jobs')
+
+    def __init__(self, installed: Optional[str] = None, available: Optional[str] = None,
+                 preloaded: bool = True) -> None:
+        self.installed = installed
+        self.available = available
+        self.preloaded = preloaded
+        self.statements: List[str] = []
+
+    def connect(self) -> FakeServerConnection:
+        return FakeServerConnection(self)
+
+    def created(self) -> bool:
+        return any(sql.startswith('CREATE EXTENSION') for sql in self.statements)
+
+
+class FakeServerConnection:
+    """One connection to a `FakeServer`."""
+
+    def __init__(self, server: FakeServer) -> None:
+        self.server = server
+
+    def __enter__(self) -> FakeServerConnection:
+        return self
+
+    def __exit__(self, *exc) -> None:
+        pass
+
+    def execution_options(self, **options) -> FakeServerConnection:
+        return self
+
+    def execute(self, statement, params=None) -> FakeResult:
+        sql = str(statement)
+        self.server.statements.append(sql)
+        if 'FROM pg_extension' in sql:
+            return FakeResult(self.server.installed)
+        if 'pg_available_extension' in sql:
+            return FakeResult(self.server.available)
+        if 'timescaledb.max_background_workers' in sql:  # Defined only by the preloaded library.
+            return FakeResult('16' if self.server.preloaded else None)
+        if sql.startswith('CREATE EXTENSION'):
+            self.server.installed = self.server.available
+            return FakeResult(None)
+        raise AssertionError(f'unexpected statement: {sql}')
+
+    def invalidate(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+@mark.unit
+def test_prepare_creates_offered_extension() -> None:
+    """A usable server offering the extension gets it created in the database."""
+    server = FakeServer(available='2.31.0')
+    timescale.prepare(server)
+    assert server.created() and server.installed == '2.31.0'
+
+
+@mark.unit
+def test_prepare_refuses_old_offer_before_creating() -> None:
+    """A server offering only a release before 2.22.0 is refused, and nothing is created."""
+    server = FakeServer(available='2.21.3')
+    with pytest.raises(TimescaleError, match='2.21.3.*too old.*2.22.0'):
+        timescale.prepare(server)
+    assert not server.created() and server.installed is None
+
+
+@mark.unit
+def test_prepare_refuses_without_preload_before_creating() -> None:
+    """A server that does not preload the library is refused before the extension is created."""
+    server = FakeServer(available='2.31.0', preloaded=False)
+    with pytest.raises(TimescaleError, match='shared_preload_libraries'):
+        timescale.prepare(server)
+    assert not server.created() and server.installed is None
+
+
+@mark.unit
+def test_prepare_refuses_created_without_preload() -> None:
+    """An extension already created, on a server that does not preload it, is refused before the schema step."""
+    server = FakeServer(installed='2.31.0', available='2.31.0', preloaded=False)
+    with pytest.raises(TimescaleError, match='shared_preload_libraries'):
+        timescale.prepare(server)
+    assert not server.created()
+
+
 @mark.integration
 @needs_server
 @without_timescale
@@ -650,8 +757,9 @@ def test_concurrent_initdb(ts_database, ts_site) -> None:
     ({'chunk_interval': '1  day', 'compress_after': '2 weeks'},
      Settings(chunk_interval='1 day', compress_after='2 weeks')),
     ({'chunk_interval': '12 HOURS'}, Settings(chunk_interval='12 HOURS')),
-    ({'segmentby': 'client_id, group', 'orderby': 'id desc, submit_time ASC NULLS FIRST'},
-     Settings(segmentby='client_id, group', orderby='id desc, submit_time ASC NULLS FIRST')),
+    ({'segmentby': 'client_id, submit_host', 'orderby': 'id desc, submit_time ASC NULLS FIRST'},
+     Settings(segmentby='client_id, submit_host', orderby='id desc, submit_time ASC NULLS FIRST')),
+    ({'segmentby': '"client_id"', 'orderby': '"id"  DESC'}, Settings(segmentby='client_id', orderby='id DESC')),
     ({'segmentby': ''}, Settings(segmentby='')),
     ({'policy': False}, Settings(policy=False)),
     ({'policy': 'false', 'columnstore': 'false'}, Settings(policy=False, columnstore=False)),
@@ -659,6 +767,163 @@ def test_concurrent_initdb(ts_database, ts_site) -> None:
 def test_settings_from_config(table, expected: Settings) -> None:
     """Zero configuration gives the defaults; each key overrides one of them."""
     assert Settings.from_config(table) == expected
+
+
+class FakeColumnstore:
+    """
+    Stand-in connection for the pass on a `task` hypertable that TimescaleDB 2.31.0 already holds
+    (partitioned by `id`, policy in place), modelling the columnstore settings as upstream does:
+
+    - `ALTER TABLE … SET (timescaledb.segmentby = …, timescaledb.orderby = …)` parses each option as
+      raw SQL (`GROUP BY <text>`, `ORDER BY <text>`), so a bare reserved word is a syntax error, and
+      refuses a column named twice (`src/with_clause/alter_table_with_clause.c`).
+    - A partition column named in neither list is appended to orderby, descending, nulls first
+      (`add_time_to_order_by_if_not_included`, `tsl/src/compression/create.c`).
+    - `timescaledb_information.hypertable_columnstore_settings` shows segmentby as the bare names
+      joined by ',' and orderby items as `format('%I%s%s', …)` joined by ',' (`sql/views.sql`).
+    """
+
+    dialect = postgresql.dialect()
+
+    def __init__(self) -> None:
+        self.enabled = False
+        self.segmentby: List[str] = []
+        self.orderby: List[Tuple[str, bool, bool]] = []  # (column, descending, nulls first)
+        self.statements: List[str] = []
+
+    def alters(self) -> List[str]:
+        return [sql for sql in self.statements if sql.startswith('ALTER TABLE')]
+
+    def execute(self, statement, params=None) -> FakeResult:
+        sql = ' '.join(str(statement).split())
+        self.statements.append(sql)
+        if 'FROM pg_extension' in sql:
+            return FakeResult(('2.31.0', 'public'))
+        if 'timescaledb.license' in sql:
+            return FakeResult('timescale')
+        if 'timescaledb_information.dimensions' in sql:
+            return FakeResult(('id', '7 days', True))
+        if 'SELECT compression_enabled' in sql:
+            return FakeResult(self.enabled)
+        if 'hypertable_columnstore_settings' in sql:
+            return FakeResult(self.view())
+        if 'timescaledb_information.jobs' in sql:
+            return FakeResult((1000, '28 days', True, 'Success'))
+        raise AssertionError(f'unexpected statement: {sql}')
+
+    def exec_driver_sql(self, sql: str) -> None:
+        self.statements.append(sql)
+        if not sql.startswith('ALTER TABLE'):
+            raise AssertionError(f'unexpected statement: {sql}')
+        segmentby = [self.parse(item, sql)[0] for item in self.option('segmentby', sql)]
+        orderby = [self.parse(item, sql) for item in self.option('orderby', sql)]
+        for names in (segmentby, [name for name, _, _ in orderby]):
+            if len(set(names)) != len(names):
+                raise DBAPIError(sql, {}, DriverError('duplicate column name', '42701'))
+        if 'id' not in segmentby and 'id' not in [name for name, _, _ in orderby]:
+            orderby.append(('id', True, True))
+        self.enabled, self.segmentby, self.orderby = True, segmentby, orderby
+
+    @staticmethod
+    def option(name: str, sql: str) -> List[str]:
+        match = re.search(rf"timescaledb\.{name} = '((?:[^']|'')*)'", sql)
+        text_ = match.group(1).replace("''", "'") if match else ''
+        return [item for item in text_.split(',') if item.strip()]
+
+    def parse(self, item: str, sql: str) -> Tuple[str, bool, bool]:
+        words = item.split()
+        name = words[0]
+        if name.startswith('"'):
+            name = name.strip('"')
+        elif name.lower() in self.dialect.identifier_preparer.reserved_words:
+            raise DBAPIError(sql, {}, DriverError(f'syntax error at or near "{name}"', '42601'))
+        rest = [word.lower() for word in words[1:]]
+        descending = 'desc' in rest
+        nulls_first = rest[-1] == 'first' if 'nulls' in rest else descending
+        return name, descending, nulls_first
+
+    def view(self) -> Optional[Tuple[str, str]]:
+        if not self.enabled:
+            return None
+        quote = self.dialect.identifier_preparer.quote
+        orderby = []
+        for name, descending, nulls_first in self.orderby:
+            nulls = (' NULLS FIRST' if nulls_first and not descending else
+                     ' NULLS LAST' if descending and not nulls_first else '')
+            orderby.append(quote(name) + (' DESC' if descending else '') + nulls)
+        return ','.join(self.segmentby), ','.join(orderby)
+
+
+def run_pass(conn: FakeColumnstore, settings: Settings) -> List[str]:
+    """The real pass on the fake connection; returns its changes."""
+    changes, warnings = timescale._Pass(conn, 'public', settings).run()
+    assert warnings == []
+    return changes
+
+
+@mark.unit
+def test_default_columnstore_converges() -> None:
+    """The default settings are applied once; the next pass finds them in place."""
+    conn = FakeColumnstore()
+    assert len(run_pass(conn, timescale.DEFAULTS)) == 1
+    assert run_pass(conn, timescale.DEFAULTS) == []
+    assert len(conn.alters()) == 1
+
+
+@mark.unit
+def test_orderby_without_id_converges() -> None:
+    """An orderby that omits id is compared as TimescaleDB stores it (id DESC appended): one ALTER, then none."""
+    conn = FakeColumnstore()
+    settings = Settings.from_config({'orderby': 'submit_time DESC'})
+    assert len(run_pass(conn, settings)) == 1
+    assert conn.view() == ('client_id', 'submit_time DESC,id DESC')
+    assert run_pass(conn, settings) == []
+    assert run_pass(conn, settings) == []
+    assert len(conn.alters()) == 1
+
+
+@mark.unit
+def test_group_column_emitted_quoted() -> None:
+    """The task column `group` (a reserved word) is accepted and emitted as a quoted identifier."""
+    settings = Settings.from_config({'segmentby': 'client_id, group', 'orderby': 'group DESC'})
+    assert settings.segmentby == 'client_id, group' and settings.orderby == 'group DESC'
+    conn = FakeColumnstore()
+    assert len(run_pass(conn, settings)) == 1
+    alter, = conn.alters()
+    assert 'timescaledb.segmentby = \'client_id, "group"\'' in alter, alter
+    assert 'timescaledb.orderby = \'"group" DESC' in alter, alter
+    assert conn.view() == ('client_id,group', '"group" DESC,id DESC')
+    assert run_pass(conn, settings) == []
+    assert len(conn.alters()) == 1
+
+
+@mark.unit
+@mark.parametrize('table, named', [
+    ({'segmentby': 'client_id, client_id'}, 'database.timescale.segmentby'),
+    ({'segmentby': 'client_id, "client_id"'}, 'database.timescale.segmentby'),
+    ({'orderby': 'id DESC, id'}, 'database.timescale.orderby'),
+    ({'orderby': 'submit_time, "submit_time" DESC'}, 'database.timescale.orderby'),
+])
+def test_settings_duplicate_column(table, named: str) -> None:
+    """A column named twice in one list is refused at validation, before any connection."""
+    with pytest.raises(ConfigurationError, match='expected') as caught:
+        Settings.from_config(table)
+    assert named in str(caught.value) and 'once' in str(caught.value)
+
+
+@mark.unit
+@mark.parametrize('table, named', [
+    ({'segmentby': 'client_id, client'}, 'database.timescale.segmentby'),
+    ({'segmentby': '"nope"'}, 'database.timescale.segmentby'),
+    ({'segmentby': 'client_id DESC'}, 'database.timescale.segmentby'),
+    ({'orderby': 'id DESC, nope'}, 'database.timescale.orderby'),
+    ({'orderby': '"Group" DESC'}, 'database.timescale.orderby'),
+])
+def test_settings_unknown_column(table, named: str) -> None:
+    """A name that is not a task column is refused at validation, before any connection."""
+    with pytest.raises(ConfigurationError, match='expected') as caught:
+        Settings.from_config(table)
+    assert named in str(caught.value) and 'task column' in str(caught.value)
 
 
 @mark.unit
@@ -757,3 +1022,21 @@ def test_policy_off_removes_job(ts_database, ts_site, tmp_path: Path) -> None:
     rc, _, stderr = main_lines(['hs', 'initdb', '--truncate', '--yes'])
     assert rc == exit_status.success, stderr
     assert shape(engine)['jobs'] == []
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_configured_columns_converge(ts_database, ts_site, tmp_path: Path) -> None:
+    """The column `group` and an orderby without id are applied once; the next run changes nothing."""
+    engine = ts_site(ts_database())
+    write_config(tmp_path / 'config.toml', ['segmentby = "client_id, group"', 'orderby = "submit_time DESC"'])
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    allowed = server_gates(engine)
+    state = shape(engine)
+    assert state['hypertable'] and state['columnstore'] == allowed.columnstore, state
+    if allowed.columnstore:
+        assert (state['segmentby'], state['orderby']) == ('client_id, group', 'submit_time desc, id desc'), state
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success and pass_lines(stderr, 'INFO') == [], stderr

@@ -185,3 +185,12 @@ Unmapped changes (possible scope creep): none. The fixture sealing and the CI ma
 - **F4:** correct the seed's and the ROADMAP entry's description of the `postgres` job.
 
 After that, cycle 2 should re-run the TimescaleDB entries in CI.
+
+## Triage — cycle 1 (foreman, as judge under the maintainer's delegation, 2026-11-02)
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| F1 · CONFIRMED | fix | Convergence compares like with like. Before comparing a configured `orderby` with the view, normalise it with TimescaleDB's own rule (`add_time_to_order_by_if_not_included`: append `id DESC` when the partitioning column is absent), citing the upstream source. Red-first test: a configured `orderby` without `id`, run twice through the real pass with a fake connection, ALTERs once and then no more. |
+| F2 · CONFIRMED | fix | `segmentby`/`orderby` are validated as lists of real `task` column names (no duplicates, each with an optional `ASC`/`DESC`/`NULLS FIRST|LAST` for orderby), and every column is emitted through SQLAlchemy's identifier quoting, so that `group` works and junk is refused at startup, not at `initdb`. Correct the test at `tests/test_timescale.py:653` to expect the quoted emission. Red-first tests: `group` accepted and emitted quoted; a duplicate is refused at validation; an unknown column is refused at validation. |
+| F3 · CONFIRMED | fix | Check the offered version (`pg_available_extension_versions`/`pg_available_extensions`) **before** `CREATE EXTENSION`, and refuse a version below 2.22.0 having created nothing, as the docs promise. Treat the PLAUSIBLE created-but-not-preloaded sub-case the same way: check preload before creating. Red-first unit test with a fake connection: no `CREATE EXTENSION` is issued when the offered version is too old. |
+| F4 · CONFIRMED | fix | Correct `issues/server-db-test-suite.md:17-20` and `ROADMAP.md:332`: after this cycle, the postgres job runs the upgrade tests and `test_timescale.py` across five entries. |

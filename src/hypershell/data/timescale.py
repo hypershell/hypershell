@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from cmdkit.config import ConfigurationError
 from sqlalchemy import text
 from sqlalchemy.engine import Engine, Connection
+from sqlalchemy.sql.compiler import IdentifierPreparer
 from sqlalchemy.exc import DBAPIError
 
 # Internal libs
@@ -39,7 +40,7 @@ from hypershell.data.upgrade import (_sqlstate, _message, _waiting, _waiting_for
                                      _lock_postgres, WAIT_UPGRADE, WAIT_TABLES)
 
 # Public interface
-__all__ = ['prepare', 'converge', 'gates', 'parse_version', 'normalize_columns',
+__all__ = ['prepare', 'converge', 'gates', 'parse_version', 'normalize_columns', 'effective_orderby', 'quote_columns',
            'Settings', 'DEFAULTS', 'SETTINGS_KEYS', 'Gates', 'TimescaleError', 'MIN_VERSION', 'POLICY_VERSION', ]
 
 # Initialize logger
@@ -69,9 +70,12 @@ PARTITION_COLUMN: Final[str] = 'id'
 INTERVAL_PATTERN: Final[re.Pattern] = re.compile(
     r'^\s*[1-9]\d*\s*(microsecond|millisecond|second|minute|hour|day|week|month)s?\s*$', re.IGNORECASE)
 
-# One orderby item: a column, an optional direction, an optional NULLS placement.
+# One segmentby item: a column, bare or double-quoted.
+SEGMENTBY_PATTERN: Final[re.Pattern] = re.compile(r'^\s*(?:"(\w+)"|(\w+))\s*$')
+
+# One orderby item: a column (bare or double-quoted), an optional direction, an optional NULLS placement.
 ORDERBY_PATTERN: Final[re.Pattern] = re.compile(
-    r'^\s*(\w+)(\s+(asc|desc))?(\s+nulls\s+(first|last))?\s*$', re.IGNORECASE)
+    r'^\s*(?:"(\w+)"|(\w+))(\s+(asc|desc))?(\s+nulls\s+(first|last))?\s*$', re.IGNORECASE)
 
 
 class TimescaleError(SchemaUpgradeError):
@@ -136,17 +140,23 @@ def _check_setting(key: str, value: Any, columns: Tuple[str, ...]) -> Any:
                           '(microseconds through months)')
         return ' '.join(value.split())
     if key == 'segmentby':
-        names = [name.strip() for name in value.split(',')] if value.strip() else []
-        if any(name not in columns for name in names):
-            raise invalid(f'comma-separated task columns ({", ".join(columns)}), or "" for none')
-        return ', '.join(names)
-    items = value.split(',')
+        pattern, form = SEGMENTBY_PATTERN, f'comma-separated task columns ({", ".join(columns)}), or "" for none'
+        items = value.split(',') if value.strip() else []
+    else:
+        pattern, form = ORDERBY_PATTERN, (f'comma-separated "<task column> [ASC|DESC] [NULLS FIRST|LAST]" items, '
+                                          f'e.g. "id DESC"; columns: {", ".join(columns)}')
+        items = value.split(',')
+    canonical, seen = [], set()
     for item in items:
-        match = ORDERBY_PATTERN.match(item)
-        if match is None or match.group(1) not in columns:
-            raise invalid(f'comma-separated "<task column> [ASC|DESC] [NULLS FIRST|LAST]" items, '
-                          f'e.g. "id DESC"; columns: {", ".join(columns)}')
-    return ', '.join(' '.join(item.split()) for item in items)
+        match = pattern.match(item)
+        name = match and (match.group(1) or match.group(2))
+        if name not in columns:
+            raise invalid(form)
+        if name in seen:
+            raise invalid(f'each column once ({name} is named twice)')
+        seen.add(name)
+        canonical.append(' '.join([name, *item.split()[1:]]))
+    return ', '.join(canonical)
 
 
 DEFAULTS: Final[Settings] = Settings()
@@ -217,6 +227,13 @@ def too_old_message(version: Tuple[int, ...]) -> str:
             f'and run "ALTER EXTENSION timescaledb UPDATE" in the database, then rerun hs initdb.')
 
 
+def offered_too_old_message(version: Tuple[int, ...]) -> str:
+    """The server offers only a release that predates partitioning by a UUIDv7 column."""
+    return (f'The PostgreSQL server offers TimescaleDB {format_version(version)}, which is too old: partitioning '
+            f'the task table by its UUIDv7 id needs TimescaleDB {format_version(MIN_VERSION)} or later. Nothing was '
+            f'created; install a newer release on the server, then rerun hs initdb.')
+
+
 def apache_message() -> str:
     """The Apache-only build has hypertables but no columnstore."""
     return ('TimescaleDB is the Apache-only edition (timescaledb.license = \'apache\'): the task table '
@@ -256,19 +273,22 @@ def prepare(engine: Engine) -> None:
     with engine.connect() as conn:
         installed = _installed_version(conn)
         available = None if installed else _available_version(conn)
-    log.debug(f'TimescaleDB extension: installed={installed} available={available}')
+        preloaded = _preloaded(conn)
+    log.debug(f'TimescaleDB extension: installed={installed} available={available} preloaded={preloaded}')
+    if installed is None and available is None:
+        raise TimescaleError(absent_message(database))
+    version = parse_version(installed or available)
+    if version < MIN_VERSION:
+        raise TimescaleError(too_old_message(version) if installed else offered_too_old_message(version))
+    if not preloaded:
+        raise TimescaleError(preload_message())
     if installed is None:
-        if available is None:
-            raise TimescaleError(absent_message(database))
         _create_extension(engine, database)
         with engine.connect() as conn:
             installed = _installed_version(conn)
         if installed is None:
             raise TimescaleError(absent_message(database))
         log.info(f'Created extension timescaledb {installed} in database {database}')
-    version = parse_version(installed)
-    if version < MIN_VERSION:
-        raise TimescaleError(too_old_message(version))
 
 
 def _installed_version(conn: Connection) -> Optional[str]:
@@ -280,6 +300,17 @@ def _available_version(conn: Connection) -> Optional[str]:
     """The version the server would install, or None if the server does not offer the extension."""
     return conn.execute(text('SELECT default_version FROM pg_available_extensions '
                              'WHERE name = \'timescaledb\'')).scalar()
+
+
+def _preloaded(conn: Connection) -> bool:
+    """
+    Whether the server preloads the TimescaleDB library. Its loader, run only from
+    shared_preload_libraries, defines `timescaledb.max_background_workers` in the postmaster, so the
+    setting exists in every session; without the preload it is unknown (and shared_preload_libraries
+    itself is readable only with elevated privileges).
+    """
+    return conn.execute(text('SELECT current_setting(\'timescaledb.max_background_workers\', true)')).scalar() \
+        is not None
 
 
 def _create_extension(engine: Engine, database: str) -> None:
@@ -299,12 +330,13 @@ def _create_extension(engine: Engine, database: str) -> None:
 def normalize_columns(value: Optional[str]) -> str:
     """
     Canonical form of a segmentby or orderby list, for comparison: single spaces, lower case,
-    and an explicit default direction or NULLS placement dropped ('id  DESC NULLS FIRST' and
-    'id desc' compare equal; so do 'id ASC NULLS LAST' and 'id').
+    identifier quotes and an explicit default direction or NULLS placement dropped
+    ('"id"  DESC NULLS FIRST' and 'id desc' compare equal; so do 'id ASC NULLS LAST' and 'id').
+    Every name is a task column, so removing its quotes cannot merge two names.
     """
     items = []
     for item in (value or '').split(','):
-        words = item.lower().split()
+        words = item.replace('"', '').lower().split()
         if not words:
             continue
         descending = 'desc' in words
@@ -312,6 +344,37 @@ def normalize_columns(value: Optional[str]) -> str:
             words = words[:-2]
         words = [word for word in words if word != 'asc']
         items.append(' '.join(words))
+    return ', '.join(items)
+
+
+def _column_names(value: str) -> List[str]:
+    """The column of each item in a segmentby or orderby list, without identifier quotes."""
+    return [item.split()[0].strip('"') for item in value.split(',') if item.strip()]
+
+
+def effective_orderby(segmentby: str, orderby: str) -> str:
+    """
+    The orderby TimescaleDB stores for these settings. When neither list names the partition
+    column, setting the orderby appends it, descending with nulls first
+    (`add_time_to_order_by_if_not_included` in `tsl/src/compression/create.c`, 2.22.0 through
+    2.31.0), so a configured orderby is compared with the stored one in that form.
+    """
+    if PARTITION_COLUMN in _column_names(segmentby) + _column_names(orderby):
+        return orderby
+    return f'{orderby}, {PARTITION_COLUMN} DESC' if orderby.strip() else f'{PARTITION_COLUMN} DESC'
+
+
+def quote_columns(value: str, preparer: IdentifierPreparer) -> str:
+    """
+    A segmentby or orderby list as SQL, each column through the dialect's identifier quoting:
+    TimescaleDB parses the option as raw SQL (`GROUP BY …`, `ORDER BY …`), where a column named
+    by a reserved word, such as `group`, must be quoted.
+    """
+    items = []
+    for item in value.split(','):
+        words = item.split()
+        if words:
+            items.append(' '.join([preparer.quote(words[0].strip('"')), *words[1:]]))
     return ', '.join(items)
 
 
@@ -389,7 +452,7 @@ class _Pass:
     def __init__(self, conn: Connection, schema: Optional[str], settings: Settings) -> None:
         self.conn = conn
         self.settings = settings
-        prep = conn.dialect.identifier_preparer
+        self.prep = prep = conn.dialect.identifier_preparer
         self.table = f'{prep.quote_schema(schema)}.{prep.quote(TABLE)}' if schema else prep.quote(TABLE)
         self.schema = schema or conn.execute(text('SELECT current_schema()')).scalar()
         self.changes: List[str] = []
@@ -485,7 +548,8 @@ class _Pass:
             if enabled:
                 self.warnings.append(columnstore_off_message(TABLE))
             return
-        segmentby, orderby = self.settings.segmentby, self.settings.orderby
+        segmentby = quote_columns(self.settings.segmentby, self.prep)
+        orderby = quote_columns(effective_orderby(self.settings.segmentby, self.settings.orderby), self.prep)
         current = None
         if enabled:
             current = self.conn.execute(text(

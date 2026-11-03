@@ -329,8 +329,10 @@ them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
 
 ## The whole test suite on a server database
 
-The suite runs on SQLite only, and CI's PostgreSQL job runs just the upgrade tests, so the scheduler,
-writeback, retries and CLI are never exercised on PostgreSQL or TimescaleDB. A harness selected by
+The suite runs on SQLite only. CI's PostgreSQL job runs the upgrade tests and the TimescaleDB
+scenarios (`tests/test_timescale.py`) across five entries, but the rest of the suite never runs on a
+server, so the scheduler, writeback, retries and most of the CLI are never exercised on PostgreSQL
+or TimescaleDB. A harness selected by
 an environment variable would run the whole suite against a server, isolated per test, with the
 SQLite-only tests marked and skipped. Split out of TimescaleDB's R9, which ships a dedicated
 TimescaleDB scenario module instead.

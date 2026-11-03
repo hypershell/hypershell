@@ -3,10 +3,10 @@ slug: timescale
 title: 'TimescaleDB provider: hypertables out of the box (TS1)'
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/timescale
 base: develop
-current_phase: done
+current_phase: P5
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -80,7 +80,7 @@ phases:
 - id: P5
   name: 'CI evidence for the load-bearing slice (run B: external wait on the draft
     PR)'
-  status: done
+  status: in_progress
   satisfies:
   - R2
   - R3
@@ -117,7 +117,7 @@ phases:
     && uv run pytest -rs tests/test_timescale.py && uv run pytest
 - id: P7
   name: CI evidence for R6 (run B)
-  status: done
+  status: pending
   satisfies:
   - R6
   - R9
@@ -204,6 +204,7 @@ These resolve PLAN §5's two `[NEEDS CLARIFICATION]` items and bind the build.
 | `docs/_include/database_alt.rst` | P4 | short TimescaleDB paragraph (man-page source) |
 | `docs/install.rst` | P4 | `uuid7` extra: required on every id-minting host under TimescaleDB |
 | `docs/_include/config_param_ref.rst` | P4, P6 | `.provider` names `timescale`; `[timescale]` table (P6) |
+| `issues/server-db-test-suite.md`, `ROADMAP.md` | review-1 | F4: the `postgres` job as it now runs |
 | `spec/timescale/*` | all | state |
 
 Not touched: `data/model.py`, `data/upgrade.py`, `core/*`, `server.py`, `client.py`, `submit.py`,
@@ -269,6 +270,18 @@ feature code lands, so every later push is exercised against a real TimescaleDB.
       has **no** tables afterwards. On community: a database from `template0` gets the extension
       created and `initdb` succeeds (tables plain until P3). *(Written as
       `test_absent_fails_before_schema` and `test_extension_created`; proven only in CI, at P5.)*
+- [x] **Review-1 F3 (reopened 2026-11-02).** `prepare` now decides everything before it creates
+      anything: absent → too old (the offered `pg_available_extensions.default_version`, or the
+      created version) → not preloaded → `CREATE EXTENSION`. A server offering only a release below
+      2.22.0 is refused with nothing created (`offered_too_old_message`). Preload is read from
+      `current_setting('timescaledb.max_background_workers', true)`: the loader, run only from
+      `shared_preload_libraries`, defines it in the postmaster (`src/loader/loader.c` `_PG_init` →
+      `ts_bgw_counter_setup_gucs`, `src/loader/bgw_counter.c`, 2.22.0), and
+      `shared_preload_libraries` itself needs elevated privileges to read. This also covers the
+      created-but-not-preloaded sub-case, refused before the schema step. Unit tests on a fake
+      engine: `test_prepare_refuses_old_offer_before_creating`,
+      `test_prepare_refuses_without_preload_before_creating`, `test_prepare_refuses_created_without_preload`
+      (all red at `6cbf341`), and `test_prepare_creates_offered_extension` (control).
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/data/timescale.py`, `src/hypershell/data/__init__.py`,
   `tests/test_timescale.py`.
@@ -384,6 +397,11 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
   - `PostgreSQL (pg18)`: 84 passed, 15 skipped (the TimescaleDB-only scenarios skip without
     `HS_TEST_TIMESCALE`). `PostgreSQL (pg13)`: passed.
   - `tests (3.11)` through `tests (3.14)`, the zero-build install, and package metadata passed.
+- [ ] **Review-1 remediation (reopened 2026-11-02).** The foreman pushes the remediation head and
+      records the new run: all five `postgres` entries and the SQLite matrix green, with
+      `test_configured_columns_converge` passing (not skipped) in `timescale`, `timescale-oss` and
+      `timescale-floor`, and `test_extension_created` still passing (it now crosses the preload
+      probe on a real server). F4's seed and ROADMAP prose was corrected in the same commit.
 - **Verify:** see frontmatter (gates on the last commit outside `spec/`, not `HEAD`).
 
 ## Phase P6 — R6: `[database.timescale]` (deferrable — cut here if over appetite)
@@ -409,6 +427,24 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
   integration scenarios are proven only in CI, at P7. Local CLI drive: an invalid
   `chunk_interval` exits `bad_config` (3) with one CRITICAL line naming the key; a valid table
   reaches the connection, so it is not forwarded to psycopg.)*
+- [x] **Review-1 F1, F2 (reopened 2026-11-02).** `segmentby`/`orderby` are validated as lists of
+      `task` column names, bare or double-quoted, each named once (`SEGMENTBY_PATTERN`,
+      `ORDERBY_PATTERN`, duplicate refused with "each column once"); the canonical setting keeps bare
+      names. The pass emits every column through the dialect's identifier quoting (`quote_columns`,
+      so `group` goes out as `"group"`), and compares the view with `effective_orderby`: TimescaleDB's
+      own rule, `add_time_to_order_by_if_not_included` in `tsl/src/compression/create.c` (2.22.0
+      through 2.31.0), appends `id DESC` (nulls first) when neither list names `id`.
+      `normalize_columns` drops identifier quotes, since the view renders orderby with `%I`
+      (`sql/views.sql`). Unit tests drive the real `_Pass.run()` on `FakeColumnstore`, which models
+      the raw-SQL option parse, the duplicate refusal, the appended partition column and the view:
+      `test_orderby_without_id_converges`, `test_group_column_emitted_quoted`,
+      `test_settings_duplicate_column` (red at `6cbf341`); `test_settings_unknown_column` (green at
+      `6cbf341` too: unknown names were already refused; kept as a guard). The `group` row of
+      `test_settings_from_config` moved to `test_group_column_emitted_quoted`, which asserts the
+      quoted emission. New CI scenario `test_configured_columns_converge`. Docs: the settings
+      table and its validation note. CLI drive: `segmentby = "client_id, client_id"` exits
+      `bad_config` (3) with one CRITICAL line before connecting; `client_id, group` /
+      `group DESC` passes validation and reaches the connection.
 - **If cut:** add a dated Clarification to `GOAL.md`, move R6 to Non-goals, return it to
   `issues/timescale.md`, mark P6/P7 `blocked` with the reason, and drop the config-reference bullet
   from R10's evidence (GOAL Clarifications, 2026-11-01).
@@ -424,6 +460,7 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
   TimescaleDB entries: `timescale-floor` and `timescale-oss` each 98 passed, 1 skipped
   (`test_absent_fails_before_schema`), and `timescale` passed. They skip in `pg18` (84 passed,
   15 skipped) without `HS_TEST_TIMESCALE`. Per-entry detail is under P5.
+- [ ] **Review-1 remediation:** the same new run as P5 covers the F1/F2 changes to the R6 code.
 - **Verify:** see frontmatter.
 
 ---

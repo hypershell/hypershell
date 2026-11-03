@@ -239,16 +239,20 @@ Key                 Default          Meaning
 ``chunk_interval``  ``"1 week"``     Time span of each chunk of ``task``.
 ``columnstore``     ``true``         Enable the columnstore on ``task``.
 ``segmentby``       ``"client_id"``  Columns that group rows in a compressed chunk
-                                     (comma-separated task columns, or ``""`` for none).
+                                     (comma-separated task columns, each once, or ``""`` for none).
 ``orderby``         ``"id DESC"``    Order of rows in a compressed chunk
-                                     (``<column> [ASC|DESC] [NULLS FIRST|LAST]``, comma-separated).
+                                     (``<column> [ASC|DESC] [NULLS FIRST|LAST]``, comma-separated,
+                                     each column once). TimescaleDB appends ``id DESC`` when
+                                     neither list names ``id``.
 ``policy``          ``true``         Keep a columnstore policy on ``task``.
 ``compress_after``  ``"4 weeks"``    Age at which the policy converts a chunk.
 ==================  ===============  ==========================================================
 
 Intervals are a positive whole number and a unit, from ``microseconds`` to ``months``
-(e.g., ``"12 hours"``). An invalid value, an unknown key, or ``policy = true`` with
-``columnstore = false`` stops every command at startup with a message naming the key.
+(e.g., ``"12 hours"``). Columns are task columns by name, quoted for you where SQL needs it
+(``group``, for instance). An invalid value, an unknown or repeated column, an unknown key, or
+``policy = true`` with ``columnstore = false`` stops every command at startup with a message
+naming the key.
 
 Changes take effect at the next ``hs initdb``, which applies them as described above: a new
 ``chunk_interval`` applies to new chunks only, new ``segmentby`` or ``orderby`` to chunks converted
