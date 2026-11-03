@@ -3,10 +3,10 @@ slug: timescale
 title: 'TimescaleDB provider: hypertables out of the box (TS1)'
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/timescale
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -84,7 +84,7 @@ phases:
 - id: P5
   name: 'CI evidence for the load-bearing slice (run B: external wait on the draft
     PR)'
-  status: in_progress
+  status: done
   satisfies:
   - R2
   - R3
@@ -122,7 +122,7 @@ phases:
     tests/test_timescale.py && uv run pytest
 - id: P7
   name: CI evidence for R6 (run B)
-  status: pending
+  status: done
   satisfies:
   - R6
   - R9
@@ -447,12 +447,17 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
     `test_configured_columns_converge` PASSED. `pg13` and `pg18`: 115 passed, 16 skipped (the
     TimescaleDB scenarios skip without `HS_TEST_TIMESCALE`). (`ab7adb4` is an empty commit that
     tried to re-trigger CI before the conflict was found.)
-- [ ] **Review-2 remediation (reopened 2026-11-03).** F5 changes `Settings.from_config`, which every
+- [x] **Review-2 remediation (reopened 2026-11-03).** F5 changes `Settings.from_config`, which every
       configured integration scenario crosses, and adds a `test_invalid_setting_exits` case. The
       foreman pushes the remediation head and records the new run: all five `postgres` entries and
       the SQLite matrix green, with both `test_invalid_setting_exits` cases passing in every entry
       and `test_configured_columns_converge` passing (not skipped) in `timescale`, `timescale-oss`
       and `timescale-floor`.
+  - **Evidence (recorded by the foreman, 2026-11-03):** run `41587822550` at `cd3f96f` concluded
+    `success`, 14/14 checks green. `timescale`, `timescale-oss`, `timescale-floor`: 137 passed,
+    1 skipped each, with both `test_invalid_setting_exits` cases and `test_configured_columns_converge`
+    PASSED. `pg13` and `pg18`: 122 passed, 16 skipped, with both `test_invalid_setting_exits` cases
+    PASSED and the TimescaleDB-only scenarios skipped.
 - **Verify:** see frontmatter (gates on the last commit outside `spec/`, not `HEAD`).
 
 ## Phase P6 — R6: `[database.timescale]` (deferrable — cut here if over appetite)
@@ -533,8 +538,8 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
   15 skipped) without `HS_TEST_TIMESCALE`. Per-entry detail is under P5.
 - [x] **Review-1 remediation:** the same new run as P5 covers the F1/F2 changes to the R6 code
   (run `41581150777` at `a9ab876`; see P5).
-- [ ] **Review-2 remediation (reopened 2026-11-03):** the same new run as P5 covers the F5 change
-  to the R6 validation.
+- [x] **Review-2 remediation (reopened 2026-11-03):** the same new run as P5 covers the F5 change
+  to the R6 validation (run `41587822550` at `cd3f96f`; see P5).
 - **Verify:** see frontmatter.
 
 ---
