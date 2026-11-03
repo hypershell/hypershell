@@ -202,6 +202,19 @@ ascending order. Pre-existing since task groups were added.
 *Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: that cycle's GOAL Q1*
 **Seed:** [`issues/group-order-unsorted-inline-file.md`](issues/group-order-unsorted-inline-file.md) · *status: adopted:group-advance-strands-lower-group*
 
+## Refuse a submission below the group the schedule has reached
+
+A `hs submit` into a group lower than the one an active schedule has already reached cannot keep
+the documented ascending order. After `group-advance-strands-lower-group`, such tasks run late with
+a warning. The maintainer wants them refused at submit time instead, all or nothing and with an
+error naming both groups. The same rule covers a task file run onto an advanced database
+(`--restart`, `--update`, `--repeat`). Pipes into `hs cluster`/`hs server` stay best effort. This is
+a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
+
+*Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: overlaps
+`issues/ingest-robustness.md` (same ingest path)*
+**Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
+
 ## Concurrent first submits can collide on the reserved source row
 
 `Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
