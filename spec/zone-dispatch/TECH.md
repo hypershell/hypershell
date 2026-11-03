@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-dispatch
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -47,7 +47,7 @@ phases:
     2.8.3 --feature HEAD --skip-help
 - id: P3
   name: 'Version handshake: refuse old clients, fail cleanly against old servers'
-  status: pending
+  status: done
   satisfies:
   - R5
   - R14
@@ -395,7 +395,7 @@ run behaves as today. This is the core, novel slice.
 as too old while other clients carry on. A new client against an old server exits non-zero with
 one version error.
 
-- [ ] **Red first:**
+- [x] **Red first:**
   - `tests/test_dispatch_version.py` (`@mark.unit`): a stock-manager client registering only the
     four old typeids gets `RemoteError` containing "too old" from `_get_scheduled()`; the server
     logs one WARNING `Client too old`; a concurrent new `QueueClient` round-trips a request.
@@ -403,16 +403,25 @@ one version error.
     `QueueVersionError` naming the mismatch, within 5 s.
   - An error reply with `protocol: 2` raises `QueueVersionError` with both numbers.
   - `hs client` against that stock server exits non-zero with exactly one CRITICAL line.
-- [ ] `core/queue.py`:
+- [x] `core/queue.py`:
   - The versioned `_get_scheduled` provider and `ClientTooOld`.
   - The thread-local flag and the WARNING in `handle_request`.
   - `QueueVersionError`.
   - Pins added to `unsupported_internals()` and `TestPrivateInternals` (PLAN §2.1).
-- [ ] `tests/bench/bench_queue.py`: replace `compat` with
+- [x] `tests/bench/bench_queue.py`: replace `compat` with
       `skew --new REF --old REF… --bound S`, run TLS on and off. Old client against new server:
       the client runs without `-T`, exits within the bound, the server log says "too old", and a
       concurrent new client finishes all tasks. New client against old server: non-zero within
       the bound, one version error.
+- **Build notes (amendments, 2026-11-02):**
+  - A new client finds an old server at its first create, `_get_scheduled(PROTOCOL)`, not at
+    `_get_dispatch` (created lazily since P2): every older server's provider takes no argument,
+    so the create fails with `RemoteError`, which `connect()` raises as `QueueVersionError`.
+  - The refusal sets a thread-local flag in the provider; `_InProcessServer.handle_request`
+    logs `Client too old (no work-request protocol) from <peer>` once the connection closes,
+    outside the server mutex. The peer address is captured at accept.
+  - A reply whose `protocol` differs from the client's also raises `QueueVersionError`, naming
+    both protocol numbers.
 - **Touches:** `core/queue.py`, `client.py` (error path only, if needed),
   `tests/test_dispatch_version.py`, `tests/test_queue.py` (new pin test methods appended, existing
   ones unmodified), `tests/bench/bench_queue.py`.

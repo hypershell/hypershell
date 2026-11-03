@@ -16,8 +16,11 @@ Subcommands:
                                         builds, TLS on and off: identical normalised task tables,
                                         groups run in order, clean exits, and byte-identical
                                         ``--help`` output (unless ``--skip-help``).
-    compat  --server REF --client REF   A server from one build completes a workload with clients
-                                        from the other, TLS on and off.
+    skew    --new REF --old REF...      Version skew on the work-request protocol, TLS on and off:
+                                        an old client against a new server exits within the bound,
+                                        is logged as too old, and a concurrent new client finishes
+                                        every task; a new client against an old server exits
+                                        non-zero within the bound with one version error.
     gate    --base REF --feature REF    Throughput and footprint, interleaved and repeated.
 
 Never collected by pytest (no ``test_`` prefix). Run it with the project interpreter, which has
@@ -335,24 +338,115 @@ def cmd_parity(args: argparse.Namespace) -> bool:
     return ok
 
 
-# ---------------------------------------------------------------------------------------- compat
+# ------------------------------------------------------------------------------------------ skew
 
 
-def cmd_compat(args: argparse.Namespace) -> bool:
-    server_venv, client_venv = build(args.server, args.workdir), build(args.client, args.workdir)
+def spawn_group(site: Site, venv: Path, name: str, *args: str) -> subprocess.Popen:
+    """Start `hs` from `venv` in its own process group, logging to the site."""
+    with open(site.path / f'{name}.log', 'wb') as stream:
+        return subprocess.Popen([str(venv / 'bin' / 'hs'), *args], cwd=site.path, env=site.env,
+                                stdout=subprocess.DEVNULL, stderr=stream, start_new_session=True)
+
+
+def kill_group(proc: subprocess.Popen) -> None:
+    """Kill the process group of `proc` if it is still running, and reap it."""
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, 9)
+        except ProcessLookupError:
+            pass
+    proc.wait()
+
+
+def wait_bounded(proc: subprocess.Popen, bound: float) -> Tuple[Any, float]:
+    """Exit code of `proc` (or 'timeout') and the seconds it took, killing its group past `bound`."""
+    start = time.monotonic()
+    try:
+        rc = proc.wait(timeout=bound)
+    except subprocess.TimeoutExpired:
+        kill_group(proc)
+        rc = 'timeout'
+    return rc, time.monotonic() - start
+
+
+def start_server(site: Site, venv: Path, name: str = 'server') -> subprocess.Popen:
+    """`hs server --restart` from `venv` on the site, once it listens."""
+    server = spawn_group(site, venv, name, 'server', '--restart', '-H', 'localhost', '-p', str(site.port),
+                         '-k', site.key, *site.tls_args())
+    deadline = time.monotonic() + WAIT
+    while not listening(server.pid, site.port):
+        if server.poll() is not None or time.monotonic() > deadline:
+            kill_group(server)
+            raise RuntimeError(f'server did not listen; see {site.path}/{name}.log')
+        time.sleep(0.05)
+    return server
+
+
+def client_args(site: Site) -> List[str]:
+    """Connection arguments of a client for the site (no -T: an old client must exit on its own)."""
+    return ['client', '-H', 'localhost', '-p', str(site.port), '-k', site.key, *site.tls_args()]
+
+
+def old_client_new_server(new: Path, old: Path, label: str, tls: bool, args: argparse.Namespace) -> bool:
+    """An old client is turned away in bounded time while a new client finishes every task."""
+    site = Site(args.workdir, f'skew-old-client-{label}', tls)
+    submit(site, new, [f'echo {i}' for i in range(args.tasks)])
+    server = start_server(site, new)
+    procs = [server]
+    try:
+        old_client = spawn_group(site, old, 'old-client', *client_args(site))
+        procs.append(old_client)
+        new_client = spawn_group(site, new, 'new-client', *client_args(site), '-T', '30')
+        procs.append(new_client)
+        old_rc, old_s = wait_bounded(old_client, args.bound)
+        new_rc, _ = wait_bounded(new_client, WAIT)
+        server_rc, _ = wait_bounded(server, WAIT)
+    finally:
+        for proc in procs:
+            kill_group(proc)
+    log_text = (site.path / 'server.log').read_text(errors='replace')
+    refused = log_text.count('Client too old')
+    rows = site.rows()
+    finished = len(rows) == args.tasks and all(r['exit_status'] == 0 and r['completion_time'] for r in rows)
+    passed = old_rc not in ('timeout', 0) and refused >= 1 and new_rc == 0 and server_rc == 0 and finished
+    print(f'skew old client {label} -> new server, tls={"on" if tls else "off"}: old client rc {old_rc} '
+          f'in {old_s:.1f} s (bound {args.bound:g}), "too old" logged {refused}x, new client rc {new_rc}, '
+          f'server rc {server_rc}, {sum(r["exit_status"] == 0 for r in rows)}/{args.tasks} tasks done '
+          f'-> {"PASS" if passed else "FAIL"}')
+    return passed
+
+
+def new_client_old_server(new: Path, old: Path, label: str, tls: bool, args: argparse.Namespace) -> bool:
+    """A new client against an old server exits non-zero in bounded time with one version error."""
+    site = Site(args.workdir, f'skew-old-server-{label}', tls)
+    submit(site, old, [f'echo {i}' for i in range(args.tasks)])
+    server = start_server(site, old)
+    procs = [server]
+    try:
+        client = spawn_group(site, new, 'new-client', *client_args(site))
+        procs.append(client)
+        rc, seconds = wait_bounded(client, args.bound)
+    finally:
+        for proc in procs:
+            kill_group(proc)
+    lines = (site.path / 'new-client.log').read_text(errors='replace').splitlines()
+    critical = [line for line in lines if line.startswith('CRITICAL')]
+    named = len(critical) == 1 and 'work-request protocol' in critical[0]
+    passed = rc not in ('timeout', 0) and named
+    print(f'skew new client -> old server {label}, tls={"on" if tls else "off"}: rc {rc} in {seconds:.1f} s '
+          f'(bound {args.bound:g}), critical lines {len(critical)}'
+          f'{": " + critical[0][:160] if critical else ""} -> {"PASS" if passed else "FAIL"}')
+    return passed
+
+
+def cmd_skew(args: argparse.Namespace) -> bool:
+    new = build(args.new, args.workdir)
     ok = True
-    for tls in (True, False):
-        site = Site(args.workdir, 'compat', tls)
-        submit(site, server_venv, [f'echo {i}' for i in range(args.tasks)])
-        result = serve(site, server_venv, client_venv, [], [], clients=2)
-        rows = site.rows()
-        passed = (clean(result) and len(rows) == args.tasks
-                  and all(row['exit_status'] == 0 and row['completion_time'] is not None for row in rows))
-        ok &= passed
-        print(f'compat server={args.server} client={args.client} tls={"on" if tls else "off"}: '
-              f'{sum(row["exit_status"] == 0 for row in rows)}/{args.tasks} tasks exit 0, '
-              f'rc {result["server_rc"]}/{result["client_rcs"]}, wall {result["wall_s"]:.1f} s '
-              f'-> {"PASS" if passed else "FAIL"}')
+    for ref in args.old:
+        old = build(ref, args.workdir)
+        for tls in (True, False):
+            ok &= old_client_new_server(new, old, ref, tls, args)
+            ok &= new_client_old_server(new, old, ref, tls, args)
     return ok
 
 
@@ -461,10 +555,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parity.add_argument('--base', required=True)
     parity.add_argument('--feature', required=True)
     parity.add_argument('--skip-help', action='store_true', help='do not compare --help output')
-    compat = commands.add_parser('compat')
-    compat.add_argument('--server', required=True)
-    compat.add_argument('--client', required=True)
-    compat.add_argument('--tasks', type=int, default=200)
+    skew = commands.add_parser('skew')
+    skew.add_argument('--new', required=True)
+    skew.add_argument('--old', required=True, action='append')
+    skew.add_argument('--bound', type=float, default=30.0, help='seconds a refused client may take to exit')
+    skew.add_argument('--tasks', type=int, default=200)
     gate = commands.add_parser('gate')
     gate.add_argument('--base', required=True)
     gate.add_argument('--feature', required=True)
@@ -475,7 +570,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     gate.add_argument('--out', help='append each run as a JSON line to this file')
     args = parser.parse_args(argv)
     args.workdir.mkdir(parents=True, exist_ok=True)
-    handler = {'parity': cmd_parity, 'compat': cmd_compat, 'gate': cmd_gate}[args.command]
+    handler = {'parity': cmd_parity, 'skew': cmd_skew, 'gate': cmd_gate}[args.command]
     return 0 if handler(args) else 1
 
 

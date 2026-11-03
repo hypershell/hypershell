@@ -223,8 +223,9 @@ class ClientScheduler(StateMachine):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[signal]})')
             return SchedulerState.FINAL
         reply = json.loads(self.queue.dispatcher.request(self.request_text()))
-        if 'error' in reply:
-            raise QueueVersionError(f'Server refused the work request: {reply.get("message")} '
+        if 'error' in reply or reply.get('protocol') != PROTOCOL:
+            raise QueueVersionError(f'Server refused the work request (server protocol {reply.get("protocol")}, '
+                                    f'client protocol {PROTOCOL}): {reply.get("message")} '
                                     f'(server {reply.get("server_version")}, client {build_version()})')
         if reply['tasks']:
             self.bundle = reply['tasks']

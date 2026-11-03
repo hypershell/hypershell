@@ -25,7 +25,8 @@ from functools import cache
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from multiprocessing import util, ProcessError
-from multiprocessing.managers import BaseManager, BaseProxy, Server, State, AutoProxy, listener_client
+from multiprocessing.managers import (BaseManager, BaseProxy, Server, State, AutoProxy, RemoteError,
+                                      listener_client, convert_to_error)
 from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener,
                                         answer_challenge, deliver_challenge, BUFSIZE)
 from queue import Queue, SimpleQueue
@@ -50,7 +51,8 @@ __all__ = [
     'SENTINEL', 'make_sentinel',
     'SecureConnection', 'SecureListener', 'secure_client', 'SecureManager',
     'QueueConfig', 'QueueInterface', 'QueueServer', 'QueueClient',
-    'QueueServerError', 'QueueVersionError', 'unsupported_internals', 'PROTOCOL', 'DISPATCH_EXPOSED',
+    'QueueServerError', 'QueueVersionError', 'ClientTooOld', 'unsupported_internals', 'PROTOCOL',
+    'DISPATCH_EXPOSED',
 ]
 
 # Initialize logger
@@ -305,6 +307,21 @@ class QueueVersionError(RuntimeError):
     """The server and this client do not speak the same work-request protocol."""
 
 
+class ClientTooOld(Exception):
+    """A client connected without the work-request protocol (a release before it); it is refused."""
+
+
+def _var_positional(func: Callable[..., Any]) -> bool:
+    """Whether `func` takes ``*args``."""
+    return any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in inspect.signature(func).parameters.values())
+
+
+def _register_passes_args() -> bool:
+    """Whether the method `BaseManager.register` makes passes its positional arguments to ``_create``."""
+    methods = [const for const in BaseManager.register.__code__.co_consts if inspect.iscode(const)]
+    return any(code.co_flags & inspect.CO_VARARGS and '_create' in code.co_names for code in methods)
+
+
 def _parameters(func: Callable[..., Any]) -> List[str]:
     """Parameter names of `func`, in order."""
     return list(inspect.signature(func).parameters)
@@ -347,6 +364,14 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
     ('BaseProxy._decref(token, ...)', lambda: _parameters(BaseProxy._decref)[0] == 'token'),
     ('util.Finalize calls its _callback with its _args',
      lambda: {'_callback', '_args'} <= set(_names(util.Finalize.__init__)) & set(_names(util.Finalize.__call__))),
+    ('Server.serve_client takes no mutex', lambda: 'mutex' not in _names(Server.serve_client)),
+    ('Server._handle_request turns an exception into #TRACEBACK',
+     lambda: '#TRACEBACK' in Server._handle_request.__code__.co_consts and 'format_exc' in _names(Server._handle_request)),
+    ('Server.create passes *args to the registry callable', lambda: _var_positional(Server.create)),
+    ("BaseManager.register's method passes *args to _create", _register_passes_args),
+    ('convert_to_error produces RemoteError', lambda: isinstance(convert_to_error('#TRACEBACK', ''), RemoteError)),
+    ('BaseProxy._callmethod caches a connection per thread (_tls.connection)',
+     lambda: {'_tls', 'connection'} <= set(_names(BaseProxy._callmethod))),
 )
 
 
@@ -375,6 +400,10 @@ REFUSAL_WARNING_INTERVAL: Final[float] = 60.0
 
 # Accept errors that mean the process (or system) is out of descriptors
 OUT_OF_DESCRIPTORS: Final[Tuple[int, ...]] = (errno.EMFILE, errno.ENFILE)
+
+# Set by a registry callable on the handler thread whose connection it refused as too old, and read
+# by that thread once the connection is closed, so the warning is logged outside the server mutex.
+_refusals = threading.local()
 
 
 def _open_file_limit() -> Optional[int]:
@@ -464,12 +493,13 @@ class _InProcessServer(Server):
                     if not self._admits(conn):
                         conn.close()
                         continue
+                    peer = getattr(self.listener, 'last_accepted', None)
                     with self._lock:
                         if self._halted:
                             conn.close()
                             break
                         self._live.add(conn)
-                    threading.Thread(target=self.handle_request, args=(conn, ), daemon=True,
+                    threading.Thread(target=self.handle_request, args=(conn, peer), daemon=True,
                                      name='hypershell-queue-handler').start()
         except Exception as error:
             if not self._halted:
@@ -490,8 +520,8 @@ class _InProcessServer(Server):
             log.debug(message)
         return False
 
-    def handle_request(self: _InProcessServer, conn) -> None:
-        """Serve one connection, then forget and close it."""
+    def handle_request(self: _InProcessServer, conn, peer: Optional[Tuple[str, int]] = None) -> None:
+        """Serve one connection, then forget and close it; log a client refused as too old."""
         try:
             self._handle_request(conn)
         except SystemExit:
@@ -501,6 +531,10 @@ class _InProcessServer(Server):
             with self._lock:
                 self._live.discard(conn)
             conn.close()
+            if getattr(_refusals, 'too_old', False):
+                _refusals.too_old = False
+                where = f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
+                log.warning(f'Client too old (no work-request protocol) from {where}')
 
     def shutdown(self: _InProcessServer, c) -> None:
         """Remote shutdown request: stop serving after the reply, without exiting the process."""
@@ -834,9 +868,28 @@ QUEUE_EXPOSED: Final[Tuple[str, ...]] = ('empty', 'full', 'get', 'get_nowait', '
 DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', )
 
 
-def _provider(obj: Any) -> Callable[..., Any]:
+def _provider(obj: Any) -> Callable[[], Any]:
     """Registry callable handing the manager `obj`; lock-free, since it runs under the server's mutex."""
-    return lambda *args: obj
+    return lambda: obj
+
+
+def _versioned_provider(obj: Any) -> Callable[..., Any]:
+    """Registry callable handing the manager `obj` only to a client that names this work-request protocol.
+
+    Every release before the protocol creates `_get_scheduled()` with no argument as the first step
+    of connecting, so it is refused here, before it starts a thread or sends a heartbeat, and exits.
+    The refusal is noted for the handler thread to log once the connection is closed.
+    """
+    def provide(*args: Any) -> Any:
+        if not args:
+            _refusals.too_old = True
+            raise ClientTooOld('client too old: this server requires the work-request protocol '
+                               f'(protocol {PROTOCOL}); run a client of the same version as the server')
+        if args != (PROTOCOL, ):
+            raise ClientTooOld(f'client speaks work-request protocol {args[0]!r}; '
+                               f'this server speaks protocol {PROTOCOL}')
+        return obj
+    return provide
 
 
 class QueueServer(QueueInterface):
@@ -865,7 +918,8 @@ class QueueServer(QueueInterface):
         # Per-instance registry: the class registry is shared, so two servers in one process
         # would otherwise serve each other's queues.
         registry = {f'_get_{name}': (_provider(getattr(self, name)), QUEUE_EXPOSED, None, AutoProxy)
-                    for name in ('scheduled', 'completed', 'heartbeat', 'confirmed')}
+                    for name in ('completed', 'heartbeat', 'confirmed')}
+        registry['_get_scheduled'] = (_versioned_provider(self.scheduled), QUEUE_EXPOSED, None, AutoProxy)
         registry['_get_dispatch'] = (_provider(self.dispatcher), DISPATCH_EXPOSED, None, AutoProxy)
         self.dispatcher.attach(self.scheduled)
         if initializer is not None:
@@ -928,7 +982,13 @@ class QueueClient(QueueInterface):
         super().connect()
         _note_dialed(self._address)
         self._dispatcher_lock = threading.Lock()
-        self.scheduled = _defer_decref(self._get_scheduled(PROTOCOL))
+        try:
+            self.scheduled = _defer_decref(self._get_scheduled(PROTOCOL))
+        except RemoteError as error:
+            host, port = self._address
+            raise QueueVersionError(f'Server at {host}:{port} does not speak work-request protocol {PROTOCOL} '
+                                    f'(an older release such as 2.8.x or 2.9.0a2, or a newer one); '
+                                    f'run matching server and client versions') from None
         self.completed = _defer_decref(self._get_completed())
         self.heartbeat = _defer_decref(self._get_heartbeat())
         self.confirmed = _defer_decref(self._get_confirmed())
