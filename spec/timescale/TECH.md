@@ -3,11 +3,11 @@ slug: timescale
 title: 'TimescaleDB provider: hypertables out of the box (TS1)'
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/timescale
 base: develop
-current_phase: P5
-last_updated: '2026-11-02'
+current_phase: done
+last_updated: '2026-11-03'
 phases:
 - id: P1
   name: 'CI lane: pinned TimescaleDB entries (Community, Apache, floor) and the scenario-module
@@ -80,7 +80,7 @@ phases:
 - id: P5
   name: 'CI evidence for the load-bearing slice (run B: external wait on the draft
     PR)'
-  status: in_progress
+  status: done
   satisfies:
   - R2
   - R3
@@ -117,7 +117,7 @@ phases:
     && uv run pytest -rs tests/test_timescale.py && uv run pytest
 - id: P7
   name: CI evidence for R6 (run B)
-  status: pending
+  status: done
   satisfies:
   - R6
   - R9
@@ -397,11 +397,21 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
   - `PostgreSQL (pg18)`: 84 passed, 15 skipped (the TimescaleDB-only scenarios skip without
     `HS_TEST_TIMESCALE`). `PostgreSQL (pg13)`: passed.
   - `tests (3.11)` through `tests (3.14)`, the zero-build install, and package metadata passed.
-- [ ] **Review-1 remediation (reopened 2026-11-02).** The foreman pushes the remediation head and
+- [x] **Review-1 remediation (reopened 2026-11-02).** The foreman pushes the remediation head and
       records the new run: all five `postgres` entries and the SQLite matrix green, with
       `test_configured_columns_converge` passing (not skipped) in `timescale`, `timescale-oss` and
       `timescale-floor`, and `test_extension_created` still passing (it now crosses the preload
       probe on a real server). F4's seed and ROADMAP prose was corrected in the same commit.
+  - **Evidence (recorded by the foreman, 2026-11-03):** the push of `ae38532` produced no
+    `pull_request` run because PR #71 had become conflicting with `develop` once writeback landed
+    (`6f216d0` edited the same workflow line). Merge `a9ab876` brought `develop` in and resolved
+    that one conflict: the postgres job now runs `test_upgrade_postgres.py`,
+    `test_writeback_postgres.py` and `test_timescale.py`. Run `41581150777` at `a9ab876`
+    concluded `success` with all 14 checks green. `timescale`, `timescale-oss` and
+    `timescale-floor`: 130 passed, 1 skipped each, with `test_extension_created` and
+    `test_configured_columns_converge` PASSED. `pg13` and `pg18`: 115 passed, 16 skipped (the
+    TimescaleDB scenarios skip without `HS_TEST_TIMESCALE`). (`ab7adb4` is an empty commit that
+    tried to re-trigger CI before the conflict was found.)
 - **Verify:** see frontmatter (gates on the last commit outside `spec/`, not `HEAD`).
 
 ## Phase P6 — R6: `[database.timescale]` (deferrable — cut here if over appetite)
@@ -460,7 +470,8 @@ entry having run its scenarios (the module fails rather than skips when `HS_TEST
   TimescaleDB entries: `timescale-floor` and `timescale-oss` each 98 passed, 1 skipped
   (`test_absent_fails_before_schema`), and `timescale` passed. They skip in `pg18` (84 passed,
   15 skipped) without `HS_TEST_TIMESCALE`. Per-entry detail is under P5.
-- [ ] **Review-1 remediation:** the same new run as P5 covers the F1/F2 changes to the R6 code.
+- [x] **Review-1 remediation:** the same new run as P5 covers the F1/F2 changes to the R6 code
+  (run `41581150777` at `a9ab876`; see P5).
 - **Verify:** see frontmatter.
 
 ---
