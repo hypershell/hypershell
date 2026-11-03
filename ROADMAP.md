@@ -267,6 +267,19 @@ CLI path forks a serving process; only library use sees it.
 `spec/zone-queue-primitive/` (review cycle 5, Observations)*
 **Seed:** [`issues/queue-forked-child-keeps-listener.md`](issues/queue-forked-child-keeps-listener.md)
 
+## Server-owned queue proxies without reference counting
+
+The in-process queue server closes its "finalizer dials the server" stalls with thread rules that
+rest on CPython timing and private internals. The shared queues live as long as the server, so a
+client's proxies for them may not need reference counting at all. Proxies built as server-owned
+never send a decref, which would make the stall impossible by construction and could let the
+hand-off machinery retire. It needs a check of server-side refcount bookkeeping across reconnects
+first.
+
+*Horizon: mid-term · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
+**Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
+
 ## Merged output is interleave-corruptible
 
 Concurrent executors write to one shared file description with no line discipline, so long lines
