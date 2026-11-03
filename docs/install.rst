@@ -53,6 +53,8 @@ the package directly from the package index, the following optional `extras` are
   intended for production deployments.
 * ``uuid7``: install `uuid-utils <https://pypi.org/project/uuid-utils/>`_ to auto-enable
   UUIDv7 task identifiers. Without this extra, task IDs use the standard-library UUIDv4.
+  The TimescaleDB provider requires it on every host that submits tasks, not only the server
+  (see the TimescaleDB section of :ref:`database <database>`).
 * ``zstd``: enable `Zstandard <https://facebook.github.io/zstd/>`_ as a log-rotation
   compression option (``logging.compress = "zstd"``).
 * ``cron``: enable cron-style, time-based log-rotation schedules via

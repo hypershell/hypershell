@@ -12,11 +12,12 @@ from typing import List, Dict, Tuple, Any, Type, Optional, Final
 import re
 import json
 import hashlib
+from enum import Enum
 from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func
+from sqlalchemy import Column, Index, func, text, update, select
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.ext.declarative import declared_attr
@@ -35,7 +36,7 @@ from hypershell.data.core import schema, Session
 __all__ = [
     'Task', 'Client', 'Source', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
-    'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo',
+    'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
 ]
 
 # Initialize logger
@@ -253,6 +254,21 @@ class TaskGroupInfo:
     viable: bool = True
 
 
+class ResultOutcome(Enum):
+    """What became of one returned task result (see `Task.apply_results`).
+
+    A result belongs to the dispatch that produced it, identified by the row's `schedule_time`
+    as it was sent to the client. APPLIED means the row was still in flight under that dispatch
+    and its result columns were written. DUPLICATE means that same dispatch had already completed
+    the row (a redelivered or repeated result). STALE means the row no longer belongs to that
+    dispatch: it was reverted, rescheduled, completed by another dispatch, cancelled, or no
+    longer exists. A DUPLICATE or STALE result writes nothing.
+    """
+    APPLIED = 1
+    DUPLICATE = 2
+    STALE = 3
+
+
 class Task(Entity):
     """Task entity within database implements task methods."""
 
@@ -292,13 +308,20 @@ class Task(Entity):
     waited: Mapped[Optional[int]] = mapped_column(INTEGER, nullable=True)
     duration: Mapped[Optional[int]] = mapped_column(INTEGER, nullable=True)
 
-    previous_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
-    next_id: Mapped[Optional[str]] = mapped_column(UUID, unique=True, nullable=True)
+    # The retry chain carries plain indexes, not UNIQUE constraints: a TimescaleDB hypertable
+    # requires every unique index to include its partition column, and one schema serves every
+    # provider. One retry per failed row is held by the Scheduler's `retried` filter, not by the
+    # schema. SQLite databases created before 2.9 keep their UNIQUE constraints (SQLite cannot
+    # drop them without rebuilding the table).
+    previous_id: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)
+    next_id: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)
 
     source: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)  # Source.id or reserved-const id
     fingerprint: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)  # Stable identity hash (args + group + tags).
 
-    part: Mapped[int] = mapped_column(INTEGER, nullable=False, default=0)  # Partition index for SQLite database rotation.
+    # Partition index for SQLite database rotation. The server default lets an existing table gain
+    # the column in place, with existing rows reading 0.
+    part: Mapped[int] = mapped_column(INTEGER, nullable=False, default=0, server_default=text('0'))
 
     tag: Mapped[dict] = mapped_column(JSON, nullable=False, default={})  # kept last (export/print order)
 
@@ -337,6 +360,23 @@ class Task(Entity):
         'part': int,
         'tag': dict,
     }
+
+    # The columns a client produces when it runs a task; a returned result writes these and nothing else.
+    result_columns: Final[Tuple[str, ...]] = (
+        'client_id',
+        'client_host',
+        'command',
+        'start_time',
+        'completion_time',
+        'waited',
+        'duration',
+        'exit_status',
+        'outpath',
+        'errpath',
+        'csvpath',
+        'cores_max',
+        'memory_max',
+    )
 
     class NotFound(NotFound):
         pass
@@ -770,6 +810,56 @@ class Task(Entity):
         cls.cancel_all([id, ])
 
     @classmethod
+    def apply_results(cls: Type[Task], results: List[Task]) -> List[ResultOutcome]:
+        """Write returned task results, each only onto the dispatch that produced it.
+
+        A result is identified with its dispatch by the `schedule_time` it carries, which the
+        server stamped when it sent the task and every client returns unchanged. Each result is
+        one conditional UPDATE of the result columns, matching only while the row still has that
+        `schedule_time` and no `completion_time`, so the check and the write are one atomic
+        statement against a concurrent revert or reschedule. A result that matches nothing is
+        classified as a DUPLICATE (its own dispatch already completed the row) or STALE.
+        Returns one outcome per result, in order, and commits once for the whole list.
+        """
+        outcomes = []
+        try:
+            for result in results:
+                outcomes.append(cls.__apply_result(result))
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        for result, outcome in zip(results, outcomes):
+            log.trace(f'Result {outcome.name.lower()} for task ({result.id})')
+        return outcomes
+
+    @classmethod
+    def __apply_result(cls: Type[Task], result: Task) -> ResultOutcome:
+        """Conditionally write one result within the current transaction and classify it."""
+        if result.schedule_time is None:
+            # NOTE: comparing to None renders IS NULL, which would match a reverted row.
+            return ResultOutcome.STALE
+        matched = Session.execute(
+            update(cls)
+            .where(cls.id == result.id,
+                   cls.schedule_time == result.schedule_time,
+                   cls.completion_time.is_(None))
+            .values({name: getattr(result, name) for name in cls.result_columns})
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        if matched == 1:
+            return ResultOutcome.APPLIED
+        # NOTE: a cancel restamps schedule_time, so a cancelled row never matches here and its
+        # result is STALE; a run that itself exited with the cancel status value is a DUPLICATE.
+        completed = Session.execute(
+            select(cls.id)
+            .where(cls.id == result.id,
+                   cls.schedule_time == result.schedule_time,
+                   cls.completion_time.isnot(None))
+        ).first()
+        return ResultOutcome.DUPLICATE if completed is not None else ResultOutcome.STALE
+
+    @classmethod
     def select_orphaned(cls: Type[Task], client_id: str, limit: int) -> List[Task]:
         """Select tasks that were orphaned from an evicted client."""
         return (
@@ -900,6 +990,8 @@ class Task(Entity):
 # Indices for efficient queries
 index_tasks_unscheduled = Index('index_tasks_unscheduled', Task.group, Task.schedule_time)
 index_tasks_retries = Index('index_tasks_retries', Task.exit_status, Task.retried)
+index_tasks_previous_id = Index('index_tasks_previous_id', Task.previous_id)
+index_tasks_next_id = Index('index_tasks_next_id', Task.next_id)
 # Covering index for source detection / lineage de-dup. Deliberately *not* partial:
 # a partial `WHERE source NOT IN (<direct>, <stdin>)` predicate is only honored when the query
 # repeats it with matching literals, but `count_for_source`/`fingerprints_for_sources` bind the

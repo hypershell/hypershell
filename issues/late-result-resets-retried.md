@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:writeback-scoped-conditional
 kind: fix
 appetite: small
 lane: public
@@ -20,8 +20,10 @@ Consider a client evicted while its task is running. `HeartMonitor` reverts the 
 elsewhere, fails, and the scheduler creates the retry, setting `retried=True` and `next_id` on the
 row. If the evicted client then reports its own (failed) result, the writeback sets
 `retried=False` and `next_id=None` on that already-retried row. The row now matches the retryable
-predicate again, so the next `Task.next` tries to create a second retry with the same
-`previous_id`, which violates the UNIQUE `previous_id` constraint.
+predicate again, so the next `Task.next` creates a second retry row with the same `previous_id`.
+Only a pre-2.9 SQLite database, which keeps the old UNIQUE constraint on `previous_id`, rejects it
+with an `IntegrityError`. Anywhere else the second retry row is written silently and the command
+runs again.
 
 Evidence: found by reading during `group-advance-retry-gate`'s research
 (`spec/group-advance-retry-gate/research/02-final-safety.md`, "Pre-existing hazards observed").

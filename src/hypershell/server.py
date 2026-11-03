@@ -69,7 +69,7 @@ from hypershell.core.thread import Thread
 from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
-from hypershell.data.model import Task, Client, serialize_tasks, deserialize_tasks
+from hypershell.data.model import Task, Client, ResultOutcome, serialize_tasks, deserialize_tasks
 from hypershell.data import ensuredb, DATABASE_ENABLED
 from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE
 from hypershell.client import ClientInfo
@@ -458,9 +458,20 @@ class Receiver(StateMachine):
 
     def update_tasks(self: Receiver) -> ReceiverState:
         """Update tasks in database with run details."""
-        if not self.in_memory:
-            Task.update_all([task.to_dict() for task in self.tasks])
-        for task in self.tasks:
+        # A result applies only to the dispatch that produced it; anything else is logged and dropped.
+        if self.in_memory:
+            outcomes = [ResultOutcome.APPLIED] * len(self.tasks)
+        else:
+            outcomes = Task.apply_results(self.tasks)
+        for task, outcome in zip(self.tasks, outcomes):
+            if outcome is ResultOutcome.STALE:
+                log.warning(f'Refused stale result for task ({task.id}) '
+                            f'from client ({task.client_host}: {task.client_id})')
+                continue
+            if outcome is ResultOutcome.DUPLICATE:
+                log.warning(f'Ignored duplicate result for task ({task.id}) '
+                            f'from client ({task.client_host}: {task.client_id})')
+                continue
             log.debug(f'Completed task ({task.id})')
             if task.exit_status != 0:
                 log.warning(f'Non-zero exit status ({task.exit_status}) for task ({task.id})')

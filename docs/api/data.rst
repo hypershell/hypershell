@@ -10,6 +10,10 @@
 
 Access to low-level database objects and methods.
 
+The command-line programs check the database before they touch it. Python API callers
+(e.g., :func:`hypershell.server.serve_from`) bypass that check, so run :func:`ensuredb` first;
+it initializes the database or upgrades an existing one in place.
+
 -------------------
 
 Functions
@@ -26,6 +30,10 @@ Functions
 |
 
 .. autofunction:: ensuredb
+
+|
+
+.. autofunction:: upgradedb
 
 |
 

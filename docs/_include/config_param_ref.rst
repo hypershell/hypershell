@@ -94,8 +94,10 @@
 
     ``.provider``
         Database provider (default: 'sqlite'). Supported alternatives include
-        'postgres' (or compatible). Support for other providers may be considered in
-        the future.
+        'postgres' (or compatible) and 'timescale' (alias 'timescaledb'), which is PostgreSQL
+        with the TimescaleDB extension: ``hs initdb`` makes the task table a hypertable
+        (requires the ``uuid7`` extra; see the TimescaleDB section of :ref:`database <database>`).
+        Support for other providers may be considered in the future.
 
     ``.file``
         Only applicable for SQLite provider.
@@ -138,6 +140,14 @@
     ``[pragmas]``
         Specify one or more pragmas to apply to database connections (SQLite only).
         For example ``pragmas = { journal_mode = "wal" }`` to enable WAL-mode.
+
+    ``[timescale]``
+        Settings for the TimescaleDB shape ``hs initdb`` gives the task table (``timescale``
+        provider only; never forwarded to the connection). Keys: ``chunk_interval``
+        (default ``"1 week"``), ``columnstore`` (``true``), ``segmentby`` (``"client_id"``),
+        ``orderby`` (``"id DESC"``), ``policy`` (``true``), and ``compress_after``
+        (``"4 weeks"``). For example ``timescale = { chunk_interval = "1 day" }``.
+        See the TimescaleDB section of :ref:`database <database>`.
 
     ``*``
         Any additional arguments are forwarded to the provider, e.g., ``encoding = 'utf-8'``.

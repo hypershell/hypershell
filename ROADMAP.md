@@ -50,6 +50,16 @@ already implements comment semantics correctly.
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md)
 
+## Date-like task arguments are turned into datetimes on the wire
+
+The bundle decoder converts any string that parses as an ISO date into a datetime, whatever field
+it is in. A task whose argument line is `2026-11-02` or `20261102`, an ordinary `hsx` input, reaches
+the client as a datetime, template expansion fails on it, and the task is recorded as a template
+error without running. Decoding by declared column type, not by guessing, removes the class.
+
+*Horizon: near-term · Depends on: — · Refs: found by the writeback fix's research*
+**Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md)
+
 ## Unguarded task start kills the executor and poisons the task
 
 An `OSError` while opening capture files or spawning the subprocess propagates out of the FSM and
@@ -64,7 +74,7 @@ never got the same treatment.
 ## Result writeback is last-writer-wins over every column
 
 A returning result rewrites *every* column from the client's wire copy of the row — including
-`schedule_time`, `attempt`, `retried`, and the UNIQUE retry chain. Combined with the fact that an
+`schedule_time`, `attempt`, `retried`, and the retry-chain links. Combined with the fact that an
 evicted client is never told to stop, a stale bundle can stamp a row "done" while another client is
 still running that command. Scoping the write to result columns and making it conditional on the
 row's owner and in-flight state closes the corruption without needing any new transport.
@@ -76,7 +86,8 @@ row's owner and in-flight state closes the corruption without needing any new tr
 
 One concrete path through the writeback hole above. An evicted client's late result writes
 `retried=False` and `next_id=None` back onto a row the scheduler has already retried, so the next
-`Task.next` tries a second retry with the same `previous_id` and hits the UNIQUE constraint. Found
+`Task.next` writes a second retry row with the same `previous_id`. Only a pre-2.9 SQLite database,
+which keeps the old UNIQUE constraint, rejects it; anywhere else it is written silently. Found
 by reading, not yet reproduced; the seed asks for the test first. The scoped writeback probably
 closes it, in which case this retires with that cycle.
 
@@ -192,6 +203,17 @@ untested; the seed asks for that test first.
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
+## Concurrent first submits can collide on the reserved source row
+
+`Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
+`hs submit`s started together against an empty `source` table can both insert it, and one exits
+rc=5 with a traceback and its tasks unsubmitted. Seen in 1 of 20 runs on `develop` and 2 of 10 on
+an upgraded 2.8.3 database, which starts with an empty `source` table. Pre-existing, and found by
+the review of the schema-upgrade fix.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/schema-upgrade-step/` (review cycle 2)*
+**Seed:** [`issues/source-reserved-race.md`](issues/source-reserved-race.md)
+
 ## Docs and runtime surfacing
 
 Behaviour that is correct or deliberate but unannounced: `--no-confirm` silently disables orphan
@@ -214,6 +236,62 @@ waits rather than building one twice.
 *Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half is closed
 separately by the writeback fix*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
+
+## A task whose confirmation has not landed is invisible to orphan recovery
+
+Orphan recovery finds an evicted client's rows by `client_id`, which only the client's confirmation
+sets, and confirmations are not ordered against eviction. A client evicted before its confirmation
+is applied leaves its rows in flight with a NULL `client_id`, never reverted or redispatched; a late
+confirmation then names the already-evicted client. Either way the row waits until restart.
+
+*Horizon: mid-term · Depends on: — · Refs: writeback fix (same token); relay*
+**Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
+
+## A late confirmation can overwrite the executing client's attribution
+
+Confirmations and results are applied by separate threads in no fixed order. A confirmation applied
+after the result rewrites the completed row's attribution with the confirming client's id. Harmless
+for ordinary clients; wrong for relay, which confirms under its own id and returns results
+attributed to the leaf client that ran them. Conditioning the confirmation on an incomplete row
+needs no wire change.
+
+*Horizon: near-term, before relay · Depends on: — · Refs: relay (return path, leaf attribution)*
+**Seed:** [`issues/late-confirm-overwrites-attribution.md`](issues/late-confirm-overwrites-attribution.md)
+
+## Orphan recovery can discard a result that lands while it runs
+
+Reverting an evicted client's tasks reads the in-flight rows, then reverts them by id in a separate,
+unconditional statement. A legitimate result committed in between is wiped and the task runs again,
+with no sign to the operator. Making the revert conditional on the row still being in flight closes
+it.
+
+*Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
+**Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
+
+## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
+
+The 2.9 line added task columns that a 2.8.3 peer cannot read, and nothing on the wire names a
+version. A 2.8.3 client exits on its first bundle from a 2.9 server with a `TypeError`; a 2.9 client
+against a 2.8.3 server runs its tasks, but the server records no result and the run hangs. Every 2.9
+pre-release is affected. The fix is a clean, prompt version error in both directions, and a line in
+the 2.9.0 release notes; `zone-dispatch`'s version handshake is meant to be that error and should be
+verified against 2.8.3 there.
+
+*Horizon: near-term, before 2.9.0 · Depends on: `zone-dispatch`'s version handshake (R5 of its
+GOAL, not the zone seed's R5) · Refs: release notes*
+**Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
+
+## `hs server --initdb` never initializes the database
+
+`hs server` accepts `--initdb`, but `ServerApp.run` calls `ensuredb()` without it
+(`src/hypershell/server.py:1381`; the flag is defined at `:1343-1346` and never read), so on
+PostgreSQL and TimescaleDB the server only checks the schema and refuses a database that was never
+initialized; under the `timescale` provider the hypertable pass never runs from it. `hs submit` and
+`hs cluster` honour the same flag. The docs and the server's own help still promise it.
+Pre-existing since 2023 (`70bcc63`).
+
+*Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
+**Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: unshaped*
 
 ## `rotatedb` lost-update window
 
@@ -380,9 +458,24 @@ well suited to it. An idempotent post-`create_all` pass converges the `task` tab
 with compression and a policy, interrogating the environment rather than assuming it.
 
 *Horizon: mid-term · Depends on: soft — conforms to (or establishes) turso R4's per-provider seam ·
-Refs: **R1 is provider-independent and cheap** — dropping the `previous_id`/`next_id` UNIQUE
-constraints could land any time and unblocks the rest*
-**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: shaped*
+Refs: **R1 is discharged** — `schema-upgrade-step` dropped the `previous_id`/`next_id` UNIQUE
+constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQLite databases keep
+them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
+**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: adopted:timescale*
+
+## The whole test suite on a server database
+
+The suite runs on SQLite only. CI's PostgreSQL job runs three modules across five entries: the
+upgrade tests, the writeback's result-to-dispatch match at the data layer
+(`tests/test_writeback_postgres.py`) and the TimescaleDB scenarios (`tests/test_timescale.py`). The
+rest of the suite never runs on a server, so the scheduler, the writeback end to end, retries and
+most of the CLI are never exercised on PostgreSQL or TimescaleDB. A harness selected by
+an environment variable would run the whole suite against a server, isolated per test, with the
+SQLite-only tests marked and skipped. Split out of TimescaleDB's R9, which ships a dedicated
+TimescaleDB scenario module instead.
+
+*Horizon: mid-term · Depends on: — · Refs: split from `timescale` R9 (ruling 2026-11-02)*
+**Seed:** [`issues/server-db-test-suite.md`](issues/server-db-test-suite.md) · *status: unshaped*
 
 ---
 

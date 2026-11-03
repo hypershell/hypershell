@@ -37,6 +37,76 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest -v
 
+  # Upgrades PostgreSQL databases that released hypershell versions created (2.8.3, and the
+  # half-upgraded state 2.9.0a1 leaves) in place, and matches returned results to their dispatch
+  # on PostgreSQL. The PostgreSQL tests skip without HS_TEST_POSTGRES and fail if a listed
+  # template is missing, so a green run here means every one of them ran.
+  #
+  # The TimescaleDB entries run the same upgrade and writeback tests on TimescaleDB servers, plus
+  # the TimescaleDB scenarios in tests/test_timescale.py (hypertable, columnstore and policy under
+  # the `timescale` provider). HS_TEST_TIMESCALE names the edition the server must report
+  # (community or apache); with it set, a server without TimescaleDB or with another edition
+  # fails the scenarios rather than skipping them. The plain entries run tests/test_timescale.py
+  # too: its unit tests and the three integration tests that need a server but not TimescaleDB
+  # (test_server_matches_entry, test_absent_fails_before_schema and test_invalid_setting_exits);
+  # its TimescaleDB scenarios skip there. Images are pinned by tag and index digest (Docker Hub
+  # tag API, https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/<tag>, read
+  # 2026-11-02).
+  postgres:
+    name: PostgreSQL (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: pg13, image: 'postgres:13', timescale: '' }   # oldest supported server
+          - { name: pg18, image: 'postgres:18', timescale: '' }   # current release
+          # TimescaleDB 2.31.0 (current release), Community edition.
+          - name: timescale
+            image: 'timescale/timescaledb:2.31.0-pg18@sha256:0fcff5761363809d1242f2261a3482197b5a5337407f8b97a976fb174206d579'
+            timescale: community
+          # TimescaleDB 2.31.0, Apache-only build: hypertables without the columnstore.
+          - name: timescale-oss
+            image: 'timescale/timescaledb:2.31.0-pg18-oss@sha256:cc00b0ede968b0c6e55212bd55a9a195726afe5a9e19dcf8af49a13334e92ff3'
+            timescale: apache
+          # The last release before the compression-policy fix for UUID hypertables (2.25.0):
+          # the highest 2.24.x tag, 2.24.0-pg17 (no 2.24 patch release exists), read 2026-11-02.
+          - name: timescale-floor
+            image: 'timescale/timescaledb:2.24.0-pg17@sha256:8ab414f7f73fd47dfa643097f1a753e2ac009c70fcb0de5717d0e79d21e7b7d6'
+            timescale: community
+    services:
+      postgres:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_PASSWORD: postgres
+          TIMESCALEDB_TELEMETRY: 'off'   # ignored by the plain postgres images
+        ports: [ '5432:5432' ]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      HS_TEST_POSTGRES: postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+      HS_TEST_POSTGRES_TEMPLATES: hs283,hs290a1
+      HS_TEST_TIMESCALE: ${{ matrix.timescale }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Build template databases with hypershell 2.8.3 and 2.9.0a1
+        run: bash tests/fixtures/make-legacy-postgres.sh
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+
+      - name: Run PostgreSQL tests
+        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py
+
   # Guards zero-conflict installability: a full install of the default extras must succeed using
   # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g., greenlet, pyyaml) that
   # would force a source build on a minimal host like Rocky 8 — failures a local macOS build masks.
