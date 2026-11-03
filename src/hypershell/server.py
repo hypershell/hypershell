@@ -163,6 +163,7 @@ class Scheduler(StateMachine):
         self.current_group = None
         self.submitter = submitter
         self.held = set()
+        self.woken = False
 
     @property
     def dispatcher(self: Scheduler) -> Dispatcher:
@@ -248,6 +249,7 @@ class Scheduler(StateMachine):
             self.tasks = [task for _, tasks in self.loaded for task in tasks]
             self.startup_phase = False
             self.poll = SERVER_POLL_MIN
+            self.woken = False
             return SchedulerState.PACK
         elif (not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0
               and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0
@@ -272,9 +274,12 @@ class Scheduler(StateMachine):
                 self.current_group = group_info.value
                 return SchedulerState.LOAD
             self.report_held(group_info.value)
-            self.poll = min(self.poll_max, 2 * self.poll)
+            # A back-off cut short by a client taking tasks was not an empty poll; only a wait that
+            # ran its full length grows the next one.
+            if not self.woken:
+                self.poll = min(self.poll_max, 2 * self.poll)
             log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
-            self.dispatcher.wait_need(generation, timeout=self.poll)
+            self.woken = self.dispatcher.wait_need(generation, timeout=self.poll)
             return SchedulerState.LOAD
 
     def pack_bundle(self: Scheduler) -> SchedulerState:

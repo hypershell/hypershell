@@ -254,6 +254,13 @@ The plan gate is **passed** with these rulings and conditions.
      workload, bounded against 2.8.3's behaviour; P5 parity wall within ~0.5 s of 2.8.3.
   3. Commit signed at the next clean boundary; FSM stays at P6.
 
+- **Back-off fix (second ruling 2), 2026-11-03.** `Dispatcher.wait_need` now says whether a cut or
+  new demand ended the wait; the scheduler grows its back-off only after a wait that ran its full
+  length, so a wake that finds nothing restarts the current step instead of moving to the next.
+  `Receiver`, `Confirm` and `update_all` are untouched. Red first:
+  `tests/test_dispatch_workload.py::test_retry_and_group_advance_latency` (retry 2.00 s at the
+  previous head; bound 1.5 s, against 2.8.3's ~1.0 s), green three runs in a row.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling

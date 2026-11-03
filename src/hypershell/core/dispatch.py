@@ -366,11 +366,15 @@ class Dispatcher:
                     refills.append((zone, size))
             return self.generation, refills
 
-    def wait_need(self: Dispatcher, generation: int, timeout: float) -> None:
-        """Wait up to `timeout` for a cut or new demand, unless one came since `generation` was read."""
+    def wait_need(self: Dispatcher, generation: int, timeout: float) -> bool:
+        """Wait up to `timeout` for a cut or new demand, unless one came since `generation` was read.
+
+        Returns True when a cut or new demand ended (or skipped) the wait, False when it timed out.
+        """
         with self.lock:
             if self.generation == generation:
                 self.need.wait(timeout)
+            return self.generation != generation
 
     def stage(self: Dispatcher, zone: str, rows: Iterable[Tuple[str, str]], stamped: bool = True) -> int:
         """Append loaded rows (id, record as JSON text) to `zone`'s pool and wake its requests; return the count."""

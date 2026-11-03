@@ -214,3 +214,45 @@ def test_queue_submit_to_in_memory_server(group: Group) -> None:
     assert len(RUNNING.findall(group.text('client'))) == 50
     sizes = received(group.text('client'))
     assert sizes and max(sizes) <= 3 and sum(sizes) == 50
+
+
+def stamp(text: str) -> float:
+    """Seconds since the epoch of a stored time."""
+    from datetime import datetime
+    return datetime.fromisoformat(text).timestamp()
+
+
+@mark.integration
+def test_retry_and_group_advance_latency(group: Group) -> None:
+    """A retry and each group advance are scheduled within the scheduler's first back-off step.
+
+    The workload is the parity one: three groups, one task failing on its first attempt. 2.8.3
+    schedules each next step about 1 s (its first back-off sleep) after the result that unblocks
+    it; a wake that finds nothing must not push the scheduler into its next, 2 s, step.
+    """
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    marker = group.site / 'retry.marker'
+    lines = ['echo a0  #HYPERSHELL: group:0', 'echo a1  #HYPERSHELL: group:0', 'echo a2  #HYPERSHELL: group:0',
+             f'test -f {marker} || {{ touch {marker}; exit 3; }}  #HYPERSHELL: group:0',
+             'echo b0  #HYPERSHELL: group:1', 'echo b1  #HYPERSHELL: group:1', 'echo b2  #HYPERSHELL: group:1',
+             'echo c0  #HYPERSHELL: group:2', 'echo c1  #HYPERSHELL: group:2']
+    taskfile = create_taskfile(group.site, lines)
+    submit = group.start('submit', 'submit', str(taskfile))
+    assert group.wait(submit, time.monotonic() + DEADLINE) == 0, group.text('submit')
+    deadline = time.monotonic() + DEADLINE
+    server = group.start('server', 'server', '--restart', '-r', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    wait_listening(server, port, group, 'server')
+    clients = [group.start(f'client-{n}', 'client', '-H', 'localhost', '-p', str(port), '-k', key, '-T', '30')
+               for n in range(2)]
+    assert group.wait(server, deadline) == 0, group.text('server')
+    for n, client in enumerate(clients):
+        assert group.wait(client, deadline) == 0, group.text(f'client-{n}')
+    rows = task_rows()
+    failed, = [row for row in rows if row['attempt'] == 1 and row['exit_status'] == 3]
+    retry, = [row for row in rows if row['attempt'] == 2]
+    gaps = {'retry': stamp(retry['schedule_time']) - stamp(failed['completion_time'])}
+    for g in (0, 1):
+        done = max(stamp(row['completion_time']) for row in rows if row['group'] == g)
+        start = min(stamp(row['schedule_time']) for row in rows if row['group'] == g + 1)
+        gaps[f'group {g + 1}'] = start - done
+    assert all(0 <= gap <= 1.5 for gap in gaps.values()), gaps
