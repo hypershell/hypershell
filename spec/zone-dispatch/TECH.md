@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-dispatch
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-02'
 phases:
 - id: P1
@@ -82,7 +82,7 @@ phases:
     && uv run sphinx-build -q docs docs/_build
 - id: P5
   name: 'R1 gate: throughput and footprint against 2.8.3, full suite'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R14
@@ -492,17 +492,45 @@ completes with every task run only by a client of its zone.
 **Goal:** the default path shows ≥ 95% of 2.8.3's throughput (median of 7) with no more server
 processes or open descriptors, and parity holds against 2.8.3.
 
-- [ ] `tests/bench/bench_queue.py gate`:
+- [x] `tests/bench/bench_queue.py gate`:
   - `--min-ratio R`: pass iff `feature_median ≥ R × base_median` per config, plus Z1's footprint
     checks.
   - Add configs where the client gets **no** `-b` (the R1 default path), next to the existing
     explicit-`-b` ones.
   - Report both.
-- [ ] Run the gate. If a config misses only because of `index_tasks_zone`, remove the index (P1
+- [x] Run the gate. If a config misses only because of `index_tasks_zone`, remove the index (P1
       leaves it declared separately) and record that in the commit body.
-- [ ] Gate record in this section: the table, interpreter, and host load.
-- **Touches:** `tests/bench/bench_queue.py`, `src/hypershell/data/model.py` (index only, if
-  removed), `spec/zone-dispatch/TECH.md`.
+- [x] Gate record in this section: the table, interpreter, and host load.
+- **Gate record (2026-11-02, this host).** `bench_queue.py gate --base 2.8.3 --feature <P5 candidate
+  6d11e5c> --repeats 7 --min-ratio 0.95`, interleaved; CPython 3.14.6, start method spawn. Started at
+  1-minute load 5.4 (rule: below 6); other worktrees' agents then pushed it to a peak of 47.2 (38
+  one-minute samples: min 4.7, mean 14.6; 11.6 at the end), which both builds shared run for run.
+  Verdict PASS on all nine configs; tree children 0 vs 2 and tree FDs lower on every config.
+
+  | config | base median [min-max] | feature median [min-max] | delta | ratio >= 0.95 | throughput | tree children b/f | tree FDs b/f | tree threads b/f | own threads b/f | own FDs b/f | tree RSS MB b/f | clean | verdict |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | 4x4 b=1 tls | 277.6 [253.8-287.4] | 305.2 [300.1-316.8] | +27.6 | 1.1 | PASS | 2/0 | 118/22 | 25/20 | 7/20 | 53/23 | 195.1/96.1 | True | PASS |
+  | 4x4 b=1 no-tls | 210.1 [161.2-285.9] | 221.1 [176.0-324.4] | +11.0 | 1.05 | PASS | 2/0 | 117/24 | 25/20 | 7/20 | 53/24 | 192.5/92.2 | True | PASS |
+  | 16x1 b=1 tls | 163.1 [156.2-294.8] | 175.0 [172.9-294.3] | +11.9 | 1.07 | PASS | 2/0 | 154/60 | 61/56 | 7/56 | 53/60 | 201/100 | True | PASS |
+  | 16x1 b=1 no-tls | 262.7 [157.6-273.3] | 297.3 [174.5-306.3] | +34.6 | 1.13 | PASS | 2/0 | 154/60 | 61/56 | 7/56 | 53/60 | 194.7/94.6 | True | PASS |
+  | 4x4 b=50 tls | 847.8 [839.9-855.2] | 849.9 [844.8-853.6] | +2.1 | 1 | PASS | 2/0 | 116/22 | 25/20 | 7/20 | 51/22 | 202.2/99 | True | PASS |
+  | 32x1 b=1 tls | 268.2 [263.9-274.9] | 289.1 [286.8-292.1] | +20.9 | 1.08 | PASS | 2/0 | 201/107 | 109/104 | 7/104 | 52/107 | 203.9/103.5 | True | PASS |
+  | 4x4 b=1 client-default tls | 258.8 [253.9-290.8] | 288.6 [284.5-320.1] | +29.8 | 1.12 | PASS | 2/0 | 118/22 | 25/20 | 7/20 | 53/23 | 197.2/95.9 | True | PASS |
+  | 16x1 b=1 client-default no-tls | 292.7 [270.5-299.9] | 333.0 [312.6-339.1] | +40.3 | 1.14 | PASS | 2/0 | 154/60 | 61/56 | 7/56 | 52/59 | 193/94.2 | True | PASS |
+  | 4x4 b=50 client-default tls | 557.1 [530.0-586.6] | 546.3 [542.7-580.4] | -10.8 | 0.981 | PASS | 2/0 | 117/22 | 25/20 | 7/20 | 52/23 | 198.3/97.2 | True | PASS |
+
+- **Build notes (amendments, 2026-11-02):**
+  - The first probe ran at 0.89-0.92 of 2.8.3 on `b=1` (the Z1 base itself measured 0.954).
+    Removing `index_tasks_zone` did not help (0.92 of the indexed build). The cost was the
+    default-zone selection's sort: `WHERE zone IS NULL AND group = ? AND schedule_time IS NULL
+    ORDER BY submit_time` sorted every unscheduled row per load. `index_tasks_zone` now ends in
+    `submit_time` (zone, group, schedule_time, submit_time), so SQLite reads rows in submit order
+    with no temporary B-tree; the index is new in this cycle, so redefining it is free.
+  - Waiting requests now each wait on their own condition, and only the head of a zone's line is
+    woken by a stage or by the request before it leaving (was `notify_all` on every waiter).
+    Touch amended: `core/dispatch.py`.
+- **Touches:** `tests/bench/bench_queue.py`, `src/hypershell/data/model.py` (index only),
+  `src/hypershell/core/dispatch.py` (amended), `spec/zone-dispatch/TECH.md`.
 
 ## Phase P6 — Multi-node drive, run A
 **Satisfies:** R1, R4, R14 · **Depends on:** P4 · parallel with P5

@@ -148,16 +148,29 @@ def _error(error: BadRequest) -> str:
 
 
 class Pool:
-    """One zone's staged rows, its waiting requests in arrival order, and the condition they wait on."""
+    """One zone's staged rows and its waiting requests in arrival order, each with its own condition.
 
-    __slots__ = ('rows', 'ids', 'tickets', 'ready', 'name')
+    Only the request at the head of the line can take rows, so only it is woken when rows are
+    staged or when the request before it leaves; the others sleep until their turn (or shutdown).
+    """
 
-    def __init__(self, lock: threading.Lock, name: str) -> None:
+    __slots__ = ('rows', 'ids', 'tickets', 'name')
+
+    def __init__(self, name: str) -> None:
         self.rows: Deque[Tuple[str, str, bool]] = deque()  # (task id, record as JSON text, stamped)
         self.ids: set = set()
-        self.tickets: Deque[object] = deque()
-        self.ready = threading.Condition(lock)
+        self.tickets: Deque[threading.Condition] = deque()
         self.name = name
+
+    def wake_head(self) -> None:
+        """Wake the request at the head of the line, if any (lock held)."""
+        if self.tickets:
+            self.tickets[0].notify()
+
+    def wake_all(self) -> None:
+        """Wake every waiting request (lock held)."""
+        for ticket in self.tickets:
+            ticket.notify()
 
     def cut(self, size: int) -> List[Tuple[str, str, bool]]:
         """Take up to `size` rows from the front."""
@@ -194,7 +207,7 @@ class Dispatcher:
         self.need = threading.Condition(self.lock)
         self.generation = 0
         self.finishing = False
-        self.pools: Dict[str, Pool] = {DEFAULT_ZONE_ID: Pool(self.lock, DEFAULT_ZONE_NAME)}
+        self.pools: Dict[str, Pool] = {DEFAULT_ZONE_ID: Pool(DEFAULT_ZONE_NAME)}
         self.demand: Dict[str, Tuple[str, int]] = {}
         self.unstaging: set = set()
 
@@ -232,7 +245,7 @@ class Dispatcher:
         """The pool for `zone`, created on first use (lock held)."""
         pool = self.pools.get(zone)
         if pool is None:
-            pool = self.pools[zone] = Pool(self.lock, name)
+            pool = self.pools[zone] = Pool(name)
             self._signal_need()
         return pool
 
@@ -308,7 +321,7 @@ class Dispatcher:
         wait = self.max_wait if request.wait is None else max(0.0, min(self.max_wait, request.wait))
         deadline = time.monotonic() + wait
         in_memory = self.inbound is not None and request.zone == DEFAULT_ZONE_ID
-        ticket = object()
+        ticket = threading.Condition(self.lock)
         with self.lock:
             pool = self._register(request, size)
             pool.tickets.append(ticket)
@@ -329,10 +342,10 @@ class Dispatcher:
                     if in_memory and pool.tickets[0] is ticket:
                         self._await_inbound(pool, min(remaining, INBOUND_POLL))
                     else:
-                        pool.ready.wait(remaining)
+                        ticket.wait(remaining)
             finally:
                 pool.tickets.remove(ticket)
-                pool.ready.notify_all()
+                pool.wake_head()
         log.debug(f'Dispatched {len(rows)} tasks to client {request.client} (zone {pool.name})')
         return _reply(row[1] for row in rows)
 
@@ -369,7 +382,7 @@ class Dispatcher:
                     pool.ids.add(task_id)
                     pool.rows.append((task_id, record, stamped))
                     count += 1
-            pool.ready.notify_all()
+            pool.wake_head()
         return count
 
     def staged(self: Dispatcher, zone: str = None) -> int:
@@ -440,5 +453,5 @@ class Dispatcher:
         with self.lock:
             self.finishing = True
             for pool in self.pools.values():
-                pool.ready.notify_all()
+                pool.wake_all()
             self._signal_need()

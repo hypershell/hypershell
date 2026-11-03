@@ -1061,8 +1061,9 @@ index_tasks_next_id = Index('index_tasks_next_id', Task.next_id)
 # also carries are a marginal cost (real named-file sources dominate the target workload).
 index_tasks_source = Index('index_tasks_source', Task.source, Task.fingerprint)
 # Zone-filtered selection of unscheduled tasks. The default zone is stored as NULL, so its
-# `zone IS NULL` predicate seeks this index as a named zone's equality does.
-index_tasks_zone = Index('index_tasks_zone', Task.zone, Task.group, Task.schedule_time)
+# `zone IS NULL` predicate seeks this index as a named zone's equality does. Ending in
+# `submit_time` lets the selection read rows already in submit order, with no sort.
+index_tasks_zone = Index('index_tasks_zone', Task.zone, Task.group, Task.schedule_time, Task.submit_time)
 
 
 class Client(Entity):

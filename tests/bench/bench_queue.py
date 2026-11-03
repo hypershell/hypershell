@@ -21,7 +21,9 @@ Subcommands:
                                         is logged as too old, and a concurrent new client finishes
                                         every task; a new client against an old server exits
                                         non-zero within the bound with one version error.
-    gate    --base REF --feature REF    Throughput and footprint, interleaved and repeated.
+    gate    --base REF --feature REF    Throughput and footprint, interleaved and repeated; with
+                                        ``--min-ratio R`` a config passes only if the feature's
+                                        median is at least R times the base's.
 
 Never collected by pytest (no ``test_`` prefix). Run it with the project interpreter, which has
 ``psutil``: ``uv run python tests/bench/bench_queue.py parity --base b819de6 --feature HEAD``.
@@ -453,14 +455,18 @@ def cmd_skew(args: argparse.Namespace) -> bool:
 # ------------------------------------------------------------------------------------------ gate
 
 
-# (name, clients, threads per client, server bundle, client bundle, tls, tasks)
-GATE_CONFIGS: Tuple[Tuple[str, int, int, int, int, bool, int], ...] = (
+# (name, clients, threads per client, server bundle, client bundle or None for no -b, tls, tasks).
+# A client given no -b advertises no size, so the server's -b sizes its bundles (the default path).
+GATE_CONFIGS: Tuple[Tuple[str, int, int, int, Optional[int], bool, int], ...] = (
     ('4x4 b=1 tls', 4, 4, 1, 1, True, 5000),
     ('4x4 b=1 no-tls', 4, 4, 1, 1, False, 5000),
     ('16x1 b=1 tls', 16, 1, 1, 1, True, 5000),
     ('16x1 b=1 no-tls', 16, 1, 1, 1, False, 5000),
     ('4x4 b=50 tls', 4, 4, 50, 50, True, 20000),
     ('32x1 b=1 tls', 32, 1, 1, 1, True, 5000),
+    ('4x4 b=1 client-default tls', 4, 4, 1, None, True, 5000),
+    ('16x1 b=1 client-default no-tls', 16, 1, 1, None, False, 5000),
+    ('4x4 b=50 client-default tls', 4, 4, 50, None, True, 20000),
 )
 
 
@@ -491,8 +497,9 @@ def run_gate_once(venv: Path, label: str, config: Tuple, args: argparse.Namespac
     name, clients, threads, bundle, client_bundle, tls, tasks = config
     site = Site(args.workdir, label, tls, log_level='WARNING')
     submit(site, venv, ['true'] * tasks)
+    client_size = [] if client_bundle is None else ['-b', str(client_bundle)]
     result = serve(site, venv, venv, ['-b', str(bundle)],
-                   ['-N', str(threads), '-b', str(client_bundle), '-w', '1'], clients=clients,
+                   ['-N', str(threads), *client_size, '-w', '1'], clients=clients,
                    server_timeout=args.timeout, client_timeout=WAIT, sampler_interval=args.interval)
     result.update(throughput(site.rows(), tasks))
     result.update(label=label, config=name)
@@ -517,7 +524,8 @@ def cmd_gate(args: argparse.Namespace) -> bool:
                 log(f'{config[0]} {label} #{repeat}: {result["p10_p90"]} tasks/s, rc {result["server_rc"]}/'
                     f'{sorted(set(map(str, result["client_rcs"])))}, peak {result["peak"]}')
     ok = True
-    print(f'| config | base median [min-max] | feature median [min-max] | delta | tolerance | throughput '
+    rule = (f'ratio >= {args.min_ratio:g}' if args.min_ratio is not None else 'tolerance')
+    print(f'| config | base median [min-max] | feature median [min-max] | delta | {rule} | throughput '
           f'| tree children b/f | tree FDs b/f | tree threads b/f | own threads b/f | own FDs b/f '
           f'| tree RSS MB b/f | clean | verdict |')
     print('|' + '---|' * 14)
@@ -526,8 +534,12 @@ def cmd_gate(args: argparse.Namespace) -> bool:
         base, feature = results[(name, 'base')], results[(name, 'feature')]
         tb, tf = [r['p10_p90'] for r in base], [r['p10_p90'] for r in feature]
         mb, mf = statistics.median(tb), statistics.median(tf)
-        tolerance = max(max(tb) - min(tb), max(tf) - min(tf), 0.05 * mb)
-        fast = mf >= mb - tolerance
+        if args.min_ratio is not None:
+            tolerance = mf / mb
+            fast = mf >= args.min_ratio * mb
+        else:
+            tolerance = max(max(tb) - min(tb), max(tf) - min(tf), 0.05 * mb)
+            fast = mf >= mb - tolerance
         peak = {key: (max(r['peak'][key] for r in base), max(r['peak'][key] for r in feature))
                 for key in Sampler.KEYS}
         small = peak['children'][1] <= peak['children'][0] and peak['tree_fds'][1] <= peak['tree_fds'][0]
@@ -536,10 +548,11 @@ def cmd_gate(args: argparse.Namespace) -> bool:
         ok &= passed
         pair = lambda key: f'{peak[key][0]:g}/{peak[key][1]:g}'
         print(f'| {name} | {mb:.1f} [{min(tb):.1f}-{max(tb):.1f}] | {mf:.1f} [{min(tf):.1f}-{max(tf):.1f}] '
-              f'| {mf - mb:+.1f} | {tolerance:.1f} | {"PASS" if fast else "FAIL"} | {pair("children")} '
+              f'| {mf - mb:+.1f} | {tolerance:.3g} | {"PASS" if fast else "FAIL"} | {pair("children")} '
               f'| {pair("tree_fds")} | {pair("tree_threads")} | {pair("threads")} | {pair("fds")} '
               f'| {pair("tree_rss_mb")} | {tidy} | {"PASS" if passed else "FAIL"} |')
-    print(f'# gate: {"PASS" if ok else "FAIL"} ({args.repeats} repeats per build, interleaved)')
+    print(f'# gate: {"PASS" if ok else "FAIL"} ({args.repeats} repeats per build, interleaved; '
+          f'load average {os.getloadavg()[0]:.1f} at the end)')
     return ok
 
 
@@ -564,6 +577,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     gate.add_argument('--base', required=True)
     gate.add_argument('--feature', required=True)
     gate.add_argument('--repeats', type=int, default=5)
+    gate.add_argument('--min-ratio', type=float, default=None,
+                      help='pass a config only if the feature median is at least this fraction of the base median')
     gate.add_argument('--interval', type=float, default=0.2, help='footprint sampling period (seconds)')
     gate.add_argument('--timeout', type=float, default=600.0, help='bound on one server run (seconds)')
     gate.add_argument('--only', action='append', help='run only this config (repeatable)')
