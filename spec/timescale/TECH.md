@@ -3,7 +3,7 @@ slug: timescale
 title: 'TimescaleDB provider: hypertables out of the box (TS1)'
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/timescale
 base: develop
 current_phase: done
