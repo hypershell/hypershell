@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/tls-client-address-family
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-03'
 phases:
 - id: P1
   name: Red-first regression tests, IPv4-only TLS dial, free_port hardening
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -22,12 +22,14 @@ phases:
   depends_on: []
   parallel: false
   hammerable: false
-  hill: uphill
-  verify: "uv run python -c \"import os, signal, subprocess, sys, threading\ndef run(args, limit):\n \
-    \   p = subprocess.Popen([sys.executable, '-m', 'pytest', '-p', 'no:cacheprovider', *args], start_new_session=True)\n\
-    \    timer = threading.Timer(limit, os.killpg, (p.pid, signal.SIGKILL))\n    timer.start()\n    try:\n\
-    \        return p.wait()\n    finally:\n        timer.cancel()\nsys.exit(run(['-rs', 'tests/test_queue_address_family.py',\
-    \ 'tests/test_queue_tls.py', 'tests/test_cluster.py'], 900) or run(['-q', '-n', 'auto'], 2400))\""
+  hill: downhill
+  verify: "uv run python -c \"import os, signal, subprocess, sys, threading\ndef run(args,\
+    \ limit):\n    p = subprocess.Popen([sys.executable, '-m', 'pytest', '-p', 'no:cacheprovider',\
+    \ *args], start_new_session=True)\n    timer = threading.Timer(limit, os.killpg,\
+    \ (p.pid, signal.SIGKILL))\n    timer.start()\n    try:\n        return p.wait()\n\
+    \    finally:\n        timer.cancel()\nsys.exit(run(['-rs', 'tests/test_queue_address_family.py',\
+    \ 'tests/test_queue_tls.py', 'tests/test_cluster.py'], 900) or run(['-q', '-n',\
+    \ 'auto'], 2400))\""
 - id: P2
   name: 'R6 trial: path-limited 3-way apply onto a detached origin/master worktree'
   status: pending
@@ -38,27 +40,30 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: "uv run python -c \"import os, signal, subprocess, sys, threading\npaths = ['src/hypershell/core/queue.py',\
-    \ 'tests/conftest.py', 'tests/test_queue_address_family.py']\ncommon = subprocess.check_output(['git',\
-    \ 'rev-parse', '--path-format=absolute', '--git-common-dir'], text=True).strip()\ntrial = os.path.join(os.path.dirname(common),\
-    \ '.worktrees', 'r6-trial-tls-client-address-family')\nsubprocess.run(['git', 'worktree', 'add', '--detach',\
-    \ trial, 'origin/master'], check=True)\ntry:\n    patch = subprocess.check_output(['git', 'diff',\
-    \ 'origin/develop...HEAD', '--', *paths])\n    subprocess.run(['git', '-C', trial, 'apply', '--3way',\
-    \ '--index'], input=patch, check=True)\n    env = dict(os.environ, PYTHONPATH=os.path.join(trial,\
-    \ 'src'))\n    subprocess.run([sys.executable, '-c', 'import hypershell, sys; sys.exit(0 if hypershell.__file__.startswith(sys.argv[1])\
-    \ else 1)', trial], env=env, cwd=trial, check=True)\n    p = subprocess.Popen([sys.executable, '-m',\
-    \ 'pytest', '-p', 'no:cacheprovider', '-rs', 'tests/test_queue_address_family.py', 'tests/test_queue_tls.py'],\
-    \ env=env, cwd=trial, start_new_session=True)\n    timer = threading.Timer(900, os.killpg, (p.pid,\
-    \ signal.SIGKILL))\n    timer.start()\n    rc = p.wait()\n    timer.cancel()\nfinally:\n    subprocess.run(['git',\
-    \ 'worktree', 'remove', '--force', trial], check=True)\n    subprocess.run(['git', 'worktree', 'prune'],\
-    \ check=True)\nsys.exit(rc)\""
+  verify: "uv run python -c \"import os, signal, subprocess, sys, threading\npaths\
+    \ = ['src/hypershell/core/queue.py', 'tests/conftest.py', 'tests/test_queue_address_family.py']\n\
+    common = subprocess.check_output(['git', 'rev-parse', '--path-format=absolute',\
+    \ '--git-common-dir'], text=True).strip()\ntrial = os.path.join(os.path.dirname(common),\
+    \ '.worktrees', 'r6-trial-tls-client-address-family')\nsubprocess.run(['git',\
+    \ 'worktree', 'add', '--detach', trial, 'origin/master'], check=True)\ntry:\n\
+    \    patch = subprocess.check_output(['git', 'diff', 'origin/develop...HEAD',\
+    \ '--', *paths])\n    subprocess.run(['git', '-C', trial, 'apply', '--3way', '--index'],\
+    \ input=patch, check=True)\n    env = dict(os.environ, PYTHONPATH=os.path.join(trial,\
+    \ 'src'))\n    subprocess.run([sys.executable, '-c', 'import hypershell, sys;\
+    \ sys.exit(0 if hypershell.__file__.startswith(sys.argv[1]) else 1)', trial],\
+    \ env=env, cwd=trial, check=True)\n    p = subprocess.Popen([sys.executable, '-m',\
+    \ 'pytest', '-p', 'no:cacheprovider', '-rs', 'tests/test_queue_address_family.py',\
+    \ 'tests/test_queue_tls.py'], env=env, cwd=trial, start_new_session=True)\n  \
+    \  timer = threading.Timer(900, os.killpg, (p.pid, signal.SIGKILL))\n    timer.start()\n\
+    \    rc = p.wait()\n    timer.cancel()\nfinally:\n    subprocess.run(['git', 'worktree',\
+    \ 'remove', '--force', trial], check=True)\n    subprocess.run(['git', 'worktree',\
+    \ 'prune'], check=True)\nsys.exit(rc)\""
 review:
   last_reviewed_commit: ''
   verdict: none
   blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — TLS client reaches the server on the address family it listens on
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -113,50 +118,93 @@ atomic code+state commit.
 file proves it at the transport and `hs cluster` levels, and `free_port()` never returns a port number
 held on `::1`.
 
-- [ ] Create `tests/test_queue_address_family.py` (PLAN §2 "Regression tests"):
-  - [ ] `ipv6_resetter(port)`: `AF_INET6` + `IPV6_V6ONLY` on `('::1', port)`; a daemon accept thread
+- [x] Create `tests/test_queue_address_family.py` (PLAN §2 "Regression tests"):
+  - [x] `ipv6_resetter(port)`: `AF_INET6` + `IPV6_V6ONLY` on `('::1', port)`; a daemon accept thread
         that resets (`SO_LINGER` `(1, 0)`) and counts connections; event stop, bounded join, close in
         `finally`; `pytest.skip` when `::1` cannot be bound.
-  - [ ] `ipv6_first_getaddrinfo`: wraps the real `socket.getaddrinfo`; for `localhost` with family
+  - [x] `ipv6_first_getaddrinfo`: wraps the real `socket.getaddrinfo`; for `localhost` with family
         `0`/`AF_UNSPEC`/`AF_INET6`, puts `('::1', port, 0, 0)` first, injected if absent; `AF_INET`
         passes through. Installed with `monkeypatch` in process. Its source is also written to
         `tmp_path/sitecustomize.py` and prepended to `PYTHONPATH` for the CLI drive.
-  - [ ] Arming check helper: under the wrapper, `socket.create_connection(('localhost', P))` reaches
+  - [x] Arming check helper: under the wrapper, `socket.create_connection(('localhost', P))` reaches
         the resetter (count ≥ 1). Every trap test calls it before its real assertion.
-  - [ ] TLS transport under the trap: real `SecureListener(('127.0.0.1', P))` and
+  - [x] TLS transport under the trap: real `SecureListener(('127.0.0.1', P))` and
         `secure_client(('localhost', P), authkey=…)`; handshake + auth + payload round-trip; resetter
         count unchanged after arming.
-  - [ ] Cleartext twin: stock `multiprocessing.connection.Listener`/`Client` with an authkey, same
+  - [x] Cleartext twin: stock `multiprocessing.connection.Listener`/`Client` with an authkey, same
         setup and assertions.
-  - [ ] `hs cluster` under the trap, parametrized TLS / `--no-tls`: `HYPERSHELL_SERVER_PORT=P`,
+  - [x] `hs cluster` under the trap, parametrized TLS / `--no-tls`: `HYPERSHELL_SERVER_PORT=P`,
         `create_taskfile_echo` in `temp_site`, DB mode. Exit 0, every task recorded complete with
         `exit_status == 0`, resetter count unchanged after arming.
-  - [ ] Nothing listening: both transports raise `ConnectionRefusedError` for `('localhost', P)`.
-  - [ ] No IPv4 address: both transports raise `socket.gaierror` for `('::1', P)` well under 5 s.
-  - [ ] Host-name check uses the given name: materials for `localhost` only; patch
+  - [x] Nothing listening: both transports raise `ConnectionRefusedError` for `('localhost', P)`.
+  - [x] No IPv4 address: both transports raise `socket.gaierror` for `('::1', P)` well under 5 s.
+  - [x] Host-name check uses the given name: materials for `localhost` only; patch
         `get_client_context` to a context with `check_hostname=True` and that cert as CA, with
         `servername` unset; `secure_client(('localhost', P))` succeeds.
-  - [ ] `free_port()` skips a `::1`-held port: hold `::1:P`, inject `P` as the first IPv4 draw, assert
+  - [x] `free_port()` skips a `::1`-held port: hold `::1:P`, inject `P` as the first IPv4 draw, assert
         the result `!= P` and that it binds on `::1`.
-  - [ ] Tag each test `unit` or `integration`.
-- [ ] **Red run on the unchanged source.** Run the new file (in a process group with a timeout).
+  - [x] Tag each test `unit` or `integration`.
+- [x] **Red run on the unchanged source.** Run the new file (in a process group with a timeout).
       Expect: the TLS trap, TLS `hs cluster`, no-IPv4 and `free_port` tests fail; the cleartext,
       `--no-tls`, refused and host-name tests pass; nothing hangs. Record the pass/fail list in the
       commit body. If a TLS trap test passes here, the arming check is broken: stop and fix the test
       before touching `src/`.
-- [ ] `src/hypershell/core/queue.py`, `secure_client`: replace `socket.create_connection(address)`
+- [x] `src/hypershell/core/queue.py`, `secure_client`: replace `socket.create_connection(address)`
       with `socket.socket(AF_INET, SOCK_STREAM)`, `setblocking(True)`, `connect(address)`; widen the
       existing close-on-failure `try` to cover the connect; add a comment on why IPv4. Leave
       `servername`, `wrap_socket`, `verify_peer_fingerprint` and the challenge/response untouched.
-- [ ] `tests/conftest.py`, `free_port()`: an IPv4 draw helper, plus a `::1` check (V6ONLY bind). On
+- [x] `tests/conftest.py`, `free_port()`: an IPv4 draw helper, plus a `::1` check (V6ONLY bind). On
       `EADDRINUSE` draw again, up to a bound, then raise. Any other IPv6 `OSError` accepts the port.
       Update the docstring.
-- [ ] Green: the new file passes, and `tests/test_queue_tls.py` passes **unchanged**.
+- [x] Green: the new file passes, and `tests/test_queue_tls.py` passes **unchanged**.
 - **Verify:** the frontmatter `verify:` runs the new file, `tests/test_queue_tls.py` and
   `tests/test_cluster.py` with `-rs` (timeout 900 s), then the full suite `-n auto` (timeout 2400 s),
   each in its own process group. Confirm in the `-rs` output that the trap tests **ran** (not skipped)
   on the build host.
 - **Touches:** `src/hypershell/core/queue.py`, `tests/conftest.py`, `tests/test_queue_address_family.py`.
+
+### P1 build record (2026-11-03)
+
+**Red/green, test by test** (`tests/test_queue_address_family.py`; red = the new tests on the unchanged
+`queue.py` and `conftest.py`; same result on 3.12 and 3.14; nothing hung, the red file ran in ~5 s):
+
+| Test | Red (pre-fix) | Green |
+|------|---------------|-------|
+| `test_tls_client_skips_ipv6_listener` | FAIL: `BrokenPipeError` in the TLS handshake (the dial hit the `::1` resetter) | pass |
+| `test_cleartext_client_skips_ipv6_listener` | pass (reference) | pass |
+| `test_cluster_skips_ipv6_listener[tls]` | FAIL: `hs cluster` non-zero, `CRITICAL [hypershell.cluster] BrokenPipeError` | pass |
+| `test_cluster_skips_ipv6_listener[no-tls]` | pass (reference) | pass |
+| `test_refused_when_nothing_listening` | pass (R4 guard) | pass |
+| `test_no_ipv4_address_fails_promptly` | FAIL: TLS dial raised `ConnectionRefusedError` from `::1`, not `gaierror` | pass |
+| `test_hostname_check_uses_given_name` | pass (R5 guard) | pass |
+| `test_free_port_skips_port_held_on_ipv6_loopback` | FAIL: `AttributeError`, the unchanged `conftest` has no draw seam | pass |
+
+The `free_port` test's red is the missing seam, not the behaviour, so it was also checked by mutation:
+with the `::1` check in `free_port()` disabled (draw seam present), it fails; restored, it passes.
+
+**Verify** (the frontmatter command, run with the worktree's own frozen environment per interpreter,
+built offline with `uv sync --frozen`; no `.venv` in the worktree, so `uv run` was replaced by that
+environment's interpreter on `PATH`): 3.12.16 and 3.14.10, each `105 passed` for the `-rs` stage
+(new file + `test_queue_tls.py` + `test_cluster.py`, trap tests ran, none skipped) and
+`639 passed, 64 skipped` for the full suite with `-n auto`.
+Also run, full suite only with `-n auto -rs`: 3.11.18 and 3.13.18, `639 passed, 64 skipped` each. Every
+skip, on all four interpreters, is an environment-gated PostgreSQL/TimescaleDB test or the 2.8.3
+fixture regeneration; none is in the new file. Neither known pre-existing failure appeared: no
+`hs cluster` rc 5 and no `tests/test_groups.py` hang.
+
+**Where the trap tests skip.** `test_tls_client_skips_ipv6_listener`,
+`test_cleartext_client_skips_ipv6_listener`, both `test_cluster_skips_ipv6_listener` cases and
+`test_free_port_skips_port_held_on_ipv6_loopback` skip on a host without IPv6 loopback (no `::1` to
+bind), as R3 allows: expect that on CI images without `::1`. The refused, no-IPv4 and host-name tests
+never skip. On the build host (macOS, `::1` present) none skipped.
+
+**Departures from the plan (minor, no R-ID affected).** The resetter context manager draws its own
+port number (free on IPv4, bindable on `::1`, redrawing on `EADDRINUSE`) instead of taking one, so the
+trap is robust even on the unchanged `free_port()`. The `free_port()` helpers are public module
+functions, `draw_port()` and `held_on_ipv6_loopback()`, so the unit test can inject a draw. The
+`hs cluster` test also arms the trap inside a fresh interpreter (asserting the test's
+`sitecustomize` is the one imported) before driving the CLI, and reads task rows from the temp-site
+SQLite file directly.
 
 ## Phase P2 — R6 trial: path-limited 3-way apply onto a detached origin/master worktree
 **Satisfies:** R6 · **Depends on:** P1
