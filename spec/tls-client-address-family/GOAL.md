@@ -77,6 +77,9 @@ free enough of 2.9-only code, to ship in a 2.8.4 patch.
 - **R6** — The client change SHALL use only the standard library and nothing introduced after 2.8.3,
   so that it cherry-picks onto `master` without conflict and the R3 test passes there. `TECH.md` SHALL
   state whether that was checked by a trial cherry-pick or by diff inspection.
+- **R7** — `tests/conftest.py:free_port()` SHALL NOT return a port number that is bound on `::1`
+  when the host has IPv6 loopback, so the rest of the suite never draws a port something else holds
+  there. Test-only; it SHALL cherry-pick onto `master` with the client change.
 
 ## Non-goals (no-gos)
 
@@ -104,8 +107,8 @@ free enough of 2.9-only code, to ship in a 2.8.4 patch.
 - **Q:** Should the test-side hardening ride along? Two candidates, both small: (a)
   `tests/conftest.py:free_port()` rejects a port it cannot also bind on `::1`; (b)
   `src/hypershell/cluster/local.py` (~239) has its client dial the server's bound address rather than
-  `'localhost'`. — **A:** [NEEDS CLARIFICATION: include (a), (b), both, or neither?] **Shaper's
-  recommendation:** include (a) and leave out (b). (a) is test-only, a few lines, and cherry-picks
+  `'localhost'`. — **A (2026-11-03, maintainer's delegate at the sign-off gate):** (a) only, as **R7**; (b) is
+  left out. **Shaper's recommendation, adopted:** include (a) and leave out (b). (a) is test-only, a few lines, and cherry-picks
   cleanly; it keeps the rest of the suite from drawing a port number something else holds on `::1`,
   while R3 still creates that condition on purpose, so the regression stays covered. (b) changes
   product code on both release lines and is redundant once R2 holds, since the client then dials
