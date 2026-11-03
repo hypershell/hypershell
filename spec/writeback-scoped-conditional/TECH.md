@@ -3,7 +3,7 @@ slug: writeback-scoped-conditional
 title: Scoped, conditional result writeback
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/writeback-scoped-conditional
 base: develop
 current_phase: done
@@ -68,9 +68,9 @@ phases:
     && grep -q "only its result columns" .agents/factory/invariants.md && uv run pytest
     -m unit -q tests/test_writeback.py
 review:
-  last_reviewed_commit: b941ec9
-  verdict: changes-requested
-  blocked_reason: 'review cycle 3: F4 seed prose (LOW); bound reached, escalate'
+  last_reviewed_commit: dd500ed
+  verdict: approved
+  blocked_reason: ''
   cycle: 3
 ---
 # TECH.md — Scoped, conditional result writeback

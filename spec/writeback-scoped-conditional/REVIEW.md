@@ -437,3 +437,19 @@ None. F4 is prose only and touches no core file and no security or DB-lifecycle 
   does not recover the row."
 - Optionally, apply the Observation's wording to `ROADMAP.md:267-268`.
 - This is cycle 3 of ≤3. The loop has not converged, so the next step is the human's call.
+
+## Triage (human gate) — cycle 3 · maintainer's ruling
+
+Review did not converge within three cycles, so the foreman stopped this lane and escalated it to
+the maintainer. The code was unchanged since `36a4e67`, which cycle 2 reviewed clean (blind pass
+empty, compat drives identical, PostgreSQL CI green on PR #70). The only open finding, F4, is one
+sentence of seed prose. **On 2026-11-02 the maintainer chose option (a):** the foreman applies F4's
+one-sentence correction and the Observation's `ROADMAP.md` rewording, checks that the diff is
+prose-only (no change under `src/` or `tests/`), and the fix lands **without a fourth review
+cycle**. This commit is therefore **landed without re-review**, by the maintainer's explicit
+exception; `review.verdict` is set to `approved` on that basis, not on a reviewer's verdict.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| F4 · CONFIRMED | fixed by the foreman | `issues/late-confirm-overwrites-attribution.md` Notes now agree with both of the sibling seed's interleavings: the row is stranded before its confirmation is applied, and a confirmation that lands afterwards names the evicted client but does not recover the row. |
+| Observation · `ROADMAP.md` wire-compat pointer | fixed by the foreman | "Depends on" now names `zone-dispatch`'s version handshake as R5 of its GOAL, not the zone seed's R5. |

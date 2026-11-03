@@ -52,7 +52,8 @@ confirmation can rewrite it.
 - **Relay-facing.** Carry this to relay's shaping alongside its return-path note.
 - A cheap partial fix needs no wire change: condition the confirmation's update on
   `completion_time IS NULL`. It is a separate defect from `issues/stale-confirm-hides-orphan.md`,
-  where the row is stranded before any confirmation is applied, so no confirmation reaches it.
+  where the row is stranded before its confirmation is applied; a confirmation that lands
+  afterwards names the evicted client but does not recover the row.
   Whether that seed's recovery needs the dispatch token on the confirmation, or a bound on how long
   a dispatched row may stay unconfirmed, is left to its `/hs-plan`.
 - Found by: `writeback-scoped-conditional` plan research, 2026-11-02.
