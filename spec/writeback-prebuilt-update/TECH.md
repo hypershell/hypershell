@@ -3,10 +3,10 @@ slug: writeback-prebuilt-update
 title: Result writeback at or below 2.8.3's CPU cost
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/writeback-prebuilt-update
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -90,7 +90,7 @@ phases:
     runs''; kt 2400 pytest -q -l --lf; }; }'
 - id: P5
   name: Record the CI and cluster evidence
-  status: blocked
+  status: done
   satisfies:
   - R6
   - R3
@@ -98,7 +98,7 @@ phases:
   - P4
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: kt() { uv run --frozen python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
     if r<0 else r)' "$@"; }; f=$(git log -1 --format=%H -- src); git diff --quiet
     "$f" HEAD -- src tests && kt 120 python spec/writeback-prebuilt-update/check_evidence.py
@@ -106,7 +106,7 @@ phases:
 review:
   last_reviewed_commit: ''
   verdict: none
-  blocked_reason: awaiting foreman CI run and cluster runs
+  blocked_reason: ''
   cycle: 0
 ---
 # TECH.md — Result writeback at or below 2.8.3's CPU cost
@@ -278,13 +278,13 @@ the method, and meets the bar.
 **Satisfies:** R6, R3 (PostgreSQL/TimescaleDB green) · **Depends on:** P4
 **Goal:** the foreman's evidence is in `EVIDENCE.md` and meets the bars.
 
-- [ ] **External wait.** Until the foreman delivers both blocks, `hs-build` sets this phase
+- [x] **External wait.** Until the foreman delivers both blocks, `hs-build` sets this phase
       `blocked` with `blocked_reason: awaiting foreman CI run and cluster runs` and stops. It
       never runs a cluster job, pushes, or reads GitHub itself.
-- [ ] Paste the foreman's `ci` and `r6` blocks, and their notes, under their markers as delivered.
+- [x] Paste the foreman's `ci` and `r6` blocks, and their notes, under their markers as delivered.
       Add a short results table (mean, min, max tasks/s per build; the fix against 2.8.3 and against
       develop in %).
-- [ ] If `check_evidence.py r6` fails on a shortfall within the spread, record the numbers and stop
+- [x] If `check_evidence.py r6` fails on a shortfall within the spread, record the numbers and stop
       for the maintainer's ruling (GOAL R6). Their ruling goes in the block's `ruling` field, quoted.
       A CI entry red for a reason outside this change needs a rerun or the foreman's ruling,
       recorded next to the `ci` block.
@@ -358,3 +358,18 @@ exactly that signature is allowed and recorded; anything else red blocks.
 - **P5:** set `blocked` at the end of P4 (`review.blocked_reason`: awaiting foreman CI run and
   cluster runs). It is an external wait: `hs-build` resumes it only once the foreman has delivered
   the `ci` and `r6` blocks.
+  Resumed when the foreman delivered both (2026-11-04): `blocked` cleared to `in_progress` with
+  `set_phase.py`, the blocks pasted under their markers as delivered, the harness note verbatim
+  above the `r6` block, and a results table added. **Cluster (R6):** one job of 3 rounds on a
+  third test cluster, a 16-CPU server node and 256 single-executor clients on three client nodes,
+  Python 3.13.18, TLS, SQLite, 20,000 tasks. Means: 2.8.3 114.2, `develop` 117.1, fix 117.2 tasks/s
+  (fix +2.6% against 2.8.3, +0.1% against `develop`); bar met with no ruling needed. The nine
+  server records match the block (each 20,000 rows, 0 incomplete, 200 failed, 256/256 clients,
+  server exit 0). **Amendment (departure from P4's request):** the hand-back asked the build order
+  to rotate from round to round; the foreman ran a fixed order each round (2.8.3, `develop`, fix).
+  `check_evidence.py r6` checks complete interleaved triples, not rotation, so the evidence passes
+  as recorded and the checker is unchanged. **CI (R3):** run 41840120711 on head `7439999`, all 14
+  checks successful on the first attempt, no rerun, so the `ci` block carries no `reruns` key.
+  Verify: the `verify:` text ran with `kt`'s `uv run --frozen python` replaced by the main
+  checkout's `.venv` Python 3.14.6 (the scripts use only the standard library and `git`):
+  `src/` and `tests/` unchanged since `37bfc72`, and `check_evidence.py r1 ci r6` passed.

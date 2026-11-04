@@ -163,3 +163,121 @@ fenced `json` block directly after the marker line `<!-- evidence:ci -->`:
 if the plan-gate ruling was used: one rerun of `tests (3.13)` whose first attempt failed only in the
 documented restart-update flake, with exactly that signature. `check_evidence.py ci` refuses any
 other rerun, a second rerun, or a different signature. Anything else red blocks.
+
+## R6 — the cluster runs
+
+**Harness note,** in the foreman's words:
+
+> Cluster run on the third test cluster (the first was down and the second was contended): one job, 4 whole nodes; node 0 runs the server bound to 16 CPUs, and nodes 1–3 run 256 single-executor clients, cyclic. The harness is the repo's `tests/cluster/drive.sh` at `3d7231e` (drive sha256 43e59df1…) via a matrix script. Every archive was built by `build_archive.sh` from the commit shown, with Python 3.13.18 and TLS on, on SQLite: 20,000 tasks, every 100th failing, bundle size 1 both ways. Throughput is drive.sh's tasks/s (completed rows over first schedule to last completion). Builds run in a fixed order within each round (2.8.3, develop, fix), not rotated. All 9 runs exited 0 with 256/256 clients and 0 incomplete. On this cluster the server was not CPU-bound: develop (117.1) did not reproduce its 4–8% drop against 2.8.3 (114.2) seen on the second test cluster, where develop measured 123.5 vs 2.8.3's 129.0 at 16 CPUs, so this run shows the fix does not regress, not the size of the recovery. R1's CPU measurement is the discriminating evidence.
+
+**Departure from the request.** The hand-back above asked for the order to rotate from round to
+round; the builds ran in the same order every round (2.8.3, develop, fix). `check_evidence.py r6`
+requires complete interleaved triples, not rotation, and every round holds all three builds.
+
+| build | commit | runs | mean tasks/s | min | max | max − min |
+|---|---|---|---|---|---|---|
+| 2.8.3 | `4d5771b` | 3 | 114.2 | 108.4 | 117.8 | 9.4 |
+| develop | `bc6547a` | 3 | 117.1 | 115.8 | 117.9 | 2.1 |
+| fix | `37bfc72` | 3 | 117.2 | 113.0 | 120.5 | 7.5 |
+
+Bar (fix mean at or above 2.8.3 mean): **met**. The fix's mean is **2.6% above** 2.8.3's (117.2
+against 114.2 tasks/s) and **0.1% above** `develop`'s (against 117.1). As the note says, `develop`
+did not fall below 2.8.3 on this cluster, so the run shows no regression rather than the size of
+the recovery; R1 above is the measurement of the CPU cost itself.
+
+<!-- evidence:r6 -->
+```json
+{
+ "config": {
+  "clients": 256,
+  "executors_per_client": 1,
+  "bundlesize": 1,
+  "tls": true,
+  "database": "sqlite",
+  "server_cpus": 16
+ },
+ "runs": [
+  {
+   "label": "2.8.3",
+   "sha": "4d5771b8a70a148142022117a30c5a4bf31e9afe",
+   "order": 1,
+   "tasks_per_s": 117.8
+  },
+  {
+   "label": "develop",
+   "sha": "bc6547a52fcf0ebd8dd04235a3e188a1480463f0",
+   "order": 2,
+   "tasks_per_s": 117.9
+  },
+  {
+   "label": "fix",
+   "sha": "37bfc72d250c487b61b0a8dfc88078b09c093a04",
+   "order": 3,
+   "tasks_per_s": 120.5
+  },
+  {
+   "label": "2.8.3",
+   "sha": "4d5771b8a70a148142022117a30c5a4bf31e9afe",
+   "order": 4,
+   "tasks_per_s": 116.4
+  },
+  {
+   "label": "develop",
+   "sha": "bc6547a52fcf0ebd8dd04235a3e188a1480463f0",
+   "order": 5,
+   "tasks_per_s": 117.6
+  },
+  {
+   "label": "fix",
+   "sha": "37bfc72d250c487b61b0a8dfc88078b09c093a04",
+   "order": 6,
+   "tasks_per_s": 113.0
+  },
+  {
+   "label": "2.8.3",
+   "sha": "4d5771b8a70a148142022117a30c5a4bf31e9afe",
+   "order": 7,
+   "tasks_per_s": 108.4
+  },
+  {
+   "label": "develop",
+   "sha": "bc6547a52fcf0ebd8dd04235a3e188a1480463f0",
+   "order": 8,
+   "tasks_per_s": 115.8
+  },
+  {
+   "label": "fix",
+   "sha": "37bfc72d250c487b61b0a8dfc88078b09c093a04",
+   "order": 9,
+   "tasks_per_s": 118.1
+  }
+ ]
+}
+```
+
+## R3 — CI on the draft PR
+
+CI run 41840120711 on the branch head `7439999c2fea52a0ee531f73cd3108e318f0f170`, whose `src/`
+and `tests/` match the fix's. The foreman reports all 14 checks successful on the first attempt, so
+no rerun was taken and the block has no `reruns` key. The nine jobs below are the ones the check
+requires: the four Python versions and the five PostgreSQL entries (two plain servers, three
+TimescaleDB).
+
+<!-- evidence:ci -->
+```json
+{
+ "run_id": 41840120711,
+ "head_sha": "7439999c2fea52a0ee531f73cd3108e318f0f170",
+ "jobs": {
+  "tests (3.11)": "success",
+  "tests (3.12)": "success",
+  "tests (3.13)": "success",
+  "tests (3.14)": "success",
+  "PostgreSQL (pg13)": "success",
+  "PostgreSQL (pg18)": "success",
+  "PostgreSQL (timescale)": "success",
+  "PostgreSQL (timescale-oss)": "success",
+  "PostgreSQL (timescale-floor)": "success"
+ }
+}
+```
