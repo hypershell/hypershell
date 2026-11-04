@@ -77,10 +77,10 @@ stand in for it in a measurement.
 - **R6** — Before `/hs-publish`, the foreman SHALL record cluster throughput evidence in
   `spec/writeback-prebuilt-update/`, as the P-phase hand-back. The configuration is 256
   single-executor clients, bundle size 1, TLS, SQLite, and a 16-CPU server node, running 2.8.3,
-  `develop` (`bc6547a`) and the fix interleaved. The fix's throughput SHALL be at or above 2.8.3's
-  [NEEDS CLARIFICATION: the bar for "at or above". Proposed: the fix's mean over at least three
-  interleaved runs per build is at or above 2.8.3's mean. If it falls short by less than the
-  runs' spread, the foreman reports the numbers and the maintainer rules.]. Build agents never run
+  `develop` (`bc6547a`) and the fix interleaved. The fix's throughput SHALL be at or above 2.8.3's:
+  the fix's mean over at least three interleaved runs per build is at or above 2.8.3's mean. If it
+  falls short by less than the runs' spread, the foreman reports the numbers and the maintainer
+  rules. Build agents never run
   this; `hs-review` checks that the evidence is recorded and meets the bar.
 
 ## Non-goals (no-gos)
@@ -121,7 +121,9 @@ stand in for it in a measurement.
   (foreman's shaping brief, 2026-11-04).
 - **Q:** Who produces the cluster evidence? — **A:** The foreman, as the P-phase hand-back. Build
   agents do not touch cluster resources (foreman's shaping brief, 2026-11-04).
-- **Open:** the R6 bar — see the `[NEEDS CLARIFICATION]` marker in R6. The foreman rules at sign-off.
+- **Q:** What is the R6 bar for "at or above"? — **A:** The fix's mean over at least three interleaved
+  runs per build is at or above 2.8.3's mean. A shortfall smaller than the runs' spread goes to the
+  maintainer with the numbers (foreman at sign-off, 2026-11-04, adopting the shaper's proposal).
 
 ## Related materials
 
