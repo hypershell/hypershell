@@ -1639,3 +1639,5 @@ on top of that. **Verdict: approve**, with six findings. The foreman ruled on ea
 | 6 | Not new. A same-port successor receives the old server's decrefs. | Already seeded in `issues/queue-stale-decref-same-port-restart.md`; no change, recorded only. |
 
 The work and its evidence are recorded in TECH.md under P1 ("Follow-up: quick review of the C10 fix").
+
+**2026-11-04.** Cycle 7 (scoped quick review) — approved; its NIT/LOW follow-ups landed in `7dd85c1` under the foreman's rulings; recorded in the FSM 2026-11-04.
