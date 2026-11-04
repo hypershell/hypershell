@@ -212,7 +212,7 @@ retry row with the same `previous_id`:
 - two servers on one database, which is unsupported: no query takes row locks, so new tasks
   double-schedule too;
 - a process killed between the retry insert and the `retried` mark, which are separate commits;
-- a reset `retried` flag, from `hs task update`.
+- a reset `retried` flag, from `hs update`.
 
 A returned result writes only its result columns (`Task.result_columns`), and only for its current
 assignment: the row's `schedule_time` as dispatched, while `completion_time` is NULL
@@ -362,7 +362,7 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
   held by the Receiver) are the pattern. Never use `bulk_update_mappings` or an ORM flush for such a
   write: they assert the total and raise `StaleDataError`. The Scheduler's `Task.next` stamp and
-  `retried` mark, `Task.cancel_all` and `hs task update` do not follow it yet
+  `retried` mark, `Task.cancel_all` and `hs update` do not follow it yet
   (`issues/hypertable-contended-scheduler-and-cli-writes.md`).
 
 ## Testing

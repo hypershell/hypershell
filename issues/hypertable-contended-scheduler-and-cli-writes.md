@@ -5,7 +5,7 @@ appetite: small
 lane: public
 ---
 
-# The Scheduler's and `hs task update`'s task-row writes fail when contended on a TimescaleDB hypertable
+# The Scheduler's and `hs update`'s task-row writes fail when contended on a TimescaleDB hypertable
 
 > **Candidate, not a contract.** `/hs-feature` promotes this into `spec/{slug}/GOAL.md`, where
 > appetite, non-goals and R-IDs get negotiated. Do not copy it verbatim.
@@ -37,17 +37,17 @@ rows 3, 4 and 7–10; the verdicts are in its `TECH.md`) left these writers as t
   cannot reuse "warn and leave the row as it is".
 - **`Task.cancel_all` / `Task.cancel`** (bulk update by id) have no in-tree caller (Python API only);
   a contended 0 raises to the caller.
-- **`hs task update`, single-row legacy form** (`Task.update` → `update_all`): a contended 0 raises
+- **`hs update`, single-row legacy form** (`Task.update` → `update_all`): a contended 0 raises
   `StaleDataError`, which the command reports as `Task.NotFound` — a **false "not found"** for a row
   that exists.
-- **`hs task update --limit` batches** (`update_all` per batch): a contended 0 raises after earlier
+- **`hs update --limit` batches** (`update_all` per batch): a contended 0 raises after earlier
   batches have committed — a partial update, then a traceback.
-- **`hs task update` set / `--cancel` / `--revert` / tag edits** (`Query.update`, a filtered bulk
+- **`hs update` set / `--cancel` / `--revert` / tag edits** (`Query.update`, a filtered bulk
   UPDATE): contended rows are **silently skipped**, and "Updated N" is still logged from a count
   taken earlier. These inline their own column lists, so the `Task.revert_all` fix does not reach
   `--revert`.
 
-Not probed: the DELETE paths (`hs task update --delete`, `Task.delete_all`). Upstream #9315 moved
+Not probed: the DELETE paths (`hs update --delete`, `Task.delete_all`). Upstream #9315 moved
 hypertable DELETE onto the same expansion as UPDATE, so a contended DELETE may miss rows the same
 way.
 
@@ -62,14 +62,14 @@ was failing on. Its GOAL (R4) seeds a cross-process path rather than fixing it u
 Scheduler's in-server contention is seeded here too. None of these is the same few lines:
 `Task.next` must move off the ORM flush onto a per-row core UPDATE with a count check and a choice of
 what "still qualifies" means; the `retried` mark needs a doubled-retry-safe exhaustion outcome; and
-`hs task update` needs its matched counts reconciled against its targets, with a re-run that
+`hs update` needs its matched counts reconciled against its targets, with a re-run that
 re-evaluates the user's filter.
 
 ## Outcome / vision
 
 On a TimescaleDB hypertable of any supported version, every writer of `task` rows behaves as it does
 on PostgreSQL when its write waited on another writer: the Scheduler never exits because a stamp or
-mark was contended, a failed row is never retried twice on that account, and `hs task update`
+mark was contended, a failed row is never retried twice on that account, and `hs update`
 reports and applies exactly the rows its filter selects.
 
 ## Sketch of the acceptance criteria
@@ -78,7 +78,7 @@ reports and applies exactly the rows its filter selects.
   the stamp SHALL land and the Scheduler SHALL keep running.
 - **R2** — WHEN the `retried` mark of a failed row is contended, the row SHALL end retried exactly
   once, including when the recovery bound is exhausted.
-- **R3** — WHEN `hs task update` contends with a running server, it SHALL report a missing row only
+- **R3** — WHEN `hs update` contends with a running server, it SHALL report a missing row only
   when the row is missing, and its "Updated N" SHALL count the rows actually written.
 - **R4** — A test SHALL force each race deterministically on a server database, as
   `tests/test_contended_write.py` does, failing on TimescaleDB 2.29+ before the fix.

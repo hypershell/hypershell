@@ -44,7 +44,7 @@ already landed is never undone.
   replay, no sleeps) and show today's outcome.
 - **R2** — WHEN orphan recovery reverts a row, THEN it SHALL do so only while the row has no
   `completion_time`, in the same statement as the check.
-- **R3** — Revert by operator command (`hs task update --revert`) and restart recovery SHALL behave
+- **R3** — Revert by operator command (`hs update --revert`) and restart recovery SHALL behave
   as today, or any change to them SHALL be stated in the GOAL.
 
 ## Notes
