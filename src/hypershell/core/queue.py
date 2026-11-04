@@ -259,8 +259,13 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
     ctx = get_client_context()
     _mark()
     try:
-        raw = socket.create_connection(address)
+        # Dial IPv4 only, exactly as the cleartext client does: the listener binds AF_INET, so
+        # following the resolver to an IPv6 address (e.g., `localhost` -> ::1) could reach some
+        # other process holding the same port number there instead of the server.
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
+            raw.setblocking(True)
+            raw.connect(address)
             servername = (cfg.servername if cfg is not None and cfg.servername else None)
             if servername is None and ctx.check_hostname:
                 servername = address[0] if isinstance(address, tuple) else None

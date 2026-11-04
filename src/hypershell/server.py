@@ -46,9 +46,11 @@ from typing import List, Dict, Tuple, Iterable, IO, Optional, Callable, Type, Fi
 from types import TracebackType
 
 # Standard libs
+import io
 import sys
 import time
 from enum import Enum
+from numbers import Real
 from datetime import datetime, timedelta
 from functools import cached_property
 from itertools import islice
@@ -75,7 +77,7 @@ from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT
 from hypershell.client import ClientInfo
 
 # Public interface
-__all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp',
+__all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp', 'is_file_input',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
            'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
@@ -127,6 +129,9 @@ class Scheduler(StateMachine):
     poll: float
     poll_max: float
     startup_phase: bool
+    first_group_pending: bool
+    highest_started_group: Optional[int]
+    last_scheduled_group: Optional[int]
     current_group: Optional[int]
     submitter: Optional[SubmitThread]
 
@@ -150,6 +155,9 @@ class Scheduler(StateMachine):
         self.poll = SERVER_POLL_MIN
         self.poll_max = poll
         self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
+        self.first_group_pending = False
+        self.highest_started_group = None
+        self.last_scheduled_group = None
         self.current_group = None
         self.submitter = submitter
 
@@ -198,9 +206,10 @@ class Scheduler(StateMachine):
                 log.info(f'Reverted {tasks_interrupted} previously interrupted tasks')
         else:
             log.info('Empty database - waiting for initial tasks')
+            self.first_group_pending = True
         group_info = Task.current_group()
         log.debug(f'Starting with task group {group_info.value} ({group_info.reason})')
-        self.current_group = group_info.value
+        self.current_group = self.starting_group(group_info.value)
         return SchedulerState.LOAD
 
     def load_bundle(self: Scheduler) -> SchedulerState:
@@ -208,11 +217,9 @@ class Scheduler(StateMachine):
         if check_signal() in (SIGUSR1, SIGUSR2):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
             return SchedulerState.FINAL
-        self.tasks = Task.next(limit=self.bundlesize,
-                               attempts=self.attempts,
-                               eager=self.eager,
-                               group=self.current_group)
+        self.tasks = self.next_tasks()
         if self.tasks:
+            self.mark_group_started()
             self.startup_phase = False
             self.poll = SERVER_POLL_MIN
             return SchedulerState.PACK
@@ -242,6 +249,60 @@ class Scheduler(StateMachine):
             log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
             time.sleep(self.poll)
             return SchedulerState.LOAD
+
+    def next_tasks(self: Scheduler) -> List[Task]:
+        """Select the next tasks to schedule from the current group."""
+        if self.first_group_pending:
+            # On an empty-database start no task is scheduled into a group chosen before any task
+            # existed: the first group is the lowest one holding tasks, once there are any.
+            first_group = Task.lowest_incomplete_group()
+            if first_group is None:
+                return []
+            self.current_group = first_group
+        return Task.next(limit=self.bundlesize,
+                         attempts=self.attempts,
+                         eager=self.eager,
+                         group=self.current_group)
+
+    def mark_group_started(self: Scheduler) -> None:
+        """Record that the current group has scheduled tasks, warning if a higher group started first."""
+        group = self.current_group
+        if group != self.last_scheduled_group:
+            # SQLite can store a non-integer group as text, which has no order against an integer
+            # group: it is never tracked as the highest group and never warned on.
+            if isinstance(group, Real):
+                highest = self.highest_started_group
+                if highest is not None and group < highest:
+                    log.warning(f'Starting task group {group} after task group {highest} (tasks submitted late)')
+                self.highest_started_group = group if highest is None else max(group, highest)
+            self.last_scheduled_group = group
+        self.first_group_pending = False
+
+    def starting_group(self: Scheduler, group: int) -> int:
+        """
+        The task group to start in, given the most recently scheduled `group`.
+
+        That group is kept while it holds failures still to be retried or halted on. Otherwise the
+        start is the lowest group holding incomplete tasks, so new tasks on a database whose earlier
+        work finished at a higher group run in ascending order. With no incomplete tasks yet, the
+        first group is chosen once tasks arrive, as on an empty database.
+        """
+        if self.first_group_pending:
+            return group
+        if Task.count_remaining(group=group) == 0:
+            # With every task in the group complete, increment_group holds the group while a
+            # failure awaits retry, and halts it on a failure that has used its retries.
+            held = Task.increment_group(group, attempts=self.attempts, eager=self.eager)
+            if not held.viable or Task.count_retryable(self.attempts, group=group, eager=self.eager) > 0:
+                return group
+        lowest = Task.lowest_incomplete_group()
+        if lowest is None:
+            log.debug('No incomplete tasks - first task group chosen once tasks arrive')
+            self.first_group_pending = True
+            return group
+        if lowest != group:
+            log.debug(f'Moving to task group {lowest} (lowest group with incomplete tasks)')
+        return lowest
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
         """Pack tasks into bundle (list)."""
@@ -879,15 +940,31 @@ class ServerThread(Thread):
         log.info(f'Server listening on {self.queue.config.host}:{self.queue.config.port}')
 
     def start_threads(self: ServerThread) -> None:
-        """Start child threads."""
+        """Start child threads; with file input, scheduling starts once the whole file is submitted."""
         if self.submitter is not None:
             self.submitter.start()
-        if self.scheduler is not None:
-            self.scheduler.start()
         if self.confirm is not None:
             self.confirm.start()
         self.heartmonitor.start()
         self.receiver.start()
+        if self.scheduler is not None:
+            if self.submitter is not None and is_file_input(self.submitter.source):
+                # The scheduler sees every group in the file before it chooses the first one,
+                # so the file's groups run in ascending order whatever order they are listed.
+                log.info('Waiting for task file to be submitted before scheduling')
+                self.wait_submitter()
+            self.scheduler.start()
+
+    def wait_scheduling(self: ServerThread) -> None:
+        """Wait until scheduling starts, which for file input is once the whole file is submitted.
+
+        Clients started after this never idle while a task file is read. If the server stops
+        first, its error (if any) is raised here.
+        """
+        while self.scheduler is not None and self.scheduler.ident is None and self.is_alive():
+            time.sleep(0.1)
+        if not self.is_alive():
+            self.join()
 
     def wait_submitter(self: ServerThread) -> None:
         """Wait on task submission to complete."""
@@ -927,7 +1004,9 @@ class ServerThread(Thread):
         if self.submitter is not None:
             self.submitter.stop(wait=wait, timeout=timeout)
         if self.scheduler is not None:
-            self.scheduler.stop(wait=wait, timeout=timeout)
+            # A scheduler not yet started, because a task file is still being submitted, has
+            # nothing to join.
+            self.scheduler.stop(wait=wait and self.scheduler.ident is not None, timeout=timeout)
         self.heartmonitor.stop(wait=wait, timeout=timeout)
         self.queue.completed.put(make_sentinel())
         self.receiver.stop(wait=wait, timeout=timeout)
@@ -935,6 +1014,24 @@ class ServerThread(Thread):
             self.queue.confirmed.put(make_sentinel())
             self.confirm.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
+
+
+def is_file_input(source: Iterable[str | dict]) -> bool:
+    """True if `source` is a whole task file: a seekable file (not standard input), or a list or tuple.
+
+    Standard input, pipes, FIFOs, process substitution and other iterables are streams, which
+    are scheduled as they arrive.
+    """
+    # A gated source carries the stream it wraps as `iterable`.
+    inner = getattr(source, 'iterable', source)
+    if isinstance(inner, (list, tuple)):
+        return True
+    if isinstance(inner, io.IOBase) and inner is not sys.stdin:
+        try:
+            return inner.seekable()
+        except (OSError, ValueError):
+            return False
+    return False
 
 
 def serve_from(source: Iterable[str],

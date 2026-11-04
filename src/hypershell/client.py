@@ -201,6 +201,7 @@ class ClientScheduler(StateMachine):
         """Jump to GET_REMOTE state."""
         timeout_label = self.timeout or 'no'
         log.debug(f'Started (scheduler: {timeout_label} timeout)')
+        self.previous_received = datetime.now()  # NOTE: idle time counts from start, not construction
         return SchedulerState.GET_REMOTE
 
     def get_remote(self: ClientScheduler) -> SchedulerState:

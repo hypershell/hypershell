@@ -67,7 +67,11 @@ subsystems.
   them together. Every one of those queries keeps the `CANCEL_STATUS` filter (§2).
 - Group-gating can stall **by design**: `increment_group` won't advance while the group has
   incomplete tasks or failures still awaiting retry, so a permanently-failing task halts the group
-  (and, in non-`forever` mode, the server); don't "fix" it without understanding it.
+  (and, in non-`forever` mode, the server); don't "fix" it without understanding it. Once the
+  group clears, the next group is the smallest one with incomplete tasks, which may be lower when
+  tasks arrive late. File input to `hs cluster`/`hs server` is submitted in full (the whole file)
+  before the scheduler starts, so its groups run in order. Stream input is best effort: a late
+  lower group runs after the current one, with a warning.
 
 ## 4. Server modes — guard before assuming DB behavior
 

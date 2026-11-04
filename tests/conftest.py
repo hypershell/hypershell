@@ -6,6 +6,7 @@
 
 # Standard libs
 import os
+import errno
 import socket
 
 # External libs
@@ -13,11 +14,44 @@ from pytest import fixture
 from pathlib import Path
 
 
-def free_port() -> int:
-    """Return an available TCP port on the loopback interface."""
+# Upper bound on draws before free_port() gives up (loud rather than flaky).
+FREE_PORT_DRAWS: int = 32
+
+
+def draw_port() -> int:
+    """Return a TCP port number the kernel reports free on IPv4 loopback."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(('localhost', 0))
         return sock.getsockname()[1]
+
+
+def held_on_ipv6_loopback(port: int) -> bool:
+    """True if `port` is already bound on ``::1``; False if free there or no IPv6 loopback."""
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    except OSError:
+        return False
+    with sock:
+        try:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            sock.bind(('::1', port))
+        except OSError as error:
+            return error.errno == errno.EADDRINUSE
+    return False
+
+
+def free_port() -> int:
+    """Return a TCP port number free on IPv4 loopback and, if the host has it, on ``::1``.
+
+    The server listens on IPv4 only, but a port number some other process holds on ``::1``
+    can still capture a client that resolves ``localhost`` to IPv6 first, so such a number
+    is drawn again. Raises RuntimeError after :data:`FREE_PORT_DRAWS` draws.
+    """
+    for _ in range(FREE_PORT_DRAWS):
+        port = draw_port()
+        if not held_on_ipv6_loopback(port):
+            return port
+    raise RuntimeError(f'No port free on both loopbacks after {FREE_PORT_DRAWS} draws')
 
 
 def isolate_environment() -> None:

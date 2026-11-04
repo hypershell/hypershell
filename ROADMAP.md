@@ -203,6 +203,82 @@ untested; the seed asks for that test first.
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
+## An unsorted inline task file can run a higher group first
+
+`hs cluster FILE` and `hs server FILE` used to schedule while the file was still being ingested,
+so a file that listed group 1 before group 0 hung about half the time with group 0 stranded.
+`group-advance-strands-lower-group` reads a task file in full before scheduling begins, so its
+groups run in ascending order whatever order the file lists them in. The cost, accepted by the
+maintainer, is that a large file's first task waits until the whole file is in. Pre-existing since
+task groups were added.
+
+*Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: that cycle's GOAL Q1*
+**Seed:** [`issues/group-order-unsorted-inline-file.md`](issues/group-order-unsorted-inline-file.md) · *status: adopted:group-advance-strands-lower-group*
+
+## Refuse a submission below the group the schedule has reached
+
+A `hs submit` into a group lower than the one an active schedule has already reached cannot keep
+the documented ascending order. After `group-advance-strands-lower-group`, such tasks run late with
+a warning. The maintainer wants them refused at submit time instead, all or nothing and with an
+error naming both groups. The same rule covers a task file run onto an advanced database
+(`--restart`, `--update`, `--repeat`). Pipes into `hs cluster`/`hs server` stay best effort. This is
+a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
+
+*Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: overlaps
+`issues/ingest-robustness.md` (same ingest path)*
+**Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
+
+## A run fed by a pipe can stop before the pipe ends
+
+`hs cluster` and `hs server` given stream input can reach FINAL and exit 0 while the stream is
+still feeding tasks. Once the first bundle is scheduled, the stop branch no longer asks whether the
+submitter is still reading, so a pause in the input longer than the committed work ends the run
+and later tasks are never scheduled. `(echo 'echo a'; sleep 8; echo 'echo b') | hsx -N1` runs only
+`echo a`. File input is immune once it is submitted in full first. The likely fix is one conjunct
+on `develop`; 2.8.x lacks the submitter reference it needs. Pre-existing, and found by the plan of
+the group-order fix.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (PLAN §5 risk 1)*
+**Seed:** [`issues/stream-run-stops-before-input-ends.md`](issues/stream-run-stops-before-input-ends.md) · *status: unshaped*
+
+## An empty task file never finishes
+
+`hsx` given an empty task file on an empty database never exits: the server logs `Empty database -
+waiting for initial tasks` and waits for tasks that cannot arrive. The stop branch of
+`Scheduler.load_bundle` needs at least one task in the database, so a run that submits none on an
+empty database never reaches FINAL. The same holds before and after
+`group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 1)*
+**Seed:** [`issues/empty-task-file-hangs.md`](issues/empty-task-file-hangs.md) · *status: unshaped*
+
+## A "database is locked" error while a task file is read hangs the run
+
+On SQLite, when another connection holds the database locked while `hsx` or `hs cluster` submits a
+task file, the submitter's committer dies with `database is locked` and the run waits until it is
+killed. The loader then blocks on its full queue, so the server never gets past waiting for the
+submitter, and nothing passes the committer's error on to the exit status. The same holds before
+and after `group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
+**Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
+
+## A non-integer task group is accepted at submit time
+
+The inline `group:` tag, `-t group:…` and a `--from-json` record's `group` key accept any value.
+SQLite stores a non-integer one as text in the integer column, while PostgreSQL rejects it at
+insert. 2.8.3 runs text groups after every integer group. `group-advance-strands-lower-group`
+needed two guards in the scheduler against them, and `group:nan` is stored as NULL, which kills
+the committer on `NOT NULL` and hangs the run, before and after that fix. The maintainer wants an
+integer group enforced at submit time: a whole file read ahead and refused before anything is
+inserted, and on a pipe an error on just the offending line. This is a behaviour change, and
+whether it ships in a 2.8.x patch or 2.9 only is open. Pre-existing, and found by that cycle's
+review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW
+cycles 2 and 3); same committer death as `issues/database-locked-during-ingest-hangs.md`*
+**Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
+
 ## Concurrent first submits can collide on the reserved source row
 
 `Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
@@ -358,6 +434,16 @@ first.
 `spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
 **Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
 
+## The server cannot listen on IPv6
+
+Both transports listen on IPv4 only, so a server is unreachable on an IPv6-only host or network and
+an IPv6 bind address fails. Not a fidelity defect, but recorded here because the TLS address-family
+fix aligns the client with the IPv4-only listener rather than widening it; dual-stack serving would
+have to move both ends together.
+
+*Horizon: long-term · Depends on: — · Refs: `spec/tls-client-address-family/`*
+**Seed:** [`issues/ipv6-server-listener.md`](issues/ipv6-server-listener.md)
+
 ## Merged output is interleave-corruptible
 
 Concurrent executors write to one shared file description with no line discipline, so long lines
@@ -397,6 +483,18 @@ does. Zones reduce how often this happens without fixing the mechanism.
 
 *Horizon: long-term · Depends on: — · Refs: —*
 **Seed:** [`issues/head-of-line-blocking.md`](issues/head-of-line-blocking.md)
+
+## Server CPU per task bounds throughput at small bundle sizes
+
+At bundle size 1, the server's main process runs its own scheduling, confirm and writeback
+statements for every task, and the evidence points at its CPU as the throughput ceiling.
+`writeback-prebuilt-update` recovers the writeback's share by building that statement once. The
+scheduler and confirm paths may carry the same per-call cost, and batching results across bundles
+is a further option.
+
+*Horizon: mid-term · Depends on: `writeback-prebuilt-update` (the measurement method) ·
+Refs: —*
+**Seed:** [`issues/server-per-task-statement-overhead.md`](issues/server-per-task-statement-overhead.md) · *status: unshaped*
 
 ---
 
@@ -476,6 +574,16 @@ TimescaleDB scenario module instead.
 
 *Horizon: mid-term · Depends on: — · Refs: split from `timescale` R9 (ruling 2026-11-02)*
 **Seed:** [`issues/server-db-test-suite.md`](issues/server-db-test-suite.md) · *status: unshaped*
+
+## A hung integration test costs the whole CI job timeout
+
+Integration tests run each command as a subprocess with no timeout and no per-test time limit, so
+a hang runs the CI job to its `timeout-minutes` and the log names no failing test.
+`group-advance-strands-lower-group` hit this with a hang in about 1–3% of grouped runs under load.
+A subprocess or per-test timeout would turn a hang into a fast, named failure.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/`*
+**Seed:** [`issues/integration-test-hang-timeout.md`](issues/integration-test-hang-timeout.md) · *status: unshaped*
 
 ---
 
