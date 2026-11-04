@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/writeback-prebuilt-update
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -29,7 +29,7 @@ phases:
     -q test_applied_values_match_reference && kt 300 pytest -q -rs tests/test_writeback_postgres.py
 - id: P2
   name: Prebuilt writeback statements in Task
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -40,7 +40,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: kt() { uv run --frozen python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
     if r<0 else r)' "$@"; }; f=src/hypershell/data/model.py; git diff --quiet bc6547a
     -- tests/test_writeback.py && test "$(git diff --name-only bc6547a -- src)" =
@@ -209,17 +209,17 @@ the wire codec, the schema, `data/upgrade.py`, `.github/workflows/tests.yml`, `d
 **Goal:** the conditional UPDATE and the classifying SELECT are built once per process; a result
 binds only its values. Behaviour, SQL and stored values unchanged.
 
-- [ ] In `src/hypershell/data/model.py`, add `bindparam` to the `sqlalchemy` import.
-- [ ] Build the two statements once per process, per PLAN §2.1: against `Task.__table__`, every
+- [x] In `src/hypershell/data/model.py`, add `bindparam` to the `sqlalchemy` import.
+- [x] Build the two statements once per process, per PLAN §2.1: against `Task.__table__`, every
       bind typed with `t.c[name].type`, every bind name prefixed (`r_…`), and the
       `(column, bind key)` pairs precomputed. Either a `functools.cache`d private `Task`
       classmethod or a module-level pair defined after `Task` is fine. Keep it private.
-- [ ] Rewrite only the body of `Task.__apply_result`: keep the `schedule_time is None` → STALE
+- [x] Rewrite only the body of `Task.__apply_result`: keep the `schedule_time is None` → STALE
       return and its comment. Execute the UPDATE with **one parameter dict**; `rowcount == 1` →
       APPLIED; otherwise execute the SELECT with `r_id`/`r_schedule_time` → DUPLICATE if a row,
       else STALE. Keep the cancel-status comment.
-- [ ] One declarative comment on the statements, saying why they are built once.
-- [ ] Remove the `xfail` marker from `test_writeback_reuses_its_statements`.
+- [x] One declarative comment on the statements, saying why they are built once.
+- [x] Remove the `xfail` marker from `test_writeback_reuses_its_statements`.
 - **Verify:** the `src/` diff is `data/model.py` only, with no column/table/index line;
   `tests/test_writeback.py` untouched; no `xfail` left. The writeback, statement, server, cancel and
   update unit tests pass. A CLI drive in a throwaway site, 100 tasks with one failure through
@@ -339,3 +339,9 @@ exactly that signature is allowed and recorded; anything else red blocks.
   Its SQL-shape check was compiled offline against the psycopg dialect (the SET order differs from
   SQLite's; the check compares sets). Verify on 3.14.10: 25 passed, 1 xfailed, 1 deselected; the
   PostgreSQL module collects the new test and skips (24 skipped).
+- **P2:** the statements are a `functools.cache`d private classmethod, `Task.__result_statements`,
+  which returns the UPDATE, the SELECT and the `(column, bind key)` pairs. Compiled offline, the
+  prebuilt UPDATE's SQLite text equals the reference statement's apart from bind names, and its
+  psycopg text carries the same casts (`::UUID`, `::TIMESTAMP WITH TIME ZONE`, `::SMALLINT`).
+  Verify on 3.14.10: 26 passed, 32 deselected (`-m unit`); the CLI drive (100 tasks, `-b1 -f`,
+  one failure) held every post-condition.

@@ -234,7 +234,6 @@ def test_applied_values_match_reference(task_db, name: str) -> None:
 
 
 @mark.unit
-@mark.xfail(strict=True, raises=AssertionError, reason='the writeback builds a new statement for every result')
 def test_writeback_reuses_its_statements(task_db, caplog: pytest.LogCaptureFixture, monkeypatch) -> None:
     """The writeback executes one UPDATE object and at most one SELECT object for every result.
 
