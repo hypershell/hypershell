@@ -250,6 +250,22 @@ and after `group-advance-strands-lower-group`. Pre-existing, and found by that c
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
 **Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
 
+## A non-integer task group is accepted at submit time
+
+The inline `group:` tag, `-t group:…` and a `--from-json` record's `group` key accept any value.
+SQLite stores a non-integer one as text in the integer column, while PostgreSQL rejects it at
+insert. 2.8.3 runs text groups after every integer group. `group-advance-strands-lower-group`
+needed two guards in the scheduler against them, and `group:nan` is stored as NULL, which kills
+the committer on `NOT NULL` and hangs the run, before and after that fix. The maintainer wants an
+integer group enforced at submit time: a whole file read ahead and refused before anything is
+inserted, and on a pipe an error on just the offending line. This is a behaviour change, and
+whether it ships in a 2.8.x patch or 2.9 only is open. Pre-existing, and found by that cycle's
+review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW
+cycles 2 and 3); same committer death as `issues/database-locked-during-ingest-hangs.md`*
+**Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
+
 ## Concurrent first submits can collide on the reserved source row
 
 `Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
@@ -469,10 +485,10 @@ TimescaleDB scenario module instead.
 
 ## A hung integration test costs the whole CI job timeout
 
-Integration tests run commands in process with no per-test time limit, so a hang runs the CI job to
-its `timeout-minutes` and the log names no failing test. `group-advance-strands-lower-group` hit
-this with a hang in about 1–3% of grouped runs under load. A per-test limit would turn a hang into
-a fast, named failure.
+Integration tests run each command as a subprocess with no timeout and no per-test time limit, so
+a hang runs the CI job to its `timeout-minutes` and the log names no failing test.
+`group-advance-strands-lower-group` hit this with a hang in about 1–3% of grouped runs under load.
+A subprocess or per-test timeout would turn a hang into a fast, named failure.
 
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/`*
 **Seed:** [`issues/integration-test-hang-timeout.md`](issues/integration-test-hang-timeout.md) · *status: unshaped*

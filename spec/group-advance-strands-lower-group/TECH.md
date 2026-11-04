@@ -3,10 +3,10 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: done
+current_phase: P5
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -96,7 +96,7 @@ phases:
     docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
 - id: P5
   name: 2.8.4 port trial and final gate
-  status: done
+  status: in_progress
   satisfies:
   - R9
   - R7
@@ -122,8 +122,8 @@ phases:
 review:
   last_reviewed_commit: eca86c8
   verdict: changes-requested
-  blocked_reason: 'Review cycle 3 (last): O1 LOW server.py R5 warning lost after a
-    text group starts first; O2 LOW seed prose. Human gate; non-convergence escalation.'
+  blocked_reason: 'review 3 (human ruling 2026-11-04, narrow fix then scoped review):
+    O1 text group first hides the late-group warning (server.py:274); O2 seed prose'
   cycle: 3
 ---
 # TECH.md — Run task groups in order, and never strand a late one
@@ -320,6 +320,16 @@ coupled core and is made as one edit.
       `echo 0  # HYPERSHELL: group:0` and `echo x  # HYPERSHELL: group:x` through
       `hs cluster FILE -N1 --no-tls`, under a 120 s timer; after the fix rc 0 and both tasks
       succeeded.
+- [x] Review-3 remediation, O1 (maintainer's ruling, narrow fix then a scoped review; triage in
+      `REVIEW.md`). `mark_group_started` tracks only a group that orders against an integer group
+      (`numbers.Real`) as `highest_started_group`, so a text group started first never becomes
+      the tracked value and the late-group warning still fires for later integer groups. A text
+      group is never compared, so it still never raises (the N1 tolerance), and
+      `last_scheduled_group` is still recorded for every group.
+- [x] Red first, at `eca86c8`'s `src`: `test_late_lower_group_warns_after_text_group_started_first`
+      (`unit`, the reviewer's scenario replayed in-process on SQLite under `forever_mode`): group
+      `x` is scheduled first, then 5, then a late 0 committed while 5 runs; the one late-group
+      warning names groups 0 and 5.
 - **Verify:** the frontmatter `verify:`.
   - `tests/test_groups.py` and `tests/test_retry_gate.py` are identical to `b31c66e`, and there
     is no `xfail` in the new file.
@@ -431,6 +441,12 @@ is unchanged.
       is not in this phase's unchanged list; the CLI help strings are untouched. The deferred
       "database is locked" hang is seeded as `issues/database-locked-during-ingest-hangs.md`
       (unshaped, fix, small, public) with its `ROADMAP.md` entry.
+- [x] Review-3 remediation. O2: `issues/integration-test-hang-timeout.md` and its `ROADMAP.md`
+      entry say the integration tests run each command as a subprocess (`subprocess.run` in
+      `tests.main`, `tests/__init__.py`) with no timeout, not in process, and point the fix at a
+      subprocess or per-test timeout, not thread handling. The maintainer's seed: a non-integer
+      group is accepted at submit time, seeded as `issues/group-tag-integer-validation.md`
+      (unshaped, fix, small, public) with its `ROADMAP.md` entry.
 - **Verify:** the frontmatter `verify:`.
   - Each of the three files mentions the whole file being read first (`whole file`,
     `entire file` or `in full`), `best effort`, and `warning`.
@@ -474,6 +490,8 @@ conflict, fix the placement in P2's or P3's files under a P5 amendment note, and
       of 3.11, 3.12, 3.13 and 3.14. The known flakes (the TLS localhost `ConnectionResetError`,
       and `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade`) may each be rerun once, and
       every rerun is recorded.
+- [ ] Review-3 remediation: rerun the port trial at the O1 commit, and the full suite once on
+      each of 3.12 and 3.14 (the maintainer's gate), with the same flake rule.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/group-advance-strands-lower-group/TECH.md` (state and build record) only.
 
@@ -673,6 +691,29 @@ foreman's plan-gate ruling on PLAN §5 risk 1 is recorded as a seed,
   moment, so the holder could not take the exclusive lock its commit needs: the same fixed-sleep
   timing race, which fails in a different place. The test and `data/upgrade.py` are identical to
   `b31c66e`, and this cycle touches no upgrade code. Neither TLS flake appeared.
+
+**Review-3 remediation (maintainer's ruling, triage in `REVIEW.md`), P2 and P4.** Same environment
+substitution as above.
+- **O1 red** (3.12, `src` identical to `eca86c8`; the tree's `src` had no change since):
+  `test_late_lower_group_warns_after_text_group_started_first` failed 2 of 2 on `assert 0 == 1`
+  (no late-group warning) after the scheduler ran `x`, then 5, then the late 0. **Green:** 2 of 2
+  passed after the fix.
+- **The fix.** `mark_group_started` gates its comparison on `isinstance(group, numbers.Real)`, in
+  place of the N1 `try`/`except TypeError`. Every value SQLite or PostgreSQL returns for the
+  column is an `int`, a `float`, a `str`, `bytes` or `None`, so a `Real` group is always ordered
+  against the tracked one, which is itself always `Real`; a text group is never compared, never
+  tracked, and never raises. `last_scheduled_group` is still recorded for every group. The N1
+  audit table above is otherwise unchanged.
+- **CLI drive** (3.12, `--no-tls`, fresh sites): a `--forever` cluster fed one-line files by
+  `hs submit -f`, 6 s apart. `x, 5, 2` ran `x 5 2` and warned "Starting task group 2 after task
+  group 5" (no warning before the fix, per review cycle 3); `5, 2` and `5, x, 2` warned the same.
+  No `TypeError` anywhere. N1's two-line file (`group:0`, then `group:x`) gave rc 0, both rows
+  done. Pipes with pauses exited early on the known stream-stop item, so they were not used.
+- **O2** and **the maintainer's seed:** prose only; every `issues/` link in `ROADMAP.md` resolves.
+- Named gates (3.12): `tests/test_group_order.py tests/test_groups.py tests/test_retry_gate.py`
+  `55 passed`, no rerun. Verify (3.12, `uv run` stripped, frozen offline venv): P2 rc 0 (`40
+  passed` unit; the restart drive ran group 0 with no late warning; the text-group test `1
+  passed`); P4 rc 0.
 
 ---
 

@@ -237,6 +237,27 @@ def test_late_lower_group_runs_after_current(task_db: Engine, caplog: pytest.Log
     assert reached_final is not forever_mode
 
 
+@mark.unit
+def test_late_lower_group_warns_after_text_group_started_first(task_db: Engine,
+                                                               caplog: pytest.LogCaptureFixture) -> None:
+    """A group SQLite stores as text, started first, does not hide a later late-group warning."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    text_id, = commit_tasks('x')
+    scheduler = make_scheduler(forever_mode=True)
+    assert first_bundle(scheduler) == [('x', text_id)]
+    succeed(text_id)
+
+    high_id, = commit_tasks(5)
+    assert first_bundle(scheduler) == [(5, high_id)]
+    late_id, = commit_tasks(0)
+    succeed(high_id)
+
+    assert first_bundle(scheduler) == [(0, late_id)]
+    warnings = late_group_warnings(caplog)
+    assert len(warnings) == 1
+    assert 'task group 0' in warnings[0] and 'task group 5' in warnings[0]
+
+
 # --- Input in ascending order that begins below the default group ----------------------------------
 
 @mark.unit

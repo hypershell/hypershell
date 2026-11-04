@@ -630,3 +630,30 @@ sentence, the N2 prose and the ruled database-locked seed.
 - **Triggered.** O1 is a CONFIRMED finding in `server.py`, which is high-blast-radius core.
 - This is cycle 3 of ≤3 without convergence, so it stops and escalates: a human must sign off
   before any further step.
+
+## Triage (human gate) — cycle 3
+
+Cycle 3 (`0564295`, reviewing `eca86c8`) confirmed that N1 and N2 are fixed. It requested changes
+for two LOW findings, O1 in `server.py` and O2 in seed prose. It was the last cycle allowed and did
+not converge, so the foreman stopped and asked the maintainer. The maintainer ruled on 2026-11-04,
+choosing "Fix + quick review": a narrow fix, then a quick scoped blind review of only that diff,
+then publish.
+
+The maintainer's seed instruction, verbatim:
+
+> "I did not think we allowed non-integer group IDs. In SQLite, I understand the types are more of a suggestion; are you saying, that if a naive user applies a non-integer group ID, it breaks our logic in a way that is unexpected? If so, we should make a note, and commit an issues/ seed calling this out and have it scoped to guard against this by enforcing integer group ID at submit time both bulk (read ahead whole file) and over pipe (limiting to error on just the occurance)."
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| O1 · LOW · CONFIRMED | fix, narrow | In `Scheduler.mark_group_started` (`server.py:274`), record a group as `highest_started_group` only when it is comparable with an integer group, so a text group never becomes the tracked value and the late-group warning still fires for later integer groups. Keep the N1 tolerance: a non-comparable group never raises. **Red first:** a deterministic test that fails at `eca86c8` and passes after the fix, on the reviewer's scenario (SQLite; `x` starts first, then 5, then a late lower integer group; the warning names both integer groups). A unit-level replay of the Scheduler path is preferred. |
+| O2 · LOW · CONFIRMED | fix | Correct `issues/integration-test-hang-timeout.md` (lines 15 and 28) and its `ROADMAP.md` entry: the integration tests run each command through `subprocess.run` with no timeout (`tests/__init__.py:36`), not in process, and the fix direction is a subprocess or per-test timeout, not thread handling. |
+| Maintainer's seed: a non-integer group is accepted at submit time | seed | Write `issues/group-tag-integer-validation.md` (unshaped, fix, small, public) with a `ROADMAP.md` entry. Problem: the inline `group:` tag accepts non-integer values, which SQLite stores as text and PostgreSQL rejects at insert; 2.8.3 runs them with text after integers, this cycle needed the N1 and O1 guards, and `group:nan` is stored as NULL and hangs the run on the committer's `NOT NULL`, on base too. Scope: enforce an integer group at submit time, refusing a whole file read ahead before anything is inserted, and erroring on just the offending occurrence of a pipe or stream, across inline tags and `--from-json`. Open for shaping: a behaviour change, so 2.8.x patch or 2.9 only. Cross-reference the database-locked seed and N1/O1. |
+| Pre-existing items in "Out of scope, observed" | unchanged | `group:nan` is covered by the new seed. The others stay as recorded. |
+
+Gates for the remediation:
+- the O1 test fails at `eca86c8` and passes after the fix;
+- `test_group_order.py`, `test_groups.py` and `test_retry_gate.py` pass;
+- the full suite once on 3.12 and once on 3.14;
+- `port-trial.sh` passes, with the recorded uv cache substitution.
+
+Next: a scoped blind review (cycle 4, scoped) of only the remediation diff, then publish.

@@ -12,9 +12,10 @@ lane: public
 
 ## Problem
 
-Integration tests run `hs cluster` and similar commands in process through `tests.main`
-(`tests/__init__.py`), with no per-test time limit. The project does not use a pytest timeout
-plugin (`pyproject.toml` `[tool.pytest.ini_options]`). When a run hangs, as
+Integration tests run `hs cluster` and similar commands as a subprocess, through
+`subprocess.run` in `tests.main` (`tests/__init__.py`), with no timeout on that call and no
+per-test time limit. The project does not use a pytest timeout plugin (`pyproject.toml`
+`[tool.pytest.ini_options]`). When a run hangs, as
 `group-advance-strands-lower-group` showed for about 1–3% of grouped runs under load, the test
 never returns. The CI job then runs until its `timeout-minutes` (20 for the test matrix in
 `.github/workflows/tests.yml`) and is cancelled. The log names no failing test, and every other
@@ -24,8 +25,8 @@ result in that job is lost.
 
 Out of scope for `group-advance-strands-lower-group`, which fixes the hang it found and adds a
 deterministic unit test for it. A suite-wide limit is test-harness work with its own choices: a
-plugin (a new dev dependency) or a limit in the harness itself, how it ends threads that do not
-exit inside an in-process run, and what limit suits the slowest tests. **Pre-existing.**
+timeout on the subprocess in `tests.main` (which kills the hung command) or a per-test limit
+from a plugin (a new dev dependency), and what limit suits the slowest tests. **Pre-existing.**
 
 ## Outcome / vision
 
