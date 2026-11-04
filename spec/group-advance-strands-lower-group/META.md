@@ -129,3 +129,20 @@
   and stop if `git diff --stat {base}...HEAD` touches commits outside `{base}..HEAD`. Inject the
   diffstat against that same ref. This tightens the blind-review input and weakens no gate.
 - **Confidence:** high · **Effort:** small
+
+## F10 — The verdict rule gives a LOW prose or log finding on the last cycle no lane but non-convergence
+`origin=hs-review:step4 severity=low category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** Cycle 3, the last allowed, found two CONFIRMED LOW items: a missing WARNING on
+  an undocumented input, and three sentences of seed prose. Neither changes order, exit status or
+  data. The rubric's only routes are "CONFIRMED → changes-requested" and the narrow deferral, so
+  both forced a non-convergence escalation. The foreman had asked for blocking findings and
+  observations to be separated, and the rubric gives no basis for that split.
+- **Skill cause:** "Verdict & loop" has no guidance for a CONFIRMED finding whose remedy is prose
+  or a log line, nor for how to grade such a finding on the final cycle. Every severity routes the
+  same way.
+- **Recommended fix:** add a final-cycle note to "Verdict & loop". CONFIRMED LOW findings that
+  change no behaviour beyond a message or prose still set changes-requested. The report lists them
+  apart, as "small, no behaviour change", so the human can rule them fixed-without-re-review or
+  deferred. The human gate stays mandatory, and no finding becomes non-blocking on the reviewer's
+  own say-so.
+- **Confidence:** med · **Effort:** small

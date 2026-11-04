@@ -420,3 +420,213 @@ Gates for cycle 3:
 - `test_group_order.py`, `test_groups.py` and `test_retry_gate.py` pass;
 - the full suite once on each of 3.11, 3.12, 3.13 and 3.14;
 - `port-trial.sh` passes, with the recorded uv cache substitution.
+
+## Review cycle 3 — changes-requested (2026-11-04)
+
+- **Reviewed commit:** eca86c8  ·  **Base:** b31c66e (the fork point; `origin/develop` is at
+  bc6547a)  ·  **Date:** 2026-11-04
+- **Verdict:** changes-requested, on two CONFIRMED LOW findings. O1, in `server.py`: the R5
+  warning is lost for the rest of a run once a non-integer group starts first. O2: a seed added on
+  this branch misdescribes how integration tests run. Neither changes run order, exit status or
+  stored data. N1 and N2 are remediated, and F1–F3 stay fixed.
+- **Cycle:** 3 of ≤3, the last one allowed. The loop has not converged, so this stops and goes to
+  the human (the foreman, as judge).
+
+**Mode:** one fresh blind reviewer (no `debate`) made a full pass over
+`git diff b31c66e...HEAD -- . ':(exclude)spec/'`, graded against every R-ID. It looked hardest at
+the cycle-2 remediation, `git diff 0378250..eca86c8 -- . ':(exclude)spec/'`.
+- **It saw:** `GOAL.md`, this file (cycles 1 and 2 and their triage), `invariants.md`,
+  `review-rubric.md`, `AGENTS.md`, and the diff. It was pointed at these files by path rather than
+  given their text inline. The orchestrator relayed the foreman's rulings (F1 ratified, the
+  `-d`/`-T` reading, N1 narrow), the N1 probe list and the known pre-existing items.
+- **It did not see:** `PLAN.md`, `TECH.md`, `META.md`, `research/` or `port-trial.sh`. The
+  orchestrator read only TECH's frontmatter, and META's finding headings only after the reviewer
+  returned, to number the meta-note.
+- **Contract drift:** none. `GOAL.md`'s last commit is still `b242fc3`, which precedes the plan.
+
+### Verification run
+
+Every run used frozen offline environments, ran in a throwaway site with `--no-tls`, and had its own
+process group and kill timer.
+
+- **Unit suite, HEAD:** 356 passed on each of 3.11, 3.13 and 3.14.
+- **Full suite, HEAD 3.12:** 652 passed, 64 skipped, 0 failed in 393 s, with no rerun.
+- **`test_group_order.py`, `test_groups.py` and `test_retry_gate.py`, HEAD 3.12:** 54 passed in
+  each of two runs. `tests/test_groups.py` is unmodified against `b31c66e`.
+- **Red checks:**
+  - `test_cluster_runs_group_stored_as_text` at `5c7f381` failed 2 of 2 (`assert 5 == 0`). At HEAD
+    it passes alone in 3.3 s, and in every group-file and full-suite run.
+  - HEAD's `test_group_order.py -m unit` on a `b31c66e` extract: 16 failed, 1 passed, as in
+    cycle 2.
+- **R9 port, `port-trial.sh` (orchestrator), unedited, at eca86c8 on `origin/master` 4d5771b
+  (2.8.3):**
+  - #68 hit its one known conflict, which the script resolved.
+  - This cycle then applied with no conflict: `M` `client.py`, `cluster/local.py`,
+    `cluster/remote.py`, `cluster/ssh.py`, `data/model.py`, `server.py`; `A`
+    `tests/test_group_order.py`, plus #68's `tests/test_retry_gate.py`.
+  - The group tests gave 54 passed in 124.5 s, with no rerun. That includes the N1 test, so the
+    N1 fix holds on 2.8.3 + #68.
+  - The trial worktree was removed, `master` stayed at dd0264c, and the worktree list and every
+    branch ref were unchanged.
+  - **Environment substitution,** as in cycle 2: `UV_OFFLINE=1`, `UV_NO_GROUP=docs`,
+    `UV_PYTHON_DOWNLOADS=never`, `UV_NO_CONFIG=1`, a local CPython 3.12.16,
+    `UV_PROJECT_ENVIRONMENT` outside the repo, and `UV_CACHE_DIR` pointed at this review's own
+    copy of the builder's uv cache, which holds `hatchling`.
+- **Orchestrator's own reproductions:**
+  - **N1's two-line file** (`group:0`, then `group:x`): rc 0 at HEAD and at base, both rows
+    complete, no `TypeError`.
+  - **O1,** through a `--forever` cluster fed one-line files by `hs submit -f`, 6 s apart:
+    - `x, 5, 2`: HEAD runs all three with no late-group warning. Base runs `x` and strands 5
+      and 2.
+    - `5, 2` (control): HEAD logs "Starting task group 2 after task group 5".
+    - `5, x, 2`: HEAD logs the same warning. Only a text group started first loses it.
+  - **O2:** `tests/__init__.py:36`, `main()` calls `subprocess.run`.
+  - A pipe with pauses between its lines left rows unscheduled with rc 0 on both HEAD and base.
+    That is the known stream-stop item, so it is not a finding.
+
+### Cycle-2 remediation
+
+- **N1 — remediated.**
+  - **Cycle 2's CLI case** (`echo a`, then `echo b  # HYPERSHELL: group:x`, through
+    `hsx bad.txt -N1 --no-tls`): rc 0 at HEAD and at base, with both rows done. At `5c7f381` it
+    gives rc 5 with the `TypeError`, and the `x` row is left scheduled.
+  - **At scale** (6,001 lines in groups 0–2, with one `group:x` line mid-file, `-N4`): HEAD gives
+    rc 0 in 51 s, with all 6,001 complete, the groups in order and `x` last.
+  - **The foreman's probes,** at HEAD against base:
+    - **Text and integer groups mixed across restarts.** HEAD gives rc 0 at every step, integers
+      ascending and then the text groups, for each of: `--repeat`; a second file on the same
+      database; `hs submit -f` then a bare `hsx --restart`; `--restart --update` adding `y`, 2
+      and -1. Base hangs at each of these.
+    - **A kill with `x` in flight, then `--restart`:** `x` is reverted and the run exits 0.
+    - **A base-built database with 0 stranded below a finished `x`:** HEAD's `--restart` runs 0
+      and exits 0.
+    - **`--forever` with live submits** of `x`/1, then 0/`z`, then -1: HEAD runs `1, x, 0, z,
+      -1` and warns "0 after 1" and "-1 after 1". Base strands 0 and -1.
+    - **A late lower group after a text group started,** on a pipe: HEAD runs it, rc 0. Base hangs
+      with it stranded. The warning gap is O1.
+    - **Eager and plain, with failures in and around `x`:** HEAD matches base row by row. An
+      exhausted failure in `x` as the last group gives rc 0, and a new file after it halts with
+      "Failed task group x", the F1 hold as ruled. A retryable failure in `x` is retried. An
+      exhausted failure in group 0 halts before `x`.
+    - **`--no-db`:** identical, rc 0.
+  - **Other values the ingest paths store in the group column.** Each runs to rc 0 at HEAD:
+    - inline `1.5` is REAL and runs between 0 and 2;
+    - inline `''` and `0x10`, JSON `"x"`, `[1]` and `{"a":1}`, and `hs submit -t group:x` are
+      TEXT and run after the integers;
+    - `true`, `1e3`, JSON `"7"` and `inf` are numeric;
+    - inline and JSON `null` take the column default, 0.
+
+    `hs submit -g x` is rejected by argparse. Inline `nan` is out of scope; see below.
+  - **Audit of group comparisons:**
+    - `lowest_incomplete_group` uses SQLite `min()`, which orders numbers before text.
+    - `increment_group` and `starting_group` compare only for equality, which is safe across
+      types.
+    - `<` and `max` appear only inside the new `try`.
+  - **PostgreSQL, by reasoning only:** `group` is INTEGER, so text is rejected at insert, as on
+    base. Every value read back is an integer, so the `except` branch is unreachable there.
+  - **Catching `TypeError`:** the `try` holds only the two group comparisons, an f-string and a
+    `log.warning`, and every value comes from the database. It hides no other bug. Its side effect
+    is O1.
+- **N2 — remediated.** The seed and its ROADMAP entry now say "on an empty database". On a fresh
+  database `hsx empty.txt` times out on both HEAD and base. After a finished run, it exits 0 in
+  about 2 s on both.
+- **The `-d`/`-T` reading — documented accurately** (`docs/_include/client_help.rst:91-92`). An
+  idle `hs client -d 4 -T 3` lives 8.5 s at HEAD against 6.5 s at base, and `-T 3` alone lives
+  4.5 s on both. CLI help text is unchanged.
+- **The database-locked seed and its ROADMAP entry — accurate.** A 20,000-line file with
+  `BEGIN EXCLUSIVE` held from 1.5 s for 60 s hangs both HEAD and base, killed at 120 s after the
+  committer's `database is locked` CRITICAL. Stack dumps put the loader in `put_task`, and the
+  server in `wait_submitter`, with HEAD's `LocalCluster` in `wait_scheduling`, as the seed says.
+  Every `issues/` link in `ROADMAP.md` resolves.
+- **F1, F2 and F3 stay fixed:**
+  - F1: the mixed-group repeat, second-file, update and restart probes run ascending, and the F1
+    unit tests pass.
+  - F2: `test_cluster_clients_with_timeout_wait_for_file` passes.
+  - F3: the prose is unchanged since cycle 2.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `Task.lowest_incomplete_group`, `Task.increment_group` (`data/model.py`) | `--forever` live submits; a late group on a pipe; unit (b) | ✅ |
+| R2 | Same, plus `Scheduler.next_tasks` and `Scheduler.starting_group` (`server.py`) | Every N1 probe exits 0 where base hangs; F2 test; unit (a) | ✅ |
+| R3 | `ServerThread.start_threads` + `is_file_input`; `starting_group` | Mixed text and integer files run ascending; the 6,001-line run; integration (c) | ✅ |
+| R4 | Atomic next-group query + `starting_group` | `hs submit` then `--restart`; a second file; `--repeat` | ✅ |
+| R5 | `Scheduler.mark_group_started` | Warnings name both groups in integer runs and after an integer first group | ❌ partial — O1 |
+| R6 | Lowest-incomplete start | A base-stranded database below `x` runs 0 under `--restart`, rc 0 | ✅ |
+| R7 | #68 gates; the failure hold in `starting_group` | `test_groups.py` unmodified and passing; failure probes match base row by row; `--no-db` identical | ✅ |
+| R8 | `tests/test_group_order.py` | (a) and (b) red on base; the N1 test red at `5c7f381`, green at HEAD; no sleeps, threads or repetition | ✅ |
+| R9 | No schema, wire, CLI or config change | `port-trial.sh` 54 passed, no conflict, `master` unmoved; static check | ✅ |
+| R10 | `task_groups_alt.rst`, `AGENTS.md`, invariants §3 | Sentences present and true at HEAD; CLI help and `share/` unchanged | ✅ |
+
+Unmapped changes: none. The cycle-3 delta is the N1 `try`/`except` and its test, the ruled `-d`/`-T`
+sentence, the N2 prose and the ruled database-locked seed.
+
+### Findings
+
+#### [LOW/CONFIRMED] O1 — A non-integer group started first turns off the R5 warning for the rest of the run
+- **Where:** `src/hypershell/server.py:274`, `Scheduler.mark_group_started`. With nothing tracked
+  yet, the line records the started group as `highest_started_group` without comparing it.
+- **Failure scenario:**
+  - On SQLite, stream input or a later `hs submit` starts a text group such as `x` first.
+  - Every later comparison against `'x'` raises `TypeError`, which line 275 swallows, so the
+    tracked value stays `'x'` for the rest of the run.
+  - When an integer group then starts below an integer group that has already started, no WARNING
+    is logged. R5 requires one.
+  - Order, exit status and data are correct; only the log line is missing. Base strands the same
+    input instead. The N1 ruling ("when the comparison is impossible, skip the warning and keep
+    the tracked value unchanged") does not cover this first assignment.
+- **Evidence:**
+  - Reviewer, on a pipe: `x`, then 5, then a late 0. HEAD gives rc 0 and runs `x, 5, 0` with no
+    WARNING. With `group:9` in place of `x`, HEAD warns "Starting task group 5 after task group 9"
+    and "Starting task group 0 after task group 9". Base hangs (rc 124), with 5 and 0 stranded.
+  - Orchestrator, on `--forever`: `x, 5, 2` gives no warning. `5, 2` and `5, x, 2` each warn
+    "Starting task group 2 after task group 5".
+- **Touches:** R5. `server.py` is core, so the human gate applies.
+- **Suggested fix:** record as the highest started group only a value that is comparable with an
+  integer group, so a text group never becomes the tracked value. Extend the N1 test or add a unit
+  replay.
+
+#### [LOW/CONFIRMED] O2 — A shaping-era seed and its ROADMAP entry misdescribe how integration tests run
+- **Where:**
+  - `issues/integration-test-hang-timeout.md:15`: "run `hs cluster` and similar commands in
+    process through `tests.main`";
+  - `issues/integration-test-hang-timeout.md:28`: "threads that do not exit inside an in-process
+    run";
+  - `ROADMAP.md:472`: "run commands in process".
+
+  It was added on this branch in `9645a2d`, during shaping. Cycles 1 and 2 did not grade it.
+- **Failure scenario:** `tests/__init__.py:36`, `main()`, runs every command through
+  `subprocess.run` with no timeout, and no test builds a cluster or server in process. The seed's
+  claim that a hang costs the CI job its whole `timeout-minutes` holds. Its in-process premise
+  points the eventual fix at thread handling, where a subprocess timeout would be enough.
+- **Evidence:** the reviewer ran
+  `grep -rln "run_local\|LocalCluster(\|serve_from(\|serve_file(\|ServerThread(" tests/`, which
+  returns nothing. The orchestrator read `tests/__init__.py:36`.
+- **Touches:** prose accuracy of a graded seed (review rubric), as with cycle 1's F3.
+- **Suggested fix:** say the tests run each command as a subprocess with no timeout, and drop the
+  in-process thread clause from "Why it was deferred".
+
+### Blocking or observation (for the judge)
+
+- **Under the rubric, every CONFIRMED in-scope finding blocks.** So O1 and O2 set
+  changes-requested. The reviewer labelled both observations, because neither changes order,
+  exit status or data.
+- **Both fixes are small.** O1 is one guard in `mark_group_started` plus a test. O2 is three
+  sentences of prose.
+- **This was the last review cycle allowed,** so the judge decides how they close.
+
+### Out of scope, observed (pre-existing, unchanged by this diff)
+
+- **Inline `group:nan` hangs both HEAD and base.** SQLite stores NaN as NULL, so the `NOT NULL`
+  constraint kills the committer. It is the same mechanism as the database-locked seed, which
+  could name it.
+- **A run halted by an exhausted failure exits rc 0** on both HEAD and base.
+- **The stream-stop item, the empty-input hang and the database-locked hang** reproduce on both,
+  unchanged.
+
+### Human-gate triggers
+
+- **Triggered.** O1 is a CONFIRMED finding in `server.py`, which is high-blast-radius core.
+- This is cycle 3 of ≤3 without convergence, so it stops and escalates: a human must sign off
+  before any further step.
