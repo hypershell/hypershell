@@ -16,9 +16,13 @@ lane: public
 database (`--no-db`) serves that queue: a server with a database schedules from its database, and
 nothing drains the live queue.
 
-- **Before zone-dispatch (2.8.x, 2.9.0a2):** a server with a database handed the submitted bundles to
-  its clients, but their rows were not in its database. Their confirmations failed and their results
-  were refused, so the tasks ran and nothing was recorded.
+- **Released (2.8.x, 2.9.0a2):** a server with a database handed the submitted bundles to its
+  clients, but their rows were not in its database. The tasks ran, and the server's Confirm and
+  Receiver threads each died on an uncaught `StaleDataError`, after which the server recorded no
+  results for the rest of the run.
+- **Unreleased `ec75169` (zone-dispatch's base):** only the Confirm thread died. The Receiver
+  refused the submitted tasks' results as stale, so those tasks ran and nothing was recorded for
+  them.
 - **zone-dispatch (Z2), before its review-1 remediation:** nothing drained the queue, so the
   submission hung and no task ran.
 - **Since that remediation:** `hs submit -q` asks the server first and, against a server with a
@@ -35,6 +39,7 @@ If not, the refusal stands and the docs say so (they already do).
 
 ## Refs
 
-- `spec/zone-dispatch/REVIEW.md` (cycle 1, F4, and the triage that ruled the refusal).
+- `spec/zone-dispatch/REVIEW.md` (cycle 1, F4, and the triage that ruled the refusal; cycle 2, F6,
+  for what the released servers did).
 - `src/hypershell/core/dispatch.py` (`Dispatcher.takes_submissions`), `src/hypershell/submit.py`
   (`LiveSubmitThread.check_server`).

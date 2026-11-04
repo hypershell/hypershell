@@ -164,15 +164,19 @@ submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─stage
 The queue exposes four threading `queue.Queue`s served in-process by the manager's request
 handling: `scheduled` (task bundles submitted live, without a database), `completed` (results),
 `heartbeat` (client liveness), `confirmed` (bundle acks); and one `Dispatcher` (`core/dispatch.py`),
-whose single method `request` hands work to clients. The scheduler stages stamped tasks in one
-pool per zone; a client calls `request` with its id, zone and advertised size, and the call runs
-on the handler thread of that client's own connection and returns, on it, up to that many tasks
+whose two remotely callable methods are `request`, which hands work to clients, and
+`takes_submissions`, which `hs submit -q` calls to learn whether the server serves its live queue
+(only a server without a database does). The scheduler stages stamped tasks in one pool per zone;
+a client calls `request` with its id, zone and advertised size, and the call runs on the handler
+thread of that client's own connection and returns, on it, up to that many tasks
 cut from its zone's pool (JSON text both ways, bounded wait, first-come-first-served). There is no manager child process: `QueueServer.start` runs its own
 accept loop around the stock `multiprocessing.managers.Server` on daemon threads of the server
 process (`core/queue.py` `_InProcessServer`), whose handler threads and the server's own threads
 share the same queue objects. That loop leans on CPython privates; `tests/test_queue.py`
 `TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`)
-on the queues and the one method `request` on the dispatcher.
+on the queues and a pinned two-method surface (`DISPATCH_EXPOSED`: `request` and
+`takes_submissions`) on the dispatcher; `tests/test_dispatch_version.py` pins the latter, so a
+method added to or dropped from that pickle-framed RPC surface fails a test.
 
 **Two modes change the picture — check for them before assuming DB behavior:**
 - `in_memory` (in-memory SQLite): the `Scheduler` is `None` and the server **skips all DB

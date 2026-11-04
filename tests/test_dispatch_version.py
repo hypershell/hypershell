@@ -31,7 +31,7 @@ from pytest import mark, fixture
 # Internal libs
 from hypershell.core import queue as queue_module
 from hypershell.core.queue import (QueueServer, QueueClient, QueueConfig, QueueVersionError, SecureManager,
-                                   QUEUE_EXPOSED, PROTOCOL)
+                                   QUEUE_EXPOSED, DISPATCH_EXPOSED, PROTOCOL)
 from hypershell.client import ClientScheduler
 from hypershell.data.model import DEFAULT_ZONE_ID
 
@@ -80,6 +80,24 @@ def ask(dispatcher, wait: float = 0.0) -> dict:
     """One default-zone work request, decoded."""
     return json.loads(dispatcher.request(json.dumps({'protocol': PROTOCOL, 'client': 'new', 'host': 'h',
                                                      'zone': None, 'size': 5, 'wait': wait})))
+
+
+@mark.unit
+def test_dispatcher_remote_surface_is_pinned() -> None:
+    """A remote client may call exactly `request` and `takes_submissions` on the dispatcher, nothing else.
+
+    The surface is pickle-framed RPC: adding a method to it or dropping one must change this test, both
+    the declared tuple and the surface a connected client is handed.
+    """
+    surface = ('request', 'takes_submissions')
+    assert DISPATCH_EXPOSED == surface
+    with QueueServer(config()) as server:
+        client = QueueClient(config(server.address[1]))
+        client.connect()
+        assert type(client.dispatcher)._exposed_ == surface
+        assert ask(client.dispatcher)['tasks'] == []
+        assert isinstance(client.dispatcher.takes_submissions(), bool)
+        assert not hasattr(client.dispatcher, 'stage')
 
 
 @mark.unit

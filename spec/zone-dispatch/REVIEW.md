@@ -490,3 +490,13 @@ The multi-node evidence stands. These fixes touch only cancel, delete and revert
 **Not triggered by a finding.** F5 and F6 are prose in `AGENTS.md`, `issues/` and `ROADMAP.md`. No CONFIRMED finding is in a high-blast-radius file or breaks a security or DB-lifecycle invariant. F5 describes the remote surface of `core/queue.py`, but the code it describes was graded sound.
 
 **The bounded loop does escalate.** This is cycle 2 of ≤3 without convergence, so the human decides the next step.
+
+## Triage (human gate) — cycle 2
+
+Cycle 2 (`04a83b4`, reviewing `32379a4`) confirmed F1–F4 fixed and requested changes on two LOW prose findings. Not a human-gate trigger by finding; the foreman rules as judge (2026-11-04). Cycle 3 is a scoped review of this remediation diff.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| F5 · LOW · CONFIRMED | fix + pin | `AGENTS.md` names both remotely callable dispatcher methods, `request` and `takes_submissions`, wherever it describes the dispatcher's surface. Add a unit test that pins `DISPATCH_EXPOSED` to exactly that tuple, so the pickle-framed RPC surface cannot grow unnoticed. |
+| F6 · LOW · CONFIRMED | fix | `issues/queue-submit-database-server.md` and its `ROADMAP.md` entry state accurately what 2.8.x and 2.9.0a2 did (Confirm and Receiver threads die on an uncaught `StaleDataError`, after which the server records no results), and what `ec75169` did. |
+| Note: `Task.revert_staged` under TimescaleDB ≥ 2.29 | defer to merge | The `hypertable-update-retry` cycle on develop adds a contended-write re-run helper. When Z2 next merges develop after that lands, `revert_staged` goes through the same helper. Record this in TECH as a merge obligation. |

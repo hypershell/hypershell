@@ -3,7 +3,7 @@ slug: zone-dispatch
 title: Zone-aware, demand-driven dispatch (zone, cycle 2)
 kind: feature
 appetite: big
-status: blocked
+status: in_review
 branch: feature/zone-dispatch
 base: develop
 current_phase: done
@@ -139,9 +139,7 @@ phases:
 review:
   last_reviewed_commit: 32379a44c4a1d45511d887edca1be76bbc2b1ef6
   verdict: changes-requested
-  blocked_reason: 'Review cycle 2: F5 AGENTS.md names one dispatcher method (two exposed);
-    F6 seed/ROADMAP misstate 2.8.x/2.9.0a2 submit -q behaviour. Both LOW prose; F1-F4
-    fixed.'
+  blocked_reason: ''
   cycle: 2
 ---
 # TECH.md — Zone-aware, demand-driven dispatch (zone, cycle 2)
@@ -366,6 +364,39 @@ The plan gate is **passed** with these rulings and conditions.
     change is two paragraphs of `submit_*.rst`), and P7's external evidence, which the triage
     let stand. `test_zone_postgres.py` runs in CI.
 
+- **Review-2 remediation (2026-11-04).** Cycle 2 (`04a83b4`, reviewing `32379a4`) confirmed F1–F4
+  fixed and requested changes on F5 and F6, both LOW prose; the foreman's triage (appended verbatim
+  to `REVIEW.md`) ruled F5 fix + pin, F6 fix, and the TimescaleDB note deferred to merge (see
+  *Merge obligations*). P2 reopened; no source change. Gates on the working tree (macOS; a frozen
+  dev venv from `uv sync --frozen --offline` over a copy of the tracked files, standalone 3.12.16;
+  every run in its own process group under a kill timer, in an isolated site):
+  - **Pin test, red by mutation.** `test_dispatcher_remote_surface_is_pinned` passes as built. With
+    `'stage'` added to `DISPATCH_EXPOSED` it fails (`('request', '...ons', 'stage') == ('request',
+    '..._submissions')`); with `'takes_submissions'` dropped it fails (`('request',) == …`); with
+    the registry serving `DISPATCH_EXPOSED + ('stage',)` the served-surface assertion fails. Each
+    mutation was in the test copy only and reverted (`cmp` identical to the tree); green again.
+  - **Zone and dispatch modules, 3.12.16:** 107 passed, 3 skipped (test_zone_postgres, no server):
+    the earlier 106 plus the pin test.
+  - **Full suite, 3.12.16, once:** **830 passed, 67 skipped**: the earlier 829 plus the pin test;
+    the skips and the two fork `DeprecationWarning`s in `test_logging.py` are unchanged.
+  - Not rerun (prose and one unit test; the triage scoped the gates): the other Pythons, parity,
+    skew, the local smoke, P4's Sphinx verify and P7's evidence.
+
+## Merge obligations
+
+- **`Task.revert_staged` under TimescaleDB ≥ 2.29** (review-2 triage, 2026-11-04; deferred to
+  merge). On TimescaleDB 2.29 and later, an UPDATE that waited on another transaction's row lock
+  can match 0 rows although the row still qualifies. `revert_staged` is this cycle's only new
+  UPDATE on `task`, and a spurious 0 there leaves the row stamped, with `completion_time` NULL, in
+  no pool, until `revert_interrupted` at the next start. The `hypertable-update-retry` cycle on
+  `develop` adds a per-row contended-write helper on `Task` that re-runs such a write. **When Z2
+  next merges `develop` after that cycle lands, `revert_staged` goes through the same helper.** The
+  merge keeps what F1 and F2 ruled: a row that no longer qualifies (completed, cancelled or
+  deleted) is skipped and never raises, so the re-run asks whether the row still qualifies
+  (`completion_time IS NULL`), not merely whether it exists (the helper as planned raises
+  `StaleDataError` for a missing row); the pass stays one transaction; and
+  `tests/test_dispatch_staged.py` passes unmodified. Record the resolution in the merge commit.
+
 ## Open rulings ([NEEDS CLARIFICATION])
 
 The build proceeds on each **recommendation** unless the judge rules otherwise. Record any ruling
@@ -583,6 +614,18 @@ run behaves as today. This is the core, novel slice.
   - **§6 invariant.** `AGENTS.md` and `invariants.md` name the staged revert between the heartbeat
     join and the receiver/confirm sentinels, and state that a staged revert never touches a
     completed or cancelled row (its own prose-only commit, before the code).
+- [x] **Review-2 remediation** (triage appended to `REVIEW.md`, 2026-11-04). P2 is reopened again:
+      `takes_submissions` and the seed are its F4 work. No source change.
+  - **F5.** `AGENTS.md` (Architecture) names both remotely callable dispatcher methods, `request`
+    and `takes_submissions`, in both places it describes the dispatcher's surface. Test (red by
+    mutation, since the tuple is already right): `test_dispatcher_remote_surface_is_pinned` in
+    `tests/test_dispatch_version.py` asserts `DISPATCH_EXPOSED == ('request', 'takes_submissions')`
+    and that a connected client's dispatcher proxy is handed exactly that surface (and no `stage`).
+  - **F6.** The seed `issues/queue-submit-database-server.md` and its `ROADMAP.md` entry say what
+    2.8.x and 2.9.0a2 did (Confirm and Receiver threads die on an uncaught `StaleDataError`, after
+    which the server records no results) and what the unreleased `ec75169` did (only Confirm dies;
+    the Receiver refuses those results as stale).
+  - **TimescaleDB note.** Deferred to the next develop merge: see *Merge obligations*.
 - **Touches:** `core/dispatch.py` (new), `core/queue.py`, `core/config.py`, `server.py`,
   `client.py`, `tests/test_dispatch.py`, `tests/test_client_request.py`,
   `tests/test_dispatch_workload.py`, `tests/test_server_fsm.py`, `tests/bench/bench_queue.py`,
@@ -590,7 +633,7 @@ run behaves as today. This is the core, novel slice.
   `share/zsh/site-functions/_hs`, `AGENTS.md`, `.agents/factory/invariants.md`. Review-1
   remediation (amendment): also `data/model.py`, `submit.py`, `tests/test_dispatch_staged.py`,
   `docs/_include/{submit_help,submit_desc}.rst`, `issues/queue-submit-database-server.md`,
-  `ROADMAP.md`.
+  `ROADMAP.md`. Review-2 remediation (amendment): also `tests/test_dispatch_version.py`.
 
 ## Phase P3 — Version handshake
 **Satisfies:** R5, R14 · **Depends on:** P2

@@ -372,12 +372,15 @@ client too.
 ## `hs submit -q` cannot feed a server with a database
 
 `hs submit -q` puts bundles on a server's live queue, which only a server without a database
-serves. Against a server with a database the tasks used to run with their results refused, then
-(in zone-dispatch, before its review-1 remediation) the submission hung; it is now refused at once
-with a clear error. A host that can reach the server but not its database cannot add work to it.
+serves. Against a server with a database, 2.8.x and 2.9.0a2 ran the tasks, but the server's Confirm
+and Receiver threads each died on an uncaught `StaleDataError`, after which it recorded no results
+for the rest of the run; at the unreleased `ec75169` only the Confirm thread died and those tasks'
+results were refused as stale. In zone-dispatch, before its review-1 remediation, the submission
+hung; it is now refused at once with a clear error. A host that can reach the server but not its
+database cannot add work to it.
 
 *Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
-`spec/zone-dispatch/REVIEW.md` (cycle 1, F4)*
+`spec/zone-dispatch/REVIEW.md` (cycle 1, F4; cycle 2, F6)*
 **Seed:** [`issues/queue-submit-database-server.md`](issues/queue-submit-database-server.md)
 
 ## Merged output is interleave-corruptible
