@@ -339,6 +339,18 @@ does. Zones reduce how often this happens without fixing the mechanism.
 *Horizon: long-term · Depends on: — · Refs: —*
 **Seed:** [`issues/head-of-line-blocking.md`](issues/head-of-line-blocking.md)
 
+## Server CPU per task bounds throughput at small bundle sizes
+
+At bundle size 1, the server's main process runs its own scheduling, confirm and writeback
+statements for every task, and the evidence points at its CPU as the throughput ceiling.
+`writeback-prebuilt-update` recovers the writeback's share by building that statement once. The
+scheduler and confirm paths may carry the same per-call cost, and batching results across bundles
+is a further option.
+
+*Horizon: mid-term · Depends on: `writeback-prebuilt-update` (the measurement method) ·
+Refs: —*
+**Seed:** [`issues/server-per-task-statement-overhead.md`](issues/server-per-task-statement-overhead.md) · *status: unshaped*
+
 ---
 
 # Part II — The 2.9.0 feature cycle
