@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/writeback-prebuilt-update
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -55,14 +55,14 @@ phases:
     err.log"
 - id: P3
   name: 'R1 CPU evidence: interleaved in-process measurement'
-  status: pending
+  status: done
   satisfies:
   - R1
   depends_on:
   - P2
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: kt() { uv run --frozen python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
     if r<0 else r)' "$@"; }; kt 1800 python spec/writeback-prebuilt-update/cpu_bench.py
     && kt 120 python spec/writeback-prebuilt-update/check_evidence.py r1
@@ -232,16 +232,16 @@ binds only its values. Behaviour, SQL and stored values unchanged.
 **Goal:** the CPU per result is recorded for 2.8 (`b819de6`), develop (`bc6547a`) and the fix, with
 the method, and meets the bar.
 
-- [ ] With the fix committed (P2), run `uv run --frozen python spec/writeback-prebuilt-update/cpu_bench.py`
+- [x] With the fix committed (P2), run `uv run --frozen python spec/writeback-prebuilt-update/cpu_bench.py`
       under a kill timer (defaults: N 5,000, six recorded rounds after one warm-up, 300 s per
       child). Do not edit the script's method. If it must change, amend PLAN §2.3 and say why in the
       commit body.
-- [ ] Create `spec/writeback-prebuilt-update/EVIDENCE.md` with: **R1 method** (one paragraph,
+- [x] Create `spec/writeback-prebuilt-update/EVIDENCE.md` with: **R1 method** (one paragraph,
       pointing at `cpu_bench.py`'s docstring); the host line (machine, OS, Python, SQLAlchemy, CPUs);
       the Markdown table the script prints; and the script's JSON summary as a fenced `json` block
       directly after the marker line `<!-- evidence:r1 -->`. State the fix's margin against 2.8 and
       against develop as percentages.
-- [ ] If the bar is missed, **stop and escalate**. Don't tune the benchmark to pass.
+- [x] If the bar is missed, **stop and escalate**. Don't tune the benchmark to pass.
 - **Verify:** the script exits 0 (bar met on a fresh run), and `check_evidence.py r1` passes on the
   recorded block.
 - **Touches:** `spec/writeback-prebuilt-update/EVIDENCE.md`, this file.
@@ -345,3 +345,7 @@ exactly that signature is allowed and recorded; anything else red blocks.
   psycopg text carries the same casts (`::UUID`, `::TIMESTAMP WITH TIME ZONE`, `::SMALLINT`).
   Verify on 3.14.10: 26 passed, 32 deselected (`-m unit`); the CLI drive (100 tasks, `-b1 -f`,
   one failure) held every post-condition.
+- **P3:** `cpu_bench.py` ran unchanged (N 5,000, six rounds after a warm-up) on 3.14.10. Recorded
+  run: 2.8 0.3669, `develop` 0.4864, fix 0.2981 ms per result (fix −18.8% against 2.8, −38.7%
+  against `develop`). The gate's fresh run: 0.3802, 0.5189, 0.3139 (bar met); `check_evidence.py r1`
+  passed on the recorded block.
