@@ -28,3 +28,17 @@
 - **Skill cause:** The size circuit-breaker and Non-goals guidance stop at "record the deferred scope in Non-goals". They never point at the deferral table, so a deferral made while shaping can be lost in the GOAL's prose.
 - **Recommended fix:** In Step 4, say that a non-goal that is real work, not just a scope fence, gets an `issues/{slug}.md` seed (`status: unshaped`) and a `ROADMAP.md` entry per `AGENTS.md`, linked from the Non-goal. In Step 7, stage those two files alongside the GOAL.
 - **Confidence:** med · **Effort:** small
+
+## F4 — No way to express an external wait (CI run, cluster hand-back) in a TECH phase · seen again
+`origin=hs-plan:step6 severity=low category=template status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** R6 is a foreman hand-back and R3's PostgreSQL/TimescaleDB green comes only from CI on a PR the foreman opens. P5 had to be authored as an ordinary `pending` phase whose checklist tells `hs-build` to set itself `blocked` and stop, and whose `verify:` pins the final fix as the last commit touching `src/` (not `HEAD`) so committing the evidence does not invalidate it.
+- **Skill cause:** The same gap as `spec/schema-upgrade-step/META.md` F3/F6, `spec/timescale/META.md` F3 and `spec/writeback-scoped-conditional/META.md` F3, all still open: the TECH template has no external-wait phase kind and no guidance on pinning evidence to code rather than `HEAD`.
+- **Recommended fix:** As recorded there. Add an `external: true` (or `awaits:`) phase field that `next_phase.py` reports as waiting rather than actionable. In Step 6, say that evidence gates compare against the last code commit, not `HEAD`.
+- **Confidence:** high · **Effort:** small
+
+## F5 — No guidance on evidence or trial scripts the plan commits under `spec/{slug}/`
+`origin=hs-plan:step4 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** R1 needs a rerunnable in-process measurement, and R6 needs a checker for the foreman's numbers. Following the group cycle's `port-trial.sh` precedent, the plan wrote and committed `cpu_bench.py` and `check_evidence.py` under `spec/writeback-prebuilt-update/` and ran the bench on the base. The skill's "Never build", its artifact list (PLAN, TECH, research, META) and its `allowed-tools` cover none of this, so whether a planner may write such a script, run it, and commit it was a judgement call each time.
+- **Skill cause:** The skill assumes every `verify:` is a pytest or CLI command. It has no case for performance or port evidence, where the verify gate is a script that has to exist before any phase can name it.
+- **Recommended fix:** In Step 4, allow `spec/{slug}/` evidence or trial scripts as plan artifacts when a GOAL criterion needs recorded measurement or a port trial. Require them to run offline, under a kill timer and from extracted trees or worktrees, and to be run once on the base to show the bar can fail. List them in Step 8's staging and add `git archive`/`python` to `allowed-tools`.
+- **Confidence:** med · **Effort:** small
