@@ -95,15 +95,22 @@ the result's current assignment, as `spec/writeback-scoped-conditional/` defines
   Waiting SHALL NOT turn a write the condition refuses into one that lands.
 - **R4** — Every code path that UPDATEs `task` rows SHALL be audited, and `TECH.md` SHALL list each
   with its verdict: either it can be contended under the `timescale` provider and gets the R1–R3
-  behaviour, or it cannot, with the reason. The paths named in Problem are the minimum list.
+  behaviour, or it cannot, with the reason. The paths named in Problem are the minimum list. A
+  cross-process path (`Task.next` stamps, cancel, `hs task update`, `revert_interrupted`) whose
+  verdict is that it needs the behaviour is **seeded** (an `issues/` file with a `ROADMAP.md` entry)
+  rather than fixed in this cycle, unless its fix is the same few lines as the in-server paths' and
+  needs no new test harness.
   `Task.revert_orphaned` is reachable inside one server (HeartMonitor eviction against a late
   Confirm or result for the same row) and SHALL get the R1 behaviour: a contended revert lands and
   the HeartMonitor thread does not die. `client`-table writes are expected to need no change; the
   audit confirms it.
 - **R5** — Recovering a contended write SHALL be bounded: no unbounded loop, and each extra attempt
   logged at DEBUG naming the task id. IF the bound is exhausted while the row still qualifies, THEN
-  the server SHALL log a WARNING naming the task id and the write path, and `TECH.md` SHALL state the
-  outcome in that case. The bound's value is the plan's.
+  the server SHALL log a WARNING naming the task id and the write path, SHALL NOT crash, and SHALL
+  NOT silently strand the task. For Confirm, the WARNING is logged, `client_id` and `client_host`
+  stay unrecorded on that row, and the Confirm thread keeps running. For a result still unapplied
+  after the bound, the WARNING is logged and `TECH.md` SHALL state what then happens to that task,
+  such that the run neither hangs waiting for it nor runs it twice. The bound's value is the plan's.
 - **R6** — WHILE the database is SQLite, plain PostgreSQL, or TimescaleDB before 2.29, and for any
   write that is not contended, behaviour SHALL be identical to `develop` `0e8275e`: the same rows,
   outcomes, and log lines at INFO and above, and a write that matches on its first attempt is
@@ -178,18 +185,17 @@ the result's current assignment, as `spec/writeback-scoped-conditional/` defines
   and is not, and `pg13`/`pg18` are plain PostgreSQL. R7's fails-before applies to the first two only;
   the other three are controls (shaping, 2026-11-04).
 
-**Open for sign-off** (defaults chosen above; none blocks `hs-plan` unless the maintainer overturns
-it):
-
-- **R8 edits `AGENTS.md`.** It adds a data-layer hazard and a rule for new task-row writes. It
-  strengthens a guarantee and relaxes nothing, as `writeback-scoped-conditional` R10 did, but an
-  `AGENTS.md` change is flagged to the maintainer at sign-off.
-- **R5's exhaustion outcome is left to the plan.** The GOAL requires only that it be bounded,
-  WARNING-logged and stated in `TECH.md`. If the maintainer wants a fixed outcome (for example,
-  Confirm keeps running and the Receiver classifies the result STALE), it goes in R5 now.
-- **R4's cross-process paths.** If the audit finds that `Task.next`, cancel or `hs task update`
-  can be contended, they get the R1–R3 behaviour and an R7 test each. That is the most likely way
-  this cycle outgrows `small`; the alternative is to record a verdict and defer them to a seed.
+- **Q:** Is R8's `AGENTS.md` edit approved? — **A:** Yes. It adds a hazard and a rule, as #70's R10
+  did (foreman sign-off, 2026-11-04).
+- **Q:** What is R5's exhaustion outcome? — **A:** Fixed in R5. The server never crashes and never
+  silently strands a task. Confirm logs a WARNING naming the task, leaves `client_id` and
+  `client_host` unrecorded, and keeps running. A result still unapplied after the bound logs a
+  WARNING naming the task, and the plan says what then happens to that task, so that the run neither
+  hangs nor double-runs it (foreman sign-off, 2026-11-04).
+- **Q:** Do the cross-process paths get the fix here? — **A:** They get an audit verdict in
+  `TECH.md`. Any that need the fix are seeded (`issues/`, with a `ROADMAP.md` entry) rather than
+  fixed here, unless the fix is the same few lines as the in-server paths and needs no new test
+  harness; keep the cycle small. `revert_orphaned` stays in scope (foreman sign-off, 2026-11-04).
 
 ## Related materials
 
