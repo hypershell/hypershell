@@ -3,11 +3,11 @@ slug: zone-dispatch
 title: Zone-aware, demand-driven dispatch (zone, cycle 2)
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/zone-dispatch
 base: develop
-current_phase: P6
-last_updated: '2026-11-02'
+current_phase: done
+last_updated: '2026-11-04'
 phases:
 - id: P1
   name: Zone schema and zone-filtered selection on the upgrade step
@@ -97,7 +97,7 @@ phases:
 - id: P6
   name: 'Multi-node drive, run A: zone knobs in the drive, local smoke, hand back
     (external wait follows)'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R4
@@ -110,7 +110,7 @@ phases:
   verify: sh tests/cluster/smoke.sh
 - id: P7
   name: 'Multi-node drive, run B: judge the external evidence'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R4
@@ -699,7 +699,7 @@ cluster; this phase only builds and smoke-tests locally.
 - [x] `tests/cluster/smoke.sh`: add a local zoned rehearsal: 2 zones + default, 4 clients (2
       advertise, 2 don't), `HSD_TASKS=300`, one retry per zone. `compare.py --zoned` on it must
       pass.
-- [ ] Hand back to the foreman the run matrix it must execute (all 3 builds via
+- [x] Hand back to the foreman the run matrix it must execute (all 3 builds via
       `build_archive.sh`, TLS on):
   1. **Homogeneous throughput**, `HSD_CLIENT_ADVERTISE=0`, no zones. 2.8.3, 2.9.0a2 and
      feature, interleaved, ≥ 3 repeats each, same node count. Judges R1 at scale.
@@ -750,7 +750,60 @@ cluster; this phase only builds and smoke-tests locally.
 **Goal:** judge the foreman's evidence. Blocked (external wait) until
 `spec/zone-dispatch/evidence/cluster/` exists.
 
-- [ ] Run the verify, and record the summary table and the run matrix actually executed.
+- [x] Run the verify, and record the summary table and the run matrix actually executed.
+- **P6 closed (2026-11-04).** The foreman executed the hand-back matrix (below), and ran P6's local
+  smoke on `a040e1d` (`smoke: PASS`, recorded under Build status), so P6 is marked done.
+- **Harness note (foreman, verbatim):**
+
+  > Run 1 ran on the second test cluster and Run 2 on the third (the second became contended, the
+  > first was down); each job is self-contained, and Run 1 interleaves its own baseline and control.
+  > Both used 4 whole nodes, server on node 0 bound to 16 CPUs, TLS on, SQLite, archives built by
+  > `build_archive.sh` (label `feature` = `3d7231e`, `2.9.0a2` = `d996579`, `2.8.3` = `4d5771b`), and
+  > the run scripts implement TECH P6's hand-back exactly, with `HSD_TIMEOUT=600` for Run 1 (TECH
+  > said 300; raised so a slow run could not time out). Run 1: 3 clients × 16 threads, advertise off.
+  > Run 2: six clients per the P6 table, `HSD_ZONES=default:40,cpu:30,gpu:30`, `HSD_GROUPS=3`,
+  > retries on, `HSD_FAIL_EVERY=50`, second repeat with `HSD_CAP=32`.
+
+- **Matrix executed** (every run: Python 3.13.18, start method fork, TLS on, 20,000 tasks; the
+  records carry no host, user or path, and the re-scrub — `smoke.sh`'s host/user grep plus cluster
+  and user names and site path prefixes — found nothing):
+  - **Run 1, homogeneous** (`run1-<label>-r<n>`): server `HSD_BUNDLESIZE=1 HSD_FAIL_EVERY=100
+    HSD_THREADS=16 HSD_TIMEOUT=600`, 3 clients × 16 threads, `HSD_CLIENT_ADVERTISE=0`. Nine runs in
+    the order 2.8.3, 2.9.0a2, feature, repeated three times (client start times confirm it).
+  - **Run 2, zoned, feature only:** `run2-feature-r1` and `run2-feature-r2-cap32` (`HSD_CAP=32`).
+    Server `HSD_BUNDLESIZE=4 HSD_RETRIES=1 HSD_FAIL_EVERY=50 HSD_TIMEOUT=600`, six clients × 8
+    threads, `HSD_CLIENT_LOG=DEBUG`:
+
+    | client | zone | advertised | r1 received / largest | r2 (cap 32) received / largest |
+    |---|---|---|---|---|
+    | 1 | cpu | 1 | 1546 / 1 | 1641 / 1 |
+    | 2 | gpu | — | 565 / 4 | 773 / 4 |
+    | 3 | cpu | — | 4574 / 4 | 4479 / 4 |
+    | 4 | gpu | 16 | 5555 / 16 | 5347 / 16 |
+    | 5 | default | 64 | 7690 / 64 | 7515 / **32** |
+    | 6 | default | — | 470 / 4 | 645 / 4 |
+
+    Each repeat: 20,400 rows (400 retried, exit histogram `0: 20000, 3: 400`), received sums to
+    20,400, zones default 8,160 / cpu 6,120 / gpu 6,120, zero exit 7, zero zone-mismatched retries,
+    zero evictions, group order held. p10-p90 throughput 458.2 and 488.9 tasks/s.
+  - Departures from the hand-back: Run 1's `HSD_TIMEOUT` 600 (was 300), per the note. The two zoned
+    repeats differ in cap, so `compare.py` keys them as two groups of one run each; each run is
+    judged on its own, as `--zoned` does.
+- **Verify** (2026-11-04): `uv run python tests/cluster/compare.py spec/zone-dispatch/evidence/cluster
+  --baseline 2.8.3 --candidate feature --control 2.9.0a2 --min-ratio 0.95 --zoned feature` →
+  **verdict: PASS**, exit 0. Plain `uv run` could not take its cache lock in this build's sandbox;
+  the same command ran as `uv run --frozen --offline` against a frozen dev venv (warm uv cache,
+  CPython 3.13.18). `compare.py` is standard-library only.
+
+  | label (Run 1) | runs | median p10-p90 tasks/s [min-max] | ratio to 2.8.3 | tree children | tree FDs | tree threads | tree RSS MB |
+  |---|---|---|---|---|---|---|---|
+  | 2.8.3 | 3 | 140.6 [140.3-140.7] | 1 | 1 | 43 | 21 | 155 |
+  | 2.9.0a2 (control) | 3 | 132.8 [130.1-132.8] | 0.944 | 1 | 44 | 21 | 157 |
+  | feature | 3 | 201.3 [199.5-201.4] | **1.432** (min 0.95) PASS | 0 | 19 | 17 | 93 |
+
+  Results identical across all nine runs (`0: 19800, 3: 200`), every rc 0. Attribution: 2.9.0a2 vs
+  2.8.3 −7.8 tasks/s; feature vs 2.9.0a2 +68.5 tasks/s. Footprint feature vs 2.8.3: children 0 vs
+  1, FDs 19 vs 43, PASS. Zoned: both runs PASS on every check.
 - **Touches:** `spec/zone-dispatch/TECH.md`, `spec/zone-dispatch/evidence/cluster/` (as delivered).
 
 ## Phase P8 — (Deferrable) Zone by name
