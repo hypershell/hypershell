@@ -304,8 +304,9 @@ class SSHCluster(Thread):
 
     def run_with_exceptions(self: SSHCluster) -> None:
         """Start child threads, wait."""
+        self.clients = []  # NOTE: empty for stop() until the clients are launched
         self.server.start()
-        self.clients = []
+        self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         for argv in self.client_argv:
             log.debug('Launching client: ' + redact_secrets(argv, ['-k']))
             self.clients.append(Popen(argv, stdout=sys.stdout, stderr=sys.stderr))
