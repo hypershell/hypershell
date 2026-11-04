@@ -3,10 +3,10 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: done
+current_phase: P5
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -50,7 +50,8 @@ phases:
     && uv run hsx --restart -N1 --no-tls && printf ''%s\n'' ''echo 0 #HYPERSHELL:
     n:0 group:0'' > b.in && uv run hs submit -f b.in && uv run hsx --restart -N1 --no-tls
     2> err.log && test \$(uv run hs list -c -R) -eq 0 && test \$(uv run hs list -c
-    -S -t n:0) -eq 1 && ! grep -q ''after task group'' err.log"'
+    -S -t n:0) -eq 1 && ! grep -q ''after task group'' err.log" && kt 300 pytest -q
+    tests/test_group_order.py::test_cluster_runs_group_stored_as_text'
 - id: P3
   name: File input is ingested before the scheduler starts
   status: done
@@ -95,7 +96,7 @@ phases:
     docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
 - id: P5
   name: 2.8.4 port trial and final gate
-  status: done
+  status: in_progress
   satisfies:
   - R9
   - R7
@@ -308,6 +309,17 @@ coupled core and is made as one edit.
   ascending file on a database whose earlier run finished groups 0-2) and
   `test_tasks_after_finished_run_start_at_lowest_group` (`forever`, the tasks arrive after the
   start).
+- [x] Review-2 remediation, N1 (narrow ruling; triage in `REVIEW.md`). SQLite stores a
+      non-integer group such as `group:x` as text, which has no order against an integer group.
+      `mark_group_started` catches the `TypeError` from its late-group comparison: it logs no
+      warning and keeps `highest_started_group` unchanged, and still records
+      `last_scheduled_group`. There is no coercion or rejection at ingest, so what base accepts is
+      unchanged. Audit every comparison or arithmetic on group values this cycle added, in
+      `server.py` and `data/model.py`, and record it in the build record.
+- [x] Red first, on `5c7f381`'s `src`: `test_cluster_runs_group_stored_as_text` (`integration`):
+      `echo 0  # HYPERSHELL: group:0` and `echo x  # HYPERSHELL: group:x` through
+      `hs cluster FILE -N1 --no-tls`, under a 120 s timer; after the fix rc 0 and both tasks
+      succeeded.
 - **Verify:** the frontmatter `verify:`.
   - `tests/test_groups.py` and `tests/test_retry_gate.py` are identical to `b31c66e`, and there
     is no `xfail` in the new file.
@@ -318,6 +330,8 @@ coupled core and is made as one edit.
     - Expect exit 0, 0 remaining, the group-0 task succeeded, and no `after task group` in
       stderr.
     - On `b31c66e` the second run hangs, so the drive is under `kt 300`.
+  - The text-group integration test passes (rc 0, both tasks succeeded). It uses `--no-tls`, so
+    the TLS flake cannot reach it.
 - **Touches:** `src/hypershell/data/model.py`, `src/hypershell/server.py`,
   `tests/test_group_order.py`.
 
@@ -410,6 +424,13 @@ is unchanged.
       task file hang is seeded as `issues/empty-task-file-hangs.md` with its `ROADMAP.md` entry. The
       verify's unchanged list names `src/hypershell/cluster/__init__.py` (the CLI) in place of the
       whole `cluster` package, which F2 edits.
+- [x] Review-2 remediation. N2: `issues/empty-task-file-hangs.md` and its `ROADMAP.md` entry say
+      the hang is on an empty database. The confirmed idle-clock reading: the `-T` paragraph of
+      `docs/_include/client_help.rst`, which already documents `-d`/`--delay-start`, says the
+      timeout counts from when the client starts, after any delay. That file is prose only and
+      is not in this phase's unchanged list; the CLI help strings are untouched. The deferred
+      "database is locked" hang is seeded as `issues/database-locked-during-ingest-hangs.md`
+      (unshaped, fix, small, public) with its `ROADMAP.md` entry.
 - **Verify:** the frontmatter `verify:`.
   - Each of the three files mentions the whole file being read first (`whole file`,
     `entire file` or `in full`), `best effort`, and `warning`.
@@ -449,6 +470,10 @@ conflict, fix the placement in P2's or P3's files under a P5 amendment note, and
       suite's summary (plus any rerun) into the commit body and below.
 - [x] Review-1 remediation: the static check's `src/` list adds `client.py` and the three cluster
       launchers (F2). Rerun the port trial and the full suite on 3.11, 3.12, 3.13 and 3.14.
+- [ ] Review-2 remediation: rerun the port trial at the N1 commit, and the full suite once on each
+      of 3.11, 3.12, 3.13 and 3.14. The known flakes (the TLS localhost `ConnectionResetError`,
+      and `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade`) may each be rerun once, and
+      every rerun is recorded.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/group-advance-strands-lower-group/TECH.md` (state and build record) only.
 
@@ -572,6 +597,56 @@ foreman's plan-gate ruling on PLAN §5 risk 1 is recorded as a seed,
 - Full `develop` suite, first run, no rerun: 3.12.16 `651 passed, 64 skipped`; 3.11.18 `651
   passed, 64 skipped`; 3.13.18 `651 passed, 64 skipped`; 3.14.10 `651 passed, 64 skipped`. Neither
   known flake appeared.
+
+**Review-2 remediation (triage in `REVIEW.md`), P2 and P4.** Same environment substitution as above.
+- **Readings the foreman confirmed.**
+  - **The F1 hold.** `starting_group` keeps the last scheduled group only while every task in it
+    is complete and a failure there still awaits retry or has used its retries
+    (`Task.count_remaining(group=group) == 0`). If that group holds a failure and also gets new
+    rows, the start is the lowest group with incomplete tasks. This keeps R3's ascending order
+    and the R7 gate (nothing above the failed group runs, and the retry still runs before the run
+    stops), and matches the cycle-1 ratification.
+  - **The idle clock.** `ClientScheduler.start` restarts the idle clock, so a standalone client's
+    `-d`/`--delay-start` no longer counts toward `-T`/`--timeout`: `hs client -d 4 -T 3` lives
+    about 8.5 s, against 6.4 s on base. No command that succeeds today fails, and plain idle `-T`
+    timings are unchanged. `docs/_include/client_help.rst` (which documents `-d`) now says so
+    under `-T`.
+- **N1 red** (3.12, `src` identical to `5c7f381`): `test_cluster_runs_group_stored_as_text`
+  failed, `assert 5 == 0`. The same file through the CLI gave rc 5 with
+  `TypeError: '<' not supported between instances of 'str' and 'int'` from the Scheduler, after
+  `Completed task group 0 - starting task group x`; the `x` row (`typeof(group)='text'`) was left
+  scheduled with no completion. **Green:** the test passes; the CLI drive gives rc 0, both rows
+  completed with exit 0, and `x` runs after group 0, as on base.
+- **N1 audit:** every comparison or arithmetic on a group value that this cycle added. SQLite
+  orders an integer before text, and Python equality between a `str` and an `int` is false, not
+  an error; only ordering raises.
+
+  | Site | Operation on group values | Safe with a text group? | Change |
+  |------|---------------------------|-------------------------|--------|
+  | `Task.lowest_incomplete_group` (`data/model.py`) | SQL `min("group")` over incomplete rows | Yes: SQLite orders it, with integers before text; no Python comparison | None |
+  | `Task.increment_group` (`data/model.py`) | `next_group is None`, `next_group == previous_group` | Yes: identity and equality only | None |
+  | `Scheduler.next_tasks` (`server.py`) | `first_group is None`, then assignment | Yes | None |
+  | `Scheduler.mark_group_started` (`server.py`) | `group != last_scheduled_group` | Yes: equality | None |
+  | `Scheduler.mark_group_started` (`server.py`) | `group < highest`, `max(group, highest)` (the only Python-side `min`/`max`) | **No:** `TypeError` (N1) | Fixed: the `TypeError` is caught; no warning, `highest_started_group` kept, `last_scheduled_group` still recorded |
+  | `Scheduler.starting_group` (`server.py`) | `count_remaining(group=…) == 0`, `count_retryable(group=…) > 0`, `lowest is None`, `lowest != group` | Yes: the group is an SQL filter, and Python compares integer counts or uses identity and equality | None |
+  | `Scheduler.start` (`server.py`) | Assignment from `starting_group(…)` | Yes | None |
+  | Log messages naming groups (`server.py`, `data/model.py`) | f-string formatting | Yes | None |
+  | `client.py`, `cluster/local.py`, `cluster/remote.py`, `cluster/ssh.py` | No group values | Not applicable | None |
+
+  No group arithmetic was added. Pre-existing SQL group filters (`Task.next`, `Task.current_group`)
+  are unchanged.
+- **Audit probes** (3.12, `--no-tls`, fresh sites, after the fix), each rc 0 with no `TypeError`:
+  a file listing `x`, `0`, `1` ran `0 1 x`; a file of only `x` and `y` ran both; a finished `x`
+  run followed by a file of groups 0 and 1 ran both; `hs submit` of groups 1 and `x` with
+  `hsx --restart`, then a late group 0 with `hsx --restart`, ran all three; and a `--forever`
+  cluster that had started `x` then ran a late `hs submit` group 0 (`Completed task group x -
+  starting task group 0`), which exercises the caught comparison mid-run, with no warning.
+- Named gates (3.12): `tests/test_group_order.py tests/test_groups.py tests/test_retry_gate.py`
+  `54 passed`, no rerun. Verify (3.12, `uv run` stripped, frozen offline venv): P2 rc 0 (`39
+  passed` unit; the restart drive ran group 0 with no late warning; the text-group test `1
+  passed`); P4 rc 0.
+- **TECH amendment:** P2's verify adds the text-group integration test, through
+  `set_phase.py --verify`.
 
 ---
 

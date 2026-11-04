@@ -431,3 +431,19 @@ def test_cluster_clients_with_timeout_wait_for_file(temp_site: Path) -> None:
 
     rc, stdout, _ = main(['hs', 'list', '-c', '-S'])
     assert rc == exit_status.success and stdout == str(CLIENT_TIMEOUT_TASKS)
+
+
+@mark.integration
+def test_cluster_runs_group_stored_as_text(temp_site: Path) -> None:
+    """A group SQLite stores as text, which cannot be ordered against an integer group, still runs."""
+    taskfile = create_taskfile(temp_site, ['echo 0  # HYPERSHELL: group:0',
+                                           'echo x  # HYPERSHELL: group:x'])
+    try:
+        proc = run(['hs', 'cluster', str(taskfile), '-N1', '--no-tls'],
+                   stdout=PIPE, stderr=PIPE, env=os.environ, timeout=120)
+    except TimeoutExpired:
+        pytest.fail('hs cluster did not finish within 120 seconds')
+    assert proc.returncode == exit_status.success
+
+    rc, stdout, _ = main(['hs', 'list', '-c', '-S'])
+    assert rc == exit_status.success and stdout == '2'

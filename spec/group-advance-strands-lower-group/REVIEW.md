@@ -402,3 +402,21 @@ Unmapped changes: none. The `client.py` idle-clock reset belongs to the F2 fix.
 - **Triggered.** N1 is a CONFIRMED finding in `server.py`, which is high-blast-radius core.
 - This is cycle 2 of ≤3 without convergence, so it escalates to the human: a human must sign off
   before any further step.
+
+## Triage (human gate) — cycle 2
+
+Cycle 2 (`0378250`, reviewing `5c7f381`) confirmed that F1–F3 are fixed. It requested changes for N1, a MEDIUM in `server.py`, which triggers the human gate. The foreman ruled on 2026-11-04 as judge. Cycle 3 is the last cycle allowed.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| N1 · MEDIUM · CONFIRMED | fix, narrow | A non-integer group stored by SQLite (for example `group:x`) must never crash the scheduler, and a file that runs on base must still run. Make the late-group warning's comparison (`Scheduler.mark_group_started`, `server.py:271-272`) tolerate a group that is not comparable with the tracked one: when the comparison is impossible, skip the warning and keep the tracked value unchanged. Do not coerce or reject at ingest; that would change what base accepts. **Audit** every comparison or arithmetic on group values this cycle added in `server.py` and `data/model.py` (`starting_group`, `next_tasks`, `lowest_incomplete_group` and any Python-side `min`/`max`) for the same flaw, and record the audit in TECH. **Red first:** the reviewer's two-line file (`echo 0 # HYPERSHELL: group:0` and `echo x # HYPERSHELL: group:x`, or the reviewer's exact form) through `hs cluster -N1 --no-tls` is an integration test. It must fail at `5c7f381` (exit 5 or a stranded row) and pass after the fix, with exit 0 and every task completed. Must remain portable to 2.8.3 + #68. |
+| N2 · LOW · CONFIRMED | fix | Add "on an empty database" to `issues/empty-task-file-hangs.md` and its ROADMAP entry. |
+| Reading: the F1 hold applies only when the last scheduled group has no new rows | confirmed | It keeps R3 and R7, and matches the cycle-1 ratification. Record it in TECH. |
+| Reading: `client.py:204`'s idle-clock reset excludes the `-d` start delay from `-T` | confirmed | No command that succeeds today fails, and a client lives slightly longer. State it in the `-T` docs sentence or the `hs client` help notes, whichever already documents `-d`. |
+| Pre-existing: "database is locked" during the read hangs, on HEAD and on base | defer | Seed `issues/database-locked-during-ingest-hangs.md` (unshaped, fix, small, public) with a ROADMAP entry. Leave the other pre-existing items as recorded in REVIEW.md. |
+
+Gates for cycle 3:
+- the N1 red test, then green;
+- `test_group_order.py`, `test_groups.py` and `test_retry_gate.py` pass;
+- the full suite once on each of 3.11, 3.12, 3.13 and 3.14;
+- `port-trial.sh` passes, with the recorded uv cache substitution.

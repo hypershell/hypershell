@@ -79,7 +79,7 @@
   Add a note on keeping edits clear of lines that differ on the target.
 - **Confidence:** med · **Effort:** medium
 
-## F6 — Step 7 stages with `git add -A`, against the explicit-path rule
+## F6 — Step 7 stages with `git add -A`, against the explicit-path rule · seen again
 `origin=hs-build:P1 severity=medium category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
 - **What happened:** Step 7's commit block is `git add -A`, and Step 6 says the meta-note "rides in this
   phase's atomic `git add -A` commit". This cycle's TECH conventions and the foreman both require staging by

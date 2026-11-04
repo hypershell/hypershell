@@ -230,13 +230,25 @@ the group-order fix.
 
 ## An empty task file never finishes
 
-`hsx` given an empty task file never exits: the server logs `Empty database - waiting for initial
-tasks` and waits for tasks that cannot arrive. The stop branch of `Scheduler.load_bundle` needs at
-least one task in the database, so a run that submits none never reaches FINAL. The same holds
-before and after `group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
+`hsx` given an empty task file on an empty database never exits: the server logs `Empty database -
+waiting for initial tasks` and waits for tasks that cannot arrive. The stop branch of
+`Scheduler.load_bundle` needs at least one task in the database, so a run that submits none on an
+empty database never reaches FINAL. The same holds before and after
+`group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
 
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 1)*
 **Seed:** [`issues/empty-task-file-hangs.md`](issues/empty-task-file-hangs.md) · *status: unshaped*
+
+## A "database is locked" error while a task file is read hangs the run
+
+On SQLite, when another connection holds the database locked while `hsx` or `hs cluster` submits a
+task file, the submitter's committer dies with `database is locked` and the run waits until it is
+killed. The loader then blocks on its full queue, so the server never gets past waiting for the
+submitter, and nothing passes the committer's error on to the exit status. The same holds before
+and after `group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
+**Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
 
 ## Concurrent first submits can collide on the reserved source row
 

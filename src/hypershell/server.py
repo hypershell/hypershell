@@ -268,9 +268,14 @@ class Scheduler(StateMachine):
         group = self.current_group
         if group != self.last_scheduled_group:
             highest = self.highest_started_group
-            if highest is not None and group < highest:
-                log.warning(f'Starting task group {group} after task group {highest} (tasks submitted late)')
-            self.highest_started_group = group if highest is None else max(group, highest)
+            try:
+                if highest is not None and group < highest:
+                    log.warning(f'Starting task group {group} after task group {highest} (tasks submitted late)')
+                self.highest_started_group = group if highest is None else max(group, highest)
+            except TypeError:
+                # SQLite can store a non-integer group as text, which has no order against an
+                # integer group: no late-group warning is possible, and the highest group is kept.
+                pass
             self.last_scheduled_group = group
         self.first_group_pending = False
 
