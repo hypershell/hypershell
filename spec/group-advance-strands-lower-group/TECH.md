@@ -3,7 +3,7 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/group-advance-strands-lower-group
 base: develop
 current_phase: done
