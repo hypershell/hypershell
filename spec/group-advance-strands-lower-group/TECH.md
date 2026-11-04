@@ -3,10 +3,10 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -96,7 +96,7 @@ phases:
     docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
 - id: P5
   name: 2.8.4 port trial and final gate
-  status: in_progress
+  status: done
   satisfies:
   - R9
   - R7
@@ -122,8 +122,7 @@ phases:
 review:
   last_reviewed_commit: eca86c8
   verdict: changes-requested
-  blocked_reason: 'review 3 (human ruling 2026-11-04, narrow fix then scoped review):
-    O1 text group first hides the late-group warning (server.py:274); O2 seed prose'
+  blocked_reason: ''
   cycle: 3
 ---
 # TECH.md — Run task groups in order, and never strand a late one
@@ -490,7 +489,7 @@ conflict, fix the placement in P2's or P3's files under a P5 amendment note, and
       of 3.11, 3.12, 3.13 and 3.14. The known flakes (the TLS localhost `ConnectionResetError`,
       and `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade`) may each be rerun once, and
       every rerun is recorded.
-- [ ] Review-3 remediation: rerun the port trial at the O1 commit, and the full suite once on
+- [x] Review-3 remediation: rerun the port trial at the O1 commit, and the full suite once on
       each of 3.12 and 3.14 (the maintainer's gate), with the same flake rule.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/group-advance-strands-lower-group/TECH.md` (state and build record) only.
@@ -714,6 +713,24 @@ substitution as above.
   `55 passed`, no rerun. Verify (3.12, `uv run` stripped, frozen offline venv): P2 rc 0 (`40
   passed` unit; the restart drive ran group 0 with no late warning; the text-group test `1
   passed`); P4 rc 0.
+
+**Review-3 remediation, P5 (port trial and final gate).**
+- R9 static checks passed: `src/` changes are exactly `client.py`, `cluster/local.py`,
+  `cluster/remote.py`, `cluster/ssh.py`, `data/model.py` and `server.py`, and no added or removed
+  line touches `mapped_column`, `__tablename__`, `add_argument`, `_HELP` or `_USAGE`.
+- `port-trial.sh` on `origin/master` at `4d5771b` (2.8.3), unedited, at `5e5829b`: #68 conflicted
+  only in `server.py`, resolved by the script as before. This cycle applied with no conflict
+  (including the new `numbers` import): `M` `client.py`, `cluster/local.py`, `cluster/remote.py`,
+  `cluster/ssh.py`, `data/model.py`, `server.py`, `A tests/test_group_order.py` (with #68's
+  `A tests/test_retry_gate.py`). Tests (`test_group_order.py`, `test_retry_gate.py`,
+  `test_groups.py`): `55 passed`, no rerun. The trial worktree was removed, the worktree list and
+  every ref are unchanged, and `master` stayed at `dd0264c`.
+- **Environment substitution for the trial**, as before: `UV_NO_GROUP=docs`, `UV_OFFLINE=1`,
+  `UV_PYTHON_DOWNLOADS=never`, `UV_NO_CONFIG=1`, a local CPython 3.12.16, `UV_PROJECT_ENVIRONMENT`
+  outside the repo, and `UV_CACHE_DIR` pointed at a private copy of review cycle 3's uv cache. The
+  script was not edited.
+- Full `develop` suite, one run each (the maintainer's gate): 3.12.16 `653 passed, 64 skipped`;
+  3.14.10 `653 passed, 64 skipped`. No rerun; neither known flake appeared.
 
 ---
 
