@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/writeback-prebuilt-update
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-04'
 phases:
 - id: P1
   name: Red statement-reuse guard and reference-equivalence pins (tests only)
-  status: pending
+  status: done
   satisfies:
   - R4
   - R3
@@ -19,7 +19,7 @@ phases:
   depends_on: []
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: kt() { uv run --frozen python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
     if r<0 else r)' "$@"; }; l="${TMPDIR:-/tmp}/hs-wb-p1.log"; git diff --quiet bc6547a
     -- src tests/test_writeback.py && ! git diff bc6547a -- tests/test_writeback_postgres.py
@@ -168,11 +168,11 @@ the wire codec, the schema, `data/upgrade.py`, `.github/workflows/tests.yml`, `d
 **Goal:** a guard that fails **by assertion** on `bc6547a`, and equivalence pins that pass there.
 **No `src/` edit.** Every test references only symbols that exist on `bc6547a`.
 
-- [ ] Create `tests/test_writeback_statement.py`, every test `@mark.unit`. Module docstring: the
+- [x] Create `tests/test_writeback_statement.py`, every test `@mark.unit`. Module docstring: the
       writeback reuses its statements, and stores exactly what the per-result statement stored.
-- [ ] Copy (do not move) `task_db`, `submit`, `dispatch`, `dispatch_one`, `finish`, `receive`, `row`
+- [x] Copy (do not move) `task_db`, `submit`, `dispatch`, `dispatch_one`, `finish`, `receive`, `row`
       from `tests/test_writeback.py`. **`tests/test_writeback.py` is not edited in any phase.**
-- [ ] `test_writeback_reuses_its_statements`: `monkeypatch.setattr(Session, 'execute', wrapper)` on
+- [x] `test_writeback_reuses_its_statements`: `monkeypatch.setattr(Session, 'execute', wrapper)` on
       the scoped session that `hypershell.data.model` imports. The wrapper appends the statement
       object to a list (keep the objects, not `id()`s) and delegates. Dispatch at least 8 tasks; return
       them through `receive` in at least two bundles, so that some are APPLIED, one is returned again
@@ -181,7 +181,7 @@ the wire codec, the schema, `data/upgrade.py`, `.github/workflows/tests.yml`, `d
       UPDATE statements (`stmt.is_update`) number at least 8 and are all one object, and the SELECT
       statements issued by the writeback are at most one object. Mark it
       `@mark.xfail(strict=True, reason='the writeback builds a new statement for every result')`.
-- [ ] `test_applied_values_match_reference`, `@mark.parametrize` over cases: `+05:30` with
+- [x] `test_applied_values_match_reference`, `@mark.parametrize` over cases: `+05:30` with
       microsecond 999999; `-07:00` with microsecond 0; UTC; `outpath`/`errpath`/`csvpath` `None`;
       exit status 3. Two submitted tasks, dispatched together; finish both copies with identical
       result values for the case. Apply one through `Task.apply_results([...])`. Apply the twin
@@ -195,7 +195,7 @@ the wire codec, the schema, `data/upgrade.py`, `.github/workflows/tests.yml`, `d
       `before_cursor_execute` listener (removed afterwards). Assert its SET list is exactly
       `set(Task.result_columns)`, and its WHERE names `id`, `schedule_time` and
       `completion_time IS NULL`.
-- [ ] Append `test_applied_values_match_reference` to `tests/test_writeback_postgres.py` (existing
+- [x] Append `test_applied_values_match_reference` to `tests/test_writeback_postgres.py` (existing
       lines untouched), using that module's `pg_tasks` fixture (both session time zones) and its
       helpers, with the same cases and assertions. Raw values come from a `text()` select through
       psycopg's own loaders. It skips locally and runs in the five CI `postgres` entries.
@@ -304,3 +304,38 @@ the method, and meets the bar.
 5. Amend this file freely if reality diverges (regenerate frontmatter with `set_phase.py`; note the
    amendment in the commit body). STOP and escalate only on a **`GOAL.md` contradiction**.
 6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[fix]` commit; stop and report.
+
+---
+
+## Build record
+
+**Environment substitution (foreman-approved, 2026-11-04).** The worktree has no `.venv`, and the
+build machine works offline. Four frozen environments were synced offline from `uv.lock`
+(`uv sync --frozen --offline`, a private `UV_CACHE_DIR`, standalone CPython 3.11.18, 3.12.16,
+3.13.18 and 3.14.10, no downloads), each with this worktree installed editable. Where a `verify:`
+says `uv run --frozen CMD`, the build ran `CMD` with that environment's `bin/` first on `PATH`,
+through a shim named `uv` that only strips `run --frozen` and refuses every other `uv` command.
+The `verify:` text itself ran unchanged, under `zsh`. Unless a phase's entry says otherwise, the
+gates ran on 3.14.10.
+
+**Plan-gate rulings (foreman, 2026-11-04).** R6's spread is the wider of the 2.8.3 and fix
+max-minus-min ranges, as `check_evidence.py` implements it. No hypertable-specific equivalence
+test: the TimescaleDB test of the real cluster covers writeback on a hypertable. The classifying
+SELECT stays prebuilt. The guard names the mechanism, and its docstring says a redesign of the
+write path should update it. R1 runs on the build machine with `b819de6` standing in for 2.8.
+`tests/test_restart.py::test_restart_update_adds_novel_and_runs` is a documented 3.13 flake
+(signature `assert [''] == ['4', '5']` at `test_restart.py:102`): one rerun of that CI job for
+exactly that signature is allowed and recorded; anything else red blocks.
+
+- **P1:** the guard fails by assertion on `bc6547a`'s source (run with `--runxfail`: `12 UPDATE
+  objects over 12 executions`), so the strict `xfail` also names `raises=AssertionError`: a
+  failed precondition (`pytest.fail`) reports FAILED, not XFAIL. The guard drives 10 tasks through
+  `Receiver.update_tasks` in three bundles: 10 APPLIED, 1 DUPLICATE, 1 STALE, 12 UPDATE and 2
+  SELECT executions. It records statements only while a bundle is written, since dispatch, confirm
+  and revert run their own UPDATEs. The wrapper is installed with `monkeypatch.setitem(vars(Session),
+  'execute', …)` rather than `setattr`: `setattr` on an instance would leave the bound method behind
+  as an instance attribute after undo, while `setitem` deletes the key it added. The PostgreSQL test imports the cases and the twin helpers
+  from `tests/test_writeback_statement.py`, so the two databases run the same cases and assertions.
+  Its SQL-shape check was compiled offline against the psycopg dialect (the SET order differs from
+  SQLite's; the check compares sets). Verify on 3.14.10: 25 passed, 1 xfailed, 1 deselected; the
+  PostgreSQL module collects the new test and skips (24 skipped).

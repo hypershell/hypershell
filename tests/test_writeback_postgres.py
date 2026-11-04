@@ -39,6 +39,7 @@ from hypershell.data import core as data_core
 from hypershell.data.core import Session
 from hypershell.data.model import Entity, Task, ResultOutcome, serialize_tasks, deserialize_tasks
 from hypershell.server import Confirm, Receiver
+from tests.test_writeback_statement import CASES, stamp, apply_twins, check_twins
 
 
 ADMIN_URL: Optional[str] = os.getenv('HS_TEST_POSTGRES')
@@ -217,3 +218,23 @@ def test_stale_echo_after_redispatch(pg_tasks, caplog: pytest.LogCaptureFixture)
     receiver.tasks = [returned(finish(second))]
     receiver.update_tasks()
     assert row(task_id)['exit_status'] == 0
+
+
+@mark.parametrize('name', list(CASES))
+def test_applied_values_match_reference(pg_tasks, name: str) -> None:
+    """An applied result stores what the per-result statement stores, through the same SQL.
+
+    The raw values are read with a plain-text query, so psycopg's own loaders return them and
+    SQLAlchemy's type processing plays no part in the comparison.
+    """
+    first_id, second_id = submit('echo twin'), submit('echo twin')
+    copies = {copy.id: copy for copy in deserialize_tasks(serialize_tasks(Task.next(limit=2)))}
+    if set(copies) != {first_id, second_id}:
+        pytest.fail(f'Expected to dispatch both twins, got {list(copies)}')
+    before = {task_id: row(task_id) for task_id in copies}
+    client_id = str(uuid.uuid4())
+    first, second = (returned(stamp(copies[task_id], CASES[name], client_id)) for task_id in (first_id, second_id))
+
+    captured = apply_twins(pg_tasks, first, second)
+
+    check_twins(first_id, second_id, before, captured)
