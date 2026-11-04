@@ -3,10 +3,10 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-03'
 phases:
 - id: P1
@@ -95,7 +95,7 @@ phases:
     docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
 - id: P5
   name: 2.8.4 port trial and final gate
-  status: in_progress
+  status: done
   satisfies:
   - R9
   - R7
@@ -121,8 +121,7 @@ phases:
 review:
   last_reviewed_commit: 31d8771
   verdict: changes-requested
-  blocked_reason: 'Review cycle 1: F1 groups out of order on a finished database (R3,
-    R4); F2 file run with client -T hangs (R2); human gate (server.py)'
+  blocked_reason: ''
   cycle: 1
 ---
 # TECH.md — Run task groups in order, and never strand a late one
@@ -447,7 +446,7 @@ conflict, fix the placement in P2's or P3's files under a P5 amendment note, and
 - [x] Full `develop` suite under `kt 2400`, with the one-rerun flake rule.
 - [x] Build record: paste the trial's applied-file list, its pytest summary, and the full
       suite's summary (plus any rerun) into the commit body and below.
-- [ ] Review-1 remediation: the static check's `src/` list adds `client.py` and the three cluster
+- [x] Review-1 remediation: the static check's `src/` list adds `client.py` and the three cluster
       launchers (F2). Rerun the port trial and the full suite on 3.11, 3.12, 3.13 and 3.14.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/group-advance-strands-lower-group/TECH.md` (state and build record) only.
@@ -554,6 +553,24 @@ foreman's plan-gate ruling on PLAN §5 risk 1 is recorded as a seed,
   `0 1 2` after the earlier `0 1 2`, with no late warning. A halted group still halts under
   `--restart` (CRITICAL, the higher group not run). A bad tag exits rc 5 in 0.3 s. `--launcher=env
   -H 127.0.0.1 -T1` on 3,000 tasks: rc 0, all succeeded. `--no-db` and a pipe run.
+
+**Review-1 remediation, P5 (port trial and final gate).**
+- R9 static checks passed: `src/` changes are exactly `client.py`, `cluster/local.py`,
+  `cluster/remote.py`, `cluster/ssh.py`, `data/model.py` and `server.py`, and no added or removed
+  line touches `mapped_column`, `__tablename__`, `add_argument`, `_HELP` or `_USAGE`.
+- `port-trial.sh` on `origin/master` at `4d5771b` (2.8.3), unedited, at `fccb67f`: #68 conflicted
+  only in `server.py`, resolved by the script as before. This cycle applied with no conflict:
+  `M` `client.py`, `cluster/local.py`, `cluster/remote.py`, `cluster/ssh.py`, `data/model.py`,
+  `server.py`, `A tests/test_group_order.py` (with #68's `A tests/test_retry_gate.py`). Tests
+  (`test_group_order.py`, `test_retry_gate.py`, `test_groups.py`): `53 passed`, no rerun. The
+  trial worktree was removed, the worktree list is unchanged, and `master` stayed at `dd0264c`.
+- **Environment substitution for the trial**, as before: `UV_NO_GROUP=docs`, `UV_OFFLINE=1`,
+  `UV_PYTHON_DOWNLOADS=never`, a local CPython 3.12, `UV_PROJECT_ENVIRONMENT` outside the repo, and
+  `UV_CACHE_DIR` pointed at a private copy of a local uv cache that holds `hatchling` (the default
+  cache is not writable from the build sandbox). The script was not edited.
+- Full `develop` suite, first run, no rerun: 3.12.16 `651 passed, 64 skipped`; 3.11.18 `651
+  passed, 64 skipped`; 3.13.18 `651 passed, 64 skipped`; 3.14.10 `651 passed, 64 skipped`. Neither
+  known flake appeared.
 
 ---
 
