@@ -104,10 +104,10 @@ phases:
     "$f" HEAD -- src tests && kt 120 python spec/writeback-prebuilt-update/check_evidence.py
     r1 ci r6
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 43190577d354c933a7fe86733e1031a340b57b8a
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — Result writeback at or below 2.8.3's CPU cost
 
