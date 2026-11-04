@@ -261,9 +261,14 @@ Long-running work runs in **daemon threads** (`core/thread.py`) driving **state 
 **Shutdown/sentinel ordering is load-bearing.** Preserve the exact ordering in
 `ServerThread`/`ClientThread` (client: scheduler → executors → collector → heartbeat; server:
 submitter → scheduler → `dispatcher.finish()` (where per-client sentinels on `scheduled` used to
-be posted: clients drain their zone's staged tasks, then are told to shut down) → sentinels to
-heartbeat/receiver/confirm) and the submit flush
+be posted: clients drain their zone's staged tasks, then are told to shut down) → heartbeat join →
+staged revert (`ServerThread.revert_staged`: rows still staged, never delivered, go back to
+unscheduled) → sentinels to receiver/confirm) and the submit flush
 (`loader.join()` then `queue.put(None)`). Reordering drops the last results or hangs a join.
+**A staged revert never touches a completed or cancelled row.** Both staged reverts, at shutdown and
+when a zone's last client leaves (`Scheduler.revert_unstaged`), go through `Task.revert_staged`: one
+conditional update on `completion_time IS NULL`, so a row cancelled while staged stays cancelled
+and a deleted one is skipped. Never revert staged ids with the unconditional `Task.revert_all`.
 The stream sentinel is `make_sentinel()` (`serialize(None)`); consumers detect end-of-stream
 by dequeuing it. **Remote-queue payloads go through `serialize_tasks`/`deserialize_tasks` and
 `heartbeat.pack` (JSON) — never put a live object or a literal `None` on a remote queue.**
