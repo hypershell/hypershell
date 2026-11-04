@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/hypertable-update-retry
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -32,7 +32,7 @@ phases:
     --label p1 --commit 0e8275e --dry-run
 - id: P2
   name: Confirm and the eviction revert land when contended
-  status: pending
+  status: done
   satisfies:
   - R1
   - R4
@@ -345,15 +345,15 @@ present on `0e8275e`, so `0e8275e` fails them by assertion. **No `src/` edit.**
 **Goal:** a contended Confirm or revert re-runs and lands; at the bound it warns and the thread keeps
 running; uncontended writes issue one UPDATE per row and nothing else.
 
-- [ ] `src/hypershell/data/model.py`: `CONTENDED_RERUNS: Final[int] = 3` with a declarative comment
+- [x] `src/hypershell/data/model.py`: `CONTENDED_RERUNS: Final[int] = 3` with a declarative comment
       (a TimescaleDB 2.29+ hypertable can report 0 rows for an UPDATE that waited on a row lock);
       `Task.__row_statements` (cached per column-name tuple), `Task.__write_rows`, `Task.confirm_all`,
       `Task.revert_all` on the helper returning the landed ids, and the two revert loops stopping on
       a pass that lands nothing — all per PLAN §2.1, log texts as given there. Import `StaleDataError`
       from `sqlalchemy.orm.exc`.
-- [ ] `src/hypershell/server.py`: `Confirm.update_info` calls `Task.confirm_all(info.task_ids,
+- [x] `src/hypershell/server.py`: `Confirm.update_info` calls `Task.confirm_all(info.task_ids,
       info.client_id, info.client_host)` under the existing `in_memory` guard.
-- [ ] Create `tests/test_contended_recovery.py` (`@mark.unit`, SQLite, a per-test database as
+- [x] Create `tests/test_contended_recovery.py` (`@mark.unit`, SQLite, a per-test database as
       `tests/test_writeback_statement.py`'s `task_db` does). Fixture `contention`: wraps the scoped
       session's `execute` with `monkeypatch.setitem(vars(Session), 'execute', …)`; `contention.lose(
       task_id, k)` makes the next `k` UPDATEs whose `r_id` is `task_id` return an object with

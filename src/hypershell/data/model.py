@@ -20,7 +20,7 @@ from dataclasses import dataclass
 # External libs
 from sqlalchemy import Column, Index, func, text, update, select, bindparam
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
+from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.types import Integer, Float, DateTime, Text, Boolean, JSON as JSON_TEXT
 from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES
@@ -55,6 +55,15 @@ A cancelled task is terminal: it must never be scheduled, retried, or counted as
 unrecoverable failure. It is distinguished from a genuine failure (positive exit codes,
 or the negative template/resource sentinels in `client.py`) solely by this value, so the
 scheduler's failure and retry queries filter it out explicitly.
+"""
+
+CONTENDED_RERUNS: Final[int] = 3
+"""Extra attempts for a task-row UPDATE that matched no row while the row still qualifies.
+
+On a TimescaleDB 2.29+ hypertable, an UPDATE that waited on another transaction's row lock can
+report 0 matched rows although the row exists and still satisfies the statement's condition. A
+new statement sees the other transaction's commit and matches normally, so a write that a fresh
+read shows still qualifies is re-run, at most this many times.
 """
 
 DIRECT_SOURCE_ID: Final[str] = '00000000-0000-7000-8000-000000000000'
@@ -758,29 +767,89 @@ class Task(Entity):
         )
 
     @classmethod
-    def revert_all(cls: Type[Task], ids: List[str]) -> None:
-        """Revert all tasks identified by `ids`."""
-        cls.update_all([
-            {
-                'id': id,
-                'schedule_time': None,
-                'server_host': None,
-                'server_id': None,
-                'client_host': None,
-                'client_id': None,
-                'command': None,
-                'start_time': None,
-                'completion_time': None,
-                'exit_status': None,
-                'outpath': None,
-                'errpath': None,
-                'waited': None,
-                'duration': None,
-             }
-            for id in ids
-        ])
-        for id in ids:
+    @cache
+    def __row_statements(cls: Type[Task], names: Tuple[str, ...]) -> Tuple[Any, Any]:
+        """The UPDATE of one row by `id` for a set of columns, and the SELECT of that row's `id`.
+
+        Built once per column set, with binds typed from the table and prefixed names, as for the
+        result statements.
+        """
+        table = cls.__table__
+        by_id = table.c.id == bindparam('r_id', type_=table.c.id.type)
+        write = (
+            update(table)
+            .where(by_id)
+            .values({name: bindparam(f'r_{name}', type_=table.c[name].type) for name in names})
+        )
+        exists = select(table.c.id).where(by_id)
+        return write, exists
+
+    @classmethod
+    def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any],
+                     path: str, consequence: str) -> List[str]:
+        """Write the same `values` onto each task in `ids` by `id`, committing once; return the ids written.
+
+        Each row is its own UPDATE, so each has its own matched count. A row matched on the first
+        attempt costs that one statement. A row that matched nothing is looked up: a missing row
+        raises `StaleDataError` and nothing of the call is committed, as for a bulk update; a row
+        that still exists was missed because the write waited on another transaction's row lock,
+        and the write is re-run, at most `CONTENDED_RERUNS` times. A row still not written after
+        that is logged as a warning with the `consequence` and left as it is.
+        """
+        write, exists = cls.__row_statements(tuple(values))
+        params = {f'r_{name}': value for name, value in values.items()}
+        attempts = 1 + CONTENDED_RERUNS
+        landed = []
+        try:
+            for id in ids:
+                for attempt in range(1, attempts + 1):
+                    # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per row.
+                    if Session.execute(write, {**params, 'r_id': id}).rowcount == 1:
+                        landed.append(id)
+                        break
+                    if Session.execute(exists, {'r_id': id}).first() is None:
+                        raise StaleDataError(f'UPDATE statement on table \'{cls.__table__.name}\' expected to '
+                                             f'update 1 row(s); 0 were matched (task {id})')
+                    if attempt < attempts:
+                        log.debug(f'Re-running contended {path} write for task ({id}) '
+                                  f'(attempt {attempt + 1} of {attempts})')
+                else:
+                    log.warning(f'Contended {path} write did not land for task ({id}) '
+                                f'after {attempts} attempts - {consequence}')
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        log.trace(f'Updated {len(landed)} {cls.__table__.name}s')
+        return landed
+
+    @classmethod
+    def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str) -> List[str]:
+        """Record the client that confirmed the tasks identified by `ids`; return the ids recorded."""
+        return cls.__write_rows(ids, {'client_id': client_id, 'client_host': client_host},
+                                'confirm', 'client not recorded')
+
+    @classmethod
+    def revert_all(cls: Type[Task], ids: List[str]) -> List[str]:
+        """Revert all tasks identified by `ids`; return the ids reverted."""
+        reverted = cls.__write_rows(ids, {
+            'schedule_time': None,
+            'server_host': None,
+            'server_id': None,
+            'client_host': None,
+            'client_id': None,
+            'command': None,
+            'start_time': None,
+            'completion_time': None,
+            'exit_status': None,
+            'outpath': None,
+            'errpath': None,
+            'waited': None,
+            'duration': None,
+        }, 'revert', 'task left in flight')
+        for id in reverted:
             log.trace(f'Reverted previous task ({id})')
+        return reverted
 
     @classmethod
     def revert(cls: Type[Task], id: str) -> None:
@@ -790,8 +859,10 @@ class Task(Entity):
     @classmethod
     def revert_interrupted(cls: Type[Task]) -> None:
         """Revert scheduled but incomplete tasks to unscheduled state."""
+        # A pass that reverts nothing ends the loop, so a row left in flight cannot be selected forever.
         while tasks := cls.select_interrupted(100):
-            cls.revert_all([task.id for task in tasks])
+            if not cls.revert_all([task.id for task in tasks]):
+                break
 
     @classmethod
     def cancel_all(cls: Type[Task], ids: List[str]) -> None:
@@ -897,8 +968,10 @@ class Task(Entity):
     @classmethod
     def revert_orphaned(cls: Type[Task], client_id: str) -> None:
         """Revert orphaned tasks from an evicted client to unscheduled state."""
+        # A pass that reverts nothing ends the loop, so a row left in flight cannot be selected forever.
         while tasks := cls.select_orphaned(client_id, 100):
-            cls.revert_all([task.id for task in tasks])
+            if not cls.revert_all([task.id for task in tasks]):
+                break
 
     @classmethod
     def latest_server(cls: Type[Task]) -> Optional[str]:
