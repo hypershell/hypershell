@@ -319,3 +319,174 @@ Gates for cycle 2:
 - the local zoned rehearsal (`smoke.sh`) passes.
 
 The multi-node evidence stands. These fixes touch only cancel, delete and revert edge paths, and the request path is unchanged; the reviewer confirms in cycle 2.
+
+## Review cycle 2 — changes-requested (2026-11-04)
+
+- **Reviewed commit:** 32379a44c4a1d45511d887edca1be76bbc2b1ef6  ·  **Base:** `ec75169`, unchanged  ·  **Remediation:** `git diff 9a81343..32379a4 -- . ':(exclude)spec/'`
+- **Verdict:** changes-requested. Two LOW findings, both CONFIRMED and both prose: F5 in `AGENTS.md`, F6 in the new seed and its `ROADMAP.md` entry. F1–F4 and the §6 note are fixed.
+- **Cycle:** 2 of ≤3. The loop has not converged, so this goes to the human.
+- **Mode:** a fresh blind pass over the whole spec-excluded diff `ec75169...HEAD`, plus verification of cycle 1's F1–F4.
+  - One blind reviewer, without `debate`.
+  - Given inline: GOAL.md, the invariants, the rubric, the cycle-1 findings F1–F4 and the judge's rulings. It could also read `evidence/cluster/`.
+  - Not given: PLAN, TECH, research, META or the earlier REVIEW.md text.
+  - The orchestrator ran the full suite. No `completeness` sub-pass.
+
+### Pre-flight
+
+- **Base.** As in cycle 1: `ec75169`. The merge resolutions in `core/queue.py` at `a040e1d` are in scope. The stale local `develop` was not used.
+- **Build state.** `TECH.md` is `status: in_review`.
+- **Contract drift.** `git log --oneline 9a81343..HEAD -- spec/zone-dispatch/GOAL.md` is empty, so the contract has not moved since cycle 1.
+- **Builds.** Frozen offline venvs, each from a `git archive` extract with a private copy of the uv cache:
+  - HEAD on 3.11.18, 3.12.16, 3.13.18 and 3.14.10;
+  - `b946b14` on 3.12.16;
+  - `ec75169`, 2.8.3, 2.9.0a2 and `b819de6` on 3.12, reused from cycle 1.
+
+  Every run had its own process group and a kill timer, in a throwaway site.
+
+### Verification run
+
+- **Full suite at HEAD** (orchestrator, `pytest -q`, one Python at a time). The reviewer's drives shared the machine.
+  - 3.12: **829 passed, 67 skipped**.
+  - 3.11: **825 passed, 71 skipped**.
+  - 3.13: **826 passed, 70 skipped**.
+  - 3.14: **826 passed, 70 skipped**.
+  - Each count is cycle 1's plus the 8 new tests in `tests/test_dispatch_staged.py`. The skips are the same as in cycle 1: there is no PostgreSQL or TimescaleDB server locally.
+- **Zone and dispatch modules on 3.12** (orchestrator; 11 modules, including `test_dispatch_staged.py`): **106 passed, 3 skipped** (PostgreSQL).
+- **Targeted modules** (reviewer):
+  - 3.12: 290 passed, plus `test_cluster.py` with 98 passed;
+  - 3.14: 149 passed.
+- **Red/green** (reviewer). HEAD's `tests/test_dispatch_staged.py` was run in a copy of the `b946b14` extract. All 8 tests fail there, and all 8 pass at HEAD.
+
+  | Test | At `b946b14` | At HEAD |
+  |---|---|---|
+  | `test_stage_replaces_a_staged_record` | the old record is served | pass |
+  | `test_revert_staged_leaves_terminal_and_missing_rows` | `AttributeError` (no `Task.revert_staged`) | pass |
+  | `test_staged_rows_changed_before_shutdown[cancel]` | cancelled row returns with exit NULL | pass |
+  | `test_staged_rows_changed_before_shutdown[delete]` | server rc 5, `StaleDataError` | pass |
+  | `test_staged_rows_changed_before_zone_empties[cancel]` | cancelled staged rows run | pass |
+  | `test_staged_rows_changed_before_zone_empties[delete]` | server dies once the zone empties | pass |
+  | `test_reverted_staged_row_runs_with_its_new_stamp` | server never finishes | pass |
+  | `test_queue_submit_refused_by_database_server` | `hs submit -q` hangs | pass |
+
+- **`Task.revert_staged`** (reviewer probe, SQLite):
+  - **1201 ids.** They ran as 3 statements with 513, 513 and 214 bound parameters, and all 1201 rows were reverted.
+  - **One transaction.** A failure injected on the second chunk raised and rolled back the first chunk: all 1201 rows stayed stamped, and the session was still usable afterwards.
+  - **Mixed rows.** With deleted, cancelled and completed rows spread across chunks, 1197 of 1201 were reverted, and the cancelled row stayed terminal.
+  - **Concurrent delete.** On SQLite, a delete from another connection between chunks waits on the held write lock.
+  - **Sessions.** The session is per thread: `revert_unstaged` runs on the Scheduler thread, the shutdown revert on the ServerThread.
+  - **PostgreSQL.** The bound limit is 65535, far above 513 per statement. This was reasoned, not run.
+- **`Dispatcher.stage` replacing a record in place** (reviewer probe):
+  - **Locking and position.** `stage`, `_replace`, `cut`, `take_*` and `finish` all run under the dispatcher lock. A replaced record keeps its position: an instrumented launcher replaced at positions 1 and 3 of 6, and all six tasks ran once each, in submit order, with 0 stale results.
+  - **Old stamp already cut.** The id has left the pool, so the new record is appended. The holder of the old stamp has its result refused as stale. This is the same as at base for a hand revert.
+  - **Return value.** The added count is unused for accounting: refill uses `len(pool.rows)`.
+  - **Normal runs.** In an instrumented 214-task run (three zones, three groups, retries, mixed `-b`), the replace branch was hit **0** times.
+- **`hs submit -q`** (reviewer, every combination bounded; none hung):
+  - **HEAD against a HEAD server with a database:** rc 5 in 0.3–0.5 s, with one CRITICAL `QueueSubmitRefused` that names the reason (the server schedules from its database) and the remedy (`--no-db`). The server keeps running.
+  - **HEAD against `--no-db`:** rc 0, and the tasks run.
+  - **Old submitters** (2.8.3, 2.9.0a2, `b819de6`, `ec75169`) against HEAD, with or without a database: rc 5 in 0.4–0.9 s with "client too old". The server logs "Client too old" and keeps serving. This is identical against `b946b14`.
+  - **HEAD against old servers** (2.8.3, 2.9.0a2, `b819de6`, `ec75169`): rc 5 in about 0.5 s, with one `QueueVersionError`.
+  - **The handshake.** `PROTOCOL` is unchanged, and the handshake does not involve the new exposed method.
+- **Multi-node evidence.** The remediation diff changes only:
+  - the duplicate-id branch of `stage`;
+  - the new `takes_submissions`;
+  - the two staged-revert paths;
+  - the submit check.
+
+  `request`, `cut`, registration, sizing, refill and the cap are unchanged. The reviewer re-ran `tests/cluster/compare.py` over `evidence/cluster/` in three modes, all **PASS**:
+  - default, with `--control 2.9.0a2`;
+  - `--zoned feature`;
+  - `--min-ratio 0.95 --baseline 2.8.3 --candidate feature --control 2.9.0a2`.
+
+  The cycle-1 grade stands.
+- **Single-host R1 benchmark** (reviewer; indicative only, because the machine was shared with the full suite): 5 interleaved repetitions of 1500 tasks give a median of **0.971×** 2.8.3.
+- **Tree hygiene.** `git status --porcelain` is empty after the reviewer. None of the 253 process groups it recorded is alive, and none of the orchestrator's is either.
+
+### Cycle-1 findings: remediation
+
+| Finding | Status | Evidence at HEAD |
+|---|---|---|
+| F1 · CRITICAL | **Fixed** | Cycle 1's own repro script was re-run in four modes: shutdown, delete, unstage, and unstage-delete. Each gives server rc 0, and the cancelled rows stay at exit −1 with `completion_time` set and never run. The log reads "Reverted 0 staged tasks … (2 left as completed, cancelled or deleted)". In the mixed variants, the unchanged staged row is reverted, then either runs or is left unscheduled |
+| F2 · MEDIUM | **Fixed** | Delete before shutdown and delete mid-run: server rc 0, no `StaleDataError`, the Scheduler keeps running, and the other rows complete |
+| F3 · MEDIUM | **Fixed** | Replacing in place keeps the position and carries the new stamp. The run finishes with every task done and no stale refusal |
+| F4 · LOW | **Fixed** | A clean refusal with rc 5 in under 0.5 s. The in-memory `-q` path still works. Seed `issues/queue-submit-database-server.md` filed (see F6) |
+| §6 note | **Fixed** | `AGENTS.md` and `invariants.md` now name the staged revert and its conditional rule. The order matches `ServerThread` (`server.py:977-994`), and both call sites use `Task.revert_staged` (`server.py:328`, `:992`). "One conditional update" is several statements in one transaction when there are more than 500 ids; the property it states holds |
+
+### Requirement → evidence matrix
+
+| R-ID | Verified how (cycle 2) | Status |
+|------|------------------------|--------|
+| R1 | `test_cluster_default_path` and `test_server_bundlesize_serves_plain_clients`; `compare.py --min-ratio 0.95` PASS; single host 0.971× | ✅ |
+| R2 | `test_request_carries_identity_zone_and_size`, `test_advertise_only_an_explicit_size`, `test_cut_follows_advertised_size`, `test_configured_bundlesize_is_advertised` | ✅ |
+| R3 | `test_reply_shape`, `test_cap_bounds_the_largest_bundle`; evidence cap-32 PASS | ✅ |
+| R4 | `test_no_task_is_delivered_twice`, the partial, empty and re-entry tests; mixed drive with 214 tasks and 0 double runs; F3 fixed | ✅ |
+| R5 | `test_dispatch_version.py`; the old/new submit matrix above | ✅ |
+| R6 | `test_submit_stamps_zone`, `test_zone_usage_errors`; `test_cluster.py` 98 passed | ✅ |
+| R7 | `test_zone_model.py` | ✅ |
+| R8 | `test_ensure_is_idempotent`, `test_ensure_under_concurrent_processes` (SQLite). PostgreSQL is not run locally; CI runs `test_zone_postgres.py` | ✅ (SQLite) |
+| R9 | `test_zoned_request_gets_only_its_zone`, `test_retry_keeps_zone`; mixed drive with 0 wrong-zone runs | ✅ |
+| R10 | `test_group_gating_stays_global`, `test_mixed_zone_workload`, `test_groups.py` | ✅ |
+| R11 | `test_upgrade_adds_zone_in_place`, `test_new_task_stores_default_zone_as_null` | ✅ |
+| R12 | `test_zone_display.py` | ✅ |
+| R13 | `--zone` is documented everywhere it is required. The F4 help text landed in the same commit as the code (`7dee92c`) | ✅ |
+| R14 | Full suite green on 3.11–3.14; the staged cancel, delete and revert paths are now covered | ✅ |
+
+**Unmapped changes:** none harmful.
+- The changes cycle 1 listed.
+- The `Task.revert_columns` refactor of `revert_all`, which keeps the same 13 columns.
+- `takes_submissions` and `QueueSubmitRefused`, from the F4 ruling.
+- The new seed and its `ROADMAP.md` entry.
+
+### Findings
+
+#### [LOW/CONFIRMED] F5 — `AGENTS.md` says the dispatcher exposes one method; it exposes two
+- **Where:**
+  - `AGENTS.md:167`: "whose single method `request` hands work to clients".
+  - `AGENTS.md:175`: "the one method `request` on the dispatcher".
+  - The code: `src/hypershell/core/queue.py:904`, `DISPATCH_EXPOSED = ('request', 'takes_submissions')`.
+- **Failure scenario:** `AGENTS.md` is the stated ground truth for the remote surface, and that surface is a pickle-framed RPC. It now under-reports the methods a remote party can call on the dispatcher. No test pins `DISPATCH_EXPOSED`.
+- **Evidence:**
+  - `grep -n "one method\|single method" AGENTS.md` matches both lines.
+  - `grep -rn "DISPATCH_EXPOSED\|takes_submissions" tests/` finds nothing.
+  - `takes_submissions` was added in `7dee92c`.
+- **The method itself is sound.** It is authenticated, takes no arguments and returns a bool. It was ruled for under F4. The defect is the prose only.
+- **Suggested fix:** name both methods in those two sentences: `takes_submissions` is the one `hs submit -q` calls.
+
+#### [LOW/CONFIRMED] F6 — The new seed understates what `hs submit -q` did to a database-backed 2.8.x or 2.9.0a2 server
+- **Where:**
+  - `issues/queue-submit-database-server.md:19-21`: "Their confirmations failed and their results were refused, so the tasks ran and nothing was recorded."
+  - `ROADMAP.md:375`: "the tasks used to run with their results refused".
+- **What actually happens:**
+  - **2.8.3 and 2.9.0a2:** both the server's Confirm thread and its Receiver thread die on an uncaught `StaleDataError`. The server stops recording results for the rest of the run.
+  - **`ec75169`:** only the Confirm thread dies, and results are refused as stale. This matches the seed's wording, which fits `ec75169` but not the releases it names.
+- **Evidence:** the reviewer drove each old submitter against its own version's server with a database. Its logs show `Uncaught exception from <class 'hypershell.server.Receiver'>` and `StaleDataError` at 2.8.3 and 2.9.0a2, and `Refused stale result` at `ec75169`.
+- **What is accurate:**
+  - every other claim in the seed;
+  - `status: unshaped`;
+  - the ROADMAP link target.
+- **Suggested fix:** correct both sentences to say what the released versions did.
+
+**Dropped under refutation** (recorded, not findings):
+- **A deleted staged row cut by a live client.** The Confirm thread hits `StaleDataError` and the server exits rc 5. This is identical at `ec75169`, where the row sat on `scheduled`, so it is pre-existing and not made worse.
+- **A cancelled staged row cut by a live client still runs.** Its result is dropped. This is the same as at base, and `hs update` warns that the task is already scheduled.
+- **Hand-reverting rows that were delivered but not yet confirmed.** They run twice, and the stale result is refused. This is the same at `ec75169` (HEAD: 59 double runs; base: 85).
+- **Editing a staged row's zone to a raw UUID and then reverting it** puts the id in two pools. It needs a hand edit, the result fence holds, and the remediation does not change it.
+- **A new `hs submit -q` against a `b946b14` server** raises `AttributeError`. `b946b14` was never released.
+- **`cluster/remote.py` passes `--zone` unquoted.** The argv is a list given to `Popen` with no shell, so this is not a bug.
+
+**Known pre-existing items: does this diff make them worse?**
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| TLS localhost flake (fixed on develop after this base) | Not worse | `hs submit -q` opens one more proxy. The TLS-on refusal test passes on 3.12 and 3.14, and four full suites are green |
+| A stream run stopping before its input ends | Not exercised | Untouched by the remediation |
+| An empty task file hanging | Not exercised | Untouched by the remediation |
+| "database is locked" during ingest | Not worse | `revert_staged` holds the SQLite write lock across its chunks, as `revert_all` held it at `b946b14`. The window is milliseconds for realistic pools. Not exercised during ingest |
+| `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade` | Not worse | Passes in all four full suites |
+| `test_restart.py::test_restart_update_adds_novel_and_runs` | Not worse | Passes in all four full suites |
+| TimescaleDB ≥ 2.29 concurrent-update regression | Exposed, PLAUSIBLE, LOW; owned by its own cycle | `Task.revert_staged` is this cycle's only new UPDATE on `task`. The regression needs another transaction to hold that staged row's lock at that moment, which only a hand `hs update` or `hs task update` does. If that writer was a cancel, matching 0 rows is the right outcome. Otherwise the row stays stamped with `completion_time` NULL and sits in no pool. A simulated spurious 0 (SQLite) showed the consequence: mid-run, a non-`forever` server does not finish and logs nothing about why; at the next start, `revert_interrupted` reverts the row and every task completes |
+
+### Human-gate triggers
+
+**Not triggered by a finding.** F5 and F6 are prose in `AGENTS.md`, `issues/` and `ROADMAP.md`. No CONFIRMED finding is in a high-blast-radius file or breaks a security or DB-lifecycle invariant. F5 describes the remote surface of `core/queue.py`, but the code it describes was graded sound.
+
+**The bounded loop does escalate.** This is cycle 2 of ≤3 without convergence, so the human decides the next step.

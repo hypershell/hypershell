@@ -3,7 +3,7 @@ slug: zone-dispatch
 title: Zone-aware, demand-driven dispatch (zone, cycle 2)
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/zone-dispatch
 base: develop
 current_phase: done
@@ -137,10 +137,12 @@ phases:
   verify: uv run pytest -v tests/test_zone_display.py tests/test_list.py tests/test_card_info.py
     tests/test_card_render.py tests/test_card_integration.py tests/test_main.py
 review:
-  last_reviewed_commit: b946b14820b4109d483a5311b8f24692e2d9c307
+  last_reviewed_commit: 32379a44c4a1d45511d887edca1be76bbc2b1ef6
   verdict: changes-requested
-  blocked_reason: ''
-  cycle: 1
+  blocked_reason: 'Review cycle 2: F5 AGENTS.md names one dispatcher method (two exposed);
+    F6 seed/ROADMAP misstate 2.8.x/2.9.0a2 submit -q behaviour. Both LOW prose; F1-F4
+    fixed.'
+  cycle: 2
 ---
 # TECH.md — Zone-aware, demand-driven dispatch (zone, cycle 2)
 

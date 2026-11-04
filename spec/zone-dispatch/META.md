@@ -15,6 +15,9 @@
 - `hs-review`'s `debate` variant on a coupled-core diff: both blind reviewers independently
   reproduced the CRITICAL (F1), and the block-stance reviewer found two more CONFIRMED defects
   (F3, F4) that the ship-stance reviewer did not.
+- `hs-review` cycle 2's executed-evidence spine: a frozen build of the cycle-1 reviewed commit let
+  the blind reviewer prove all 8 new tests red there and green at HEAD. Cycle 1's own repro script
+  re-ran F1 unchanged.
 
 ## Friction findings
 
@@ -70,7 +73,7 @@
 - **Confidence:** high · **Effort:** small
 
 
-## F5 — hs-review has no guidance for a stacked cycle whose base has not landed on `develop`
+## F5 — hs-review has no guidance for a stacked cycle whose base has not landed on `develop` · seen again (review cycle 2)
 `origin=hs-review:step-1 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** `TECH.md` says `base: develop`, and the skill's injected diffstat is
   `develop...HEAD`. This cycle is stacked on Z1, which has not landed yet, and local `develop` is
@@ -84,7 +87,7 @@
   and print the diffstat against that base instead of `develop`.
 - **Confidence:** med · **Effort:** small
 
-## F6 — Committed external evidence under `spec/{slug}/evidence/` is neither allowed nor forbidden reviewer input
+## F6 — Committed external evidence under `spec/{slug}/evidence/` is neither allowed nor forbidden reviewer input · seen again (review cycle 2)
 `origin=hs-review:step-2 severity=medium category=missing-guidance status=open target=.agents/factory/review-rubric.md`
 - **What happened:** R1, R4 and R14 are partly graded against multi-node evidence committed under
   `spec/zone-dispatch/evidence/cluster/`. The `':(exclude)spec/'` pathspec hides it from the
@@ -97,3 +100,29 @@
   `spec/{slug}/evidence/` (raw run records only) as allowed reviewer input, and tell the reviewer to
   re-judge it with the in-repo judge rather than trust any summary.
 - **Confidence:** high · **Effort:** small
+
+## F7 — A cycle-2+ review must verify named findings, but the rubric hides the prior REVIEW.md
+`origin=hs-review:step-2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** Cycle 2 had to confirm F1–F4 fixed. The rubric withholds "any prior cycle's
+  REVIEW.md" from the reviewer, and Step 2's inline-only list has no slot for prior findings or the
+  human's triage rulings. The orchestrator chose to inline the cycle-1 Findings text and the triage
+  table, and withheld the rest of the file.
+- **Skill cause:** Step 3 names a remediation-verification mode, but Step 2 does not say which inputs
+  it needs, or which parts of a prior REVIEW.md are reviewer output (safe) and which leak rationale.
+- **Recommended fix:** In Step 2, for cycle ≥ 2, inline the prior cycle's Findings section and the
+  human's triage rulings, and nothing else from REVIEW.md. Have the reviewer return a per-finding
+  FIXED / NOT FIXED table, with red/green results for each new test at the reviewed commit.
+- **Confidence:** high · **Effort:** small
+
+## F8 — CONFIRMED LOW prose findings block and use up a bounded cycle
+`origin=hs-review:step-4 severity=medium category=steering status=open target=.agents/factory/review-rubric.md`
+- **What happened:** Cycle 2's only findings were two LOW prose errors: an `AGENTS.md` sentence and a
+  seed's history line. Step 4 routes any CONFIRMED finding to `changes-requested` whatever its
+  severity, so a docs-only fix costs a full build↔review cycle against the ≤3 bound.
+- **Skill cause:** The verdict rule has no severity or kind floor. It has no lighter path for a
+  prose fix that changes no code, the way Z1's quick-review follow-up worked.
+- **Recommended fix:** Add a "prose-only LOW" route. The finding stays CONFIRMED and blocking, but
+  its fix is verified by a scoped quick-review of the docs diff rather than a full cycle, and that
+  pass does not increment `review.cycle`. This does not weaken the human gate or the evidence
+  spine, so it is not `high`.
+- **Confidence:** med · **Effort:** small
