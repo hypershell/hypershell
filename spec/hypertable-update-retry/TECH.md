@@ -3,10 +3,10 @@ slug: hypertable-update-retry
 title: A task-row write that waited on a row lock still lands on a TimescaleDB hypertable
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/hypertable-update-retry
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -130,7 +130,7 @@ phases:
     runs''; kt 2400 env -u HS_TEST_POSTGRES pytest -q -l --lf; }; }'
 - id: P6
   name: Record the foreman's runs and CI
-  status: blocked
+  status: done
   satisfies:
   - R7
   depends_on:
@@ -145,7 +145,7 @@ phases:
 review:
   last_reviewed_commit: ''
   verdict: none
-  blocked_reason: awaiting foreman contended-write runs and CI
+  blocked_reason: ''
   cycle: 0
 ---
 # TECH.md — A task-row write that waited on a row lock still lands on a TimescaleDB hypertable
@@ -472,15 +472,17 @@ not fix are recorded as a candidate with their evidence.
 - [x] **External wait.** At the end of P5, `hs-build` sets this phase `blocked` with
       `blocked_reason: awaiting foreman contended-write runs and CI` and stops. It never runs a
       cluster job or a PostgreSQL server, pushes, or reads GitHub itself.
-- [ ] When the foreman delivers: clear `blocked` with `set_phase.py`; paste the `r7` and `ci` blocks
+- [x] When the foreman delivers: clear `blocked` with `set_phase.py`; paste the `r7` and `ci` blocks
       and the harness note under their markers as delivered, and a short table (run, server, build,
-      exit, red tests).
-- [ ] If `check_evidence.py r7` fails, do not edit the evidence. A failing
+      exit, red tests). *(Delivered 2026-11-04. The four logs went in as EVIDENCE.md's collapsed
+      appendix, the hand-back's other allowed form: the repository ignores `*.log`.)*
+- [x] If `check_evidence.py r7` fails, do not edit the evidence. A failing
       `test_rerun_after_contended_update_matches` on 2.31.0 means the design's premise is false:
       stop and escalate (PLAN §5). A test that never observed the lock wait, or a red test that
       errored instead of failing, is a test defect: amend P1's module in a new commit, re-run P5's
       gate, and ask the foreman for new runs. A CI entry red for a reason outside this change needs
-      a rerun or the foreman's ruling, recorded next to the `ci` block.
+      a rerun or the foreman's ruling, recorded next to the `ci` block. *(Not triggered: `r7` and
+      `ci` both pass as delivered, and CI needed no rerun.)*
 - **Verify:** no `src/` or `tests/` change since the final fix commit, and `check_evidence.py r7 ci`
   passes.
 - **Touches:** `spec/hypertable-update-retry/EVIDENCE.md`, this file.
