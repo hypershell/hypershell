@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/hypertable-update-retry
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-04'
 phases:
 - id: P1
   name: Contended-write tests and the CI line (tests only)
-  status: pending
+  status: done
   satisfies:
   - R7
   - R3
@@ -20,14 +20,15 @@ phases:
   hammerable: false
   hill: uphill
   verify: kt() { uv run --frozen python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
-    if r<0 else r)' "$@"; }; m=tests/test_contended_write.py; l="${TMPDIR:-/tmp}/hs-hur-p1.log"; git diff
-    --quiet 0e8275e -- src && test "$(git diff --name-only 0e8275e -- .github)" = .github/workflows/tests.yml
-    && grep -q 'tests/test_timescale.py tests/test_contended_write.py' .github/workflows/tests.yml &&
-    for t in test_rerun_after_contended_update_matches test_contended_confirm_records_client test_contended_result_applies
-    test_contended_result_refused_when_reverted test_contended_orphan_revert_lands; do grep -q "^def $t("
-    "$m" || exit 1; done && test "$(grep -c '^def test_' "$m")" -eq 5 && ! grep -qE 'confirm_all|DEFERRED|CONTENDED_RERUNS'
-    "$m" && { kt 300 env -u HS_TEST_POSTGRES pytest -rs "$m" > "$l" 2>&1; r=$?; tail -n 8 "$l"; test $r
-    -eq 0; } && grep -q '5 skipped' "$l" && kt 120 python spec/hypertable-update-retry/contention_run.py
+    if r<0 else r)' "$@"; }; m=tests/test_contended_write.py; l="${TMPDIR:-/tmp}/hs-hur-p1.log";
+    git diff --quiet 0e8275e -- src && test "$(git diff --name-only 0e8275e -- .github)"
+    = .github/workflows/tests.yml && grep -q 'tests/test_timescale.py tests/test_contended_write.py'
+    .github/workflows/tests.yml && for t in test_rerun_after_contended_update_matches
+    test_contended_confirm_records_client test_contended_result_applies test_contended_result_refused_when_reverted
+    test_contended_orphan_revert_lands; do grep -q "^def $t(" "$m" || exit 1; done
+    && test "$(grep -c '^def test_' "$m")" -eq 5 && ! grep -qE 'confirm_all|DEFERRED|CONTENDED_RERUNS'
+    "$m" && { kt 300 env -u HS_TEST_POSTGRES pytest -rs "$m" > "$l" 2>&1; r=$?; tail
+    -n 8 "$l"; test $r -eq 0; } && grep -q '5 skipped' "$l" && kt 120 python spec/hypertable-update-retry/contention_run.py
     --label p1 --commit 0e8275e --dry-run
 - id: P2
   name: Confirm and the eviction revert land when contended
@@ -43,18 +44,20 @@ phases:
   hammerable: false
   hill: uphill
   verify: kt() { uv run --frozen python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
-    if r<0 else r)' "$@"; }; git diff --quiet 0e8275e -- src/hypershell/client.py src/hypershell/task.py
-    src/hypershell/core && test "$(git diff --name-only 0e8275e -- src | tr '\n' ' ')" = 'src/hypershell/data/model.py
-    src/hypershell/server.py ' && ! git diff 0e8275e -- src | grep -qE '^[-+].*(mapped_column|__tablename__|__table_args__|Index\()'
+    if r<0 else r)' "$@"; }; git diff --quiet 0e8275e -- src/hypershell/client.py
+    src/hypershell/task.py src/hypershell/core && test "$(git diff --name-only 0e8275e
+    -- src | tr '\n' ' ')" = 'src/hypershell/data/model.py src/hypershell/server.py
+    ' && ! git diff 0e8275e -- src | grep -qE '^[-+].*(mapped_column|__tablename__|__table_args__|Index\()'
     && grep -q 'Task.confirm_all(' src/hypershell/server.py && ! grep -q 'update_all(self.client_info'
     src/hypershell/server.py && kt 900 env -u HS_TEST_POSTGRES pytest -m unit -q tests/test_contended_recovery.py
-    tests/test_writeback.py tests/test_writeback_statement.py tests/test_server.py tests/test_cancel.py
-    tests/test_update.py && kt 300 env -u HS_TEST_POSTGRES pytest -q -rs tests/test_contended_write.py
-    tests/test_writeback_postgres.py && kt 300 .agents/factory/bin/temp_site.sh sh -c "seq 100 | uv run
-    --frozen hsx -t 'test {} -ne 7' -N4 -b1 --no-tls -f failed.txt 2> err.log; test \"\$(cat failed.txt)\"
-    = 7 && test \$(uv run --frozen hs list -c -S) -eq 99 && test \$(uv run --frozen hs list -c -F) -eq
-    1 && test \$(uv run --frozen hs list -c -w 'client_id == null') -eq 0 && ! grep -qiE 'stale|duplicate|contended|not
-    written' err.log"
+    tests/test_writeback.py tests/test_writeback_statement.py tests/test_server.py
+    tests/test_cancel.py tests/test_update.py && kt 300 env -u HS_TEST_POSTGRES pytest
+    -q -rs tests/test_contended_write.py tests/test_writeback_postgres.py && kt 300
+    .agents/factory/bin/temp_site.sh sh -c "seq 100 | uv run --frozen hsx -t 'test
+    {} -ne 7' -N4 -b1 --no-tls -f failed.txt 2> err.log; test \"\$(cat failed.txt)\"
+    = 7 && test \$(uv run --frozen hs list -c -S) -eq 99 && test \$(uv run --frozen
+    hs list -c -F) -eq 1 && test \$(uv run --frozen hs list -c -w 'client_id == null')
+    -eq 0 && ! grep -qiE 'stale|duplicate|contended|not written' err.log"
 - id: P3
   name: Results land when contended; a deferred result is held
   status: pending
@@ -69,20 +72,23 @@ phases:
   hammerable: false
   hill: uphill
   verify: kt() { uv run --frozen python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
-    if r<0 else r)' "$@"; }; git diff --quiet 0e8275e -- src/hypershell/client.py src/hypershell/task.py
-    src/hypershell/core && test "$(git diff --name-only 0e8275e -- src | tr '\n' ' ')" = 'src/hypershell/data/model.py
-    src/hypershell/server.py ' && ! git diff 0e8275e -- src | grep -qE '^[-+].*(mapped_column|__tablename__|__table_args__|Index\()'
+    if r<0 else r)' "$@"; }; git diff --quiet 0e8275e -- src/hypershell/client.py
+    src/hypershell/task.py src/hypershell/core && test "$(git diff --name-only 0e8275e
+    -- src | tr '\n' ' ')" = 'src/hypershell/data/model.py src/hypershell/server.py
+    ' && ! git diff 0e8275e -- src | grep -qE '^[-+].*(mapped_column|__tablename__|__table_args__|Index\()'
     && grep -q 'Task.confirm_all(' src/hypershell/server.py && ! grep -q 'update_all(self.client_info'
-    src/hypershell/server.py && grep -q 'DEFERRED' src/hypershell/data/model.py && grep -q 'DEFERRED'
-    tests/test_contended_recovery.py && grep -q 'self.held' src/hypershell/server.py && git diff --quiet
-    0e8275e -- tests/test_writeback.py tests/test_writeback_statement.py && kt 900 env -u HS_TEST_POSTGRES
-    pytest -m unit -q tests/test_contended_recovery.py tests/test_writeback.py tests/test_writeback_statement.py
-    tests/test_server.py tests/test_cancel.py tests/test_update.py && kt 300 env -u HS_TEST_POSTGRES pytest
-    -q -rs tests/test_contended_write.py tests/test_writeback_postgres.py && kt 300 .agents/factory/bin/temp_site.sh
-    sh -c "seq 100 | uv run --frozen hsx -t 'test {} -ne 7' -N4 -b1 --no-tls -f failed.txt 2> err.log;
-    test \"\$(cat failed.txt)\" = 7 && test \$(uv run --frozen hs list -c -S) -eq 99 && test \$(uv run
-    --frozen hs list -c -F) -eq 1 && test \$(uv run --frozen hs list -c -w 'client_id == null') -eq 0
-    && ! grep -qiE 'stale|duplicate|contended|not written' err.log"
+    src/hypershell/server.py && grep -q 'DEFERRED' src/hypershell/data/model.py &&
+    grep -q 'DEFERRED' tests/test_contended_recovery.py && grep -q 'self.held' src/hypershell/server.py
+    && git diff --quiet 0e8275e -- tests/test_writeback.py tests/test_writeback_statement.py
+    && kt 900 env -u HS_TEST_POSTGRES pytest -m unit -q tests/test_contended_recovery.py
+    tests/test_writeback.py tests/test_writeback_statement.py tests/test_server.py
+    tests/test_cancel.py tests/test_update.py && kt 300 env -u HS_TEST_POSTGRES pytest
+    -q -rs tests/test_contended_write.py tests/test_writeback_postgres.py && kt 300
+    .agents/factory/bin/temp_site.sh sh -c "seq 100 | uv run --frozen hsx -t 'test
+    {} -ne 7' -N4 -b1 --no-tls -f failed.txt 2> err.log; test \"\$(cat failed.txt)\"
+    = 7 && test \$(uv run --frozen hs list -c -S) -eq 99 && test \$(uv run --frozen
+    hs list -c -F) -eq 1 && test \$(uv run --frozen hs list -c -w 'client_id == null')
+    -eq 0 && ! grep -qiE 'stale|duplicate|contended|not written' err.log"
 - id: P4
   name: Record the hazard and the rule; seed the deferred paths
   status: pending
@@ -95,9 +101,10 @@ phases:
   hammerable: false
   hill: uphill
   verify: 'f=$(git log -1 --format=%H -- src); s=issues/hypertable-contended-scheduler-and-cli-writes.md;
-    git diff --quiet "$f" HEAD -- src tests && git diff --quiet "$f" -- src tests && grep -q CONTENDED_RERUNS
-    AGENTS.md && grep -q CONTENDED_RERUNS .agents/factory/invariants.md && grep -qi hypertable .agents/factory/invariants.md
-    && test -f "$s" && grep -q ''^status: unshaped'' "$s" && grep -q "$s" ROADMAP.md && for x in stale-confirm-hides-orphan
+    git diff --quiet "$f" HEAD -- src tests && git diff --quiet "$f" -- src tests
+    && grep -q CONTENDED_RERUNS AGENTS.md && grep -q CONTENDED_RERUNS .agents/factory/invariants.md
+    && grep -qi hypertable .agents/factory/invariants.md && test -f "$s" && grep -q
+    ''^status: unshaped'' "$s" && grep -q "$s" ROADMAP.md && for x in stale-confirm-hides-orphan
     late-confirm-overwrites-attribution orphan-revert-loses-result coordinator-resilience-retry-backoff;
     do grep -q "$x" "$s" || exit 1; done'
 - id: P5
@@ -113,13 +120,14 @@ phases:
   hill: uphill
   verify: 'kt() { uv run --frozen python -c ''import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
     if r<0 else r)'' "$@"; }; f=$(git log -1 --format=%H -- src); e=spec/hypertable-update-retry/EVIDENCE.md;
-    l="${TMPDIR:-/tmp}/hs-hur-p5.log"; git diff --quiet "$f" HEAD -- src tests && git diff --quiet "$f"
-    -- src tests && grep -q "$f" "$e" && grep -q "$(git rev-parse 0e8275e)" "$e" && grep -q ''evidence:r7''
-    "$e" && grep -q ''evidence:ci'' "$e" && ! grep -qE ''^<!-- evidence:'' "$e" && kt 120 python spec/hypertable-update-retry/contention_run.py
-    --label p5 --commit "$f" --dry-run && { kt 2400 env -u HS_TEST_POSTGRES pytest -q -l > "$l" 2>&1 &&
-    tail -n 3 "$l" || { tail -n 40 "$l"; grep -E ''^(FAILED|ERROR)'' "$l"; echo ''One rerun of the failed
-    tests (known localhost flakes): record both runs''; kt 2400 env -u HS_TEST_POSTGRES pytest -q -l --lf;
-    }; }'
+    l="${TMPDIR:-/tmp}/hs-hur-p5.log"; git diff --quiet "$f" HEAD -- src tests &&
+    git diff --quiet "$f" -- src tests && grep -q "$f" "$e" && grep -q "$(git rev-parse
+    0e8275e)" "$e" && grep -q ''evidence:r7'' "$e" && grep -q ''evidence:ci'' "$e"
+    && ! grep -qE ''^<!-- evidence:'' "$e" && kt 120 python spec/hypertable-update-retry/contention_run.py
+    --label p5 --commit "$f" --dry-run && { kt 2400 env -u HS_TEST_POSTGRES pytest
+    -q -l > "$l" 2>&1 && tail -n 3 "$l" || { tail -n 40 "$l"; grep -E ''^(FAILED|ERROR)''
+    "$l"; echo ''One rerun of the failed tests (known localhost flakes): record both
+    runs''; kt 2400 env -u HS_TEST_POSTGRES pytest -q -l --lf; }; }'
 - id: P6
   name: Record the foreman's runs and CI
   status: pending
@@ -131,8 +139,9 @@ phases:
   hammerable: false
   hill: uphill
   verify: kt() { uv run --frozen python -c 'import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
-    if r<0 else r)' "$@"; }; f=$(git log -1 --format=%H -- src); git diff --quiet "$f" HEAD -- src tests
-    && kt 120 python spec/hypertable-update-retry/check_evidence.py r7 ci
+    if r<0 else r)' "$@"; }; f=$(git log -1 --format=%H -- src); git diff --quiet
+    "$f" HEAD -- src tests && kt 120 python spec/hypertable-update-retry/check_evidence.py
+    r7 ci
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -248,6 +257,27 @@ plan; change them only by amending PLAN §2.7 and saying why in the commit body.
   every local verify (`env -u`): the PostgreSQL modules must skip, never reach a server.
 - No cluster tools, no network, no PostgreSQL server, no GitHub actions in any phase.
 
+## Pre-build evidence and the build environment (recorded at build)
+
+- **The re-run premise, verified before the build** (the foreman's plan-gate probe, 2026-11-04, on a
+  test cluster): on a real TimescaleDB 2.31.0 (Apache), in all 6 two-session cases (with
+  `timescaledb.enable_hypertable_expansion_for_dml` on and off), the blocked UPDATE matched 0 rows,
+  and an immediate re-run of the same statement on the waiter's connection matched **1**. A plain
+  table matched 1 the first time. This settles PLAN §5's first residual risk ahead of P6;
+  `test_rerun_after_contended_update_matches` still pins it in the foreman's runs and in CI.
+- **Plan-gate rulings (foreman, 2026-11-04):** risk 1, keep `develop`'s behaviour (an uncontended
+  write to a missing row still raises); risk 2, the Scheduler's in-server contention (the `Task.next`
+  stamp and the `retried` mark) goes into the P4 seed, not fixed here; risk 3, accept the per-row
+  cost; risk 4, a new test module plus a CI line.
+- **Interpreters.** The build machine has no network and no PostgreSQL server. Each verify ran with
+  a frozen, offline venv per Python (3.11–3.14), synced from the lock with `uv sync --frozen
+  --offline --extra postgres` against a private copy of a local uv cache. No local cache holds the
+  `psycopg-binary` 3.3.4 wheels, so the venvs were synced with `--no-install-package
+  psycopg-binary`: `psycopg` is installed but cannot load a libpq, which nothing local needs (every
+  PostgreSQL module skips). Where a verify says `uv run --frozen CMD`, CMD ran with that venv first
+  on `PATH` (a stand-in `uv` that only executes `run [--frozen] CMD`); nothing was resolved or synced
+  by a verify.
+
 ---
 
 ## Phase P1 — Contended-write tests and the CI line (tests only)
@@ -255,23 +285,23 @@ plan; change them only by amending PLAN §2.7 and saying why in the commit body.
 **Goal:** the five R7 tests exist, run in every CI `postgres` entry, and reference only symbols
 present on `0e8275e`, so `0e8275e` fails them by assertion. **No `src/` edit.**
 
-- [ ] Create `tests/test_contended_write.py`. Module docstring: what the tests force (a write that
+- [x] Create `tests/test_contended_write.py`. Module docstring: what the tests force (a write that
       waits on another transaction's row lock, then the holder commits) and how to run them
       (`HS_TEST_POSTGRES`, `HS_TEST_TIMESCALE`, as `tests/test_timescale.py` documents). Module-level
       `pytestmark = [mark.integration, needs_server]`.
-- [ ] Import from `tests.test_timescale`: `admin`, `ts_database`, `ts_site` (fixtures),
+- [x] Import from `tests.test_timescale`: `admin`, `ts_database`, `ts_site` (fixtures),
       `database_engine`, `is_hypertable`, `uuid7`, `needs_server`, `TIMESCALE`; from `tests`:
       `main_lines`. Fixture `contended_db`: `ts_database()`; `ts_site(name, provider='timescale' if
       TIMESCALE else 'postgres')`; `hs initdb --yes` succeeds; with `TIMESCALE` set,
       `is_hypertable(engine)` or `pytest.fail`; bind the in-process `Session` to
       `database_engine(name)` and restore it in `finally`, as `tests/test_writeback_postgres.py`'s
       `pg_tasks` does. Yields the engine and the database name.
-- [ ] Helpers: `submit()` (`Task.new`, `id = uuid7()`, `Task.add`), `dispatch_one()` (through
+- [x] Helpers: `submit()` (`Task.new`, `id = uuid7()`, `Task.add`), `dispatch_one()` (through
       `serialize_tasks`/`deserialize_tasks`), `finish()`, `confirm()` (a `Confirm(queue=None)` with
       `client_info` set, then `update_info()`, returning its next state), `receive()` (a
       `Receiver(queue=None, redirect_failures=…)` with `tasks` set through the codec, then
       `update_tasks()`), `row()` (a raw `text()` select of one row on a private connection).
-- [ ] `contend(engine, holder_sql, params, write)`: open a holder connection (not autocommit), read
+- [x] `contend(engine, holder_sql, params, write)`: open a holder connection (not autocommit), read
       `pg_backend_pid()`, execute the holder's UPDATE (row lock held, uncommitted); start `write` in a
       `threading.Thread` that records its return value or exception and calls `Session.remove()` in
       `finally`; poll every 20 ms, up to 30 s, from an autocommit observer connection:
@@ -281,7 +311,7 @@ present on `0e8275e`, so `0e8275e` fails them by assertion. **No `src/` edit.**
       (commit the holder first so nothing hangs). Then commit the holder, join (30 s; `pytest.fail`
       if alive), close both connections, and return the recorded value or exception. No sleep
       decides an outcome.
-- [ ] The five tests, names exactly as below (`check_evidence.py` reads them), each `pytest.fail`
+- [x] The five tests, names exactly as below (`check_evidence.py` reads them), each `pytest.fail`
       on an unmet precondition and `assert` only on the outcome:
   - `test_rerun_after_contended_update_matches`: raw SQL only. Holder `UPDATE task SET client_host =
     'holder' WHERE id = :id`; the write runs `UPDATE task SET client_host = 'writer' WHERE id = :id`
@@ -303,7 +333,7 @@ present on `0e8275e`, so `0e8275e` fails them by assertion. **No `src/` edit.**
   - `test_contended_orphan_revert_lands`: dispatch and confirm to client X; holder is a late Confirm
     re-stamping the same client by id; the write is `Task.revert_orphaned(X)`. Assert no exception
     and the row is unscheduled (`schedule_time`, `client_id` NULL).
-- [ ] `.github/workflows/tests.yml`: in the `postgres` job's "Run PostgreSQL tests" step, append
+- [x] `.github/workflows/tests.yml`: in the `postgres` job's "Run PostgreSQL tests" step, append
       ` tests/test_contended_write.py` after `tests/test_timescale.py`. Nothing else in the file.
 - **Verify:** `src/` byte-identical to `0e8275e`; the workflow is the only `.github` change and
   names the module; the module defines exactly the five tests and names no symbol the fix adds;
