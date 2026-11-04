@@ -120,10 +120,10 @@ phases:
     echo ''One rerun of the failed tests (known TLS localhost flake): record both
     runs''; kt 2400 pytest -q -l --lf ; }; }'
 review:
-  last_reviewed_commit: eca86c8
-  verdict: changes-requested
+  last_reviewed_commit: 4743db6
+  verdict: approved
   blocked_reason: ''
-  cycle: 3
+  cycle: 4
 ---
 # TECH.md — Run task groups in order, and never strand a late one
 

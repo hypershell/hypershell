@@ -657,3 +657,183 @@ Gates for the remediation:
 - `port-trial.sh` passes, with the recorded uv cache substitution.
 
 Next: a scoped blind review (cycle 4, scoped) of only the remediation diff, then publish.
+
+## Review cycle 4 (scoped) — approved (2026-11-04)
+
+- **Reviewed commit:** 4743db6  ·  **Diff:** `git diff 0564295..4743db6 -- . ':(exclude)spec/'`, the
+  cycle-3 remediation only  ·  **Date:** 2026-11-04
+- **Verdict:** approved. O1 and O2 are remediated, and nothing in the diff is CONFIRMED broken. One
+  LOW PLAUSIBLE finding, P1, is in the new seed's PostgreSQL sentence. It goes to the human for
+  triage and does not block.
+- **Cycle:** 4, the scoped review the maintainer ruled after cycle 3 ("Fix + quick review"). It is
+  not a fresh full pass.
+
+**Mode:** scoped, as ruled. One blind reviewer graded the remediation diff. The caller also had it
+record this section and set the verdict.
+- **It saw:** the scoped diff, `GOAL.md` (R5, R7–R9), this file's cycle-3 section and its triage,
+  and the runnable repo.
+- **It did not see:** `PLAN.md`, `research/`, `port-trial.sh`, the builder's commit bodies or
+  `META.md`'s bodies. It read `TECH.md`'s frontmatter only after forming its view, to set the
+  verdict. That frontmatter also holds the phase list.
+- **Contract drift:** none. `GOAL.md`'s last commit is still `b242fc3`.
+
+### Verification run
+
+Each run used the build's frozen environments, ran in its own process group with a kill timer, and
+used a throwaway site under the review's scratch directory, with `--no-tls` for clusters.
+
+- **`test_group_order.py`, `test_groups.py` and `test_retry_gate.py`, HEAD, 3.12:** 55 passed in
+  129 s, which is cycle 3's 54 plus the new test.
+- **Full suite, HEAD, 3.12:** 653 passed, 64 skipped, 0 failed in 414 s, with no
+  rerun. That is cycle 3's 652 plus the new test.
+- **The new test, five runs on each of 3.11, 3.12, 3.13 and 3.14:** 20 of 20 passed, at 0.3–0.5 s
+  each. It commits through a separate session and drives `load_bundle` with `poll=0`, so it uses
+  no sleeps, threads or timing.
+- **Red check:**
+  - **Setup:** `git archive 4743db6` was unpacked into scratch, and only the `server.py` hunk was
+    reversed with `git apply -R`. The file is then byte-identical to `0564295`'s, and `tests/` is
+    untouched. `PYTHONPATH` put that tree ahead of the editable install.
+  - **Result:** `test_group_order.py -m unit` gives 1 failed and 17 passed. The failure is the new
+    test, with `assert 0 == 1` on the warning count. Its log shows groups `x`, 5 and 0 started,
+    with no warning.
+
+### O1 — remediated
+
+`mark_group_started` now compares and tracks only groups that are `numbers.Real`.
+
+- **What the database hands back.** A SQLite probe on an `INTEGER NOT NULL` column gives:
+  - `str` for `'x'`, `''` and `'0x10'`;
+  - `float` for 1.5 and `inf`;
+  - `int` for `True`, 1e3, `'7'` and 2.0;
+  - `bytes` for `b'x'`.
+
+  NaN becomes NULL, which `NOT NULL` refuses. So only int, float, str and bytes reach the
+  scheduler.
+- **A direct replay of `mark_group_started`,** on a bare `Scheduler` with only its tracking
+  fields set, HEAD against the reversed hunk:
+  - `x, 5, 0`: HEAD warns "0 after 5" and tracks 5. Reversed, there is no warning and it tracks
+    `'x'`, which is O1. `b'x', 5, 0` and `x, y, 3, 1` split the same way.
+  - `5, x, 0` and `1, x, 0` warn on both.
+  - With REAL groups, `1, 1.5, 2` gives no warning and `2, 1.5` warns "1.5 after 2", on both.
+    `x, 1.5, 1` warns "1 after 1.5" on HEAD only.
+  - `inf, 3` warns on both.
+  - Plain integers (`0, 1, 2`; `2, 2, 1`; `5, 0, 0, 0`) give the same warnings and the same
+    tracked value on both.
+  - **It never raises.** All 1,000 ordered triples over `x`, `''`, 0, 1, 1.5, -1, `inf`, `b'x'`,
+    `True` and `Decimal(2)` run clean on HEAD. After each call `last_scheduled_group` is the
+    started group and `first_group_pending` is False.
+- **Unchanged.** `last_scheduled_group` is still set for every new group, outside the guard.
+  `first_group_pending = False` is still unconditional. R5 for plain integers is as before. The
+  code comment is accurate.
+- **Refuted candidates:**
+  - **NaN** is Real, and would freeze the tracked value: `max(nan, 5)` is NaN, and nothing compares
+    below it. That is unreachable. SQLite stores NaN as NULL and the column refuses it, so the
+    committer dies before a scheduler sees it. That is the seed's hang. A PostgreSQL integer
+    column cannot hold NaN either.
+  - **`Decimal`** is not `numbers.Real`, so HEAD skips it where the old code warned
+    (`Decimal(5), 0`). That is unreachable too:
+    - `group` is `Integer()` (`data/model.py:97`, `:276`), and nothing in `data/` gives it a
+      NUMERIC variant or an `ALTER COLUMN`;
+    - psycopg loads int4 as `int`, and `min()` keeps int4;
+    - TimescaleDB makes the table a hypertable without retyping the column.
+  - **`bool`** is Real, but the database never returns one: `true` is stored as 1.
+  - **Turso** (`sqlite+turso`) uses SQLite's typing. Its driver is not installed here, so it was
+    not run.
+
+### O2 — remediated
+
+- **Where:** `issues/integration-test-hang-timeout.md:15-18`, `:28-29` and `ROADMAP.md:488-491`.
+  They now say the tests run each command as a subprocess with no timeout, and that the fix is a
+  subprocess or per-test timeout.
+- **Checked against:**
+  - `tests/__init__.py:36`, where `main()` calls `run(argv, stdout=PIPE, stderr=PIPE,
+    env=os.environ)` with no timeout;
+  - `pyproject.toml`, which has no pytest timeout plugin.
+
+  No "in process" wording is left in either file.
+- **Not a finding:** "each command" at `ROADMAP.md:488` is wider than the seed body. A few tests
+  pass their own `timeout=` (`tests/test_group_order.py:447-448`, `:463-464`;
+  `tests/test_upgrade_cli.py:168-170`). The seed body correctly scopes the claim to `tests.main`.
+
+### The new seed, `issues/group-tag-integer-validation.md`
+
+Checked against the code and by run:
+
+- **In the code:**
+  - `task.group` is `INTEGER NOT NULL` (`data/model.py:276`).
+  - `-g` is `type=int` (`submit.py:1274`).
+  - The docs say groups run in ascending order (`task_groups_alt.rst:1-2`, `submit_help.rst:114`).
+  - `Task.new` takes the group from the tags unchecked (`data/model.py:450`).
+  - `smart_coerce` (`core/types.py:33-47`) leaves `x`, `''` and `0x10` as text, and makes `1.5`
+    and `nan` floats.
+- **By run, `hs submit` in a throwaway site:**
+  - `-t group:x` stores text `'x'`.
+  - `--from-json` stores `"y"` as text, 1.5 as REAL, `"7"` as integer 7 and `true` as integer 1.
+  - Inline `group:0x10` and `group:` store text.
+  - A tag-only `group:z` line sets `z` for the two lines after it.
+
+  All as the seed says.
+- **`group:nan`:** `hs cluster nan.txt -N1 --no-tls` was killed at 45 s (rc 124), on HEAD and on
+  `b31c66e`. Both log `IntegrityError: NOT NULL constraint failed: task.group` from
+  `DatabaseCommitter`. That is as the seed says.
+- **Cross-references resolve:** `database-locked-during-ingest-hangs.md`, `ingest-robustness.md`,
+  and `submit-refuses-lower-group.md`, which is 2.9 only at line 18.
+- **The PostgreSQL sentence:** see P1.
+
+### Requirement → evidence matrix (scoped)
+
+| R-ID | Touched by this diff | Verified how | Status |
+|------|----------------------|--------------|--------|
+| R5 | `Scheduler.mark_group_started` | Replay, HEAD against the reversed hunk; the new test, red then green | ✅ (O1 closed) |
+| R7 | No | `tests/test_groups.py` unmodified, and passing; full suite | ✅ |
+| R8 | New unit test | Deterministic, with 20 of 20 passing on four Pythons; red on the reversed hunk | ✅ |
+| R9 | A stdlib import only; no schema, wire, CLI or config change | Static. The port trial was not rerun by this review. | ✅ |
+
+Unmapped changes: none. The diff is the O1 guard and its test, the O2 prose, and the ruled seed
+with its ROADMAP entry.
+
+### Findings
+
+#### [LOW/PLAUSIBLE] P1 — The new seed says PostgreSQL rejects a non-integer group, but a fractional one is likely rounded and stored
+- **Where:** `issues/group-tag-integer-validation.md:25` ("PostgreSQL rejects a non-integer value
+  at insert, as it always has") and `ROADMAP.md:256-257`.
+- **Failure scenario:**
+  - On PostgreSQL, `echo a  # HYPERSHELL: group:1.5`, or a JSON `"group": 1.5`, reaches the
+    insert as a Python float.
+  - SQLAlchemy's psycopg dialect renders the parameter as `%(group)s::INTEGER`, and psycopg sends
+    a float as float8 (`psycopg/types/numeric.py:76-77`).
+  - PostgreSQL's float8-to-integer cast rounds. So the task would be stored in group 2 with no
+    error, not refused.
+  - By the same casts, `true` would store as 1 and JSON `"7"` as 7, while `x`, `''`, `inf` and
+    `nan` are refused.
+- **Why it matters:** shaping reads the seed. The sentence frames PostgreSQL as already safe, and
+  the open question "Which values count as an integer?" discusses SQLite only. On PostgreSQL a
+  fractional group would silently land in another group. Separately, the ROADMAP's "stores a
+  non-integer one as text" misses REAL (1.5), which the seed body gets right.
+- **Evidence:** executed, `insert(Task.__table__).values(group=1.5, …)` compiled with
+  `sqlalchemy.dialects.postgresql.psycopg.dialect()` gives `bind_typing = RENDER_CASTS` and
+  `VALUES (%(group)s::INTEGER, …)`. Also read: psycopg's `FloatDumper` has `oid = FLOAT8_OID`.
+- **Why PLAUSIBLE:** it was not run end to end. There is no PostgreSQL server or libpq here, and
+  the suite's PostgreSQL job does not cover ingest (`ROADMAP.md:474-478`).
+- **Touches:** prose accuracy of a seed in this diff. No code, and no R-ID.
+- **Suggested fix:** say PostgreSQL refuses non-numeric text, NaN and infinity at insert, but
+  rounds a fractional value to an integer and casts a boolean or numeric string. Add PostgreSQL to
+  the open question.
+
+### Out of scope, observed (pre-existing, unchanged by this diff)
+
+- **A text group carries over to later submissions.** `hs submit` with no `-g` auto-selects the
+  database's lowest group, and on a database whose only group is text, that is the text group.
+  After `hs submit echo first -t group:x`, a plain `hs submit echo second` logged "Auto-selected
+  task group x (no tasks scheduled - defaulting to earliest group)" and stored its row in `'x'`.
+- **Why it is noted:** this is `Task.current_group`, which the diff does not touch. It is one more
+  way a group arrives, for whoever shapes the seed.
+
+### Human-gate triggers
+
+- **None from this cycle.** There is no CONFIRMED finding. `server.py` is core, but its change
+  grades clean.
+- **P1 is PLAUSIBLE** and surfaced for triage. It does not block.
+
+Next: `/hs-publish`. Whether P1's two sentences are corrected before publishing or left for shaping
+is the human's call.
