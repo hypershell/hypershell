@@ -3,7 +3,7 @@ slug: writeback-prebuilt-update
 title: Result writeback at or below 2.8.3's CPU cost
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/writeback-prebuilt-update
 base: develop
 current_phase: done
