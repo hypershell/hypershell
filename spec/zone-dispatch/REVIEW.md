@@ -500,3 +500,78 @@ Cycle 2 (`04a83b4`, reviewing `32379a4`) confirmed F1–F4 fixed and requested c
 | F5 · LOW · CONFIRMED | fix + pin | `AGENTS.md` names both remotely callable dispatcher methods, `request` and `takes_submissions`, wherever it describes the dispatcher's surface. Add a unit test that pins `DISPATCH_EXPOSED` to exactly that tuple, so the pickle-framed RPC surface cannot grow unnoticed. |
 | F6 · LOW · CONFIRMED | fix | `issues/queue-submit-database-server.md` and its `ROADMAP.md` entry state accurately what 2.8.x and 2.9.0a2 did (Confirm and Receiver threads die on an uncaught `StaleDataError`, after which the server records no results), and what `ec75169` did. |
 | Note: `Task.revert_staged` under TimescaleDB ≥ 2.29 | defer to merge | The `hypertable-update-retry` cycle on develop adds a contended-write re-run helper. When Z2 next merges develop after that lands, `revert_staged` goes through the same helper. Record this in TECH as a merge obligation. |
+
+## Review cycle 3 (scoped) — approved (2026-11-04)
+
+- **Reviewed commit:** f8a078f33daa13364bbd43e9fb89e81c4bad9508  ·  **Base:** `ec75169`, unchanged  ·  **Remediation:** `git diff 04a83b4..f8a078f -- . ':(exclude)spec/'`
+- **Verdict:** approved. F5 and F6 are fixed. No new finding.
+- **Cycle:** 3 of ≤3. The loop has converged.
+- **Mode:** scoped, as ruled in the cycle-2 triage. The review covers only the cycle-2 remediation diff, and checks it against F5, F6 and their rulings.
+  - One blind reviewer, without `debate`.
+  - Read: the cycle-2 section of this file and its triage.
+  - Not read: PLAN, TECH (beyond its `kind` and `review` fields), research, META, or the builder's commit body.
+  - No `completeness` sub-pass.
+
+### Pre-flight
+
+- **Scope.** The diff touches exactly the four expected files: `AGENTS.md`, `tests/test_dispatch_version.py`, `issues/queue-submit-database-server.md` and `ROADMAP.md`.
+- **No source change.** `git diff --quiet 04a83b4..f8a078f -- src/` exits 0.
+- **Builds.** A `git archive` extract of `f8a078f`, run on the frozen offline 3.12 venv with the import path pinned to the extract; the cycle-2 venvs for 3.11, 3.13 and 3.14. Every run had its own process group and a kill timer, in a throwaway site.
+
+### Verification run
+
+- **Zone and dispatch modules on 3.12.** 11 modules: the 9 `test_dispatch*.py` and `test_zone*.py` modules, plus `test_client_request.py` and `test_server_fsm.py`. Result: **113 passed, 3 skipped** (PostgreSQL). Unraisable and unhandled-thread exceptions were errors.
+- **`tests/test_dispatch_version.py` on 3.11, 3.13 and 3.14:** 5 passed on each.
+- **The pin test, 20 times on 3.12.** Each run was a separate pytest process. **20/20 passed**, in 0.58–0.60 s each. `ResourceWarning`, unraisable and unhandled-thread exceptions were errors.
+- **Mutation of the pin.** Each mutant was a scratch copy of the extract with one line changed, and each failed the pin test in about 0.6 s:
+
+  | Mutant (`core/queue.py`) | Fails at |
+  |---|---|
+  | `DISPATCH_EXPOSED` grows: `+ 'stage'` | `DISPATCH_EXPOSED == surface` |
+  | `DISPATCH_EXPOSED` shrinks to `('request', )` | `DISPATCH_EXPOSED == surface` |
+  | `DISPATCH_EXPOSED` reordered | `DISPATCH_EXPOSED == surface` |
+  | The registry serves `None` (every public method) in place of `DISPATCH_EXPOSED` | `type(client.dispatcher)._exposed_ == surface` (15 methods served) |
+  | The registry serves `DISPATCH_EXPOSED + ('stage', )` | `_exposed_ == surface` |
+  | The registry serves `('request', )` | `_exposed_ == surface` |
+
+  So the test catches a change to the declared tuple and a change to what the server actually hands a client. The last three mutants fail inside the `with QueueServer(...)` block, and the server still tears down: each run exits promptly, with no hang.
+- **Teardown.** The pin test ran 200 times in one process, about 4–5 ms each.
+  - **Threads.** None added. Only the main thread and the per-process `hypershell-queue-decref` sender remain.
+  - **Errors.** None: no warning, no unraisable or thread exception, and nothing logged at WARNING or above.
+  - **Sockets.** One loopback client socket is still open after 50 or 200 iterations, and none after one iteration. The same single socket remains when the loop runs the pattern that predates this diff: a server, a client and one `request`, with no `takes_submissions`. It is not this test's.
+- **Server-side enforcement** (probe, not part of the test). A raw `_callmethod` on the dispatcher proxy for `stage`, `finish`, `staged` or `configure` is refused with `RemoteError`, and the staged pool is unchanged. `request` is still served. `__repr__` is answered by the stdlib proxy fallback, as on every managed object.
+- **F6 re-drive.** Each version was driven against its own server, with a database:
+  1. `hs submit -q` with 3 tasks;
+  2. one client;
+  3. then `hs submit` with 3 database tasks.
+
+  | Server | Threads that died (`StaleDataError`) | `-q` tasks | Later database tasks |
+  |---|---|---|---|
+  | 2.8.3 | Confirm and Receiver | ran, not recorded | ran, **not recorded** (completion and exit NULL) |
+  | 2.9.0a2 | Confirm and Receiver | ran, not recorded | ran, **not recorded** |
+  | `ec75169` | Confirm only | ran; 3 × "Refused stale result" | ran, **recorded** (exit 0) |
+
+  - "After which the server recorded no results for the rest of the run" holds for the releases.
+  - "Only the Confirm thread died" and "nothing was recorded for them" hold for `ec75169`.
+  - **"2.8.x"** is reasoned, not run: `server.py` is identical from 2.8.0 to 2.8.3, and the `model.py` changes between them do not touch `Task.update_all`.
+  - **"Unreleased"**: `git tag --contains ec75169` is empty.
+
+### Cycle-2 findings: remediation
+
+| Finding | Status | Evidence at `f8a078f` |
+|---|---|---|
+| F5 · LOW | **Fixed** | `AGENTS.md:166-168` and `:176-179` name both methods. A grep of the whole file finds no other description of the dispatcher's remote surface, and no "one method" or "single method" anywhere. The prose matches the code: `queue.py:904` (`DISPATCH_EXPOSED`), `queue.py:959` (the registry) and `submit.py:888` (`check_server` calls `takes_submissions`). The pin test `test_dispatch_version.py:85-100` is deterministic: it uses no timing, binds port 0, and asks with `wait` 0. The mutants above show it fails on growth, shrinkage or a bypassed registry |
+| F6 · LOW | **Fixed** | `issues/queue-submit-database-server.md:19-25` and `ROADMAP.md:375-380` now state the released and `ec75169` behaviour; the re-drive above confirms each clause. Both Refs lines cite cycle 2, F6. `status: unshaped` is unchanged |
+
+### Findings
+
+None.
+
+**Dropped under refutation** (recorded, not findings):
+- **The pin is order-sensitive.** A reordered `DISPATCH_EXPOSED` fails it, which is stricter than "grows or shrinks". This is harmless for a pin.
+- **The test never disconnects its client.** The neighbouring tests in the module do the same. The teardown probe shows no thread, warning or per-run leak.
+- **"Two remotely callable methods".** The stdlib proxy also answers `__repr__` and `__str__` on every managed object, the queues included. `AGENTS.md` describes the exposed surface, as it already did for `QUEUE_EXPOSED`.
+
+### Human-gate triggers
+
+**None.** There is no CONFIRMED finding. The diff is prose plus one unit test, and it changes no source. The TimescaleDB merge obligation from the cycle-2 triage is outside this diff and was not checked.

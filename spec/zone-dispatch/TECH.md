@@ -137,10 +137,10 @@ phases:
   verify: uv run pytest -v tests/test_zone_display.py tests/test_list.py tests/test_card_info.py
     tests/test_card_render.py tests/test_card_integration.py tests/test_main.py
 review:
-  last_reviewed_commit: 32379a44c4a1d45511d887edca1be76bbc2b1ef6
-  verdict: changes-requested
+  last_reviewed_commit: f8a078f33daa13364bbd43e9fb89e81c4bad9508
+  verdict: approved
   blocked_reason: ''
-  cycle: 2
+  cycle: 3
 ---
 # TECH.md — Zone-aware, demand-driven dispatch (zone, cycle 2)
 
