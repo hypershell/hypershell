@@ -22,6 +22,7 @@ from pathlib import Path
 import io
 import logging
 from datetime import datetime, timedelta
+from queue import Empty as QueueEmpty
 
 # External libs
 import pytest
@@ -32,12 +33,13 @@ from sqlalchemy.orm.exc import StaleDataError
 
 # Internal libs
 from hypershell.core.uuid import uuid
+from hypershell.core.queue import make_sentinel
 from hypershell.client import ClientInfo
 from hypershell.data import core as data_core
 from hypershell.data import model
 from hypershell.data.core import Session
-from hypershell.data.model import Entity, Task, serialize_tasks, deserialize_tasks
-from hypershell.server import Confirm, ConfirmState
+from hypershell.data.model import Entity, Task, ResultOutcome, serialize_tasks, deserialize_tasks
+from hypershell.server import Confirm, ConfirmState, Receiver, ReceiverState
 
 
 CLIENT_A = (uuid(), 'client-a')
@@ -157,6 +159,35 @@ def finish(copy: Task, exit_status: int = 0, client: Tuple[str, str] = CLIENT_A)
     copy.outpath = f'task-{copy.id}.out'
     copy.errpath = f'task-{copy.id}.err'
     return copy
+
+
+def returned(copies: List[Task]) -> List[Task]:
+    """Finished copies as the server receives them, after the bundle's JSON."""
+    return deserialize_tasks(serialize_tasks(copies))
+
+
+class NothingReturned:
+    """A queue whose completed-task side is always empty, as when no bundle arrives in time."""
+
+    class Completed:
+        @staticmethod
+        def get(timeout: float = None) -> bytes:
+            raise QueueEmpty()
+
+    completed = Completed()
+
+
+def receiver(failures: Optional[io.StringIO] = None, in_memory: bool = False) -> Receiver:
+    """A Receiver whose queue never delivers a bundle."""
+    return Receiver(queue=NothingReturned(), in_memory=in_memory, redirect_failures=failures)
+
+
+def cycle(machine: Receiver) -> ReceiverState:
+    """One Receiver cycle with no new bundle: UNLOAD, and UPDATE if it moves there; return the state after UNLOAD."""
+    state = machine.unload_bundle()
+    if state is ReceiverState.UPDATE:
+        assert machine.update_tasks() is ReceiverState.UNLOAD
+    return state
 
 
 def row(task_id: str) -> Dict[str, Any]:
@@ -297,3 +328,158 @@ def test_uncontended_confirm_and_revert_cost_one_update_per_row(contention, logs
     assert contention.kinds() == ['UPDATE'] * len(ids)
     assert all(row(task_id)['schedule_time'] is None for task_id in ids)
     assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+
+
+def dispatched_and_confirmed(count: int = 1) -> List[Task]:
+    """Dispatch and confirm `count` new tasks to the client; return their copies in submission order."""
+    ids = [submit(f'echo {n}') for n in range(count)]
+    copies = dispatch_all(ids)
+    confirm(ids)
+    return [copies[task_id] for task_id in ids]
+
+
+@mark.unit
+def test_contended_result_applies_on_rerun(contention, logs) -> None:
+    """A result that missed its row the first time re-runs and is applied, with the usual logging."""
+    copy, = dispatched_and_confirmed()
+    finished = finish(copy, exit_status=3)
+    failures = io.StringIO()
+    contention.lose(copy.id, 1)
+
+    machine = receiver(failures)
+    machine.tasks = returned([finished])
+    machine.update_tasks()
+
+    data = row(copy.id)
+    assert (data['command'], data['duration'], data['exit_status']) == (copy.args, 2, 3)
+    assert data['completion_time'] is not None
+    assert failures.getvalue().splitlines() == [copy.args]
+    assert machine.held == []
+    assert len(reruns(logs, 'result', copy.id)) == 1
+    assert messages(logs, logging.DEBUG, f'Completed task ({copy.id})')
+    assert messages(logs, logging.WARNING) == [f'Non-zero exit status (3) for task ({copy.id})']
+
+
+@mark.unit
+def test_contended_result_exhausted_is_deferred(contention) -> None:
+    """At the bound, a result whose row still qualifies is DEFERRED and writes nothing."""
+    copy, = dispatched_and_confirmed()
+    before = row(copy.id)
+    contention.clear()
+    contention.lose(copy.id, ALWAYS)
+
+    assert Task.apply_results(returned([finish(copy)])) == [ResultOutcome.DEFERRED]
+
+    assert row(copy.id) == before
+    assert contention.kinds(copy.id) == ['UPDATE', 'SELECT'] * attempts()
+
+
+@mark.unit
+def test_held_result_lands_on_a_later_cycle(contention, logs) -> None:
+    """A deferred result is held, warned about once, and applied on a later cycle with no new bundle."""
+    copy, = dispatched_and_confirmed()
+    finished = finish(copy, exit_status=3)
+    failures = io.StringIO()
+    contention.lose(copy.id, 2 * attempts())
+    machine = receiver(failures)
+    machine.tasks = returned([finished])
+
+    machine.update_tasks()
+    assert [task.id for task in machine.held] == [copy.id]
+    assert row(copy.id)['completion_time'] is None
+    assert cycle(machine) is ReceiverState.UPDATE
+    assert [task.id for task in machine.held] == [copy.id]
+    assert cycle(machine) is ReceiverState.UPDATE
+
+    assert machine.held == []
+    data = row(copy.id)
+    assert (data['command'], data['duration'], data['exit_status']) == (copy.args, 2, 3)
+    assert data['completion_time'] is not None
+    assert failures.getvalue().splitlines() == [copy.args]
+    assert len(messages(logs, logging.DEBUG, f'Completed task ({copy.id})')) == 1
+    assert len(messages(logs, logging.DEBUG, f'Retrying held result for task ({copy.id})')) == 2
+    held = messages(logs, logging.WARNING, 'Contended result write did not land')
+    assert len(held) == 1 and f'({copy.id})' in held[0] and 'held for retry' in held[0]
+    assert cycle(machine) is ReceiverState.UNLOAD
+
+
+@mark.unit
+def test_held_result_refused_once_row_is_reverted(contention, logs) -> None:
+    """A held result whose row is reverted meanwhile is refused as stale and released."""
+    copy, = dispatched_and_confirmed()
+    contention.lose(copy.id, attempts())
+    machine = receiver()
+    machine.tasks = returned([finish(copy)])
+    machine.update_tasks()
+    assert [task.id for task in machine.held] == [copy.id]
+
+    Task.revert_orphaned(CLIENT_A[0])
+    assert cycle(machine) is ReceiverState.UPDATE
+
+    assert machine.held == []
+    assert row(copy.id)['schedule_time'] is None
+    stale = messages(logs, logging.WARNING, 'Refused stale result')
+    assert len(stale) == 1 and f'({copy.id})' in stale[0]
+
+
+@mark.unit
+def test_held_result_at_shutdown_is_reported(contention, logs) -> None:
+    """The shutdown sentinel with a result still held logs it and finishes."""
+    copy, = dispatched_and_confirmed()
+    contention.lose(copy.id, ALWAYS)
+    machine = receiver()
+    machine.tasks = returned([finish(copy)])
+    machine.update_tasks()
+
+    machine.bundle = make_sentinel()
+    assert machine.unpack_bundle() is ReceiverState.FINAL
+
+    shutdown = messages(logs, logging.WARNING, 'not written at shutdown')
+    assert shutdown == [f'Result for task ({copy.id}) not written at shutdown - task left interrupted']
+    assert in_flight(row(copy.id))
+
+
+@mark.unit
+def test_uncontended_results_cost_what_they_did(contention, logs) -> None:
+    """Applied is one UPDATE; stale and duplicate are one UPDATE and one SELECT; nothing is held."""
+    first, second = dispatched_and_confirmed(2)
+    machine = receiver()
+
+    contention.clear()
+    machine.tasks = returned([finish(first)])
+    machine.update_tasks()
+    assert contention.kinds() == ['UPDATE']
+
+    contention.clear()
+    machine.tasks = returned([finish(first)])
+    machine.update_tasks()
+    assert contention.kinds() == ['UPDATE', 'SELECT']
+    assert len(messages(logs, logging.WARNING, 'Ignored duplicate result')) == 1
+
+    Task.revert_orphaned(CLIENT_A[0])
+    contention.clear()
+    machine.tasks = returned([finish(second)])
+    machine.update_tasks()
+    assert contention.kinds() == ['UPDATE', 'SELECT']
+    assert len(messages(logs, logging.WARNING, 'Refused stale result')) == 1
+
+    assert machine.held == []
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert cycle(machine) is ReceiverState.UNLOAD
+
+
+@mark.unit
+def test_in_memory_receiver_never_holds(contention, logs) -> None:
+    """In memory, results are not written, so none is ever held."""
+    copy, = dispatched_and_confirmed()
+    contention.lose(copy.id, ALWAYS)
+    machine = receiver(in_memory=True)
+
+    contention.clear()
+    machine.tasks = returned([finish(copy)])
+    machine.update_tasks()
+
+    assert contention.kinds() == []
+    assert machine.held == []
+    assert messages(logs, logging.DEBUG, f'Completed task ({copy.id})')
+    assert cycle(machine) is ReceiverState.UNLOAD

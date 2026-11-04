@@ -272,11 +272,15 @@ class ResultOutcome(Enum):
     and its result columns were written. DUPLICATE means that same dispatch had already completed
     the row (a redelivered or repeated result). STALE means the row no longer belongs to that
     dispatch: it was reverted, rescheduled, completed by another dispatch, cancelled, or no
-    longer exists. A DUPLICATE or STALE result writes nothing.
+    longer exists. A DUPLICATE or STALE result writes nothing. DEFERRED means the row still
+    belongs to that dispatch and is not complete, but the write did not land within
+    `CONTENDED_RERUNS` re-runs, each having waited on another transaction's row lock; nothing
+    was written, and the caller may present the result again.
     """
     APPLIED = 1
     DUPLICATE = 2
     STALE = 3
+    DEFERRED = 4
 
 
 class Task(Entity):
@@ -896,8 +900,11 @@ class Task(Entity):
         one conditional UPDATE of the result columns, matching only while the row still has that
         `schedule_time` and no `completion_time`, so the check and the write are one atomic
         statement against a concurrent revert or reschedule. A result that matches nothing is
-        classified as a DUPLICATE (its own dispatch already completed the row) or STALE.
-        Returns one outcome per result, in order, and commits once for the whole list.
+        classified as a DUPLICATE (its own dispatch already completed the row) or STALE. A result
+        whose row still qualifies although its write matched nothing (the write waited on another
+        transaction's row lock) is re-run, at most `CONTENDED_RERUNS` times, and is DEFERRED if
+        it still has not landed. Returns one outcome per result, in order, and commits once for
+        the whole list.
         """
         outcomes = []
         try:
@@ -930,8 +937,8 @@ class Task(Entity):
             .where(*same_dispatch, table.c.completion_time.is_(None))
             .values({name: bindparam(key, type_=table.c[name].type) for name, key in binds})
         )
-        completed = select(table.c.id).where(*same_dispatch, table.c.completion_time.isnot(None))
-        return write, completed, binds
+        dispatched = select(table.c.completion_time).where(*same_dispatch)
+        return write, dispatched, binds
 
     @classmethod
     def __apply_result(cls: Type[Task], result: Task) -> ResultOutcome:
@@ -939,18 +946,28 @@ class Task(Entity):
         if result.schedule_time is None:
             # NOTE: comparing to None renders IS NULL, which would match a reverted row.
             return ResultOutcome.STALE
-        write, completed, binds = cls.__result_statements()
+        write, dispatched, binds = cls.__result_statements()
         dispatch = {'r_id': result.id, 'r_schedule_time': result.schedule_time}
         values = {key: getattr(result, name) for name, key in binds}
         values.update(dispatch)
-        # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per result.
-        matched = Session.execute(write, values).rowcount
-        if matched == 1:
-            return ResultOutcome.APPLIED
-        # NOTE: a cancel restamps schedule_time, so a cancelled row never matches here and its
-        # result is STALE; a run that itself exited with the cancel status value is a DUPLICATE.
-        found = Session.execute(completed, dispatch).first()
-        return ResultOutcome.DUPLICATE if found is not None else ResultOutcome.STALE
+        attempts = 1 + CONTENDED_RERUNS
+        for attempt in range(1, attempts + 1):
+            # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per result.
+            matched = Session.execute(write, values).rowcount
+            if matched == 1:
+                return ResultOutcome.APPLIED
+            # NOTE: a cancel restamps schedule_time, so a cancelled row never matches here and its
+            # result is STALE; a run that itself exited with the cancel status value is a DUPLICATE.
+            found = Session.execute(dispatched, dispatch).first()
+            if found is None:
+                return ResultOutcome.STALE
+            if found[0] is not None:
+                return ResultOutcome.DUPLICATE
+            # The row is still in flight under this dispatch, so the write waited on a row lock.
+            if attempt < attempts:
+                log.debug(f'Re-running contended result write for task ({result.id}) '
+                          f'(attempt {attempt + 1} of {attempts})')
+        return ResultOutcome.DEFERRED
 
     @classmethod
     def select_orphaned(cls: Type[Task], client_id: str, limit: int) -> List[Task]:

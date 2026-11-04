@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/hypertable-update-retry
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -60,7 +60,7 @@ phases:
     -eq 0 && ! grep -qiE 'stale|duplicate|contended|not written' err.log"
 - id: P3
   name: Results land when contended; a deferred result is held
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -377,12 +377,12 @@ running; uncontended writes issue one UPDATE per row and nothing else.
 **Goal:** a contended result re-runs while its row still qualifies; at the bound it is held and
 presented again; uncontended results issue exactly today's statements.
 
-- [ ] `src/hypershell/data/model.py`: `ResultOutcome.DEFERRED = 4` and its docstring sentence; the
+- [x] `src/hypershell/data/model.py`: `ResultOutcome.DEFERRED = 4` and its docstring sentence; the
       classifying SELECT returns `completion_time` for the same dispatch; `__apply_result`'s bounded
       loop — PLAN §2.2. Keep the `schedule_time is None` guard and both existing comments.
-- [ ] `src/hypershell/server.py`: `Receiver.held` and the `update_tasks` / `unload_bundle` /
+- [x] `src/hypershell/server.py`: `Receiver.held` and the `update_tasks` / `unload_bundle` /
       `unpack_bundle` changes — PLAN §2.3, log texts as given there.
-- [ ] Extend `tests/test_contended_recovery.py`: result loses once → APPLIED, one DEBUG naming the
+- [x] Extend `tests/test_contended_recovery.py`: result loses once → APPLIED, one DEBUG naming the
       id; result loses 4 → `DEFERRED`, WARNING once, nothing written; the next `update_tasks` with an
       empty bundle (driven through `unload_bundle` with a stub queue whose `completed.get` raises
       `QueueEmpty`, so the `UNLOAD → UPDATE` edge is exercised) applies it with the "Completed task"
