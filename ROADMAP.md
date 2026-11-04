@@ -331,6 +331,18 @@ it.
 *Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
 **Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
 
+## Contended Scheduler and `hs task update` writes fail on a TimescaleDB hypertable
+
+On TimescaleDB 2.29+, a `task`-row UPDATE that waited on another writer's row lock matches 0 rows
+although the row still qualifies. The server's Confirm, revert and result writes now re-run in that
+case; the Scheduler's dispatch stamp and `retried` mark, `Task.cancel_all` and every `hs task update`
+write do not. A contended stamp or mark exits the server mid-run (a late confirmation is an
+in-server contender), and an unmarked failed row would be retried twice; `hs task update` reports a
+false "not found", commits partially, or silently skips rows.
+
+*Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); resilience*
+**Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: unshaped*
+
 ## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
 
 The 2.9 line added task columns that a 2.8.3 peer cannot read, and nothing on the wire names a

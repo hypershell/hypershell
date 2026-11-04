@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/hypertable-update-retry
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -91,7 +91,7 @@ phases:
     -eq 0 && ! grep -qiE 'stale|duplicate|contended|not written' err.log"
 - id: P4
   name: Record the hazard and the rule; seed the deferred paths
-  status: pending
+  status: done
   satisfies:
   - R8
   - R4
@@ -402,11 +402,11 @@ presented again; uncontended results issue exactly today's statements.
 **Goal:** future writers of `task` rows meet the rule where agents read; the paths this cycle does
 not fix are recorded as a candidate with their evidence.
 
-- [ ] `AGENTS.md` § Data layer specifics: the bullet in PLAN §2.6, naming `CONTENDED_RERUNS`,
+- [x] `AGENTS.md` § Data layer specifics: the bullet in PLAN §2.6, naming `CONTENDED_RERUNS`,
       `Task.confirm_all`/`revert_all` and `Task.apply_results` as the pattern. § High-risk files &
       footguns, `data/model.py` entry: one clause pointing at it.
-- [ ] `.agents/factory/invariants.md` §1: the same rule, in lockstep.
-- [ ] `issues/hypertable-contended-scheduler-and-cli-writes.md` from
+- [x] `.agents/factory/invariants.md` §1: the same rule, in lockstep.
+- [x] `issues/hypertable-contended-scheduler-and-cli-writes.md` from
       `.agents/factory/templates/ISSUE.md` (`status: unshaped`, `kind: fix`, `appetite: small`,
       `lane: public`): Problem from research 02 rows for `Task.next`, the `retried` mark,
       `cancel_all` and the `hs task update` paths (with the in-server late-Confirm contender, the
@@ -415,7 +415,7 @@ not fix are recorded as a candidate with their evidence.
       `coordinator-resilience-retry-backoff`; links to `stale-confirm-hides-orphan`,
       `late-confirm-overwrites-attribution`, `orphan-revert-loses-result`,
       `coordinator-resilience-retry-backoff`, and to this cycle's `spec/` as the pattern.
-- [ ] `ROADMAP.md` Part I: an entry in the house style (heading, short problem paragraph, horizon
+- [x] `ROADMAP.md` Part I: an entry in the house style (heading, short problem paragraph, horizon
       line, `**Seed:**` link with `*status: unshaped*`), placed near the confirmation entries.
 - **Verify:** no `src/` or `tests/` change since the last `src/` commit; both docs name
   `CONTENDED_RERUNS` and the hypertable hazard; the seed exists, is `unshaped`, links the four seeds,

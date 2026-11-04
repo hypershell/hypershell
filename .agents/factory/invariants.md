@@ -32,6 +32,15 @@ subsystems.
   `revert_interrupted()` re-runs on next server start.
 - **Task-state transition logic belongs in `Task` classmethods**, not scattered into FSM driver
   files.
+- **A 0-row UPDATE of a `task` row is not proof the row is gone or no longer qualifies.** On a
+  TimescaleDB 2.29+ hypertable (the `timescale` provider), an UPDATE that waited on another
+  transaction's row lock can match 0 rows although the row still qualifies. A task-row write another
+  writer can contend checks its own count and, on 0, re-runs only while a fresh read says the row
+  still qualifies, at most `CONTENDED_RERUNS` times (DEBUG per extra attempt; at the bound a WARNING
+  naming the task and path, and a safe outcome: no crash, no silently stranded task, no write that
+  lands without its condition). A first-attempt match is neither re-run nor re-checked. Pattern:
+  `Task.confirm_all`/`revert_all`, `Task.apply_results` (`ResultOutcome.DEFERRED`). Never
+  `bulk_update_mappings` or an ORM flush for such a write.
 
 ## 2. `exit_status` overloading
 

@@ -349,6 +349,21 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   constant `server_default`, and a new index must not be `UNIQUE`, or the step refuses to upgrade
   an existing table (`SchemaUpgradeError`). Python API callers bypass the CLI helpers and must
   call `ensuredb()` first.
+- **A 0-row UPDATE of a `task` row is not proof the row is gone or no longer qualifies.** Under the
+  `timescale` provider on TimescaleDB 2.29+, an UPDATE that waited on another transaction's row lock
+  can match 0 rows although the row exists and still satisfies the statement's condition (a plain
+  table, plain PostgreSQL and TimescaleDB before 2.29 re-check it and match 1). A new statement sees
+  the other transaction's commit and matches normally. So a task-row write that another writer can
+  contend checks its own matched count and, on 0, re-runs only while a fresh read says the row still
+  qualifies, at most `CONTENDED_RERUNS` times, each extra attempt logged at DEBUG; at the bound it
+  logs a WARNING naming the task and the path and takes a safe outcome (never a crash, a silently
+  stranded task, or a write that lands without its condition). A write that matches first time is
+  neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id) and
+  `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
+  held by the Receiver) are the pattern. Never use `bulk_update_mappings` or an ORM flush for such a
+  write: they assert the total and raise `StaleDataError`. The Scheduler's `Task.next` stamp and
+  `retried` mark, `Task.cancel_all` and `hs task update` do not follow it yet
+  (`issues/hypertable-contended-scheduler-and-cli-writes.md`).
 
 ## Testing
 
@@ -391,7 +406,9 @@ warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-e
 - **`data/model.py`** — highest blast radius. A dropped `CANCEL_STATUS` filter or a missing
   `completion_time` silently double-runs or resurrects tasks; one retry per failed row rests on
   the single Scheduler plus the `retried` filter, not on the schema (`previous_id`/`next_id` are
-  not unique, except in pre-2.9 SQLite databases).
+  not unique, except in pre-2.9 SQLite databases); a contended `task`-row UPDATE can match 0 rows on
+  a TimescaleDB 2.29+ hypertable, so a new task-row write follows the `CONTENDED_RERUNS` rule in
+  *Data layer specifics*.
 - **`server.py`** — Scheduler FSM, HeartMonitor (Issue-#29 re-registration branch, `evict_after≥10`),
   and shutdown/sentinel ordering.
 - **`client.py`** — FSMs, process-global resource counters under `executor_lock`, sticky
