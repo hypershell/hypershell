@@ -28,3 +28,10 @@
 - **Skill cause:** Same as `spec/writeback-prebuilt-update/META.md` F5, still open.
 - **Recommended fix:** As recorded there.
 - **Confidence:** high · **Effort:** small
+
+## F4 — A verify's schema-line guard matches benign uses of `__tablename__`, and fails silently
+`origin=hs-build:P2 severity=low category=steering status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** P2's and P3's `verify:` refuse any added `src/` line matching `__tablename__` (meant to catch a schema change). The new helper's `StaleDataError` message and trace line used `cls.__tablename__`, so the gate failed with no output at all (the `! git diff … | grep -qE …` step is quiet), and the cause had to be found by running the chain's pieces by hand. The code was changed to `cls.__table__.name` to pass.
+- **Skill cause:** `hs-plan` gives no guidance on scope-guard greps in verify commands: a guard written as a bare token match on a symbol the codebase also reads at runtime (`__tablename__`) misfires, and an `&&` chain of quiet `grep -q` steps gives no clue which step failed.
+- **Recommended fix:** In `hs-plan`'s verify guidance, anchor schema guards to declarations (e.g. `^[-+]\s*__tablename__\s*=`, `mapped_column\(`), and have each scope check echo a label on failure (`|| { echo 'scope: schema line'; false; }`).
+- **Confidence:** high · **Effort:** small

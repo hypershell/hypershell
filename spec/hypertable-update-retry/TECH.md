@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/hypertable-update-retry
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -109,7 +109,7 @@ phases:
     do grep -q "$x" "$s" || exit 1; done'
 - id: P5
   name: Final local gate and the foreman hand-back
-  status: pending
+  status: done
   satisfies:
   - R6
   - R7
@@ -130,7 +130,7 @@ phases:
     runs''; kt 2400 env -u HS_TEST_POSTGRES pytest -q -l --lf; }; }'
 - id: P6
   name: Record the foreman's runs and CI
-  status: pending
+  status: blocked
   satisfies:
   - R7
   depends_on:
@@ -145,7 +145,7 @@ phases:
 review:
   last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ''
+  blocked_reason: awaiting foreman contended-write runs and CI
   cycle: 0
 ---
 # TECH.md — A task-row write that waited on a row lock still lands on a TimescaleDB hypertable
@@ -426,9 +426,9 @@ not fix are recorded as a candidate with their evidence.
 **Satisfies:** R6, R7 (request) · **Depends on:** P4
 **Goal:** the whole suite is green on the final fix, and the foreman has an exact run request.
 
-- [ ] Run the full suite (the `verify:` allows one recorded `--lf` rerun for the known localhost
+- [x] Run the full suite (the `verify:` allows one recorded `--lf` rerun for the known localhost
       flakes; record both runs in the commit body).
-- [ ] Create `spec/hypertable-update-retry/EVIDENCE.md` with a section **"Hand-back — contended-write
+- [x] Create `spec/hypertable-update-retry/EVIDENCE.md` with a section **"Hand-back — contended-write
       runs and CI"**:
       - builds, by label and full commit: **develop** = `0e8275e…` (full sha); **fix** = the output
         of `git log -1 --format=%H -- src` (any later commit changes only `spec/` and docs);
@@ -469,7 +469,7 @@ not fix are recorded as a candidate with their evidence.
 **Satisfies:** R7 · **Depends on:** P5
 **Goal:** the foreman's evidence is in `EVIDENCE.md` and meets the bars.
 
-- [ ] **External wait.** At the end of P5, `hs-build` sets this phase `blocked` with
+- [x] **External wait.** At the end of P5, `hs-build` sets this phase `blocked` with
       `blocked_reason: awaiting foreman contended-write runs and CI` and stops. It never runs a
       cluster job or a PostgreSQL server, pushes, or reads GitHub itself.
 - [ ] When the foreman delivers: clear `blocked` with `set_phase.py`; paste the `r7` and `ci` blocks
