@@ -102,3 +102,64 @@ The phase gate ran the script again, fresh, on the same host: 2.8 0.3802, `devel
   "runs_jsonl": "/tmp/claude-501/wbbuild/bench1/runs.jsonl"
 }
 ```
+
+## R6 hand-back — cluster run request
+
+For the foreman. Build agents run none of this: no cluster job, no push, no GitHub action.
+
+**Builds**, by label and full commit. The fix is the last commit that touches `src/`; every later
+commit on the branch changes only `spec/`, so the branch head measures the same code.
+
+| label | ref | commit |
+|---|---|---|
+| `2.8.3` | tag `2.8.3` | `4d5771b8a70a148142022117a30c5a4bf31e9afe` |
+| `develop` | `develop` at shaping | `bc6547a52fcf0ebd8dd04235a3e188a1480463f0` |
+| `fix` | `fix/writeback-prebuilt-update` | `37bfc72d250c487b61b0a8dfc88078b09c093a04` |
+
+**Configuration.** 256 single-executor clients, bundle size 1, TLS on, SQLite, a 16-CPU server
+node. At least 3 interleaved runs per build: each round runs all three builds, and the order
+rotates from round to round.
+
+**The bar,** verbatim from GOAL R6: "The fix's throughput SHALL be at or above 2.8.3's: the fix's
+mean over at least three interleaved runs per build is at or above 2.8.3's mean. If it falls short
+by less than the runs' spread, the foreman reports the numbers and the maintainer rules."
+
+**How `check_evidence.py r6` reads it.** The runs, sorted by `order`, must fall into consecutive
+triples that each hold all three builds, at least three triples. The `2.8.3` and `develop` runs
+must carry the commits above, and every `fix` run a commit whose `src/` and `tests/` match the
+fix's. If the fix's mean tasks/s is at or above 2.8.3's, the check passes. "The runs' spread" is
+the wider of the two builds' max − min ranges, 2.8.3's and the fix's, as ruled at the plan gate
+(2026-11-04). A shortfall smaller than that spread passes only with a non-empty `ruling`, the
+maintainer's words quoted; a larger one fails.
+
+**Return 1 — the cluster runs.** The harness note in the foreman's own words (the harness, its
+version, how throughput is measured, anything unusual), then a fenced `json` block directly after
+the marker line `<!-- evidence:r6 -->`, of this form:
+
+```text
+{"config": {"clients": 256, "executors_per_client": 1, "bundlesize": 1, "tls": true,
+            "database": "sqlite", "server_cpus": 16},
+ "runs": [{"label": "2.8.3" | "develop" | "fix", "sha": "<full commit>", "order": <1, 2, …>,
+           "tasks_per_s": <float>}, …],
+ "ruling": "<only if the fix falls short within the spread>"}
+```
+
+**Return 2 — CI on the draft PR.** Push the branch and open the draft PR so CI runs. Return a
+fenced `json` block directly after the marker line `<!-- evidence:ci -->`:
+
+```text
+{"run_id": <int>, "head_sha": "<full commit>",
+ "jobs": {"tests (3.11)": "<conclusion>", "tests (3.12)": "…", "tests (3.13)": "…",
+          "tests (3.14)": "…", "PostgreSQL (pg13)": "…", "PostgreSQL (pg18)": "…",
+          "PostgreSQL (timescale)": "…", "PostgreSQL (timescale-oss)": "…",
+          "PostgreSQL (timescale-floor)": "…"},
+ "reruns": [{"job": "tests (3.13)",
+             "test": "tests/test_restart.py::test_restart_update_adds_novel_and_runs",
+             "signature": "assert [''] == ['4', '5']", "location": "test_restart.py:102",
+             "first_attempt": "failure"}]}
+```
+
+`jobs` holds each job's final conclusion, and every one must be `success`. `reruns` is present only
+if the plan-gate ruling was used: one rerun of `tests (3.13)` whose first attempt failed only in the
+documented restart-update flake, with exactly that signature. `check_evidence.py ci` refuses any
+other rerun, a second rerun, or a different signature. Anything else red blocks.

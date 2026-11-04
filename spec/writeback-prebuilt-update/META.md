@@ -42,3 +42,10 @@
 - **Skill cause:** The skill assumes every `verify:` is a pytest or CLI command. It has no case for performance or port evidence, where the verify gate is a script that has to exist before any phase can name it.
 - **Recommended fix:** In Step 4, allow `spec/{slug}/` evidence or trial scripts as plan artifacts when a GOAL criterion needs recorded measurement or a port trial. Require them to run offline, under a kill timer and from extracted trees or worktrees, and to be run once on the base to show the bar can fail. List them in Step 8's staging and add `git archive`/`python` to `allowed-tools`.
 - **Confidence:** med · **Effort:** small
+
+## F6 — Step 7's `git add -A` contradicts explicit-path staging · seen again
+`origin=hs-build:P1 severity=low category=instruction status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** Step 7 (and Step 6's reference to it) prescribes `git add -A`, while this cycle's `TECH.md` Conventions and the session rules say to stage by explicit path. Every phase was staged by path.
+- **Skill cause:** The same finding as `spec/writeback-scoped-conditional/META.md` F2 and `spec/tls-client-address-family/META.md` F4, still open: the commit recipe assumes the tree holds only this phase's work.
+- **Recommended fix:** As recorded there: stage the phase's **Touches** paths plus `spec/{slug}/TECH.md` and `META.md`.
+- **Confidence:** high · **Effort:** small

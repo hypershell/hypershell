@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/writeback-prebuilt-update
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -68,7 +68,7 @@ phases:
     && kt 120 python spec/writeback-prebuilt-update/check_evidence.py r1
 - id: P4
   name: Final local gate and the foreman hand-back
-  status: pending
+  status: done
   satisfies:
   - R2
   - R5
@@ -77,7 +77,7 @@ phases:
   - P3
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: 'kt() { uv run --frozen python -c ''import os,signal,subprocess,sys,threading;p=subprocess.Popen(sys.argv[2:],start_new_session=True);t=threading.Timer(float(sys.argv[1]),os.killpg,(p.pid,signal.SIGKILL));t.start();r=p.wait();t.cancel();sys.exit(124
     if r<0 else r)'' "$@"; }; f=$(git log -1 --format=%H -- src); l="${TMPDIR:-/tmp}/hs-wb-p4.log";
     git diff --quiet "$f" HEAD -- src tests && git diff --quiet bc6547a -- tests/test_writeback.py
@@ -90,7 +90,7 @@ phases:
     runs''; kt 2400 pytest -q -l --lf; }; }'
 - id: P5
   name: Record the CI and cluster evidence
-  status: pending
+  status: blocked
   satisfies:
   - R6
   - R3
@@ -106,7 +106,7 @@ phases:
 review:
   last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ''
+  blocked_reason: awaiting foreman CI run and cluster runs
   cycle: 0
 ---
 # TECH.md — Result writeback at or below 2.8.3's CPU cost
@@ -250,9 +250,9 @@ the method, and meets the bar.
 **Satisfies:** R2, R5 (final), R6 (request) · **Depends on:** P3
 **Goal:** the whole suite is green on the final fix, and the foreman has an exact run request.
 
-- [ ] Run the full suite (the `verify:` allows one recorded `--lf` rerun for the known localhost
+- [x] Run the full suite (the `verify:` allows one recorded `--lf` rerun for the known localhost
       flakes; record both runs in the commit body).
-- [ ] Append to `EVIDENCE.md` a section **"R6 hand-back — cluster run request"**:
+- [x] Append to `EVIDENCE.md` a section **"R6 hand-back — cluster run request"**:
       - builds, by label and full commit: **2.8.3** = tag `2.8.3`, commit
         `4d5771b8a70a148142022117a30c5a4bf31e9afe`; **develop** = `bc6547a52fcf0ebd8dd04235a3e188a1480463f0`;
         **fix** = the output of `git log -1 --format=%H -- src` (the final fix commit; any later
@@ -349,3 +349,12 @@ exactly that signature is allowed and recorded; anything else red blocks.
   run: 2.8 0.3669, `develop` 0.4864, fix 0.2981 ms per result (fix −18.8% against 2.8, −38.7%
   against `develop`). The gate's fresh run: 0.3802, 0.5189, 0.3139 (bar met); `check_evidence.py r1`
   passed on the recorded block.
+- **P4:** the gate ran on all four interpreters, one after another, each the full `verify:`: 645
+  passed, 74 skipped on 3.11.18 (333 s), 3.12.16 (341 s), 3.13.18 (337 s) and 3.14.10 (361 s).
+  No test failed, so no rerun was taken. `check_evidence.py` gained the plan-gate ruling on CI:
+  an optional `reruns` list in the `ci` block, accepting at most one rerun, of `tests (3.13)`,
+  whose first attempt failed only in the documented restart-update flake with exactly its
+  signature; anything else fails the check. The hand-back in `EVIDENCE.md` gives that form.
+- **P5:** set `blocked` at the end of P4 (`review.blocked_reason`: awaiting foreman CI run and
+  cluster runs). It is an external wait: `hs-build` resumes it only once the foreman has delivered
+  the `ci` and `r6` blocks.

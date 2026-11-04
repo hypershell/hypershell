@@ -14,9 +14,12 @@ match that commit's.
 
 - r1: the summary ``cpu_bench.py`` prints. N at least 5,000, at least three recorded rounds, the
   three builds at the right commits, and the fix's mean CPU per result at or below 2.8's.
-- ci: ``{"run_id", "head_sha", "jobs": {name: conclusion}}`` from the GitHub Actions run on the
-  draft PR. Every job listed succeeded, and the four Python entries and the five PostgreSQL
-  entries (two plain servers, three TimescaleDB) are all there.
+- ci: ``{"run_id", "head_sha", "jobs": {name: conclusion}, "reruns": [...]}`` from the GitHub
+  Actions run on the draft PR. Every job listed succeeded, and the four Python entries and the five
+  PostgreSQL entries (two plain servers, three TimescaleDB) are all there. ``jobs`` holds each job's
+  final conclusion. ``reruns`` (optional) records a rerun the foreman allowed at the plan gate:
+  at most one, of ``tests (3.13)``, whose first attempt failed only in the documented restart-update
+  flake, with exactly its signature (``FLAKE``). Any other rerun fails the check.
 - r6: ``{"config", "runs": [{"label", "sha", "order", "tasks_per_s"}], "ruling"}`` from the
   foreman's cluster runs. The configuration is the GOAL's, each build has at least three runs, the
   runs are interleaved (each consecutive triple holds all three builds), and the fix's mean
@@ -40,6 +43,11 @@ DEVELOP = 'bc6547a'
 RELEASE = '2.8.3'
 CI_JOBS = [f'tests ({version})' for version in ('3.11', '3.12', '3.13', '3.14')] + [
     f'PostgreSQL ({name})' for name in ('pg13', 'pg18', 'timescale', 'timescale-oss', 'timescale-floor')]
+# The one rerun the foreman's plan-gate ruling allows (2026-11-04): the Python 3.13 job, failing
+# only in the documented restart-update flake, with exactly this signature.
+FLAKE_JOB = 'tests (3.13)'
+FLAKE = {'test': 'tests/test_restart.py::test_restart_update_adds_novel_and_runs',
+         'signature': "assert [''] == ['4', '5']", 'location': 'test_restart.py:102'}
 CLUSTER = {'clients': 256, 'executors_per_client': 1, 'bundlesize': 1, 'tls': True, 'database': 'sqlite',
            'server_cpus': 16}
 
@@ -84,7 +92,14 @@ def check_ci(data: dict, fix: str) -> str:
     assert not missing, f'missing CI jobs: {missing}'
     failed = {name: result for name, result in jobs.items() if result != 'success'}
     assert not failed, f'CI jobs not successful: {failed}'
-    return f'ci: run {data["run_id"]} at {data["head_sha"][:7]}, {len(jobs)} jobs successful'
+    reruns = data.get('reruns', [])
+    assert isinstance(reruns, list) and len(reruns) <= 1, f'more than the one allowed rerun: {reruns}'
+    for rerun in reruns:
+        assert rerun.get('job') == FLAKE_JOB, f'rerun of {rerun.get("job")!r}; only {FLAKE_JOB} may be rerun'
+        assert {key: rerun.get(key) for key in FLAKE} == FLAKE, f'rerun is not the documented flake: {rerun}'
+        assert rerun.get('first_attempt') == 'failure', f'rerun without a failed first attempt: {rerun}'
+    note = f', {FLAKE_JOB} rerun once for the documented flake' if reruns else ''
+    return f'ci: run {data["run_id"]} at {data["head_sha"][:7]}, {len(jobs)} jobs successful{note}'
 
 
 def check_r6(data: dict, fix: str) -> str:
