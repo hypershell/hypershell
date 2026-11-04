@@ -13,11 +13,12 @@ import re
 import json
 import hashlib
 from enum import Enum
+from functools import cache
 from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, select
+from sqlalchemy import Column, Index, func, text, update, select, bindparam
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.ext.declarative import declared_attr
@@ -834,30 +835,45 @@ class Task(Entity):
         return outcomes
 
     @classmethod
+    @cache
+    def __result_statements(cls: Type[Task]) -> Tuple[Any, Any, Tuple[Tuple[str, str], ...]]:
+        """The conditional UPDATE and classifying SELECT for one result, and the (column, bind) pairs.
+
+        Built once per process, so each result binds only its own values rather than building,
+        coercing and keying a new statement. Every bind takes the column's own type, so datetimes,
+        UUIDs and dialect variants are processed exactly as for a statement built from the values.
+        Bind names are prefixed, since SQLAlchemy reserves a column's own name in a SET clause.
+        """
+        table = cls.__table__
+        binds = tuple((name, f'r_{name}') for name in cls.result_columns)
+        same_dispatch = (table.c.id == bindparam('r_id', type_=table.c.id.type),
+                         table.c.schedule_time == bindparam('r_schedule_time', type_=table.c.schedule_time.type))
+        write = (
+            update(table)
+            .where(*same_dispatch, table.c.completion_time.is_(None))
+            .values({name: bindparam(key, type_=table.c[name].type) for name, key in binds})
+        )
+        completed = select(table.c.id).where(*same_dispatch, table.c.completion_time.isnot(None))
+        return write, completed, binds
+
+    @classmethod
     def __apply_result(cls: Type[Task], result: Task) -> ResultOutcome:
         """Conditionally write one result within the current transaction and classify it."""
         if result.schedule_time is None:
             # NOTE: comparing to None renders IS NULL, which would match a reverted row.
             return ResultOutcome.STALE
-        matched = Session.execute(
-            update(cls)
-            .where(cls.id == result.id,
-                   cls.schedule_time == result.schedule_time,
-                   cls.completion_time.is_(None))
-            .values({name: getattr(result, name) for name in cls.result_columns})
-            .execution_options(synchronize_session=False)
-        ).rowcount
+        write, completed, binds = cls.__result_statements()
+        dispatch = {'r_id': result.id, 'r_schedule_time': result.schedule_time}
+        values = {key: getattr(result, name) for name, key in binds}
+        values.update(dispatch)
+        # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per result.
+        matched = Session.execute(write, values).rowcount
         if matched == 1:
             return ResultOutcome.APPLIED
         # NOTE: a cancel restamps schedule_time, so a cancelled row never matches here and its
         # result is STALE; a run that itself exited with the cancel status value is a DUPLICATE.
-        completed = Session.execute(
-            select(cls.id)
-            .where(cls.id == result.id,
-                   cls.schedule_time == result.schedule_time,
-                   cls.completion_time.isnot(None))
-        ).first()
-        return ResultOutcome.DUPLICATE if completed is not None else ResultOutcome.STALE
+        found = Session.execute(completed, dispatch).first()
+        return ResultOutcome.DUPLICATE if found is not None else ResultOutcome.STALE
 
     @classmethod
     def select_orphaned(cls: Type[Task], client_id: str, limit: int) -> List[Task]:
