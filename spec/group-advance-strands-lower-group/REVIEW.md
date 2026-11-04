@@ -190,3 +190,215 @@ Cycle 1 (`ef0c653`, reviewing `31d8771`) found two HIGH findings in `server.py`,
 | Note: an empty task file hangs `hsx` (on HEAD and on base) | defer | Seed `issues/empty-task-file-hangs.md` (unshaped, fix, small, public) with a ROADMAP entry. |
 
 Gates for cycle 2: P1's red tests plus the two new red tests pass. `test_groups.py`, `test_retry_gate.py` and `test_group_order.py` pass. The full suite passes once on each of 3.11, 3.12, 3.13 and 3.14. `port-trial.sh` passes, and the new diff applies to 2.8.3 + #68 without conflict.
+
+## Review cycle 2 — changes-requested (2026-11-04)
+
+- **Reviewed commit:** 5c7f381  ·  **Base:** b31c66e (the fork point; `origin/develop` has since
+  moved to bc6547a with #72)  ·  **Date:** 2026-11-04
+- **Verdict:** changes-requested — one CONFIRMED MEDIUM regression in `server.py` (N1), one
+  CONFIRMED LOW prose fix (N2). F1, F2 and F3 are remediated.
+- **Cycle:** 2 of ≤3, and the loop has not converged, so this goes to the human (the foreman, as
+  judge).
+
+**Mode:** one fresh blind reviewer (no `debate`) made a full pass over
+`git diff b31c66e...HEAD -- . ':(exclude)spec/'`, graded against every R-ID. It also verified
+cycle 1's findings against the triage, with particular attention to `ef0c653..5c7f381`.
+- **It saw:** `GOAL.md`, this file (cycle 1's findings and triage), `invariants.md`,
+  `review-rubric.md`, `AGENTS.md`, and the diff. The orchestrator also relayed the foreman's
+  ratified F1 reading (2026-11-04) and the F2 probe list.
+- **It did not see:** `PLAN.md`, `TECH.md`, `META.md` or `research/`. The orchestrator read only
+  TECH's metadata and its environment notes (the offline venvs and the port trial's uv cache), and
+  passed none of TECH's content to the reviewer.
+- **Contract drift:** none since cycle 1. `GOAL.md`'s last commit is still `b242fc3`, which
+  precedes the plan.
+
+### Verification run
+
+Every run used frozen offline environments, ran in a throwaway site, mostly with `--no-tls`, and
+had its own process group and kill timer.
+
+- **Unit suite, HEAD:** 356 passed on each of 3.11, 3.12, 3.13 and 3.14.
+- **Full suite, HEAD 3.12:** 651 passed, 64 skipped, 0 failed on the first run. Neither known
+  flake appeared.
+- **`test_group_order.py`, `test_groups.py` and `test_retry_gate.py`, HEAD:** 53 passed in each
+  of two runs. `tests/test_groups.py` is unmodified (`git diff b31c66e...HEAD --stat` is empty).
+- **Red checks:**
+  - At `31d8771`, the three new F1 unit tests fail with `[2, 0, 1] != [0, 1, 2]` on 3.11, 3.12
+    and 3.14. The new F2 integration test `test_cluster_clients_with_timeout_wait_for_file` fails
+    on its 180 s timer.
+  - At `b31c66e` (3.12): 16 failed and 1 passed in 3 of 3 runs. R8 (a) and (b) fail for behaviour
+    reasons (`current_group` 1 ≠ 0; `[] != [(0, id)]`). The 8 `is_file_input` cases fail only
+    because the function does not exist on base.
+  - At HEAD the F2 test passed in 51–54 s in three runs by the reviewer, and in 48.7 s in the
+    orchestrator's own run.
+- **R9 port, `port-trial.sh` (orchestrator), unedited, at 5c7f381 on `origin/master` 4d5771b
+  (2.8.3):**
+  - #68 hit its one known conflict, which the script resolved.
+  - This cycle then applied with no conflict: `M` `client.py`, `cluster/local.py`,
+    `cluster/remote.py`, `cluster/ssh.py`, `data/model.py`, `server.py`; `A`
+    `tests/test_group_order.py`, plus #68's `tests/test_retry_gate.py`.
+  - The group tests gave 53 passed in 121.7 s, with no rerun.
+  - The trial worktree was removed, `master` stayed at dd0264c, and no other worktree changed
+    except one unrelated to this review, which another session advanced.
+  - **Environment substitution:** `UV_OFFLINE=1`, `UV_NO_GROUP=docs`, `UV_PYTHON_DOWNLOADS=never`,
+    `UV_NO_CONFIG=1`, a local CPython 3.12.16, `UV_PROJECT_ENVIRONMENT` outside the repo, and
+    `UV_CACHE_DIR` pointed at a private copy of a local uv cache that holds `hatchling`.
+  - **Static check:** the `src/` changes are exactly those six files. No added or removed line
+    touches `mapped_column`, `__tablename__`, `add_argument`, `_HELP` or `_USAGE`. The reviewer also
+    checked that every symbol the change relies on exists on 2.8.3 + #68.
+- **Orchestrator's own reproductions:**
+  - N1 and N2, both below.
+  - The F1 reproducer: two ascending files in turn give `B0 B1 B2` at HEAD with no warning,
+    against `B2 B0 B1` and 2 false warnings at `31d8771`.
+  - With another listener holding the port, the first `hsx` run hangs on both HEAD and base, and
+    later runs pass on both. This is pre-existing, so it is not a finding.
+- **The optional restart flake:** `test_restart_update_adds_novel_and_runs` passed 25 of 25 at
+  HEAD (3.12). The mechanism matches the diagnosis: the file is fully in before the restart
+  scheduler starts. The 200-run figure was not re-run.
+
+### Cycle-1 remediation
+
+- **F1 — remediated.** On a database whose first run finished groups 0–2, each of these now
+  runs `0 1 2` at HEAD with rc 0 and no warning, against `2 0 1` with 2 false warnings at
+  `31d8771`:
+  - two ascending files in turn;
+  - `--repeat` of the same file;
+  - `hs submit -f` then `hsx --restart`;
+  - an ascending pipe.
+
+  Hold probes:
+  - **Retryable failure in the last group,** plain and `--eager`: A2 is retried first, then B0
+    and B1 run with a WARNING naming both groups; rc 0. Base hangs.
+  - **Exhausted failure in the last group with no new rows there:** the run halts with "Failed
+    task group 2", the same as base.
+  - **Exhausted failure in a middle group,** under `--restart` and `--repeat`: halts again.
+  - **`--forever` with an exhausted failure:** waits, the same as base.
+  - **R6:** a stranded database built with base runs group 0 under `--restart` at HEAD with rc 0;
+    base hangs.
+- **F2 — remediated.**
+  - **Cycle 1's reproducer** (`hsx` on 10,000 `echo` tasks, `-N4 -T 3`): rc 0 in 87.9 s, with
+    10,000 of 10,000 succeeded.
+  - **The foreman's probe list:**
+    - **A loader error mid-file:** rc 5 in 2.5 s with 0 scheduled. This holds for local,
+      `--launcher env`, `-T 2`, and autoscaling fixed and dynamic. Base hangs under autoscaling.
+    - **Bad input caught by the up-front read** (a bad tag, invalid UTF-8, an unreadable file, a
+      directory): rc 5 in 0.3 s.
+    - **SIGINT during the read:** rc 4 in 0.1 s on both, and HEAD schedules nothing. With
+      `--launcher`, HEAD launches no client, while base leaves its launched client running.
+    - **SIGUSR1 or SIGUSR2 during the read:** rc 0 after the whole read, with nothing scheduled
+      and nothing left running.
+    - **SIGTERM:** the same as base (see below).
+    - **`--no-db`:** plain, `-T 2` and launcher runs are identical to base.
+    - **Pipe, `/dev/stdin`, FIFO and `<(…)`:** the first task completes before the input ends.
+    - **Autoscaling:** the first client launches only after the file is in; 6,000 of 6,000
+      complete, in group order.
+    - **`RemoteCluster.stop` and `SSHCluster.stop` before any client exists** (in process): no
+      error, no launch after the stop, and nothing scheduled.
+    - **An external `hs client -T 2` against `hs server` on a 12,000-task file:** the client exits
+      during the read with nothing scheduled, and the server waits. A new client then completes
+      all 12,000 and the server exits rc 0, so the new docs sentence is accurate.
+- **F3 — remediated.** `ROADMAP.md` and `issues/group-order-unsorted-inline-file.md` now
+  describe ingest-first. An unsorted `[2, 1, 0, -1]×3` file ran ascending in 6 of 6 runs.
+- **The empty-file deferral — seeded**, `status: unshaped`, with a ROADMAP entry. Its mechanism
+  (`Task.count() > 0` in the stop branch) is present at HEAD. The seed's wording is too broad;
+  see N2.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `Task.lowest_incomplete_group`, `Task.increment_group` (`data/model.py`) | Live `hs submit -g 0` into `--forever` after group 1 started runs it, with a WARNING (base strands it); unit (b) | ✅ |
+| R2 | Same, plus `Scheduler.next_tasks` and `Scheduler.starting_group` (`server.py`) | Unit (a); 10k `-T 3` reproducer rc 0; R6 restart rc 0 | ✅ |
+| R3 | `ServerThread.start_threads` + `is_file_input`; `starting_group` | Unsorted file 6/6 ascending; integration (c); F1 reproducers | ✅ |
+| R4 | Atomic next-group query + `starting_group` | `hs submit` then `--restart` and an ascending pipe after a finished run give `0 1 2` | ✅ |
+| R5 | `Scheduler.mark_group_started` | WARNING names both groups; none for ascending input from -1 or on restart | ❌ partial — N1 |
+| R6 | Lowest-incomplete start | Stranded database built with base: base hangs, HEAD rc 0 | ✅ |
+| R7 | #68 gates; the failure hold in `starting_group` | `test_groups.py` (unmodified), `test_retry_gate.py`; hold, halt and forever probes match base; `--no-db` identical | ✅ |
+| R8 | `tests/test_group_order.py` | (a) and (b) red on `b31c66e` 3/3, green at HEAD, no sleeps, threads or repetition; (c) compares database times; new F1/F2 tests red at `31d8771` | ✅ |
+| R9 | No schema, wire, CLI or config change; client launch deferred in four cluster/client files | `port-trial.sh` 53 passed, no conflict, `master` unmoved; static check | ✅ |
+| R10 | `task_groups_alt.rst`, `AGENTS.md`, invariants §3 | Sentences present and true at HEAD; the `-T` sentence verified with an external client; CLI help and `share/` unchanged | ✅ (N2 is a seed, not R10) |
+
+Unmapped changes: none. The `client.py` idle-clock reset belongs to the F2 fix.
+
+### Findings
+
+#### [MEDIUM/CONFIRMED] N1 — A non-integer group crashes the scheduler, where base runs it
+- **Where:** `src/hypershell/server.py:271`, `Scheduler.mark_group_started`: `group < highest`
+  (and `max(group, highest)` on the next line).
+- **Failure scenario:**
+  - The inline tag parser accepts `# HYPERSHELL: group:x`, and SQLite stores `x` as text in the
+    integer column.
+  - Once group 0 has started, `Task.next` commits `schedule_time` for the `x` row, and the
+    comparison raises `TypeError: '<' not supported between instances of 'str' and 'int'`.
+  - The scheduler dies and the run exits rc 5. The row is left scheduled and never completed.
+  - The scope is SQLite only: PostgreSQL rejects a non-integer group at insert. The docs say
+    groups are integers, so this is an edge path. But it breaks GOAL Clarifications → Blast radius:
+    "A adds no new error path: a command that succeeds today still succeeds."
+- **Evidence:** a two-line file, `echo a` then `echo b  # HYPERSHELL: group:x`, run with
+  `hsx bad.txt -N1 --no-tls`.
+  - **HEAD:** rc 5, with the `TypeError` in the Scheduler's CRITICAL log. The `x` row is
+    `typeof(group)='text'`, scheduled, with no completion and no exit status. Reproduced by both
+    the reviewer and the orchestrator.
+  - **Base:** rc 0, and both rows completed with exit 0.
+  - **At scale:** with 6,001 lines and one bad line mid-file, HEAD gave rc 5 after 53 s, while
+    base ran all 6,001 with rc 0.
+- **Touches:** R5's warning path, and the Blast-radius clause. `server.py` is core, so the human
+  gate applies.
+- **Suggested fix:** pick one; any of them is portable to 2.8.3:
+  - make the warning's comparison tolerate a non-integer group, for example by skipping the
+    late-group check when either value is not an `int`;
+  - or coerce the group to an integer at ingest.
+
+  Add the two-line file as a test.
+
+#### [LOW/CONFIRMED] N2 — The empty-file seed and its ROADMAP entry claim more than happens
+- **Where:**
+  - `issues/empty-task-file-hangs.md:15` and `:19-20`: "`hsx` given an empty task file never
+    exits" and "a run that submits no task never reaches FINAL";
+  - `ROADMAP.md:233-235`.
+- **Failure scenario:** both hold only on an empty database. On a database that already holds
+  finished tasks, `Task.count() > 0`, so the stop branch is reached and the run exits 0.
+- **Evidence:**
+  - `hsx one.txt` then `hsx empty.txt -N2 --no-tls` on the same database: rc 0 in about 2 s on both
+    HEAD and base (orchestrator).
+  - On a fresh database, both time out (reviewer).
+- **Touches:** prose accuracy of a graded seed (review rubric).
+- **Suggested fix:** qualify both with "on an empty database".
+
+### For the judge (not findings)
+
+- **The F1 hold applies only when the last scheduled group has no incomplete rows**
+  (`server.py:288`, `if Task.count_remaining(group=group) == 0`). If that group holds a failure
+  and also gets new rows, HEAD starts at the lowest incomplete group instead.
+  - **Exhausted failure in group 2, then a file with groups 0–2:** HEAD runs B0, B1, B2 and exits
+    0 with nothing above group 2. Base runs B2 first, then halts with CRITICAL.
+  - **Retryable failure in group 2, same file:** HEAD runs B0, B1, B2, then the A2 retry, and exits
+    0. Base runs B2 and the retry, then hangs.
+  - This keeps R3's order and the R7 gate: nothing above the failed group runs, and the retry
+    still runs before the run stops.
+  - The ratified reading ("failures hold the group") would start at B2 instead. Please confirm the
+    implemented reading.
+- **The idle-clock reset (`client.py:204`) also changes a standalone `hs client -d 4 -T 3`:** it
+  now lives about 8.5 s, against 6.4 s on base, because the start delay no longer counts toward
+  `-T`. That fits the help text ("shutdown if no tasks received"). Plain idle `-T` timings are
+  unchanged.
+
+### Out of scope, observed (pre-existing, unchanged by this diff)
+
+- **A "database is locked" error during ingest hangs both HEAD and base.** The committer dies, and
+  the loader then blocks on its full local queue, so the server never gets past `wait_submitter`.
+  `wait_scheduling` cannot see the failure because the server thread is still alive. It may
+  warrant a seed.
+- **SIGTERM during the read leaves a process in the command's session alive for at least 25 s,**
+  on both HEAD and base.
+- **A library-level `cluster.stop()` during ingest blocks on both.** `SubmitThread.stop` and
+  `SubmitThread.run` each put `None` on a size-1 queue. This path cannot be reached from the CLI.
+- **An empty stream hangs, like an empty file.** The seed's Notes already ask for this to be
+  checked.
+- **The stream-stop seed reproduces** on both HEAD and base.
+
+### Human-gate triggers
+
+- **Triggered.** N1 is a CONFIRMED finding in `server.py`, which is high-blast-radius core.
+- This is cycle 2 of ≤3 without convergence, so it escalates to the human: a human must sign off
+  before any further step.

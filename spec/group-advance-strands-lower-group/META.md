@@ -114,7 +114,7 @@
   same flag), so the trial needs only what the tests import.
 - **Confidence:** med · **Effort:** small
 
-## F9 — The review's base resolves to local `develop`, which can grade the wrong diff
+## F9 — The review's base resolves to local `develop`, which can grade the wrong diff · seen again
 `origin=hs-review:step1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** In this checkout, local `develop` (222075b) is stale, and the cycle's base
   b31c66e is not an ancestor of it. The skill gets its base from `TECH.md` (`base: develop`) and
