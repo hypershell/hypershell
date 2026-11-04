@@ -13,7 +13,7 @@ A forced-collection probe runs one collection, with a dropped same-process clien
 part of the server side in turn: the accept loop, a handler, the thread starting a server between its
 bind and its accept loop, and the stop thread inside ``stop()``. It runs with clients dialing a plain
 address, and with TLS clients dialing a name that resolves to an address that fails first and then the
-server's.
+server's; the probe sends their IPv4 dial to the second.
 
 Two probes place a collection on a new server thread before anything else has run on it. One forces
 it at the thread's first instruction. In the other, a thread fetching rows from SQLite schedules
@@ -96,7 +96,8 @@ LANDING_CAP = 40
 ROWS = 300_000
 
 # A name the forced-collection probe resolves, in-process, to an address that fails at once and then
-# to the server's address (a name with two IPv4 addresses whose first does not serve the port)
+# to the server's address (a name with two IPv4 addresses whose first does not serve the port), and
+# whose connects it sends to the second
 MULTI_ADDRESS = 'queue-multi-address.test'
 
 
@@ -249,17 +250,21 @@ def test_finalizer_hands_off_only_server_side(monkeypatch) -> None:
     assert done.wait(WAIT) and seen[2:] == [True, True]
     del seen[2:]
 
-    # A TLS client is on the server side until its handshake ends, which an accept loop waits on
+    # A TLS client is on the server side until its handshake ends, which an accept loop waits on. Its
+    # dial is the connect of its IPv4 socket; this one is refused, and seen from inside that connect.
     monkeypatch.setattr(queue_module, 'get_tls_config', lambda: None)
     monkeypatch.setattr(queue_module, 'get_client_context', lambda: None)
+    dialed, connect = ('localhost', 50001), socket.socket.connect
 
-    def refuse(address: tuple) -> None:
+    def refuse(sock: socket.socket, address) -> None:
+        if address != dialed:
+            return connect(sock, address)
         seen.append(all(handed(token) for token in tokens))
         raise ConnectionRefusedError(address)
 
-    monkeypatch.setattr(socket, 'create_connection', refuse)
+    monkeypatch.setattr(socket.socket, 'connect', refuse)
     with raises(ConnectionRefusedError):
-        queue_module.secure_client(('localhost', 50001))
+        queue_module.secure_client(dialed)
     assert seen == [True, True, True] and queue_module._server_side == {}
 
     # A process with no sender (a forked child that serves nothing) hands nothing off
@@ -281,11 +286,14 @@ def test_forced_collection_on_server_side_never_stalls(tls_args: List[str]) -> N
 def test_multi_address_name_never_stalls(tls_materials: tuple[str, str]) -> None:
     """The same, for TLS clients that dial a name whose first address fails and whose second is the server's.
 
-    A TLS client tries each address a name resolves to, so it reaches the server at the second.
+    A TLS client dials IPv4 only and connects its socket to the name itself, which the operating system
+    resolves; the probe has that connect reach the name's second address. Each client so reaches the
+    server through a name, not through the address the server bound.
     """
     if failing_address() is None:
         skip('no address here fails a connection at once')
-    run_probe('forced-collection', list(tls_materials), FORCED_ROUNDS, MULTI_ADDRESS)
+    output = run_probe('forced-collection', list(tls_materials), FORCED_ROUNDS, MULTI_ADDRESS)
+    assert f'dialed {MULTI_ADDRESS} at its second address' in output
 
 
 @mark.unit
@@ -576,10 +584,18 @@ def failing_address() -> Optional[str]:
     return None
 
 
+# The addresses that sockets in this process were connected to in place of :data:`MULTI_ADDRESS`
+multi_address_dials: List[tuple] = []
+
+
 def resolve_multi_address(first: str) -> None:
     """Resolve :data:`MULTI_ADDRESS` in this process as a resolver does a name with two IPv4 addresses:
-    ``getaddrinfo`` answers `first`, then 127.0.0.1, and ``gethostbyname`` answers `first`."""
-    getaddrinfo, gethostbyname = socket.getaddrinfo, socket.gethostbyname
+    ``getaddrinfo`` answers `first`, then 127.0.0.1, and ``gethostbyname`` answers `first`.
+
+    A socket's connect resolves a name natively, past these, so a connect to the name goes to its second
+    address, the one that serves, and is recorded in :data:`multi_address_dials`.
+    """
+    getaddrinfo, gethostbyname, connect = socket.getaddrinfo, socket.gethostbyname, socket.socket.connect
 
     def multi_getaddrinfo(host, *args, **kwargs):
         if host != MULTI_ADDRESS:
@@ -589,8 +605,15 @@ def resolve_multi_address(first: str) -> None:
     def multi_gethostbyname(host: str) -> str:
         return first if host == MULTI_ADDRESS else gethostbyname(host)
 
+    def multi_connect(sock: socket.socket, address) -> None:
+        if isinstance(address, tuple) and address[0] == MULTI_ADDRESS:
+            address = multi_getaddrinfo(*address, sock.family, sock.type)[1][4]
+            multi_address_dials.append(address)
+        return connect(sock, address)
+
     socket.getaddrinfo = multi_getaddrinfo
     socket.gethostbyname = multi_gethostbyname
+    socket.socket.connect = multi_connect
 
 
 # The point at which the forced-collection probe runs its next collection, if any
@@ -682,6 +705,9 @@ def probe_forced_collection(rounds: int, dial: str, tls: Optional[TLSConfig]) ->
             # the port would get this thread's stale one (issues/queue-stale-decref-same-port-restart.md)
             with BaseProxy._mutex:
                 BaseProxy._address_to_local.pop((dial, port), None)
+    if dial == MULTI_ADDRESS:
+        assert multi_address_dials and all(host == '127.0.0.1' for host, _ in multi_address_dials)
+        print(f'dialed {MULTI_ADDRESS} at its second address {len(multi_address_dials)} times', flush=True)
 
 
 def probe_first_instruction(rounds: int, tls: Optional[TLSConfig]) -> None:

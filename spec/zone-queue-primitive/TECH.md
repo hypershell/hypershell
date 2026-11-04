@@ -803,6 +803,32 @@ stdio. This is the core, small and novel slice: everything else builds on it.
       passed, 4 skipped** (the first-instruction and scheduled-elsewhere tests); 3.13.18 and 3.14.10
       **566 passed, 3 skipped** each (scheduled-elsewhere, and the stale-entry test: no stale entry).
       No gate was restarted.
+- **Build note (2026-11-04): develop merged; two queue tests adapted to #72's IPv4-only TLS dial.**
+  `0fc0577` merges develop at `0e8275e` (#72 TLS dial, #73 writeback statements, #74 group advance).
+  #72 has `secure_client` dial over an `AF_INET` socket (`setblocking`, then `connect(address)`)
+  instead of `socket.create_connection`; the merge keeps Z1's `_mark()`/`_unmark()` around that dial
+  and the TLS handshake. Two of this cycle's tests had stood on `create_connection`, and both failed
+  5/5 on 3.12.16 at `0fc0577`. The foreman ruled them test-only adaptations, with no `src/` change.
+  - [x] **`test_finalizer_hands_off_only_server_side`.** Its spy on `socket.create_connection`, which
+        the client no longer calls, now wraps `socket.socket.connect` for the dialed address and
+        records there whether the thread is marked. The assertion is unchanged: the TLS dial runs
+        marked.
+  - [x] **`test_multi_address_name_never_stalls` (C9).** The patched resolver no longer reaches the
+        dial, since `connect` resolves the name natively (`gaierror`). The probe now also wraps
+        `socket.socket.connect`, sending a connect to `queue-multi-address.test` to that name's second
+        address (`127.0.0.1`, where the server binds), and records each one. Clients still reach the
+        server through a name rather than the bound literal. The probe asserts that every such
+        connect went there, and prints a count that the test asserts. The no-stall assertion is
+        unchanged, since the thread rule covers the case whatever the address. The docstrings that
+        said the client tries each address now describe the IPv4-only dial.
+  - **Red/green (3.12.16, scratch copies of the merged tree).** With the `_mark()` before the dial
+    removed from `secure_client`, the rule test fails at the TLS-dial entry (`[True, True, False]`).
+    With the connect rewrite left out, the C9 test fails in round 0 with #72's `gaierror`. With the
+    probe dialing `127.0.0.1` in place of the name, it fails on the rewrite assertion. On the merged
+    tree, both pass.
+  - **C9 source:** none is left that serves only multi-address dialing. The address match was
+    removed in the review-5 remediation, and `src/` has no `getaddrinfo`, `gethostbyname` or
+    `create_connection`.
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
@@ -814,7 +840,7 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   `tests/test_queue_start.py`, `ROADMAP.md` and three seeds in `issues/`; review-5 remediation
   `tests/test_queue_gc.py`, `AGENTS.md`, `ROADMAP.md`, one new seed and two amended seeds in `issues/`;
   review-6 remediation `tests/test_queue_gc.py`, `tests/test_queue.py` and `AGENTS.md`; the C10
-  quick-review follow-up the same three.
+  quick-review follow-up the same three; the develop merge's adaptation `tests/test_queue_gc.py`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1
