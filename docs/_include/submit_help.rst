@@ -44,6 +44,9 @@ Options
     scheduling. This bypasses the database entirely, which is useful for transient
     workflows or when a database is not configured.
 
+    The server must be running without a database (``--no-db``). A server with a database
+    schedules only from it, so it refuses the submission and the command exits with an error.
+
     Requires ``-H``, ``-p``, and ``-k`` options to specify the server connection.
 
 ``-H``, ``--host`` *ADDR*

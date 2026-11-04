@@ -298,3 +298,24 @@ Explicit human sign-off is required before any further step.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run this cycle.
+
+## Triage (human gate) — cycle 1
+
+Cycle 1 (`9a81343`, reviewing `b946b14`) requested changes on F1–F4, with a CRITICAL in `server.py`, which triggers the human gate. The foreman ruled on 2026-11-04 as judge.
+
+| Finding | Ruling | Disposition |
+|---|---|---|
+| F1 · CRITICAL · CONFIRMED | fix | The staged-revert paths (`Scheduler.revert_unstaged`, `ServerThread.revert_staged`) must never touch a completed or cancelled row. Revert with one conditional statement, `UPDATE … WHERE id IN (:ids) AND completion_time IS NULL`, as a `Task` classmethod with no rowcount assertion. **Red first:** integration tests that cancel a staged, undelivered task and then (a) let the zone's last client leave and (b) stop the server. Each must fail at `b946b14` (the task is un-cancelled or runs) and pass after (the row stays cancelled with exit −1 and never runs). |
+| F2 · MEDIUM · CONFIRMED | fix (with F1) | **Red first:** a test that deletes a staged task (`hs update --delete`) and then hits each revert path. The scheduler must not die, the server must exit 0, and other tasks must complete. |
+| F3 · MEDIUM · CONFIRMED | fix | `Dispatcher.stage` must replace an already-staged record with the current one (current `schedule_time`), not skip it, so a reverted-then-restaged task carries its live stamp. **Red first:** `hs update --revert` on a staged task. The run must finish at HEAD (it hangs at `b946b14`) with every task done. |
+| F4 · LOW · CONFIRMED | fix | `hs submit -q` against a database-backed server refuses with one clear error and a nonzero exit, naming the reason. It must not hang. Draining the inbound queue in database mode is out of scope; if real deferred work remains, seed it. **Test:** the refusal, and the in-memory `-q` path still works. |
+| Note: §6 invariant text omits `revert_staged` | fix | Amend the invariant text (and `AGENTS.md` if it carries the same list) to name the staged revert, and state that a staged revert never touches a completed or cancelled row. |
+
+Gates for cycle 2:
+- every new red test fails at `b946b14` and passes after the fix;
+- the zone and dispatch modules pass;
+- the full suite passes once on each of 3.11, 3.12, 3.13 and 3.14;
+- parity and skew against `b819de6` pass, with TLS on and off, as TECH records them;
+- the local zoned rehearsal (`smoke.sh`) passes.
+
+The multi-node evidence stands. These fixes touch only cancel, delete and revert edge paths, and the request path is unchanged; the reviewer confirms in cycle 2.

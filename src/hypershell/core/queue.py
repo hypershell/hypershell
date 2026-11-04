@@ -51,7 +51,7 @@ __all__ = [
     'SENTINEL', 'make_sentinel',
     'SecureConnection', 'SecureListener', 'secure_client', 'SecureManager',
     'QueueConfig', 'QueueInterface', 'QueueServer', 'QueueClient',
-    'QueueServerError', 'QueueVersionError', 'ClientTooOld', 'unsupported_internals', 'PROTOCOL',
+    'QueueServerError', 'QueueVersionError', 'QueueSubmitRefused', 'ClientTooOld', 'unsupported_internals', 'PROTOCOL',
     'DISPATCH_EXPOSED',
 ]
 
@@ -312,6 +312,10 @@ class QueueServerError(RuntimeError):
 
 class QueueVersionError(RuntimeError):
     """The server and this client do not speak the same work-request protocol."""
+
+
+class QueueSubmitRefused(RuntimeError):
+    """The server does not serve tasks submitted to its live queue (it has a database)."""
 
 
 class ClientTooOld(Exception):
@@ -897,7 +901,7 @@ QUEUE_EXPOSED: Final[Tuple[str, ...]] = ('empty', 'full', 'get', 'get_nowait', '
 
 
 # Methods a remote client may call on the dispatcher.
-DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', )
+DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', 'takes_submissions')
 
 
 def _provider(obj: Any) -> Callable[[], Any]:

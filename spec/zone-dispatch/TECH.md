@@ -3,10 +3,10 @@ slug: zone-dispatch
 title: Zone-aware, demand-driven dispatch (zone, cycle 2)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/zone-dispatch
 base: develop
-current_phase: done
+current_phase: P2
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -30,7 +30,7 @@ phases:
 - id: P2
   name: Request callable, staging and the client request loop (default zone, homogeneous
     path)
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -139,9 +139,7 @@ phases:
 review:
   last_reviewed_commit: b946b14820b4109d483a5311b8f24692e2d9c307
   verdict: changes-requested
-  blocked_reason: 'review cycle 1: F1 staged revert un-cancels cancelled tasks (CRITICAL);
-    F2 StaleDataError on deleted staged rows; F3 revert-while-staged strands task;
-    F4 submit -q hangs on DB server; human gate'
+  blocked_reason: ''
   cycle: 1
 ---
 # TECH.md — Zone-aware, demand-driven dispatch (zone, cycle 2)
@@ -519,11 +517,47 @@ run behaves as today. This is the core, novel slice.
     new STAGE state: `tests/test_retry_gate.py` (#68, not an N3 test) drives `load_bundle` on a
     queue-less scheduler and expects PACK. A scheduler built without a queue server stages into
     a dispatcher of its own, so those replays run unmodified.
+- [x] **Review-1 remediation** (triage appended to `REVIEW.md`, 2026-11-04). P2 is reopened for
+      all four findings: the staged-revert, staging and inbound-queue seams are P2's, and the
+      zone-pool revert (`Scheduler.revert_unstaged`, P4's per-zone pools) goes through the same
+      new classmethod, so P4 is not reopened. Red first, on `b946b14`'s `src`, all in the new
+      `tests/test_dispatch_staged.py`:
+  - **F1/F2.** `Task.revert_staged(ids)`: one conditional `UPDATE … WHERE id IN (:ids) AND
+    completion_time IS NULL` that clears `Task.revert_columns`, with no rowcount assertion; it
+    returns the rows reverted. Both staged reverts call it (`Scheduler.revert_unstaged` and
+    `ServerThread.revert_staged`); their log lines keep their text and add how many staged rows were
+    left as completed, cancelled or deleted.
+    `revert_all` takes its columns from the same `revert_columns` and is otherwise unchanged.
+    The ids are bound in chunks of `REVERT_CHUNK` (500), one conditional statement each, in one
+    transaction, so a large pool stays within SQLite's and PostgreSQL's bound-parameter limits.
+    Tests: `test_revert_staged_leaves_terminal_and_missing_rows` (unit, 1,203 ids),
+    `test_staged_rows_changed_before_shutdown[cancel|delete]` and
+    `test_staged_rows_changed_before_zone_empties[cancel|delete]` (integration).
+  - **F3.** `Dispatcher.stage` replaces the record of an id already staged in place (its queue
+    position kept), so a row reverted by hand and loaded again carries its current stamp; the
+    duplicate guard (eager retries) still never holds a row twice. Tests:
+    `test_stage_replaces_a_staged_record` (unit) and
+    `test_reverted_staged_row_runs_with_its_new_stamp` (integration: every row staged before any
+    client, one reverted, staged again, then delivered once and completed).
+  - **F4.** `Dispatcher.takes_submissions()` (exposed to remote clients beside `request`) says
+    whether the inbound queue is served, which only an in-memory server does.
+    `LiveSubmitThread.check_server` asks once connected, before loading a task, and raises
+    `QueueSubmitRefused` (a `RuntimeError`, so rc 5 with one CRITICAL line) naming the database
+    and `--no-db`. `submit_help.rst` and `submit_desc.rst` say the server must run with
+    `--no-db`. The deferred capability is seeded as `issues/queue-submit-database-server.md`
+    (unshaped) with a `ROADMAP.md` entry. Test: `test_queue_submit_refused_by_database_server`;
+    the in-memory path stays covered by `test_queue_submit_to_in_memory_server`.
+  - **§6 invariant.** `AGENTS.md` and `invariants.md` name the staged revert between the heartbeat
+    join and the receiver/confirm sentinels, and state that a staged revert never touches a
+    completed or cancelled row (its own prose-only commit, before the code).
 - **Touches:** `core/dispatch.py` (new), `core/queue.py`, `core/config.py`, `server.py`,
   `client.py`, `tests/test_dispatch.py`, `tests/test_client_request.py`,
   `tests/test_dispatch_workload.py`, `tests/test_server_fsm.py`, `tests/bench/bench_queue.py`,
   `docs/_include/{client_help,client_desc,server_help,server_desc,config_param_ref}.rst`,
-  `share/zsh/site-functions/_hs`, `AGENTS.md`, `.agents/factory/invariants.md`.
+  `share/zsh/site-functions/_hs`, `AGENTS.md`, `.agents/factory/invariants.md`. Review-1
+  remediation (amendment): also `data/model.py`, `submit.py`, `tests/test_dispatch_staged.py`,
+  `docs/_include/{submit_help,submit_desc}.rst`, `issues/queue-submit-database-server.md`,
+  `ROADMAP.md`.
 
 ## Phase P3 — Version handshake
 **Satisfies:** R5, R14 · **Depends on:** P2

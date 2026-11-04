@@ -369,6 +369,17 @@ client too.
 `spec/zone-dispatch/` (plan gate ruling N4)*
 **Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
 
+## `hs submit -q` cannot feed a server with a database
+
+`hs submit -q` puts bundles on a server's live queue, which only a server without a database
+serves. Against a server with a database the tasks used to run with their results refused, then
+(in zone-dispatch, before its review-1 remediation) the submission hung; it is now refused at once
+with a clear error. A host that can reach the server but not its database cannot add work to it.
+
+*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
+`spec/zone-dispatch/REVIEW.md` (cycle 1, F4)*
+**Seed:** [`issues/queue-submit-database-server.md`](issues/queue-submit-database-server.md)
+
 ## Merged output is interleave-corruptible
 
 Concurrent executors write to one shared file description with no line discipline, so long lines

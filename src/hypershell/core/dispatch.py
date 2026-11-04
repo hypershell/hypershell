@@ -377,17 +377,31 @@ class Dispatcher:
             return self.generation != generation
 
     def stage(self: Dispatcher, zone: str, rows: Iterable[Tuple[str, str]], stamped: bool = True) -> int:
-        """Append loaded rows (id, record as JSON text) to `zone`'s pool and wake its requests; return the count."""
+        """Append loaded rows (id, record as JSON text) to `zone`'s pool and wake its requests; return the count added.
+
+        A row already staged (reverted by hand and loaded again) keeps its place in the pool and
+        takes the record just loaded, which carries the row's current stamp; it is not added twice.
+        """
         count = 0
         with self.lock:
             pool = self.pools.get(zone) or self._pool(zone, zone)
             for task_id, record in rows:
-                if task_id not in pool.ids:
+                if task_id in pool.ids:
+                    self._replace(pool, task_id, record, stamped)
+                else:
                     pool.ids.add(task_id)
                     pool.rows.append((task_id, record, stamped))
                     count += 1
             pool.wake_head()
         return count
+
+    @staticmethod
+    def _replace(pool: Pool, task_id: str, record: str, stamped: bool) -> None:
+        """Put `record` in place of the staged record for `task_id` (lock held)."""
+        for index, row in enumerate(pool.rows):
+            if row[0] == task_id:
+                pool.rows[index] = (task_id, record, stamped)
+                return
 
     def staged(self: Dispatcher, zone: str = None) -> int:
         """Number of rows staged in `zone`'s pool, or in every pool."""
@@ -404,6 +418,11 @@ class Dispatcher:
         """Whether any client serves a zone other than the default zone."""
         with self.lock:
             return any(zone != DEFAULT_ZONE_ID for zone, _ in self.demand.values())
+
+    def takes_submissions(self: Dispatcher) -> bool:
+        """Whether bundles put on the server's inbound queue are served: only a server without a database."""
+        with self.lock:
+            return self.inbound is not None
 
     def zone_name(self: Dispatcher, zone: str) -> Optional[str]:
         """Name a client used for `zone`, if any client has asked for it."""

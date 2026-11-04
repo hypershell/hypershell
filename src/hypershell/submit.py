@@ -65,7 +65,8 @@ from hypershell.core.logging import Logger
 from hypershell.core.config import config, default
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
-from hypershell.core.queue import QueueClient, QueueConfig, DEFAULT_LOCAL_TIMEOUT, DEFAULT_REMOTE_TIMEOUT
+from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
+                                  DEFAULT_LOCAL_TIMEOUT, DEFAULT_REMOTE_TIMEOUT)
 from hypershell.core.thread import Thread
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.types import JSONData, parse_bytes
@@ -872,6 +873,7 @@ class LiveSubmitThread(Thread):
         """Start child threads, wait."""
         log.debug(f'Started ({self.source_name})')
         with self.client:
+            self.check_server()
             self.loader.start()
             self.committer.start()
             log.trace('Waiting (loader)')
@@ -880,6 +882,13 @@ class LiveSubmitThread(Thread):
             log.trace('Waiting (committer)')
             self.committer.join()
         log.debug('Done')
+
+    def check_server(self: LiveSubmitThread) -> None:
+        """Refuse a server that does not serve its live queue: one with a database, which schedules from it."""
+        if not self.client.dispatcher.takes_submissions():
+            raise QueueSubmitRefused(f'Server at {self.client.config.host}:{self.client.config.port} schedules '
+                                     f'from its database and does not serve tasks submitted with --queue; '
+                                     f'submit without --queue, or start the server with --no-db')
 
     @functools.cached_property
     def source_name(self: LiveSubmitThread) -> str:

@@ -61,6 +61,9 @@ or the negative template/resource sentinels in `client.py`) solely by this value
 scheduler's failure and retry queries filter it out explicitly.
 """
 
+REVERT_CHUNK: Final[int] = 500
+"""Most ids bound in one conditional revert statement (well within SQLite's and PostgreSQL's limits)."""
+
 DIRECT_SOURCE_ID: Final[str] = '00000000-0000-7000-8000-000000000000'
 """Reserved `Source` id for single command-line submissions (`hs submit '<cmd>'`)."""
 
@@ -418,6 +421,23 @@ class Task(Entity):
         'csvpath',
         'cores_max',
         'memory_max',
+    )
+
+    # The columns a revert clears, so the task reads as new again.
+    revert_columns: Final[Tuple[str, ...]] = (
+        'schedule_time',
+        'server_host',
+        'server_id',
+        'client_host',
+        'client_id',
+        'command',
+        'start_time',
+        'completion_time',
+        'exit_status',
+        'outpath',
+        'errpath',
+        'waited',
+        'duration',
     )
 
     class NotFound(NotFound):
@@ -813,27 +833,36 @@ class Task(Entity):
     @classmethod
     def revert_all(cls: Type[Task], ids: List[str]) -> None:
         """Revert all tasks identified by `ids`."""
-        cls.update_all([
-            {
-                'id': id,
-                'schedule_time': None,
-                'server_host': None,
-                'server_id': None,
-                'client_host': None,
-                'client_id': None,
-                'command': None,
-                'start_time': None,
-                'completion_time': None,
-                'exit_status': None,
-                'outpath': None,
-                'errpath': None,
-                'waited': None,
-                'duration': None,
-             }
-            for id in ids
-        ])
+        cls.update_all([{'id': id, **dict.fromkeys(cls.revert_columns)} for id in ids])
         for id in ids:
             log.trace(f'Reverted previous task ({id})')
+
+    @classmethod
+    def revert_staged(cls: Type[Task], ids: List[str]) -> int:
+        """Revert tasks staged but never delivered, unless they have since become terminal or gone.
+
+        One conditional UPDATE matches only rows still without a `completion_time`, so the check and
+        the write are one atomic statement: a row cancelled (or otherwise completed) while staged keeps
+        its terminal state, and a deleted row matches nothing. The ids go in chunks that stay within
+        every database's limit on bound parameters, all in one transaction. Returns the number of rows
+        reverted, which may be fewer than the ids given.
+        """
+        reverted = 0
+        try:
+            for start in range(0, len(ids), REVERT_CHUNK):
+                reverted += Session.execute(
+                    update(cls)
+                    .where(cls.id.in_(ids[start:start + REVERT_CHUNK]),
+                           cls.completion_time.is_(None))
+                    .values(dict.fromkeys(cls.revert_columns))
+                    .execution_options(synchronize_session=False)
+                ).rowcount
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        log.trace(f'Reverted {reverted} of {len(ids)} staged tasks')
+        return reverted
 
     @classmethod
     def revert(cls: Type[Task], id: str) -> None:

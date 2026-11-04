@@ -320,10 +320,14 @@ class Scheduler(StateMachine):
                      f'{waiting[zone]} tasks, no client serving it')
 
     def revert_unstaged(self: Scheduler) -> None:
-        """Revert the rows staged for zones whose last client is gone, so another run can take them."""
+        """Revert the rows staged for zones whose last client is gone, so another run can take them.
+
+        A row cancelled, completed or deleted while staged is left as it is.
+        """
         if ids := self.dispatcher.take_unstaged():
-            Task.revert_all(ids)
-            log.info(f'Reverted {len(ids)} staged tasks (zone has no client)')
+            reverted = Task.revert_staged(ids)
+            kept = f'; {len(ids) - reverted} left as completed, cancelled or deleted' if reverted < len(ids) else ''
+            log.info(f'Reverted {reverted} staged tasks (zone has no client{kept})')
 
     @staticmethod
     def finalize() -> SchedulerState:
@@ -979,11 +983,15 @@ class ServerThread(Thread):
         self.revert_staged()
 
     def revert_staged(self: ServerThread) -> None:
-        """Revert rows still staged once no client is left to take them."""
+        """Revert rows still staged once no client is left to take them.
+
+        A row cancelled, completed or deleted while staged is left as it is.
+        """
         ids = self.queue.dispatcher.take_staged()
         if ids and not self.in_memory:
-            Task.revert_all(ids)
-            log.info(f'Reverted {len(ids)} staged tasks never delivered')
+            reverted = Task.revert_staged(ids)
+            kept = f' ({len(ids) - reverted} left as completed, cancelled or deleted)' if reverted < len(ids) else ''
+            log.info(f'Reverted {reverted} staged tasks never delivered{kept}')
 
     def wait_receiver(self: ServerThread) -> None:
         """Wait for receiver to stop."""
