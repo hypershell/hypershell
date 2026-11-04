@@ -3,7 +3,7 @@ slug: zone-dispatch
 title: Zone-aware, demand-driven dispatch (zone, cycle 2)
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/zone-dispatch
 base: develop
 current_phase: done
@@ -137,10 +137,12 @@ phases:
   verify: uv run pytest -v tests/test_zone_display.py tests/test_list.py tests/test_card_info.py
     tests/test_card_render.py tests/test_card_integration.py tests/test_main.py
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: b946b14820b4109d483a5311b8f24692e2d9c307
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: F1 staged revert un-cancels cancelled tasks (CRITICAL);
+    F2 StaleDataError on deleted staged rows; F3 revert-while-staged strands task;
+    F4 submit -q hangs on DB server; human gate'
+  cycle: 1
 ---
 # TECH.md — Zone-aware, demand-driven dispatch (zone, cycle 2)
 
