@@ -3,10 +3,10 @@ slug: group-advance-strands-lower-group
 title: Run task groups in order, and never strand a late one
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/group-advance-strands-lower-group
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -96,7 +96,7 @@ phases:
     docs/_include/server_usage.rst docs/_include/submit_help.rst docs/_include/submit_usage.rst
 - id: P5
   name: 2.8.4 port trial and final gate
-  status: in_progress
+  status: done
   satisfies:
   - R9
   - R7
@@ -122,8 +122,7 @@ phases:
 review:
   last_reviewed_commit: 5c7f381
   verdict: changes-requested
-  blocked_reason: 'review 2: N1 non-integer group crashes scheduler (server.py:271);
-    N2 seed wording'
+  blocked_reason: ''
   cycle: 2
 ---
 # TECH.md — Run task groups in order, and never strand a late one
@@ -470,7 +469,7 @@ conflict, fix the placement in P2's or P3's files under a P5 amendment note, and
       suite's summary (plus any rerun) into the commit body and below.
 - [x] Review-1 remediation: the static check's `src/` list adds `client.py` and the three cluster
       launchers (F2). Rerun the port trial and the full suite on 3.11, 3.12, 3.13 and 3.14.
-- [ ] Review-2 remediation: rerun the port trial at the N1 commit, and the full suite once on each
+- [x] Review-2 remediation: rerun the port trial at the N1 commit, and the full suite once on each
       of 3.11, 3.12, 3.13 and 3.14. The known flakes (the TLS localhost `ConnectionResetError`,
       and `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade`) may each be rerun once, and
       every rerun is recorded.
@@ -647,6 +646,32 @@ foreman's plan-gate ruling on PLAN §5 risk 1 is recorded as a seed,
   passed`); P4 rc 0.
 - **TECH amendment:** P2's verify adds the text-group integration test, through
   `set_phase.py --verify`.
+
+**Review-2 remediation, P5 (port trial and final gate).**
+- R9 static checks passed: `src/` changes are exactly `client.py`, `cluster/local.py`,
+  `cluster/remote.py`, `cluster/ssh.py`, `data/model.py` and `server.py`, and no added or removed
+  line touches `mapped_column`, `__tablename__`, `add_argument`, `_HELP` or `_USAGE`.
+- `port-trial.sh` on `origin/master` at `4d5771b` (2.8.3), unedited, at `dbfa759`: #68 conflicted
+  only in `server.py`, resolved by the script as before. This cycle applied with no conflict:
+  `M` `client.py`, `cluster/local.py`, `cluster/remote.py`, `cluster/ssh.py`, `data/model.py`,
+  `server.py`, `A tests/test_group_order.py` (with #68's `A tests/test_retry_gate.py`). Tests
+  (`test_group_order.py`, `test_retry_gate.py`, `test_groups.py`): `54 passed`, no rerun. The
+  trial worktree was removed, the worktree list is unchanged, and `master` stayed at `dd0264c`.
+- **Environment substitution for the trial**, as before: `UV_NO_GROUP=docs`, `UV_OFFLINE=1`,
+  `UV_PYTHON_DOWNLOADS=never`, a local CPython 3.12.16, `UV_PROJECT_ENVIRONMENT` outside the repo,
+  and `UV_CACHE_DIR` pointed at a private copy of a local uv cache that holds `hatchling`. The
+  script was not edited.
+- Full `develop` suite, one run each: 3.12.16 `652 passed, 64 skipped`; 3.13.18 `652 passed, 64
+  skipped`; 3.14.10 `652 passed, 64 skipped`, none needing a rerun.
+- 3.11.18: `1 failed, 651 passed, 64 skipped`. The failure was the known flake
+  `tests/test_upgrade_cli.py::test_waits_for_slow_peer_upgrade`, and its rerun (`--lf`) gave `1
+  passed`. **The signature differs from the one recorded in P5 above, so it is a finding:**
+  `sqlite3.OperationalError: database is locked` from the lock holder's own `COMMIT`
+  (`tests/test_upgrade_cli.py:322`), after the test's fixed 2 s sleep, instead of
+  `assert len(waits) >= 2`. The likely cause is that the child process held a read lock at that
+  moment, so the holder could not take the exclusive lock its commit needs: the same fixed-sleep
+  timing race, which fails in a different place. The test and `data/upgrade.py` are identical to
+  `b31c66e`, and this cycle touches no upgrade code. Neither TLS flake appeared.
 
 ---
 
