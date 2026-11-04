@@ -3,10 +3,10 @@ slug: zone-dispatch
 title: Zone-aware, demand-driven dispatch (zone, cycle 2)
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/zone-dispatch
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -30,7 +30,7 @@ phases:
 - id: P2
   name: Request callable, staging and the client request loop (default zone, homogeneous
     path)
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -332,6 +332,37 @@ The plan gate is **passed** with these rulings and conditions.
     CRITICAL `QueueVersionError`. PASS.
   - No follow-up commit was needed. `tests/test_groups.py::test_group_starts_based_on_previous_scheduled_tasks`
     passed in every full suite.
+
+- **Review-1 remediation (2026-11-04).** Cycle 1 (`9a81343`, reviewing `b946b14`) requested changes
+  on F1–F4; the foreman's triage (appended verbatim to `REVIEW.md`) ruled each a fix. The invariant
+  prose is `6f00fc5` (no code); the fixes, tests, docs and seed are `7dee92c` (P2 reopened; see
+  P2's remediation item). Gates on `7dee92c` (macOS; frozen dev venvs from `uv sync --frozen
+  --offline` over a `git archive` extract, against standalone 3.11.18, 3.12.16, 3.13.18 and
+  3.14.10; every run in its own process group under a kill timer, in an isolated site):
+  - **Red first** (`b946b14`'s `src`, 3.12.16): `tests/test_dispatch_staged.py` 8 failed, 0
+    passed. **Green** at `7dee92c`: 8 passed.
+  - **Zone and dispatch modules, 3.12.16:** 106 passed, 3 skipped (test_zone_postgres, no
+    server): the earlier 98 plus the 8 new tests.
+  - **Full suite**, once each, one Python at a time: 3.12.16 **829 passed, 67 skipped**; 3.11.18
+    **825 passed, 71 skipped**; 3.13.18 **826 passed, 70 skipped**; 3.14.10 **825 passed, 70
+    skipped, 1 failed**: `tests/test_dispatch_workload.py::test_cluster_default_path[True]`, a
+    `ConnectionResetError` in the client's TLS handshake on localhost (the known TLS localhost
+    reset, fixed on `develop` after this base). Rerun once on 3.14.10: passed. Each count is the
+    `a040e1d` count plus the 8 new tests; the skips are unchanged.
+  - **`parity` vs `b819de6`** (`--skip-help`): identical task tables and groups in order, TLS on
+    and off, rc 0/[0, 0] on both builds. **P2's own verify** (`parity --base 2.8.3`,
+    `--skip-help`, with the 3.12 full suite above): the same, TLS on and off. PASS.
+  - **`skew` vs `b819de6`**, TLS on and off: a `b819de6` client against this server exits rc 5 in
+    0.3 s and is logged `Client too old` once while a new client finishes 200/200; a new client
+    against a `b819de6` server exits rc 5 in 0.3 s with one CRITICAL `QueueVersionError`. PASS.
+  - **Local smoke** (`sh tests/cluster/smoke.sh`, `HSD_SMOKE_KEEP=1`; feature archive on Python
+    3.13.18): homogeneous TLS on and off, 2,000 tasks, identical results, PASS. Zoned rehearsal
+    (`default:40,cpu:30,gpu:30`, 3 groups, one retry per zone, 4 clients, TLS) with
+    `compare.py --zoned feature`: zones default 122, cpu 91, gpu 91, 304 rows, 4 retried, PASS.
+    `smoke: PASS`, with no host or user name in the results.
+  - Not rerun: P4's verify, which builds Sphinx (not built in this remediation; the only docs
+    change is two paragraphs of `submit_*.rst`), and P7's external evidence, which the triage
+    let stand. `test_zone_postgres.py` runs in CI.
 
 ## Open rulings ([NEEDS CLARIFICATION])
 
