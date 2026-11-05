@@ -25,10 +25,9 @@ See the deferral table in [`AGENTS.md`](AGENTS.md) for which lane a deferral bel
 prerequisites the feature cycles depend on rather than merely being urgent — those dependencies are
 named in each entry. Horizons are indicative; the stated dependencies are the hard constraints.
 
-Some seeds cite maintainer-local records under `.local/` — `IMPROVEMENTS.md` for the GNU Parallel
-comparison's finding ids (H\*, M\*, L\*), `timescale-ideas-transcript.txt` for the TimescaleDB notes.
-That directory is gitignored: the named review and the ids are stable, the paths are not resolvable
-from a clone.
+Some seeds cite a maintainer-local record under `.local/`: `IMPROVEMENTS.md`, for the GNU Parallel
+comparison's finding ids (H\*, M\*, L\*). That directory is gitignored: the named review and the
+ids are stable, the path is not resolvable from a clone.
 
 ---
 
@@ -420,10 +419,11 @@ Refs: —*
 
 # Part II — The 2.9.0 feature cycle
 
-Four shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
+Three shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
 drafted R-IDs. They carry `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
-drifted, then adopt largely as written.
+drifted, then adopt largely as written. The last two entries are `unshaped` test-infrastructure
+seeds split out of shipped cycles.
 
 ## Zone-aware demand-driven dispatch on a lighter queue primitive
 
@@ -465,20 +465,6 @@ captured output from the execution host.
 `data/core.py` shares ground with the resilience feature's pragma defaults · Refs: R13–R15 soften
 relay's cross-site output non-goal*
 **Seed:** [`issues/turso.md`](issues/turso.md) · *status: shaped*
-
-## TimescaleDB provider: hypertables out of the box
-
-The `timescale` provider aliases exist and deliver nothing TimescaleDB-shaped — the schema comes up
-as plain PostgreSQL tables and the code says so at every startup. Since hypertables can partition
-directly on a UUIDv7 column, our primary key *is* the partition key, which makes HyperShell unusually
-well suited to it. An idempotent post-`create_all` pass converges the `task` table to a hypertable
-with compression and a policy, interrogating the environment rather than assuming it.
-
-*Horizon: mid-term · Depends on: soft — conforms to (or establishes) turso R4's per-provider seam ·
-Refs: **R1 is discharged** — `schema-upgrade-step` dropped the `previous_id`/`next_id` UNIQUE
-constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQLite databases keep
-them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
-**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: adopted:timescale*
 
 ## The whole test suite on a server database
 
