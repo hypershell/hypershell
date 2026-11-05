@@ -17,9 +17,9 @@ succeed today, a `hs submit` into a lower group or a file run onto an advanced d
 with a clear error. It branches as `feature/submit-refuses-lower-group`, and it ships on `develop`
 only (2.9), not in a 2.8 patch.
 
-**Depends on:** `group-advance-strands-lower-group` (part A). A's safety net, that a late lower
-group still runs with a warning, covers a submission that races a running server past this
-refusal check.
+**Depends on:** `group-advance-strands-lower-group` (part A), landed in #74. A's safety net, that a
+late lower group still runs with a warning, covers a submission that races a running server past
+this refusal check.
 
 ## Problem
 

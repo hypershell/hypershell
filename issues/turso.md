@@ -35,7 +35,7 @@ HyperShell's founding simplicity is a single SQLite file — no service to run, 
 mint. But that simplicity taxes exactly the workflows 2.9.0 is opening up:
 
 1. **Rotation partitions are write-only archives.** `hs initdb --rotate` splits completed tasks
-   into `main.1`, `main.2`, … — and then `hs list`/`hs search` can no longer see them. SQLite's
+   into `main.1`, `main.2`, … — and then `hs list` can no longer see them. SQLite's
    `ATTACH` cap (10 default, 125 compiled max) forecloses ever querying a long campaign's history
    as one thing; a year of weekly rotations is unreachable without ad-hoc scripts.
 2. **Concurrency is adequate, not graceful.** The single-writer model plus polite WAL settings is
@@ -43,7 +43,7 @@ mint. But that simplicity taxes exactly the workflows 2.9.0 is opening up:
    campaign database) rides on hope and busy-timeouts, and the engine has no growth path —
    SQLite's answer to contention will always be "retry."
 3. **Captured output is marooned on the execution host.** `--capture` / `-o`/`-e` write task
-   stdout/stderr to client-local files; `hs task info --stdout` retrieves them over paramiko SFTP
+   stdout/stderr to client-local files; `hs info --stdout` retrieves them over paramiko SFTP
    only if you can SSH to that node. On ephemeral or scratch-purged nodes, output dies with the
    allocation.
 
@@ -73,7 +73,7 @@ we find are filed and fixed **upstream** (the spike found two immediately: `turs
 rejects pysqlite's `check_same_thread`, and the 0.7.2 wheel stubs index/FK reflection), with thin
 shims in `data/core.py` only until upstream releases land.
 
-On that provider, rotation stops being an archive graveyard: `hs list`/`hs search`/`hs info` gain
+On that provider, rotation stops being an archive graveyard: `hs list`/`hs info` gain
 a flag (say `--parts`) that discovers the rotation family (`main.db`, `main.1`, `main.2`, …),
 `ATTACH`es the partitions read-only on one connection, and answers across the whole campaign
 history — **1000+ rotations** is the design point, gated by an early benchmark phase against
@@ -83,7 +83,7 @@ the provenance thread; `uuid7` time-ordered ids keep cross-partition ordering ch
 
 Independently of provider, the **`[s3]` extra** un-maroons captured output: `outpath` /
 `errpath` / `csvpath` accept `s3://bucket/key` URIs; the client streams captured stdout/stderr to
-object storage instead of the node-local filesystem, and `hs task info --stdout` fetches it back
+object storage instead of the node-local filesystem, and `hs info --stdout` fetches it back
 from anywhere with credentials — no SSH to a dead node. This is HyperShell-side plumbing
 (boto3), deliberately provider-independent, and it quietly serves `relay` too: cross-site output
 retrieval was a relay non-goal precisely because paths named site-local files.
@@ -134,7 +134,7 @@ not a migration. PostgreSQL remains the recommendation for large multi-user depl
   pins — such that no turso-related TODO comment remains in the file.
 - **R6** — The full test suite SHALL run green with `provider = turso` as a CI matrix job
   alongside sqlite/postgres, covering submit, scheduling, writeback, retries, revert, group
-  gating, `hs list`/`search`/`update`/`info`/`wait`, config pragmas, `vacuumdb`, and `rotatedb`;
+  gating, `hs list`/`update`/`info`/`wait`, config pragmas, `vacuumdb`, and `rotatedb`;
   any behavioral exception SHALL be explicitly enumerated in docs rather than silently skipped.
   In-memory semantics (`:memory:` → `in_memory` mode) SHALL match the sqlite provider.
 - **R7** — `[database.pragmas]` SHALL work under turso, and the docs SHALL state the supported
@@ -149,7 +149,7 @@ not a migration. PostgreSQL remains the recommendation for large multi-user depl
 **Partition-attached listing** *(rides on R1–R8)*
 
 - **R9** — WHEN the provider supports uncapped `ATTACH` (turso), the read-only presentation
-  commands (`hs list`, `hs search`, and `hs info` by id) SHALL be able to answer across the
+  commands (`hs list` and `hs info` by id) SHALL be able to answer across the
   rotation family — main database plus rotated partition files discovered by the established
   `main.N` naming — via `ATTACH`, behind an explicit opt-in flag; results SHALL present
   identically to today (including `Source`/`Zone` name dereferencing) with the originating
@@ -173,7 +173,7 @@ not a migration. PostgreSQL remains the recommendation for large multi-user depl
   captured stream to object storage (credentials/endpoint via the standard AWS environment and
   config chain, so S3-compatible stores — MinIO, Ceph RGW, institutional object stores — work
   unchanged) and the task row SHALL record the URI exactly as it records file paths today.
-- **R14** — `hs task info --stdout`/`--stderr` SHALL retrieve `s3://` outputs directly from
+- **R14** — `hs info --stdout`/`--stderr` SHALL retrieve `s3://` outputs directly from
   object storage from any host with credentials, bypassing the SFTP host-path retrieval; the
   existing SFTP path remains for file paths.
 - **R15** — IF the `s3` extra is missing and an `s3://` capture or retrieval is requested, THEN
@@ -294,7 +294,7 @@ not a migration. PostgreSQL remains the recommendation for large multi-user depl
 - **Note (for `hs-plan`):** *S3 touchpoints.* Capture happens in `client.py` (`TaskExecutor`
   redirection) — today it opens local files; the S3 path likely wants stream-to-part-upload on
   completion rather than buffering. Retrieval is `core/remote.py` (paramiko SFTP) branched by
-  URI scheme in `task.py` (`hs task info`). Template expansion (`core/template.py`) must expand
+  URI scheme in `task.py` (`hs info`). Template expansion (`core/template.py`) must expand
   into URIs safely. Keep boto3 imports inside the `[s3]` guard.
 - **Note (for `hs-plan`):** *version floors.* The dialect's in-repo doc says SQLAlchemy ≥2.0.45
   on main; we already require ≥2.0.50. pyturso wheels are cp310-abi3 (Linux/macOS/Windows) —
@@ -312,7 +312,7 @@ not a migration. PostgreSQL remains the recommendation for large multi-user depl
   `pyturso`; the R4 per-provider consolidation — connect-argument policy incl. the injected
   `check_same_thread`, `experimental_features` handling, pragma event, `in_memory` detection,
   dependency guards); `src/hypershell/data/__init__.py` (`rotatedb`/`vacuumdb` under turso;
-  partition discovery for R9); `src/hypershell/task.py` (`hs list`/`search`/`info` `--parts`
+  partition discovery for R9); `src/hypershell/task.py` (`hs list`/`info` `--parts`
   flag; `s3://` retrieval branch); `src/hypershell/client.py` (`TaskExecutor` capture-to-S3);
   `src/hypershell/core/remote.py` (retrieval seam); `pyproject.toml` (extras: `turso`, `s3`;
   resolve all turso TODO placeholders per R5); CI workflow (turso matrix job);

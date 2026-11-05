@@ -26,8 +26,9 @@ limit returns 2 entries with 1 distinct id, both before and after `spec/group-ad
 That cycle's `test_hold_matches_retry_selection` compares retries by row id for this reason, and
 its `TECH.md` P2 amendment records the raw count (10 entries for 5 retries).
 
-**Untested:** whether the client actually runs the command twice, and what the second result
-writeback does to the row.
+**Untested:** whether the client actually runs the command twice. What the second result does to
+the row is settled: `writeback-scoped-conditional` (#70, its R5) leaves the row unchanged and logs
+the repeat as a duplicate.
 
 ## Why it was deferred
 
