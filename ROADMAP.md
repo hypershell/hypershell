@@ -399,7 +399,7 @@ statements for every task, and the evidence points at its CPU as the throughput 
 scheduler and confirm paths may carry the same per-call cost, and batching results across bundles
 is a further option.
 
-*Horizon: mid-term · Depends on: `writeback-prebuilt-update` (the measurement method) ·
+*Horizon: mid-term · Depends on: `writeback-prebuilt-update` (landed, #73; the measurement method) ·
 Refs: —*
 **Seed:** [`issues/server-per-task-statement-overhead.md`](issues/server-per-task-statement-overhead.md) · *status: unshaped*
 
