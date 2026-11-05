@@ -143,10 +143,10 @@ phases:
     "$f" HEAD -- src tests && kt 120 python spec/hypertable-update-retry/check_evidence.py
     r7 ci
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: b33f99f561a0e5df18a8f2f4e189e5aafa220c3d
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — A task-row write that waited on a row lock still lands on a TimescaleDB hypertable
 
