@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Tuple, List, Dict, IO, Iterable, Callable, Type, Optional, Final
 
 # Standard libs
-import os
 import sys
 import time
 import shlex
@@ -22,7 +21,7 @@ from subprocess import Popen
 # Internal libs
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig
-from hypershell.core.config import default, load_task_env
+from hypershell.core.config import default
 from hypershell.core.thread import Thread
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.template import DEFAULT_TEMPLATE
@@ -383,7 +382,7 @@ class AutoScaler(StateMachine):
     init_size: int
     min_size: int
     max_size: int
-    launcher: List[str]
+    launch: ClientLaunch
 
     clients: List[Popen]
     last_check: datetime
@@ -394,7 +393,7 @@ class AutoScaler(StateMachine):
     states: Type[State] = AutoScalerState
 
     def __init__(self: AutoScaler,
-                 launcher: List[str],
+                 launch: ClientLaunch,
                  policy: str = DEFAULT_AUTOSCALE_POLICY,
                  factor: float = DEFAULT_AUTOSCALE_FACTOR,
                  period: int = DEFAULT_AUTOSCALE_PERIOD,
@@ -409,7 +408,7 @@ class AutoScaler(StateMachine):
         self.init_size = init_size
         self.min_size = min_size
         self.max_size = max_size
-        self.launcher = launcher
+        self.launch = launch
         self.last_check = datetime.now()
         self.wait_check = timedelta(seconds=period)
         self.clients = []
@@ -431,7 +430,7 @@ class AutoScaler(StateMachine):
     def start(self: AutoScaler) -> AutoScalerState:
         """Jump to INIT state."""
         log.info(f'Autoscale start (policy: {self.policy.name.lower()}, init-size: {self.init_size})')
-        log.debug('Autoscale launcher: ' + redact_secrets(self.launcher, ['-k']))
+        log.debug('Autoscale launcher: ' + self.launch.describe())
         return AutoScalerState.INIT
 
     def init(self: AutoScaler) -> AutoScalerState:
@@ -523,8 +522,7 @@ class AutoScaler(StateMachine):
 
     def scale(self: AutoScaler) -> AutoScalerState:
         """Launch new client."""
-        proc = Popen(self.launcher, stdout=sys.stdout, stderr=sys.stderr,
-                     bufsize=0, universal_newlines=True, env={**os.environ, **load_task_env()})
+        proc = self.launch.start(stdout=sys.stdout, stderr=sys.stderr, bufsize=0, universal_newlines=True)
         log.info(f'Autoscale adding client ({proc.pid})')
         self.clients.append(proc)
         if self.phase is AutoScalerPhase.INIT:
@@ -557,7 +555,7 @@ class AutoScalerThread(Thread):
     """Run AutoScaler within dedicated thread."""
 
     def __init__(self: AutoScalerThread,
-                 launcher: List[str],
+                 launch: ClientLaunch,
                  policy: str = DEFAULT_AUTOSCALE_POLICY,
                  factor: float = DEFAULT_AUTOSCALE_FACTOR,
                  period: int = DEFAULT_AUTOSCALE_PERIOD,
@@ -567,7 +565,7 @@ class AutoScalerThread(Thread):
                  ) -> None:
         """Initialize task executor."""
         super().__init__(name=f'hypershell-autoscaler')
-        self.machine = AutoScaler(launcher, policy=policy, factor=factor, period=period,
+        self.machine = AutoScaler(launch, policy=policy, factor=factor, period=period,
                                   init_size=init_size, min_size=min_size, max_size=max_size)
 
     def run_with_exceptions(self: AutoScalerThread) -> None:
@@ -741,7 +739,7 @@ class AutoScalingCluster(Thread):
 
     server: ServerThread
     clients: Dict[str, Popen]
-    launch_argv: str
+    launch: ClientLaunch
 
     def __init__(self: AutoScalingCluster,
                  source: Iterable[str] = None,
@@ -803,38 +801,20 @@ class AutoScalingCluster(Thread):
                                    template=template,
                                    from_json=from_json,
                                    tls=tls)
-        launcher = shlex.split(launcher)
         if launcher_args is None:
             launcher_args = []
         else:
             launcher_args = [arg for arg_group in launcher_args for arg in shlex.split(arg_group)]
-        client_args = []
-        if capture:
-            client_args.append('--capture')
-        if monitor:
-            client_args.append('--monitor')
-        if client_cores is not None:
-            client_args.extend(['-C', str(client_cores)])
-        if client_memory is not None:
-            client_args.extend(['-M', str(client_memory)])
-        if client_timeout is not None:
-            client_args.extend(['-T', str(client_timeout)])
-        if task_timeout is not None:
-            client_args.extend(['-W', str(task_timeout)])
-        if ratelimit is not None:
-            client_args.extend(['-R', str(ratelimit)])
-        if tls is None:
-            # TLS material is resolved by each client from its own site/config (identical to
-            # the server's on a shared filesystem); only the disabled state must be propagated.
-            client_args.append('--no-tls')
-        if zone is not None:
-            client_args.extend(['--zone', zone])
-        launcher.extend([
-            *launcher_args, remote_exe, 'client',
-            '-H', HOSTNAME, '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-            '-t', client_template, '-k', auth, '-d', str(delay_start), '-S', str(task_signalwait), *client_args
-        ])
-        self.autoscaler = AutoScalerThread(launcher, policy=policy, factor=factor, period=period,
+        # One launch serves every scale-up, under either policy.
+        self.launch = client_launch(remote_exe, (HOSTNAME, bind[1]), auth,
+                                    launcher=shlex.split(launcher), launcher_args=launcher_args,
+                                    num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
+                                    template=client_template, delay_start=delay_start,
+                                    task_signalwait=task_signalwait, capture=capture, monitor=monitor,
+                                    client_cores=client_cores, client_memory=client_memory,
+                                    client_timeout=client_timeout, task_timeout=task_timeout,
+                                    ratelimit=ratelimit, tls_enabled=tls is not None, zone=zone)
+        self.autoscaler = AutoScalerThread(self.launch, policy=policy, factor=factor, period=period,
                                            init_size=init_size, min_size=min_size, max_size=max_size)
         super().__init__(name='hypershell-cluster')
 

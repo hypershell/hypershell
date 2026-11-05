@@ -35,6 +35,8 @@ from cmdkit.app import exit_status
 # Internal libs
 from tests import create_taskfile_echo
 from hypershell.cluster.launch import AUTH_ENV, OMPI_ENV_LIST, ClientLaunch, client_launch
+from hypershell.core.logging import HOSTNAME
+from hypershell.cluster.remote import AutoScaler, AutoScalingCluster
 
 
 pytestmark = mark.integration
@@ -80,6 +82,16 @@ keep = ('PATH', 'HOME', 'HYPERSHELL_CONFIG_FILE', 'HYPERSHELL_SITE', 'HYPERSHELL
 os.execve(sys.argv[1], sys.argv[1:], {name: os.environ[name] for name in keep if name in os.environ})
 """
 
+# A launcher for autoscaling runs. The autoscaler advertises the host's own name, which some hosts
+# (sandboxes, laptops) cannot resolve, so after recording what it was given the stand-in points
+# the client at the loopback address the run binds.
+AUTOSCALE_LAUNCHER_BODY: Final[str] = f"""\
+record('launcher')
+argv = sys.argv[1:]
+argv[argv.index('-H') + 1] = {LOOPBACK!r}
+os.execv(argv[0], argv)
+"""
+
 # The remote executable: runs this tree's `hypershell.main` under the test's interpreter.
 CLIENT_BODY: Final[str] = """\
 record('client')
@@ -97,6 +109,12 @@ TASK_RESULTS: Final[str] = """\
 import json
 from hypershell.data.model import Task
 print(json.dumps([[args, status] for args, status in Task.query(Task.args, Task.exit_status).all()]))
+"""
+
+# Reports whether every task in the run's site has completed.
+TASKS_DONE: Final[str] = f"""\
+from hypershell.data.model import Task
+print(Task.query().count() == {TASK_COUNT} and Task.count_remaining() == 0)
 """
 
 # Builds and runs the launcher-mode cluster in-process, capturing every log record at every level.
@@ -119,6 +137,37 @@ with open(output, mode='w') as stream:
     json.dump(records, stream)
 """
 
+# Builds and runs an autoscaling cluster in-process, capturing every log record at every level.
+# Autoscaling clusters do not exit on their own: once every task has completed the records are
+# written, and the test kills the run's process group.
+CAPTURE_AUTOSCALING_LOGS: Final[str] = f"""\
+import os, sys, json, time, logging
+from hypershell.cluster.remote import AutoScalingCluster
+from hypershell.data import initdb
+from hypershell.data.model import Task
+records = []
+class Capture(logging.Handler):
+    def emit(self, record):
+        records.append({{'level': record.levelname, 'name': record.name, 'message': record.getMessage()}})
+logger = logging.getLogger('hypershell')
+logger.addHandler(Capture(level=1))
+logger.setLevel(1)
+launcher, remote_exe, port, policy, output = sys.argv[1:]
+initdb()
+cluster = AutoScalingCluster(source=[f'echo {{n}}' for n in range({TASK_COUNT})], launcher=launcher,
+                             remote_exe=remote_exe, bind=({LOOPBACK!r}, int(port)), policy=policy, tls=None)
+cluster.start()
+while cluster.server.ident is None:
+    time.sleep(0.1)
+cluster.server.wait_scheduling()
+while not (Task.query().count() == {TASK_COUNT} and Task.count_remaining() == 0):
+    time.sleep(0.2)
+with open(output + '.part', mode='w') as stream:
+    json.dump(records, stream)
+os.rename(output + '.part', output)
+cluster.join()
+"""
+
 
 @dataclass
 class StandIns:
@@ -128,6 +177,7 @@ class StandIns:
     records: Path
     launcher: Path
     launcher_drop_env: Path
+    autoscale_launcher: Path
     remote_exe: Path
 
     def read(self: StandIns) -> List[Dict[str, Any]]:
@@ -158,9 +208,10 @@ def stand_ins(tmp_path: Path) -> StandIns:
     launcher = write_program(bin_dir / 'launcher', LAUNCHER_BODY, records)
     write_program(bin_dir / 'mpirun', LAUNCHER_BODY, records)
     launcher_drop_env = write_program(bin_dir / 'launcher-drop-env', LAUNCHER_DROP_ENV_BODY, records)
+    autoscale_launcher = write_program(bin_dir / 'autoscale-launcher', AUTOSCALE_LAUNCHER_BODY, records)
     remote_exe = write_program(bin_dir / 'hs-client-under-test', CLIENT_BODY, records)
-    return StandIns(bin=bin_dir, records=records, launcher=launcher,
-                    launcher_drop_env=launcher_drop_env, remote_exe=remote_exe)
+    return StandIns(bin=bin_dir, records=records, launcher=launcher, launcher_drop_env=launcher_drop_env,
+                    autoscale_launcher=autoscale_launcher, remote_exe=remote_exe)
 
 
 @dataclass
@@ -173,14 +224,14 @@ class Run:
 
 
 def run_in_session(argv: List[str], env: Dict[str, str], workdir: Path,
-                   until: Callable[[], bool] = None, timeout: float = RUN_TIMEOUT) -> Run:
+                   until: Callable[[], bool] = None, timeout: float = RUN_TIMEOUT, name: str = 'run') -> Run:
     """
     Run `argv` in its own session; kill its process group when it ends.
 
     The run ends when the process exits, when `until()` turns true (status is then None),
-    or at `timeout`, which fails the test.
+    or at `timeout`, which fails the test. Its output is kept in `workdir` under `name`.
     """
-    stdout_path, stderr_path = workdir / 'run.stdout', workdir / 'run.stderr'
+    stdout_path, stderr_path = workdir / f'{name}.stdout', workdir / f'{name}.stderr'
     with open(stdout_path, mode='w') as stdout, open(stderr_path, mode='w') as stderr:
         proc = Popen(argv, env=env, stdin=DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
         deadline = time.monotonic() + timeout
@@ -229,9 +280,25 @@ def run_cluster(stand_ins: StandIns, mode: List[str], temp_site: Path, no_tls: b
 
 def task_results(stand_ins: StandIns, temp_site: Path) -> List[List[Any]]:
     """Every task's arguments and exit status, read through the data model in the temp site."""
-    run = run_in_session([sys.executable, '-c', TASK_RESULTS], run_env(stand_ins), Path(temp_site))
+    run = run_in_session([sys.executable, '-c', TASK_RESULTS], run_env(stand_ins), Path(temp_site), name='results')
     assert run.status == exit_status.success, run.stderr
     return json.loads(run.stdout.strip().splitlines()[-1])
+
+
+def all_tasks_done(stand_ins: StandIns, temp_site: Path, interval: float = 1) -> Callable[[], bool]:
+    """A check, made at most once per `interval` seconds, that every task in the site has completed."""
+    last_check = 0.0
+
+    def check() -> bool:
+        nonlocal last_check
+        if time.monotonic() - last_check < interval:
+            return False
+        last_check = time.monotonic()
+        run = run_in_session([sys.executable, '-c', TASKS_DONE], run_env(stand_ins), Path(temp_site),
+                             name='poll', timeout=30)
+        return run.status == exit_status.success and run.stdout.strip().endswith('True')
+
+    return check
 
 
 def keys_seen(records: Iterable[Dict[str, Any]]) -> Set[str]:
@@ -437,3 +504,92 @@ def test_redact_secrets_still_available_from_remote() -> None:
     from hypershell.cluster import launch, remote
     assert remote.redact_secrets is launch.redact_secrets
     assert 'redact_secrets' in remote.__all__
+
+
+AUTOSCALING_CASES: Final[List] = [
+    pytest.param('fixed', False, None, id='fixed-tls'),
+    pytest.param('fixed', True, None, id='fixed-no-tls'),
+    pytest.param('dynamic', False, None, id='dynamic-tls'),
+    pytest.param('dynamic', True, None, id='dynamic-no-tls'),
+    pytest.param('fixed', False, 'blue', id='fixed-tls-zone'),
+]
+
+
+@mark.parametrize('policy, no_tls, zone', AUTOSCALING_CASES)
+def test_autoscaling_mode_keeps_key_off_command_lines(stand_ins: StandIns, temp_site: Path,
+                                                      policy: str, no_tls: bool, zone: Optional[str]) -> None:
+    """With --autoscaling, every client gets the key in its environment and on no command line."""
+    mode = [f'--launcher={stand_ins.autoscale_launcher}', f'--autoscaling={policy}']
+    run = run_cluster(stand_ins, mode, temp_site, no_tls, zone, until=all_tasks_done(stand_ins, temp_site))
+    assert run.status is None, f'Autoscaling run exited ({run.status}) before its tasks completed\n' + run.stderr[-4000:]
+    records = stand_ins.read()
+    assert [record['role'] for record in records].count('launcher') >= 1
+    key = assert_key_off_command_lines(records)
+    assert_key_not_in(key, run.stdout, run.stderr)
+    results = task_results(stand_ins, temp_site)
+    assert sorted(args for args, _ in results) == sorted(f'echo {n}' for n in range(TASK_COUNT))
+    assert [status for _, status in results] == [0] * TASK_COUNT
+
+
+@mark.parametrize('policy', ['fixed', 'dynamic'])
+def test_autoscaling_mode_logs_never_hold_key(stand_ins: StandIns, temp_site: Path, policy: str) -> None:
+    """Building and running an autoscaling cluster logs no key, at any level, in any process."""
+    script = Path(temp_site) / 'capture_autoscaling_logs.py'
+    script.write_text(CAPTURE_AUTOSCALING_LOGS)
+    output = Path(temp_site) / 'records.json'
+    run = run_in_session([sys.executable, str(script), str(stand_ins.autoscale_launcher), str(stand_ins.remote_exe),
+                          os.environ['HYPERSHELL_SERVER_PORT'], policy, str(output)],
+                         run_env(stand_ins), Path(temp_site), until=output.exists)
+    assert run.status is None, f'Autoscaling run exited ({run.status}) before its tasks completed\n' + run.stderr[-4000:]
+    logged = json.loads(output.read_text())
+    assert any(record['level'] == 'DEBUG' and 'Autoscale launcher' in record['message'] for record in logged)
+    key, = keys_seen(stand_ins.read())
+    assert_key_not_in(key, *(record['message'] for record in logged), run.stdout, run.stderr)
+
+
+@mark.parametrize('options', [
+    pytest.param({}, id='defaults'),
+    pytest.param({'no_confirm': True, 'capture': True, 'monitor': True, 'client_cores': 8, 'client_memory': 1024,
+                  'client_timeout': 60, 'task_timeout': 30, 'ratelimit': 5, 'zone': 'blue'}, id='every-option'),
+])
+def test_autoscaling_mode_keeps_every_client_option(options: Dict[str, Any]) -> None:
+    """The autoscaler's one launch carries the client options it built inline, and no key."""
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    cluster = AutoScalingCluster(launcher='srun -n1', launcher_args=['--mpi=pmi2'], remote_exe='hs', num_threads=4,
+                                 bundlesize=2, bundlewait=5, template='echo {} > "$OUT"', delay_start=-1.5,
+                                 task_signalwait=10, bind=(LOOPBACK, port), tls=None, **options)
+    expected = {name: value for name, value in options.items() if name != 'no_confirm'}  # Never passed on
+    assert cluster.launch.argv == previous_argv('hs', (HOSTNAME, port), ['srun', '-n1'], ['--mpi=pmi2'],
+                                                num_threads=4, bundlesize=2, bundlewait=5,
+                                                template='echo {} > "$OUT"', delay_start=-1.5,
+                                                task_signalwait=10, tls_enabled=False, **expected)
+    assert cluster.autoscaler.machine.launch is cluster.launch
+    assert not set(cluster.launch.argv) & KEY_OPTIONS
+
+
+def test_autoscaling_mode_starts_every_client_through_one_launch(tmp_path: Path) -> None:
+    """Each scale-up starts a client from the autoscaler's one launch: key in the environment only."""
+    key = 'k' * 32
+    probe = [sys.executable, '-c',
+             'import os, sys, uuid; '
+             f'open(os.path.join({str(tmp_path)!r}, uuid.uuid4().hex), "w").write(os.environ.get({AUTH_ENV!r}, ""))']
+    launch = client_launch('hs', ('localhost', 50001), key, launcher=probe, num_threads=1, bundlesize=1,
+                           bundlewait=5, template='{}', delay_start=0, task_signalwait=10)
+    scaler = AutoScaler(launch, policy='fixed', max_size=2)
+    scaler.clients = []
+    before = dict(os.environ)
+    try:
+        scaler.scale()
+        scaler.scale()
+        assert scaler.launch is launch
+        assert len(scaler.clients) == 2
+        for client in scaler.clients:
+            assert client.wait(timeout=30) == 0
+            assert key not in ' '.join(client.args)
+    finally:
+        for client in scaler.clients:
+            if client.poll() is None:
+                client.kill()
+                client.wait()
+    assert [path.read_text() for path in tmp_path.iterdir()] == [key, key]
+    assert dict(os.environ) == before

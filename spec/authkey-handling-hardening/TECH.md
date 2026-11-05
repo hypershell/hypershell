@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/authkey-handling-hardening
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
     or mpi' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
 - id: P2
   name: Autoscaling (fixed and dynamic) launches through the same function
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -38,7 +38,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k autoscaling
     && uv run pytest -p no:cacheprovider -q tests/test_autoscale.py
 - id: P3
@@ -73,7 +73,7 @@ phases:
   hill: uphill
   verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py && uv
     run pytest -p no:cacheprovider -q -n auto && .agents/factory/bin/temp_site.sh
-    sh -c "seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2"
+    sh -c "seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2 -H 127.0.0.1"
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -187,6 +187,8 @@ complete with TLS on and off, with and without `--zone`.
     launchers redacted `-k`); it is the regression guard, not a red-first test.
   - A run whose client fails to authenticate still leaves `hs cluster` waiting for clients, as any
     failed client launch does today; the tests stop it when the client's exit is recorded.
+    **Ruling (maintainer, 2026-11-05): accepted for this cycle**, since it applies to any failed
+    client launch and the client now prints the ruling-Q1 diagnostic; a follow-up public seed covers it.
 - **Verify:** `uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k 'launcher or mpi' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py`.
 - **Touches:** `src/hypershell/cluster/launch.py` (new), `src/hypershell/cluster/remote.py`,
   `src/hypershell/client.py` (ruling Q1 only), `tests/test_cluster_launch.py` (new).
@@ -197,18 +199,34 @@ complete with TLS on and off, with and without `--zone`.
 `ClientLaunch` that `client_launch()` built. The key never reaches a command line, and runs
 complete.
 
-- [ ] Add `test_autoscaling_mode_keeps_key_off_command_lines` and
+- [x] Add `test_autoscaling_mode_keeps_key_off_command_lines` and
       `test_autoscaling_mode_logs_never_hold_key`, parametrised over policy `fixed`/`dynamic` and
       TLS on/off, plus one `--zone` case. Autoscaling clusters do not exit on their own: the test
       stops the process group once the data model shows no remaining tasks, then asserts results.
       Record red.
-- [ ] `AutoScalingCluster.__init__`: build one `ClientLaunch` with `client_launch(…)` (same option
+- [x] `AutoScalingCluster.__init__`: build one `ClientLaunch` with `client_launch(…)` (same option
       set as today: no `--no-confirm`, as now). Pass it to `AutoScalerThread`.
-- [ ] `AutoScaler`: hold `launch: ClientLaunch` instead of `launcher: List[str]`. `start()` logs
+- [x] `AutoScaler`: hold `launch: ClientLaunch` instead of `launcher: List[str]`. `start()` logs
       `launch.describe()`. `scale()` calls `self.launch.start(stdout=sys.stdout, stderr=sys.stderr,
       bufsize=0, universal_newlines=True)`.
-- [ ] `tests/test_autoscale.py` `make_scaler`: build the scaler with a `client_launch(…)` value in
+- [x] `tests/test_autoscale.py` `make_scaler`: build the scaler with a `client_launch(…)` value in
       place of `['hs', 'client']`. The policy tests are otherwise unchanged.
+- **Build notes (P2).**
+  - `AutoScalingCluster` keeps its launch as `self.launch` (as `RemoteCluster` does) and hands that
+    same object to `AutoScalerThread`. Every scale-up calls `launch.start()`, so the next change to
+    autoscaled client launches is a change to `client_launch()` only.
+  - The autoscaler still advertises the host's own name, as before. The end-to-end runs bind
+    `-H 127.0.0.1`, so the `autoscale-launcher` stand-in records the command line it was given and
+    then points the client's `-H` at the loopback address; the recorded command line is what the
+    key assertions read. P3 meets the same thing for `--ssh`.
+  - `test_autoscaling_mode_logs_never_hold_key` is parametrised over policy, in-process with
+    `--no-tls`, as P1's launcher-mode log test is. It passes before and after (the autoscaler
+    redacted `-k` already); it is the regression guard, not a red-first test.
+  - Two further tests: `test_autoscaling_mode_keeps_every_client_option` (the call site builds the
+    same client options as before, still without `--no-confirm`, and the autoscaler holds the
+    cluster's one launch) and `test_autoscaling_mode_starts_every_client_through_one_launch` (two
+    scale-ups from one launch; each client gets the key in its environment only; `os.environ` is
+    unchanged).
 - **Verify:** `uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k autoscaling && uv run pytest -p no:cacheprovider -q tests/test_autoscale.py`.
 - **Touches:** `src/hypershell/cluster/remote.py`, `tests/test_cluster_launch.py`,
   `tests/test_autoscale.py`.
@@ -274,9 +292,11 @@ guidance describe the hardened behaviour.
   - [ ] § *High-risk files & footguns*: amend the matching `remote.py`/`ssh.py` note.
 - [ ] `.agents/factory/invariants.md` §11: the same bullet change.
 - [ ] Confirm that `docs/_include/` and `share/` are unchanged (no option/help change).
-- [ ] Full suite with `-n auto`, then the CLI drive: `--launcher=env`, which runs a local client
-      through the launcher path.
-- **Verify:** `uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py && uv run pytest -p no:cacheprovider -q -n auto && .agents/factory/bin/temp_site.sh sh -c "seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2"`.
+- [ ] Full suite with `-n auto`, then the CLI drive: `--launcher=env -H 127.0.0.1`, which runs a
+      local client through the launcher path.
+- **Verify:** `uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py && uv run pytest -p no:cacheprovider -q -n auto && .agents/factory/bin/temp_site.sh sh -c "seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2 -H 127.0.0.1"`.
+  **Ruling (maintainer, 2026-11-05):** the CLI drive binds `-H 127.0.0.1`, so it does not depend on
+  the host's own name resolving.
 - **Touches:** `tests/test_cluster_launch.py`, `docs/security.rst`, `AGENTS.md`,
   `.agents/factory/invariants.md`.
 
