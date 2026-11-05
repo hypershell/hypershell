@@ -25,7 +25,8 @@ from functools import cache
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from multiprocessing import util, ProcessError
-from multiprocessing.managers import BaseManager, BaseProxy, Server, State, AutoProxy, listener_client
+from multiprocessing.managers import (BaseManager, BaseProxy, Server, State, AutoProxy, RemoteError,
+                                      listener_client, convert_to_error)
 from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener, Client, Connection,
                                         address_type, answer_challenge, deliver_challenge, BUFSIZE)
 from queue import Queue, SimpleQueue
@@ -42,6 +43,7 @@ from hypershell.core.types import NoneType, serialize
 from hypershell.core.tls import (TLSConfig, install_process_context, build_server_context,
                                  get_server_context, get_client_context, get_tls_config,
                                  verify_peer_fingerprint, from_namespace as _tls_from_namespace)
+from hypershell.core.dispatch import Dispatcher, PROTOCOL
 
 # Public interface
 __all__ = [
@@ -49,7 +51,8 @@ __all__ = [
     'SENTINEL', 'make_sentinel',
     'SecureConnection', 'SecureListener', 'secure_client', 'SecureManager',
     'QueueConfig', 'QueueInterface', 'QueueServer', 'QueueClient',
-    'QueueServerError', 'unsupported_internals',
+    'QueueServerError', 'QueueVersionError', 'QueueSubmitRefused', 'ClientTooOld', 'unsupported_internals', 'PROTOCOL',
+    'DISPATCH_EXPOSED',
 ]
 
 # Initialize logger
@@ -388,6 +391,29 @@ class QueueServerError(RuntimeError):
     """The queue server could not start serving."""
 
 
+class QueueVersionError(RuntimeError):
+    """The server and this client do not speak the same work-request protocol."""
+
+
+class QueueSubmitRefused(RuntimeError):
+    """The server does not serve tasks submitted to its live queue (it has a database)."""
+
+
+class ClientTooOld(Exception):
+    """A client connected without the work-request protocol (a release before it); it is refused."""
+
+
+def _var_positional(func: Callable[..., Any]) -> bool:
+    """Whether `func` takes ``*args``."""
+    return any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in inspect.signature(func).parameters.values())
+
+
+def _register_passes_args() -> bool:
+    """Whether the method `BaseManager.register` makes passes its positional arguments to ``_create``."""
+    methods = [const for const in BaseManager.register.__code__.co_consts if inspect.iscode(const)]
+    return any(code.co_flags & inspect.CO_VARARGS and '_create' in code.co_names for code in methods)
+
+
 def _parameters(func: Callable[..., Any]) -> List[str]:
     """Parameter names of `func`, in order."""
     return list(inspect.signature(func).parameters)
@@ -439,6 +465,14 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
               and '_active' not in _names(threading.Thread.start))),
     ('threading._DummyThread is the Thread of a thread that threading did not start',
      lambda: issubclass(threading._DummyThread, threading.Thread)),
+    ('Server.serve_client takes no mutex', lambda: 'mutex' not in _names(Server.serve_client)),
+    ('Server._handle_request turns an exception into #TRACEBACK',
+     lambda: '#TRACEBACK' in Server._handle_request.__code__.co_consts and 'format_exc' in _names(Server._handle_request)),
+    ('Server.create passes *args to the registry callable', lambda: _var_positional(Server.create)),
+    ("BaseManager.register's method passes *args to _create", _register_passes_args),
+    ('convert_to_error produces RemoteError', lambda: isinstance(convert_to_error('#TRACEBACK', ''), RemoteError)),
+    ('BaseProxy._callmethod caches a connection per thread (_tls.connection)',
+     lambda: {'_tls', 'connection'} <= set(_names(BaseProxy._callmethod))),
 )
 
 
@@ -467,6 +501,10 @@ REFUSAL_WARNING_INTERVAL: Final[float] = 60.0
 
 # Accept errors that mean the process (or system) is out of descriptors
 OUT_OF_DESCRIPTORS: Final[Tuple[int, ...]] = (errno.EMFILE, errno.ENFILE)
+
+# Set by a registry callable on the handler thread whose connection it refused as too old, and read
+# by that thread once the connection is closed, so the warning is logged outside the server mutex.
+_refusals = threading.local()
 
 
 def _open_file_limit() -> Optional[int]:
@@ -556,12 +594,13 @@ class _InProcessServer(Server):
                     if not self._admits(conn):
                         conn.close()
                         continue
+                    peer = getattr(self.listener, 'last_accepted', None)
                     with self._lock:
                         if self._halted:
                             conn.close()
                             break
                         self._live.add(conn)
-                    _ServerThread(target=self.handle_request, args=(conn, ), name='hypershell-queue-handler').start()
+                    _ServerThread(target=self.handle_request, args=(conn, peer), name='hypershell-queue-handler').start()
         except Exception as error:
             if not self._halted:
                 log.error(f'Queue server stopped accepting connections: {error!r}')
@@ -581,8 +620,8 @@ class _InProcessServer(Server):
             log.debug(message)
         return False
 
-    def handle_request(self: _InProcessServer, conn) -> None:
-        """Serve one connection, then forget and close it."""
+    def handle_request(self: _InProcessServer, conn, peer: Optional[Tuple[str, int]] = None) -> None:
+        """Serve one connection, then forget and close it; log a client refused as too old."""
         try:
             self._handle_request(conn)
         except SystemExit:
@@ -592,6 +631,10 @@ class _InProcessServer(Server):
             with self._lock:
                 self._live.discard(conn)
             conn.close()
+            if getattr(_refusals, 'too_old', False):
+                _refusals.too_old = False
+                where = f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
+                log.warning(f'Client too old (no work-request protocol) from {where}')
 
     def shutdown(self: _InProcessServer, c) -> None:
         """Remote shutdown request: stop serving after the reply, without exiting the process."""
@@ -939,13 +982,44 @@ QUEUE_EXPOSED: Final[Tuple[str, ...]] = ('empty', 'full', 'get', 'get_nowait', '
                                          'put', 'put_nowait', 'qsize', 'task_done')
 
 
+# Methods a remote client may call on the dispatcher.
+DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', 'takes_submissions')
+
+
 def _provider(obj: Any) -> Callable[[], Any]:
     """Registry callable handing the manager `obj`; lock-free, since it runs under the server's mutex."""
     return lambda: obj
 
 
+def _versioned_provider(obj: Any) -> Callable[..., Any]:
+    """Registry callable handing the manager `obj` only to a client that names this work-request protocol.
+
+    Every release before the protocol creates `_get_scheduled()` with no argument as the first step
+    of connecting, so it is refused here, before it starts a thread or sends a heartbeat, and exits.
+    The refusal is noted for the handler thread to log once the connection is closed.
+    """
+    def provide(*args: Any) -> Any:
+        if not args:
+            _refusals.too_old = True
+            raise ClientTooOld('client too old: this server requires the work-request protocol '
+                               f'(protocol {PROTOCOL}); run a client of the same version as the server')
+        if args != (PROTOCOL, ):
+            raise ClientTooOld(f'client speaks work-request protocol {args[0]!r}; '
+                               f'this server speaks protocol {PROTOCOL}')
+        return obj
+    return provide
+
+
 class QueueServer(QueueInterface):
     """Server for managing queue, served from within the calling process."""
+
+    dispatcher: Dispatcher
+
+    def __init__(self: QueueServer, config: QueueConfig) -> None:
+        """Initialize queue interface and the dispatcher that serves work requests."""
+        super().__init__(config)
+        self.dispatcher = Dispatcher(queuesize=config.size, bundlemax=_config.server.bundlemax,
+                                     max_wait=DEFAULT_REMOTE_TIMEOUT)
 
     def start(self: QueueServer,
               initializer: Optional[Callable[..., Any]] = None,
@@ -962,7 +1036,10 @@ class QueueServer(QueueInterface):
         # Per-instance registry: the class registry is shared, so two servers in one process
         # would otherwise serve each other's queues.
         registry = {f'_get_{name}': (_provider(getattr(self, name)), QUEUE_EXPOSED, None, AutoProxy)
-                    for name in ('scheduled', 'completed', 'heartbeat', 'confirmed')}
+                    for name in ('completed', 'heartbeat', 'confirmed')}
+        registry['_get_scheduled'] = (_versioned_provider(self.scheduled), QUEUE_EXPOSED, None, AutoProxy)
+        registry['_get_dispatch'] = (_provider(self.dispatcher), DISPATCH_EXPOSED, None, AutoProxy)
+        self.dispatcher.attach(self.scheduled)
         if initializer is not None:
             initializer(*initargs)
         self._serve_in_process(registry)
@@ -980,6 +1057,9 @@ class QueueServer(QueueInterface):
     def _get_confirmed(self: QueueServer) -> Queue[bytes]:
         return self.confirmed
 
+    def _get_dispatch(self: QueueServer) -> Dispatcher:
+        return self.dispatcher
+
     def __enter__(self: QueueServer) -> QueueServer:
         """Start the server."""
         self.start()
@@ -990,6 +1070,7 @@ class QueueServer(QueueInterface):
                  exc_val: Optional[Exception],
                  exc_tb: Optional[TracebackType]) -> None:
         """Shutdown the server."""
+        self.dispatcher.finish()
         self.shutdown()
 
 
@@ -1000,23 +1081,43 @@ class QueueClient(QueueInterface):
     _get_completed: Callable[[], Queue[bytes]]
     _get_heartbeat: Callable[[], Queue[bytes]]
     _get_confirmed: Callable[[], Queue[bytes]]
+    _get_dispatch: Callable[[], Any]
+    _dispatcher: Optional[BaseProxy] = None
 
     def connect(self: QueueClient) -> None:
         """Connect to server using unique client ID for token generation.
 
-        The proxies' finalizer is :func:`_decref`: in a process that serves queues itself, a decref
-        finalized on the server side is sent by the decref sender.
+        The first queue is created with this client's work-request protocol, so a server that does
+        not speak it is found before anything else is done. The proxies' finalizer is
+        :func:`_decref`: in a process that serves queues itself, a decref finalized on the server
+        side is sent by the decref sender.
         """
         self.register('_get_scheduled')
         self.register('_get_completed')
         self.register('_get_heartbeat')
         self.register('_get_confirmed')
+        self.register('_get_dispatch')
         super().connect()
-        self.scheduled = _defer_decref(self._get_scheduled())
+        self._dispatcher_lock = threading.Lock()
+        try:
+            self.scheduled = _defer_decref(self._get_scheduled(PROTOCOL))
+        except RemoteError as error:
+            host, port = self._address
+            raise QueueVersionError(f'Server at {host}:{port} does not speak work-request protocol {PROTOCOL} '
+                                    f'(an older release such as 2.8.x or 2.9.0a2, or a newer one); '
+                                    f'run matching server and client versions') from None
         self.completed = _defer_decref(self._get_completed())
         self.heartbeat = _defer_decref(self._get_heartbeat())
         self.confirmed = _defer_decref(self._get_confirmed())
         self.ready = True
+
+    @property
+    def dispatcher(self: QueueClient) -> BaseProxy:
+        """The server's dispatcher, created on first use (only a client that requests work holds one)."""
+        with self._dispatcher_lock:
+            if self._dispatcher is None:
+                self._dispatcher = _defer_decref(self._get_dispatch())
+            return self._dispatcher
 
     def __enter__(self: QueueClient) -> QueueClient:
         """Connect to server."""

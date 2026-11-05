@@ -14,10 +14,16 @@ Subcommands:
 
     parity  --base REF --feature REF    Same grouped workload (with a retried failure) on both
                                         builds, TLS on and off: identical normalised task tables,
-                                        clean exits, and byte-identical ``--help`` output.
-    compat  --server REF --client REF   A server from one build completes a workload with clients
-                                        from the other, TLS on and off.
-    gate    --base REF --feature REF    Throughput and footprint, interleaved and repeated.
+                                        groups run in order, clean exits, and byte-identical
+                                        ``--help`` output (unless ``--skip-help``).
+    skew    --new REF --old REF...      Version skew on the work-request protocol, TLS on and off:
+                                        an old client against a new server exits within the bound,
+                                        is logged as too old, and a concurrent new client finishes
+                                        every task; a new client against an old server exits
+                                        non-zero within the bound with one version error.
+    gate    --base REF --feature REF    Throughput and footprint, interleaved and repeated; with
+                                        ``--min-ratio R`` a config passes only if the feature's
+                                        median is at least R times the base's.
 
 Never collected by pytest (no ``test_`` prefix). Run it with the project interpreter, which has
 ``psutil``: ``uv run python tests/bench/bench_queue.py parity --base b819de6 --feature HEAD``.
@@ -279,11 +285,24 @@ def normalise(site: Site, rows: List[Dict[str, Any]]) -> List[Tuple]:
                   for row in rows)
 
 
+def group_order(rows: List[Dict[str, Any]]) -> bool:
+    """Every task of each group completed before any task of the next group was scheduled."""
+    groups = sorted({row['group'] for row in rows})
+    for earlier, later in zip(groups, groups[1:]):
+        done = [row['completion_time'] for row in rows if row['group'] == earlier]
+        started = [row['schedule_time'] for row in rows if row['group'] == later]
+        if None in done or None in started or max(done) > min(started):
+            return False
+    return True
+
+
 def run_parity_once(venv: Path, label: str, tls: bool, workdir: Path) -> Tuple[List[Tuple], Dict[str, Any]]:
     site = Site(workdir, label, tls)
     submit(site, venv, grouped_workload(site.path))
     result = serve(site, venv, venv, ['-r', '1'], [], clients=2)
-    return normalise(site, site.rows()), result
+    rows = site.rows()
+    result['group_order'] = group_order(rows)
+    return normalise(site, rows), result
 
 
 def help_text(venv: Path, workdir: Path) -> Dict[str, bytes]:
@@ -299,15 +318,20 @@ def cmd_parity(args: argparse.Namespace) -> bool:
         table_feature, result_feature = run_parity_once(feature, 'feature', tls, args.workdir)
         same = table_base == table_feature
         exits = clean(result_base) and clean(result_feature)
-        ok &= same and exits and len(table_feature) == 10
+        ordered = result_base['group_order'] and result_feature['group_order']
+        ok &= same and exits and ordered and len(table_feature) == 10
         print(f'parity tls={"on" if tls else "off"}: rows {len(table_base)} vs {len(table_feature)}, '
-              f'identical={same}; rc base {result_base["server_rc"]}/{result_base["client_rcs"]} '
-              f'feature {result_feature["server_rc"]}/{result_feature["client_rcs"]}; wall s '
-              f'base {result_base["wall_s"]:.1f} feature {result_feature["wall_s"]:.1f} -> '
-              f'{"PASS" if same and exits else "FAIL"}')
+              f'identical={same}; group order base {result_base["group_order"]} '
+              f'feature {result_feature["group_order"]}; rc base {result_base["server_rc"]}/'
+              f'{result_base["client_rcs"]} feature {result_feature["server_rc"]}/{result_feature["client_rcs"]}; '
+              f'wall s base {result_base["wall_s"]:.1f} feature {result_feature["wall_s"]:.1f} -> '
+              f'{"PASS" if same and exits and ordered else "FAIL"}')
         if not same:
             for row in sorted(set(table_base) ^ set(table_feature)):
                 print(f'  differs: {row}')
+    if args.skip_help:
+        print('help: skipped (--skip-help)')
+        return ok
     help_base, help_feature = help_text(base, args.workdir), help_text(feature, args.workdir)
     for command in HELP_COMMANDS:
         same = help_base[command] == help_feature[command] and len(help_base[command]) > 0
@@ -316,38 +340,133 @@ def cmd_parity(args: argparse.Namespace) -> bool:
     return ok
 
 
-# ---------------------------------------------------------------------------------------- compat
+# ------------------------------------------------------------------------------------------ skew
 
 
-def cmd_compat(args: argparse.Namespace) -> bool:
-    server_venv, client_venv = build(args.server, args.workdir), build(args.client, args.workdir)
+def spawn_group(site: Site, venv: Path, name: str, *args: str) -> subprocess.Popen:
+    """Start `hs` from `venv` in its own process group, logging to the site."""
+    with open(site.path / f'{name}.log', 'wb') as stream:
+        return subprocess.Popen([str(venv / 'bin' / 'hs'), *args], cwd=site.path, env=site.env,
+                                stdout=subprocess.DEVNULL, stderr=stream, start_new_session=True)
+
+
+def kill_group(proc: subprocess.Popen) -> None:
+    """Kill the process group of `proc` if it is still running, and reap it."""
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, 9)
+        except ProcessLookupError:
+            pass
+    proc.wait()
+
+
+def wait_bounded(proc: subprocess.Popen, bound: float) -> Tuple[Any, float]:
+    """Exit code of `proc` (or 'timeout') and the seconds it took, killing its group past `bound`."""
+    start = time.monotonic()
+    try:
+        rc = proc.wait(timeout=bound)
+    except subprocess.TimeoutExpired:
+        kill_group(proc)
+        rc = 'timeout'
+    return rc, time.monotonic() - start
+
+
+def start_server(site: Site, venv: Path, name: str = 'server') -> subprocess.Popen:
+    """`hs server --restart` from `venv` on the site, once it listens."""
+    server = spawn_group(site, venv, name, 'server', '--restart', '-H', 'localhost', '-p', str(site.port),
+                         '-k', site.key, *site.tls_args())
+    deadline = time.monotonic() + WAIT
+    while not listening(server.pid, site.port):
+        if server.poll() is not None or time.monotonic() > deadline:
+            kill_group(server)
+            raise RuntimeError(f'server did not listen; see {site.path}/{name}.log')
+        time.sleep(0.05)
+    return server
+
+
+def client_args(site: Site) -> List[str]:
+    """Connection arguments of a client for the site (no -T: an old client must exit on its own)."""
+    return ['client', '-H', 'localhost', '-p', str(site.port), '-k', site.key, *site.tls_args()]
+
+
+def old_client_new_server(new: Path, old: Path, label: str, tls: bool, args: argparse.Namespace) -> bool:
+    """An old client is turned away in bounded time while a new client finishes every task."""
+    site = Site(args.workdir, f'skew-old-client-{label}', tls)
+    submit(site, new, [f'echo {i}' for i in range(args.tasks)])
+    server = start_server(site, new)
+    procs = [server]
+    try:
+        old_client = spawn_group(site, old, 'old-client', *client_args(site))
+        procs.append(old_client)
+        new_client = spawn_group(site, new, 'new-client', *client_args(site), '-T', '30')
+        procs.append(new_client)
+        old_rc, old_s = wait_bounded(old_client, args.bound)
+        new_rc, _ = wait_bounded(new_client, WAIT)
+        server_rc, _ = wait_bounded(server, WAIT)
+    finally:
+        for proc in procs:
+            kill_group(proc)
+    log_text = (site.path / 'server.log').read_text(errors='replace')
+    refused = log_text.count('Client too old')
+    rows = site.rows()
+    finished = len(rows) == args.tasks and all(r['exit_status'] == 0 and r['completion_time'] for r in rows)
+    passed = old_rc not in ('timeout', 0) and refused >= 1 and new_rc == 0 and server_rc == 0 and finished
+    print(f'skew old client {label} -> new server, tls={"on" if tls else "off"}: old client rc {old_rc} '
+          f'in {old_s:.1f} s (bound {args.bound:g}), "too old" logged {refused}x, new client rc {new_rc}, '
+          f'server rc {server_rc}, {sum(r["exit_status"] == 0 for r in rows)}/{args.tasks} tasks done '
+          f'-> {"PASS" if passed else "FAIL"}')
+    return passed
+
+
+def new_client_old_server(new: Path, old: Path, label: str, tls: bool, args: argparse.Namespace) -> bool:
+    """A new client against an old server exits non-zero in bounded time with one version error."""
+    site = Site(args.workdir, f'skew-old-server-{label}', tls)
+    submit(site, old, [f'echo {i}' for i in range(args.tasks)])
+    server = start_server(site, old)
+    procs = [server]
+    try:
+        client = spawn_group(site, new, 'new-client', *client_args(site))
+        procs.append(client)
+        rc, seconds = wait_bounded(client, args.bound)
+    finally:
+        for proc in procs:
+            kill_group(proc)
+    lines = (site.path / 'new-client.log').read_text(errors='replace').splitlines()
+    critical = [line for line in lines if line.startswith('CRITICAL')]
+    named = len(critical) == 1 and 'work-request protocol' in critical[0]
+    passed = rc not in ('timeout', 0) and named
+    print(f'skew new client -> old server {label}, tls={"on" if tls else "off"}: rc {rc} in {seconds:.1f} s '
+          f'(bound {args.bound:g}), critical lines {len(critical)}'
+          f'{": " + critical[0][:160] if critical else ""} -> {"PASS" if passed else "FAIL"}')
+    return passed
+
+
+def cmd_skew(args: argparse.Namespace) -> bool:
+    new = build(args.new, args.workdir)
     ok = True
-    for tls in (True, False):
-        site = Site(args.workdir, 'compat', tls)
-        submit(site, server_venv, [f'echo {i}' for i in range(args.tasks)])
-        result = serve(site, server_venv, client_venv, [], [], clients=2)
-        rows = site.rows()
-        passed = (clean(result) and len(rows) == args.tasks
-                  and all(row['exit_status'] == 0 and row['completion_time'] is not None for row in rows))
-        ok &= passed
-        print(f'compat server={args.server} client={args.client} tls={"on" if tls else "off"}: '
-              f'{sum(row["exit_status"] == 0 for row in rows)}/{args.tasks} tasks exit 0, '
-              f'rc {result["server_rc"]}/{result["client_rcs"]}, wall {result["wall_s"]:.1f} s '
-              f'-> {"PASS" if passed else "FAIL"}')
+    for ref in args.old:
+        old = build(ref, args.workdir)
+        for tls in (True, False):
+            ok &= old_client_new_server(new, old, ref, tls, args)
+            ok &= new_client_old_server(new, old, ref, tls, args)
     return ok
 
 
 # ------------------------------------------------------------------------------------------ gate
 
 
-# (name, clients, threads per client, server bundle, client bundle, tls, tasks)
-GATE_CONFIGS: Tuple[Tuple[str, int, int, int, int, bool, int], ...] = (
+# (name, clients, threads per client, server bundle, client bundle or None for no -b, tls, tasks).
+# A client given no -b advertises no size, so the server's -b sizes its bundles (the default path).
+GATE_CONFIGS: Tuple[Tuple[str, int, int, int, Optional[int], bool, int], ...] = (
     ('4x4 b=1 tls', 4, 4, 1, 1, True, 5000),
     ('4x4 b=1 no-tls', 4, 4, 1, 1, False, 5000),
     ('16x1 b=1 tls', 16, 1, 1, 1, True, 5000),
     ('16x1 b=1 no-tls', 16, 1, 1, 1, False, 5000),
     ('4x4 b=50 tls', 4, 4, 50, 50, True, 20000),
     ('32x1 b=1 tls', 32, 1, 1, 1, True, 5000),
+    ('4x4 b=1 client-default tls', 4, 4, 1, None, True, 5000),
+    ('16x1 b=1 client-default no-tls', 16, 1, 1, None, False, 5000),
+    ('4x4 b=50 client-default tls', 4, 4, 50, None, True, 20000),
 )
 
 
@@ -378,8 +497,9 @@ def run_gate_once(venv: Path, label: str, config: Tuple, args: argparse.Namespac
     name, clients, threads, bundle, client_bundle, tls, tasks = config
     site = Site(args.workdir, label, tls, log_level='WARNING')
     submit(site, venv, ['true'] * tasks)
+    client_size = [] if client_bundle is None else ['-b', str(client_bundle)]
     result = serve(site, venv, venv, ['-b', str(bundle)],
-                   ['-N', str(threads), '-b', str(client_bundle), '-w', '1'], clients=clients,
+                   ['-N', str(threads), *client_size, '-w', '1'], clients=clients,
                    server_timeout=args.timeout, client_timeout=WAIT, sampler_interval=args.interval)
     result.update(throughput(site.rows(), tasks))
     result.update(label=label, config=name)
@@ -404,7 +524,8 @@ def cmd_gate(args: argparse.Namespace) -> bool:
                 log(f'{config[0]} {label} #{repeat}: {result["p10_p90"]} tasks/s, rc {result["server_rc"]}/'
                     f'{sorted(set(map(str, result["client_rcs"])))}, peak {result["peak"]}')
     ok = True
-    print(f'| config | base median [min-max] | feature median [min-max] | delta | tolerance | throughput '
+    rule = (f'ratio >= {args.min_ratio:g}' if args.min_ratio is not None else 'tolerance')
+    print(f'| config | base median [min-max] | feature median [min-max] | delta | {rule} | throughput '
           f'| tree children b/f | tree FDs b/f | tree threads b/f | own threads b/f | own FDs b/f '
           f'| tree RSS MB b/f | clean | verdict |')
     print('|' + '---|' * 14)
@@ -413,8 +534,12 @@ def cmd_gate(args: argparse.Namespace) -> bool:
         base, feature = results[(name, 'base')], results[(name, 'feature')]
         tb, tf = [r['p10_p90'] for r in base], [r['p10_p90'] for r in feature]
         mb, mf = statistics.median(tb), statistics.median(tf)
-        tolerance = max(max(tb) - min(tb), max(tf) - min(tf), 0.05 * mb)
-        fast = mf >= mb - tolerance
+        if args.min_ratio is not None:
+            tolerance = mf / mb
+            fast = mf >= args.min_ratio * mb
+        else:
+            tolerance = max(max(tb) - min(tb), max(tf) - min(tf), 0.05 * mb)
+            fast = mf >= mb - tolerance
         peak = {key: (max(r['peak'][key] for r in base), max(r['peak'][key] for r in feature))
                 for key in Sampler.KEYS}
         small = peak['children'][1] <= peak['children'][0] and peak['tree_fds'][1] <= peak['tree_fds'][0]
@@ -423,10 +548,11 @@ def cmd_gate(args: argparse.Namespace) -> bool:
         ok &= passed
         pair = lambda key: f'{peak[key][0]:g}/{peak[key][1]:g}'
         print(f'| {name} | {mb:.1f} [{min(tb):.1f}-{max(tb):.1f}] | {mf:.1f} [{min(tf):.1f}-{max(tf):.1f}] '
-              f'| {mf - mb:+.1f} | {tolerance:.1f} | {"PASS" if fast else "FAIL"} | {pair("children")} '
+              f'| {mf - mb:+.1f} | {tolerance:.3g} | {"PASS" if fast else "FAIL"} | {pair("children")} '
               f'| {pair("tree_fds")} | {pair("tree_threads")} | {pair("threads")} | {pair("fds")} '
               f'| {pair("tree_rss_mb")} | {tidy} | {"PASS" if passed else "FAIL"} |')
-    print(f'# gate: {"PASS" if ok else "FAIL"} ({args.repeats} repeats per build, interleaved)')
+    print(f'# gate: {"PASS" if ok else "FAIL"} ({args.repeats} repeats per build, interleaved; '
+          f'load average {os.getloadavg()[0]:.1f} at the end)')
     return ok
 
 
@@ -441,21 +567,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parity = commands.add_parser('parity')
     parity.add_argument('--base', required=True)
     parity.add_argument('--feature', required=True)
-    compat = commands.add_parser('compat')
-    compat.add_argument('--server', required=True)
-    compat.add_argument('--client', required=True)
-    compat.add_argument('--tasks', type=int, default=200)
+    parity.add_argument('--skip-help', action='store_true', help='do not compare --help output')
+    skew = commands.add_parser('skew')
+    skew.add_argument('--new', required=True)
+    skew.add_argument('--old', required=True, action='append')
+    skew.add_argument('--bound', type=float, default=30.0, help='seconds a refused client may take to exit')
+    skew.add_argument('--tasks', type=int, default=200)
     gate = commands.add_parser('gate')
     gate.add_argument('--base', required=True)
     gate.add_argument('--feature', required=True)
     gate.add_argument('--repeats', type=int, default=5)
+    gate.add_argument('--min-ratio', type=float, default=None,
+                      help='pass a config only if the feature median is at least this fraction of the base median')
     gate.add_argument('--interval', type=float, default=0.2, help='footprint sampling period (seconds)')
     gate.add_argument('--timeout', type=float, default=600.0, help='bound on one server run (seconds)')
     gate.add_argument('--only', action='append', help='run only this config (repeatable)')
     gate.add_argument('--out', help='append each run as a JSON line to this file')
     args = parser.parse_args(argv)
     args.workdir.mkdir(parents=True, exist_ok=True)
-    handler = {'parity': cmd_parity, 'compat': cmd_compat, 'gate': cmd_gate}[args.command]
+    handler = {'parity': cmd_parity, 'skew': cmd_skew, 'gate': cmd_gate}[args.command]
     return 0 if handler(args) else 1
 
 

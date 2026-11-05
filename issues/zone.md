@@ -22,6 +22,11 @@ shaped-as: zone
 > [`spec/zone-queue-primitive/`](../spec/zone-queue-primitive/GOAL.md) (Z1). This seed stays
 > `shaped` and remains the candidate for the other two cycles: Z2 (R2–R12) and Z3 (R13–R17). When
 > Z1 lands, retire R1 from this seed only, not the seed itself.
+>
+> **R2–R12 are carved out (2026-11-02).** They are being delivered as cycle Z2,
+> [`spec/zone-dispatch/`](../spec/zone-dispatch/GOAL.md); that GOAL is the contract for them and
+> moves R12's autoscaler docs (`{zone}` / `HYPERSHELL_ZONE`) to Z3. This seed stays `shaped` as the
+> candidate for Z3 (R13–R17). When Z2 lands, retire R2–R12 from this seed only.
 
 - **slug:** zone
 - **kind:** feature
@@ -102,7 +107,8 @@ turnkey resource pinning are separate follow-ups — see Non-goals.
   `multiprocessing.JoinableQueue`, preserving the existing `put`/`get`/`join`/`task_done` behavior
   over the `BaseManager`, and SHALL NOT allocate a per-queue OS pipe or spawn a per-queue feeder
   thread. This SHALL be landable on its own, ahead of the dispatch/zone work.
-- **R2** — The default configuration — an unzoned submission consumed by the uniform fleet `hsx`
+- **R2** — *(R2–R12 carved into [`zone-dispatch`](../spec/zone-dispatch/GOAL.md), Z2,
+  2026-11-02; that GOAL is the contract for them.)* The default configuration — an unzoned submission consumed by the uniform fleet `hsx`
   launches — SHALL behave as it does today, with no throughput or manager-footprint regression.
 - **R3** — WHEN a client requests work, it SHALL advertise its identity and its own bundle size, and
   the scheduler SHALL size the returned bundle from the **requesting client's** advertised value

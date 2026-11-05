@@ -19,7 +19,7 @@ import threading
 import multiprocessing as mp
 from multiprocessing import util
 from multiprocessing.connection import Listener, Client, Connection, answer_challenge, deliver_challenge
-from multiprocessing.managers import Server, BaseManager, State
+from multiprocessing.managers import Server, BaseManager, State, AutoProxy, RemoteError, convert_to_error
 
 # External libs
 from pytest import fixture, mark, raises, skip
@@ -205,6 +205,56 @@ class TestPrivateInternals:
         finalizer()
         finalizer()
         assert calls == [1]
+
+    def test_serve_client_takes_no_mutex(self) -> None:
+        """``Server.serve_client`` runs a method without the server mutex, so a long call blocks no other client."""
+        assert 'mutex' not in Server.serve_client.__code__.co_names
+
+    def test_create_passes_args_and_refusal_is_a_traceback(self) -> None:
+        """A registry callable gets the client's positional arguments, and an exception it raises reaches
+        the client as ``RemoteError`` while the server keeps serving."""
+        seen = []
+
+        def provide(*args):
+            seen.append(args)
+            if not args:
+                raise RuntimeError('refused here')
+            return queue.Queue()
+
+        manager = queue_module.SecureManager(address=('127.0.0.1', 0), authkey=AUTH.encode())
+        manager._serve_in_process({'_get_thing': (provide, queue_module.QUEUE_EXPOSED, None, AutoProxy)})
+        try:
+            class Caller(BaseManager):
+                pass
+
+            Caller.register('_get_thing')
+            caller = Caller(address=('127.0.0.1', manager.address[1]), authkey=AUTH.encode())
+            caller.connect()
+            with raises(RemoteError, match='refused here'):
+                caller._get_thing()
+            caller._get_thing(7).put(1)
+            assert seen == [(), (7, )]
+        finally:
+            manager.shutdown()
+
+    def test_convert_to_error(self) -> None:
+        """``convert_to_error`` turns a ``#TRACEBACK`` reply into ``RemoteError``."""
+        assert isinstance(convert_to_error('#TRACEBACK', 'text'), RemoteError)
+
+    def test_proxy_connection_per_thread(self) -> None:
+        """``BaseProxy._callmethod`` keeps one connection per thread, cached at ``_tls.connection``."""
+        with QueueServer(make_config()) as server:
+            client = connect('127.0.0.1', server.address[1])
+            client.completed.put(1)
+            first = client.completed._tls.connection
+            client.completed.put(2)
+            assert client.completed._tls.connection is first
+            other = []
+            thread = threading.Thread(target=lambda: (client.completed.qsize(),
+                                                      other.append(client.completed._tls.connection)))
+            thread.start()
+            thread.join(timeout=WAIT)
+            assert other and other[0] is not first
 
 
 @mark.unit

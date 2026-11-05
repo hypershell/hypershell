@@ -412,6 +412,31 @@ first.
 `spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
 **Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
 
+## `hs client -b` reads the submit section's key, not the client section's
+
+`hs client` takes its `-b`/`-w` defaults from `submit.bundlesize`/`submit.bundlewait`, while the
+configuration reference documents `[client]`. Since zone-dispatch a client advertises an explicit
+`-b` as the size it requests, so a `submit.bundlesize` set for `hs submit` is advertised by every
+client too.
+
+*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
+`spec/zone-dispatch/` (plan gate ruling N4)*
+**Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
+
+## `hs submit -q` cannot feed a server with a database
+
+`hs submit -q` puts bundles on a server's live queue, which only a server without a database
+serves. Against a server with a database, 2.8.x and 2.9.0a2 ran the tasks, but the server's Confirm
+and Receiver threads each died on an uncaught `StaleDataError`, after which it recorded no results
+for the rest of the run; at the unreleased `ec75169` only the Confirm thread died and those tasks'
+results were refused as stale. In zone-dispatch, before its review-1 remediation, the submission
+hung; it is now refused at once with a clear error. A host that can reach the server but not its
+database cannot add work to it.
+
+*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
+`spec/zone-dispatch/REVIEW.md` (cycle 1, F4; cycle 2, F6)*
+**Seed:** [`issues/queue-submit-database-server.md`](issues/queue-submit-database-server.md)
+
 ## The server cannot listen on IPv6
 
 Both transports listen on IPv4 only, so a server is unreachable on an IPv6-only host or network and
@@ -496,8 +521,8 @@ managed queues move to the lighter threading primitive so per-client dispatch st
 and a feeder thread each.
 
 *Horizon: near-term · Depends on: — · Refs: ships in three cycles. R1 (the queue primitive) is
-carved into `zone-queue-primitive`; R2–R12 (dispatch and zones) and R13–R17 (zone-aware
-autoscaling) follow from this seed*
+carved into `zone-queue-primitive`; R2–R12 (dispatch and zones) into `zone-dispatch`; R13–R17
+(zone-aware autoscaling) follow from this seed*
 **Seed:** [`issues/zone.md`](issues/zone.md) · *status: shaped*
 
 ## Relay: two-level scheduling across administrative sites

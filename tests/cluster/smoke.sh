@@ -5,10 +5,14 @@
 # Local rehearsal of the multi-node drive: build the archive for HEAD (label 'feature'), then run
 # one server and two clients as separate "nodes" (their own HSD_LOCAL under the work directory)
 # sharing one results directory, with TLS on and off. Checks that compare.py finds identical,
-# clean results and that no host or user name appears in the results.
+# clean results and that no host or user name appears in the results. Then a zoned rehearsal of the
+# candidate: zones default, cpu and gpu, three groups, one retry per zone, four clients (one per
+# zone plus a second default-zone client; two advertise a size, two do not), judged with
+# compare.py --zoned.
 #
 #   HSD_SMOKE_BASELINE   also build and run this ref as the baseline (e.g. b819de6)
 #   HSD_SMOKE_TASKS      task count per run (default: 2000)
+#   HSD_SMOKE_ZONED_TASKS  task count of the zoned rehearsal (default: 300)
 #   HSD_SMOKE_DIR        work directory (default: $TMPDIR/hsd-smoke); archives are cached there
 #   HSD_SMOKE_KEEP       1 = keep the results and node directories after a pass
 #
@@ -57,6 +61,30 @@ if [ -n "${HSD_SMOKE_BASELINE:-}" ]; then
     baseline=$HSD_SMOKE_BASELINE
 fi
 
+drive_zoned() {  # archive
+    run_id="smoke-zoned-$(basename "$1" .tar.gz)"
+    port=$(pyrun -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+    export HSD_ARCHIVE="$1" HSD_RESULTS="$results" HSD_RUN_ID="$run_id" HSD_TLS=1 HSD_PORT="$port" \
+        HSD_AUTH="smoke-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')" HSD_HOST=localhost HSD_BIND=127.0.0.1 \
+        HSD_TASKS="${HSD_SMOKE_ZONED_TASKS:-300}" HSD_CLIENTS=4 HSD_THREADS=2 HSD_IDLE=60 HSD_TIMEOUT=600 HSD_WAIT=120 \
+        HSD_ZONES=default:40,cpu:30,gpu:30 HSD_GROUPS=3 HSD_RETRIES=1 HSD_FAIL_EVERY=50 HSD_BUNDLESIZE=4 \
+        HSD_CLIENT_LOG=DEBUG
+    HSD_ROLE=server HSD_LOCAL="$nodes/zoned-server" sh "$here/drive.sh" & server=$!
+    HSD_ROLE=client HSD_LOCAL="$nodes/zoned-a" HSD_CLIENT_INDEX=cpu HSD_ZONE=cpu \
+        HSD_CLIENT_ADVERTISE=1 HSD_CLIENT_BUNDLESIZE=3 sh "$here/drive.sh" & c1=$!
+    HSD_ROLE=client HSD_LOCAL="$nodes/zoned-a" HSD_CLIENT_INDEX=gpu HSD_ZONE=gpu \
+        HSD_CLIENT_ADVERTISE=0 sh "$here/drive.sh" & c2=$!
+    HSD_ROLE=client HSD_LOCAL="$nodes/zoned-b" HSD_CLIENT_INDEX=any-0 \
+        HSD_CLIENT_ADVERTISE=1 HSD_CLIENT_BUNDLESIZE=2 sh "$here/drive.sh" & c3=$!
+    HSD_ROLE=client HSD_LOCAL="$nodes/zoned-b" HSD_CLIENT_INDEX=any-1 \
+        HSD_CLIENT_ADVERTISE=0 sh "$here/drive.sh" & c4=$!
+    rc=0
+    for pid in "$server" "$c1" "$c2" "$c3" "$c4"; do wait "$pid" || rc=$?; done
+    unset HSD_ZONES HSD_GROUPS HSD_RETRIES HSD_FAIL_EVERY HSD_BUNDLESIZE HSD_CLIENT_LOG
+    echo "smoke: $run_id exit $rc" >&2
+    return "$rc"
+}
+
 status=0
 for tls in 1 0; do
     for each in "$@"; do
@@ -65,6 +93,10 @@ for tls in 1 0; do
 done
 
 pyrun "$here/compare.py" "$results" --baseline "$baseline" --candidate feature --results-only || status=1
+
+drive_zoned "$candidate" || status=1
+pyrun "$here/compare.py" "$results" --baseline "$baseline" --candidate feature --results-only \
+    --zoned feature || status=1
 
 host_long=$(hostname); host_short=$(hostname | cut -d. -f1); user=${USER:-$(id -un)}
 if grep -rIl -e "$host_long" -e "$host_short" -e "$user" "$results"; then

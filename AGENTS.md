@@ -156,18 +156,27 @@ replaces the other.
 ## Architecture & data flow
 
 ```
-submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─bundles→ [TCP queue] → client(ClientScheduler)
+submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─stages→ [zone pools] ←request─ client(ClientScheduler)
                        ▲                                                                      │ spawns subprocs
                        └──────────────── server writes exit/timing/output back ──────────────┘ returns results
 ```
 
 The queue exposes four threading `queue.Queue`s served in-process by the manager's request
-handling: `scheduled` (task bundles), `completed` (results), `heartbeat` (client liveness),
-`confirmed` (bundle acks). There is no manager child process: `QueueServer.start` runs its own
+handling: `scheduled` (task bundles submitted live, without a database), `completed` (results),
+`heartbeat` (client liveness), `confirmed` (bundle acks); and one `Dispatcher` (`core/dispatch.py`),
+whose two remotely callable methods are `request`, which hands work to clients, and
+`takes_submissions`, which `hs submit -q` calls to learn whether the server serves its live queue
+(only a server without a database does). The scheduler stages stamped tasks in one pool per zone;
+a client calls `request` with its id, zone and advertised size, and the call runs on the handler
+thread of that client's own connection and returns, on it, up to that many tasks
+cut from its zone's pool (JSON text both ways, bounded wait, first-come-first-served). There is no manager child process: `QueueServer.start` runs its own
 accept loop around the stock `multiprocessing.managers.Server` on daemon threads of the server
 process (`core/queue.py` `_InProcessServer`), whose handler threads and the server's own threads
 share the same queue objects. That loop leans on CPython privates; `tests/test_queue.py`
-`TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`).
+`TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`)
+on the queues and a pinned two-method surface (`DISPATCH_EXPOSED`: `request` and
+`takes_submissions`) on the dispatcher; `tests/test_dispatch_version.py` pins the latter, so a
+method added to or dropped from that pickle-framed RPC surface fails a test.
 
 **Two modes change the picture — check for them before assuming DB behavior:**
 - `in_memory` (in-memory SQLite): the `Scheduler` is `None` and the server **skips all DB
@@ -258,8 +267,16 @@ Long-running work runs in **daemon threads** (`core/thread.py`) driving **state 
 
 **Shutdown/sentinel ordering is load-bearing.** Preserve the exact ordering in
 `ServerThread`/`ClientThread` (client: scheduler → executors → collector → heartbeat; server:
-submitter → scheduler → sentinels to heartbeat/receiver/confirm) and the submit flush
+submitter → scheduler → `dispatcher.finish()` (where per-client sentinels on `scheduled` used to
+be posted: clients drain their zone's staged tasks, then are told to shut down) → heartbeat join →
+staged revert (`ServerThread.revert_staged`: rows still staged, never delivered, go back to
+unscheduled) → sentinels to receiver/confirm) and the submit flush
 (`loader.join()` then `queue.put(None)`). Reordering drops the last results or hangs a join.
+**A staged revert never touches a completed or cancelled row.** Both staged reverts, at shutdown and
+when a zone's last client leaves (`Scheduler.revert_unstaged`), go through `Task.revert_staged`: a
+conditional update per row on `completion_time IS NULL`, so a row cancelled while staged stays
+cancelled and a deleted one is skipped; under contention it is re-run only while a fresh read finds
+the row still without a `completion_time`. Never revert staged ids with the unconditional `Task.revert_all`.
 The stream sentinel is `make_sentinel()` (`serialize(None)`); consumers detect end-of-stream
 by dequeuing it. **Remote-queue payloads go through `serialize_tasks`/`deserialize_tasks` and
 `heartbeat.pack` (JSON) — never put a live object or a literal `None` on a remote queue.**
@@ -392,7 +409,9 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   qualifies, at most `CONTENDED_RERUNS` times, each extra attempt logged at DEBUG; at the bound it
   logs a WARNING naming the task and the path and takes a safe outcome (never a crash, a silently
   stranded task, or a write that lands without its condition). A write that matches first time is
-  neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id) and
+  neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id),
+  `Task.revert_staged` (the same, conditional on `completion_time IS NULL`, and its re-check asks
+  the same: a row completed, cancelled or deleted meanwhile is skipped, never reverted) and
   `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
   held by the Receiver) are the pattern. Never use `bulk_update_mappings` or an ORM flush for such a
   write: they assert the total and raise `StaleDataError`. The Scheduler's `Task.next` stamp and

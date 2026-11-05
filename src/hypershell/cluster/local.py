@@ -160,6 +160,10 @@ class LocalCluster(Thread):
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
 
+        zone (str, optional):
+            Zone whose tasks the clients run (default: the default zone).
+            Tasks this cluster submits are placed in the same zone.
+
     Example:
         >>> from hypershell.cluster import LocalCluster
         >>> cluster = LocalCluster.new(
@@ -206,7 +210,8 @@ class LocalCluster(Thread):
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
                  ratelimit: int = None,
                  from_json: bool = False,
-                 tls: Optional[TLSConfig] = None) -> None:
+                 tls: Optional[TLSConfig] = None,
+                 zone: Optional[str] = None) -> None:
         """Initialize with server and single client thread."""
         auth = secrets.token_hex(64)
         # In JSON mode the server expands the template submit-side; the client
@@ -249,7 +254,8 @@ class LocalCluster(Thread):
                                    task_timeout=task_timeout,
                                    task_signalwait=task_signalwait,
                                    ratelimit=ratelimit,
-                                   tls=tls)
+                                   tls=tls,
+                                   zone=zone)
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: LocalCluster) -> None:

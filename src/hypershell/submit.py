@@ -65,7 +65,8 @@ from hypershell.core.logging import Logger
 from hypershell.core.config import config, default
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
-from hypershell.core.queue import QueueClient, QueueConfig, DEFAULT_LOCAL_TIMEOUT, DEFAULT_REMOTE_TIMEOUT
+from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
+                                  DEFAULT_LOCAL_TIMEOUT, DEFAULT_REMOTE_TIMEOUT)
 from hypershell.core.thread import Thread
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.types import JSONData, parse_bytes
@@ -73,7 +74,8 @@ from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
-from hypershell.data.model import Task, Source, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP, serialize_tasks
+from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
+                                   serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
@@ -95,8 +97,8 @@ DEFAULT_TASK_GROUP: Final[int] = DEFAULT_TASK_GROUP
 class GatedSource:
     """Wrap a task source with gate context that rides *inside* the source iterable.
 
-    Carries the resolved ``source_id`` (stamped onto every task by the :class:`Loader`)
-    and an optional ``skip_fingerprints`` set — task identities already present in a prior
+    Carries the resolved ``source_id`` and optional ``zone_id`` (stamped onto every task by
+    the :class:`Loader`) and an optional ``skip_fingerprints`` set — task identities already present in a prior
     same-path source lineage, which the Loader drops for ``--update``/``--restart`` de-dup.
     Threading this inside ``source`` (rather than as kwargs) confines the gate plumbing to
     the single ``Loader``/``Task.new`` stamping chokepoint instead of the ~10 coupled-core
@@ -110,12 +112,14 @@ class GatedSource:
                  iterable: Iterable[str | dict],
                  source_id: str,
                  skip_fingerprints: Optional[set] = None,
-                 name: Optional[str] = None) -> None:
+                 name: Optional[str] = None,
+                 zone_id: Optional[str] = None) -> None:
         """Initialize wrapper around `iterable` with gate context."""
         self.iterable = iterable
         self.source_id = source_id
         self.skip_fingerprints = skip_fingerprints
         self.name = name
+        self.zone_id = zone_id
 
     def __iter__(self: GatedSource) -> Iterator[str | dict]:
         """Delegate iteration to the wrapped source."""
@@ -304,9 +308,11 @@ class Loader(StateMachine):
         if isinstance(source, GatedSource):
             self.source_id = source.source_id
             self.skip_fingerprints = source.skip_fingerprints
+            self.zone_id = source.zone_id
         else:
             self.source_id = None
             self.skip_fingerprints = None
+            self.zone_id = None
         self.template = Template(template)
         self.source = iter(source)
         self.queue = queue
@@ -348,7 +354,7 @@ class Loader(StateMachine):
         """Build the next task from a command-line string in the text source."""
         raw = str(line).strip()
         args = self.template.expand(raw)
-        self.task = Task.new(args=args, raw_args=raw, source=self.source_id,
+        self.task = Task.new(args=args, raw_args=raw, source=self.source_id, zone=self.zone_id,
                              cores=self.cores, memory=self.memory, timeout=self.timeout,
                              group=self.group, tag=self.tags)
         if self.task.args:
@@ -379,7 +385,7 @@ class Loader(StateMachine):
         record_tags = {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
                        for key, value in record.items() if key != 'args'}
         tags = {**(self.tags or {}), **record_tags}
-        self.task = Task.new(args=args, raw_args=base, source=self.source_id,
+        self.task = Task.new(args=args, raw_args=base, source=self.source_id, zone=self.zone_id,
                              cores=self.cores, memory=self.memory, timeout=self.timeout,
                              group=self.group, tag=tags, strict_tag=False, parse_inline=False)
         if self.skip_task():
@@ -867,6 +873,7 @@ class LiveSubmitThread(Thread):
         """Start child threads, wait."""
         log.debug(f'Started ({self.source_name})')
         with self.client:
+            self.check_server()
             self.loader.start()
             self.committer.start()
             log.trace('Waiting (loader)')
@@ -875,6 +882,13 @@ class LiveSubmitThread(Thread):
             log.trace('Waiting (committer)')
             self.committer.join()
         log.debug('Done')
+
+    def check_server(self: LiveSubmitThread) -> None:
+        """Refuse a server that does not serve its live queue: one with a database, which schedules from it."""
+        if not self.client.dispatcher.takes_submissions():
+            raise QueueSubmitRefused(f'Server at {self.client.config.host}:{self.client.config.port} schedules '
+                                     f'from its database and does not serve tasks submitted with --queue; '
+                                     f'submit without --queue, or start the server with --no-db')
 
     @functools.cached_property
     def source_name(self: LiveSubmitThread) -> str:
@@ -1192,7 +1206,7 @@ APP_USAGE: Final[str] = f"""\
 Usage:
   {APP_NAME} [-h] [ARGS... | -f FILE | --from-json SPEC] [-q [-H ADDR] [-p NUM] [-k KEY] | --initdb]
   {PAD_NAME} [-b NUM] [-w SEC] [-c NUM] [-m MEM] [-W SEC] [-g NUM] [--repeat | --update]
-  {PAD_NAME} [--template CMD] [-t TAG...]
+  {PAD_NAME} [--template CMD] [-t TAG...] [--zone NAME]
   {PAD_NAME} [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
 
   Submit one or more tasks.\
@@ -1228,6 +1242,7 @@ Options:
   -m, --memory       MEM     Required memory per task (default: none).
   -W, --timeout      SEC     Task-level walltime limit (default: none).
   -g, --group        NUM     Task group for dependency management (default: {DEFAULT_TASK_GROUP}).
+      --zone         NAME    Zone of the tasks; only clients of this zone run them (default: none).
   -b, --bundlesize   NUM     Number of lines to buffer (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait   SEC     Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
       --initdb               Auto-initialize database.
@@ -1306,6 +1321,10 @@ class SubmitApp(Application):
     taglist: List[str] = None
     interface.add_argument('-t', '--tag', nargs='+', default=[], dest='taglist')
 
+    zone: Optional[str] = None
+    zone_id: Optional[str] = None  # resolved Zone.id stamped onto submitted tasks
+    interface.add_argument('--zone', default=None)
+
     exceptions = {
         EOFError: functools.partial(handle_disconnect, logger=log),
         ConnectionResetError: functools.partial(handle_disconnect, logger=log),
@@ -1319,6 +1338,13 @@ class SubmitApp(Application):
         """Reject contradictory re-submission flags before doing any work."""
         if self.update_mode and self.repeat_mode:
             raise ArgumentError('Cannot combine --update with --repeat')
+        if self.zone is not None:
+            if self.queue_mode:
+                raise ArgumentError('Cannot use --zone with --queue (zones require the database)')
+            try:
+                self.zone = zone_name(self.zone)
+            except ValueError as error:
+                raise ArgumentError(str(error)) from error
 
     def run(self: SubmitApp) -> None:
         """Run submit thread."""
@@ -1335,6 +1361,8 @@ class SubmitApp(Application):
         else:
             self.check_database()
             self.check_tags()
+            if self.zone is not None:
+                self.zone_id = Zone.ensure(self.zone)
             if self.group is None:
                 group = Task.current_group()
                 self.group = group.value
@@ -1361,7 +1389,7 @@ class SubmitApp(Application):
                         tags=self.tags)
         else:
             task = Task.new(args=args, cores=self.cores, memory=self.memory, timeout=self.timeout,
-                            group=self.group, tag=self.tags, source=self.source_id)
+                            group=self.group, tag=self.tags, source=self.source_id, zone=self.zone_id)
             Task.add(task)
             log.info(f'Submitted task ({task.id})')
 
@@ -1452,14 +1480,14 @@ class SubmitApp(Application):
             self.warn_gating_no_effect('<stdin>')
             self.source_id = Source.reserved(STDIN_SOURCE_ID).id
             name = '<stdin>' if self.source is sys.stdin else self.source_path
-            self.source = GatedSource(self.source, self.source_id, name=name)
+            self.source = GatedSource(self.source, self.source_id, name=name, zone_id=self.zone_id)
         else:
             fingerprint, count = source_fingerprint_and_count(self.source_path, self.template)
             log.info(f'Found {count} tasks in {self.source_path} (md5={fingerprint})')
             self.source_id, skip = apply_source_gate(self.source_path, fingerprint, count,
                                                      repeat=self.repeat_mode, update=self.update_mode)
             self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip,
-                                      name=self.source_path)
+                                      name=self.source_path, zone_id=self.zone_id)
 
     def prepare_json_source(self: SubmitApp) -> None:
         """Apply the re-submission gate to a ``--from-json`` source.
@@ -1475,13 +1503,14 @@ class SubmitApp(Application):
         if key is None:
             self.warn_gating_no_effect('<stdin>')
             self.source_id = Source.reserved(STDIN_SOURCE_ID).id
-            self.source = GatedSource(self.source, self.source_id, name='<stdin>')
+            self.source = GatedSource(self.source, self.source_id, name='<stdin>', zone_id=self.zone_id)
             return
         count = len(self.source)
         log.info(f'Found {count} tasks in {key} (md5={self.json_fingerprint})')
         self.source_id, skip = apply_source_gate(key, self.json_fingerprint, count,
                                                  repeat=self.repeat_mode, update=self.update_mode)
-        self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip, name=key)
+        self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip, name=key,
+                                  zone_id=self.zone_id)
 
     def warn_gating_no_effect(self: SubmitApp, kind: str) -> None:
         """Note that re-submission gating flags are inert for exempt sources."""

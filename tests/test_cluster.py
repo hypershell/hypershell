@@ -121,6 +121,7 @@ OPTION_PAIR: Final[Dict[str, str]] = {
     '-I': '-I/--init-size', '--init-size': '-I/--init-size',
     '-X': '-X/--min-size', '--min-size': '-X/--min-size',
     '-Y': '-Y/--max-size', '--max-size': '-Y/--max-size',
+    '--zone': '--zone',
 }
 
 

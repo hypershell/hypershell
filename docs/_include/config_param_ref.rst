@@ -205,7 +205,16 @@
         Using larger bundles is a good idea for large distributed workflows; specifically, it is best
         to coordinate bundle size with the number of executors in use by each client.
 
+        It is also the size of the bundle given to a client that advertises no size of its own.
+
         See also ``-b``/``--bundlesize`` command-line option.
+
+    ``.bundlemax``
+        Most tasks the server hands a client in one reply (default: `1000`).
+
+        A client advertises its own bundle size (its ``-b``); the server never replies with more
+        than this many tasks, whatever a client asks for. The effective cap is never smaller than
+        the server's own ``.bundlesize``. There is no command-line option.
 
     ``.attempts``
         Attempts for auto-retry on failed tasks (default: `1`).
@@ -371,6 +380,11 @@
         The default value allows for greater concurrency and responsiveness on small scales.
         Using larger bundles is a good idea for large distributed workflows; specifically, it is best
         to coordinate bundle size with the number of executors in use by each client.
+
+        The `client` reads its ``-b``/``--bundlesize`` default from this key. When it is set (here
+        or by ``HYPERSHELL_SUBMIT_BUNDLESIZE``), a client advertises it as the size of bundle it
+        requests; when it is left at the built-in default, a client advertises no size and the
+        server uses its own.
 
         See also ``-b``/``--bundlesize`` command-line option.
 

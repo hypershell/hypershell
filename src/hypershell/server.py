@@ -48,6 +48,7 @@ from types import TracebackType
 # Standard libs
 import io
 import sys
+import json
 import time
 from enum import Enum
 from numbers import Real
@@ -59,6 +60,7 @@ from queue import Empty as QueueEmpty, Full as QueueFull
 # External libs
 from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
+from sqlalchemy import func
 
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -69,9 +71,11 @@ from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread
 from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
+from hypershell.core.dispatch import Dispatcher
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
-from hypershell.data.model import Task, Client, ResultOutcome, CONTENDED_RERUNS, serialize_tasks, deserialize_tasks
+from hypershell.data.model import (Task, Client, Zone, ResultOutcome, CONTENDED_RERUNS, serialize_tasks,
+                                   deserialize_tasks, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
 from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE
 from hypershell.client import ClientInfo
@@ -91,9 +95,8 @@ class SchedulerState(State, Enum):
     START = 0
     LOAD = 1
     PACK = 2
-    POST = 3
-    FINAL = 4
-    HALT = 5
+    FINAL = 3
+    HALT = 4
 
 
 DEFAULT_BUNDLESIZE: Final[int] = default.server.bundlesize
@@ -115,11 +118,17 @@ SERVER_POLL_MAX: Final[float] = 30.0
 
 
 class Scheduler(StateMachine):
-    """Enqueue tasks from database."""
+    """Stage tasks from database for clients to request.
+
+    Each zone a client serves (and the default zone, always) has a staging pool in the queue
+    server's dispatcher. LOAD selects one chunk for every pool at or below its refill mark, with
+    the same stamping as always; PACK encodes them and hands them to the dispatcher. With nothing to refill,
+    the scheduler waits (bounded) until a client takes tasks or a new zone asks for work.
+    """
 
     tasks: List[Task]
+    loaded: List[Tuple[str, List[Task]]]
     queue: QueueServer
-    bundle: Optional[bytes]
 
     bundlesize: int
     attempts: int
@@ -146,7 +155,8 @@ class Scheduler(StateMachine):
         """Initialize queue and parameters."""
         self.queue = queue
         self.tasks = []
-        self.bundle = None
+        self.loaded = []
+        self._own_dispatcher = None
         self.bundlesize = bundlesize
         self.attempts = attempts
         self.eager = eager
@@ -160,6 +170,22 @@ class Scheduler(StateMachine):
         self.last_scheduled_group = None
         self.current_group = None
         self.submitter = submitter
+        self.held = set()
+        self.woken = False
+
+    @property
+    def dispatcher(self: Scheduler) -> Dispatcher:
+        """The queue server's dispatcher, which holds the staging pools.
+
+        A scheduler built without a queue server (driven in-process) stages into a dispatcher
+        of its own.
+        """
+        dispatcher = getattr(self.queue, 'dispatcher', None)
+        if dispatcher is None:
+            if self._own_dispatcher is None:
+                self._own_dispatcher = Dispatcher(bundlesize=self.bundlesize)
+            dispatcher = self._own_dispatcher
+        return dispatcher
 
     def submission_complete(self: Scheduler) -> bool:
         """True once no more tasks can arrive from a co-running submitter.
@@ -179,13 +205,13 @@ class Scheduler(StateMachine):
             SchedulerState.START: self.start,
             SchedulerState.LOAD: self.load_bundle,
             SchedulerState.PACK: self.pack_bundle,
-            SchedulerState.POST: self.post_bundle,
             SchedulerState.FINAL: self.finalize,
         }
 
     def start(self: Scheduler) -> SchedulerState:
         """Initial setup then jump to LOAD state."""
         log.debug('Started (scheduler)')
+        Zone.ensure(DEFAULT_ZONE_NAME)
         if self.forever_mode:
             log.info('Scheduler will run forever')
         if (total_tasks := Task.count()) > 0:
@@ -213,15 +239,22 @@ class Scheduler(StateMachine):
         return SchedulerState.LOAD
 
     def load_bundle(self: Scheduler) -> SchedulerState:
-        """Load the next task bundle from the database."""
+        """Load the next chunk of tasks from the database for each pool that needs one."""
         if check_signal() in (SIGUSR1, SIGUSR2):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
             return SchedulerState.FINAL
-        self.tasks = self.next_tasks()
-        if self.tasks:
+        self.revert_unstaged()
+        generation, refills = self.dispatcher.refills()
+        if not refills:
+            self.dispatcher.wait_need(generation, timeout=DEFAULT_REMOTE_TIMEOUT)
+            return SchedulerState.LOAD
+        self.loaded = self.next_tasks(refills)
+        if self.loaded:
+            self.tasks = [task for _, tasks in self.loaded for task in tasks]
             self.mark_group_started()
             self.startup_phase = False
             self.poll = SERVER_POLL_MIN
+            self.woken = False
             return SchedulerState.PACK
         elif (not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0
               and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0
@@ -245,24 +278,32 @@ class Scheduler(StateMachine):
                 log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
                 self.current_group = group_info.value
                 return SchedulerState.LOAD
-            self.poll = min(self.poll_max, 2 * self.poll)
+            self.report_held(group_info.value)
+            # A back-off cut short by a client taking tasks was not an empty poll; only a wait that
+            # ran its full length grows the next one.
+            if not self.woken:
+                self.poll = min(self.poll_max, 2 * self.poll)
             log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
-            time.sleep(self.poll)
+            self.woken = self.dispatcher.wait_need(generation, timeout=self.poll)
             return SchedulerState.LOAD
 
-    def next_tasks(self: Scheduler) -> List[Task]:
-        """Select the next tasks to schedule from the current group."""
+    def next_tasks(self: Scheduler, refills: List[Tuple[str, int]]) -> List[Tuple[str, List[Task]]]:
+        """Select the next tasks to schedule from the current group, for each zone that needs a refill."""
         if self.first_group_pending:
             # On an empty-database start no task is scheduled into a group chosen before any task
             # existed: the first group is the lowest one holding tasks, once there are any.
+            # Groups order the whole run, so the first group is chosen across every zone.
             first_group = Task.lowest_incomplete_group()
             if first_group is None:
                 return []
             self.current_group = first_group
-        return Task.next(limit=self.bundlesize,
-                         attempts=self.attempts,
-                         eager=self.eager,
-                         group=self.current_group)
+        loaded = []
+        for zone, size in refills:
+            tasks = Task.next(limit=size, attempts=self.attempts, eager=self.eager,
+                              group=self.current_group, zone=zone)
+            if tasks:
+                loaded.append((zone, tasks))
+        return loaded
 
     def mark_group_started(self: Scheduler) -> None:
         """Record that the current group has scheduled tasks, warning if a higher group started first."""
@@ -305,20 +346,51 @@ class Scheduler(StateMachine):
         return lowest
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
-        """Pack tasks into bundle (list)."""
-        self.bundle = serialize_tasks(self.tasks)
-        return SchedulerState.POST
-
-    def post_bundle(self: Scheduler) -> SchedulerState:
-        """Put bundle on outbound queue."""
-        try:
-            self.queue.scheduled.put(self.bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
-            log.debug(f'Scheduled {len(self.tasks)} tasks')
-            for task in self.tasks:
+        """Hand the loaded chunks, encoded once here, to their zones' pools."""
+        for zone, tasks in self.loaded:
+            self.dispatcher.stage(zone, [(task.id, json.dumps(task.to_json())) for task in tasks])
+            log.debug(f'Scheduled {len(tasks)} tasks')
+            for task in tasks:
                 log.trace(f'Scheduled task ({task.id})')
-            return SchedulerState.LOAD
-        except QueueFull:
-            return SchedulerState.POST
+        self.loaded = []
+        return SchedulerState.LOAD
+
+    def report_held(self: Scheduler, group: int) -> None:
+        """Log, once per zone, that `group` waits on tasks of a zone no client serves.
+
+        A zone counts when it has tasks of the group not yet scheduled and no client asking for
+        it. The default zone counts only while some client serves another zone, so a run without
+        zones logs nothing new.
+        """
+        waiting = dict(Task.query(Task.zone, func.count(Task.id))
+                       .filter(Task.group == group)
+                       .filter(Task.schedule_time.is_(None))
+                       .group_by(Task.zone).all())
+        if None in waiting:
+            waiting[DEFAULT_ZONE_ID] = waiting.pop(None) + self.dispatcher.staged(DEFAULT_ZONE_ID)
+        elif self.dispatcher.staged(DEFAULT_ZONE_ID):
+            waiting[DEFAULT_ZONE_ID] = self.dispatcher.staged(DEFAULT_ZONE_ID)
+        zoned = any(self.dispatcher.clients(zone) for zone in waiting if zone != DEFAULT_ZONE_ID)
+        idle = [zone for zone in waiting if (group, zone) not in self.held and not self.dispatcher.clients(zone)
+                and (zone != DEFAULT_ZONE_ID or zoned or self.dispatcher.zoned())]
+        if not idle:
+            return
+        names = Zone.names_for_ids([zone for zone in idle if zone != DEFAULT_ZONE_ID])
+        names[DEFAULT_ZONE_ID] = DEFAULT_ZONE_NAME
+        for zone in idle:
+            self.held.add((group, zone))
+            log.info(f'Task group {group} waiting on zone {names.get(zone, zone)}: '
+                     f'{waiting[zone]} tasks, no client serving it')
+
+    def revert_unstaged(self: Scheduler) -> None:
+        """Revert the rows staged for zones whose last client is gone, so another run can take them.
+
+        A row cancelled, completed or deleted while staged is left as it is.
+        """
+        if ids := self.dispatcher.take_unstaged():
+            reverted = Task.revert_staged(ids)
+            kept = f'; {len(ids) - reverted} left as completed, cancelled or deleted' if reverted < len(ids) else ''
+            log.info(f'Reverted {reverted} staged tasks (zone has no client{kept})')
 
     @staticmethod
     def finalize() -> SchedulerState:
@@ -697,6 +769,7 @@ class HeartMonitor(StateMachine):
                 self.beats.pop(hb.uuid)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone())
+            self.queue.dispatcher.forget(hb.uuid)
             return HeartbeatState.SWITCH
 
     def switch_mode(self: HeartMonitor) -> HeartbeatState:
@@ -728,13 +801,14 @@ class HeartMonitor(StateMachine):
                 if not self.in_memory and not self.no_confirm:
                     log.warning(f'Reverting orphaned tasks ({hb.host}: {uuid})')
                     Task.revert_orphaned(uuid)
+                self.queue.dispatcher.forget(uuid)
         return HeartbeatState.SWITCH
 
     def signal_clients(self: HeartMonitor) -> HeartbeatState:
-        """Send shutdown signal to all connected clients."""
+        """Tell clients to shut down once they have drained what is staged for them."""
         log.debug(f'Signaling clients ({len(self.beats)} connected)')
+        self.queue.dispatcher.finish()
         for hb in self.beats.values():
-            self.queue.scheduled.put(make_sentinel())
             log.debug(f'Disconnect requested ({hb.host}: {hb.uuid})')
         self.should_signal = False
         return HeartbeatState.SWITCH
@@ -761,7 +835,7 @@ class HeartMonitorThread(Thread):
         self.machine.run()
 
     def signal_clients(self: HeartMonitorThread) -> None:
-        """Set signal flag to post sentinel for each connected clients."""
+        """Set signal flag to tell clients to shut down."""
         self.machine.should_signal = True
 
     def signal_scheduler_done(self: HeartMonitorThread) -> None:
@@ -909,6 +983,7 @@ class ServerThread(Thread):
             log.warning('Retries disabled when database disabled')
         queue_config = QueueConfig(host=address[0], port=address[1], auth=auth, size=config.server.queuesize, tls=tls)
         self.queue = QueueServer(config=queue_config)
+        self.queue.dispatcher.configure(bundlesize=bundlesize, in_memory=self.in_memory)
         # NOTE: In JSON mode the template is expanded submit-side (here) against each
         # record's context; otherwise the flat source is passed through verbatim and the
         # client applies the template. See hypershell.submit.Loader.
@@ -1005,6 +1080,18 @@ class ServerThread(Thread):
         self.heartmonitor.signal_scheduler_done()
         self.heartmonitor.signal_clients()
         self.heartmonitor.join()
+        self.revert_staged()
+
+    def revert_staged(self: ServerThread) -> None:
+        """Revert rows still staged once no client is left to take them.
+
+        A row cancelled, completed or deleted while staged is left as it is.
+        """
+        ids = self.queue.dispatcher.take_staged()
+        if ids and not self.in_memory:
+            reverted = Task.revert_staged(ids)
+            kept = f' ({len(ids) - reverted} left as completed, cancelled or deleted)' if reverted < len(ids) else ''
+            log.info(f'Reverted {reverted} staged tasks never delivered{kept}')
 
     def wait_receiver(self: ServerThread) -> None:
         """Wait for receiver to stop."""
