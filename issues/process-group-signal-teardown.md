@@ -81,7 +81,7 @@ rather than a dropped ssh connection and hope.
 - R5 may want a control message on the queue rather than a remote kill; note the overlap with
   `issues/evicted-client-fencing-and-cancel-reach.md`, which wants a control path for a different
   reason. `/hs-plan` should decide whether they share one mechanism — and if so, whether this
-  issue should wait for `zone`.
+  issue should build on `zone-dispatch`'s request path (landed, #78).
 - Touches `client.py` (no dedicated test file) and `core/signal.py` (load-bearing, untested) —
   both on the `AGENTS.md` high-risk list.
 - Found by: GNU Parallel comparison review, 2026-08 (H6 + H7).

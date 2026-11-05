@@ -36,9 +36,9 @@ Surfaced by the out-of-cycle GNU Parallel comparison (`.local/IMPROVEMENTS.md`, 
 pass. **Pre-existing** in `develop`.
 
 Deferred deliberately rather than fixed: both halves need a server→client control path, and
-**`zone`'s request-return dispatch RPC is that seam** (`zone` R3/R4 — a client advertises
-identity and receives a targeted reply on its own connection). Building a control channel now and
-again in `zone` means building it twice, on the load-bearing untested transport, and then
+**`zone`'s request-return dispatch RPC is that seam** (now shipped by `zone-dispatch`, #78 — a
+client advertises identity and receives a targeted reply on its own connection). Building a control
+channel now and again in `zone` means building it twice, on the load-bearing untested transport, and then
 reconciling them. The corruption half of H1 was closed independently and without new
 transport by `writeback-scoped-conditional` (#70, `spec/writeback-scoped-conditional/`); what remains
 here is genuinely blocked on the dispatch work.
@@ -63,13 +63,14 @@ operational events.
 
 ## Notes
 
-- **Sequence after `zone`** — or shape it as a `zone` follow-on. `/hs-feature` should re-confirm
-  whether the dispatch RPC actually landed the seam this assumes before accepting the appetite.
+- **Sequence after `zone`** — or shape it as a `zone` follow-on. The dispatch RPC has landed
+  (`zone-dispatch`, #78), so that ordering is discharged; `/hs-feature` should still confirm it
+  gives the seam this assumes before accepting the appetite.
 - `.local/IMPROVEMENTS.md` suggests piggybacking a cancellation list on heartbeat/confirm replies as
   a lighter alternative to a full control channel — worth evaluating at plan time, since it may not
   need `zone` at all.
 - `issues/process-group-signal-teardown.md` R5 wants a remote-stop path for cluster teardown. Same
   question, possibly the same mechanism — decide once.
 - Related: `spec/writeback-scoped-conditional/` (#70, the half already fixed),
-  `issues/zone.md` (the dependency).
+  `spec/zone-dispatch/` (the dependency, landed, #78).
 - Found by: GNU Parallel comparison review, 2026-08 (H1, M4).
