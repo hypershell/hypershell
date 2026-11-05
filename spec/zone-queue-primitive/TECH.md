@@ -3,11 +3,11 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: done
+status: in_review
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: done
-last_updated: '2026-11-04'
+last_updated: '2026-11-05'
 phases:
 - id: P1
   name: 'In-process serve loop: no manager child, clean shutdown and port release'
@@ -910,6 +910,40 @@ stdio. This is the core, small and novel slice: everything else builds on it.
       site, free port), 3.12.16 and 3.14.10: 200 lines each run, `hs list --count` 400,
       `hs list --failed --count` 0, exit 0; `unsupported_internals()` `[]`.
     - **No base test modified:** `git diff --diff-filter=M --name-only b61dbbe -- tests/` is empty.
+- **CI-found remediation (2026-11-05; the foreman's ruling).** PR #76's CI at `229ded8`, whose only
+  change since the green run at `1e79da6` was a spec-only stamp, failed one test on 3.13 and 3.14:
+  `tests/test_groups.py::test_group_parallel_execution_within_group`, "Expected > 10s for parallel
+  execution, took 9.7s" (9.8 s on 3.14). The test predates this branch. Its timing assertion was a
+  lower bound on the whole run (`elapsed > 4 + 3*2`), which measures startup and the backoff between
+  groups, not parallelism; with `TCP_NODELAY` connections are faster, and a Linux run can land just
+  under 10 s. The assertion was miscalibrated; the code does not regress. P1 was reopened under the
+  ruling: assert the two properties the test exists for, from the database, with no wall-clock bound.
+  - [x] **Test** (`tests/test_groups.py`). A helper, `task_intervals()`, reads each task's group,
+        `start_time` and `completion_time` with `hs list … --json` (the pattern of `task_times` in
+        `tests/test_group_order.py` and the #53 de-flake's authoritative DB state). The test asserts
+        four groups of two tasks; **(a)** within each group the two run intervals overlap
+        (`max(starts) < min(ends)`); **(b)** for consecutive groups, the last completion of the lower
+        precedes the first start of the higher. The rc, sorted-stdout, group-transition and
+        per-task log checks are kept. The `time.time()` bound is removed; no hang guard was added,
+        since `main` has no timeout and a check after the run could not catch a hang.
+  - [x] **Docs, review cycle 10 P1 LOW.** `docs/security.rst`: the cleartext pair sets `TCP_NODELAY`
+        on each TCP connection "where the platform allows it", as `AGENTS.md` says (`_no_delay_connection`
+        returns early where a connection has no descriptor, as on Windows).
+  - **Base test modified, by ruling.** This is the first change on the branch to a test that predates
+    it: `git diff --diff-filter=M --name-only b61dbbe -- tests/` now lists `tests/test_groups.py`.
+  - **Gate record (macOS; the frozen offline dev venvs, worktree `src` first on the path; isolated
+    site; each run in its own process group under a perl kill timer).**
+    - **Discrimination** (scratch `git archive` copies, not committed), 3.12.16. With `-N1` in place
+      of `-N8`: fails on (a), "Group 1 ran serially" (second start 0.4 ms after the first
+      completion). With `Task.increment_group` advancing to `previous_group + 1` instead of holding a
+      group with incomplete tasks: (a) holds, fails on (b), "Group 2 started before group 1
+      completed".
+    - **The test, 3.12.16:** 20/20 consecutive runs pass (15.0–18.0 s each). **3.14.10:** 5/5 pass.
+    - **`tests/test_groups.py`:** 11 passed on 3.12.16 (68.2 s) and on 3.14.10 (63.1 s).
+    - **Full suite, 3.12.16:** 775 passed, 79 skipped (10 min 40 s, beside the loops above). Review
+      cycle 9's counts; same skips.
+  - **Not covered locally:** the Linux runners. CI is the proof; the new assertions carry no timing
+    threshold to miss.
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
@@ -923,7 +957,8 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   review-6 remediation `tests/test_queue_gc.py`, `tests/test_queue.py` and `AGENTS.md`; the C10
   quick-review follow-up the same three; the develop merge's adaptation `tests/test_queue_gc.py`; the
   CI-found remediation `src/hypershell/core/queue.py`, `tests/test_queue.py` and `AGENTS.md`; the
-  review-9 remediation the same three and `docs/security.rst`.
+  review-9 remediation the same three and `docs/security.rst`; the second CI-found remediation
+  `tests/test_groups.py` and `docs/security.rst`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1
