@@ -3,16 +3,16 @@ slug: authkey-handling-hardening
 title: The queue authentication key is never exposed to other users on client nodes
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/authkey-handling-hardening
 base: develop
-current_phase: P1
+current_phase: done
 last_updated: '2026-11-05'
 phases:
 - id: P1
   name: One client-launch function; --launcher and --mpi hand the key over in the
     environment
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -45,7 +45,7 @@ phases:
 - id: P3
   name: SSH launches through the same function, key on the ssh channel's standard
     input
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -61,7 +61,7 @@ phases:
     or closed_input' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
 - id: P4
   name: Compatibility contract, cross-version check, and the docs revision
-  status: in_progress
+  status: done
   satisfies:
   - R4
   - R5
@@ -78,9 +78,7 @@ phases:
 review:
   last_reviewed_commit: 20d2509cb824039e490620719c16765aad3cc731
   verdict: changes-requested
-  blocked_reason: 'Review cycle 1: residual key reach in one SSH option combination
-    (hidden lane), Q1 hint false positive, docs scope of the Open MPI parameter; human
-    gate'
+  blocked_reason: ''
   cycle: 1
 ---
 # TECH.md — The queue authentication key is never exposed to other users on client nodes
@@ -452,6 +450,22 @@ the maintainer's and foreman's rulings of 2026-11-05, recorded in PLAN §5 and i
   assertion. The other 7 pass before and after, as noted above. Mutants re-run in scratch copies
   of the fixed `src`: "hint always fires" fails 3 hint cases; "`BrokenPipeError` not caught" fails
   `test_client_launch_start_survives_closed_input`.
+- **Gates (on the remediation commit; 2026-11-05).**
+  - Phase verifies (P1 and P3 as retuned, P4's file run) are covered by the runs below.
+  - Full suite, 3.12.13, `-n auto`: 978 passed, 85 skipped (PostgreSQL, opt-in), 2 failed:
+    `test_server_keeps_its_files_at_the_open_file_limit` and `test_waits_for_slow_peer_upgrade`,
+    both timing-bound and outside this diff; their modules (`tests/test_queue_limits.py`,
+    `tests/test_upgrade_cli.py`) pass on a serial re-run, 39 passed.
+  - 3.14.6 (scratch venv): `tests/test_cluster.py`, `tests/test_cluster_launch.py`,
+    `tests/test_client.py`, `tests/test_autoscale.py` 161 passed, 1 skipped (fish not installed).
+  - Sphinx (`sphinx-build -E`): exit 0, only the two pre-existing "not in any toctree" warnings.
+  - `unsupported_internals()` returns `[]` on 3.12.13 and 3.14.6.
+  - CLI drive (P4): `seq 20 | hsx -t 'echo {}' --launcher=env -N2 -H 127.0.0.1` in a temp site:
+    exit 0, outputs 1–20, 20 tasks, 0 failed. A second drive with a user's
+    `OMPI_MCA_mca_base_env_list=USER_A` and a template that counts `^HYPERSHELL_SERVER_AUTH=` in
+    the task's environment: exit 0, each of 4 tasks printed `key=0 ompi=USER_A`.
+  - Not run here (no cluster access): the real `srun` and Open MPI 4 `-x` checks stay with the
+    foreman, as PLAN §5 Q1 and REVIEW F1 say.
 
 ---
 
