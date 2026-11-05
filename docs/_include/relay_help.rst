@@ -17,6 +17,30 @@ Options
     This affects only the upstream connection; the relay-local *server* keeps ``[server.tls]``.
     See also ``relay.upstream.tls.enabled``.
 
+``--zone`` *NAME*
+    Zone this relay serves (default: the default zone).
+
+    The relay asks upstream only for tasks of this zone, and its *clients* at the site serve it.
+    See also ``relay.zone``.
+
+``-N``, ``--size`` *NUM*
+    Number of *clients* the relay keeps launched at its site (default: 1).
+
+    A *client* that exits is launched again. With 0 no *client* is launched, and the relay asks
+    upstream for nothing. See also ``relay.size``.
+
+``--launcher`` *CMD*
+    Command prefix used to launch each *client* at the site (default: none).
+
+    With none, *clients* run directly on the relay's host. Otherwise each is launched as
+    ``CMD [ARGS...] hyper-shell client ...`` (e.g., ``srun``). The *clients* connect back to the
+    relay by its host name. See also ``relay.launcher``.
+
+``--launcher-args`` *ARGS*
+    Extra arguments for the launcher, placed after it (quoted as one argument).
+
+    See also ``relay.launcher_args``.
+
 ``--bind`` *ADDR*
     Bind address of the relay-local *server* (default: 0.0.0.0).
 

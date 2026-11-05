@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -60,7 +60,7 @@ phases:
 - id: P4
   name: 'Site run and return path: fleet, no local retry, outbox, leaf attribution,
     one-relay loopback'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R4
@@ -517,28 +517,98 @@ confirms; it never pulls past the backlog bound.
 **Goal:** pulled tasks run on a site fleet launched with a fresh site key and come back upstream
 attributed to the leaf with the upstream `schedule_time`.
 
-- [ ] Security-cycle overlap rule for P4 (above).
-- [ ] `relay/site.py`: replace P2's bare `ServerThread` with `AutoScalingCluster(source=None,
-      max_retries=0, poll, bind, launcher, launcher_args, policy='fixed',
-      init_size=min_size=max_size=N, tls=<local>, zone=<name>)`; no edit to `cluster/`.
-- [ ] CLI `--zone`, `-N/--size`, `--launcher`, `--launcher-args` with help snippets and
+- [x] Security-cycle overlap rule for P4 (above). `fix/authkey-handling-hardening` has not landed on
+      `develop` (`origin/develop` is `02b292a`, a version bump past the merged `c6869f2`), so P4
+      builds against the current `AutoScalingCluster` constructor; the foreman re-runs P4's and P5's
+      verify after the later merge.
+- [x] `relay/site.py`: `site_cluster()` builds `AutoScalingCluster(source=None, max_retries=0, poll,
+      bind, launcher, launcher_args, policy='fixed', init_size=min_size=max_size=N, tls=<local>,
+      zone=<name>)`, replacing P2's bare `ServerThread`; no edit to `cluster/`.
+- [x] CLI `--zone`, `-N/--size`, `--launcher`, `--launcher-args` with help snippets and
       completions (P2 amendment).
-- [ ] Returner FSM (`START, COLLECT, SEND, MARK, FINAL, HALT`): move completed rows into
+- [x] Returner FSM (`START, COLLECT, SEND, MARK, FINAL, HALT`): move completed rows into
       `relay_result` in one transaction; restore `schedule_time`/`server_id`/`server_host` from
       `relay_task`; give naive timestamps the relay tz; bundle by bundlesize/bundlewait; mark
       `returned` only after `completed.put` returns; prune `returned` after retention.
-- [ ] Tests (`tests/test_relay_return.py`): restored record APPLIED upstream with the leaf id;
+- [x] Tests (`tests/test_relay_return.py`): restored record APPLIED upstream with the leaf id;
       replay DUPLICATE; return after revert STALE; put failure leaves the row pending; a failed
       local row does not hold the next local group; retention prune keeps the file size-stable.
-- [ ] `tests/test_relay_workload.py::test_one_relay_end_to_end`: upstream `hs server` and one
+- [x] `tests/test_relay_workload.py::test_one_relay_end_to_end`: upstream `hs server` and one
       `hs relay` (launcher `env`, 2 site clients) as separate processes; a grouped workload with
       a failing-then-retried task; every task completed once upstream; no `attempt` beyond the
       upstream retry; every completed `client_id` is a site client, never the relay identity.
-- [ ] Drive once by hand in a throwaway site and record it in the commit body:
+- [x] Drive once by hand in a throwaway site and record it in the commit body:
       `.agents/factory/bin/temp_site.sh sh -c "…hs server --forever… & …hs relay… & …; hs list"`.
+- **Foreman rulings on P3's open decisions (2026-11-05), recorded as accepted:**
+  1. *Gate count.* The gate counts the relay-local server's own client registrations
+     (`server_id` = this relay instance). **Note for P9:** a multi-zone relay needs this count per
+     zone (site clients of each zone's fleet); not built here.
+  2. *FINISHED only when nothing is held* (`count_held` = 0). P4's returner marks rows `returned`
+     once their put upstream returns, so a drained relay sends FINISHED; the one-relay workload
+     asserts the final beat is FINISHED and upstream records a clean disconnect with no eviction.
+  3. *An unreachable upstream at start is fatal* until P8.
+  4. *Insert failure:* 3 attempts, then exit non-zero without confirming.
+  5. *Smaller points:* local `part` = 0; the transport exception map; `[relay] zone` from
+     configuration, now overridden by `--zone` (wired in this phase).
+- **Amendments (2026-11-05, build):**
+  - **Site lifecycle.** `RelayThread` starts the cluster thread and waits for its server to listen.
+    It finishes when pulling is over (an upstream `shutdown` reply or a drain signal) and the local
+    backlog is empty, or when the local scheduler has ended (a drain signal). The site is then
+    stopped in order: the autoscaler is halted first (under the fixed policy it would relaunch the
+    clients as they exit), then the local scheduler, and the local server finishes the stock way:
+    it tells its clients to finish and waits for their FINISHED beats, so every leaf result reaches
+    the relay database. A local server that never had a client is stopped outright (its heart
+    monitor would wait for a first one). The returner then flushes and ends, and the FINISHED rule
+    above applies. This replaces P2's stop order, as planned (§2.9).
+  - **Outbox writes are serialised.** The puller's insert and the returner's move, mark and prune
+    take one process lock in `relay/store.py`, so a re-dispatched id can never be moved or marked
+    against a stamp it no longer has. A re-received id drops any result still held for its earlier
+    assignment in the insert transaction, and a mark matches the exact record that was sent, so a
+    result from a superseded assignment is never marked returned and never counts as handed over.
+    The relay-local server writes only incomplete rows, which these writers never touch.
+  - **Return bundles** use the upstream bundle size (`[relay.upstream] bundlesize`, the size the
+    relay advertises) and `[relay] bundlewait`, as a client's collector uses its own `-b`/`-w`.
+  - **New `[relay] retention`** (default 300 s, PLAN §2.3) in `core/config.py` and the config
+    reference. Pruning runs from the returner at most once a minute (sooner with a shorter
+    retention) and deletes each pruned result's `relay_task` stamp with it.
+  - **`-N 0`** launches no site client; with no connected client the gate never opens, so the
+    relay asks upstream for nothing. P3's process tests in `tests/test_relay_fsm.py` and
+    `tests/test_relay_db.py` now pass `-N 0` (or `HYPERSHELL_RELAY_SIZE=0`); their assertions are
+    unchanged.
+  - **Site clients relaunch period** is `[autoscale] period` (the class's own knob).
+  - **Loopback launcher in the tests.** Site clients dial the relay by host name
+    (`AutoScalingCluster` builds `-H HOSTNAME`, unchanged). On the build host the name resolves to
+    an address whose firewall completes TCP but never delivers it to `accept()`, and inside the
+    sandbox it does not resolve at all. The workload test therefore launches site clients through a
+    small wrapper around `env` that replaces the `-H` value with `127.0.0.1`; the relay binds
+    loopback. The real dial-by-name path is the stock autoscaler's.
 - **Verify:** see frontmatter.
-- **Touches:** `src/hypershell/relay/`, `tests/test_relay_return.py`, `tests/test_relay_workload.py`,
-  `docs/_include/relay_*`, `docs/manual.rst`, `share/`.
+- **Red first (2026-11-05):** on the unmodified tree `tests/test_relay_return.py` and
+  `tests/test_relay_fsm.py` failed at collection (`ImportError: UpstreamReturner`), and
+  `test_one_relay_end_to_end` failed on its deadline (the relay refused `-N`, so the upstream server
+  never finished).
+- **Verified 2026-11-05** (venvs from `uv sync --frozen` on `PATH` in place of `uv run`):
+  - P4 verify, 3.12: 51 passed, then the one-relay workload 1 passed (about 18 s, TLS on both hops).
+  - Full suite, 3.12: 977 passed, 85 skipped (PostgreSQL and other server-backed tests), no failure.
+  - Relay, zone, dispatch, server-FSM, contended-write, writeback, main and completion files, 3.14:
+    297 passed, 35 skipped.
+  - `hs relay --help` ok; `bash -n`/`zsh -n` on the completions ok; `unsupported_internals()` is
+    `[]` on both.
+  - Loopback smoke and hand drive (`temp_site.sh`), 3.12 and 3.14: upstream `hs server --restart -r 1
+    -b 4` with TLS (`<auto>`), 50 tasks in 2 groups with one failing on its first attempt, then
+    `hs relay -N 2` through the loopback launcher. Both exited 0. Upstream: 51 rows, all completed
+    (49 exit 0 at attempt 1, the failure exit 3 and retried, its retry exit 0 at attempt 2), every
+    `client_id` one of the 2 site clients, never the relay identity; the only upstream `client`
+    row is the relay identity, disconnected and not evicted; no stale or duplicate result warning
+    and no eviction in the upstream log; group 1 scheduled after group 0 completed. Relay: final
+    FINISHED beat, no task row left, 51 results `returned`. The same with `--zone gpu` (tasks
+    submitted to that zone) on 3.12.
+- **Touches:** `src/hypershell/relay/` (`__init__.py`, `store.py`, `upstream.py`, new `site.py`),
+  `src/hypershell/core/config.py` (`[relay] retention`), `tests/test_relay_return.py`,
+  `tests/test_relay_workload.py`, `tests/test_relay_fsm.py`, `tests/test_relay_db.py`,
+  `docs/_include/relay_{usage,help,desc}.rst`, `docs/_include/config_param_ref.rst`,
+  `docs/manual.rst`, `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`. No zone code,
+  `client.py`, `server.py`, `core/queue.py` or `cluster/` edit.
 
 ## Phase P5 — Credential fence, two relays, failover (core complete)
 **Satisfies:** R3, R6, R17, R20 · **Depends on:** P4 · PLAN §2.3, §2.6 (failover)

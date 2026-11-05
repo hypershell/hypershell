@@ -534,6 +534,10 @@ function _hs_relay() {
         '(-H --upstream-host)'{-H,--upstream-host}'[Hostname of upstream server (default: localhost)]:host:_hs_known_hosts' \
         '(-p --upstream-port)'{-p,--upstream-port}'[Port of upstream server (default: 50001)]:port:_hs_ports' \
         '--no-tls[Disable TLS to upstream server (not recommended)]' \
+        '--zone[Zone this relay serves]:zone:' \
+        '(-N --size)'{-N,--size}'[Number of clients kept launched at the site (default: 1)]:count:' \
+        '--launcher[Command prefix that launches each client]:launcher:_command_names -e' \
+        '--launcher-args[Extra arguments for the launcher]:arguments:' \
         '--bind[Bind address of relay-local server (default: 0.0.0.0)]:address:(0.0.0.0 localhost 127.0.0.1)' \
         '--port[Port of relay-local server (default: 50002)]:port:_hs_ports' \
         '--database[Path to relay database]:database file:_files'

@@ -3,11 +3,12 @@
 
 """The relay's upstream machines re-enter on timeout and halt on halt, on signal and on shutdown.
 
-The puller and the heartbeat are stepped one action at a time against a fake upstream, and run in
-their threads to show a stop ends them within a deadline. The relay process itself is run against a
-queue server in this process standing in for the upstream server: it registers its zone identity
-there, pulls nothing while it has no site clients, and drains on SIGUSR1; against a server without
-the work-request protocol it exits with the client's one version error.
+The puller, the returner and the heartbeat are stepped one action at a time against a fake upstream,
+and run in their threads to show a stop ends them within a deadline. The relay process itself is run
+against a queue server in this process standing in for the upstream server, with no site clients
+launched: it registers its zone identity there, pulls nothing while it has no site clients, and
+drains on SIGUSR1; against a server without the work-request protocol it exits with the client's one
+version error.
 """
 
 
@@ -27,6 +28,7 @@ import subprocess
 from pathlib import Path
 from queue import Queue, Full as QueueFull
 from types import SimpleNamespace
+from datetime import datetime
 
 # External libs
 import pytest
@@ -41,10 +43,13 @@ import hypershell.relay.upstream as upstream_module
 from hypershell.core.signal import SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.queue import QueueServer, QueueConfig, PROTOCOL
-from hypershell.data.model import Entity, Client
+from hypershell.core.uuid import uuid
+from hypershell.data.model import Entity, Client, Task
+from hypershell.relay import store
 from hypershell.relay.store import ensure_tables
 from hypershell.relay.upstream import (UpstreamPuller, UpstreamPullerThread, PullerState, UpstreamHeartbeat,
-                                       UpstreamHeartbeatThread, HeartbeatState, upstream_identity)
+                                       UpstreamHeartbeatThread, HeartbeatState, UpstreamReturner,
+                                       UpstreamReturnerThread, ReturnerState, upstream_identity)
 from tests.test_relay_connector import FakeDispatcher, upstream, connect_clients, dispatched, reply, POLL
 from tests.test_dispatch_version import stock_server, AUTH as OLD_SERVER_AUTH
 
@@ -181,6 +186,112 @@ def test_puller_thread_stops_within_deadline(relay_db: Engine, no_signal) -> Non
     assert time.monotonic() - start < 5
 
 
+# --- The returner ------------------------------------------------------------------------------
+
+
+def returner(engine: Engine, completed: Optional[Any] = None, bundlewait: float = 0) -> UpstreamReturner:
+    """A returner on a fake upstream."""
+    return UpstreamReturner(queue=SimpleNamespace(completed=completed if completed is not None else Queue()),
+                            engine=engine, bundlesize=100, bundlewait=bundlewait, poll=POLL, retention=300)
+
+
+def complete_one(engine: Engine) -> str:
+    """Receive one task and complete it at the site; return its id."""
+    record, = dispatched('echo returned')
+    store.insert_received(engine, [record], identity=upstream_identity(None))
+    with engine.begin() as conn:
+        conn.execute(Task.__table__.update().values(completion_time=datetime.now().astimezone(), exit_status=0,
+                                                    client_id=str(uuid()), client_host='site-node'))
+    return record['id']
+
+
+@mark.unit
+def test_returner_reenters_collect_with_nothing_to_return(relay_db: Engine) -> None:
+    """With no completed row the returner waits one poll period and collects again."""
+    machine = returner(relay_db)
+    assert machine.start() is ReturnerState.COLLECT
+    start = time.monotonic()
+    assert machine.collect() is ReturnerState.COLLECT
+    assert time.monotonic() - start < 1.0
+    assert machine.queue.completed.empty()
+
+
+@mark.unit
+def test_returner_reenters_send_on_full_queue(relay_db: Engine) -> None:
+    """A bundle that does not fit is put again, and only then marked."""
+
+    class Refuses(Queue):
+        refusals = 1
+
+        def put(self, item, block=True, timeout=None):
+            if self.refusals:
+                self.refusals -= 1
+                raise QueueFull()
+            super().put(item, block, timeout)
+
+    complete_one(relay_db)
+    machine = returner(relay_db, completed=Refuses())
+    assert machine.collect() is ReturnerState.SEND
+    assert machine.send() is ReturnerState.SEND
+    assert machine.send() is ReturnerState.MARK
+    assert machine.mark() is ReturnerState.COLLECT
+    assert machine.queue.completed.qsize() == 1
+
+
+@mark.unit
+def test_returner_halts_on_halt(relay_db: Engine) -> None:
+    """A halted returner's next state is HALT, from any state."""
+    machine = returner(relay_db)
+    for state in (ReturnerState.COLLECT, ReturnerState.SEND, ReturnerState.MARK):
+        machine.state = state
+        machine.halt()
+        assert machine.next() is ReturnerState.HALT
+    assert machine.queue.completed.empty()
+
+
+@mark.unit
+def test_returner_finals_on_flush_once_drained(relay_db: Engine) -> None:
+    """Told to flush, the returner sends what it holds at once, whatever the bundle wait, then ends."""
+    task_id = complete_one(relay_db)
+    machine = returner(relay_db, bundlewait=3600)
+    assert machine.collect() is ReturnerState.COLLECT
+    machine.flush()
+    assert machine.collect() is ReturnerState.SEND
+    assert machine.send() is ReturnerState.MARK
+    assert machine.mark() is ReturnerState.COLLECT
+    assert machine.collect() is ReturnerState.FINAL
+    assert machine.finalize() is ReturnerState.HALT
+    assert [task['id'] for task in json.loads(machine.queue.completed.get_nowait())] == [task_id]
+
+
+@mark.unit
+def test_returner_thread_stops_within_deadline(relay_db: Engine) -> None:
+    """A running returner, waiting for results, ends promptly once stopped."""
+    thread = UpstreamReturnerThread(queue=SimpleNamespace(completed=Queue()), engine=relay_db, bundlesize=100,
+                                    bundlewait=600, poll=60, retention=300)
+    thread.start()
+    assert until(lambda: thread.machine.state is ReturnerState.COLLECT)
+    start = time.monotonic()
+    thread.stop(wait=True, timeout=DEADLINE)
+    assert not thread.is_alive()
+    assert time.monotonic() - start < 5
+
+
+@mark.unit
+def test_returner_thread_flushes_and_ends(relay_db: Engine) -> None:
+    """A returner told to flush returns what it holds and ends on its own."""
+    task_id = complete_one(relay_db)
+    queue = Queue()
+    thread = UpstreamReturnerThread(queue=SimpleNamespace(completed=queue), engine=relay_db, bundlesize=100,
+                                    bundlewait=600, poll=60, retention=300)
+    thread.start()
+    thread.flush()
+    thread.join(timeout=DEADLINE)
+    assert not thread.is_alive()
+    assert [task['id'] for task in json.loads(queue.get_nowait())] == [task_id]
+    assert store.count_held(relay_db) == 0
+
+
 # --- The heartbeat -----------------------------------------------------------------------------
 
 
@@ -312,7 +423,7 @@ def start_relay(tmp_path: Path, port: int, auth: str = AUTH) -> Tuple[subprocess
     env.pop('HYPERSHELL_DATABASE_FILE', None)
     with open(log, mode='w') as stream:
         proc = subprocess.Popen(['hs', 'relay', '--bind', '127.0.0.1', '--port', str(loopback_port()),
-                                 '-H', '127.0.0.1', '-p', str(port), '--no-tls'],
+                                 '-H', '127.0.0.1', '-p', str(port), '--no-tls', '-N', '0'],
                                 env=env, stdout=subprocess.DEVNULL, stderr=stream, start_new_session=True)
     return proc, log
 

@@ -166,7 +166,8 @@ def relays(tmp_path: Path, upstream: QueueServer) -> Iterator[Any]:
                    'HYPERSHELL_RELAY_UPSTREAM_HOST': '127.0.0.1',
                    'HYPERSHELL_RELAY_UPSTREAM_PORT': str(upstream.address[1]),
                    'HYPERSHELL_RELAY_UPSTREAM_AUTH': UPSTREAM_AUTH,
-                   'HYPERSHELL_RELAY_UPSTREAM_TLS_ENABLED': 'false', **env}
+                   'HYPERSHELL_RELAY_UPSTREAM_TLS_ENABLED': 'false',
+                   'HYPERSHELL_RELAY_SIZE': '0', **env}
         environ.pop('HYPERSHELL_DATABASE_FILE', None)
         if marker:
             environ[RELAY_MARKER] = '1'

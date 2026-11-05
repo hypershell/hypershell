@@ -549,19 +549,30 @@
     ``.poll``
         Maximum polling interval of the relay-local scheduler in seconds (default: `1`).
 
+    ``.retention``
+        Seconds a result is kept in the relay database after it has been returned upstream
+        (default: `300`). Results not yet returned are always kept.
+
     ``.zone``
         Zone the relay serves (default: none, the default zone).
 
+        See also ``--zone`` command-line option.
+
     ``.size``
         Number of *clients* the relay keeps launched at its site (default: `1`).
+
+        See also ``-N``, ``--size`` command-line option.
 
     ``.launcher``
         Command prefix used to launch each *client* at the site (default: none).
 
         An empty value launches clients directly as ``hs client ...``.
+        See also ``--launcher`` command-line option.
 
     ``.launcher_args``
         Extra arguments for the launcher (default: none).
+
+        See also ``--launcher-args`` command-line option.
 
     ``.num_threads``
         Executor threads for each *client* at the site (default: `1`).

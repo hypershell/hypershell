@@ -6,9 +6,10 @@ Run a relay: one site's link to an upstream server.
 
 A relay is one long-running process at a site. Upstream it is an ordinary client of the upstream
 server, once for the zone it serves (see `hypershell.relay.upstream`); at the site it runs a complete
-server, scheduling from its own database, for clients it launches there. Its database is always a private SQLite file, whatever database is configured
-(see `hypershell.core.config.relay_database_section`): the configuration swaps the database section
-when the process starts, before the database engine is built, so a process runs at most one relay.
+server, scheduling from its own database, for clients it launches there (see `hypershell.relay.site`).
+Its database is always a private SQLite file, whatever database is configured (see
+`hypershell.core.config.relay_database_section`): the configuration swaps the database section when
+the process starts, before the database engine is built, so a process runs at most one relay.
 
 Example:
     >>> from hypershell.relay import RelayThread
@@ -26,8 +27,9 @@ from types import TracebackType
 # Standard libs
 import os
 import sys
+import time
 import errno
-import secrets
+import shlex
 import functools
 
 # External libs
@@ -49,9 +51,12 @@ from hypershell.data.core import engine
 from hypershell.data.model import zone_name, DEFAULT_ZONE_NAME
 from hypershell.relay import store
 from hypershell.relay.store import ensure_tables
-from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamHeartbeatThread, upstream_identity,
-                                       upstream_config, DEFAULT_UPSTREAM_BUNDLESIZE, DEFAULT_UPSTREAM_HEARTRATE)
-from hypershell.server import ServerThread, DEFAULT_EVICT
+from hypershell.relay.site import site_cluster, DEFAULT_SITE_PERIOD
+from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
+                                       upstream_identity, upstream_config, DEFAULT_UPSTREAM_BUNDLESIZE,
+                                       DEFAULT_UPSTREAM_HEARTRATE, DEFAULT_RETENTION)
+from hypershell.cluster.remote import AutoScalingCluster
+from hypershell.server import ServerThread
 
 try:
     import fcntl
@@ -60,7 +65,7 @@ except ImportError:  # pragma: no cover (not available on Windows)
 
 # Public interface
 __all__ = ['RelayThread', 'RelayApp', 'DEFAULT_RELAY_BIND', 'DEFAULT_RELAY_PORT', 'DEFAULT_RELAY_POLL',
-           'lock_database', 'RelayDatabaseLocked']
+           'DEFAULT_RELAY_SIZE', 'lock_database', 'RelayDatabaseLocked']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -77,6 +82,15 @@ DEFAULT_RELAY_BUNDLESIZE: Final[int] = config.relay.bundlesize
 
 DEFAULT_RELAY_BUNDLEWAIT: Final[int] = config.relay.bundlewait
 """Default seconds the relay waits before returning results regardless of size."""
+
+DEFAULT_RELAY_SIZE: Final[int] = config.relay.size
+"""Default number of site clients the relay keeps launched."""
+
+DEFAULT_RELAY_LAUNCHER: Final[str] = config.relay.launcher
+"""Default command prefix that launches each site client (empty runs them directly)."""
+
+DEFAULT_RELAY_LAUNCHER_ARGS: Final[str] = config.relay.launcher_args
+"""Default extra arguments for the site client launcher."""
 
 STOP_CHECK_INTERVAL: Final[float] = 1.0
 """Seconds between the relay's checks on whether the relay-local server should stop."""
@@ -121,14 +135,21 @@ class RelayThread(Thread):
     """
     Run a relay within a dedicated thread.
 
-    The relay-local server is a stock server in forever mode on the relay database, with local
-    retries off: the upstream server alone retries tasks, so a failure at the site is a completed
-    row like any other. Its clients authenticate with a key minted for this run only.
+    The site is a stock autoscaling cluster (see `hypershell.relay.site`): a server in forever mode on
+    the relay database, with local retries off, and a fixed fleet of site clients launched with a key
+    minted for this run only. The upstream server alone retries tasks, so a failure at the site is a
+    completed row like any other.
 
     Upstream the relay is one client for its zone, under an identity derived from this relay and the
     zone name. It connects before anything else starts, so a server it cannot use (a version
     mismatch, a wrong key) ends it before the site is touched. A puller requests work while the site
-    has room for it and confirms it once it is stored, and a heartbeat keeps the identity registered.
+    has room for it and confirms it once it is stored; a returner hands completed results back upstream
+    through the relay's outbox; a heartbeat keeps the identity registered.
+
+    The relay ends when pulling is over (an upstream shutdown or a drain signal) and the site has
+    finished what it holds, or when a drain signal ends the site's scheduling. It then stops launching
+    site clients, lets the site server tell them to finish, returns every result still held, and ends
+    its upstream registration with a final heartbeat if nothing it received is left without a result.
 
     Args:
         address (tuple, optional):
@@ -139,14 +160,12 @@ class RelayThread(Thread):
             Bundle size of the relay-local server. See :const:`DEFAULT_RELAY_BUNDLESIZE`.
 
         bundlewait (int, optional):
-            Seconds to wait before flushing tasks. See :const:`DEFAULT_RELAY_BUNDLEWAIT`.
+            Seconds to wait before flushing tasks, at the site and upstream.
+            See :const:`DEFAULT_RELAY_BUNDLEWAIT`.
 
         poll (int, optional):
             Maximum polling interval of the relay-local scheduler, and of the upstream puller while
             the site is full, in seconds. See :const:`DEFAULT_RELAY_POLL`.
-
-        evict_after (int, optional):
-            Period in seconds before the relay-local server evicts a silent site client.
 
         tls (TLSConfig, optional):
             TLS configuration of the relay-local server (site clients connect with it).
@@ -158,19 +177,44 @@ class RelayThread(Thread):
             Name of the zone the relay serves (default zone if None).
 
         upstream_bundlesize (int, optional):
-            Most tasks the relay asks for at once. See :const:`DEFAULT_UPSTREAM_BUNDLESIZE`.
+            Most tasks the relay asks for, and returns, at once. See :const:`DEFAULT_UPSTREAM_BUNDLESIZE`.
 
         heartrate (int, optional):
             Seconds between upstream heartbeats. See :const:`DEFAULT_UPSTREAM_HEARTRATE`.
+
+        size (int, optional):
+            Number of site clients kept launched. See :const:`DEFAULT_RELAY_SIZE`.
+
+        launcher (str, optional):
+            Command prefix that launches each site client (empty runs them directly on this host).
+
+        launcher_args (list, optional):
+            Extra arguments for the launcher.
+
+        num_threads (int, optional):
+            Executor threads in each site client.
+
+        template (str, optional):
+            Command template of the site clients.
+
+        client_timeout (int, optional):
+            Seconds a site client waits for tasks before it exits (never if None).
+
+        retention (int, optional):
+            Seconds a returned result is kept before it is pruned. See :const:`DEFAULT_RETENTION`.
+
+        period (int, optional):
+            Seconds between checks on the site clients (an exited one is replaced at the next).
     """
 
+    cluster: AutoScalingCluster
     server: ServerThread
-    site_key: str
     zone: Optional[str]
     identity: str
     upstream_config: Optional[QueueConfig]
     upstream: Optional[QueueClient] = None
     puller: Optional[UpstreamPullerThread] = None
+    returner: Optional[UpstreamReturnerThread] = None
     heartbeat: Optional[UpstreamHeartbeatThread] = None
 
     def __init__(self: RelayThread,
@@ -178,35 +222,43 @@ class RelayThread(Thread):
                  bundlesize: int = DEFAULT_RELAY_BUNDLESIZE,
                  bundlewait: int = DEFAULT_RELAY_BUNDLEWAIT,
                  poll: int = DEFAULT_RELAY_POLL,
-                 evict_after: int = DEFAULT_EVICT,
                  tls: Optional[TLSConfig] = None,
                  upstream: Optional[QueueConfig] = None,
                  zone: Optional[str] = None,
                  upstream_bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE,
-                 heartrate: int = DEFAULT_UPSTREAM_HEARTRATE) -> None:
-        """Initialize the relay-local server and the upstream side."""
-        self.site_key = secrets.token_hex(64)
-        self.server = ServerThread(source=None, bundlesize=bundlesize, bundlewait=bundlewait,
-                                   in_memory=False, no_confirm=False, poll=poll, forever_mode=True,
-                                   address=address, auth=self.site_key, max_retries=0,
-                                   evict_after=evict_after, tls=tls)
+                 heartrate: int = DEFAULT_UPSTREAM_HEARTRATE,
+                 size: int = DEFAULT_RELAY_SIZE,
+                 launcher: Optional[str] = DEFAULT_RELAY_LAUNCHER,
+                 launcher_args: Optional[List[str]] = None,
+                 num_threads: int = 1,
+                 template: str = '{}',
+                 client_timeout: Optional[int] = None,
+                 retention: int = DEFAULT_RETENTION,
+                 period: int = DEFAULT_SITE_PERIOD) -> None:
+        """Initialize the site and the upstream side."""
+        self.cluster = site_cluster(address=address, bundlesize=bundlesize, bundlewait=bundlewait, poll=poll,
+                                    tls=tls, zone=zone, size=size, launcher=launcher, launcher_args=launcher_args,
+                                    num_threads=num_threads, template=template, client_timeout=client_timeout,
+                                    period=period)
+        self.server = self.cluster.server
         self.bundlesize = bundlesize
+        self.bundlewait = bundlewait
         self.poll = poll
         self.zone = zone
         self.identity = upstream_identity(zone)
         self.upstream_config = upstream
         self.upstream_bundlesize = upstream_bundlesize
         self.heartrate = heartrate
+        self.retention = retention
         super().__init__(name='hypershell-relay')
 
-    def run_with_exceptions(self: RelayThread) -> None:
-        """Connect upstream, start the relay-local server, pull work and wait for the relay to finish.
+    @property
+    def site_key(self: RelayThread) -> str:
+        """The key site clients authenticate with, minted for this run only."""
+        return self.server.queue.config.auth
 
-        A drain signal (USR1/USR2) ends the relay-local scheduler and the puller. An upstream
-        shutdown ends the puller, and the relay then waits for the tasks it holds to finish. The
-        server waits on its clients, but a server that never had a client waits for its first one,
-        so once scheduling is over the relay stops the server itself.
-        """
+    def run_with_exceptions(self: RelayThread) -> None:
+        """Connect upstream, start the site, pull and return work, and wait for the relay to finish."""
         log.debug('Started')
         log.info(f'Upstream identity {self.identity} for zone {self.zone or DEFAULT_ZONE_NAME}')
         upstream = self.upstream_config or upstream_config()
@@ -218,35 +270,74 @@ class RelayThread(Thread):
         self.puller = UpstreamPullerThread(queue=self.upstream, engine=engine, identity=self.identity,
                                            zone=self.zone, bundlesize=self.upstream_bundlesize,
                                            local_bundlesize=self.bundlesize, poll=self.poll)
-        self.server.start()
+        self.returner = UpstreamReturnerThread(queue=self.upstream, engine=engine,
+                                               bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
+                                               poll=self.poll, retention=self.retention)
+        self.cluster.start()
+        self.wait_ready()
         log.info(f'Relay-local server ready on {self.server.queue.config.host}:{self.server.queue.config.port}')
         self.heartbeat.start()
+        self.returner.start()
         self.puller.start()
         try:
-            self.wait_server()
+            self.wait_site()
+            self.stop_site()
+            self.returner.flush()
+            self.returner.join()
         except Exception:
-            self.server.stop(wait=True)
             self.puller.stop(wait=True)
+            self.cluster.stop(wait=True)
+            self.returner.stop(wait=True)
             self.heartbeat.stop(wait=True)
             raise
         self.finish_upstream()
         log.debug('Done')
 
-    def wait_server(self: RelayThread) -> None:
-        """Wait for the relay-local server, stopping it once scheduling is over or the pulled work is done."""
-        while self.server.is_alive():
-            self.server.join(timeout=STOP_CHECK_INTERVAL)
-            if not self.server.is_alive():
-                break
+    def wait_ready(self: RelayThread) -> None:
+        """Wait for the relay-local server to listen; raise its failure if the site ends first."""
+        while not self.server.queue.ready:
+            if not self.cluster.is_alive():
+                self.cluster.join()  # Raises the failure that ended the site, if any.
+                raise RuntimeError('Relay-local server stopped before it was ready')
+            time.sleep(0.1)
+
+    def wait_site(self: RelayThread) -> None:
+        """Wait until the relay should finish: pulling is over and the site holds nothing, or scheduling is over.
+
+        A failure in the site, the puller, the returner or the heartbeat is raised here.
+        """
+        while True:
+            self.cluster.join(timeout=STOP_CHECK_INTERVAL)
+            if not self.cluster.is_alive():
+                log.warning('Relay-local server stopped')
+                return
+            for thread in (self.returner, self.heartbeat):
+                if not thread.is_alive():
+                    thread.join()  # Raises its failure, if any.
             if not self.puller.is_alive():
                 self.puller.join()  # Raises the puller's failure, if any.
                 if self.scheduling_over or store.count_backlog(engine) == 0:
-                    log.debug('Pulling and scheduling over - stopping relay-local server')
-                    self.server.stop(wait=True)
+                    log.debug('Pulling over and site drained - stopping site')
+                    return
             elif self.scheduling_over:
-                log.debug('Scheduling over - stopping relay-local server')
-                self.server.stop(wait=True)
-        self.server.join()
+                log.debug('Scheduling over - stopping site')
+                return
+
+    def stop_site(self: RelayThread) -> None:
+        """Stop launching site clients, end scheduling, and wait for the site server to finish.
+
+        The site server tells its clients to finish once scheduling is over and waits for them, so
+        every result they hold reaches the relay database first. A site server that never had a client
+        would wait for its first one, so it is stopped outright.
+        """
+        self.cluster.autoscaler.stop()
+        scheduler = self.server.scheduler
+        if scheduler is not None and scheduler.is_alive():
+            scheduler.stop()
+        if self.server.heartmonitor.machine.startup_phase:
+            log.debug('No site client ever connected - stopping relay-local server')
+            self.server.stop(wait=True)
+        self.cluster.join()
 
     def finish_upstream(self: RelayThread) -> None:
         """Stop pulling, then end the upstream registration.
@@ -273,12 +364,14 @@ class RelayThread(Thread):
         return scheduler is not None and scheduler.ident is not None and not scheduler.is_alive()
 
     def stop(self: RelayThread, wait: bool = False, timeout: int = None) -> None:
-        """Stop the puller, the relay-local server (if it started) and the heartbeat, then this thread."""
+        """Stop the puller, the site (if it started), the returner and the heartbeat, then this thread."""
         log.warning('Stopping')
         if self.puller is not None:
             self.puller.stop(wait=wait, timeout=timeout)
-        if self.server.ident is not None:
-            self.server.stop(wait=wait, timeout=timeout)
+        if self.cluster.ident is not None:
+            self.cluster.stop(wait=wait, timeout=timeout)
+        if self.returner is not None:
+            self.returner.stop(wait=wait, timeout=timeout)
         if self.heartbeat is not None:
             self.heartbeat.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
@@ -294,7 +387,8 @@ DEFAULT_UPSTREAM_PORT: Final[int] = config.relay.upstream.port
 APP_NAME = 'hs relay'
 APP_USAGE = f"""\
 Usage:
-  hs relay [-h] [-H ADDR] [-p NUM] [--no-tls] [--bind ADDR] [--port NUM] [--database PATH]
+  hs relay [-h] [-H ADDR] [-p NUM] [--no-tls] [--zone NAME] [-N NUM] [--launcher CMD]
+           [--launcher-args ARGS] [--bind ADDR] [--port NUM] [--database PATH]
 
   Run relay for one site.\
 """
@@ -307,6 +401,10 @@ APP_HELP = f"""\
   there, and returns their results upstream. It asks upstream only for as many tasks as
   its site has room for, and confirms them once they are stored in its database.
 
+  The site runs no retries: a task that fails there goes back upstream as it ended, and
+  the upstream server decides whether to run it again. Results go back attributed to the
+  client at the site that ran them, and are kept in the relay database until handed over.
+
   The upstream key comes from the configuration ([relay.upstream] auth), never from the
   command line.
 
@@ -318,6 +416,10 @@ Options:
   -H, --upstream-host ADDR  Hostname of upstream server (default: {DEFAULT_UPSTREAM_HOST}).
   -p, --upstream-port NUM   Port of upstream server (default: {DEFAULT_UPSTREAM_PORT}).
       --no-tls              Disable TLS to upstream server (not recommended).
+      --zone          NAME  Zone this relay serves (default: the default zone).
+  -N, --size          NUM   Number of clients kept launched at the site (default: {DEFAULT_RELAY_SIZE}).
+      --launcher      CMD   Command prefix that launches each client (default: none).
+      --launcher-args ARGS  Extra arguments for the launcher.
       --bind          ADDR  Bind address of relay-local server (default: {DEFAULT_RELAY_BIND}).
       --port          NUM   Port of relay-local server (default: {DEFAULT_RELAY_PORT}).
       --database      PATH  Path to relay database (default: <lib>/relay/<host>.db).
@@ -342,6 +444,18 @@ class RelayApp(Application):
 
     no_tls: bool = False
     interface.add_argument('--no-tls', action='store_true')
+
+    zone_option: Optional[str] = None
+    interface.add_argument('--zone', default=zone_option, dest='zone_option')
+
+    size: int = DEFAULT_RELAY_SIZE
+    interface.add_argument('-N', '--size', type=int, default=size)
+
+    launcher: str = DEFAULT_RELAY_LAUNCHER
+    interface.add_argument('--launcher', default=launcher)
+
+    launcher_args: str = DEFAULT_RELAY_LAUNCHER_ARGS
+    interface.add_argument('--launcher-args', default=launcher_args)
 
     bind: str = DEFAULT_RELAY_BIND
     interface.add_argument('--bind', default=bind)
@@ -391,7 +505,14 @@ class RelayApp(Application):
                                  upstream=upstream_config(self.upstream_host, self.upstream_port, self.no_tls),
                                  zone=self.zone,
                                  upstream_bundlesize=config.relay.upstream.bundlesize,
-                                 heartrate=config.relay.upstream.heartrate)
+                                 heartrate=config.relay.upstream.heartrate,
+                                 size=self.size,
+                                 launcher=self.launcher,
+                                 launcher_args=[self.launcher_args] if self.launcher_args else None,
+                                 num_threads=config.relay.num_threads,
+                                 template=config.relay.template,
+                                 client_timeout=config.relay.timeout or None,
+                                 retention=config.relay.retention)
         try:
             thread.join()
         except Exception:
@@ -406,11 +527,18 @@ class RelayApp(Application):
             log.warning('Using default upstream key - do not use this in production!')
         if self.no_tls or not config.relay.upstream.tls.get('enabled', True):
             log.warning('TLS to upstream server is disabled - this is not recommended for production!')
+        if self.size < 0:
+            raise ArgumentError(f'Site size must not be negative (given {self.size})')
+        try:
+            shlex.split(self.launcher_args or '')
+            shlex.split(self.launcher or '')
+        except ValueError as error:
+            raise ArgumentError(f'Invalid launcher ({error})') from error
 
     @functools.cached_property
     def zone(self: RelayApp) -> Optional[str]:
-        """Name of the zone this relay serves, from `[relay] zone` (None is the default zone)."""
-        value = config.relay.get('zone', None)
+        """Name of the zone this relay serves, from `--zone` or `[relay] zone` (None is the default zone)."""
+        value = self.zone_option if self.zone_option is not None else config.relay.get('zone', None)
         if value in (None, '', PARAM_UNSET):
             return None
         try:

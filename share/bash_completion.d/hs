@@ -613,10 +613,13 @@ function _hs_client() {
 function _hs_relay() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -H --upstream-host -p --upstream-port --no-tls --bind --port --database"
+	local all_opts="-h --help -H --upstream-host -p --upstream-port --no-tls --zone -N --size
+	--launcher --launcher-args --bind --port --database"
 
 	case "${previous}" in
 		--database) COMPREPLY=($(compgen -f -- "${current}")); return ;;
+		--launcher) COMPREPLY=($(compgen -c -- "${current}")); return ;;
+		--zone | -N | --size | --launcher-args) return ;;
 		--bind)     COMPREPLY=($(compgen -W "0.0.0.0 localhost 127.0.0.1" -- "${current}")); return ;;
 		--port)     COMPREPLY=($(compgen -W "$(hs config get relay.port --raw 2>/dev/null)" -- "${current}")); return ;;
 		-H | --upstream-host) COMPREPLY=($(compgen -W "$(_hs_known_hosts)" -- "${current}")); return ;;

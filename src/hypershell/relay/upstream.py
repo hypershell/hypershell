@@ -10,7 +10,9 @@ puller asks for work under that identity with the stock work-request text, never
 site can take: while the tasks it holds and has not finished reach the bound (its connected site
 clients times the relay-local bundle size) it does not ask. A received bundle is inserted into the
 relay database in one transaction and confirmed upstream only after that transaction commits. The
-heartbeat keeps each identity registered upstream.
+returner moves completed site rows into the relay's outbox and hands them back upstream, as a client
+returns its results, each matched upstream against the assignment it answers; a result is marked
+returned only once its put has returned. The heartbeat keeps each identity registered upstream.
 
 Example:
     >>> from hypershell.relay.upstream import upstream_identity
@@ -20,7 +22,7 @@ Example:
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Callable, Dict, List, Optional, Final
+from typing import Any, Callable, Dict, List, Optional, Tuple, Final
 
 # Standard libs
 import json
@@ -28,6 +30,7 @@ import time
 import functools
 import threading
 from enum import Enum
+from datetime import datetime, timedelta
 from uuid import UUID, uuid5
 from queue import Full as QueueFull
 
@@ -52,8 +55,10 @@ from hypershell.relay import store
 # Public interface
 __all__ = ['upstream_identity', 'upstream_config', 'request_text', 'read_reply', 'RelayInsertError',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
+           'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
            'HeartbeatState', 'UpstreamHeartbeat', 'UpstreamHeartbeatThread',
-           'DEFAULT_UPSTREAM_BUNDLESIZE', 'DEFAULT_UPSTREAM_HEARTRATE', 'DEFAULT_REQUEST_WAIT', 'INSERT_ATTEMPTS']
+           'DEFAULT_UPSTREAM_BUNDLESIZE', 'DEFAULT_UPSTREAM_HEARTRATE', 'DEFAULT_REQUEST_WAIT', 'INSERT_ATTEMPTS',
+           'DEFAULT_RETENTION', 'DEFAULT_RETURN_BUNDLEWAIT']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -73,6 +78,15 @@ INSERT_ATTEMPTS: Final[int] = 3
 
 HEARTBEAT_WAIT_STEP: float = 1.0
 """Longest single wait between heartbeats, in seconds, so the machine re-enters often."""
+
+DEFAULT_RETENTION: Final[int] = config.relay.retention
+"""Default seconds a returned result is kept in the relay database before it is pruned."""
+
+DEFAULT_RETURN_BUNDLEWAIT: Final[int] = config.relay.bundlewait
+"""Default seconds the relay waits before returning results regardless of size."""
+
+PRUNE_INTERVAL: float = 60.0
+"""Longest time in seconds between prunes of returned results (shorter with a shorter retention)."""
 
 
 def upstream_identity(zone: Optional[str], instance: str = INSTANCE) -> str:
@@ -265,6 +279,171 @@ class UpstreamPullerThread(Thread):
     def stop(self: UpstreamPullerThread, wait: bool = False, timeout: Optional[int] = None) -> None:
         """Stop machine."""
         log.debug('Stopping (puller)')
+        self.machine.halt()
+        super().stop(wait=wait, timeout=timeout)
+
+
+class ReturnerState(State, Enum):
+    """Finite states of the upstream returner."""
+    START = 0
+    COLLECT = 1
+    SEND = 2
+    MARK = 3
+    FINAL = 4
+    HALT = 5
+
+
+class UpstreamReturner(StateMachine):
+    """
+    Hand completed site results back upstream through the relay's durable outbox.
+
+    Each cycle moves completed rows into the outbox in one transaction, then sends the oldest pending
+    results as one bundle once there are `bundlesize` of them or `bundlewait` seconds have passed since
+    the last send. A bundle is marked returned only after its put returns; a put that does not return
+    leaves it pending, to be sent again. Returned results are pruned after `retention` seconds. Told to
+    flush, it sends whatever it holds at once and ends once nothing is left.
+    """
+
+    queue: Any
+    engine: Engine
+    bundlesize: int
+    bundlewait: float
+    poll: float
+    retention: float
+
+    sent: List[Tuple[str, str]]
+    previous_send: float
+    previous_prune: float
+    flushing: bool
+
+    state = ReturnerState.START
+    states = ReturnerState
+
+    def __init__(self: UpstreamReturner, queue: Any, engine: Engine,
+                 bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, bundlewait: float = DEFAULT_RETURN_BUNDLEWAIT,
+                 poll: float = 1, retention: float = DEFAULT_RETENTION) -> None:
+        """Initialize with the upstream connection and the relay database."""
+        self.queue = queue
+        self.engine = engine
+        self.bundlesize = max(1, int(bundlesize))
+        self.bundlewait = bundlewait
+        self.poll = poll
+        self.retention = retention
+        self.sent = []
+        self.previous_send = time.monotonic()
+        self.previous_prune = time.monotonic()
+        self.flushing = False
+        self.wake = threading.Event()
+
+    @functools.cached_property
+    def actions(self: UpstreamReturner) -> Dict[ReturnerState, Callable[[], ReturnerState]]:
+        return {
+            ReturnerState.START: self.start,
+            ReturnerState.COLLECT: self.collect,
+            ReturnerState.SEND: self.send,
+            ReturnerState.MARK: self.mark,
+            ReturnerState.FINAL: self.finalize,
+        }
+
+    def start(self: UpstreamReturner) -> ReturnerState:
+        """Jump to COLLECT state."""
+        log.debug('Started (returner)')
+        return ReturnerState.COLLECT
+
+    def collect(self: UpstreamReturner) -> ReturnerState:
+        """Move completed rows into the outbox, then send a bundle when one is due."""
+        flushing = self.flushing  # atomic
+        try:
+            if moved := store.collect_results(self.engine):
+                log.debug(f'Holding {moved} completed tasks for return')
+            self.prune()
+            pending = store.pending_results(self.engine, limit=self.bundlesize)
+        except SQLAlchemyError as error:
+            log.error(f'Failed to collect completed tasks - trying again ({error})')
+            self.wake.wait(self.poll)
+            return ReturnerState.COLLECT
+        if not pending:
+            if flushing:
+                return ReturnerState.FINAL
+            self.wake.wait(self.poll)
+            return ReturnerState.COLLECT
+        waited = time.monotonic() - self.previous_send
+        if flushing or len(pending) >= self.bundlesize or waited >= self.bundlewait:
+            self.sent = pending
+            return ReturnerState.SEND
+        self.wake.wait(min(self.poll, self.bundlewait - waited))
+        return ReturnerState.COLLECT
+
+    def prune(self: UpstreamReturner) -> None:
+        """Delete returned results older than the retention, at most once per prune interval."""
+        if time.monotonic() - self.previous_prune < min(PRUNE_INTERVAL, self.retention):
+            return
+        self.previous_prune = time.monotonic()
+        before = datetime.now().astimezone() - timedelta(seconds=self.retention)
+        if pruned := store.prune_returned(self.engine, before=before):
+            log.debug(f'Pruned {pruned} returned results')
+
+    def send(self: UpstreamReturner) -> ReturnerState:
+        """Put the bundle upstream, as a client returns its results."""
+        bundle = ('[' + ', '.join(record for _, record in self.sent) + ']').encode('utf-8')
+        try:
+            self.queue.completed.put(bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
+        except QueueFull:
+            return ReturnerState.SEND
+        self.previous_send = time.monotonic()
+        return ReturnerState.MARK
+
+    def mark(self: UpstreamReturner) -> ReturnerState:
+        """Mark the bundle just put returned."""
+        try:
+            marked = store.mark_returned(self.engine, self.sent)
+        except SQLAlchemyError as error:
+            log.error(f'Failed to mark {len(self.sent)} results returned - trying again ({error})')
+            self.wake.wait(self.poll)
+            return ReturnerState.MARK
+        log.debug(f'Returned {len(self.sent)} results upstream' +
+                  ('' if marked == len(self.sent) else f' ({len(self.sent) - marked} superseded meanwhile)'))
+        self.sent = []
+        return ReturnerState.COLLECT
+
+    def finalize(self: UpstreamReturner) -> ReturnerState:
+        """Stop returning."""
+        log.debug('Done (returner)')
+        return ReturnerState.HALT
+
+    def flush(self: UpstreamReturner) -> None:
+        """Send whatever is held at once, then stop once nothing is left."""
+        self.flushing = True
+        self.wake.set()
+
+    def halt(self: UpstreamReturner) -> None:
+        """Halt, ending any wait at once."""
+        super().halt()
+        self.wake.set()
+
+
+class UpstreamReturnerThread(Thread):
+    """Run the upstream returner within a dedicated thread."""
+
+    def __init__(self: UpstreamReturnerThread, queue: Any, engine: Engine,
+                 bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, bundlewait: float = DEFAULT_RETURN_BUNDLEWAIT,
+                 poll: float = 1, retention: float = DEFAULT_RETENTION) -> None:
+        """Initialize machine."""
+        super().__init__(name='hypershell-relay-returner')
+        self.machine = UpstreamReturner(queue=queue, engine=engine, bundlesize=bundlesize, bundlewait=bundlewait,
+                                        poll=poll, retention=retention)
+
+    def run_with_exceptions(self: UpstreamReturnerThread) -> None:
+        """Run machine."""
+        self.machine.run()
+
+    def flush(self: UpstreamReturnerThread) -> None:
+        """Return whatever is held, then stop."""
+        self.machine.flush()
+
+    def stop(self: UpstreamReturnerThread, wait: bool = False, timeout: Optional[int] = None) -> None:
+        """Stop machine, leaving whatever is not yet returned pending."""
+        log.debug('Stopping (returner)')
         self.machine.halt()
         super().stop(wait=wait, timeout=timeout)
 
