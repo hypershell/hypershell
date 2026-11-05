@@ -101,7 +101,9 @@ reconnect path at all, so one coordinator blip terminates the whole fleet; and c
 results die with whichever process was holding them. One invariant covers all three: **a transient
 failure of the coordinator path degrades to retry-with-backoff, never to process death and never to
 lost results.** Clients park unsent results and redeliver on reconnect, which closes the ack window
-rather than documenting it as a hazard.
+rather than documenting it as a hazard. The end goal is that any node (server, client or relay) can
+be bounced without bringing the system down and recovers gracefully, behind one retry/backoff
+mechanism; not before SC26.
 
 *Horizon: near-term · Depends on: — · Refs: relay R9 is verbatim this machinery — build it once here
 and the relay's upstream connector inherits it; shares the `data/core.py` provider seam with turso*

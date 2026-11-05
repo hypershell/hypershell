@@ -81,6 +81,31 @@ as a hazard. Operators see retries in the log as events, not as crashes.
 - **R8** — Every blocking operation introduced SHALL keep the finite-timeout, re-enter-the-state
   discipline `AGENTS.md` requires of FSM states; shutdown latency SHALL NOT regress.
 
+## Clarifications
+
+- **2026-11-04: the maintainer's goal, stated directly.** Put the whole connection side of the
+  application behind **one unified retry and backoff mechanism**: client to server, relay to
+  upstream, live submit, and any other place a process talks to a coordinator. A server that hangs or
+  goes away must never halt a client. The client stays up and healthy, reconnects in a loop with
+  jittered backoff, and gives up only at a configured ultimate timeout or attempt limit. **The end
+  state: any node in the cluster (server, client or relay) can be bounced without bringing the
+  system down, and recovers gracefully.** Not before SC26.
+- **2026-11-04: interaction with result writeback (#70).** Today a server restart
+  runs `revert_interrupted`, which clears every in-flight row's `schedule_time`. A client that
+  reconnects and delivers a result it finished during the outage is then refused as **stale** by
+  #70's `(id, schedule_time)` fence, and the task runs again. "Bounce the server without loss"
+  therefore needs a recovery window. Candidate approach: on start, the server holds its in-flight
+  rows for a grace period, lets reconnecting clients reclaim their assignments or deliver their
+  results under the original stamp, and reverts only what nobody claims. The shaping must decide
+  this; it is the difference between at-least-once with re-runs and a true graceful bounce.
+- **2026-11-04: a starting point exists.** The relay cycle (`spec/relay/`) builds
+  `core/reconnect.py` `UpstreamLink`: upstream calls on a worker thread with a deadline, a split
+  between transport errors (retry) and fatal errors, full-jitter backoff from 1 s to 60 s that
+  stays responsive to halt, and a durable outbox redelivered on reconnect. It was planned so that
+  this feature can lift it into the shared mechanism rather than start over.
+- **2026-11-04: related.** The Linux `TCP_NODELAY` finding (each new connection used to cost about
+  40 ms on Linux) matters here, because reconnect loops multiply connection setup.
+
 ## Notes
 
 - **`relay` inherits this directly.** `relay` R9 is verbatim this machinery — "WHILE the upstream
