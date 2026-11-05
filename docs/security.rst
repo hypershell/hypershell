@@ -71,7 +71,7 @@ channel:
    through the queue. Task ``stdout`` and ``stderr`` do *not* — they are written to disk
    on the client (locally, or on a shared filesystem if one is configured) and retrieved
    on demand over SFTP via :class:`~hypershell.core.remote.SSHConnection` when the
-   operator runs ``hs task info --stdout`` or similar. Without transport encryption, the
+   operator runs ``hs info --stdout`` or similar. Without transport encryption, the
    metadata that *does* flow over the queue (including the authentication handshake) is
    readable on the wire.
 
@@ -129,9 +129,10 @@ TLS.
 
 The :class:`hypershell.core.queue.SecureManager` class selects this serializer when an active
 :class:`hypershell.core.tls.TLSConfig` is supplied. If TLS is disabled (or no configuration
-is found), ``SecureManager`` is byte-for-byte equivalent to a stock ``BaseManager`` with
-the default ``pickle`` serializer, so cleartext deployments remain supported for
-constrained environments.
+is found), ``SecureManager`` selects the ``'hypershell-plain'`` serializer instead. Its pair is
+the stock listener and client, with ``TCP_NODELAY`` set on each TCP connection where the
+platform allows it. The framing, the handshake, and every byte on the wire are those of a stock
+``BaseManager``, so cleartext deployments remain supported for constrained environments.
 
 |
 

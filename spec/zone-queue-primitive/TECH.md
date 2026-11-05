@@ -3,11 +3,11 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_progress
+status: done
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P7
-last_updated: '2026-11-03'
+current_phase: done
+last_updated: '2026-11-05'
 phases:
 - id: P1
   name: 'In-process serve loop: no manager child, clean shutdown and port release'
@@ -93,21 +93,21 @@ phases:
 - id: P7
   name: 'Multi-node drive, run B: collect and judge the external evidence against
     2.8.3'
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on:
   - P6
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: bc2ed5258a6ca5244ff0f78ad200fa6672fa5d41
-  verdict: changes-requested
+  last_reviewed_commit: c84a4eedea2dfc2f8e5e1ba201e864526c63add4
+  verdict: approved
   blocked_reason: ''
-  cycle: 6
+  cycle: 11
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 
@@ -803,6 +803,147 @@ stdio. This is the core, small and novel slice: everything else builds on it.
       passed, 4 skipped** (the first-instruction and scheduled-elsewhere tests); 3.13.18 and 3.14.10
       **566 passed, 3 skipped** each (scheduled-elsewhere, and the stale-entry test: no stale entry).
       No gate was restarted.
+- **Build note (2026-11-04): develop merged; two queue tests adapted to #72's IPv4-only TLS dial.**
+  `0fc0577` merges develop at `0e8275e` (#72 TLS dial, #73 writeback statements, #74 group advance).
+  #72 has `secure_client` dial over an `AF_INET` socket (`setblocking`, then `connect(address)`)
+  instead of `socket.create_connection`; the merge keeps Z1's `_mark()`/`_unmark()` around that dial
+  and the TLS handshake. Two of this cycle's tests had stood on `create_connection`, and both failed
+  5/5 on 3.12.16 at `0fc0577`. The foreman ruled them test-only adaptations, with no `src/` change.
+  - [x] **`test_finalizer_hands_off_only_server_side`.** Its spy on `socket.create_connection`, which
+        the client no longer calls, now wraps `socket.socket.connect` for the dialed address and
+        records there whether the thread is marked. The assertion is unchanged: the TLS dial runs
+        marked.
+  - [x] **`test_multi_address_name_never_stalls` (C9).** The patched resolver no longer reaches the
+        dial, since `connect` resolves the name natively (`gaierror`). The probe now also wraps
+        `socket.socket.connect`, sending a connect to `queue-multi-address.test` to that name's second
+        address (`127.0.0.1`, where the server binds), and records each one. Clients still reach the
+        server through a name rather than the bound literal. The probe asserts that every such
+        connect went there, and prints a count that the test asserts. The no-stall assertion is
+        unchanged, since the thread rule covers the case whatever the address. The docstrings that
+        said the client tries each address now describe the IPv4-only dial.
+  - **Red/green (3.12.16, scratch copies of the merged tree).** With the `_mark()` before the dial
+    removed from `secure_client`, the rule test fails at the TLS-dial entry (`[True, True, False]`).
+    With the connect rewrite left out, the C9 test fails in round 0 with #72's `gaierror`. With the
+    probe dialing `127.0.0.1` in place of the name, it fails on the rewrite assertion. On the merged
+    tree, both pass.
+  - **C9 source:** none is left that serves only multi-address dialing. The address match was
+    removed in the review-5 remediation, and `src/` has no `getaddrinfo`, `gethostbyname` or
+    `create_connection`.
+- **CI-found remediation (Linux, 2026-11-04; finding, ruling and Linux evidence in
+  [`REVIEW.md`](REVIEW.md)).** PR #76's CI hung in `tests/test_queue_gc.py`'s TLS stall probes on all
+  four Pythons. The cause is Nagle's algorithm with Linux delayed ACK: no queue socket set
+  `TCP_NODELAY`, so the handshake's write-write-read cost every new connection about 40 ms. P1 was
+  reopened under the foreman's ruling: set `TCP_NODELAY` on every queue socket, on both ends, plain
+  and TLS, through the smallest seam, with no wire change.
+  - [x] **Red first** (`tests/test_queue.py::test_connections_disable_nagle`, TLS on and off). A live
+        `QueueServer` and `QueueClient` round-trip one item; the test reads `TCP_NODELAY` on the
+        client proxy's connection and on the server's one remaining live connection (under the
+        server's lock). At `9f36de4` (Python 3.12.16) both cases fail on the client-side assertion.
+  - [x] **Fix** (`core/queue.py`). `_no_delay(sock)` sets the option on `AF_INET`/`AF_INET6` stream
+        sockets only and ignores `OSError`. TLS: on the raw socket in `SecureListener.accept` before
+        the handshake, and in `secure_client` before `connect`. Cleartext: `SecureManager` selects a
+        new `PLAIN_SERIALIZER` (`hypershell-plain`) when TLS is off, registered in `listener_client`
+        like `hypershell-tls`. Its pair is `_PlainListener` (the stock `Listener`, setting the option
+        on each accepted connection, before the server's handshake) and `_plain_client` (the stock
+        `Client` without `authkey`, the option, then the stock `answer_challenge`/`deliver_challenge`).
+        Both reach the stock connection's socket through a duplicated descriptor. The serializer key
+        never crosses the wire; framing and handshake are the stock ones. The `_INTERNALS` registry
+        check also requires the new key. `AGENTS.md` gains one bullet under Queue transport.
+  - **Gate record (macOS; frozen offline dev venvs, lock unchanged since `f45a5cf`, run against a
+    `git archive` extract with this change applied and its `src` first on the path; each run in an
+    isolated site, in its own process group under a kill timer).**
+    - **Red/green.** Red at `9f36de4`: 2 failed (TLS and plain). Green: 2 passed on 3.12.16 and on
+      3.14.10. Mutations on the green tree: without the server-side option (both `accept`s), 2 fail
+      on the server assertion; without the client-side option (both clients), 2 fail on the client
+      assertion.
+    - **`tests/test_queue_address_family.py`, 3.12.16:** 8 passed.
+    - **`tests/test_queue_gc.py` + `tests/test_queue.py`, 3.12.16, 5 consecutive runs:** 52 passed
+      each (55.3 s, 45.7 s, 55.3 s, 55.3 s, 47.4 s).
+    - **Full suite:** 3.12.16 769 passed, 79 skipped (8 min 12 s); 3.14.10 766 passed, 82 skipped
+      (8 min 4 s). Cycle 8's counts plus the two new cases; the skips are the same (a server
+      database, the 2.8.3 fixture regeneration, and on 3.14 three Z1 probes by design).
+    - **`unsupported_internals()`:** `[]` on 3.12.16 and 3.14.10 (`test_shared_checks_pass`).
+    - **CLI drive** (`hsx -t 'echo {}' -N4` over `seq 200`, TLS on and then `--no-tls`, in a throwaway
+      site on a free port), 3.12.16 and 3.14.10: 200 output lines each run, `hs list --count` 400,
+      `hs list --failed --count` 0, exit 0.
+  - **Not covered locally:** the Linux timing, which was not measured on this host. The foreman
+    re-runs the Linux check on the test cluster, and CI is the final proof. No timing assertion was
+    added.
+- **Remediation (review cycle 9; findings in [`REVIEW.md`](REVIEW.md), the foreman's rulings: F1
+  MEDIUM and F2 LOW accepted, `_INTERNALS` out of scope).** P1 was reopened for both.
+  - [x] **Red first** (`tests/test_queue.py`, a `default_timeout` fixture that sets
+        `socket.setdefaulttimeout(30)` and restores the previous value in a `finally`):
+        - `test_roundtrip_under_default_timeout[no-tls|tls]`: the existing round trip over all four
+          queues, server and client in one process (body shared with `test_roundtrip` through a
+          `roundtrip` helper);
+        - `test_plain_listener_under_default_timeout`: the server end alone. `_PlainListener` accepts
+          a stock blocking `Client` with an authkey; the accepted descriptor must stay blocking, then
+          the manager server's handshake order and one reply;
+        - `test_plain_client_under_default_timeout`: the client end alone. `_plain_client` against a
+          stock `Listener` without an authkey; the descriptor must stay blocking, then one echo;
+        - `test_no_delay_connection_keeps_blocking_mode[blocking|non-blocking]`: after
+          `_no_delay_connection`, the descriptor's mode is the one it had, and the option is set.
+
+        At `696f24d`'s source, on 3.12.16 and 3.14.10: 4 failed (`[no-tls]` round trip with
+        `BlockingIOError`, the listener and client tests, `[blocking]`), 2 passed (`[tls]` and
+        `[non-blocking]`, the controls).
+  - [x] **F1 fix** (`core/queue.py` `_no_delay_connection`). The duplicate's blocking mode is read
+        with `os.get_blocking` before the socket object is built on it, and put back with
+        `os.set_blocking` in a `finally` before the duplicate closes. The mode belongs to the shared
+        open file description, so the connection's own descriptor gets it back. No wire change.
+  - [x] **F2 fix.** `docs/security.rst`: cleartext `SecureManager` selects `hypershell-plain`, the
+        stock pair with `TCP_NODELAY`, and the wire is the stock one. `AGENTS.md` (Queue transport):
+        the option is set on every TCP connection where the platform allows it; the client writes
+        twice before a read, the server only under TLS 1.3; the cleartext pair puts back the
+        blocking mode. `_no_delay`'s docstring no longer says both ends write twice.
+  - **Gate record (macOS; the frozen offline dev venvs, lock unchanged since `f45a5cf`; worktree
+    `src` first on the path; isolated site; each run in its own process group under a kill timer).**
+    - **Red/green.** Red as above. Green: 8 passed (the 6 new cases and `test_connections_disable_nagle`)
+      on 3.12.16 and on 3.14.10.
+    - **Mutation.** Only the restore removed (`_no_delay(sock)` without the `try`/`finally`): the
+      same 4 fail, 2 pass, on 3.12.16. Restore forced to blocking (`os.set_blocking(fd, True)`):
+      `[non-blocking]` fails, 5 pass.
+    - **`tests/test_queue.py tests/test_queue_gc.py tests/test_queue_address_family.py`:** 3.12.16
+      66 passed (62.6 s); 3.14.10 63 passed, 3 skipped (50.1 s). Cycle 9's counts plus the 6 cases.
+    - **Full suite, 3.12.16:** 775 passed, 79 skipped (7 min 56 s). Cycle 9's 769 plus 6; same skips.
+    - **CLI drive** (`hsx -t 'echo {}' -N4` over `seq 200`, TLS on and then `--no-tls`, throwaway
+      site, free port), 3.12.16 and 3.14.10: 200 lines each run, `hs list --count` 400,
+      `hs list --failed --count` 0, exit 0; `unsupported_internals()` `[]`.
+    - **No base test modified:** `git diff --diff-filter=M --name-only b61dbbe -- tests/` is empty.
+- **CI-found remediation (2026-11-05; the foreman's ruling).** PR #76's CI at `229ded8`, whose only
+  change since the green run at `1e79da6` was a spec-only stamp, failed one test on 3.13 and 3.14:
+  `tests/test_groups.py::test_group_parallel_execution_within_group`, "Expected > 10s for parallel
+  execution, took 9.7s" (9.8 s on 3.14). The test predates this branch. Its timing assertion was a
+  lower bound on the whole run (`elapsed > 4 + 3*2`), which measures startup and the backoff between
+  groups, not parallelism; with `TCP_NODELAY` connections are faster, and a Linux run can land just
+  under 10 s. The assertion was miscalibrated; the code does not regress. P1 was reopened under the
+  ruling: assert the two properties the test exists for, from the database, with no wall-clock bound.
+  - [x] **Test** (`tests/test_groups.py`). A helper, `task_intervals()`, reads each task's group,
+        `start_time` and `completion_time` with `hs list … --json` (the pattern of `task_times` in
+        `tests/test_group_order.py` and the #53 de-flake's authoritative DB state). The test asserts
+        four groups of two tasks; **(a)** within each group the two run intervals overlap
+        (`max(starts) < min(ends)`); **(b)** for consecutive groups, the last completion of the lower
+        precedes the first start of the higher. The rc, sorted-stdout, group-transition and
+        per-task log checks are kept. The `time.time()` bound is removed; no hang guard was added,
+        since `main` has no timeout and a check after the run could not catch a hang.
+  - [x] **Docs, review cycle 10 P1 LOW.** `docs/security.rst`: the cleartext pair sets `TCP_NODELAY`
+        on each TCP connection "where the platform allows it", as `AGENTS.md` says (`_no_delay_connection`
+        returns early where a connection has no descriptor, as on Windows).
+  - **Base test modified, by ruling.** This is the first change on the branch to a test that predates
+    it: `git diff --diff-filter=M --name-only b61dbbe -- tests/` now lists `tests/test_groups.py`.
+  - **Gate record (macOS; the frozen offline dev venvs, worktree `src` first on the path; isolated
+    site; each run in its own process group under a perl kill timer).**
+    - **Discrimination** (scratch `git archive` copies, not committed), 3.12.16. With `-N1` in place
+      of `-N8`: fails on (a), "Group 1 ran serially" (second start 0.4 ms after the first
+      completion). With `Task.increment_group` advancing to `previous_group + 1` instead of holding a
+      group with incomplete tasks: (a) holds, fails on (b), "Group 2 started before group 1
+      completed".
+    - **The test, 3.12.16:** 20/20 consecutive runs pass (15.0–18.0 s each). **3.14.10:** 5/5 pass.
+    - **`tests/test_groups.py`:** 11 passed on 3.12.16 (68.2 s) and on 3.14.10 (63.1 s).
+    - **Full suite, 3.12.16:** 775 passed, 79 skipped (10 min 40 s, beside the loops above). Review
+      cycle 9's counts; same skips.
+  - **Not covered locally:** the Linux runners. CI is the proof; the new assertions carry no timing
+    threshold to miss.
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
@@ -814,7 +955,10 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   `tests/test_queue_start.py`, `ROADMAP.md` and three seeds in `issues/`; review-5 remediation
   `tests/test_queue_gc.py`, `AGENTS.md`, `ROADMAP.md`, one new seed and two amended seeds in `issues/`;
   review-6 remediation `tests/test_queue_gc.py`, `tests/test_queue.py` and `AGENTS.md`; the C10
-  quick-review follow-up the same three.
+  quick-review follow-up the same three; the develop merge's adaptation `tests/test_queue_gc.py`; the
+  CI-found remediation `src/hypershell/core/queue.py`, `tests/test_queue.py` and `AGENTS.md`; the
+  review-9 remediation the same three and `docs/security.rst`; the second CI-found remediation
+  `tests/test_groups.py` and `docs/security.rst`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1
@@ -1021,14 +1165,44 @@ external wait.
 **Goal:** commit the foreman's multi-node results as evidence and show unchanged results and
 throughput against 2.8.3, using `b819de6` as the attribution control.
 
-- [ ] If `spec/zone-queue-primitive/evidence/cluster/` is absent: `set_phase.py --phase P7
+- [x] If `spec/zone-queue-primitive/evidence/cluster/` is absent: `set_phase.py --phase P7
       --status blocked` with `blocked_reason: "awaiting multi-node evidence (run B)"`. Stop.
-- [ ] Check that the evidence is sanitized: no host names, user names, accounts, partitions or site
+      (Not needed: the evidence arrived before P7 ran, so P7 was never blocked.)
+- [x] Check that the evidence is sanitized: no host names, user names, accounts, partitions or site
       paths. If any is found, stop and ask; don't scrub silently.
-- [ ] Run `compare.py`. Write a short `evidence/cluster/SUMMARY.txt` with the per-config table,
+- [x] Run `compare.py`. Write a short `evidence/cluster/SUMMARY.txt` with the per-config table,
       median, spread and verdict for each label, and the footprint peaks.
-- [ ] On a regression at high N only, don't tune in-cycle. Record it and escalate to the foreman.
-      This is PLAN §5's main risk.
+- [x] On a regression at high N only, don't tune in-cycle. Record it and escalate to the foreman.
+      This is PLAN §5's main risk. (None: the feature's gap to 2.8.3 is smaller at N=256 than at
+      N=16.)
+- **Harness (foreman's note, verbatim).**
+
+  > One job on a test cluster: 4 whole nodes; the server on node 0 bound to 16 CPUs; clients on nodes 1–3, one executor each, cyclic; TLS on; SQLite; 10,000 tasks per run (halved from 20,000 so 18 runs fit the 1-hour limit), every 100th failing; bundle size 1 both ways. The harness is Z1's own `tests/cluster/drive.sh` at `f45a5cf`. Archives built by `build_archive.sh` with Python 3.13: `2.8.3` = `4d5771b`, `b819de6` = develop before writeback, `feature` = `f45a5cf` (Z1's final head, with develop through #75 merged). Labels interleaved within each (N, rep). All 18 runs exited 0 with 0 incomplete. Earlier runs on a second test cluster during review (1-CPU server binding, pre-#73 code) are superseded by this one and not used.
+
+- **Built notes.**
+  - **Evidence.** 18 run directories (labels `2.8.3`, `b819de6` and `feature`; N=16 and N=256; 3
+    reps each), holding only `server.json` and `client-*.json` (2,466 files). They were delivered
+    already scrubbed and are committed unchanged.
+  - **Sanitising re-check: clean.** Every key belongs to the drive's schema. The only string
+    values are the labels, run ids, the role, client indexes, `hypershell` (2.8.3, 2.9.0a1 and
+    2.9.0a2, matching each ref's `pyproject.toml`), `python` (3.13.18) and `start_method` (fork).
+    All files are ASCII, every `run_id` matches its directory, and a grep for site paths, domains,
+    `@`, scheduler terms and site names finds nothing.
+  - **Verdict: PASS (exit 0).** Results are identical across all 18 runs (`{"0": 9900, "3":
+    100}`). On p10–p90 medians, the feature is −3.2 tasks/s (−1.8%) against 2.8.3 at N=16 and
+    −2.5 (−1.4%) at N=256, inside a tolerance of 8.8 and 8.6 (the 5% floor binds). The control
+    `b819de6` is −4.9% and −5.1% against 2.8.3, so the feature is +5.3 and +6.3 tasks/s above it.
+    Footprint: tree children 0 vs 1, tree FDs 58 vs 84 (N=16) and 779 vs 803 (N=256). The table is
+    in `evidence/cluster/SUMMARY.txt`. The foreman's quick read (−0.9% and −0.7%) matches the
+    means: the full-span mean at N=16, and either mean at N=256. `compare.py` judges p10–p90
+    medians.
+  - **Matrix narrower than the P6 hand-back.** That hand-back asked for N ∈ {16, 128, ≥256 up to the
+    ceiling} with M ≥ 20000. This run has N ∈ {16, 256} with M = 10000, for the reason in the
+    foreman's note. GOAL R9's multi-node clause (unchanged results and throughput against 2.8.3)
+    is met, but PLAN §5's main risk, near the ~1,000-client ceiling, is tested only up to N=256.
+  - **Verify substitution.** `uv run` could not take the uv cache lock in the build sandbox. The
+    verify ran as `python tests/cluster/compare.py …` (the same arguments) under a frozen
+    standalone Python 3.13.18 venv. `compare.py` is standard library only.
 - **Verify:** the frontmatter command (`compare.py … --baseline 2.8.3 --candidate feature --control
   b819de6` exits 0).
 - **Touches:** `spec/zone-queue-primitive/evidence/cluster/` (new data only).

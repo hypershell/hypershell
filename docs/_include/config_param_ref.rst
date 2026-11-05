@@ -522,7 +522,7 @@
 
     ``.theme``
         Color scheme to use by default in output (default: `monokai`), such as with
-        ``hs info`` and ``hs search``.
+        ``hs info`` and ``hs list``.
 
         This option is passed to the `rich <https://rich.readthedocs.io/en/latest/>`_ library.
 

@@ -49,4 +49,7 @@ too long to ever spawn is caught at submit time, not on some node an hour later.
   scale, and a two-pass read of a huge task file may be unacceptable.
 - Sequence after `issues/submit-comment-truncation.md` — same ingest path, and that fix changes what
   "malformed" means.
+- Overlap: `issues/submit-refuses-lower-group.md` adds a validate-then-insert pass to `hs submit`
+  (all-or-nothing refusal of a task below the reached group, buffering piped input in full) on
+  this same ingest path. Whichever lands second must keep both contracts.
 - Found by: GNU Parallel comparison review, 2026-08 (M9, L6).

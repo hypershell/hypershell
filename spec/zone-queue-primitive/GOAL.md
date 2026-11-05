@@ -135,6 +135,10 @@ motivation only; nothing in this GOAL depends on it.
 - **Note (for `hs-plan`):** a remote client's blocking `get(timeout=…)` now holds a manager
   handler thread in the server process, alongside the scheduler, receiver, and heartbeat threads.
   R9 is the check that this does not cost throughput.
+- **2026-11-05 — R8: one existing test rewritten, by foreman ruling (SC26 run).**
+  - **Test:** `test_group_parallel_execution_within_group` asserted a wall-clock *floor* (`elapsed > 10 s`). That floor measured the scheduler's backoff between groups, not a stated behaviour. This branch's faster connections (TCP_NODELAY) put Linux CI runs at 9.7–9.8 s.
+  - **Change:** the test now asserts what it is named for, from task times in the database: the two tasks in each group overlap, and each group finishes before the next starts. The old test passed with one worker (`-N1`), so it never checked parallelism; the new one fails there.
+  - **Scope:** behaviour is unchanged, and no other existing test is modified. The cycle 11 review recorded this.
 
 ## Related materials
 

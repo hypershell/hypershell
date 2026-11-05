@@ -14,13 +14,14 @@ import json
 import hashlib
 from enum import Enum
 from uuid import UUID as PyUUID, uuid5
+from functools import cache
 from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, select
+from sqlalchemy import Column, Index, func, text, update, select, bindparam
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
+from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.types import Integer, Float, DateTime, Text, Boolean, JSON as JSON_TEXT
@@ -63,6 +64,15 @@ scheduler's failure and retry queries filter it out explicitly.
 
 REVERT_CHUNK: Final[int] = 500
 """Most ids bound in one conditional revert statement (well within SQLite's and PostgreSQL's limits)."""
+
+CONTENDED_RERUNS: Final[int] = 3
+"""Extra attempts for a task-row UPDATE that matched no row while the row still qualifies.
+
+On a TimescaleDB 2.29+ hypertable, an UPDATE that waited on another transaction's row lock can
+report 0 matched rows although the row exists and still satisfies the statement's condition. A
+new statement sees the other transaction's commit and matches normally, so a write that a fresh
+read shows still qualifies is re-run, at most this many times.
+"""
 
 DIRECT_SOURCE_ID: Final[str] = '00000000-0000-7000-8000-000000000000'
 """Reserved `Source` id for single command-line submissions (`hs submit '<cmd>'`)."""
@@ -305,11 +315,15 @@ class ResultOutcome(Enum):
     and its result columns were written. DUPLICATE means that same dispatch had already completed
     the row (a redelivered or repeated result). STALE means the row no longer belongs to that
     dispatch: it was reverted, rescheduled, completed by another dispatch, cancelled, or no
-    longer exists. A DUPLICATE or STALE result writes nothing.
+    longer exists. A DUPLICATE or STALE result writes nothing. DEFERRED means the row still
+    belongs to that dispatch and is not complete, but the write did not land within
+    `CONTENDED_RERUNS` re-runs, each having waited on another transaction's row lock; nothing
+    was written, and the caller may present the result again.
     """
     APPLIED = 1
     DUPLICATE = 2
     STALE = 3
+    DEFERRED = 4
 
 
 class Task(Entity):
@@ -645,6 +659,8 @@ class Task(Entity):
         Check the current group and increment if necessary with explanation.
         We assume all tasks in `previous_group` have already been scheduled (see Task.next()).
         A group is held while it has incomplete tasks or failures still awaiting retry.
+        The next group is the lowest group holding incomplete tasks, which may be lower than
+        `previous_group` when tasks are submitted late.
         """
         # Incomplete tasks are counted before retryable failures, so a result written back between
         # the two checks is always seen by the second. Retryable failures are counted before
@@ -675,16 +691,20 @@ class Task(Entity):
             return TaskGroupInfo(previous_group,
                                  f'at least {failed} tasks exceeding allowed retries, example: {example.id}',
                                  False)
-        next_group = (
-            Session.query(Task.group)
-            .order_by(Task.group)
-            .filter(Task.group > previous_group)
-            .first()
-        )
-        if not next_group:
+        # The next group is chosen in one query, so rows committed while the checks above ran are
+        # never skipped; it is lower than the previous group when tasks were submitted late.
+        next_group = cls.lowest_incomplete_group()
+        if next_group is None:
             return TaskGroupInfo(previous_group, f'no task groups remain')
+        elif next_group == previous_group:
+            return TaskGroupInfo(previous_group, f'new tasks submitted')
         else:
-            return TaskGroupInfo(next_group[0])
+            return TaskGroupInfo(next_group)
+
+    @classmethod
+    def lowest_incomplete_group(cls: Type[Task]) -> Optional[int]:
+        """The smallest group holding a task that has not completed, or None."""
+        return Session.query(func.min(cls.group)).filter(cls.completion_time.is_(None)).scalar()
 
     @classmethod
     def _filter_zone(cls: Type[Task], query: Query, zone: Optional[str]) -> Query:
@@ -831,11 +851,75 @@ class Task(Entity):
         )
 
     @classmethod
-    def revert_all(cls: Type[Task], ids: List[str]) -> None:
-        """Revert all tasks identified by `ids`."""
-        cls.update_all([{'id': id, **dict.fromkeys(cls.revert_columns)} for id in ids])
-        for id in ids:
+    @cache
+    def __row_statements(cls: Type[Task], names: Tuple[str, ...]) -> Tuple[Any, Any]:
+        """The UPDATE of one row by `id` for a set of columns, and the SELECT of that row's `id`.
+
+        Built once per column set, with binds typed from the table and prefixed names, as for the
+        result statements.
+        """
+        table = cls.__table__
+        by_id = table.c.id == bindparam('r_id', type_=table.c.id.type)
+        write = (
+            update(table)
+            .where(by_id)
+            .values({name: bindparam(f'r_{name}', type_=table.c[name].type) for name in names})
+        )
+        exists = select(table.c.id).where(by_id)
+        return write, exists
+
+    @classmethod
+    def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any],
+                     path: str, consequence: str) -> List[str]:
+        """Write the same `values` onto each task in `ids` by `id`, committing once; return the ids written.
+
+        Each row is its own UPDATE, so each has its own matched count. A row matched on the first
+        attempt costs that one statement. A row that matched nothing is looked up: a missing row
+        raises `StaleDataError` and nothing of the call is committed, as for a bulk update; a row
+        that still exists was missed because the write waited on another transaction's row lock,
+        and the write is re-run, at most `CONTENDED_RERUNS` times. A row still not written after
+        that is logged as a warning with the `consequence` and left as it is.
+        """
+        write, exists = cls.__row_statements(tuple(values))
+        params = {f'r_{name}': value for name, value in values.items()}
+        attempts = 1 + CONTENDED_RERUNS
+        landed = []
+        try:
+            for id in ids:
+                for attempt in range(1, attempts + 1):
+                    # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per row.
+                    if Session.execute(write, {**params, 'r_id': id}).rowcount == 1:
+                        landed.append(id)
+                        break
+                    if Session.execute(exists, {'r_id': id}).first() is None:
+                        raise StaleDataError(f'UPDATE statement on table \'{cls.__table__.name}\' expected to '
+                                             f'update 1 row(s); 0 were matched (task {id})')
+                    if attempt < attempts:
+                        log.debug(f'Re-running contended {path} write for task ({id}) '
+                                  f'(attempt {attempt + 1} of {attempts})')
+                else:
+                    log.warning(f'Contended {path} write did not land for task ({id}) '
+                                f'after {attempts} attempts - {consequence}')
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        log.trace(f'Updated {len(landed)} {cls.__table__.name}s')
+        return landed
+
+    @classmethod
+    def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str) -> List[str]:
+        """Record the client that confirmed the tasks identified by `ids`; return the ids recorded."""
+        return cls.__write_rows(ids, {'client_id': client_id, 'client_host': client_host},
+                                'confirm', 'client not recorded')
+
+    @classmethod
+    def revert_all(cls: Type[Task], ids: List[str]) -> List[str]:
+        """Revert all tasks identified by `ids`; return the ids reverted."""
+        reverted = cls.__write_rows(ids, dict.fromkeys(cls.revert_columns), 'revert', 'task left in flight')
+        for id in reverted:
             log.trace(f'Reverted previous task ({id})')
+        return reverted
 
     @classmethod
     def revert_staged(cls: Type[Task], ids: List[str]) -> int:
@@ -872,8 +956,10 @@ class Task(Entity):
     @classmethod
     def revert_interrupted(cls: Type[Task]) -> None:
         """Revert scheduled but incomplete tasks to unscheduled state."""
+        # A pass that reverts nothing ends the loop, so a row left in flight cannot be selected forever.
         while tasks := cls.select_interrupted(100):
-            cls.revert_all([task.id for task in tasks])
+            if not cls.revert_all([task.id for task in tasks]):
+                break
 
     @classmethod
     def cancel_all(cls: Type[Task], ids: List[str]) -> None:
@@ -907,8 +993,11 @@ class Task(Entity):
         one conditional UPDATE of the result columns, matching only while the row still has that
         `schedule_time` and no `completion_time`, so the check and the write are one atomic
         statement against a concurrent revert or reschedule. A result that matches nothing is
-        classified as a DUPLICATE (its own dispatch already completed the row) or STALE.
-        Returns one outcome per result, in order, and commits once for the whole list.
+        classified as a DUPLICATE (its own dispatch already completed the row) or STALE. A result
+        whose row still qualifies although its write matched nothing (the write waited on another
+        transaction's row lock) is re-run, at most `CONTENDED_RERUNS` times, and is DEFERRED if
+        it still has not landed. Returns one outcome per result, in order, and commits once for
+        the whole list.
         """
         outcomes = []
         try:
@@ -923,30 +1012,55 @@ class Task(Entity):
         return outcomes
 
     @classmethod
+    @cache
+    def __result_statements(cls: Type[Task]) -> Tuple[Any, Any, Tuple[Tuple[str, str], ...]]:
+        """The conditional UPDATE and classifying SELECT for one result, and the (column, bind) pairs.
+
+        Built once per process, so each result binds only its own values rather than building,
+        coercing and keying a new statement. Every bind takes the column's own type, so datetimes,
+        UUIDs and dialect variants are processed exactly as for a statement built from the values.
+        Bind names are prefixed, since SQLAlchemy reserves a column's own name in a SET clause.
+        """
+        table = cls.__table__
+        binds = tuple((name, f'r_{name}') for name in cls.result_columns)
+        same_dispatch = (table.c.id == bindparam('r_id', type_=table.c.id.type),
+                         table.c.schedule_time == bindparam('r_schedule_time', type_=table.c.schedule_time.type))
+        write = (
+            update(table)
+            .where(*same_dispatch, table.c.completion_time.is_(None))
+            .values({name: bindparam(key, type_=table.c[name].type) for name, key in binds})
+        )
+        dispatched = select(table.c.completion_time).where(*same_dispatch)
+        return write, dispatched, binds
+
+    @classmethod
     def __apply_result(cls: Type[Task], result: Task) -> ResultOutcome:
         """Conditionally write one result within the current transaction and classify it."""
         if result.schedule_time is None:
             # NOTE: comparing to None renders IS NULL, which would match a reverted row.
             return ResultOutcome.STALE
-        matched = Session.execute(
-            update(cls)
-            .where(cls.id == result.id,
-                   cls.schedule_time == result.schedule_time,
-                   cls.completion_time.is_(None))
-            .values({name: getattr(result, name) for name in cls.result_columns})
-            .execution_options(synchronize_session=False)
-        ).rowcount
-        if matched == 1:
-            return ResultOutcome.APPLIED
-        # NOTE: a cancel restamps schedule_time, so a cancelled row never matches here and its
-        # result is STALE; a run that itself exited with the cancel status value is a DUPLICATE.
-        completed = Session.execute(
-            select(cls.id)
-            .where(cls.id == result.id,
-                   cls.schedule_time == result.schedule_time,
-                   cls.completion_time.isnot(None))
-        ).first()
-        return ResultOutcome.DUPLICATE if completed is not None else ResultOutcome.STALE
+        write, dispatched, binds = cls.__result_statements()
+        dispatch = {'r_id': result.id, 'r_schedule_time': result.schedule_time}
+        values = {key: getattr(result, name) for name, key in binds}
+        values.update(dispatch)
+        attempts = 1 + CONTENDED_RERUNS
+        for attempt in range(1, attempts + 1):
+            # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per result.
+            matched = Session.execute(write, values).rowcount
+            if matched == 1:
+                return ResultOutcome.APPLIED
+            # NOTE: a cancel restamps schedule_time, so a cancelled row never matches here and its
+            # result is STALE; a run that itself exited with the cancel status value is a DUPLICATE.
+            found = Session.execute(dispatched, dispatch).first()
+            if found is None:
+                return ResultOutcome.STALE
+            if found[0] is not None:
+                return ResultOutcome.DUPLICATE
+            # The row is still in flight under this dispatch, so the write waited on a row lock.
+            if attempt < attempts:
+                log.debug(f'Re-running contended result write for task ({result.id}) '
+                          f'(attempt {attempt + 1} of {attempts})')
+        return ResultOutcome.DEFERRED
 
     @classmethod
     def select_orphaned(cls: Type[Task], client_id: str, limit: int) -> List[Task]:
@@ -964,8 +1078,10 @@ class Task(Entity):
     @classmethod
     def revert_orphaned(cls: Type[Task], client_id: str) -> None:
         """Revert orphaned tasks from an evicted client to unscheduled state."""
+        # A pass that reverts nothing ends the loop, so a row left in flight cannot be selected forever.
         while tasks := cls.select_orphaned(client_id, 100):
-            cls.revert_all([task.id for task in tasks])
+            if not cls.revert_all([task.id for task in tasks]):
+                break
 
     @classmethod
     def latest_server(cls: Type[Task]) -> Optional[str]:

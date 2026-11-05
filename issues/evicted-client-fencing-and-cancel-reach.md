@@ -26,7 +26,7 @@ the client returns, the Issue-#29 re-registration branch silently un-evicts it
 (`server.py:588-593`) without reconciling the tasks reverted out from under it.
 
 **Cancel never reaches a running process.** `Task.cancel_all` stamps rows terminal
-(`model.py:700-714`, correctly, so reverts cannot resurrect them) and `hs task update --cancel`
+(`model.py:700-714`, correctly, so reverts cannot resurrect them) and `hs update --cancel`
 warns about already-scheduled tasks (`task.py:1059`), but nothing signals any client. The process
 runs to completion and its writeback races the CANCEL row.
 
@@ -39,14 +39,14 @@ Deferred deliberately rather than fixed: both halves need a server→client cont
 **`zone`'s request-return dispatch RPC is that seam** (`zone` R3/R4 — a client advertises
 identity and receives a targeted reply on its own connection). Building a control channel now and
 again in `zone` means building it twice, on the load-bearing untested transport, and then
-reconciling them. The corruption half of H1 is being closed independently and without new
-transport in `issues/writeback-scoped-conditional.md`; what remains here is genuinely blocked on
-the dispatch work.
+reconciling them. The corruption half of H1 was closed independently and without new
+transport by `writeback-scoped-conditional` (#70, `spec/writeback-scoped-conditional/`); what remains
+here is genuinely blocked on the dispatch work.
 
 ## Outcome / vision
 
 Eviction is a two-sided event: the server can tell an evicted client to stop, and a client that
-returns from a partition reconciles rather than silently resuming. `hs task update --cancel`
+returns from a partition reconciles rather than silently resuming. `hs update --cancel`
 reaches the running process. Duplicate concurrent execution stops being reachable through routine
 operational events.
 
@@ -70,6 +70,6 @@ operational events.
   need `zone` at all.
 - `issues/process-group-signal-teardown.md` R5 wants a remote-stop path for cluster teardown. Same
   question, possibly the same mechanism — decide once.
-- Related: `issues/writeback-scoped-conditional.md` (the half already being fixed),
+- Related: `spec/writeback-scoped-conditional/` (#70, the half already fixed),
   `issues/zone.md` (the dependency).
 - Found by: GNU Parallel comparison review, 2026-08 (H1, M4).

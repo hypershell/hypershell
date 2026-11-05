@@ -25,10 +25,9 @@ See the deferral table in [`AGENTS.md`](AGENTS.md) for which lane a deferral bel
 prerequisites the feature cycles depend on rather than merely being urgent — those dependencies are
 named in each entry. Horizons are indicative; the stated dependencies are the hard constraints.
 
-Some seeds cite maintainer-local records under `.local/` — `IMPROVEMENTS.md` for the GNU Parallel
-comparison's finding ids (H\*, M\*, L\*), `timescale-ideas-transcript.txt` for the TimescaleDB notes.
-That directory is gitignored: the named review and the ids are stable, the paths are not resolvable
-from a clone.
+Some seeds cite a maintainer-local record under `.local/`: `IMPROVEMENTS.md`, for the GNU Parallel
+comparison's finding ids (H\*, M\*, L\*). That directory is gitignored: the named review and the
+ids are stable, the path is not resolvable from a clone.
 
 ---
 
@@ -57,7 +56,7 @@ it is in. A task whose argument line is `2026-11-02` or `20261102`, an ordinary 
 the client as a datetime, template expansion fails on it, and the task is recorded as a template
 error without running. Decoding by declared column type, not by guessing, removes the class.
 
-*Horizon: near-term · Depends on: — · Refs: found by the writeback fix's research*
+*Horizon: near-term · Depends on: — · Refs: found by `writeback-scoped-conditional`'s research*
 **Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md)
 
 ## Unguarded task start kills the executor and poisons the task
@@ -70,29 +69,6 @@ never got the same treatment.
 
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/task-start-spawn-guard.md`](issues/task-start-spawn-guard.md)
-
-## Result writeback is last-writer-wins over every column
-
-A returning result rewrites *every* column from the client's wire copy of the row — including
-`schedule_time`, `attempt`, `retried`, and the retry-chain links. Combined with the fact that an
-evicted client is never told to stop, a stale bundle can stamp a row "done" while another client is
-still running that command. Scoping the write to result columns and making it conditional on the
-row's owner and in-flight state closes the corruption without needing any new transport.
-
-*Horizon: near-term · Depends on: — · Refs: prerequisite for relay (R5/R6 inherit the return path)*
-**Seed:** [`issues/writeback-scoped-conditional.md`](issues/writeback-scoped-conditional.md)
-
-## A late result can reopen a retried row
-
-One concrete path through the writeback hole above. An evicted client's late result writes
-`retried=False` and `next_id=None` back onto a row the scheduler has already retried, so the next
-`Task.next` writes a second retry row with the same `previous_id`. Only a pre-2.9 SQLite database,
-which keeps the old UNIQUE constraint, rejects it; anywhere else it is written silently. Found
-by reading, not yet reproduced; the seed asks for the test first. The scoped writeback probably
-closes it, in which case this retires with that cycle.
-
-*Horizon: near-term · Depends on: — · Refs: writeback fix (likely subsumes it)*
-**Seed:** [`issues/late-result-resets-retried.md`](issues/late-result-resets-retried.md)
 
 ## No process-group ownership; SIGTERM and Ctrl-C tear down without cleanup
 
@@ -125,10 +101,12 @@ reconnect path at all, so one coordinator blip terminates the whole fleet; and c
 results die with whichever process was holding them. One invariant covers all three: **a transient
 failure of the coordinator path degrades to retry-with-backoff, never to process death and never to
 lost results.** Clients park unsent results and redeliver on reconnect, which closes the ack window
-rather than documenting it as a hazard.
+rather than documenting it as a hazard. The end goal is that any node (server, client or relay) can
+be bounced without bringing the system down and recovers gracefully, behind one retry/backoff
+mechanism; not before SC26.
 
-*Horizon: near-term · Depends on: — · Refs: relay R9 is verbatim this machinery — build it once here
-and the relay's upstream connector inherits it; shares the `data/core.py` provider seam with turso*
+*Horizon: after SC26 · Depends on: — · Refs: the relay cycle builds the first instance of this machinery
+(relay R9, its upstream link); lift it into the shared mechanism here; shares the `data/core.py` provider seam with turso*
 **Seed:** [`issues/coordinator-resilience-retry-backoff.md`](issues/coordinator-resilience-retry-backoff.md)
 
 ## A client cut off partway through connecting hangs until evicted
@@ -203,6 +181,70 @@ untested; the seed asks for that test first.
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
+## Refuse a submission below the group the schedule has reached
+
+A `hs submit` into a group lower than the one an active schedule has already reached cannot keep
+the documented ascending order. After `group-advance-strands-lower-group`, such tasks run late with
+a warning. The maintainer wants them refused at submit time instead, all or nothing and with an
+error naming both groups. The same rule covers a task file run onto an advanced database
+(`--restart`, `--update`, `--repeat`). Pipes into `hs cluster`/`hs server` stay best effort. This is
+a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
+
+*Horizon: near-term · Depends on: `group-advance-strands-lower-group` (landed, #74) · Refs: overlaps
+`issues/ingest-robustness.md` (same ingest path)*
+**Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
+
+## A run fed by a pipe can stop before the pipe ends
+
+`hs cluster` and `hs server` given stream input can reach FINAL and exit 0 while the stream is
+still feeding tasks. Once the first bundle is scheduled, the stop branch no longer asks whether the
+submitter is still reading, so a pause in the input longer than the committed work ends the run
+and later tasks are never scheduled. `(echo 'echo a'; sleep 8; echo 'echo b') | hsx -N1` runs only
+`echo a`. File input is immune once it is submitted in full first. The likely fix is one conjunct
+on `develop`; 2.8.x lacks the submitter reference it needs. Pre-existing, and found by the plan of
+the group-order fix.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (PLAN §5 risk 1)*
+**Seed:** [`issues/stream-run-stops-before-input-ends.md`](issues/stream-run-stops-before-input-ends.md) · *status: unshaped*
+
+## An empty task file never finishes
+
+`hsx` given an empty task file on an empty database never exits: the server logs `Empty database -
+waiting for initial tasks` and waits for tasks that cannot arrive. The stop branch of
+`Scheduler.load_bundle` needs at least one task in the database, so a run that submits none on an
+empty database never reaches FINAL. The same holds before and after
+`group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 1)*
+**Seed:** [`issues/empty-task-file-hangs.md`](issues/empty-task-file-hangs.md) · *status: unshaped*
+
+## A "database is locked" error while a task file is read hangs the run
+
+On SQLite, when another connection holds the database locked while `hsx` or `hs cluster` submits a
+task file, the submitter's committer dies with `database is locked` and the run waits until it is
+killed. The loader then blocks on its full queue, so the server never gets past waiting for the
+submitter, and nothing passes the committer's error on to the exit status. The same holds before
+and after `group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
+**Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
+
+## A non-integer task group is accepted at submit time
+
+The inline `group:` tag, `-t group:…` and a `--from-json` record's `group` key accept any value.
+SQLite stores a non-integer one as text in the integer column, while PostgreSQL rejects it at
+insert. 2.8.3 runs text groups after every integer group. `group-advance-strands-lower-group`
+needed two guards in the scheduler against them, and `group:nan` is stored as NULL, which kills
+the committer on `NOT NULL` and hangs the run, before and after that fix. The maintainer wants an
+integer group enforced at submit time: a whole file read ahead and refused before anything is
+inserted, and on a pipe an error on just the offending line. This is a behaviour change, and
+whether it ships in a 2.8.x patch or 2.9 only is open. Pre-existing, and found by that cycle's
+review.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW
+cycles 2 and 3); same committer death as `issues/database-locked-during-ingest-hangs.md`*
+**Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
+
 ## Concurrent first submits can collide on the reserved source row
 
 `Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
@@ -229,12 +271,12 @@ a stance rather than an omission, and cross-host timing aggregates assume synchr
 
 Two symptoms of one gap: the server has no channel on which to say anything to a client. An evicted
 client is never told to stop, so a merely-partitioned node keeps executing while its tasks run
-elsewhere; and `hs task update --cancel` marks rows terminal without touching the process. Both need
+elsewhere; and `hs update --cancel` marks rows terminal without touching the process. Both need
 a server→client control path — and `zone`'s request-return dispatch surface is that seam, so this
 waits rather than building one twice.
 
-*Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half is closed
-separately by the writeback fix*
+*Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half was closed
+separately by `writeback-scoped-conditional` (#70)*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
 
 ## A task whose confirmation has not landed is invisible to orphan recovery
@@ -244,7 +286,7 @@ sets, and confirmations are not ordered against eviction. A client evicted befor
 is applied leaves its rows in flight with a NULL `client_id`, never reverted or redispatched; a late
 confirmation then names the already-evicted client. Either way the row waits until restart.
 
-*Horizon: mid-term · Depends on: — · Refs: writeback fix (same token); relay*
+*Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
 ## A late confirmation can overwrite the executing client's attribution
@@ -265,8 +307,20 @@ unconditional statement. A legitimate result committed in between is wiped and t
 with no sign to the operator. Making the revert conditional on the row still being in flight closes
 it.
 
-*Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
+*Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same shape); resilience*
 **Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
+
+## Contended Scheduler and `hs update` writes fail on a TimescaleDB hypertable
+
+On TimescaleDB 2.29+, a `task`-row UPDATE that waited on another writer's row lock matches 0 rows
+although the row still qualifies. The server's Confirm, revert and result writes now re-run in that
+case; the Scheduler's dispatch stamp and `retried` mark, `Task.cancel_all` and every `hs update`
+write do not. A contended stamp or mark exits the server mid-run (a late confirmation is an
+in-server contender), and an unmarked failed row would be retried twice; `hs update` reports a
+false "not found", commits partially, or silently skips rows.
+
+*Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); resilience*
+**Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: unshaped*
 
 ## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
 
@@ -383,6 +437,16 @@ database cannot add work to it.
 `spec/zone-dispatch/REVIEW.md` (cycle 1, F4; cycle 2, F6)*
 **Seed:** [`issues/queue-submit-database-server.md`](issues/queue-submit-database-server.md)
 
+## The server cannot listen on IPv6
+
+Both transports listen on IPv4 only, so a server is unreachable on an IPv6-only host or network and
+an IPv6 bind address fails. Not a fidelity defect, but recorded here because the TLS address-family
+fix aligns the client with the IPv4-only listener rather than widening it; dual-stack serving would
+have to move both ends together.
+
+*Horizon: long-term · Depends on: — · Refs: `spec/tls-client-address-family/`*
+**Seed:** [`issues/ipv6-server-listener.md`](issues/ipv6-server-listener.md)
+
 ## Merged output is interleave-corruptible
 
 Concurrent executors write to one shared file description with no line discipline, so long lines
@@ -423,14 +487,27 @@ does. Zones reduce how often this happens without fixing the mechanism.
 *Horizon: long-term · Depends on: — · Refs: —*
 **Seed:** [`issues/head-of-line-blocking.md`](issues/head-of-line-blocking.md)
 
+## Server CPU per task bounds throughput at small bundle sizes
+
+At bundle size 1, the server's main process runs its own scheduling, confirm and writeback
+statements for every task, and the evidence points at its CPU as the throughput ceiling.
+`writeback-prebuilt-update` recovers the writeback's share by building that statement once. The
+scheduler and confirm paths may carry the same per-call cost, and batching results across bundles
+is a further option.
+
+*Horizon: mid-term · Depends on: `writeback-prebuilt-update` (landed, #73; the measurement method) ·
+Refs: —*
+**Seed:** [`issues/server-per-task-statement-overhead.md`](issues/server-per-task-statement-overhead.md) · *status: unshaped*
+
 ---
 
 # Part II — The 2.9.0 feature cycle
 
-Four shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
+Three shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
 drafted R-IDs. They carry `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
-drifted, then adopt largely as written.
+drifted, then adopt largely as written. The last two entries are `unshaped` test-infrastructure
+seeds split out of shipped cycles.
 
 ## Zone-aware demand-driven dispatch on a lighter queue primitive
 
@@ -457,8 +534,8 @@ down). `hs relay` is a per-site service that is just a client upstream and a com
 inside — roughly 100 relays × 100 nodes behind ~100 upstream sockets. Security improves at scale:
 upstream credentials stop at the relay.
 
-*Horizon: mid-term · Depends on: zone (strictly) · Refs: leans on the scoped-writeback fix and
-inherits the resilience feature's reconnect/redelivery machinery as its R9*
+*Horizon: mid-term · Depends on: zone (strictly) · Refs: leans on the scoped writeback that
+`writeback-scoped-conditional` shipped (#70) and inherits the resilience feature's reconnect/redelivery machinery as its R9*
 **Seed:** [`issues/relay.md`](issues/relay.md) · *status: shaped*
 
 ## Turso provider, partition-attached listing, and S3 captured output
@@ -474,20 +551,6 @@ captured output from the execution host.
 relay's cross-site output non-goal*
 **Seed:** [`issues/turso.md`](issues/turso.md) · *status: shaped*
 
-## TimescaleDB provider: hypertables out of the box
-
-The `timescale` provider aliases exist and deliver nothing TimescaleDB-shaped — the schema comes up
-as plain PostgreSQL tables and the code says so at every startup. Since hypertables can partition
-directly on a UUIDv7 column, our primary key *is* the partition key, which makes HyperShell unusually
-well suited to it. An idempotent post-`create_all` pass converges the `task` table to a hypertable
-with compression and a policy, interrogating the environment rather than assuming it.
-
-*Horizon: mid-term · Depends on: soft — conforms to (or establishes) turso R4's per-provider seam ·
-Refs: **R1 is discharged** — `schema-upgrade-step` dropped the `previous_id`/`next_id` UNIQUE
-constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQLite databases keep
-them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
-**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: adopted:timescale*
-
 ## The whole test suite on a server database
 
 The suite runs on SQLite only. CI's PostgreSQL job runs three modules across five entries: the
@@ -501,6 +564,16 @@ TimescaleDB scenario module instead.
 
 *Horizon: mid-term · Depends on: — · Refs: split from `timescale` R9 (ruling 2026-11-02)*
 **Seed:** [`issues/server-db-test-suite.md`](issues/server-db-test-suite.md) · *status: unshaped*
+
+## A hung integration test costs the whole CI job timeout
+
+Integration tests run each command as a subprocess with no timeout and no per-test time limit, so
+a hang runs the CI job to its `timeout-minutes` and the log names no failing test.
+`group-advance-strands-lower-group` hit this with a hang in about 1–3% of grouped runs under load.
+A subprocess or per-test timeout would turn a hang into a fast, named failure.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/`*
+**Seed:** [`issues/integration-test-hang-timeout.md`](issues/integration-test-hang-timeout.md) · *status: unshaped*
 
 ---
 

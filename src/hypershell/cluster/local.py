@@ -262,6 +262,7 @@ class LocalCluster(Thread):
         """Start child threads, wait."""
         set_client_standalone(False)
         self.server.start()
+        self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         self.client.start()
         self.client.join()
         self.server.join()

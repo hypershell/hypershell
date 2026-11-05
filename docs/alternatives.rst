@@ -179,8 +179,8 @@ scope: each lives and dies inside a *single* allocation, with state kept in run-
 files (``.completed``, ``.tfin``, ``_status.txt``) rather than a cross-run catalog, and
 their workers are the fixed node set of the current job. *HyperShell* shares the same flat
 front door but runs a persistent server backed by a SQL database whose task catalog spans
-many runs and allocations, with history, tags, retries, and a ``task``/``submit``
-management CLI (``search``/``info``/``update``/``wait``) — and its clients elastically join
+many runs and allocations, with history, tags, retries, and a management
+CLI (``submit``/``list``/``info``/``update``/``wait``) — and its clients elastically join
 and leave rather than being pinned to one job. The bundlers are the right choice when one
 allocation and zero infrastructure is all you need; *HyperShell* when the workload outgrows
 a single job or you want a durable, queryable record.
@@ -229,7 +229,7 @@ Where *HyperShell* earns *its* keep, and where the two genuinely differ:
 
 * **State model.** *HyperShell* keeps a **SQL database in the loop** (SQLite or PostgreSQL):
   a persistent, directly SQL-queryable task catalog with cross-run history, ``key:value``
-  tags, and a rich ``task``/``submit`` CLI. HyperQueue keeps state in the running server's
+  tags, and a rich ``submit``/``list``/``update`` CLI. HyperQueue keeps state in the running server's
   memory and persists it *optionally* to an append-only binary **journal**; you inspect it
   by asking the live server over the CLI (with JSON output the docs mark unstable), not by
   querying a database. For workflows where the task catalog *is* the deliverable — auditing,
@@ -406,7 +406,7 @@ concepts (``nodes_per_block``, launchers, ``init/min/max_blocks``, ``parallelism
 the user as code to tune per site. That is real power for dependency-bearing, heterogeneous,
 multi-resource workflows — and real overhead for a flat command sweep. Its durable state is
 an *optional* SQLite monitoring sidecar, not a submit/search/update task catalog; there is no
-``task search``/``wait`` CLI over a database of record.
+``list``/``wait`` CLI over a database of record.
 
 But the sharpest distinction is architectural — and, importantly, it is *not* about scale.
 Node count is a red herring here: the headline ~250,000-worker figure belonged to Parsl's

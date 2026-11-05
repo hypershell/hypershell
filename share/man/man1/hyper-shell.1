@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Nov 02, 2026" "2.9.0a2" "hypershell"
+.TH "HYPER-SHELL" "1" "Nov 04, 2026" "2.9.0a3" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -869,6 +869,8 @@ Mutually exclusive with both \fB\-\-output\fP and \fB\-\-errors\fP\&.
 Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 .sp
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
+The timeout counts from when the client starts, after any \fB\-\-delay\-start\fP, so the delay
+does not count toward it.
 .TP
 .B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit (default: none).
@@ -1975,6 +1977,15 @@ exhausted), scheduling halts with a critical message; under \fB\-\-forever\fP th
 warns and waits for those tasks to be cleared or reverted (see \fBhs update\fP). Use
 \fB\-\-max\-retries\fP and \fB\-\-eager\fP to tune retry behavior within a group.
 .sp
+A task file given to \fBhs cluster\fP or \fBhs server\fP is read in full before scheduling begins, so
+its groups run in ascending order whatever order the file lists them in. Input on standard input
+or a pipe is scheduled as it arrives, which is best effort: a lower group that arrives after a
+higher group has started runs once the current group finishes, and \fIHyperShell\fP logs a warning
+naming both groups. The clients that \fBhs cluster\fP launches start once the file is read, so
+their \fB\-T\fP/\fB\-\-timeout\fP clock does not run while it is read. A client connected to
+\fBhs server\fP whose \fB\-T\fP/\fB\-\-timeout\fP is shorter than the time to read the file reaches that
+timeout and exits before any task is scheduled, and the server then waits for new clients.
+.sp
 Filter or update tasks by group with the \fB\-g\fP/\fB\-\-group\fP option of \fBhs list\fP and
 \fBhs update\fP\&.
 .SH CONFIGURATION
@@ -2192,8 +2203,10 @@ When provided, this takes precedence over and short\-circuits the individual
 .TP
 .B \fB\&.provider\fP
 Database provider (default: \(aqsqlite\(aq). Supported alternatives include
-\(aqpostgres\(aq (or compatible). Support for other providers may be considered in
-the future.
+\(aqpostgres\(aq (or compatible) and \(aqtimescale\(aq (alias \(aqtimescaledb\(aq), which is PostgreSQL
+with the TimescaleDB extension: \fBhs initdb\fP makes the task table a hypertable
+(requires the \fBuuid7\fP extra; see the TimescaleDB section of \fI\%database\fP).
+Support for other providers may be considered in the future.
 .TP
 .B \fB\&.file\fP
 Only applicable for SQLite provider.
@@ -2236,6 +2249,14 @@ e.g., \fBsqlite3\fP or \fBpsycopg\fP\&.
 .B \fB[pragmas]\fP
 Specify one or more pragmas to apply to database connections (SQLite only).
 For example \fBpragmas = { journal_mode = \(dqwal\(dq }\fP to enable WAL\-mode.
+.TP
+.B \fB[timescale]\fP
+Settings for the TimescaleDB shape \fBhs initdb\fP gives the task table (\fBtimescale\fP
+provider only; never forwarded to the connection). Keys: \fBchunk_interval\fP
+(default \fB\(dq1 week\(dq\fP), \fBcolumnstore\fP (\fBtrue\fP), \fBsegmentby\fP (\fB\(dqclient_id\(dq\fP),
+\fBorderby\fP (\fB\(dqid DESC\(dq\fP), \fBpolicy\fP (\fBtrue\fP), and \fBcompress_after\fP
+(\fB\(dq4 weeks\(dq\fP). For example \fBtimescale = { chunk_interval = \(dq1 day\(dq }\fP\&.
+See the TimescaleDB section of \fI\%database\fP\&.
 .TP
 .B \fB*\fP
 Any additional arguments are forwarded to the provider, e.g., \fBencoding = \(aqutf\-8\(aq\fP\&.
@@ -2676,6 +2697,12 @@ database = \(dqhypershell\(dq
 .EE
 .UNINDENT
 .UNINDENT
+.sp
+With the \fBtimescale\fP provider (alias \fBtimescaledb\fP) the database is PostgreSQL with the
+TimescaleDB extension, and \fBhs initdb\fP also makes the \fBtask\fP table a hypertable partitioned by
+its UUIDv7 \fBid\fP, with columnstore compression and a policy where the server\(aqs TimescaleDB edition
+and version support them. Every process that submits tasks then needs the \fBuuid7\fP extra.
+See the TimescaleDB section of the database documentation.
 .sp
 The \fBport\fP is assumed to be 5432 but can be specified. If a \fBuser\fP is given then so too must
 a \fBpassword\fP\&. The default \fIpublic\fP schema is assumed but can also be specified. Anything else
