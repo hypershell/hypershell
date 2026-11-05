@@ -7,7 +7,7 @@ status: in_progress
 branch: feature/relay
 base: develop
 current_phase: P3
-last_updated: '2026-11-04'
+last_updated: '2026-11-05'
 phases:
 - id: P1
   name: 'Late-confirm fence: a confirmation never rewrites a completed row''s attribution'
@@ -233,6 +233,8 @@ the zone cycles' **external wait** convention for P10:
   `blocked_reason: "awaiting develop with Z1 and Z2"` and stops (not counted against `attempts`).
 - Z2's own merge obligations (among them `revert_staged` through #75's contended-write helper) are
   Z2's; relay builds on the merged result and does not redo them.
+- **Met 2026-11-05.** `origin/develop` `c6869f2` (Z1 #76, Z2 #78) is merged in and every deferred P1
+  item is green; see *Merge round* after P2. P3 is unblocked.
 
 ### Deferred verify items (need zone code; run after the zone merge, before P3)
 
@@ -248,6 +250,9 @@ Until then each phase runs its verify **minus** these items, and records the sub
 | P6 | `tests/test_server_fsm.py`, `tests/test_zone_dispatch.py` | as P1; P6 runs after the zone merge in any case |
 
 `grep -q CONTENDED_RERUNS src/hypershell/data/model.py` is #75, present on the base, and runs.
+
+**Outcome (2026-11-05, merge round):** the three P1 items ran green on Python 3.12 and 3.14. The P3
+item runs with P3's gate; it already passes on the merged tree. The P6 items run with P6.
 
 ## Security-cycle overlap (binding in every phase; PLAN §2.8)
 
@@ -386,6 +391,45 @@ configured provider, and stops cleanly; nothing upstream yet.
 - **Touches:** `src/hypershell/core/config.py`, `src/hypershell/relay/`, `src/hypershell/__init__.py`,
   `src/hypershell/core/logging.py`, `docs/`, `share/`, `tests/test_relay_db.py`,
   `tests/test_main.py`, `tests/test_logging.py`.
+
+## Merge round — `origin/develop` `c6869f2` (2026-11-05)
+**Not a phase.** It brings Z1 (#76), Z2 (#78), #77 and the 2.8.4 back-merge onto relay and runs the
+deferred P1 verifies. P3 is not started here.
+
+- **Merge base** `ab16902` (2.9.0a3), not `bd2faf9` as the precondition records. The trees are
+  identical: `bd2faf9` is the 2.8.4 back-merge resolved wholly to develop's side. The merge commit
+  is signed; develop's `spec/` directories come in verbatim, and outside `spec/relay/` the merged
+  tree differs from `c6869f2` only by relay's own P1/P2 changes.
+- **Conflicts (2).** `ROADMAP.md`: relay's count-free Part II lead, `adopted:relay` status and
+  relay-topology entry kept; develop's #70 wording and its note on the two unshaped seeds taken.
+  `data/model.py`: the contended-write helper had grown two fences on one UPDATE, relay's
+  `open_only` (confirm) and Z2's `pending` (staged revert).
+- **The fence on develop's paths.** One `pending` fence now serves both. Under `pending` the UPDATE
+  matches only while `completion_time IS NULL`, and the zero-row look-up reads `completion_time` by
+  id, not `id` under the same filter, so one SELECT separates *gone* / *complete* / *still
+  pending*. *Complete* is settled (one DEBUG line, no re-run, no warning). *Pending* re-runs up to
+  `CONTENDED_RERUNS` (#75). *Gone* is skipped under `pending` and raises `StaleDataError` under
+  `pending, strict`. `confirm_all` passes `pending=True, strict=True`. `revert_staged`'s call is
+  unchanged (`pending=True`), and so are its outcomes and statement counts, which Z2's tests
+  pin. #70's `(id, schedule_time)` result writeback and #73's prebuilt statements are a separate
+  path and are not touched. Confirmations still reach the database only through `Confirm` →
+  `confirm_all`. Z2's staging and dispatch write no `client_id`, so no second confirm path exists.
+- **P2 against the new server.** No code change. `ServerThread`'s constructor kept every argument
+  relay passes. Zones arrive with clients, not the server, and Z1's queue server is built inside
+  `ServerThread`. The P2 stop order still holds: `HeartMonitor` keeps its start-up wait for a
+  first client. The relay database now also carries Z2's `zone` table, as every primary does.
+- **Gates (Python 3.12 / 3.14, venvs from `uv sync --frozen` on `PATH` in place of `uv run`):**
+  - Full suite: 925 passed, 85 skipped / 922 passed, 88 skipped; no failure.
+  - Relay, zone, dispatch, server-FSM, contended-write and writeback files: 180 passed, 35
+    skipped on 3.12 and the same on 3.14. The skips need a PostgreSQL server.
+  - P1 full verify, including the deferred items: guard ok, 78 passed, 8 skipped on each.
+  - P2 verify: 140 passed on each; `hs relay --help` ok; `bash -n`/`zsh -n` ok.
+  - `unsupported_internals()` returns `[]` on both.
+  - Loopback smoke, P2's shape: in a throwaway site on both versions, `hs relay --bind 127.0.0.1
+    --port <free>` listened, exited 0 on SIGUSR1 within 30 s, and left only the relay database
+    (`client, relay_result, relay_task, source, task, zone`). No primary was created.
+- **Touches:** `ROADMAP.md`, `src/hypershell/data/model.py` (both in the merge commit),
+  `spec/relay/TECH.md`.
 
 ## Phase P3 — Upstream pull
 **Satisfies:** R2, R3, R8, R17, R20 · **Depends on:** P2 · PLAN §2.2
