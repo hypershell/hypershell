@@ -23,3 +23,18 @@
 - **Skill cause:** The promotion and commit steps assume the public `issues/` lane. The security-lane sentence at the end of Step 4 covers the GOAL's content, not the bookkeeping.
 - **Recommended fix:** Add a security-lane variant: edit the `.security/` seed's status (and the `.security/ROADMAP.md` marker, if any) in the main checkout, never stage it, and name the edit in the Step 8 report.
 - **Confidence:** high · **Effort:** small
+
+## F3 — Research fan-out has no rule for security-lane cycles
+`origin=hs-plan:step-3 severity=medium category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The high-blast-radius exception required a research fan-out, written to
+  `spec/{slug}/research/`, which is public and committed. On a security-lane cycle the planner has
+  to decide by hand which findings may go in public briefs and which belong in `.security/`. The
+  run brief had to supply that rule.
+- **Skill cause:** Step 3 and Step 4 assume that every research finding can be published. Unlike
+  `AGENTS.md`'s security-lane rule, the skill never says where hidden-lane planning detail goes, or
+  that public briefs and `PLAN.md` describe only the hardened behaviour.
+- **Recommended fix:** Add a security-lane variant to Steps 3–4 and 8. When the GOAL has
+  `lane: security`, public briefs and `PLAN.md`/`TECH.md` state only the fixed behaviour and cite
+  `docs/security.rst` for anything before it. Rationale that names the exposure goes into the
+  `.security/issues/` seed (never staged), and the Step 9 report names that file by path.
+- **Confidence:** high · **Effort:** small
