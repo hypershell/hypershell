@@ -7,7 +7,7 @@ status: in_review
 branch: feature/zone-dispatch
 base: develop
 current_phase: done
-last_updated: '2026-11-04'
+last_updated: '2026-11-05'
 phases:
 - id: P1
   name: Zone schema and zone-filtered selection on the upgrade step
@@ -382,6 +382,81 @@ The plan gate is **passed** with these rulings and conditions.
   - Not rerun (prose and one unit test; the triage scoped the gates): the other Pythons, parity,
     skew, the local smoke, P4's Sphinx verify and P7's evidence.
 
+- **Merge of develop `50748c6` (2026-11-05).** `git merge --no-ff 50748c6` (develop: Z1 final as
+  the squash #76, #72 TLS dial, #73 prebuilt writeback statements, #74 group advance, #75
+  contended-write re-runs, #77 roadmap maintenance, the 2.8.4/2.9.0a3 release merges), signed, as
+  merge commit `4b63594`. Git's computed base, `b31c66e`, predates Z1, because #76 is a squash; the
+  resolution used `ec75169` instead, the Z1 state this branch last merged (`a040e1d`), which #76
+  contains. Against it seven files conflicted; `spec/zone-queue-primitive/*` merged to develop's
+  version byte for byte (foreman ruling 1), and the add/add test, bench and cluster files merged
+  cleanly. Every `src/` and `tests/` line of each side's own diff since `ec75169` is in the result,
+  except at the resolved spots below.
+  - `.github/workflows/tests.yml`: the PostgreSQL step runs both sides' modules,
+    `tests/test_contended_write.py` (#75) and `tests/test_zone_postgres.py`.
+  - `ROADMAP.md` (ruling 4): this cycle's two entries kept, then #72's IPv6 listener entry. #77's
+    retirements and its § Docs rule merged without a conflict, as did `AGENTS.md` and
+    `issues/zone.md`.
+  - `client.py`: `start()` keeps #74's idle-clock reset and returns `REQUEST`.
+  - `core/queue.py`, `tests/test_queue.py`: the import lists are the union. Z1's `TCP_NODELAY`
+    pair (`hypershell-plain`) and blocking-mode restore merged cleanly; the dispatcher proxy is a
+    registry proxy, so its connections take the same pair.
+  - `server.py` (ruling 2): #74's `next_tasks` takes the dispatcher's refills and loads each zone
+    from the current group. On an empty-database start the first group is still chosen across all
+    zones before any zone loads, and `mark_group_started` runs once a pass loads anything.
+  - `data/model.py`: imports and constants are the union; #75's per-row `revert_all` and
+    `confirm_all` replace the bulk revert, with the cleared columns from `Task.revert_columns`.
+- **Merge obligation discharged** (`d093c3f`; see *Merge obligations*). `Task.revert_staged` goes
+  through #75's per-row helper, which gains a `pending` condition: the UPDATE and the re-check
+  SELECT both require `completion_time IS NULL`. A write that matched nothing is re-run only while
+  the row still qualifies; a row completed, cancelled or deleted, before the pass or in the
+  transaction the write waited on, is skipped, never reverted and never an error. Without
+  `pending` the helper is unchanged. The pass is one transaction; `REVERT_CHUNK` goes.
+  `tests/test_dispatch_staged.py` is unmodified and passes. `AGENTS.md` and `invariants.md` name
+  `revert_staged` in the contended-write pattern.
+  - **Red first (SQLite fault injection, #75's approach).** Five tests in
+    `tests/test_contended_recovery.py`, whose `Contention` wrapper gains a hook that commits another
+    writer's change at the lost attempt: re-run lands; exhausted re-runs leave the row staged and
+    warn; a cancel committed meanwhile stays cancelled; a delete committed meanwhile is skipped; the
+    uncontended cost is one UPDATE per row. On the merge's bulk statement all 5 fail (no per-row
+    re-run). Against a naive routing that re-checks only existence (mutation, reverted), 4 fail: the
+    cancelled-meanwhile row is reverted, the deleted-meanwhile row raises `StaleDataError`, and so
+    does `test_revert_staged_leaves_terminal_and_missing_rows`. Green with the conditional helper.
+  - **Real race (CI).** `tests/test_contended_write.py` gains two tests: a staged revert that waited
+    on another write to its pending row reverts it; one that waited on a cancel leaves it
+    cancelled. No PostgreSQL server here, so they skip locally; CI's PostgreSQL and TimescaleDB
+    jobs run that module already. On TimescaleDB 2.29+ the first fails without this change.
+- **Gates on `d093c3f`** (macOS; frozen dev venvs from `uv sync --frozen --offline` against
+  standalone 3.12.16 and 3.14.10, from a `git archive` extract; every run in an isolated site, in
+  its own process group under a perl kill timer). `unsupported_internals() == []` on both.
+  - **Full suite**, side by side: 3.12.16 **893 passed, 84 skipped**; 3.14.10 **890 passed, 87
+    skipped**. Skips with no PostgreSQL server: test_upgrade_postgres 29, test_writeback_postgres
+    24, test_timescale 20, test_contended_write 7, test_zone_postgres 3; 1 is the 2.8.3 fixture
+    regeneration; on 3.14 also Z1's 3 queue probes in test_queue_gc. The two fork
+    `DeprecationWarning`s in `test_logging.py` are unchanged.
+  - **`test_queue.py` + `test_queue_gc.py` + `test_queue_address_family.py` + `test_groups.py`:**
+    3.12.16 81 passed; 3.14.10 78 passed, 3 skipped (the same probes).
+  - **Zone, dispatch, group-order and contended modules** (test_zone_{model,dispatch,workload,
+    display,postgres}, test_dispatch{,_version,_workload,_staged}, test_client_request,
+    test_cluster_compare, test_contended_recovery, test_group_order): 148 passed, 3 skipped
+    (test_zone_postgres) on each.
+  - **CLI drive** (3.14.10 extract, throwaway SQLite site, TLS on and off): `hs submit` of three
+    files (zones default, `--zone cpu`, `--zone gpu`; 2 groups × 20 tasks plus one first-attempt
+    failure each); `hs server --restart -r 1 -b 4`; clients `--zone cpu -b 3`, `--zone gpu`, and an
+    unzoned `-b 2`; then `seq 12 | hs cluster --zone gpu -N2`. Each run: every process rc 0; 138
+    rows, all complete; zones default 42, cpu 42, gpu 54; 3 retries, exit 0, each in its parent's
+    zone; every task ran on a client of its own zone; group 0 completed before group 1 was
+    scheduled. Logs show only the 3 expected non-zero exits (and TLS-off notices). PASS.
+  - Not rerun: 3.11 and 3.13, parity, skew, the local smoke (its archive build needs the package
+    index), P4's Sphinx verify and P7's evidence.
+- **Touches (merge round):** the merge brings develop's `src/hypershell/{client,server}.py`,
+  `core/queue.py`, `data/model.py`, `cluster/{local,remote,ssh}.py`, `tests/conftest.py`,
+  `tests/test_{contended_recovery,contended_write,group_order,groups,queue,queue_address_family,
+  queue_gc,writeback_postgres,writeback_statement}.py`, docs, man pages, `issues/`, `spec/`;
+  resolved by hand: `.github/workflows/tests.yml`, `ROADMAP.md`, `client.py`, `core/queue.py`,
+  `server.py`, `data/model.py`, `tests/test_queue.py`. Obligation: `data/model.py`,
+  `tests/test_contended_recovery.py`, `tests/test_contended_write.py`, `AGENTS.md`,
+  `.agents/factory/invariants.md`.
+
 ## Merge obligations
 
 - **`Task.revert_staged` under TimescaleDB ≥ 2.29** (review-2 triage, 2026-11-04; deferred to
@@ -396,6 +471,8 @@ The plan gate is **passed** with these rulings and conditions.
   (`completion_time IS NULL`), not merely whether it exists (the helper as planned raises
   `StaleDataError` for a missing row); the pass stays one transaction; and
   `tests/test_dispatch_staged.py` passes unmodified. Record the resolution in the merge commit.
+  **Discharged (2026-11-05):** `d093c3f`, recorded under *Build status* (merge of develop
+  `50748c6`), in its own commit after the merge commit `4b63594`, as the foreman ruled.
 
 ## Open rulings ([NEEDS CLARIFICATION])
 
