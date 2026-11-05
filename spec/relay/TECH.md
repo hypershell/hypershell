@@ -3,7 +3,7 @@ slug: relay
 title: 'HyperShell Relay: two-level scheduling across administrative sites'
 kind: feature
 appetite: big
-status: blocked
+status: in_review
 branch: feature/relay
 base: develop
 current_phase: P7
@@ -768,6 +768,17 @@ and disconnect with their relay; `count_connected` and the rate math stay correc
     `site` are the relay plus exactly the leaves in the relay database, `relay` = the identity,
     all disconnected at the end and none evicted (in failover, B's leaves were disconnected by
     B's eviction). Relays in the two-relay tests set `HYPERSHELL_RELAY_SITE` to their name.
+- **Known property (review cycle 2 note, recorded 2026-11-05):** any holder of the upstream key can
+  heartbeat a roster, and so re-attribute or disconnect client rows. That is no weakening of the trust
+  model: a key holder already has the full RPC. A cheap guard inside `HeartMonitor.update_roster` (the
+  scope this phase already touches) now applies a roster entry only to a client whose `relay` is NULL
+  or the sender; an entry naming another relay's site client is ignored, with a WARNING, and never
+  enters the sender's tracked roster, so that roster can neither re-attribute nor later disconnect it.
+  What the guard leaves: a forged roster can still adopt a row with no relay (an ordinary client not
+  beating at the time) and later disconnect what it adopted. *Test:*
+  `test_relay_roster.py::test_roster_never_takes_another_relays_leaf` (relay B's roster and an
+  ordinary client's both name relay A's leaf: it keeps A's site and relay, stays connected when it
+  drops out of theirs, and is disconnected only by A's). *Red:* `(None, <relay B>) == ('site-a', <relay A>)`.
 - **Verify:** see frontmatter.
 - **Red first (2026-11-05):** on the unmodified tree `tests/test_relay_roster.py` failed at
   collection (`ImportError: RosterEntry`). The extended `tests/test_relay_workload.py`, run against
@@ -956,6 +967,87 @@ No zone code (`core/dispatch.py`, `core/queue.py`, `client.py`, `server.py`) or 
   `tests/test_relay_db.py`, `tests/test_relay_launch.py`, `tests/test_relay_return.py`,
   `tests/test_relay_workload.py`. No completion change (no new option).
 
+## Review-2 remediation round (2026-11-05)
+**Not a phase.** It fixes the findings of review cycle 2 (`REVIEW.md`, at `e84ff17`), red first, on
+`a9d82e7`, under the foreman's rulings. P7 is not started. No `dispatch.py`, `queue.py`, `client.py` or
+`cluster/` edit; `server.py` only inside `HeartMonitor.update_roster` (P6's scope, for the optional
+roster guard). The key reaches no new place.
+
+- **C2-1 (dead relay-local receiver).** `RelayThread.check_site(stopping)` watches every thread of the
+  relay-local server and the site's autoscaler, from the relay's existing supervisor loops (period
+  `STOP_CHECK_INTERVAL`, 1 s): `wait_site` and `stop_site`. A thread that ended with a failure raises
+  it. On a clean stop the server's threads end in turn (scheduler, heart monitor, receiver, confirm,
+  the server thread), each only after the one before it, so one that has ended while an earlier one
+  still runs has died: `RelayPartEnded`. The autoscaler must run until the site is told to stop. In
+  `wait_site`, a returner or upstream heartbeat that ends without a failure is `RelayPartEnded` too.
+  Either way the relay takes the existing bounded failure path (B1/B2): `abort` stops every part once,
+  ends the site clients, sends no FINISHED, and the relay exits non-zero; upstream evicts it and
+  reverts. No `server.py` edit. *Tests:*
+  `test_relay_workload.py::test_relay_exits_and_ends_its_site_when_its_receiver_dies` (a relay process
+  whose `Task.apply_results` raises, marked a relay before import so it does not re-execute; two site
+  tasks running, then released: the relay exits non-zero within 30 s with the injected error, no site
+  client survives, no FINISHED; upstream, evict 10 s, evicts the identity and reverts every task it
+  held); unit tests in `test_relay_fsm.py` on stand-in threads (`test_site_check_*`,
+  `test_relay_wait_raises_a_part_that_died[receiver,returner,heartbeat]`,
+  `test_relay_stop_raises_a_site_thread_that_died_meanwhile`). *Red:* the process test, "relay still
+  running 30 seconds after its site returned results". *Mutations* (scratch copies of `src/`, all
+  killed): no `check_site` in `wait_site` (process and unit), no out-of-turn check, no failure join, no
+  `check_site` in `stop_site`, no autoscaler check, no `RelayPartEnded` for a clean returner/heartbeat end.
+- **C2-2 (`store_utc` unpinned).** `test_relay_workload.py::test_leaf_times_land_upstream_as_the_instants_they_were`:
+  the real `hs relay` start path, upstream and relay in `Asia/Kolkata`, site clients in
+  `America/Los_Angeles` (a launcher wrapper sets `TZ`); every upstream row has
+  `schedule_time <= start_time <= completion_time <= schedule_time + 5 min`. Passes on the source as
+  is. *Mutation:* without `store_utc(engine)` in `RelayApp.run` it fails, the leaf times 13.5 h before
+  the schedule time.
+- **C2-3 (drain handler unpinned).** `test_drain_signal_finishes_everything_the_relay_holds` now holds a
+  backlog the relay-local server has not staged: zone `shared`, site clients asking one task at a time
+  (a launcher wrapper rewrites `-b`), relay bundle size 6, so the pool stages one or two ahead; SIGUSR1
+  goes once both site tasks run and the relay database has received rows with no local
+  `schedule_time`. It asserts every received task completes upstream and is returned
+  (`relay_result` all `returned`), FINISHED, no eviction. *Mutation:* without
+  `install_drain_handlers()` it fails (received tasks left incomplete).
+- **C2-4 (config copy after SIGTERM).** Removed through the exit path, the signal's semantics kept:
+  `RelayApp.run` installs `install_terminate_handler()` (main thread); SIGTERM raises
+  `RelayTerminated` (a `BaseException`) there, so the relay ends as on SIGINT (`thread.stop()` →
+  `abort`: parts stopped once, site clients ended, no FINISHED; `release()` removes the copy), and
+  `RelayApp.main` then re-delivers SIGTERM with its default action (`end_by_signal`), so the process
+  still dies by SIGTERM (status −15). The handler resets SIGTERM to default first, so a second SIGTERM
+  ends the process at once. `relay_desc.rst` says when the copy is removed (finish, failure, SIGINT,
+  SIGTERM; only SIGKILL leaves it, and the next relay on that database to need one writes over it),
+  and that SIGINT/SIGTERM end the relay at once without draining, with its site clients; `hs relay
+  --help` says the latter. *Test:* `test_relay_ended_by_a_signal_removes_the_site_config_copy[SIGTERM,SIGINT]`
+  (status −15 / 4, copy gone, no site client left). *Red:* SIGTERM left the copy. *Mutations:* no
+  handler installed, and no re-delivery (status 0), both fail.
+- **C2-5 (internal phase in public docs).** `relay.upstream.evict_hint` is out of
+  `config_param_ref.rst`; the default stays in `core/config.py`; P8 has the item to document it.
+- **Roster note.** Recorded under P6 with the guard (added: trivial, inside `update_roster`).
+  *Mutation:* without the guard the new roster test fails.
+- **Verify / gates (2026-11-05;** venvs on `PATH`, each run under a process-group kill timer):
+  - **Red first:** on the source at `a9d82e7`, the C2-1 process test (relay alive at 30 s), the
+    SIGTERM case of the C2-4 test (copy left) and the roster-guard test failed for their finding's
+    reason; the C2-2, C2-3 and SIGINT tests pass there by design and are mutation-checked instead.
+  - Full suite, 3.12: 1063 passed, 85 skipped. 3.14: 1060 passed, 88 skipped (PostgreSQL and other
+    server-backed tests skip). A first 3.14 run failed the new C2-1 test once: it read the upstream
+    rows between the eviction mark and the revert (two statements); the test now waits for both. The
+    amended test passed on 3.12 alone and in the 3.14 re-run above.
+  - The seven relay test files three runs in a row on 3.14: 165 passed each time, no flake.
+  - `unsupported_internals()` is `[]` on 3.12 and 3.14.
+  - Loopback smokes (`temp_site.sh`, the review-1 scratch driver), 3.12 and 3.14: **one relay** (51 rows,
+    the failure `(3, attempt 1, retried)`, FINISHED, nothing stale, duplicate or evicted); **two relays
+    plus failover** (122 rows; B killed at 74 / 78 done holding 4 / 2; held rows completed at A; B
+    evicted once; no stale or duplicate; no key in output); **roster** (relay and 2 leaves at `site-a`
+    beside an old-style client, `count_connected` 3; 43 rows; all disconnected, none evicted).
+  - Docs: a Sphinx build outside the sandbox was not attempted (denied to the last reviewer). Inside
+    the sandbox the full build fails at `sphinx_sitemap` (it needs an AF_UNIX listener). With every
+    other configured extension (`-D extensions=…` without `sphinx_sitemap`), `-W --keep-going` gives
+    the same three warnings as `a9d82e7` (`manual.rst`, `cli/task_submit.rst`) and none from the
+    changed files; both changed includes parse under docutils (only Sphinx's `:ref:` role unknown).
+- **FSM:** top status `in_review` for the scoped review cycle 3; verdict and cycle left as cycle 2 set
+  them; `current_phase` stays P7.
+- **Touches:** `src/hypershell/relay/__init__.py`, `src/hypershell/server.py` (`HeartMonitor.update_roster`),
+  `docs/_include/relay_desc.rst`, `docs/_include/config_param_ref.rst`, `tests/test_relay_workload.py`,
+  `tests/test_relay_fsm.py`, `tests/test_relay_roster.py`, this file.
+
 ## Phase P7 — R21 run A: relay drive, smoke, hand back
 **Satisfies:** R21, R20 · **Depends on:** P5, P6 · PLAN §6; [04 §2](research/04-evidence-and-tests.md)
 **Goal:** a committed, site-neutral run script the foreman can run on a 4-node, 1-hour test
@@ -1006,6 +1098,9 @@ reconnection they are handed over; a relay restart loses nothing.
       and upstream, evict 600 s): partition after local completion, results land after restore;
       blackhole stall detected within the deadline; SIGKILL during a partition, restart on the same
       file, restore: unreturned rows land (APPLIED or DUPLICATE), none lost.
+- [ ] Document `relay.upstream.evict_hint` when implemented (`docs/_include/config_param_ref.rst`,
+      under `[relay.upstream]`). Review cycle 2 (C2-5) took it out of the public docs until then;
+      its default stays in `core/config.py`.
 - **From review cycle 1 (deferred here):**
   - *A5.* The site server's eviction period is fixed at 600 s: `cluster/remote.py` builds
     `AutoScalingCluster`'s `ServerThread` with no `evict_after`, so `[server] evict` never reaches the
@@ -1013,7 +1108,8 @@ reconnection they are handed over; a relay restart loses nothing.
     note). It predates this branch. Fix it here, after the hardening cycle's `cluster/remote.py`
     changes have merged (pass the evict period through, or compose the site server in relay).
   - *B8.* `relay.upstream.evict_hint` is read here (the `UpstreamLink` warning and the replay cut-off
-    below); the config reference says "used from P8" until then.
+    below). Since review cycle 2 the public config reference does not list it: document it when
+    implemented (the checklist item above).
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/core/reconnect.py`, `src/hypershell/relay/`,
   `tests/test_relay_link.py`, `tests/test_relay_outage.py`.

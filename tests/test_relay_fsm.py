@@ -5,7 +5,9 @@
 
 The puller, the returner and the heartbeat are stepped one action at a time against a fake upstream,
 and run in their threads to show a stop ends them within a deadline. A halted puller stops at its
-gate: a request it has already sent is inserted and confirmed first. The relay process itself is run
+gate: a request it has already sent is inserted and confirmed first. The relay watches its parts:
+a site or upstream thread that fails, or ends out of turn, is raised so the relay takes its failure
+path. The relay process itself is run
 against a queue server in this process standing in for the upstream server, with a launcher that
 starts no site client: it registers its zone identity there, pulls nothing while it has no site
 clients, and drains on SIGUSR1; against a server without the work-request protocol it exits with the
@@ -47,7 +49,8 @@ from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.queue import QueueServer, QueueConfig, PROTOCOL
 from hypershell.core.uuid import uuid
 from hypershell.data.model import Entity, Client, Task
-from hypershell.relay import store
+from hypershell.core.thread import Thread
+from hypershell.relay import store, RelayThread, RelayPartEnded
 from hypershell.relay.store import ensure_tables
 from hypershell.relay.upstream import (UpstreamPuller, UpstreamPullerThread, PullerState, UpstreamHeartbeat,
                                        UpstreamHeartbeatThread, HeartbeatState, UpstreamReturner,
@@ -454,6 +457,122 @@ def test_heartbeat_thread_sends_finished_and_ends() -> None:
     assert not thread.is_alive()
     states = [Heartbeat.unpack_or_none(queue.get_nowait()).state for _ in range(queue.qsize())]
     assert states == [ClientState.RUNNING, ClientState.FINISHED]
+
+
+# --- The relay's watch on its parts ---------------------------------------------------------------
+
+
+class Part(Thread):
+    """A stand-in for one of the relay's threads: it runs until ended, cleanly or with a failure."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name=name)
+        self.ending = threading.Event()
+        self.failure: Optional[Exception] = None
+
+    def run_with_exceptions(self) -> None:
+        self.ending.wait(DEADLINE)
+        if self.failure is not None:
+            raise self.failure
+
+    def end(self, failure: Optional[Exception] = None) -> None:
+        """End the thread (with `failure`, if given) and wait for it, without raising."""
+        self.failure = failure
+        self.ending.set()
+        threading.Thread.join(self, timeout=DEADLINE)
+        assert not self.is_alive()
+
+
+SITE_ORDER = ['scheduler', 'heartmonitor', 'receiver', 'confirm', 'server']
+"""Threads of the relay-local server in the order a clean stop ends them (the server thread last)."""
+
+
+@fixture
+def watched() -> Iterator[Tuple[RelayThread, Dict[str, Part]]]:
+    """A relay (not started) whose site and upstream parts are stand-in threads, all running."""
+    parts = {name: Part(f'part-{name}') for name in [*SITE_ORDER, 'autoscaler', 'puller', 'returner', 'heartbeat']}
+    for part in parts.values():
+        part.start()
+    server = parts['server']
+    for name in SITE_ORDER[:-1]:
+        setattr(server, name, parts[name])
+    relay = object.__new__(RelayThread)  # Only the watch is exercised; nothing is built or started.
+    relay.server = server
+    relay.cluster = SimpleNamespace(autoscaler=parts['autoscaler'], join=lambda timeout=None: time.sleep(0.01),
+                                    is_alive=lambda: True)
+    relay.puller, relay.returner, relay.heartbeat = parts['puller'], parts['returner'], parts['heartbeat']
+    try:
+        yield relay, parts
+    finally:
+        for part in parts.values():
+            part.end()
+
+
+@mark.unit
+def test_site_check_passes_a_running_site_and_a_clean_stop(watched) -> None:
+    """Nothing is raised while every part runs, nor as a clean stop ends the site's threads in turn."""
+    relay, parts = watched
+    relay.check_site()
+    parts['autoscaler'].end()
+    for name in SITE_ORDER:
+        parts[name].end()
+        relay.check_site(stopping=True)
+
+
+@mark.unit
+@mark.parametrize('ended, running', [('heartmonitor', 'scheduler'), ('receiver', 'heartmonitor'),
+                                     ('confirm', 'receiver'), ('server', 'confirm')])
+def test_site_check_raises_a_thread_that_ended_out_of_turn(watched, ended: str, running: str) -> None:
+    """A site thread that ends while the one before it still runs has died, stopping or not."""
+    relay, parts = watched
+    for name in SITE_ORDER[:SITE_ORDER.index(running)]:
+        parts[name].end()
+    parts[ended].end()
+    for stopping in (False, True):
+        with pytest.raises(RelayPartEnded, match=f'part-{ended} ended while part-{running} still runs'):
+            relay.check_site(stopping=stopping)
+
+
+@mark.unit
+@mark.parametrize('name', [*SITE_ORDER, 'autoscaler'])
+def test_site_check_raises_the_failure_that_ended_a_thread(watched, name: str) -> None:
+    """A site thread that ended with a failure raises it, whatever else still runs."""
+    relay, parts = watched
+    parts[name].end(OSError(f'{name} failed'))
+    with pytest.raises(OSError, match=f'{name} failed'):
+        relay.check_site()
+
+
+@mark.unit
+def test_site_check_needs_the_autoscaler_until_the_site_stops(watched) -> None:
+    """The autoscaler ending is a death while the site runs, and expected once it is told to stop."""
+    relay, parts = watched
+    parts['autoscaler'].end()
+    with pytest.raises(RelayPartEnded, match='part-autoscaler ended'):
+        relay.check_site()
+    relay.check_site(stopping=True)
+
+
+@mark.unit
+@mark.parametrize('name', ['receiver', 'returner', 'heartbeat'])
+def test_relay_wait_raises_a_part_that_died(watched, name: str) -> None:
+    """While the relay waits on its site, a site or upstream thread that ends without a failure is raised."""
+    relay, parts = watched
+    parts[name].end()
+    with pytest.raises(RelayPartEnded, match=f'part-{name} ended'):
+        relay.wait_site()
+
+
+@mark.unit
+def test_relay_stop_raises_a_site_thread_that_died_meanwhile(watched) -> None:
+    """While the site stops, a receiver that ends before the heart monitor has is raised, not waited on."""
+    relay, parts = watched
+    looks = iter(range(100))  # A site that never stops by itself, for a bounded number of looks.
+    relay.cluster.is_alive = lambda: next(looks, None) is not None
+    parts['heartmonitor'].machine = SimpleNamespace(startup_phase=False)
+    parts['receiver'].end()
+    with pytest.raises(RelayPartEnded, match='part-receiver ended while part-heartmonitor still runs'):
+        relay.stop_site()
 
 
 # --- The relay process -------------------------------------------------------------------------

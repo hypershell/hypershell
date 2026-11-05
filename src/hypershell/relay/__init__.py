@@ -33,7 +33,7 @@ import shlex
 import platform
 import threading
 import functools
-from signal import signal as register
+from signal import signal as register, SIG_DFL
 
 # External libs
 from multiprocessing import AuthenticationError
@@ -44,7 +44,7 @@ from cmdkit.config import Namespace
 # Internal libs
 from hypershell.core.config import (config, RELAY_PROCESS, RELAY_MARKER, DEFAULT_RELAY_PORT, DEFAULT_AUTH,
                                     PARAM_UNSET, relay_database_section)
-from hypershell.core.signal import SIGUSR1, SIGUSR2
+from hypershell.core.signal import SIGUSR1, SIGUSR2, SIGTERM
 from hypershell.core.exceptions import get_shared_exception_mapping, handle_exception, handle_disconnect
 from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.queue import QueueClient, QueueConfig
@@ -71,7 +71,7 @@ except ImportError:  # pragma: no cover (not available on Windows)
 # Public interface
 __all__ = ['RelayThread', 'RelayApp', 'DEFAULT_RELAY_BIND', 'DEFAULT_RELAY_PORT', 'DEFAULT_RELAY_POLL',
            'DEFAULT_RELAY_SIZE', 'lock_database', 'RelayDatabaseLocked', 'DRAIN', 'install_drain_handlers',
-           'STOP_TIMEOUT', 'CLIENT_GRACE']
+           'STOP_TIMEOUT', 'CLIENT_GRACE', 'RelayPartEnded', 'RelayTerminated', 'install_terminate_handler']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -99,7 +99,7 @@ DEFAULT_RELAY_LAUNCHER_ARGS: Final[str] = config.relay.launcher_args
 """Default extra arguments for the site client launcher."""
 
 STOP_CHECK_INTERVAL: Final[float] = 1.0
-"""Seconds between the relay's checks on whether the relay-local server should stop."""
+"""Seconds between the relay's checks on its parts: whether one has failed or died, and whether the site should stop."""
 
 STOP_TIMEOUT: float = 10.0
 """Seconds each part of a failing relay is given to stop before the relay goes on without it."""
@@ -131,6 +131,46 @@ def install_drain_handlers() -> None:
 def draining() -> bool:
     """True once the relay has been told to drain, by its own handler or the stock one."""
     return DRAIN.is_set() or drain_signalled()
+
+
+class RelayTerminated(BaseException):
+    """SIGTERM, raised in the main thread so the relay ends through its exit path (see `install_terminate_handler`)."""
+
+    def __init__(self: RelayTerminated, signum: int) -> None:
+        super().__init__(f'Received signal {signum}')
+        self.signum = signum
+
+
+def terminate_handler(signum: int, frame: object) -> None:  # noqa: unused frame
+    """End the relay through its exit path; a second SIGTERM ends the process at once."""
+    register(signum, SIG_DFL)
+    raise RelayTerminated(signum)
+
+
+def install_terminate_handler() -> None:
+    """Take SIGTERM for the relay (call from the main thread): it ends the relay as SIGINT does, then the process.
+
+    The relay stops every part once and ends the site clients it launched, the site's copy of the
+    configuration file is removed, and then the signal is delivered again with its default action,
+    so the process still ends by SIGTERM (see `end_by_signal`).
+    """
+    if platform.system() != 'Windows':
+        register(SIGTERM, terminate_handler)
+
+
+def end_by_signal(signum: int) -> None:
+    """End this process by `signum`, with the signal's default action."""
+    for stream in (sys.stdout, sys.stderr):
+        stream.flush()
+    register(signum, SIG_DFL)
+    os.kill(os.getpid(), signum)
+    time.sleep(1)  # The signal is delivered before this ends; exit regardless.
+    os._exit(128 + signum)
+
+
+class RelayPartEnded(RuntimeError):
+    """A part of the relay, or of its site, ended while the relay still needed it."""
+
 
 REEXEC_MARKER: Final[str] ='_HYPERSHELL_RELAY_REEXEC'
 """Private environment variable set on a relay re-executed to bind its database."""
@@ -195,7 +235,10 @@ class RelayThread(Thread):
 
     If any part fails (the upstream connection is lost, say), the relay stops every part once, each
     within a bounded wait, ends the site clients it launched (SIGTERM, then SIGKILL after a grace
-    period) and raises the failure, leaving its identity to upstream eviction.
+    period) and raises the failure, leaving its identity to upstream eviction. A part that dies
+    without raising is a failure too: the relay watches its own threads and every thread of the
+    relay-local server (see `check_site`), so a dead receiver, say, never leaves it holding tasks
+    while it keeps heartbeating upstream.
 
     Args:
         address (tuple, optional):
@@ -368,7 +411,8 @@ class RelayThread(Thread):
     def wait_site(self: RelayThread) -> None:
         """Wait until the relay should finish: pulling is over and the site holds nothing, or scheduling is over.
 
-        A failure in the site, the puller, the returner or the heartbeat is raised here.
+        A failure in the site, the puller, the returner or the heartbeat is raised here, as is a
+        thread of the site, the returner or the heartbeat ending before its time (see `check_site`).
         """
         while True:
             self.cluster.join(timeout=STOP_CHECK_INTERVAL)
@@ -378,6 +422,8 @@ class RelayThread(Thread):
             for thread in (self.returner, self.heartbeat):
                 if not thread.is_alive():
                     thread.join()  # Raises its failure, if any.
+                    raise RelayPartEnded(f'Relay {thread.name} ended while the relay runs')
+            self.check_site()
             if not self.puller.is_alive():
                 self.puller.join()  # Raises the puller's failure, if any.
                 if self.scheduling_over or store.count_backlog(engine) == 0:
@@ -392,7 +438,8 @@ class RelayThread(Thread):
 
         The site server tells its clients to finish once scheduling is over and waits for them, so
         every result they hold reaches the relay database first. A site server that never had a client
-        would wait for its first one, so it is stopped outright. A failure upstream meanwhile is raised.
+        would wait for its first one, so it is stopped outright. A failure upstream meanwhile is raised,
+        as is a thread of the site ending out of turn (see `check_site`).
         """
         self.cluster.autoscaler.stop()
         scheduler = self.server.scheduler
@@ -404,6 +451,7 @@ class RelayThread(Thread):
         while self.cluster.is_alive():
             self.cluster.join(timeout=STOP_CHECK_INTERVAL)
             self.check_upstream()
+            self.check_site(stopping=True)
         self.cluster.join()  # Raises the failure that ended the site, if any.
 
     def wait_returner(self: RelayThread) -> None:
@@ -412,6 +460,31 @@ class RelayThread(Thread):
             self.returner.join(timeout=STOP_CHECK_INTERVAL)
             self.check_upstream()
         self.returner.join()  # Raises the returner's failure, if any.
+
+    def check_site(self: RelayThread, stopping: bool = False) -> None:
+        """Raise if a thread of the site has died, so the relay takes its failure path.
+
+        A thread that has ended with a failure raises it. On a clean stop the relay-local server's
+        threads end in turn: the scheduler, then the heart monitor, the receiver, confirm and the
+        server itself, each only once the one before it has ended. One that has ended while an earlier
+        one still runs has died, and the server would wait on the earlier one forever: a dead receiver,
+        say, leaves the site's results unwritten, so the relay would hold its tasks indefinitely. Until
+        the site is told to stop (`stopping`), the autoscaler that keeps the site clients launched must
+        be running too.
+        """
+        server = self.server
+        chain = [thread for thread in (server.scheduler, server.heartmonitor, server.receiver, server.confirm, server)
+                 if thread is not None]
+        autoscaler = self.cluster.autoscaler
+        for thread in (*chain, autoscaler):
+            if thread.ident is not None and not thread.is_alive():
+                thread.join()  # Raises its failure, if any.
+        for earlier, later in zip(chain, chain[1:]):
+            # The later one is read first: once it has ended on a clean stop, the earlier one has too.
+            if later.ident is not None and not later.is_alive() and earlier.is_alive():
+                raise RelayPartEnded(f'Relay-local {later.name} ended while {earlier.name} still runs')
+        if not stopping and autoscaler.ident is not None and not autoscaler.is_alive():
+            raise RelayPartEnded(f'Relay-local {autoscaler.name} ended while the relay runs')
 
     def check_upstream(self: RelayThread) -> None:
         """Raise the failure of the heartbeat or the returner, if either has ended with one."""
@@ -484,7 +557,11 @@ class RelayThread(Thread):
             log.debug(f'Stopped {thread.name} ({error.__class__.__name__}: {error})')
 
     def release(self: RelayThread) -> None:
-        """Remove the site's copy of the configuration file, if one was written."""
+        """Remove the site's copy of the configuration file, if one was written.
+
+        Called as the relay ends, however it ends: a clean drain or a failure (by this thread), and
+        SIGINT or SIGTERM (by `RelayApp.run`). Only a relay killed outright leaves the copy behind.
+        """
         if self.site_config and os.path.exists(self.site_config):
             try:
                 os.remove(self.site_config)
@@ -539,7 +616,8 @@ APP_HELP = f"""\
   tasks inherit, and they are given the configuration file without the relay settings.
 
   SIGUSR1 or SIGUSR2 drain the relay: it asks for no more work, finishes what it holds and
-  returns the results. If the relay fails, it ends the site's clients and exits non-zero.
+  returns the results. SIGINT or SIGTERM end it at once, with the site's clients. If the
+  relay fails, it ends the site's clients and exits non-zero.
 
   The relay database is always a private SQLite file, whatever database is configured,
   and the configured database is never opened. One relay runs per process, and a second
@@ -616,9 +694,17 @@ class RelayApp(Application):
 
     @classmethod
     def main(cls: type[RelayApp], cmdline: List[str] = None, shared: Namespace = None) -> int:
-        """Keep the relay arguments, which a re-executed relay is given again."""
+        """Keep the relay arguments, which a re-executed relay is given again; end by SIGTERM if it came.
+
+        A relay ended by SIGTERM has stopped its parts, ended its site clients and removed the site's
+        configuration copy by now (see `run`); the signal is delivered again so the process ends by it.
+        """
         cls.argv = list(cmdline or [])
-        return super().main(cmdline, shared)
+        try:
+            return super().main(cmdline, shared)
+        except RelayTerminated as signalled:
+            end_by_signal(signalled.signum)
+            raise
 
     def run(self: RelayApp) -> None:
         """Run relay."""
@@ -632,26 +718,28 @@ class RelayApp(Application):
         ensuredb()
         ensure_tables(engine)
         install_drain_handlers()
-        thread = RelayThread.new(address=(self.bind, self.port),
-                                 bundlesize=config.relay.bundlesize,
-                                 bundlewait=config.relay.bundlewait,
-                                 poll=config.relay.poll,
-                                 tls=tls_from_namespace(config.server.tls),
-                                 upstream=upstream_config(self.upstream_host, self.upstream_port, self.no_tls),
-                                 zone=self.zone,
-                                 site=config.relay.get('site', None),
-                                 upstream_bundlesize=config.relay.upstream.bundlesize,
-                                 heartrate=config.relay.upstream.heartrate,
-                                 size=self.size,
-                                 launcher=self.launcher,
-                                 launcher_args=[self.launcher_args] if self.launcher_args else None,
-                                 num_threads=config.relay.num_threads,
-                                 template=config.relay.template,
-                                 client_timeout=config.relay.timeout or None,
-                                 retention=config.relay.retention)
+        install_terminate_handler()
+        thread = RelayThread(address=(self.bind, self.port),
+                             bundlesize=config.relay.bundlesize,
+                             bundlewait=config.relay.bundlewait,
+                             poll=config.relay.poll,
+                             tls=tls_from_namespace(config.server.tls),
+                             upstream=upstream_config(self.upstream_host, self.upstream_port, self.no_tls),
+                             zone=self.zone,
+                             site=config.relay.get('site', None),
+                             upstream_bundlesize=config.relay.upstream.bundlesize,
+                             heartrate=config.relay.upstream.heartrate,
+                             size=self.size,
+                             launcher=self.launcher,
+                             launcher_args=[self.launcher_args] if self.launcher_args else None,
+                             num_threads=config.relay.num_threads,
+                             template=config.relay.template,
+                             client_timeout=config.relay.timeout or None,
+                             retention=config.relay.retention)
         try:
+            thread.start()
             thread.join()
-        except BaseException:
+        except BaseException:  # A failure, SIGINT, or SIGTERM (`RelayTerminated`).
             thread.stop()
             raise
         finally:

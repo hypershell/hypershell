@@ -18,8 +18,10 @@ clients and their tasks) can be scanned for the upstream key while they run. Kil
 puts them back in the queue for the other relay.
 
 A relay also works against an upstream server running without a database, ends (non-zero) with its
-site when the upstream server dies, finishes everything it holds when told to drain, and hands its
-site clients the relay's configuration file without the relay settings in it.
+site when the upstream server dies or its own relay-local receiver does, finishes everything it holds
+when told to drain (what it has not yet staged too), returns the times its site clients report as the
+instants they were from another time zone, and hands its site clients the relay's configuration file
+without the relay settings in it, a copy it removes when SIGINT or SIGTERM ends it.
 """
 
 
@@ -39,6 +41,7 @@ import sqlite3
 import tomllib
 import subprocess
 from pathlib import Path
+from datetime import datetime, timedelta
 from collections import Counter
 
 # External libs
@@ -47,6 +50,7 @@ import pytest
 from pytest import mark
 
 # Internal libs
+from hypershell.core.config import RELAY_MARKER
 from hypershell.core.logging import HOSTNAME
 from hypershell.core.tls import ensure_default_materials
 from tests.conftest import free_port
@@ -486,6 +490,80 @@ def release(group: Group, relay: Any, barrier: Path) -> None:
         pass
 
 
+ONE_AT_A_TIME_LAUNCHER = """\
+#!/bin/sh
+# The loopback launcher, with each site client asking for one task at a time (-b 1).
+previous=
+for arg; do
+    shift
+    if [ "$previous" = "-b" ]; then set -- "$@" 1; else set -- "$@" "$arg"; fi
+    previous=$arg
+done
+exec '{loopback}' "$@"
+"""
+
+ZONED_LAUNCHER = """\
+#!/bin/sh
+# The loopback launcher, with each site client in time zone {zone}.
+TZ='{zone}'
+export TZ
+exec '{loopback}' "$@"
+"""
+
+
+def wrapped_launcher(site: Path, name: str, text: str, **fields: str) -> Path:
+    """A site client launcher that adjusts each launch, then runs the loopback launcher."""
+    path = site / name
+    path.write_text(text.format(loopback=loopback_launcher(site), **fields))
+    path.chmod(0o755)
+    return path
+
+
+FAULTY_RECEIVER_RELAY = """\
+import sys
+from hypershell.data import model
+
+
+def apply_results(cls, results):
+    raise RuntimeError('injected failure in the relay-local receiver')
+
+
+# Only the relay-local server's receiver writes results back in a relay process.
+model.Task.apply_results = classmethod(apply_results)
+
+from hypershell import main
+sys.exit(main(['relay', *sys.argv[1:]]))
+"""
+
+
+def start_faulty_relay(group: Group, upstream_port: int, key: str, size: int) -> Any:
+    """Start a relay process whose relay-local receiver fails on the first result it writes.
+
+    The process is marked as a relay before it imports anything, so it binds the relay database
+    at import and runs the relay without re-executing (which would drop the fault).
+    """
+    script = group.site / 'faulty_relay.py'
+    script.write_text(FAULTY_RECEIVER_RELAY)
+    env = {**os.environ, RELAY_MARKER: '1',
+           'HYPERSHELL_RELAY_UPSTREAM_AUTH': key,
+           'HYPERSHELL_RELAY_DATABASE': str(group.site / 'relay.db'),
+           'HYPERSHELL_RELAY_BUNDLEWAIT': '1'}
+    argv = [sys.executable, str(script), '-H', 'localhost', '-p', str(upstream_port),
+            '--bind', '127.0.0.1', '--port', str(free_port()),
+            '-N', str(size), '--launcher', str(loopback_launcher(group.site))]
+    with open(group.site / 'relay.out', 'w') as stdout, open(group.site / 'relay.log', 'w') as stderr:
+        proc = subprocess.Popen(argv, cwd=group.site, stdout=stdout, stderr=stderr, env=env,
+                                start_new_session=True)
+    group.procs.append(proc)
+    return proc
+
+
+def unstaged(relay_db: Path) -> int:
+    """Tasks the relay holds that its relay-local scheduler has not yet loaded (nor handed to a site client)."""
+    return rows(relay_db, 'SELECT count(*) AS n FROM task WHERE schedule_time IS NULL '
+                          'AND completion_time IS NULL')[0]['n']
+
+
 @mark.integration
 def test_relay_against_a_server_without_a_database(group: Group) -> None:
     """Against `hs server --no-db` (no stamps) every task runs once at the site and goes back as a client returns it."""
@@ -545,23 +623,80 @@ def test_relay_exits_and_ends_its_site_when_upstream_dies(group: Group) -> None:
 
 
 @mark.integration
-def test_drain_signal_finishes_everything_the_relay_holds(group: Group) -> None:
-    """SIGUSR1 ends pulling, but the site finishes every task the relay holds, started or not, and it ends cleanly."""
+def test_relay_exits_and_ends_its_site_when_its_receiver_dies(group: Group) -> None:
+    """With its relay-local receiver dead, the relay exits non-zero within the bound, ends its site and sends no FINISHED.
+
+    Upstream then evicts the relay and puts back every task it held.
+    """
     port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
     deadline = time.monotonic() + DEADLINE
     barrier = group.site / 'barrier'
-    taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 16))
+    taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 4))
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    server = group.start('server', 'server', '--forever', '-b', '10', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key,
+                         env={'HYPERSHELL_SERVER_EVICT': '10'})
     wait_listening(server, port, group, 'server')
-    relay = start_relay(group, 'relay', port, key, 2, HYPERSHELL_RELAY_BUNDLESIZE='4')
+    relay = start_faulty_relay(group, port, key, size=2)
     upstream = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
     try:
         identity = until(lambda: IDENTITY.search(group.text('relay')), deadline, 'relay identity').group(1)
-        # The relay holds more than its site is running: some of what it holds has not started.
-        until(lambda: 0 < running_tasks(relay, barrier) < len(held_upstream(upstream, identity)),
-              deadline, 'an unstarted backlog at the site')
+        until(lambda: running_tasks(relay, barrier) >= 2, deadline, 'two site tasks running')
+        clients = [proc.pid for proc in site_clients(relay)]
+        assert len(clients) == 2
+        held = held_upstream(upstream, identity)
+        assert held
+
+        barrier.touch()  # The first result to reach the relay-local receiver ends it.
+        try:
+            status = relay.wait(timeout=EXIT_BOUND)
+        except subprocess.TimeoutExpired:
+            pytest.fail(f'relay still running {EXIT_BOUND} seconds after its site returned results:\n'
+                        f'{group.text("relay")}')
+        relay_log = group.text('relay')
+        assert status not in (0, None), relay_log
+        assert 'injected failure in the relay-local receiver' in relay_log
+        assert not any(alive(pid) for pid in clients), 'a site client outlived the relay'
+        assert 'Upstream heartbeat - final' not in relay_log
+
+        # Upstream evicts the relay, which never finished, and puts back what it held (marking the
+        # eviction and reverting the tasks are two statements, so both are waited for).
+        until(lambda: (rows(upstream, f"SELECT evicted FROM client WHERE id = '{identity}'") == [{'evicted': 1}]
+                       and not held_upstream(upstream, identity)),
+              deadline, 'the relay evicted upstream and its tasks put back')
+        reverted = rows(upstream, 'SELECT id FROM task WHERE client_id IS NULL AND schedule_time IS NULL '
+                                  'AND completion_time IS NULL')
+        assert set(held) <= {row['id'] for row in reverted}
+    finally:
+        release(group, relay, barrier)
+
+
+@mark.integration
+def test_drain_signal_finishes_everything_the_relay_holds(group: Group) -> None:
+    """SIGUSR1 ends pulling, but the site finishes every task the relay holds, staged or not, and it ends cleanly.
+
+    Site clients take one task at a time in a named zone, so the relay-local server stages one or
+    two tasks ahead of them, and the relay holds tasks it has not yet staged when the signal comes.
+    A drain that stopped the relay-local scheduler would leave those behind.
+    """
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    deadline = time.monotonic() + DEADLINE
+    barrier = group.site / 'barrier'
+    relay_db = group.site / 'relay.db'
+    taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 24))
+    submit = group.start('submit', 'submit', '--zone', ZONE, str(taskfile))
+    assert group.wait(submit, deadline) == 0, group.text('submit')
+    server = group.start('server', 'server', '--forever', '-b', '10', '-H', 'localhost', '-p', str(port), '-k', key)
+    wait_listening(server, port, group, 'server')
+    launcher = wrapped_launcher(group.site, 'one-at-a-time-launcher', ONE_AT_A_TIME_LAUNCHER)
+    relay = start_relay(group, 'relay', port, key, 2, '--zone', ZONE, '--launcher', str(launcher),
+                        HYPERSHELL_RELAY_BUNDLESIZE='6')
+    upstream = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
+    try:
+        identity = until(lambda: IDENTITY.search(group.text('relay')), deadline, 'relay identity').group(1)
+        # Both site clients are busy and the relay holds tasks its relay-local server has not staged.
+        until(lambda: running_tasks(relay, barrier) == 2 and unstaged(relay_db) > 0,
+              deadline, 'an unstaged backlog at the relay')
         relay.send_signal(signal.SIGUSR1)
         until(lambda: 'Drain requested' in group.text('relay'), deadline, 'the drain to be seen')
         barrier.touch()
@@ -569,15 +704,88 @@ def test_drain_signal_finishes_everything_the_relay_holds(group: Group) -> None:
     finally:
         release(group, relay, barrier)
 
-    received = {row['id'] for row in rows(group.site / 'relay.db', 'SELECT id FROM relay_task')}
+    received = {row['id'] for row in rows(relay_db, 'SELECT id FROM relay_task')}
     tasks = {task['id']: task for task in rows(upstream, 'SELECT * FROM task')}
     assert received and all(tasks[id]['completion_time'] is not None and tasks[id]['exit_status'] == 0
                             for id in received)
     assert all(task['client_id'] is None for id, task in tasks.items() if id not in received)  # Never pulled
+    states = rows(relay_db, 'SELECT state, count(*) AS n FROM relay_result GROUP BY state')
+    assert states == [{'state': 'returned', 'n': len(received)}]
     relay_log = group.text('relay')
     assert 'Upstream heartbeat - final' in relay_log and 'not finishing upstream' not in relay_log
     client, = rows(upstream, f"SELECT evicted, disconnected_at FROM client WHERE id = '{identity}'")
     assert client['evicted'] == 0 and client['disconnected_at'] is not None
+
+
+@mark.integration
+def test_leaf_times_land_upstream_as_the_instants_they_were(group: Group) -> None:
+    """Site clients in another time zone than their relay: every time they report lands upstream as that instant.
+
+    The upstream server and the relay run in one zone, the site clients 13.5 hours behind it. Each
+    task's start and completion, as the upstream server stores them, fall after its schedule time
+    there, and within minutes of it.
+    """
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    deadline = time.monotonic() + DEADLINE
+    relay_zone, site_zone = {'TZ': 'Asia/Kolkata'}, 'America/Los_Angeles'
+    taskfile = create_taskfile(group.site, [f'echo zone-{n}' for n in range(6)])
+    submit = group.start('submit', 'submit', str(taskfile))
+    assert group.wait(submit, deadline) == 0, group.text('submit')
+    server = group.start('server', 'server', '--restart', '-b', '2', '-H', 'localhost', '-p', str(port), '-k', key,
+                         env=relay_zone)
+    wait_listening(server, port, group, 'server')
+    launcher = wrapped_launcher(group.site, 'zoned-launcher', ZONED_LAUNCHER, zone=site_zone)
+    relay = start_relay(group, 'relay', port, key, 2, '--launcher', str(launcher), **relay_zone)
+
+    assert group.wait(server, deadline) == 0, group.text('server')
+    assert group.wait(relay, deadline) == 0, group.text('relay')
+
+    tasks = rows(Path(os.environ['HYPERSHELL_DATABASE_FILE']),
+                 'SELECT schedule_time, start_time, completion_time, exit_status FROM task')
+    assert len(tasks) == 6 and all(task['exit_status'] == 0 for task in tasks)
+    for task in tasks:
+        scheduled, started, completed = (datetime.fromisoformat(task[name])
+                                         for name in ('schedule_time', 'start_time', 'completion_time'))
+        assert scheduled <= started <= completed <= scheduled + timedelta(minutes=5), task
+
+
+SIGNALLED_STATUS = {signal.SIGTERM: -signal.SIGTERM, signal.SIGINT: 4}  # 4 is the keyboard-interrupt status
+
+
+@mark.integration
+@mark.parametrize('signum', [signal.SIGTERM, signal.SIGINT], ids=['SIGTERM', 'SIGINT'])
+def test_relay_ended_by_a_signal_removes_the_site_config_copy(group: Group, signum: int) -> None:
+    """SIGTERM or SIGINT end the relay without a drain: it ends its site clients and removes the site's config copy.
+
+    SIGTERM still ends the process by that signal.
+    """
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    deadline = time.monotonic() + DEADLINE
+    barrier = group.site / 'barrier'
+    config = group.site / 'relay.toml'
+    config.write_text(f'[relay.upstream]\nauth = "{key}"\n')
+    copy = group.site / 'relay.db.site.toml'
+    taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 4))
+    submit = group.start('submit', 'submit', str(taskfile))
+    assert group.wait(submit, deadline) == 0, group.text('submit')
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    wait_listening(server, port, group, 'server')
+    relay = start_relay(group, 'relay', port, key, 2, HYPERSHELL_CONFIG_FILE=str(config))
+    try:
+        until(lambda: running_tasks(relay, barrier) >= 2, deadline, 'two site tasks running')
+        clients = [proc.pid for proc in site_clients(relay)]
+        assert len(clients) == 2 and copy.exists()
+        relay.send_signal(signum)
+        try:
+            status = relay.wait(timeout=EXIT_BOUND)
+        except subprocess.TimeoutExpired:
+            pytest.fail(f'relay still running {EXIT_BOUND} seconds after {signal.Signals(signum).name}:\n'
+                        f'{group.text("relay")}')
+        assert status == SIGNALLED_STATUS[signum], group.text('relay')
+        assert not copy.exists(), 'the site configuration copy outlived the relay'
+        assert not any(alive(pid) for pid in clients), 'a site client outlived the relay'
+    finally:
+        release(group, relay, barrier)
 
 
 RELAY_CONFIG = """\

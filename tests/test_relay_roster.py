@@ -191,6 +191,30 @@ def test_beat_without_roster_keeps_the_roster(queues, task_db) -> None:
 
 
 @mark.unit
+def test_roster_never_takes_another_relays_leaf(queues, task_db) -> None:
+    """A roster entry applies only to a client with no relay or with the sender as its relay.
+
+    A leaf of relay A named in relay B's roster, or in an ordinary client's, keeps relay A's site and
+    relay, and is not disconnected when it drops out of that roster. Relay A's own roster still governs it.
+    """
+    machine = monitor(queues)
+    relay_a, relay_b, plain, mine = str(uuid()), str(uuid()), str(uuid()), leaf('node-a')
+    deliver(machine, relay_beat(relay_a, [mine]))
+    deliver(machine, relay_beat(relay_b, [mine], site='site-b'))
+    deliver(machine, Heartbeat.new(uuid=plain, host='plain-host', roster=[mine]))
+    assert (clients()[mine.uuid]['site'], clients()[mine.uuid]['relay']) == (SITE, relay_a)
+    deliver(machine, relay_beat(relay_b, [], site='site-b'))
+    deliver(machine, Heartbeat.new(uuid=plain, host='plain-host', roster=[]))
+    assert mine.uuid in connected(clients())
+    # Dropped by its own relay, it is disconnected; named again by another, it stays with its own relay.
+    deliver(machine, relay_beat(relay_a, []))
+    deliver(machine, relay_beat(relay_b, [mine], site='site-b'))
+    row = clients()[mine.uuid]
+    assert (row['site'], row['relay']) == (SITE, relay_a) and row['disconnected_at'] is not None
+    assert mine.uuid not in machine.rosters[relay_b] and mine.uuid not in machine.rosters[plain]
+
+
+@mark.unit
 def test_relay_eviction_disconnects_roster(queues, task_db) -> None:
     """A relay evicted for missed beats takes its whole roster with it; other clients are untouched."""
     machine = monitor(queues)

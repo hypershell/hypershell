@@ -619,10 +619,6 @@
         ``.heartrate``
             Seconds between heartbeats to the upstream *server* (default: `10`).
 
-        ``.evict_hint``
-            Eviction period in seconds the relay assumes for the upstream *server* during an
-            outage (default: `600`). Not read yet: used from P8 (outage ride-through).
-
         ``[tls]``
             ``.enabled``
                 Use TLS on the upstream connection (default: `true`).

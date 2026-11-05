@@ -800,26 +800,38 @@ class HeartMonitor(StateMachine):
                       f'tasks it holds are not put back if it fails')
 
     def update_roster(self: HeartMonitor, hb: Heartbeat) -> None:
-        """Register the site clients new to a relay's roster and disconnect those gone from it."""
+        """Register the site clients new to a relay's roster and disconnect those gone from it.
+
+        An entry naming a client already attributed to another relay is ignored: a roster applies only
+        to clients with no relay or with the sender as their relay, so it never re-attributes or
+        disconnects another relay's site clients.
+        """
         relay, previous = hb.uuid, self.rosters.get(hb.uuid, {})
         current = {entry.uuid: entry for entry in hb.roster
                    if entry.state is not ClientState.FINISHED and entry.uuid != relay and entry.uuid not in self.beats}
         self.rosters[relay] = current
         added = [entry for uuid, entry in current.items() if uuid not in previous]
         dropped = [uuid for uuid in previous if uuid not in current]
-        for entry in added:
-            log.debug(f'Registered site client ({entry.host}: {entry.uuid}) via relay {relay}')
         for uuid in dropped:
             log.debug(f'Site client disconnected ({previous[uuid].host}: {uuid}) via relay {relay}')
         if self.in_memory:
+            for entry in added:
+                log.debug(f'Registered site client ({entry.host}: {entry.uuid}) via relay {relay}')
             return
         for entry in added:
             fields = {'site': hb.site, 'relay': relay}
             try:
-                Client.from_id(entry.uuid, caching=False)
-                Client.reconnect(entry.uuid, **fields)
+                holder = Client.from_id(entry.uuid, caching=False).relay
             except Client.NotFound:
                 Client.add(Client.new(id=entry.uuid, host=entry.host, connected_at=hb.time, **fields))
+            else:
+                if holder is not None and str(holder) != relay:
+                    log.warning(f'Ignored roster entry ({entry.host}: {entry.uuid}) from {relay} '
+                                f'(a site client of relay {holder})')
+                    current.pop(entry.uuid)
+                    continue
+                Client.reconnect(entry.uuid, **fields)
+            log.debug(f'Registered site client ({entry.host}: {entry.uuid}) via relay {relay}')
         Client.disconnect_all(dropped, datetime.now().astimezone())
 
     def end_roster(self: HeartMonitor, relay: str) -> None:
