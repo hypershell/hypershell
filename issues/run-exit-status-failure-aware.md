@@ -15,8 +15,8 @@ lane: public
 `ClusterApp.run` → `run_local` → `LocalCluster.join()` all return nothing
 (`src/hypershell/cluster/__init__.py:272-285`, `src/hypershell/cluster/local.py:45-50`), so cmdkit
 exits 0 regardless of task outcomes; the scheduler simply reaches `FINAL` even when a group is
-non-viable (`src/hypershell/server.py:225-233`). `hs task wait` only raises under the opt-in
-`-r/--return` (`src/hypershell/task.py:332-366`), and `hs task run` waits without `return_status`
+non-viable (`src/hypershell/server.py:225-233`). `hs wait` only raises under the opt-in
+`-r/--return` (`src/hypershell/task.py:332-366`), and `hs run` waits without `return_status`
 (`task.py:422-430`).
 
 Every CI pipeline, Makefile, and Slurm chain that wraps `hsx` therefore sees success while jobs
@@ -44,7 +44,7 @@ requiring a follow-up `hs list` to find out whether it worked.
   run finished with `exit_status != 0 AND exit_status != CANCEL_STATUS`, and zero otherwise.
 - **R2** — The failure count SHALL be reported to the operator (a final log/summary line), and
   SHALL be produced under `in_memory` mode too, where no database record survives the run.
-- **R3** — `hs task wait` and `hs task run` SHALL make the failure outcome discoverable by default
+- **R3** — `hs wait` and `hs run` SHALL make the failure outcome discoverable by default
   — either failure-aware by default or, at minimum, saying plainly that `-r/--return` exists.
 - **R4** — Cancelled tasks SHALL NOT count as failures (the `CANCEL_STATUS` filter that every
   failure query already applies), and the exit-status convention SHALL be documented.
@@ -56,7 +56,7 @@ requiring a follow-up `hs list` to find out whether it worked.
   `cmdkit.app.exit_status` — `AGENTS.md` says to reuse those constants rather than invent integer
   literals, and a raw count collides with them. Resolve at shaping time; this is the one real
   design question in the issue.
-- Note the existing conflation `.local/IMPROVEMENTS.md` flags: `hs task wait -r` maps the raw `-1`
+- Note the existing conflation `.local/IMPROVEMENTS.md` flags: `hs wait -r` maps the raw `-1`
   status onto process code 255. Per `issues/stance-cancel-status-signal-collision.md` the `-1`
   overlap itself is **accepted behaviour**, but how it surfaces in a *process exit code* is fair
   game here.

@@ -13,7 +13,7 @@ Options
 ``-i``, ``--info``
     Print task info after completion.
 
-    See ``task info`` command.
+    See ``hs info`` command.
 
 ``-f``, ``--format`` *FORMAT*
     Format task info ([normal], card, json, yaml).

@@ -70,7 +70,7 @@ channel:
    through the queue. Task ``stdout`` and ``stderr`` do *not* — they are written to disk
    on the client (locally, or on a shared filesystem if one is configured) and retrieved
    on demand over SFTP via :class:`~hypershell.core.remote.SSHConnection` when the
-   operator runs ``hs task info --stdout`` or similar. Without transport encryption, the
+   operator runs ``hs info --stdout`` or similar. Without transport encryption, the
    metadata that *does* flow over the queue (including the authentication handshake) is
    readable on the wire.
 

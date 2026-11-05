@@ -45,7 +45,7 @@ is that the consequence is deliberate.
 1. **Say it out loud.** `AGENTS.md`'s `exit_status` table notes the collision as a fact; it should
    state that the cancel semantics for a SIGHUP-killed task are *intended*, so the next reader does
    not file it again. The user-facing docs should mention that `kill -1` on a task reads as a cancel.
-2. **Exit-code conflation is a separate question.** `hs task wait -r` maps the raw `-1` onto process
+2. **Exit-code conflation is a separate question.** `hs wait -r` maps the raw `-1` onto process
    exit code 255 (`task.py:332-366`), which conflates a cancel with a generic failure at the shell
    boundary. That is about the *process contract*, not the sentinel, and is in scope for
    `issues/run-exit-status-failure-aware.md`.
