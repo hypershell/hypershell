@@ -109,8 +109,14 @@ def client_launch(remote_exe: str, address: Tuple[str, int], auth: str, *,
     environment through: `srun`, MPICH, Intel MPI and Flux do by default; Open MPI is told to by
     the launch itself; a launcher set to drop the environment (e.g. `srun --export=NONE`) makes
     clients fail to authenticate.
-  - SSH uses the ssh channel's standard input, with no remote terminal. `-n` and `-tt` in the
-    ssh arguments have no effect on that launch.
+  - SSH uses the ssh channel's standard input, with no remote terminal. `-t`/`-tt` in the ssh
+    arguments have no effect on that launch (the forced `-T` follows them), and a bare `-n` is
+    dropped with a warning.
+    - **Correction (2026-11-05, P3 finding and foreman ruling at P4).** The earlier wording,
+      "`-n` and `-tt` ... have no effect", did not hold: `-T` overrides `-t`/`-tt`, but nothing
+      overrode `-n`, which made ssh read `/dev/null`, so the key never arrived. Ruling: for
+      client launches, `client_launch()` drops a bare `-n` from the ssh arguments (from
+      `--ssh-args` or `config.ssh.args`) and logs one WARNING naming it.
   - The key is on no command line.
   - Keep, unchanged, the sentence about a directly configured `server.auth` in plaintext (a
     separate item).

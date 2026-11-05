@@ -27,7 +27,7 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
-from hypershell.cluster.launch import ClientLaunch, client_launch
+from hypershell.cluster.launch import ClientLaunch, client_launch, ssh_launch_args
 
 # Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
@@ -277,6 +277,8 @@ class SSHCluster(Thread):
         launcher_env = shlex.split('' if not export_env else compile_env())
         if launcher_args is None:
             launcher_args = shlex.split(config.ssh.get('args', ''))
+        # NOTE: checked once here, so a dropped `-n` is reported once, not once per host
+        launcher, launcher_args = launcher[:1], ssh_launch_args([*launcher[1:], *launcher_args])
         self.launches = [
             client_launch(remote_exe, (HOSTNAME, bind[1]), auth,
                           launcher=launcher, launcher_args=launcher_args,

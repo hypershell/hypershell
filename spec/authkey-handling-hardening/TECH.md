@@ -3,10 +3,10 @@ slug: authkey-handling-hardening
 title: The queue authentication key is never exposed to other users on client nodes
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/authkey-handling-hardening
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -60,7 +60,7 @@ phases:
     && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
 - id: P4
   name: Compatibility contract, cross-version check, and the docs revision
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -70,7 +70,7 @@ phases:
   - P3
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py && uv
     run pytest -p no:cacheprovider -q -n auto && .agents/factory/bin/temp_site.sh
     sh -c "seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2 -H 127.0.0.1"
@@ -303,17 +303,17 @@ complete with TLS on and off, with `--zone`, and with `--env`.
 **Goal:** The 2.9-line compatibility promise is pinned by tests, and the public docs and agent
 guidance describe the hardened behaviour.
 
-- [ ] `test_launch_contract_uses_only_known_client_options`: freeze the set of `hs client` options
+- [x] `test_launch_contract_uses_only_known_client_options`: freeze the set of `hs client` options
       2.9.0a4 accepts (from `git show 2.9.0a4:src/hypershell/client.py`, written into the test as a
       literal). Assert that every option `client_launch()` emits, across all modes and optional
       flags, is in it, and that `AUTH_ENV == 'HYPERSHELL_SERVER_AUTH'`.
-- [ ] `test_old_client_runs_under_new_launcher`:
-  - [ ] Skip with a reason unless tag `2.9.0a4` resolves and its `src/` imports under this
+- [x] `test_old_client_runs_under_new_launcher`:
+  - [x] Skip with a reason unless tag `2.9.0a4` resolves and its `src/` imports under this
         interpreter.
-  - [ ] Otherwise `git archive` that tag's `src/` into `tmp_path` and run the `launcher`-mode and
+  - [x] Otherwise `git archive` that tag's `src/` into `tmp_path` and run the `launcher`-mode and
         `ssh`-mode runs with a `--remote-exe` wrapper that imports that tree.
-  - [ ] Assert that the runs complete and that the key property holds.
-- [ ] `docs/security.rst` § *Authentication Key*: replace the admonition titled *"The key is visible
+  - [x] Assert that the runs complete and that the key property holds.
+- [x] `docs/security.rst` § *Authentication Key*: replace the admonition titled *"The key is visible
       on the client command line in cluster launches"* with the hardened description in PLAN §2.3
       (environment for launcher modes and the pass-through requirement, ssh standard input with no
       remote terminal, the key on no command line). Ruling Q1: also say what a client prints when
@@ -324,21 +324,63 @@ guidance describe the hardened behaviour.
       notes: it stops the key arriving), worded to the maintainer's ruling on `-n`. Keep the `server.auth` plaintext sentence. Fix
       the § *Operational hardening* bullet, which says the key "is redacted from launch logs", if
       its wording now misleads.
-- [ ] `AGENTS.md`:
-  - [ ] § *Queue transport & security*: rewrite the "Auth-token exposure" bullet to the hardened
+- [x] `AGENTS.md`:
+  - [x] § *Queue transport & security*: rewrite the "Auth-token exposure" bullet to the hardened
         behaviour.
-  - [ ] § *Cluster orchestration*: replace "There is no shared client-argv builder…" with the
+  - [x] § *Cluster orchestration*: replace "There is no shared client-argv builder…" with the
         `cluster/launch.py` `client_launch()` rule.
-  - [ ] § *High-risk files & footguns*: amend the matching `remote.py`/`ssh.py` note.
-- [ ] `.agents/factory/invariants.md` §11: the same bullet change.
-- [ ] Confirm that `docs/_include/` and `share/` are unchanged (no option/help change).
-- [ ] Full suite with `-n auto`, then the CLI drive: `--launcher=env -H 127.0.0.1`, which runs a
+  - [x] § *High-risk files & footguns*: amend the matching `remote.py`/`ssh.py` note.
+- [x] `.agents/factory/invariants.md` §11: the same bullet change.
+- [x] Confirm that `docs/_include/` and `share/` are unchanged (no option/help change).
+- [x] Full suite with `-n auto`, then the CLI drive: `--launcher=env -H 127.0.0.1`, which runs a
       local client through the launcher path.
+- [x] Ruling 1 below: an SSH client launch drops a bare `-n` from the ssh arguments, with one
+      WARNING. Red first: `test_ssh_mode_ignores_no_input_option` (end to end, `--ssh-args='-n -o
+      BatchMode=yes'`), `test_ssh_mode_drops_no_input_option_once` (from `--ssh-args` and from
+      `ssh.args`, two hosts, one warning) and `test_ssh_launch_drops_no_input_option` (unit cases).
+- **Build notes (P4).**
+  - **Rulings on P3's open points (foreman, 2026-11-05).**
+    1. *`-n` in the ssh arguments.* Ruling Q2 says the launch owns ssh's standard input, so a
+       user's `-n` must not break it. For client launches, drop a bare `-n` from the ssh
+       arguments, whether it comes from `--ssh-args` or `config.ssh.args`, and log one WARNING
+       naming it. A P4 code item in `cluster/launch.py`'s ssh branch, red first. PLAN §2.3's
+       statement is corrected with a dated note. The docs describe it with `-t`/`-tt`: the
+       launch forces `-T`, owns standard input, and ignores `-n`.
+    2. *Q1 in ssh mode.* Confirmed: the remote step's message (it names the variable and ssh's
+       standard input) stands in for the client's Q1 hint in this mode. `-n` in the ssh
+       arguments no longer triggers it, so the message now names the remaining causes: a
+       wrapper that closes ssh's input, or `-n` inside combined flags such as `-qn`.
+  - `ssh_launch_args()` in `launch.py` drops each bare `-n` word and keeps the value of every
+    ssh option that takes one (so `-l -n` keeps its value). The ssh branch of `client_launch()`
+    applies it to the launcher's words after the program name and to `launcher_args`.
+    `SSHCluster` applies it once before building its per-host launches, so a run with many
+    hosts logs the warning once. Combined flags (`-qn`) are left alone, as the ruling names a
+    bare `-n`; the remote step's message covers them.
+  - `test_ssh_mode_without_key_names_the_cause` now gets its no-input ssh from the stand-in's
+    `STAND_IN_SSH_NO_INPUT=1` (a wrapper that closes ssh's input), since `-n` no longer causes
+    it.
+  - Contract: `CONTRACT_CLIENT_OPTIONS` freezes the 2.9.0a4 `hs client` options with whether
+    each takes a value. `test_launch_contract_uses_only_known_client_options` walks the client
+    words of launcher and ssh launches over the shared option sets. A tag-gated
+    `test_launch_contract_matches_tagged_client` checks the literal against
+    `git show 2.9.0a4:src/hypershell/client.py`. Both pass before and after; they pin the
+    contract and are not red-first tests.
+  - Cross-version: `test_old_client_runs_under_new_launcher[launcher|ssh]` skips unless tag
+    `2.9.0a4` resolves and its `src/` imports under the running interpreter. It extracts that
+    tree with `git archive` and runs the real `hs cluster` with a remote executable that imports
+    it. It asserts the key property, that every client imported the tagged tree, and that every
+    task completed. It runs (not skipped) on 3.12 and 3.14 here.
+  - Docs: `docs/security.rst` replaces the admonition with *"How cluster launches hand the key to
+    their clients"*. The § *Operational Recommendations* logging bullet now says the key never
+    appears in launch logs. `AGENTS.md` changes the module map row, § *Queue transport &
+    security* (now "Auth-token handoff"), § *Cluster orchestration* and § *High-risk files*.
+    `invariants.md` §11 has the matching bullet. `docs/_include/` and `share/` are unchanged.
 - **Verify:** `uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py && uv run pytest -p no:cacheprovider -q -n auto && .agents/factory/bin/temp_site.sh sh -c "seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2 -H 127.0.0.1"`.
   **Ruling (maintainer, 2026-11-05):** the CLI drive binds `-H 127.0.0.1`, so it does not depend on
   the host's own name resolving.
 - **Touches:** `tests/test_cluster_launch.py`, `docs/security.rst`, `AGENTS.md`,
-  `.agents/factory/invariants.md`.
+  `.agents/factory/invariants.md`; by ruling 1, `src/hypershell/cluster/launch.py`,
+  `src/hypershell/cluster/ssh.py` and the PLAN §2.3 correction.
 
 ---
 

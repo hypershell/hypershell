@@ -21,11 +21,15 @@ import os
 import sys
 import json
 import time
+import re
 import shlex
 import shutil
 import signal
+import tarfile
+import subprocess
+from io import BytesIO
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from subprocess import Popen, DEVNULL, PIPE
 
 # External libs
@@ -96,13 +100,15 @@ os.execv(argv[0], argv)
 """
 
 # A stand-in for `ssh`. It parses its options as ssh does, records its command line and the remote
-# command, and saves its standard input to a private file (nothing under -n, since ssh then reads
-# /dev/null). It runs the remote command with `sh -c`, as sshd runs it under a login shell, with that
+# command, and saves its standard input to a private file. That file is empty under -n, since ssh
+# then reads /dev/null, and when STAND_IN_SSH_NO_INPUT=1, as with a site wrapper that closes ssh's
+# input. It runs the remote command with `sh -c`, as sshd runs it under a login shell, with that
 # input and without the logging level, which a remote login would not inherit unless --env sends
 # it. The cluster advertises the host's own name, so the stand-in points the client at the loopback
 # address the run binds.
 SSH_BODY: Final[str] = f"""\
 import subprocess
+NO_INPUT = os.environ.get('STAND_IN_SSH_NO_INPUT') == '1'
 WITH_VALUE = set('BbcDEeFIiJLlmOoPpQRSWw')
 args, index, flags = sys.argv[1:], 0, set()
 while index < len(args) and args[index].startswith('-'):
@@ -113,7 +119,7 @@ while index < len(args) and args[index].startswith('-'):
             break
         flags.add(letter)
 host, remote = args[index], ' '.join(args[index + 1:])
-data = b'' if 'n' in flags else sys.stdin.buffer.read()
+data = b'' if 'n' in flags or NO_INPUT else sys.stdin.buffer.read()
 stdin_path = os.path.join(RECORDS, uuid.uuid4().hex + '.stdin')
 with os.fdopen(os.open(stdin_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stream:
     stream.write(data)
@@ -328,15 +334,15 @@ def run_env(stand_ins: StandIns) -> Dict[str, str]:
 
 
 def run_cluster(stand_ins: StandIns, mode: List[str], temp_site: Path, no_tls: bool, zone: Optional[str],
-                until: Callable[[], bool] = None) -> Run:
-    """Run `hs cluster` over a small task file in launcher `mode`."""
+                until: Callable[[], bool] = None, env: Dict[str, str] = None) -> Run:
+    """Run `hs cluster` over a small task file in launcher `mode`, with `env` added to the run's environment."""
     taskfile = create_taskfile_echo(temp_site, count=TASK_COUNT)
     argv = ['hs', 'cluster', str(taskfile), '-H', LOOPBACK, *mode, '--remote-exe', str(stand_ins.remote_exe)]
     if no_tls:
         argv.append('--no-tls')
     if zone is not None:
         argv.extend(['--zone', zone])
-    return run_in_session(argv, run_env(stand_ins), Path(temp_site), until=until)
+    return run_in_session(argv, {**run_env(stand_ins), **(env or {})}, Path(temp_site), until=until)
 
 
 def task_results(stand_ins: StandIns, temp_site: Path) -> List[List[Any]]:
@@ -743,12 +749,84 @@ def test_ssh_mode_logs_never_hold_key(stand_ins: StandIns, temp_site: Path) -> N
 
 def test_ssh_mode_without_key_names_the_cause(stand_ins: StandIns, temp_site: Path) -> None:
     """A client launch whose ssh passes no input exits before the client starts, naming the cause."""
-    run = run_cluster(stand_ins, ['--ssh', SSH_HOSTS[0], '--ssh-args=-n'], temp_site, True, None,
-                      until=ssh_failed(stand_ins))
+    run = run_cluster(stand_ins, ['--ssh', SSH_HOSTS[0]], temp_site, True, None,
+                      until=ssh_failed(stand_ins), env={'STAND_IN_SSH_NO_INPUT': '1'})
     records = stand_ins.read()
     assert [record['status'] for record in records if record['role'] == 'ssh-exit'] == [1], run.stderr[-4000:]
     assert not [record for record in records if record['role'] == 'client']
     assert f'no authentication key arrived on standard input for {AUTH_ENV}' in run.stderr
+
+
+def no_input_warnings(stderr: str) -> List[str]:
+    """Log lines warning that `-n` was dropped from the ssh arguments."""
+    return [line for line in stderr.splitlines() if 'WARNING' in line and "'-n'" in line]
+
+
+def test_ssh_mode_ignores_no_input_option(stand_ins: StandIns, temp_site: Path) -> None:
+    """With -n in --ssh-args, the launch still sends the key on ssh's input, and warns once."""
+    mode = ['--ssh', ','.join(SSH_HOSTS), '--ssh-args=-n -o BatchMode=yes']
+    run = run_cluster(stand_ins, mode, temp_site, True, None, until=ssh_failed(stand_ins))
+    records = stand_ins.read()
+    key = assert_ssh_key_off_command_lines(records)
+    assert_key_not_in(key, run.stdout, run.stderr)
+    launchers = [record for record in records if record['role'] == 'launcher']
+    assert sorted(record['host'] for record in launchers) == SSH_HOSTS
+    for record in launchers:
+        assert 'n' not in record['flags'], 'ssh was given -n'
+        assert record['argv'][1:4] == ['-o', 'BatchMode=yes', '-T']
+    assert len(no_input_warnings(run.stderr)) == 1, run.stderr[-4000:]
+    assert_run_complete(run, stand_ins, temp_site)
+
+
+# Builds an SSH cluster in-process, its ssh arguments from `--ssh-args` or from `ssh.args` in the
+# configuration, and reports each host's command line and every WARNING record.
+BUILD_SSH_CLUSTER: Final[str] = """\
+import sys, json, logging
+from hypershell.cluster.ssh import SSHCluster
+records = []
+class Capture(logging.Handler):
+    def emit(self, record):
+        records.append(record.getMessage())
+logging.getLogger('hypershell').addHandler(Capture(level=logging.WARNING))
+source, port = sys.argv[1:]
+launcher_args = ['-n', '-o', 'BatchMode=yes'] if source == 'ssh-args' else None
+cluster = SSHCluster(nodelist=['node-a', 'node-b'], launcher_args=launcher_args, bind=('127.0.0.1', int(port)),
+                     tls=None)
+print(json.dumps({'argv': cluster.client_argv, 'warnings': records}))
+"""
+
+
+@mark.parametrize('source', ['ssh-args', 'config'])
+def test_ssh_mode_drops_no_input_option_once(temp_site: Path, source: str) -> None:
+    """A bare -n, from --ssh-args or the ssh.args setting, is dropped from every host's launch with one warning."""
+    script = Path(temp_site) / 'build_ssh_cluster.py'
+    script.write_text(BUILD_SSH_CLUSTER)
+    env = {**os.environ, 'HYPERSHELL_SSH_ARGS': '-n -o BatchMode=yes'}
+    run = run_in_session([sys.executable, str(script), source, os.environ['HYPERSHELL_SERVER_PORT']],
+                         env, Path(temp_site), timeout=60)
+    assert run.status == exit_status.success, run.stderr[-4000:]
+    built = json.loads(run.stdout.strip().splitlines()[-1])
+    for host, argv in zip(['node-a', 'node-b'], built['argv']):
+        assert argv[:argv.index(host)] == ['ssh', '-o', 'BatchMode=yes', '-T']
+    warnings = [message for message in built['warnings'] if "'-n'" in message]
+    assert len(warnings) == 1, built['warnings']
+
+
+@mark.parametrize('launcher, launcher_args, expected', [
+    pytest.param(['ssh'], ['-n'], ['ssh'], id='alone'),
+    pytest.param(['ssh'], ['-o', 'BatchMode=yes', '-n', '-q'], ['ssh', '-o', 'BatchMode=yes', '-q'], id='among'),
+    pytest.param(['ssh', '-n'], ['-q'], ['ssh', '-q'], id='launcher-word'),
+    pytest.param(['ssh'], ['-n', '-n'], ['ssh'], id='twice'),
+    pytest.param(['ssh'], ['-l', '-n', '-q'], ['ssh', '-l', '-n', '-q'], id='option-value'),
+])
+def test_ssh_launch_drops_no_input_option(launcher: List[str], launcher_args: List[str],
+                                          expected: List[str]) -> None:
+    """A bare -n before the host is dropped, since the launch owns ssh's input; an option's value is kept."""
+    params = {**SSH_LAUNCH_BASE, 'launcher': launcher, 'launcher_args': launcher_args}
+    remote_exe, address = params.pop('remote_exe'), params.pop('address')
+    launch = client_launch(remote_exe, address, 'k' * 32, ssh_host='node-7', **params)
+    before, *_ = split_ssh_launch(launch.argv, 'node-7')
+    assert before == [*expected, '-T']
 
 
 SSH_LAUNCH_BASE: Final[Dict[str, Any]] = {
@@ -856,3 +934,140 @@ def test_ssh_mode_launches_each_host_with_every_client_option(options: Dict[str,
                                         task_signalwait=10, tls_enabled=False, **options)
         assert not set(launch.argv) & KEY_OPTIONS
     assert len({launch.stdin for launch in cluster.launches}) == 1
+
+
+CONTRACT_TAG: Final[str] = '2.9.0a4'
+"""The oldest client release a 2.9 launch must start (an older client cannot join a 2.9 server)."""
+
+# Every `hs client` option the 2.9.0a4 client accepts, and whether it takes a value. Written from
+# `git show 2.9.0a4:src/hypershell/client.py`; the launch may emit nothing outside this set.
+CONTRACT_CLIENT_OPTIONS: Final[Dict[str, bool]] = {
+    '-N': True, '--num-threads': True, '--num-tasks': True, '-H': True, '--host': True,
+    '-p': True, '--port': True, '-k': True, '--auth': True, '-t': True, '--template': True,
+    '-b': True, '--bundlesize': True, '-w': True, '--bundlewait': True, '-d': True, '--delay-start': True,
+    '--zone': True, '-T': True, '--timeout': True, '-W': True, '--task-timeout': True,
+    '-R': True, '--ratelimit': True, '-S': True, '--signalwait': True, '--no-confirm': False,
+    '-o': True, '--output': True, '-e': True, '--errors': True, '--capture': False, '--monitor': False,
+    '-C': True, '--client-cores': True, '-M': True, '--client-memory': True, '--no-tls': False,
+    '--tls-key': True, '--tls-cert': True, '--tls-ca': True,
+    '--available-cores': False, '--available-ssh-groups': False,
+}
+
+REPO: Final[Path] = Path(__file__).resolve().parent.parent
+"""This tree's repository, for reading the contract tag."""
+
+
+def emitted_client_options(launch: ClientLaunch, remote_exe: str, ssh_host: Optional[str]) -> List[str]:
+    """The words a launch passes to `<remote_exe> client`, wherever the launch carries them."""
+    if ssh_host is not None:
+        *_, command = split_ssh_launch(launch.argv, ssh_host)
+    else:
+        command = launch.argv[launch.argv.index(remote_exe):]
+    assert command[:2] == [remote_exe, 'client']
+    return command[2:]
+
+
+@mark.parametrize('ssh_host', [pytest.param(None, id='launcher'), pytest.param('node-7', id='ssh')])
+@mark.parametrize('options', LAUNCH_OPTIONS)
+def test_launch_contract_uses_only_known_client_options(options: Dict[str, Any], ssh_host: Optional[str]) -> None:
+    """Every option a launch passes to the client, in every mode, is one a 2.9.0a4 client accepts."""
+    params = {**LAUNCH_BASE, **options}
+    remote_exe, address = params.pop('remote_exe'), params.pop('address')
+    launch = client_launch(remote_exe, address, 'k' * 32, ssh_host=ssh_host, **params)
+    words = iter(emitted_client_options(launch, remote_exe, ssh_host))
+    emitted = []
+    for word in words:
+        assert word in CONTRACT_CLIENT_OPTIONS, f'{word} is not a {CONTRACT_TAG} client option'
+        emitted.append(word)
+        if CONTRACT_CLIENT_OPTIONS[word]:
+            next(words)
+    assert not set(emitted) & KEY_OPTIONS
+    assert AUTH_ENV == 'HYPERSHELL_SERVER_AUTH'
+
+
+def git_output(*args: str) -> Optional[bytes]:
+    """Output of a git command in this repository, or None if git or the object is missing."""
+    try:
+        return subprocess.run(['git', '-C', str(REPO), *args], check=True, capture_output=True, timeout=60).stdout
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+
+
+def require_contract_tag() -> None:
+    """Skip unless the contract tag resolves in this repository (shallow clones lack it)."""
+    if git_output('rev-parse', '--verify', '--quiet', f'{CONTRACT_TAG}^{{commit}}') is None:
+        pytest.skip(f'tag {CONTRACT_TAG} is not available')
+
+
+def test_launch_contract_matches_tagged_client() -> None:
+    """The frozen option set is exactly what the tagged client's command line accepts."""
+    require_contract_tag()
+    source = git_output('show', f'{CONTRACT_TAG}:src/hypershell/client.py').decode()
+    accepted = set()
+    for call in re.findall(r"interface\.add_argument\(([^\n]*)\)", source):
+        accepted.update(re.findall(r"'(-[^']*)'", call))
+    assert accepted == set(CONTRACT_CLIENT_OPTIONS)
+
+
+# The remote executable for a client from another release: runs that tree's `hypershell.main`.
+OLD_CLIENT_BODY: Final[str] = """\
+sys.path.insert(0, {src!r})
+import hypershell
+record('client', module=hypershell.__file__)
+status = None
+try:
+    status = hypershell.main(sys.argv[1:])
+finally:
+    record('exit', status=status)
+sys.exit(status)
+"""
+
+# Reports where `hypershell` imports from with the tagged tree first on the path.
+OLD_CLIENT_IMPORT: Final[str] = """\
+import sys
+sys.path.insert(0, sys.argv[1])
+import hypershell, hypershell.client
+print(hypershell.__file__)
+"""
+
+
+@pytest.fixture
+def old_client(stand_ins: StandIns, tmp_path: Path) -> StandIns:
+    """The stand-ins, with the remote executable running the contract tag's client."""
+    require_contract_tag()
+    archive = git_output('archive', '--format=tar', CONTRACT_TAG, 'src')
+    assert archive is not None, f'git archive {CONTRACT_TAG} failed'
+    tree = tmp_path / CONTRACT_TAG
+    with tarfile.open(fileobj=BytesIO(archive)) as stream:
+        stream.extractall(tree, filter='data')
+    src = tree / 'src'
+    probe = run_in_session([sys.executable, '-c', OLD_CLIENT_IMPORT, str(src)], run_env(stand_ins), tmp_path,
+                           timeout=60, name='old-import')
+    if probe.status != 0 or not probe.stdout.strip().startswith(str(src)):
+        pytest.skip(f'{CONTRACT_TAG} does not import under this interpreter: {probe.stderr[-400:]}')
+    remote_exe = write_program(stand_ins.bin / f'hs-client-{CONTRACT_TAG}', OLD_CLIENT_BODY.format(src=str(src)),
+                               stand_ins.records)
+    return replace(stand_ins, remote_exe=remote_exe)
+
+
+def assert_old_client_ran(records: List[Dict[str, Any]], old: StandIns) -> None:
+    """Every client that ran imported the tagged tree."""
+    clients = [record for record in records if record['role'] == 'client']
+    assert clients
+    src = str(old.remote_exe.parent.parent / CONTRACT_TAG / 'src')
+    for record in clients:
+        assert record['module'].startswith(src), f'client imported {record["module"]}'
+
+
+@mark.parametrize('mode', ['launcher', 'ssh'])
+def test_old_client_runs_under_new_launcher(old_client: StandIns, temp_site: Path, mode: str) -> None:
+    """A 2.9.0a4 client, unchanged, takes the key the launch hands it and completes the run."""
+    if mode == 'launcher':
+        run = run_cluster(old_client, [f'--launcher={old_client.launcher}'], temp_site, False, None)
+        key = assert_key_off_command_lines(old_client.read())
+    else:
+        run = run_cluster(old_client, ['--ssh', SSH_HOSTS[0]], temp_site, False, None, until=ssh_failed(old_client))
+        key = assert_ssh_key_off_command_lines(old_client.read())
+    assert_key_not_in(key, run.stdout, run.stderr)
+    assert_old_client_ran(old_client.read(), old_client)
+    assert_run_complete(run, old_client, temp_site)

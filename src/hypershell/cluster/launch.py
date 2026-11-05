@@ -26,20 +26,31 @@ from subprocess import Popen, PIPE
 
 # Internal libs
 from hypershell.core.config import load_task_env
+from hypershell.core.logging import Logger
 from hypershell.client import AUTH_ENV
 
 # Public interface
 __all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'SSH_NO_KEY_MESSAGE', 'ClientLaunch', 'client_launch',
-           'ssh_remote_script', 'redact_secrets']
+           'ssh_launch_args', 'ssh_remote_script', 'redact_secrets']
+
+# Initialize logger
+log = Logger.with_name('hypershell.cluster')
 
 
 OMPI_ENV_LIST: Final[str] = 'OMPI_MCA_mca_base_env_list'
 """Open MPI parameter naming the environment variables `mpirun` forwards to remote ranks."""
 
 SSH_NO_KEY_MESSAGE: Final[str] = (f'hs cluster: no authentication key arrived on standard input for {AUTH_ENV}; '
-                                  f'the ssh launch must pass its standard input to the remote command '
-                                  f'(ssh -n prevents this)')
+                                  f'ssh must pass its standard input through to the remote command '
+                                  f'(a wrapper that closes it, or -n in combined ssh flags such as -qn, '
+                                  f'prevents this)')
 """Printed on the remote host, before any client starts, when an SSH launch delivers no key."""
+
+SSH_NO_INPUT: Final[str] = '-n'
+"""The ssh option that redirects standard input from /dev/null; an SSH launch drops it."""
+
+SSH_OPTIONS_WITH_VALUE: Final[str] = 'BbcDEeFIiJLlmOoPpQRSWw'
+"""Letters of the ssh options that take a value."""
 
 
 @dataclass(frozen=True)
@@ -130,7 +141,8 @@ def client_launch(remote_exe: str,
     With `ssh_host`, the command line is `launcher` and `launcher_args`, then `-T` (no
     remote terminal, whatever those arguments or the ssh configuration ask for), the host,
     `ssh_exports`, and a remote `sh -c` step (see :func:`ssh_remote_script`). The key is the
-    launch's standard input, and ssh gets the caller's environment unchanged.
+    launch's standard input, and ssh gets the caller's environment unchanged. The launch owns
+    that input, so a bare `-n` among the ssh arguments is dropped (see :func:`ssh_launch_args`).
 
     The calling process's environment is read, never modified.
 
@@ -149,11 +161,40 @@ def client_launch(remote_exe: str,
                              tls_enabled=tls_enabled, zone=zone)
     if ssh_host is not None:
         script = ssh_remote_script(remote_exe, options)
-        return ClientLaunch(argv=[*launcher, *launcher_args, '-T', ssh_host, *ssh_exports,
-                                  'sh', '-c', shlex.quote(script)],
+        return ClientLaunch(argv=[*launcher[:1], *ssh_launch_args([*launcher[1:], *launcher_args]),
+                                  '-T', ssh_host, *ssh_exports, 'sh', '-c', shlex.quote(script)],
                             env={}, stdin=auth + '\n', inherit_env=True)
     return ClientLaunch(argv=[*launcher, *launcher_args, remote_exe, 'client', *options],
                         env={AUTH_ENV: auth, OMPI_ENV_LIST: ompi_env_list()})
+
+
+def ssh_launch_args(args: Sequence[str]) -> List[str]:
+    """
+    The ssh arguments `args` without a bare `-n`, with one warning if any was dropped.
+
+    An SSH launch writes the key to ssh's standard input, which `-n` would replace with
+    `/dev/null`. The value of an option that takes one is kept as it is, even if it is `-n`.
+
+    Example:
+        >>> ssh_launch_args(['-n', '-o', 'BatchMode=yes'])
+        ['-o', 'BatchMode=yes']
+    """
+    kept: List[str] = []
+    dropped = 0
+    words = iter(args)
+    for word in words:
+        if word == SSH_NO_INPUT:
+            dropped += 1
+            continue
+        kept.append(word)
+        if len(word) == 2 and word[0] == '-' and word[1] in SSH_OPTIONS_WITH_VALUE:
+            value = next(words, None)
+            if value is not None:
+                kept.append(value)
+    if dropped:
+        log.warning(f'Ignoring {SSH_NO_INPUT!r} in the ssh arguments: client launches send the '
+                    f'authentication key on ssh\'s standard input')
+    return kept
 
 
 def ssh_remote_script(remote_exe: str, options: List[str]) -> str:

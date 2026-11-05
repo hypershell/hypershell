@@ -168,15 +168,40 @@ placeholder key and enforces a minimum key policy: the key must be at least 16 c
 drawn from ``[A-Za-z0-9._+/=-]`` (which admits hex, URL-safe tokens, and standard Base64). The
 key generators used in the deployment guides below satisfy this policy.
 
-.. admonition:: The key is visible on the client command line in cluster launches
+.. admonition:: How cluster launches hand the key to their clients
     :class: note
 
-    For ``SSHCluster`` and the MPI/SLURM launchers, the per-invocation key is passed to each
-    client process as a ``-k`` command-line argument. On multi-user client hosts it is
-    therefore visible in the process table (``ps`` / ``/proc``) and scheduler accounting for
-    the lifetime of the client, even though it is redacted from *HyperShell*'s own launch
-    logs. Treat every host that holds the key as inside the trust boundary. A directly
-    configured ``server.auth`` is likewise stored in plaintext in the config file and printed
+    When ``hs cluster`` starts its clients as separate processes (``--launcher``, ``--mpi``,
+    ``--autoscaling`` and ``--ssh``), the per-invocation key is on no command line, either on
+    the launching host or on the client hosts. Every client reads its key from the
+    ``HYPERSHELL_SERVER_AUTH`` environment variable when no ``-k`` is given, and the launch
+    delivers it there.
+
+    * **Launcher modes** (``--launcher``, ``--mpi`` and ``--autoscaling``). The launcher is
+      started with the key in its environment, and must pass that environment through to the
+      clients it starts. ``srun`` (with its default ``--export=ALL``), MPICH, Intel MPI and
+      Flux do. With ``--mpi``, the launch also asks Open MPI's ``mpirun`` to forward the
+      variable to remote ranks, by name, through ``OMPI_MCA_mca_base_env_list``; names already
+      set there are kept. A launcher set to drop the environment, such as
+      ``srun --export=NONE``, leaves its clients without the key, so they cannot authenticate.
+      Such a client exits with a ``CRITICAL`` error that names ``HYPERSHELL_SERVER_AUTH`` and
+      the launcher not passing the environment as the likely cause.
+
+    * **SSH** (``--ssh``). The key travels on the ssh channel's standard input. On each remote
+      host a short POSIX ``sh`` step reads it into ``HYPERSHELL_SERVER_AUTH`` using shell
+      builtins, exports it, and replaces itself with the client, so the key is on no command
+      line there either. The launch owns ssh's standard input and always passes ``-T``, so no
+      remote terminal is allocated. A ``-t`` or ``-tt`` in ``--ssh-args`` or ``ssh.args``
+      therefore has no effect on client launches, and a bare ``-n`` there is dropped with a
+      warning. If no key arrives, for example because a wrapper around ``ssh`` closes its
+      standard input, the remote step prints a message naming ``HYPERSHELL_SERVER_AUTH`` and
+      ssh's standard input, and exits before any client starts.
+
+    The key is also redacted from *HyperShell*'s own launch logs, at every level. Tasks run with
+    their client's environment, as they always have, and that environment includes
+    ``HYPERSHELL_SERVER_AUTH``.
+
+    A directly configured ``server.auth`` is stored in plaintext in the config file and printed
     verbatim by ``hs config get``; prefer the ``_eval`` / ``_env`` suffixes (see below) to
     keep the secret out of the file.
 
@@ -828,7 +853,7 @@ Independent of the deployment style above:
 * **Enable audit logging.** Set ``logging.style = "detailed"`` (or ``"system"``) and ship
   logs to a central collector. The server logs every client connection, every task
   dispatched, and every completion. See :ref:`logging <logging>` for details. The
-  per-invocation auth key is redacted from launch logs, but avoid shipping full configuration
+  per-invocation auth key never appears in launch logs, but avoid shipping full configuration
   dumps (which contain a directly-set ``server.auth``) to shared log infrastructure.
 
 * **Sanitize task input.** When generating tasks programmatically, treat the command

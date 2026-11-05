@@ -155,8 +155,11 @@ subsystems.
 
 ## 11. Cluster orchestration
 
-- No shared client-argv builder — a change to launched-client arguments must be replicated across
-  `local`/`remote`/`ssh`/`autoscale`.
+- `cluster/launch.py` `client_launch()` is the one client-invocation builder for `remote`/`ssh`/
+  `autoscale` (`local` runs clients in-process): a change to launched-client arguments goes there.
+  The key is never in a launched argv — environment (`HYPERSHELL_SERVER_AUTH`) for launcher modes,
+  ssh's stdin (forced `-T`, bare `-n` dropped) for `--ssh` — and only options a 2.9.0a4 client
+  accepts may be emitted (contract test).
 - In JSON mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
   expansion.
 - Advertised `HOSTNAME` must be routable from clients. The autoscaler never terminates clients
