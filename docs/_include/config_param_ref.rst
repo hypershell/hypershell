@@ -558,6 +558,11 @@
 
         See also ``--zone`` command-line option.
 
+    ``.site``
+        Name of the relay's site (default: none, the relay's host name).
+
+        The upstream *server* records the relay, and the *clients* at its site, under this name.
+
     ``.size``
         Number of *clients* the relay keeps launched at its site (default: `1`).
 

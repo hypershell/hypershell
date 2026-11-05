@@ -12,7 +12,9 @@ clients times the relay-local bundle size) it does not ask. A received bundle is
 relay database in one transaction and confirmed upstream only after that transaction commits. The
 returner moves completed site rows into the relay's outbox and hands them back upstream, as a client
 returns its results, each matched upstream against the assignment it answers; a result is marked
-returned only once its put has returned. The heartbeat keeps each identity registered upstream.
+returned only once its put has returned. The heartbeat keeps each identity registered upstream, and
+carries the relay's site and its roster (the site clients connected to the relay-local server), so the
+upstream server lists the site clients, attributed to the site, as they come and go.
 
 Example:
     >>> from hypershell.relay.upstream import upstream_identity
@@ -39,9 +41,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 # Internal libs
-from hypershell.core.config import config
+from hypershell.core.config import config, PARAM_UNSET
 from hypershell.core.fsm import State, StateMachine
-from hypershell.core.heartbeat import Heartbeat, ClientState
+from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.queue import QueueConfig, QueueVersionError, PROTOCOL, DEFAULT_REMOTE_TIMEOUT
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
@@ -53,7 +55,7 @@ from hypershell.data.model import DEFAULT_ZONE_NAME
 from hypershell.relay import store
 
 # Public interface
-__all__ = ['upstream_identity', 'upstream_config', 'request_text', 'read_reply', 'RelayInsertError',
+__all__ = ['upstream_identity', 'upstream_config', 'relay_site', 'request_text', 'read_reply', 'RelayInsertError',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
            'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
            'HeartbeatState', 'UpstreamHeartbeat', 'UpstreamHeartbeatThread',
@@ -102,6 +104,11 @@ def upstream_config(host: Optional[str] = None, port: Optional[int] = None, no_t
     section = config.relay.upstream
     tls = None if no_tls else tls_from_namespace(section.get('tls'))
     return QueueConfig(host=host or section.host, port=int(port or section.port), auth=str(section.auth), tls=tls)
+
+
+def relay_site(site: Optional[str] = None) -> str:
+    """The site a relay names upstream: `site` (from `[relay] site`) when set, else the relay's host name."""
+    return HOSTNAME if site in (None, '', PARAM_UNSET) else str(site)
 
 
 def request_text(identity: str, zone: Optional[str], size: int, wait: float) -> str:
@@ -458,23 +465,37 @@ class HeartbeatState(State, Enum):
 
 
 class UpstreamHeartbeat(StateMachine):
-    """Keep a zone identity registered upstream with a heartbeat every `heartrate` seconds."""
+    """
+    Keep a zone identity registered upstream with a heartbeat every `heartrate` seconds.
+
+    Each beat carries the relay's `site`, and, from the identity that holds it, the roster read by
+    `roster` (the site clients connected now, a whole snapshot each time). A change in the roster is
+    sent at the next wait step rather than when the next beat is due. A roster that cannot be read
+    is left out of that beat, so upstream keeps the last one it was sent.
+    """
 
     queue: Any
     identity: str
     heartrate: float
     previous: float
     client_state: ClientState
+    site: Optional[str]
+    roster: Optional[Callable[[], List[RosterEntry]]]
+    sent_roster: Optional[List[RosterEntry]]
 
     state = HeartbeatState.START
     states = HeartbeatState
 
     def __init__(self: UpstreamHeartbeat, queue: Any, identity: str,
-                 heartrate: float = DEFAULT_UPSTREAM_HEARTRATE) -> None:
+                 heartrate: float = DEFAULT_UPSTREAM_HEARTRATE, site: Optional[str] = None,
+                 roster: Optional[Callable[[], List[RosterEntry]]] = None) -> None:
         """Initialize with the upstream connection and the zone identity."""
         self.queue = queue
         self.identity = identity
         self.heartrate = heartrate
+        self.site = site
+        self.roster = roster
+        self.sent_roster = None
         self.previous = time.monotonic()
         self.client_state = ClientState.RUNNING
         self.wake = threading.Event()
@@ -496,12 +517,15 @@ class UpstreamHeartbeat(StateMachine):
     def submit(self: UpstreamHeartbeat) -> HeartbeatState:
         """Send one heartbeat under the zone identity."""
         state = self.client_state  # atomic
-        beat = Heartbeat.new(uuid=self.identity, state=state)
+        roster = self.read_roster() if state is ClientState.RUNNING else None
+        beat = Heartbeat.new(uuid=self.identity, state=state, site=self.site, roster=roster)
         try:
             self.queue.heartbeat.put(beat.pack(), timeout=DEFAULT_REMOTE_TIMEOUT)
         except QueueFull:
             return HeartbeatState.SUBMIT
         self.previous = time.monotonic()
+        if roster is not None:
+            self.sent_roster = roster
         if state is ClientState.RUNNING:
             log.trace(f'Upstream heartbeat - running ({self.identity})')
             return HeartbeatState.WAIT
@@ -515,8 +539,20 @@ class UpstreamHeartbeat(StateMachine):
         remaining = self.heartrate - (time.monotonic() - self.previous)
         if remaining <= 0:
             return HeartbeatState.SUBMIT
+        if self.roster is not None and self.read_roster() not in (None, self.sent_roster):
+            return HeartbeatState.SUBMIT
         self.wake.wait(min(remaining, HEARTBEAT_WAIT_STEP))
         return HeartbeatState.WAIT
+
+    def read_roster(self: UpstreamHeartbeat) -> Optional[List[RosterEntry]]:
+        """The current roster, or None if there is none to send or it cannot be read now."""
+        if self.roster is None:
+            return None
+        try:
+            return self.roster()
+        except SQLAlchemyError as error:
+            log.debug(f'Roster not read for upstream heartbeat ({error.__class__.__name__}: {error})')
+            return None
 
     def finalize(self: UpstreamHeartbeat) -> HeartbeatState:
         """Stop heartbeats."""
@@ -538,10 +574,12 @@ class UpstreamHeartbeatThread(Thread):
     """Run the upstream heartbeat within a dedicated thread."""
 
     def __init__(self: UpstreamHeartbeatThread, queue: Any, identity: str,
-                 heartrate: float = DEFAULT_UPSTREAM_HEARTRATE) -> None:
+                 heartrate: float = DEFAULT_UPSTREAM_HEARTRATE, site: Optional[str] = None,
+                 roster: Optional[Callable[[], List[RosterEntry]]] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-heartbeat')
-        self.machine = UpstreamHeartbeat(queue=queue, identity=identity, heartrate=heartrate)
+        self.machine = UpstreamHeartbeat(queue=queue, identity=identity, heartrate=heartrate,
+                                         site=site, roster=roster)
 
     def run_with_exceptions(self: UpstreamHeartbeatThread) -> None:
         """Run machine."""

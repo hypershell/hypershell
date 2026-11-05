@@ -19,7 +19,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, select, bindparam
+from sqlalchemy import Column, Index, func, text, update, select, bindparam, or_
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
@@ -1231,6 +1231,11 @@ class Client(Entity):
     disconnected_at: Mapped[Optional[datetime]] = mapped_column(DATETIME, nullable=True)
     evicted: Mapped[bool] = mapped_column(BOOLEAN, nullable=False)
 
+    # A relay registers with its site and names itself as relay; the site clients it forwards
+    # (its roster) carry the same site and the relay's id. Both are NULL for an ordinary client.
+    site: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
+    relay: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)
+
     columns = {
         'id': str,
         'host': str,
@@ -1239,6 +1244,8 @@ class Client(Entity):
         'connected_at': datetime,
         'disconnected_at': datetime,
         'evicted': bool,
+        'site': str,
+        'relay': str,
     }
 
     class NotFound(NotFound):
@@ -1260,8 +1267,10 @@ class Client(Entity):
 
     @classmethod
     def from_heartbeat(cls: Type[Client], hb: Heartbeat) -> Client:
-        """Initialize entity from client heartbeat message."""
-        return cls.new(id=hb.uuid, host=hb.host, connected_at=hb.time)
+        """Initialize entity from client heartbeat message (a beat with a site is a relay's own row)."""
+        if hb.site is None:
+            return cls.new(id=hb.uuid, host=hb.host, connected_at=hb.time)
+        return cls.new(id=hb.uuid, host=hb.host, connected_at=hb.time, site=hb.site, relay=hb.uuid)
 
     @classmethod
     def new(cls: Type[Client],
@@ -1278,11 +1287,46 @@ class Client(Entity):
 
     @classmethod
     def count_connected(cls: Type[Client]) -> int:
-        """Count active clients."""
+        """Count active clients that execute tasks (a relay's own row is not one; its site clients are)."""
         if server_id := Task.latest_server():
-            return cls.query().filter_by(server_id=server_id, disconnected_at=None).count()
+            return (cls.query().filter_by(server_id=server_id, disconnected_at=None)
+                    .filter(or_(cls.relay.is_(None), cls.relay != cls.id))
+                    .count())
         else:
             return 0
+
+    @classmethod
+    def reconnect(cls: Type[Client], id: str, **changes: Any) -> None:
+        """Mark an existing client connected again under this server, with any other `changes`."""
+        cls.update(id, disconnected_at=None, evicted=False, server_id=INSTANCE, server_host=HOSTNAME, **changes)
+
+    @classmethod
+    def disconnect_all(cls: Type[Client], ids: List[str], when: datetime) -> int:
+        """Mark the connected clients among `ids` disconnected at `when`; returns how many were."""
+        if not ids:
+            return 0
+        statement = (update(cls).where(cls.id.in_(ids)).where(cls.disconnected_at.is_(None))
+                     .values(disconnected_at=when).execution_options(synchronize_session=False))
+        return cls.__execute(statement)
+
+    @classmethod
+    def disconnect_roster(cls: Type[Client], relay: str, when: datetime) -> int:
+        """Mark every connected site client forwarded by `relay` disconnected at `when` (one statement)."""
+        statement = (update(cls).where(cls.relay == relay).where(cls.id != relay)
+                     .where(cls.disconnected_at.is_(None))
+                     .values(disconnected_at=when).execution_options(synchronize_session=False))
+        return cls.__execute(statement)
+
+    @classmethod
+    def __execute(cls: Type[Client], statement: Any) -> int:
+        """Run one write statement in its own transaction; returns the rows it matched."""
+        try:
+            count = Session.execute(statement).rowcount
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        return count
 
 
 # Indices for efficient queries

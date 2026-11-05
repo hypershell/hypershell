@@ -144,10 +144,12 @@ def test_one_relay_end_to_end(group: Group) -> None:
     for g in range(GROUPS - 1):
         assert max(t['completion_time'] for t in by_group[g]) <= min(t['schedule_time'] for t in by_group[g + 1])
 
-    # The relay identity is the only upstream client; it ended with a FINISHED beat, not an eviction.
-    clients = rows(upstream, 'SELECT id, evicted, disconnected_at FROM client')
-    assert [(c['id'], c['evicted']) for c in clients] == [(identity, 0)]
-    assert clients[0]['disconnected_at'] is not None
+    # Upstream the relay identity is listed with its site, and its site clients under it; it ended
+    # with a FINISHED beat, not an eviction, which disconnected them all.
+    clients = {c['id']: c for c in rows(upstream, 'SELECT id, evicted, disconnected_at, site, relay FROM client')}
+    assert set(clients) == {identity} | leaves
+    assert all((c['site'], c['relay'], c['evicted']) == (HOSTNAME, identity, 0) for c in clients.values())
+    assert all(c['disconnected_at'] is not None for c in clients.values())
     assert 'Upstream heartbeat - final' in relay_log
     assert 'not finishing upstream' not in relay_log
     assert not any(text in server_log for text in STALE_OR_DUPLICATE)
@@ -214,6 +216,7 @@ def start_site_relay(group: Group, name: str, upstream_port: int, key: str, size
            'HYPERSHELL_RELAY_BUNDLEWAIT': '1',
            'FENCE_PROBE': f'probe:{key}',
            'SITE_MARK': name, **env}
+    env.setdefault('HYPERSHELL_RELAY_SITE', name)
     return group.start(name, 'relay', '-H', 'localhost', '-p', str(upstream_port),
                        '--bind', '127.0.0.1', '--port', str(free_port()), '--zone', ZONE,
                        '-N', str(size), '--launcher', str(loopback_launcher(group.site)), env=env)
@@ -356,10 +359,17 @@ def test_two_relays_grouped_workload_with_retry(group: Group) -> None:
     runs = Counter(RUNNING.findall(group.text('relay-a')) + RUNNING.findall(group.text('relay-b')))
     assert set(runs) == {task['id'] for task in tasks} and set(runs.values()) == {1}
 
-    # Both relays ended their registrations with a final beat; nothing stale, duplicate or evicted.
-    clients = rows(upstream, 'SELECT id, evicted, disconnected_at FROM client')
-    assert sorted((c['id'], c['evicted']) for c in clients) == sorted((i, 0) for i in identities.values())
-    assert all(c['disconnected_at'] is not None for c in clients)
+    # Upstream each site lists its relay and exactly the site clients that relay launched.
+    clients = rows(upstream, 'SELECT id, evicted, disconnected_at, site, relay FROM client')
+    for name, identity in identities.items():
+        at_site = {c['id']: c for c in clients if c['site'] == name}
+        assert set(at_site) == {identity} | leaves[name]
+        assert all(c['relay'] == identity for c in at_site.values())
+    assert len(clients) == len(identities) + sum(len(ids) for ids in leaves.values())
+
+    # Both relays ended their registrations with a final beat, which disconnected their site clients;
+    # nothing stale, duplicate or evicted.
+    assert all(c['evicted'] == 0 and c['disconnected_at'] is not None for c in clients)
     server_log = group.text('server')
     assert not any(text in server_log for text in STALE_OR_DUPLICATE)
     assert 'Evicting client' not in server_log
@@ -405,11 +415,17 @@ def test_failover_reverts_and_completes_elsewhere(group: Group) -> None:
     by_id = {task['id']: task for task in tasks}
     assert snapshot
     assert {task['client_id'] for task in tasks} <= leaves_a
-    clients = {c['id']: c for c in rows(upstream, 'SELECT id, evicted, disconnected_at FROM client')}
-    assert set(clients) == set(identities.values())
+    clients = {c['id']: c for c in rows(upstream, 'SELECT id, evicted, disconnected_at, site, relay FROM client')}
+    leaves_b = leaves_of(group, 'relay-b')
+    assert set(clients) == set(identities.values()) | leaves_a | leaves_b
     assert clients[identities['relay-b']]['evicted'] == 1
     assert clients[identities['relay-a']]['evicted'] == 0
-    assert clients[identities['relay-a']]['disconnected_at'] is not None
+    assert all(c['disconnected_at'] is not None for c in clients.values())
+
+    # Relay B's eviction disconnected its site clients (never evicted on their own); A's ended with A.
+    for name, ids in (('relay-a', leaves_a), ('relay-b', leaves_b)):
+        assert all((clients[id]['site'], clients[id]['relay'], clients[id]['evicted']) == (name, identities[name], 0)
+                   for id in ids)
     server_log = group.text('server')
     assert server_log.count('Evicting client') == 1 and identities['relay-b'] in server_log
     assert server_log.count('Reverting orphaned tasks') == 1

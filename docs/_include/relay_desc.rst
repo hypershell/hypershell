@@ -20,6 +20,11 @@ each run. The site never retries a task: one that fails goes back upstream as it
 upstream *server* decides whether to run it again. Each result goes back attributed to the *client*
 at the site that ran it, matched to the assignment the upstream *server* made. Results are kept in
 the relay database until they have been handed over, and for a while after (``relay.retention``).
+The relay's heartbeat names its site (``relay.site``, by default the relay's host name) and lists the
+*clients* connected at the site, by id and host only. The upstream *server* records them as its own
+*clients*, attributed to the site and the relay, and counts them (not the relay) as connected. They
+never heartbeat upstream themselves: they disconnect there when they leave the site, and all at once
+when the relay finishes or is evicted.
 When the upstream *server* shuts down, the relay finishes the tasks it holds, returns every result,
 and ends its upstream registration; SIGUSR1 or SIGUSR2 stop it asking for more work in the same way.
 

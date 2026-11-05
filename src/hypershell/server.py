@@ -73,7 +73,7 @@ from hypershell.core.thread import Thread
 from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
 from hypershell.core.dispatch import Dispatcher
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
-from hypershell.core.heartbeat import Heartbeat, ClientState
+from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
 from hypershell.data.model import (Task, Client, Zone, ResultOutcome, CONTENDED_RERUNS, serialize_tasks,
                                    deserialize_tasks, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
@@ -679,12 +679,20 @@ DEFAULT_EVICT: Final[int] = default.server.evict
 
 
 class HeartMonitor(StateMachine):
-    """Collect heartbeat messages from connected clients."""
+    """
+    Collect heartbeat messages from connected clients.
+
+    A relay's heartbeat also carries its site and its roster, the site clients connected to it. The
+    site clients are registered (attributed to the site and the relay) and disconnected as they
+    come and go from the roster, but never enter `beats`: only their relay is evicted for missed
+    heartbeats, and its eviction or final heartbeat disconnects its whole roster.
+    """
 
     in_memory: bool
     no_confirm: bool
     queue: QueueServer
     beats: Dict[str, Heartbeat]
+    rosters: Dict[str, Dict[str, RosterEntry]]
     last_check: datetime
     wait_check: timedelta
     evict_after: timedelta
@@ -703,6 +711,7 @@ class HeartMonitor(StateMachine):
         self.queue = queue
         self.last_check = datetime.now().astimezone()
         self.beats = {}
+        self.rosters = {}
         self.in_memory = in_memory
         self.no_confirm = no_confirm
         if evict_after >= 10:
@@ -752,16 +761,20 @@ class HeartMonitor(StateMachine):
                 log.trace(f'Heartbeat - running ({hb.host}: {hb.uuid})')
             else:
                 log.debug(f'Registered client ({hb.host}: {hb.uuid})')
+                if hb.site is not None:
+                    self.check_relay(hb)
                 if not self.in_memory:
                     new_client = Client.from_heartbeat(hb)
                     try:
                         # Check to see if we are re-registering a falsely-evicted client (Issue #29)
                         old_client = Client.from_id(new_client.id)
                         log.warning(f'Existing client re-registered ({old_client.host}: {old_client.id})')
-                        Client.update(old_client.id, disconnected_at=None, evicted=False)
+                        Client.reconnect(old_client.id, **self.relay_fields(hb))
                     except Client.NotFound:
                         Client.add(new_client)
             self.beats[hb.uuid] = hb
+            if hb.roster is not None:
+                self.update_roster(hb)
             return HeartbeatState.SWITCH
         else:
             log.trace(f'Client disconnected ({hb.host}: {hb.uuid})')
@@ -769,8 +782,53 @@ class HeartMonitor(StateMachine):
                 self.beats.pop(hb.uuid)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone())
+            if hb.site is not None or hb.uuid in self.rosters:
+                self.end_roster(hb.uuid)
             self.queue.dispatcher.forget(hb.uuid)
             return HeartbeatState.SWITCH
+
+    @staticmethod
+    def relay_fields(hb: Heartbeat) -> Dict[str, str]:
+        """Client columns a relay's heartbeat sets on its own row (none for an ordinary client)."""
+        return {} if hb.site is None else {'site': hb.site, 'relay': hb.uuid}
+
+    def check_relay(self: HeartMonitor, hb: Heartbeat) -> None:
+        """A relay registering here relies on confirmation and the database to fail over; say so if off."""
+        if self.in_memory or self.no_confirm:
+            mode = 'without a database' if self.in_memory else 'without confirmation'
+            log.error(f'Relay registered ({hb.host}: {hb.uuid}, site {hb.site}) with a server running {mode}: '
+                      f'tasks it holds are not put back if it fails')
+
+    def update_roster(self: HeartMonitor, hb: Heartbeat) -> None:
+        """Register the site clients new to a relay's roster and disconnect those gone from it."""
+        relay, previous = hb.uuid, self.rosters.get(hb.uuid, {})
+        current = {entry.uuid: entry for entry in hb.roster
+                   if entry.state is not ClientState.FINISHED and entry.uuid != relay and entry.uuid not in self.beats}
+        self.rosters[relay] = current
+        added = [entry for uuid, entry in current.items() if uuid not in previous]
+        dropped = [uuid for uuid in previous if uuid not in current]
+        for entry in added:
+            log.debug(f'Registered site client ({entry.host}: {entry.uuid}) via relay {relay}')
+        for uuid in dropped:
+            log.debug(f'Site client disconnected ({previous[uuid].host}: {uuid}) via relay {relay}')
+        if self.in_memory:
+            return
+        for entry in added:
+            fields = {'site': hb.site, 'relay': relay}
+            try:
+                Client.from_id(entry.uuid, caching=False)
+                Client.reconnect(entry.uuid, **fields)
+            except Client.NotFound:
+                Client.add(Client.new(id=entry.uuid, host=entry.host, connected_at=hb.time, **fields))
+        Client.disconnect_all(dropped, datetime.now().astimezone())
+
+    def end_roster(self: HeartMonitor, relay: str) -> None:
+        """Disconnect every site client a relay forwarded, as the relay itself goes."""
+        roster = self.rosters.pop(relay, {})
+        if roster:
+            log.debug(f'Site clients disconnected with relay {relay} ({len(roster)})')
+        if not self.in_memory:
+            Client.disconnect_roster(relay, datetime.now().astimezone())
 
     def switch_mode(self: HeartMonitor) -> HeartbeatState:
         """Decide to bail, signal, check, or get another heartbeat."""
@@ -801,6 +859,8 @@ class HeartMonitor(StateMachine):
                 if not self.in_memory and not self.no_confirm:
                     log.warning(f'Reverting orphaned tasks ({hb.host}: {uuid})')
                     Task.revert_orphaned(uuid)
+                if hb.site is not None or uuid in self.rosters:
+                    self.end_roster(uuid)
                 self.queue.dispatcher.forget(uuid)
         return HeartbeatState.SWITCH
 

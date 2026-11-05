@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay
 base: develop
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -93,7 +93,7 @@ phases:
 - id: P6
   name: 'Roster forwarding: heartbeat site/roster, client site/relay columns, HeartMonitor
     cascade'
-  status: pending
+  status: done
   satisfies:
   - R7
   - R6
@@ -102,7 +102,7 @@ phases:
   - P5
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -v tests/test_relay_roster.py tests/test_server_fsm.py tests/test_server.py
     tests/test_upgrade_cli.py tests/test_zone_dispatch.py tests/test_autoscale.py
     tests/test_relay_workload.py
@@ -715,25 +715,91 @@ killing one relay fails its work over to the other with no task lost.
 **Goal:** leaf clients appear upstream attributed to their site, are never evicted on their own,
 and disconnect with their relay; `count_connected` and the rate math stay correct.
 
-- [ ] `core/heartbeat.py`: optional `site` and `roster`, packed only when set, read with `.get`.
-- [ ] `data/model.py`: `Client.site` (TEXT) and `Client.relay` (UUID), nullable, through #69's
+- [x] `core/heartbeat.py`: optional `site` and `roster`, packed only when set, read with `.get`.
+- [x] `data/model.py`: `Client.site` (TEXT) and `Client.relay` (UUID), nullable, through #69's
       upgrade step; `count_connected` excludes `relay = id`.
-- [ ] `server.py` HeartMonitor: relay identity rows written with `site` and `relay = id`; roster
+- [x] `server.py` HeartMonitor: relay identity rows written with `site` and `relay = id`; roster
       diff adds/re-registers/disconnects leaves without entering `beats`; holder eviction or
       FINISHED disconnects its roster in one statement; #29 re-registration refreshes
       `server_id`/`server_host`; one ERROR when a `site` beat arrives under `no_confirm` or
       `in_memory`.
-- [ ] Relay heartbeat FSM sends `site` on every identity and the roster (local `Client` table) on
+- [x] Relay heartbeat FSM sends `site` on every identity and the roster (local `Client` table) on
       the holder.
-- [ ] `tests/test_relay_roster.py` (HeartMonitor on stand-in queues + `task_db`): leaf registered
+- [x] `tests/test_relay_roster.py` (HeartMonitor on stand-in queues + `task_db`): leaf registered
       with site; leaf disconnect forwarded; relay eviction disconnects the roster; a leaf is never
       evicted on its own; `count_connected` counts leaves, not relays; a beat with no roster fields
       decodes; an existing pre-column database upgrades in place.
-- [ ] Extend the two-relay workload: upstream `client` rows per site equal the leaves launched.
+- [x] Extend the two-relay workload: upstream `client` rows per site equal the leaves launched.
+- **Amendments (2026-11-05, build):**
+  - **Site name.** Nothing named where `site` comes from. New `[relay] site` (config only, no
+    CLI flag; default unset, which means the relay's host name, `HOSTNAME`), resolved by
+    `relay/upstream.py::relay_site` and logged on the identity line (`Upstream identity … for zone
+    … at site …`). Documented in the config reference, `relay_desc.rst` and `hs relay --help`.
+    A `--site` option is left for P9 or a foreman ruling.
+  - **The roster** is `store.roster(engine, INSTANCE)`: the relay-local server's connected `client`
+    rows (its own `server_id`), as `RosterEntry(uuid, host, state=RUNNING)`, ordered by id. Only
+    id, host and state go upstream (credential fence: nothing the site was given to connect).
+    Leaves that leave the site drop out of the snapshot; upstream treats that as a disconnect.
+  - **Roster changes beat early.** A roster read at heartrate alone (default 10 s) would miss leaves
+    that come and go between beats, and the first beat goes before the fleet registers. The
+    heartbeat FSM re-reads the roster at each wait step (≤ 1 s) and beats at once when it differs
+    from the last one sent. A roster that cannot be read (SQLAlchemy error) is left out of that
+    beat; upstream then keeps the last roster (a beat without `roster` changes no leaf, an empty
+    roster disconnects them all). The FINISHED beat carries `site` but no roster.
+  - **Upstream monitor shape.** `HeartMonitor.rosters` holds `{relay: {leaf: RosterEntry}}`.
+    Leaves with state FINISHED, the relay itself, and any id that beats on its own are not taken
+    as leaves. New leaves are added (or reconnected through `Client.reconnect`) with `site` and
+    `relay = holder`; dropped ones are disconnected with one `Client.disconnect_all` statement;
+    eviction or FINISHED of a relay runs `Client.disconnect_roster` (one UPDATE, `relay = holder
+    AND id <> holder AND disconnected_at IS NULL`). Leaves are disconnected, never marked evicted.
+    In memory the rosters are tracked but nothing is written.
+  - **#29 re-registration** (`Client.reconnect`) now refreshes `server_id`/`server_host` for every
+    re-registered client, not only relays, as PLAN §2.7 states it.
+  - **ERROR line:** once per relay registration (its first beat, or its first after an eviction)
+    under `--no-confirm` or `--no-db`.
+  - **Test harness touch.** `tests/__init__.py::snapshot` (#69's helper) read `SELECT * FROM
+    client`, so the new nullable columns broke `test_upgrade_cli.py::test_rows_preserved`. It now
+    snapshots the 2.8.3 client columns (`ORIGINAL_CLIENT_COLUMNS`, as it already did for `task`),
+    and the test asserts the new columns read NULL. The PostgreSQL snapshot is task-only and is
+    unchanged.
+  - **Workload tests.** All three relay workload tests asserted the relay identity was the only
+    upstream client; they now assert the forwarded roster: per site, the upstream rows with that
+    `site` are the relay plus exactly the leaves in the relay database, `relay` = the identity,
+    all disconnected at the end and none evicted (in failover, B's leaves were disconnected by
+    B's eviction). Relays in the two-relay tests set `HYPERSHELL_RELAY_SITE` to their name.
 - **Verify:** see frontmatter.
+- **Red first (2026-11-05):** on the unmodified tree `tests/test_relay_roster.py` failed at
+  collection (`ImportError: RosterEntry`). The extended `tests/test_relay_workload.py`, run against
+  the P5 source (`d6e9d7d`, a scratch export), failed its one-relay and two-relay tests on the
+  roster assertions (`no such column: site` upstream). During the build
+  `test_count_connected_counts_leaves_not_relays` and `test_upgrade_cli.py::test_rows_preserved`
+  (the snapshot amendment above) were red until fixed.
+- **Verified 2026-11-05** (venvs from `uv sync --frozen` on `PATH` in place of `uv run`):
+  - P6 verify, 3.12: 129 passed (19 of them `test_relay_roster.py`), no skip.
+  - Full suite, 3.12: 1017 passed, 85 skipped (PostgreSQL and other server-backed tests), no failure.
+  - Relay, zone, dispatch, server-FSM, contended-write, writeback, upgrade, autoscale and initdb
+    files, 3.14: 348 passed, 64 skipped.
+  - `unsupported_internals()` is `[]` on both; `hs relay --help` shows the roster paragraph.
+  - Loopback smoke (`temp_site.sh`, a scratch driver), 3.12 at DEBUG and 3.14 at INFO: upstream
+    `hs server --restart -r 1 -b 4` with TLS (`<auto>`), 41 tasks plus one failing on its first
+    attempt; a raw four-key heartbeat as 2.9.0a4 packs it (no `site`, no `roster`) put on the
+    upstream heartbeat queue; then `hs relay -N 2` (loopback launcher, `[relay] site` = `site-a`).
+    Mid-run the upstream `client` table held the relay (`site-a`, `relay` = itself), its 2 site
+    clients (`site-a`, `relay` = the relay) and the old-style client (`site`/`relay` NULL), all
+    connected, and `Client.count_connected()` was 3 (the leaves and the old-style client, not the
+    relay). Both processes exited 0; 42 rows, all completed, the failure `(3, attempt 1, retried)`;
+    every `client_id` (and `hs list client_id client_host`) names one of the 2 leaves, which equal
+    the relay database's `client` rows; at the end every upstream client row was disconnected and
+    none evicted; no eviction, stale, duplicate, ERROR or CRITICAL line upstream; no key in the
+    relay's log or output.
 - **Touches:** `src/hypershell/core/heartbeat.py`, `src/hypershell/data/model.py`,
-  `src/hypershell/server.py`, `src/hypershell/relay/`, `tests/test_relay_roster.py`,
-  `tests/test_relay_workload.py`.
+  `src/hypershell/server.py` (`HeartMonitor` only), `src/hypershell/core/config.py` (`[relay]
+  site`), `src/hypershell/relay/` (`__init__.py`, `store.py`, `upstream.py`),
+  `tests/test_relay_roster.py`, `tests/test_relay_workload.py`, `tests/__init__.py`,
+  `tests/test_upgrade_cli.py`, `docs/_include/relay_desc.rst`, `docs/_include/config_param_ref.rst`.
+  No zone code (`Scheduler`/staging, `core/dispatch.py`, `core/queue.py`), `client.py` or `cluster/`
+  edit. Wire: two optional heartbeat keys, packed only when set; a beat without them decodes as
+  before, and an older server ignores them.
 
 ## Phase P7 — R21 run A: relay drive, smoke, hand back
 **Satisfies:** R21, R20 · **Depends on:** P5, P6 · PLAN §6; [04 §2](research/04-evidence-and-tests.md)

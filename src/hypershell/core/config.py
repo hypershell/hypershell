@@ -198,6 +198,7 @@ default = Namespace({
         'poll': 1,                # Max polling interval of the relay-local scheduler in seconds
         'retention': 300,         # Seconds a returned result is kept in the relay database
         'zone': PARAM_UNSET,      # Zone served by the relay (default zone if unset)
+        'site': PARAM_UNSET,      # Site name the relay gives upstream (default: the relay's host name)
         'size': 1,                # Number of site clients the relay keeps launched
         'launcher': '',           # Command prefix to launch each site client (empty means 'hs client ...')
         'launcher_args': '',      # Extra arguments for the launcher

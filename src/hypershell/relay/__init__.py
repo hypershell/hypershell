@@ -42,7 +42,7 @@ from cmdkit.config import Namespace
 from hypershell.core.config import (config, RELAY_PROCESS, RELAY_MARKER, DEFAULT_RELAY_PORT, DEFAULT_AUTH,
                                     PARAM_UNSET, relay_database_section)
 from hypershell.core.exceptions import get_shared_exception_mapping, handle_exception, handle_disconnect
-from hypershell.core.logging import Logger
+from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.queue import QueueClient, QueueConfig
 from hypershell.core.thread import Thread
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
@@ -53,7 +53,7 @@ from hypershell.relay import store
 from hypershell.relay.store import ensure_tables
 from hypershell.relay.site import site_cluster, fence_site, DEFAULT_SITE_PERIOD
 from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
-                                       upstream_identity, upstream_config, DEFAULT_UPSTREAM_BUNDLESIZE,
+                                       upstream_identity, upstream_config, relay_site, DEFAULT_UPSTREAM_BUNDLESIZE,
                                        DEFAULT_UPSTREAM_HEARTRATE, DEFAULT_RETENTION)
 from hypershell.cluster.remote import AutoScalingCluster
 from hypershell.server import ServerThread
@@ -147,7 +147,9 @@ class RelayThread(Thread):
     which site clients and their tasks inherit, is cleared of relay settings and of anything holding
     the key (see `hypershell.relay.site.fence_site`). A puller requests work while the site
     has room for it and confirms it once it is stored; a returner hands completed results back upstream
-    through the relay's outbox; a heartbeat keeps the identity registered.
+    through the relay's outbox; a heartbeat keeps the identity registered, naming the relay's site
+    and listing the site clients connected now, so upstream they appear attributed to the site and
+    disconnect with the relay.
 
     The relay ends when pulling is over (an upstream shutdown or a drain signal) and the site has
     finished what it holds, or when a drain signal ends the site's scheduling. It then stops launching
@@ -178,6 +180,9 @@ class RelayThread(Thread):
 
         zone (str, optional):
             Name of the zone the relay serves (default zone if None).
+
+        site (str, optional):
+            Name of the relay's site, as upstream lists it and its site clients (default: this host's name).
 
         upstream_bundlesize (int, optional):
             Most tasks the relay asks for, and returns, at once. See :const:`DEFAULT_UPSTREAM_BUNDLESIZE`.
@@ -213,6 +218,7 @@ class RelayThread(Thread):
     cluster: AutoScalingCluster
     server: ServerThread
     zone: Optional[str]
+    site: str
     identity: str
     upstream_config: Optional[QueueConfig]
     upstream: Optional[QueueClient] = None
@@ -228,6 +234,7 @@ class RelayThread(Thread):
                  tls: Optional[TLSConfig] = None,
                  upstream: Optional[QueueConfig] = None,
                  zone: Optional[str] = None,
+                 site: Optional[str] = None,
                  upstream_bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE,
                  heartrate: int = DEFAULT_UPSTREAM_HEARTRATE,
                  size: int = DEFAULT_RELAY_SIZE,
@@ -248,6 +255,7 @@ class RelayThread(Thread):
         self.bundlewait = bundlewait
         self.poll = poll
         self.zone = zone
+        self.site = relay_site(site)
         self.identity = upstream_identity(zone)
         self.upstream_config = upstream
         self.upstream_bundlesize = upstream_bundlesize
@@ -263,14 +271,15 @@ class RelayThread(Thread):
     def run_with_exceptions(self: RelayThread) -> None:
         """Connect upstream, start the site, pull and return work, and wait for the relay to finish."""
         log.debug('Started')
-        log.info(f'Upstream identity {self.identity} for zone {self.zone or DEFAULT_ZONE_NAME}')
+        log.info(f'Upstream identity {self.identity} for zone {self.zone or DEFAULT_ZONE_NAME} at site {self.site}')
         upstream = self.upstream_config or upstream_config()
         fence_site(self.cluster, key=upstream.auth)
         self.upstream = QueueClient(config=upstream)
         self.upstream.connect()
         log.info(f'Connected to upstream server {upstream.host}:{upstream.port}')
         self.heartbeat = UpstreamHeartbeatThread(queue=self.upstream, identity=self.identity,
-                                                 heartrate=self.heartrate)
+                                                 heartrate=self.heartrate, site=self.site,
+                                                 roster=functools.partial(store.roster, engine, INSTANCE))
         self.puller = UpstreamPullerThread(queue=self.upstream, engine=engine, identity=self.identity,
                                            zone=self.zone, bundlesize=self.upstream_bundlesize,
                                            local_bundlesize=self.bundlesize, poll=self.poll)
@@ -408,6 +417,8 @@ APP_HELP = f"""\
   The site runs no retries: a task that fails there goes back upstream as it ended, and
   the upstream server decides whether to run it again. Results go back attributed to the
   client at the site that ran them, and are kept in the relay database until handed over.
+  Upstream, the site's clients are listed under the relay and its site ([relay] site,
+  default: this host's name) while they are connected, and disconnect with the relay.
 
   The upstream key comes from the configuration ([relay.upstream] auth), never from the
   command line, and never reaches the site: relay settings, and any variable holding the
@@ -509,6 +520,7 @@ class RelayApp(Application):
                                  tls=tls_from_namespace(config.server.tls),
                                  upstream=upstream_config(self.upstream_host, self.upstream_port, self.no_tls),
                                  zone=self.zone,
+                                 site=config.relay.get('site', None),
                                  upstream_bundlesize=config.relay.upstream.bundlesize,
                                  heartrate=config.relay.upstream.heartrate,
                                  size=self.size,

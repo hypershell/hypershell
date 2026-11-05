@@ -51,12 +51,14 @@ from sqlalchemy.types import Text, DateTime
 
 # Internal libs
 from hypershell.core.types import JSONData, to_json_type
+from hypershell.core.heartbeat import RosterEntry, ClientState
 from hypershell.data.model import Task, Client, DEFAULT_ZONE_ID
 from hypershell.data.upgrade import upgrade_schema
 
 # Public interface
 __all__ = ['RelayBase', 'RelayTask', 'RelayResult', 'RESULT_PENDING', 'RESULT_RETURNED', 'ensure_tables',
            'LOCAL_STAMP_COLUMNS', 'local_row', 'insert_received', 'count_backlog', 'count_connected', 'count_held',
+           'roster',
            'result_record', 'collect_results', 'pending_results', 'mark_returned', 'prune_returned',
            'COLLECT_BATCH', 'PRUNE_BATCH']
 
@@ -185,6 +187,19 @@ def count_connected(engine: Engine, server_id: str) -> int:
              .where(and_(table.c.server_id == server_id, table.c.disconnected_at.is_(None))))
     with engine.connect() as conn:
         return conn.execute(query).scalar()
+
+
+def roster(engine: Engine, server_id: str) -> List[RosterEntry]:
+    """The clients connected to the relay-local server `server_id`, as the relay lists them upstream.
+
+    Only a client's id and host go upstream (never anything the site was given to connect).
+    """
+    table = Client.__table__
+    query = (select(table.c.id, table.c.host).select_from(table)
+             .where(and_(table.c.server_id == server_id, table.c.disconnected_at.is_(None)))
+             .order_by(table.c.id))
+    with engine.connect() as conn:
+        return [RosterEntry(uuid=id, host=host, state=ClientState.RUNNING) for id, host in conn.execute(query)]
 
 
 def count_held(engine: Engine) -> int:
