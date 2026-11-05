@@ -95,15 +95,18 @@ limitation.
 - **Q:** Must old clients and servers still interoperate? — **A (proposed, 2026-11-04):** Yes. The
   wire format and handshake stay the same (R4), and a new launcher must still bring up clients from
   an older install (R5). HPC sites often run a different HyperShell install on compute nodes from
-  the one on the launch host. **[NEEDS CLARIFICATION: confirm that R5 is binding, or relax it to
-  "2.9.0 and later clients only" if the plan shows that holding it costs more than the appetite.]**
+  the one on the launch host. **Resolved (maintainer, 2026-11-05): split by line.** Zone dispatch (#78, in 2.9.0a4)
+  makes a 2.9 server refuse any client older than its work-request protocol, so on the 2.9 line R4
+  and R5 apply to 2.9.0a4-and-later peers only. On the 2.8.5 backport, the 2.8.5 launcher SHALL
+  still bring up any 2.8.x client unchanged, and a 2.8.5 server and client SHALL interoperate with
+  any 2.8.x peer. On both lines the authentication handshake and wire format stay unchanged.
 - **Q:** Should this ship in a 2.8.x patch? — **A (proposed, 2026-11-04):** The cycle lands on
   `develop` first, as `fix/`, since hotfix branches are out of scope for `/hs-feature`. Because it is
   a pre-existing, high-ranked security item, the shaper recommends a backport to the next 2.8.x
   patch, the same way earlier 2.9 fixes were backported. That is only possible if the change does
   not depend on zone-only code. If the build is planned against the post-zone launchers, the
-  backport needs its own small adaptation to the 2.8 launchers. **[NEEDS CLARIFICATION: 2.8.x
-  backport — yes, no, or decide after review?]**
+  backport needs its own small adaptation to the 2.8 launchers. **Resolved (maintainer, 2026-11-04): yes**, as 2.8.5. It is
+  released together with the TCP_NODELAY backport (#76) and held until both are ready.
 - **Q:** Appetite — **A (2026-11-04):** `small`, which fits the roughly two days of build and review
   the maintainer set. The seed was already recorded as small. If the plan finds that one launch mode
   needs a much larger mechanism than the others, the fallback is to close the exposure in the modes
