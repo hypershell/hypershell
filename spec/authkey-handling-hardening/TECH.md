@@ -3,16 +3,16 @@ slug: authkey-handling-hardening
 title: The queue authentication key is never exposed to other users on client nodes
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/authkey-handling-hardening
 base: develop
-current_phase: P1
+current_phase: done
 last_updated: '2026-11-05'
 phases:
 - id: P1
   name: One client-launch function; --launcher and --mpi hand the key over in the
     environment
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -45,7 +45,7 @@ phases:
 - id: P3
   name: SSH launches through the same function, key on the ssh channel's standard
     input
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -61,7 +61,7 @@ phases:
     or closed_input or redacts' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
 - id: P4
   name: Compatibility contract, cross-version check, and the docs revision
-  status: in_progress
+  status: done
   satisfies:
   - R4
   - R5
@@ -78,8 +78,7 @@ phases:
 review:
   last_reviewed_commit: a18f672ca86aef658cde7cd5ecb0c54ba3eac33b
   verdict: changes-requested
-  blocked_reason: 'Review cycle 2: two hidden-lane residuals (N1, N2), CI tag fetch
-    fails without the tag (N4), [export] docs wording (N5); human gate for N1/N2'
+  blocked_reason: ''
   cycle: 2
 ---
 # TECH.md — The queue authentication key is never exposed to other users on client nodes
@@ -531,6 +530,24 @@ its change, and each change was mutation-checked in a scratch copy of the fixed 
   `expand_shell` ignores it, `shell_env` empty (1 each, the `{% %}` run); no dotted variants (3);
   no `orterun`/`prterun` (3); prefix match on the launcher name (1); bare `-x` only (2); TLS hint
   never fires (1); TLS hint ignores the condition (1); no `basename` (3).
+- **Gates (on `9f2fd97`; 2026-11-05).**
+  - P1 verify (as retuned): 48 passed; `tests/test_cluster.py tests/test_client.py` 62 passed.
+    P3 verify (as retuned): 48 passed, 1 skipped (fish not installed); `tests/test_cluster.py` 59
+    passed. P4's file run: `tests/test_cluster_launch.py` 110 passed, 1 skipped (fish).
+  - Full suite, 3.12.13, `-n 8`, tag `2.9.0a4` present: 1003 passed, 85 skipped (PostgreSQL and
+    TimescaleDB opt-in, fish), 0 failed.
+  - Full suite, 3.14.6, `-n 8`: 1000 passed, 88 skipped (the same, plus three
+    version-gated `tests/test_queue_gc.py` cases), 0 failed.
+  - Sphinx (`sphinx-build -E`): exit 0, only the two pre-existing "not in any toctree" warnings.
+  - `unsupported_internals()` returns `[]` on 3.12.13 and 3.14.6.
+  - CLI drive (P4): `seq 20 | hsx -t 'echo {}' --launcher=env -N2 -H 127.0.0.1` in a temp site:
+    exit 0, outputs 1–20, 20 tasks, 0 failed. A second drive with a user's
+    `OMPI_MCA_mca_base_env_list=USER_A` and a template whose `{% %}` commands count
+    `^HYPERSHELL_SERVER_AUTH=` and print the Open MPI list, beside a `{= =}` lambda that measures
+    the client's own key variable: exit 0, each of 4 tasks printed `key=0 ompi=USER_A lambda=128`
+    (the explicit lambda path reads the client's environment, as documented).
+  - Not run here (no cluster access): Open MPI under a dotted name, and the TLS hint under a real
+    `srun --export=NONE`, stay with the foreman's real-cluster check.
 
 ---
 
