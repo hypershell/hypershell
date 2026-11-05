@@ -77,7 +77,7 @@ Top-level package `src/hypershell/`:
 | `submit.py` | `SubmitApp` / `SubmitThread` / `LiveSubmitThread` — ingest commands from stdin/files, assign UUIDs, parse `# HYPERSHELL:` tags, write task rows. Also the source-gating for safe re-submission (`--restart`/`--repeat`/`--update`): `GatedSource`, `source_fingerprint_and_count`, `apply_source_gate`. |
 | `server.py` | `ServerThread`, the `Scheduler` FSM (load/pack/post bundles), and `HeartMonitor` (client eviction + task revert). |
 | `client.py` | `ClientThread`, `ClientScheduler` + `TaskExecutor` FSMs — pull bundles, run subprocesses, emit heartbeats, return results. |
-| `task.py` | The `task` CLI group and top-level `submit`/`info`/`wait`/`run`/`list`/`search`/`update` apps, incl. exit-status-colorized `hs list`. |
+| `task.py` | The top-level `info`/`wait`/`run`/`list`/`update` apps, incl. exit-status-colorized `hs list`, and the legacy `task` group (kept until v3). |
 | `core/` | Shared infrastructure (see below). |
 | `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection. `InitDBApp` (`hs initdb`) and the `initdb`/`checkdb`/`ensuredb` helpers live in `data/__init__.py`; the schema-upgrade step in `data/upgrade.py`. |
 | `data/model.py` | `Entity` base + `Task`, `Client`, and `Source` ORM models (`Source` records submission provenance for re-submission gating; `DIRECT_SOURCE_ID`/`STDIN_SOURCE_ID` are reserved source ids). **Most query/state logic lives as `Task` classmethods here.** |
@@ -400,6 +400,10 @@ underlines (must be ≥ title length), `-------------------` section rules, `|br
 italics, first-person-plural voice. CLI help text is generated into `docs/_include/*.rst` — a
 CLI change updates those. Build with `uv run sphinx-build docs docs/_build` and confirm no new
 warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-existing).
+
+Current docs, notes, seeds and PRs name only the top-level commands: `hs list`, `hs info`,
+`hs wait`, `hs run`, `hs update`. The `hs task …` subcommands stay in the code for backwards
+compatibility until v3, but are never referenced.
 
 ## High-risk files & footguns (quick reference)
 
