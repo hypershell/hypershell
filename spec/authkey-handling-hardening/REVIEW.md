@@ -385,3 +385,184 @@ reproduced on 3.12.13, where the builder saw them.
 
 Next: `/hs-build` for N1, N2, N4 and N5 after the human gate; then a scoped cycle 3, the last before
 escalation.
+
+## Review cycle 3 — approved, with follow-ups (2026-11-05)
+
+> **Mode: scoped** to the cycle-2 remediation (foreman's instruction):
+> `git diff faac45d..97611ca -- . ':(exclude)spec/'` (`9f2fd97` code, tests, docs, CI; `97611ca`
+> gates), graded against [`GOAL.md`](GOAL.md), the AGENTS.md invariants, the runnable repo and the
+> foreman's named checks. The blind pass ran inline in the orchestrator (no subagent, foreman's
+> instruction). TECH § *Review-2 remediation*, PLAN §5 and the cycle 1–2 sections were read only
+> after the findings below were formed. Hidden-lane items are named by kind only. This is the last
+> cycle the run allows, so each finding says whether it **blocks merge** or is a **follow-up**, and why.
+
+- **Reviewed commit:** 97611ca  ·  **Base:** develop (`02b292a`, 2.9.0a4)  ·  **Date:** 2026-11-05
+- **Verdict:** approved. No finding blocks merge; four CONFIRMED LOW items are follow-ups. Human
+  sign-off is still required before `/hs-publish` (R3-2 is in `client.py`; R3-1 is security-lane).
+- **Routing note:** the rubric sends any CONFIRMED finding back to `/hs-build`. At the cycle bound
+  the foreman asked for blocking findings to go to the maintainer instead. None blocks, so the LOW
+  items are recorded here as follow-ups, not looped.
+- **Cycle:** 3 of ≤3.
+- **Contract drift:** none (`git log faac45d..97611ca -- spec/authkey-handling-hardening/GOAL.md` is empty).
+
+### Verification run (cycle 3)
+
+Scratch copies only (`git archive 97611ca`, tag `2.9.0a4` fetched into one of them), venvs from
+`uv sync --frozen`, every run under a process-group kill timer; none of this review's processes
+remain.
+
+- **Full suite**, 3.14.6, `-n auto`, tag present: 1000 passed, 88 skipped, 0 failed (the builder's
+  3.14.6 counts). No timing failures, so no comparison against `origin/develop` was needed. The
+  probes and mutants below ran on the uv default interpreter (3.15.2) in a tagless copy, where
+  `tests/test_cluster_launch.py` gives 107 passed, 4 skipped.
+- **Sphinx** (`-E`): exit 0, only the two pre-existing "not in any toctree" warnings; nothing from
+  `security.rst` or the changed includes.
+- **`--ssh --env` exports (N1).** `SSHCluster(export_env=True)` with the key variable first, in the
+  middle and last among 14 awkward `HYPERSHELL_*` values (a trailing backslash, an odd `"`, `'`, a
+  newline, `=`, empty, non-ASCII, `$HOME`/backticks/`$(…)`, mixed quotes, outer spaces, `*`, `-T`,
+  `;exit 3;`, tab and CR): the key is in no argv word, not in `describe()` and not in
+  `compile_env()`. The export words, joined as ssh joins them and run under `sh`, `bash`, `zsh`,
+  `dash` and `ksh`, read back every value exactly and no key variable. One residual of another
+  kind, R3-1.
+- **Template shell expansion (N2).** A client environment holding the key and
+  `OMPI_MCA_mca_base_env_list=A;HYPERSHELL_SERVER_AUTH;B`: `{% printenv HYPERSHELL_SERVER_AUTH %}`
+  prints nothing and the Open MPI list reads `A;B`; a `{= =}` lambda reads the key (documented,
+  explicit). The client builds one `Template` (`client.py:725`); submit-side templates are
+  unchanged; `hs run` and `hs submit` carry arguments and tags only. `[export]` values are literal
+  (`_env`/`_eval` keys are exported as named, not resolved), so it cannot carry a minted key; every
+  cluster mode mints its own (`secrets.token_hex(64)` in `local.py`, `remote.py` twice, `ssh.py`),
+  so the nested-run sentence holds.
+- **Open MPI names (N3).** `is_mpi_launcher()` is true for `mpirun`, `mpiexec`, `mpirun.openmpi`,
+  `mpiexec.openmpi`, `orterun`, `prterun` and full or relative paths to them; false for `srun`,
+  `aprun`, `jsrun`, `ibrun`, `flux`, `mpirun_rsh`, `charmrun`, `pbsdsh`, `env`, `mpirunner`,
+  `xmpirun`, and for `srun mpirun` (first word only). MPICH dotted names match, the accepted
+  residual: the launch only adds the Open MPI parameter to the environment, which MPICH ignores,
+  and nothing changes on its command line, so no MPICH launch breaks (no MPI here to run one).
+  `-x`, `--x`, `-x=A` and `--x=A` count as `-x`; the attached `-xA` does not, which matters only
+  if Open MPI accepts that form.
+- **TLS hint.** Fires for a launched client that got no environment (branch test; mutants M10,
+  M11) and stays silent when the key variable is kept. It also fires when the key came from a
+  configuration file: R3-2.
+- **CI tag fetch (N4).** The step's own text under `bash -e`, in a `--depth=1` clone of a local
+  bare origin: without the tag, `fatal: couldn't find remote ref`, the notice, exit 0; with it,
+  exit 0 and the tag resolves. Still one step, one tag, depth 1.
+- **Docs and gates.** No `hs task …` in the diff. AGENTS.md, invariants §11, `docs/security.rst`,
+  `cluster_help.rst` and `templates.rst` read against the code and the probes above: one
+  inaccuracy, R3-3.
+
+#### Mutation results (cycle 3)
+
+The reviewer's own mutants, one at a time, over `tests/test_cluster_launch.py`:
+
+| Mutant | Result |
+|--------|--------|
+| M1 key variable not dropped from the exports | killed (`test_ssh_env_export_never_carries_key`, `…quote_every_value`) |
+| M2 values double-quoted, not `shlex.quote`d | killed (`test_ssh_launch_runs_client_under_sh_with_no_terminal`) |
+| M3 no shell-name check on export names | **survived** (R3-4) |
+| M4 no dotted launcher names | killed (`…for_mpi_launchers[mpirun-dotted]`) |
+| M5 any launcher word counts | killed (`…for_other_launchers[mpirun-not-first]`) |
+| M6 `prterun` dropped | killed (`…for_mpi_launchers[prterun]`) |
+| M7 bare `-x` only | killed (`…beside_mpirun_x[double-dash]`) |
+| M8 executor builds `Template` without `shell_env` | killed (`test_template_shell_expansion_never_sees_key`) |
+| M9 `expand_shell` ignores `shell_env` | killed (same) |
+| M10 TLS hint ignores the environment key | killed (`…names_cause_under_tls[key-kept]`) |
+| M11 TLS hint removed | killed (`…names_cause_under_tls[no-key]`) |
+| M12 `describe()` redacts by prefix only | killed (`…redacts_key_however_quoted[double-quoted]`) |
+| M13 Open MPI list keeps the key's name | killed (`test_task_environment_never_holds_key[launch-only]`, `test_launched_tasks_never_hold_key[mpi]`) |
+| M14 exports rebuilt from the cycle-2 double-quoted string | killed (`…quote_every_value[value-0,value-1]`) |
+
+13 of 14 killed.
+
+### Findings (cycle 3)
+
+#### [R3-1 · LOW · CONFIRMED · follow-up] Residual key reach for an operator-held key in an export and task-environment edge case
+- **Where:** the SSH export path and the client's task environment (`cluster/launch.py`, `client.py`).
+- **Summary:** it needs a key the operator set up in one particular way. The run's own key is never
+  involved, in any mode. Detail, reproduction and a small fix are in the hidden security lane.
+- **Why follow-up:** R1–R8 concern the run's key and hold; the statements this cycle adds stay true
+  as written; and the reach predates the cycle (this remediation narrows it, it does not add it).
+
+#### [R3-2 · LOW · CONFIRMED · follow-up] The no-key hints also fire for a key from a configuration file
+- **Where:** `src/hypershell/client.py:1693-1700` (`ClientApp.run`, both handlers).
+- **Scenario:** an `hs client` whose key is `server.auth` in its configuration file (a way
+  `docs/_include/security_alt.rst` names) fails TLS verification, or authenticates with a wrong
+  key. Its error then goes on "No key reached this client (either): HYPERSHELL_SERVER_AUTH is not
+  set in its environment and no -k was given … the launcher most likely did not pass the
+  environment". The second clause is true; the first is not, and the cause it names is wrong.
+- **Evidence:** scratch tests. A stand-in launcher that drops the environment but gives the client
+  the run's key in a configuration file → `CERTIFICATE_VERIFY_FAILED … - No key reached this client
+  either`. `hs client --no-tls` with a wrong key in `HYPERSHELL_CONFIG_FILE`, against
+  `hs server -k` → `AuthenticationError` with the hint.
+- **Why follow-up:** this is the Q1/F2 condition as ruled ("no key from `-k` or the environment"),
+  and cycle 2 saw the authentication case. The text is advisory, on a run that fails anyway, and
+  the real error comes first.
+- **Fix shape (checked in scratch):** test the resolved key in both handlers,
+  `not auth_given and self.auth == DEFAULT_AUTH`. Every existing hint test and both probes pass
+  with it. The maintainer may take it before merge.
+
+#### [R3-3 · LOW · CONFIRMED · follow-up] `templates.rst` says `{% %}` commands get the tasks' environment
+- **Where:** `docs/_include/templates.rst:178-180`, and `:195`.
+- **Scenario:** "the command runs with the same environment the client's tasks get". It runs with
+  the client's own environment without the key. Tasks also get `[export]` and the `TASK_*`
+  variables, which `{% %}` commands did not get before this cycle either. Probe: with
+  `[export] HYPERSHELL_SERVER_AUTH = "…"`, `load_task_env()` holds it and
+  `{% printenv HYPERSHELL_SERVER_AUTH %}` prints nothing. The code is on the safe side of the text.
+  At `:195`, "under a client, it includes `HYPERSHELL_SERVER_AUTH`" holds for a client that
+  `hs cluster` started, not for one started by hand with `-k`.
+- **Suggested wording:** "When a client expands the template, the command runs with the client's
+  own environment, without ``HYPERSHELL_SERVER_AUTH`` (the environment its tasks inherit, before
+  ``[export]`` and the ``TASK_*`` variables are added)." and "under a client that ``hs cluster``
+  started, it includes ``HYPERSHELL_SERVER_AUTH``".
+- **Why follow-up:** docs only; no requirement or safety statement is wrong.
+
+#### [R3-4 · LOW · CONFIRMED · follow-up] No test covers the export name check
+- **Where:** `src/hypershell/cluster/launch.py:236-238` (`ssh_env_exports()`, the `SHELL_NAME` skip).
+- **Scenario:** with the skip removed (mutant M3) the whole file passes. The check matters: an
+  exported name a shell cannot assign is read by the remote shell as a command
+  (`/bin/sh -c "HYPERSHELL.X='v' /usr/bin/true"` → `command not found`, exit 127), so that host's
+  client never starts.
+- **Why follow-up:** the code is right. One parametrized case closes it: an invalid name in the
+  environment, absent from the argv, and the launch still runs.
+
+### Cycle-2 closure
+
+| Item | Status | Evidence |
+|------|--------|----------|
+| N1 | closed; one residual of another kind (R3-1) | export probe (14 values × 3 key positions × 5 shells); M1, M2, M12, M14 |
+| N2 | closed | `{% %}` probe; M8, M9; one `Template` in the client; `[export]`, `hs run`, `hs submit` checked |
+| N3 | closed in the builder; a real Open MPI 4/5 run stays with the foreman | name probe; M4–M7 |
+| N4 | closed | CI step run with and without the tag |
+| N5 | closed; one adjacent wording item (R3-3) | `[export]` probe; every mode mints its own key |
+| TLS hint (foreman's real-cluster item) | closed for a launched client with no environment; R3-2 for a key from a configuration file | branch test; M10, M11; R3-2 probe |
+
+### The unapproved `docs/security.rst` sentence
+
+> Keeping the key out of what tasks inherit keeps it out of an environment a task dumps or logs
+> by accident; it is not a barrier against task code that looks for it, since tasks run as the
+> same user as their client, which can generally read the client's own process environment.
+
+- **Accurate.** A task is its client's child and runs as the same user. The client holds the key
+  in its own environment for its whole life (launcher modes start it there; the SSH step exports
+  it before `exec`), and an operating system generally lets a user read the environment of that
+  user's own processes. The `{= =}` path documented just above reads it on purpose. "Generally" is
+  the right hedge, since hardened hosts can restrict this.
+- **Public-safe.** It states the boundary of the protection in general terms any HPC user knows,
+  and names no tool, path or procedure.
+- **Wording.** "which" can be read as the client rather than the user, and "keeping … keeps"
+  repeats. Suggested:
+
+  > This keeps the key out of an environment that a task dumps or logs by accident. It does not
+  > hide the key from task code that looks for it: a task runs as the same user as its client,
+  > and that user can generally read the client's environment.
+
+### Human-gate triggers (cycle 3)
+
+- **R3-2** (CONFIRMED, LOW) is in `client.py` → human sign-off, as a follow-up, not a blocker.
+- **R3-1** (CONFIRMED, LOW) is a security-lane residual → maintainer triage of the hidden note.
+- R3-3 and R3-4: docs and test coverage; no gate of their own.
+- Still with the foreman's real-cluster check: Open MPI 4/5 under `--mpi` and under a dotted name
+  (and whether Open MPI accepts an attached `-xNAME`), and the TLS hint under
+  `srun --export=NONE`.
+
+Next: maintainer sign-off, including the sentence above, then `/hs-publish`. The four follow-ups
+can ride along before merge at the maintainer's choice, or become seeds.

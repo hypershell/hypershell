@@ -39,9 +39,16 @@
   `.security/issues/` seed (never staged), and the Step 9 report names that file by path.
 - **Confidence:** high · **Effort:** small
 
-## F4 — Review has no security-lane rule for public REVIEW.md, the seed's planning notes, or the hidden index
+## F4 — Review has no security-lane rule for public REVIEW.md, the seed's planning notes, or the hidden index · seen again
 `origin=hs-review:step-2,step-4 severity=high category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** On a `lane: security` cycle the run brief had to supply three rules the skill lacks: REVIEW.md is public, so a CONFIRMED finding that exposes a new weakness is recorded by kind only, with the detail in a new `.security/` note; the blind reviewer may read the hidden seed; and the reviewer may not edit `.security/ROADMAP.md`. The seed it allows also carries hs-plan's "Planning notes", that is, the author's rationale the blindness rule keeps from the reviewer.
 - **Skill cause:** Step 4 routes only *deferrals* to `.security/`, and assumes the reviewer writes the ROADMAP entry. It says nothing about redacting a blocking finding in the public REVIEW.md. Step 2's input list has no security-lane variant, so the plan's rationale reaches the reviewer through the seed. This weakens a non-negotiable gate (blind-review integrity), hence high.
 - **Recommended fix:** Add a security-lane variant. The reviewer gets the seed's Problem and evidence sections, not its planning notes. A finding that would reveal a live weakness goes to a new `.security/issues/` note and appears in REVIEW.md by kind and severity only. Indexing in `.security/ROADMAP.md` is left to the maintainer.
 - **Confidence:** high · **Effort:** small
+
+## F5 — Verdict routing has no follow-up route for a low CONFIRMED finding at the cycle bound
+`origin=hs-review:step-4 severity=medium category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** On the last allowed cycle the run brief had to tell the reviewer to split findings into "blocks merge" and "follow-up". Step 4 and the rubric's *Verdict & loop* send every CONFIRMED finding, LOW included, to `changes-requested` and `/hs-build`, which the cycle bound no longer allows; the only other route, the deferral exception, needs a GOAL criterion that forces preserving the behavior.
+- **Skill cause:** Routing keys on CONFIRMED versus PLAUSIBLE, not on severity or blocking effect, and says nothing about the final cycle; the reviewer has to depart from the rubric to record a LOW item without forcing another build round.
+- **Recommended fix:** Add a final-cycle rule: a CONFIRMED LOW (or MEDIUM, with a stated reason) finding that leaves every R-ID and invariant met may be recorded in REVIEW.md as a follow-up, with `--verdict approved`, while the human gate still applies to core files and security-lane items. Keep CRITICAL/HIGH and any R-ID or invariant violation blocking.
+- **Confidence:** med · **Effort:** small
