@@ -1641,3 +1641,159 @@ on top of that. **Verdict: approve**, with six findings. The foreman ruled on ea
 The work and its evidence are recorded in TECH.md under P1 ("Follow-up: quick review of the C10 fix").
 
 **2026-11-04.** Cycle 7 (scoped quick review) — approved; its NIT/LOW follow-ups landed in `7dd85c1` under the foreman's rulings; recorded in the FSM 2026-11-04.
+
+## Review cycle 8 (scoped) — approved (2026-11-04)
+
+- **Reviewed commit:** f45a5cffab88d73df0308daf94d1c966025a5453  ·  **Base:** `b61dbbe` (merge base with
+  `origin/develop`; the stale local `develop` was not used)  ·  **Date:** 2026-11-04
+- **Verdict:** approved. No findings. Two observations, neither in the delta.
+- **Cycle:** 8, scoped to everything since the cycle-7 approval at `7dd85c1`: the develop merges
+  `ec75169` (#70, #71), `0fc0577` (#72–#74) and `f45a5cf` (#75), the test adaptation `fab14f8`, and
+  the cycle-7 record `bc8fdbf`. Develop's own content was reviewed in its own cycles and is out of
+  scope.
+- **Mode:** one blind reviewer, inline, with no nested subagents. Inputs were `GOAL.md`, the diffs and
+  the runnable repo; `PLAN.md`, `TECH.md` (beyond its FSM block), `research/` and `META.md` were not
+  read. Every run used a `git archive` extract of `f45a5cf` (and of `7dd85c1` for one control), with
+  frozen offline venvs on 3.12.16 and 3.14.10 built from a private copy of the uv cache. Each run had
+  its own process group and a kill timer.
+
+### Pre-flight
+
+- **Contract drift.** `git log --oneline b61dbbe..f45a5cf -- spec/zone-queue-primitive/GOAL.md`
+  shows only the shaping commit `da987c2`.
+- **Commits since cycle 7.** `ec75169`, `bc8fdbf`, `0fc0577`, `fab14f8`, `f45a5cf`: all signed, none
+  with a `Co-Authored-By` trailer. `git diff --diff-filter=M --name-only b61dbbe f45a5cf -- tests/` is
+  empty, so no base test is modified (R8).
+- **Z1's own delta across the merges.** `git diff b819de6 7dd85c1 -- src tests` (Z1 against its base
+  at approval) and `git diff b61dbbe f45a5cf -- src tests` (Z1 against its base now) are identical
+  except for hunk offsets and three places: `secure_client` (the #72 conflict), one context line in
+  `ServerThread.start_threads` (#74's docstring), and `fab14f8`'s edits to `tests/test_queue_gc.py`.
+  The same comparison over `AGENTS.md` and `ROADMAP.md` gives 146 lines each side, identical except
+  for offsets and context. Nothing else in Z1 moved across the three merges.
+- **No conflict markers.** `git grep -E '^(<<<<<<<|>>>>>>>|=======$)' f45a5cf -- src tests AGENTS.md
+  ROADMAP.md issues .agents` is empty.
+
+### 1. `0fc0577`: the `secure_client` resolution (`core/queue.py:247-285`)
+
+- **The marks still surround the dial and the handshake.** `_mark()` (`:260`) comes before the socket
+  is made. The `try … finally: _unmark()` (`:261-277`) covers the IPv4 socket (`:265`),
+  `setblocking(True)`, `connect` (`:268`) and `wrap_socket` (`:272`). The fingerprint check and the
+  HMAC challenge stay outside the marks, as they were at `7dd85c1`.
+- **#72 is intact.** The three dial lines and their comment are byte-identical to `b61dbbe`'s.
+  `tests/test_queue_address_family.py` passes on 3.12 (8 passed). With the dial reverted to
+  `socket.create_connection` inside the marks (mutation M3 below), three of its eight tests fail.
+- **Close on failure is correct.** The inner `except Exception: raw.close(); raise` covers `connect`
+  and `wrap_socket`, as in #72. If the socket cannot be made there is nothing to close, and the outer
+  `finally` still unmarks. `_unmark` runs on every exit. M2 shows that the suite catches its loss.
+- **`ROADMAP.md`** keeps both sides: Z1's five queue entries, then #72's IPv6 entry.
+
+### 2. `fab14f8`: the two adapted tests, proved by mutation
+
+Each mutation was applied to a scratch copy of the `f45a5cf` extract, and the copy's `src` was put
+first on the path (confirmed by `hypershell.core.queue.__file__`). The four targeted tests ran on 3.12:
+T1 `test_finalizer_hands_off_only_server_side`, T2 `test_multi_address_name_never_stalls`, and T3
+`test_forced_collection_on_server_side_never_stalls[no-tls|tls]`.
+
+| Mutation | What it breaks | T1 | T2 | T3 ×2 | Other |
+|---|---|---|---|---|---|
+| none (green control) | — | pass | pass | pass | address-family 8/8 pass |
+| M1: `_mark()` after `connect` | the dial runs unmarked | **FAIL** (`seen == [True, True, False]`) | pass | pass | |
+| M2: `_unmark()` only on success | a refused dial leaves its mark | **FAIL** (`_server_side == {ident: 1}`) | pass | pass | |
+| M3: dial by `socket.create_connection` (#72 reverted, marks kept) | IPv4-only dial | **FAIL** (the dial never reaches the spy) | **FAIL** (its path assertion: `multi_address_dials` empty, all 40 points pass) | pass | address-family **3/8 FAIL** |
+| M4: `_unmark()` after `connect`, before `wrap_socket` | the handshake runs unmarked | pass | pass | pass | survives; see Observation 1 |
+| M5: C9's rule, hand off only when `gethostbyname(token host)` is `127.0.0.1` | a decision by address | **FAIL** | **FAIL**: stall at round 0, accept: accept loop → `collect_at` → `_decref` (stock) → `secure_client` → `do_handshake` | pass | |
+| M6 (test): the probe's `socket.socket.connect` redirect removed | the probe's path | pass | **FAIL** (`gaierror` in `secure_client` → `raw.connect`) | pass | |
+
+- **T1 is still meaningful.** Its spy now wraps `socket.socket.connect` and passes every other address
+  through. It fails when the dial runs unmarked (M1), when a failed dial keeps its mark (M2), and when
+  the dial stops being the IPv4 socket's own `connect` (M3). `monkeypatch` removes the class
+  attribute on undo, because `socket.socket` has no `connect` of its own.
+- **T2 is still meaningful and still discriminates.** Under M5, the rule C9 replaced, T2 stalls with
+  C9's own stack while T3 (a dial to `127.0.0.1`) passes. The connect redirect is load-bearing (M6).
+  The new assertion catches a probe that no longer dials through the name (M3), so T2 cannot pass
+  without exercising its path.
+- Logs: `/tmp/claude-501/z1rev8/logs/red-*-3.12.log`.
+
+### 3. `f45a5cf`: the auto-merged `server.py`, `AGENTS.md` and `ROADMAP.md`
+
+- **`server.py` is coherent.**
+  - Z1's two hunks against `b61dbbe` are unchanged from those against `b819de6`: "Server listening"
+    moved from `__init__` to `start()` once the queue is ready, and `start()`'s re-raise
+    (`server.py:949-961`).
+  - #75's changes are confined to `Confirm.update_info` (`:422`, `confirm_all`) and `Receiver` (`held`;
+    on `QueueEmpty` with held results it goes to UPDATE, `:511`; the shutdown warning; outcomes in
+    `update_tasks`). None of them touches `ServerThread.start`, `start_threads`, `stop` or
+    `run_with_exceptions`.
+  - #74's reordered `start_threads` (`:963`) and its `wait_scheduling` (`:979`) run after `start()`
+    returns. `wait_scheduling` re-raises through the same `Thread.join` that `start()` uses.
+    `QueueInterface.ready` is never reset, so `start()`'s loop cannot spin after a fast clean exit.
+- **`AGENTS.md`** has no duplicated headings. Z1's text ("`ServerThread.start` re-raises", `:299`; the
+  thread rule including "any thread in a TLS handshake", `:308`) matches the code at HEAD. #75's 0-row
+  UPDATE bullet and Z1's server-process bullet do not overlap.
+- **`ROADMAP.md`** has no duplicated headings. #75's entry appears once. The two issue paths that
+  occur twice are cross-references, as on `b61dbbe`. Every `issues/` seed link resolves.
+
+### 4. Z1 against #75's per-row writes and held results
+
+- `Confirm` and `Receiver` run on `hypershell.core.thread.Thread`s, not `_ServerThread`s. A decref
+  finalized there takes the stock path, before and after #75. Held results are `Task` objects, not
+  proxies, so they never reach `_decref`.
+- On the server side, `completed` and `confirmed` are local `queue.Queue`s. `Receiver.unload_bundle`'s
+  `get(timeout=…)` raises `queue.Empty` (imported as `QueueEmpty`, `server.py:57`), which is what the
+  held-retry branch expects. The sentinel puts in `wait_receiver` and `stop` are local.
+- The stop order is unchanged: submitter, scheduler, heart monitor, the sentinel to the receiver, the
+  sentinel to confirm, then the exit of `with self.queue`. Held results are dropped with #75's warning
+  when the sentinel arrives, while the queue server is still up.
+- In memory every outcome is `APPLIED`, so the same-process `LiveSubmitThread` client never sees a held
+  result. Z1's R7 state-machine tests run in memory and are unaffected; they pass in the suites below.
+
+### Verification run
+
+| Gate | Result |
+|---|---|
+| `tests/test_queue_address_family.py`, 3.12 | 8 passed |
+| `tests/test_queue_gc.py` + `tests/test_queue.py`, 3.12, 5 consecutive runs | 50 passed ×5 (52.3 s, 54.2 s, 53.0 s, 51.4 s, 54.2 s) |
+| full suite, 3.12.16 | 767 passed, 79 skipped (8 min 0 s) |
+| full suite, 3.14.10 | 764 passed, 82 skipped (8 min 5 s) |
+| `unsupported_internals()` | `[]` on 3.12.16 and 3.14.10 |
+
+Every skip on 3.12 needs a server database (PostgreSQL or TimescaleDB, which this host lacks) or a
+Python with 2.8.3 to regenerate a fixture. 3.14 also skips three Z1 probes, as designed: two need
+3.12's shared flag for pending collections, and one needs a Python whose `threading` does not register
+the main thread under its own identifier. The known timing flake `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade` was not
+seen in either full run. Logs: `/tmp/claude-501/z1rev8/logs/`.
+
+### Requirement → evidence matrix (this cycle's delta)
+
+| R-ID | Touched by the delta | Evidence |
+|---|---|---|
+| R1 | no (`_serve_in_process` unchanged) | Z1's delta identical across merges; suites pass |
+| R3 | through `secure_client` | `test_queue.py` ×5 on 3.12; full suites |
+| R4 | `secure_client` dial (#72) | address-family 8/8; TLS queue tests pass unmodified; marks verified by T1 + M1/M2 |
+| R5 | `ServerThread.start` unchanged; #74/#75 stop paths | §3–4; full suites |
+| R6 | `fab14f8` (Z1's own test) | mutation table, §2 |
+| R7 | #75 changed `Confirm`/`Receiver` | `test_server_fsm.py` passes in both suites |
+| R8 | no base test modified | `--diff-filter=M` empty; full suites |
+| R2, R9 | not touched | — |
+
+### Findings
+
+None.
+
+### Observations (not findings)
+
+1. **The handshake half of a TLS client's mark has no test.** M4 unmarks after `connect` and before
+   `wrap_socket`, and T1, T2 and T3 all pass. The same mutation applied to `7dd85c1` also passes all
+   four (`red-m4-at-7dd85c1-3.12.log`): T1's spy refused the dial there too, before any handshake. The
+   gap predates this delta and is not introduced by `fab14f8`. A probe that forces a collection on a
+   same-process TLS client's thread between `connect` and the end of `wrap_socket` would cover it.
+2. **T2's precondition is stricter than it needs to be.** Since `fab14f8` the probe never dials the
+   name's first address; `getaddrinfo` and `gethostbyname` only answer with it. T2 still skips where
+   `failing_address()` finds no address that fails at once, though any non-serving address would do.
+   Since #72 a real TLS client dials only a name's first IPv4 address, so T2 now models a name whose
+   connect reaches the server while the resolver's first answer is another address (round-robin
+   DNS). It still discriminates (M5).
+
+### Human-gate triggers
+
+- None triggered: no CONFIRMED finding. P7 (the multi-node run) is still pending, as before.
