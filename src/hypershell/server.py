@@ -71,7 +71,7 @@ from hypershell.core.thread import Thread
 from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState
-from hypershell.data.model import Task, Client, ResultOutcome, serialize_tasks, deserialize_tasks
+from hypershell.data.model import Task, Client, ResultOutcome, CONTENDED_RERUNS, serialize_tasks, deserialize_tasks
 from hypershell.data import ensuredb, DATABASE_ENABLED
 from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE
 from hypershell.client import ClientInfo
@@ -422,7 +422,8 @@ class Confirm(StateMachine):
     def update_info(self: Confirm) -> ConfirmState:
         """Update client info in database for confirmed task bundle."""
         if not self.in_memory:
-            Task.update_all(self.client_info.transpose())
+            info = self.client_info
+            Task.confirm_all(info.task_ids, info.client_id, info.client_host)
         return ConfirmState.UNLOAD
 
     @staticmethod
@@ -466,6 +467,7 @@ class Receiver(StateMachine):
 
     queue: QueueServer
     tasks: List[Task]
+    held: List[Task]
     bundle: Optional[bytes]
 
     in_memory: bool
@@ -478,6 +480,7 @@ class Receiver(StateMachine):
         """Initialize receiver."""
         self.queue = queue
         self.tasks = []
+        self.held = []  # Results whose row still qualifies but whose write did not land yet.
         self.bundle = None
         self.in_memory = in_memory
         self.redirect_failures = redirect_failures
@@ -505,6 +508,10 @@ class Receiver(StateMachine):
             self.queue.completed.task_done()
             return ReceiverState.UNPACK
         except QueueEmpty:
+            if self.held:
+                # Held results are presented again on every cycle, not only when a bundle arrives.
+                self.tasks = []
+                return ReceiverState.UPDATE
             log.trace('No completed tasks returned - waiting')
             return ReceiverState.UNLOAD
 
@@ -512,6 +519,8 @@ class Receiver(StateMachine):
         """Unpack previous bundle into list of tasks."""
         data = deserialize_tasks(self.bundle)
         if data is None:
+            for task in self.held:
+                log.warning(f'Result for task ({task.id}) not written at shutdown - task left interrupted')
             return ReceiverState.FINAL
         else:
             self.tasks = data
@@ -520,11 +529,23 @@ class Receiver(StateMachine):
     def update_tasks(self: Receiver) -> ReceiverState:
         """Update tasks in database with run details."""
         # A result applies only to the dispatch that produced it; anything else is logged and dropped.
+        # A result whose write did not land while its row still qualifies is held and presented again.
+        held = {id(task) for task in self.held}
+        results = self.held + self.tasks
         if self.in_memory:
-            outcomes = [ResultOutcome.APPLIED] * len(self.tasks)
+            outcomes = [ResultOutcome.APPLIED] * len(results)
         else:
-            outcomes = Task.apply_results(self.tasks)
-        for task, outcome in zip(self.tasks, outcomes):
+            for task in self.held:
+                log.debug(f'Retrying held result for task ({task.id})')
+            outcomes = Task.apply_results(results)
+        self.held = []
+        for task, outcome in zip(results, outcomes):
+            if outcome is ResultOutcome.DEFERRED:
+                if id(task) not in held:
+                    log.warning(f'Contended result write did not land for task ({task.id}) '
+                                f'after {1 + CONTENDED_RERUNS} attempts - result held for retry')
+                self.held.append(task)
+                continue
             if outcome is ResultOutcome.STALE:
                 log.warning(f'Refused stale result for task ({task.id}) '
                             f'from client ({task.client_host}: {task.client_id})')
