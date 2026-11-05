@@ -42,3 +42,29 @@
   breaker, the split is offered as an open clarification with options, and the remainder is
   re-seeded `shaped` (carrying the seed's dated clarifications) in the same commit as the ruling.
 - **Confidence:** high · **Effort:** small
+
+## F3 — Planning on a base that does not yet hold the GOAL's prerequisites · seen again
+`origin=hs-plan:step-3 severity=medium category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** A recurrence of `spec/zone-dispatch/META.md` F2, one level deeper. Relay must
+  be planned against develop + Z1 + Z2, none of which is merged, and Z1 and Z2 conflict in
+  `server.py`, `client.py` and `data/model.py`. The planner built a read-only merge preview
+  (`git merge-tree --write-tree` + `git archive` into scratch) for the research briefs and invented
+  the same fail-fast guard in P1's `verify:` and a `blocked_reason`.
+- **Skill cause:** Step 1 checks the branch and GOAL, not the base; Step 3 gives research no way to
+  read a tree that is not checked out.
+- **Recommended fix:** As in the original finding, plus a Step 3 note: when the base is a stack of
+  unmerged branches, build a read-only merge preview for the briefs and tell them which side of
+  each conflicted file is authoritative.
+- **Confidence:** med · **Effort:** small
+
+## F4 — Step 6's size circuit-breaker has no rule for scope a maintainer already ruled
+`origin=hs-plan:step-6 severity=low category=instruction status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The roadmap needs ten phases. Step 6 says to pause and reconsider with the
+  human above ~8, but the GOAL records the maintainer's ruling (C1) that the whole scope is in,
+  made knowing it was tight, and the foreman asked for small phases for incremental review. The
+  planner recorded the breaker as an open ruling (N6) instead of pausing.
+- **Skill cause:** The breaker treats phase count as a proxy for scope, and does not say what to do
+  when scope is already ruled and the count comes from slicing finer for review.
+- **Recommended fix:** Say that when the GOAL carries a scope ruling, the breaker becomes a recorded
+  plan-gate ruling with the phase count and the reason, not a pause.
+- **Confidence:** med · **Effort:** small
