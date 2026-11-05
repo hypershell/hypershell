@@ -57,7 +57,7 @@ it is in. A task whose argument line is `2026-11-02` or `20261102`, an ordinary 
 the client as a datetime, template expansion fails on it, and the task is recorded as a template
 error without running. Decoding by declared column type, not by guessing, removes the class.
 
-*Horizon: near-term · Depends on: — · Refs: found by the writeback fix's research*
+*Horizon: near-term · Depends on: — · Refs: found by `writeback-scoped-conditional`'s research*
 **Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md)
 
 ## Unguarded task start kills the executor and poisons the task
@@ -70,17 +70,6 @@ never got the same treatment.
 
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/task-start-spawn-guard.md`](issues/task-start-spawn-guard.md)
-
-## Result writeback is last-writer-wins over every column
-
-A returning result rewrites *every* column from the client's wire copy of the row — including
-`schedule_time`, `attempt`, `retried`, and the retry-chain links. Combined with the fact that an
-evicted client is never told to stop, a stale bundle can stamp a row "done" while another client is
-still running that command. Scoping the write to result columns and making it conditional on the
-row's owner and in-flight state closes the corruption without needing any new transport.
-
-*Horizon: near-term · Depends on: — · Refs: prerequisite for relay (R5/R6 inherit the return path)*
-**Seed:** [`issues/writeback-scoped-conditional.md`](issues/writeback-scoped-conditional.md)
 
 ## A late result can reopen a retried row
 
@@ -296,8 +285,8 @@ elsewhere; and `hs update --cancel` marks rows terminal without touching the pro
 a server→client control path — and `zone`'s request-return dispatch surface is that seam, so this
 waits rather than building one twice.
 
-*Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half is closed
-separately by the writeback fix*
+*Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half was closed
+separately by `writeback-scoped-conditional` (#70)*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
 
 ## A task whose confirmation has not landed is invisible to orphan recovery
@@ -307,7 +296,7 @@ sets, and confirmations are not ordered against eviction. A client evicted befor
 is applied leaves its rows in flight with a NULL `client_id`, never reverted or redispatched; a late
 confirmation then names the already-evicted client. Either way the row waits until restart.
 
-*Horizon: mid-term · Depends on: — · Refs: writeback fix (same token); relay*
+*Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
 ## A late confirmation can overwrite the executing client's attribution
@@ -328,7 +317,7 @@ unconditional statement. A legitimate result committed in between is wiped and t
 with no sign to the operator. Making the revert conditional on the row still being in flight closes
 it.
 
-*Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
+*Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same shape); resilience*
 **Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
 
 ## Contended Scheduler and `hs update` writes fail on a TimescaleDB hypertable
@@ -472,8 +461,8 @@ down). `hs relay` is a per-site service that is just a client upstream and a com
 inside — roughly 100 relays × 100 nodes behind ~100 upstream sockets. Security improves at scale:
 upstream credentials stop at the relay.
 
-*Horizon: mid-term · Depends on: zone (strictly) · Refs: leans on the scoped-writeback fix and
-inherits the resilience feature's reconnect/redelivery machinery as its R9*
+*Horizon: mid-term · Depends on: zone (strictly) · Refs: leans on the scoped writeback that
+`writeback-scoped-conditional` shipped (#70) and inherits the resilience feature's reconnect/redelivery machinery as its R9*
 **Seed:** [`issues/relay.md`](issues/relay.md) · *status: shaped*
 
 ## Turso provider, partition-attached listing, and S3 captured output
