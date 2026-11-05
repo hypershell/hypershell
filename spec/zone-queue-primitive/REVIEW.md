@@ -2199,3 +2199,131 @@ connection without the platform qualifier.**
 - No CONFIRMED finding this cycle. Cycle 9's F1 sat in `core/queue.py` (high-blast-radius core), so
   the human sign-off it required still governs the step to `/hs-publish`. This is cycle 10, past the
   rubric's 2–3-cycle bound, and the human gate already governs the loop. P1 is for triage.
+
+## Review cycle 11 (scoped) — approved (2026-11-05)
+
+- **Reviewed commit:** c84a4eedea2dfc2f8e5e1ba201e864526c63add4  ·  **Base:** `b61dbbe` (merge base
+  with `origin/develop`, unchanged since cycle 8)  ·  **Date:** 2026-11-05
+- **Verdict:** approved. No CONFIRMED and no PLAUSIBLE finding. Cycle 10's P1 (docs qualifier) is
+  closed.
+- **Cycle:** 11. The scope is `256df35..c84a4ee`. The only commit outside `spec/` is `c84a4ee`, which
+  touches `tests/test_groups.py` (a base test, changed by the foreman's ruling below) and
+  `docs/security.rst`.
+- **Mode:** scoped to that commit. One blind pass was done inline by the orchestrator, with no
+  subagent, at the foreman's direction. The inputs were `GOAL.md`, the spec-excluded diff
+  `256df35..c84a4ee`, the `AGENTS.md` invariants and the runnable repo. `TECH.md` was read only after
+  the findings below were formed, to transcribe the ruling and check its gate record.
+- **Runs:** scratch `git archive` extracts of `c84a4ee` with their own venvs built from `uv.lock`
+  (`uv sync --frozen`): 3.12.13 and 3.14.6, plus a separate 3.12.13 extract for mutations. Each
+  pytest run had the venv's `bin` first on `PATH`, since the tests shell out to `hs`, and ran in its
+  own process group under a perl kill timer. The worktree was never edited.
+
+### CI finding and ruling (recorded here; until now only in TECH.md)
+
+- **Finding (CI, Linux).** PR #76's run `41971072285` at `229ded8` failed one test on 3.13 and 3.14:
+  `tests/test_groups.py::test_group_parallel_execution_within_group`, "Expected > 10s for parallel
+  execution, took 9.7s" (3.13) and "took 9.8s" (3.14). The rest of each job passed (770 passed, 83
+  skipped). The commit before it, `1e79da6`, had passed, and `229ded8` changed only `spec/`. The test
+  predates this branch. Its timing check was a *lower* bound on the whole run
+  (`elapsed > 4 + 3*2`), so it timed process startup and the scheduler's backoff between groups.
+  It did not time parallelism. The faster `TCP_NODELAY` connections put a Linux run just under 10 s.
+  The assertion was miscalibrated; nothing in the code regressed.
+- **Ruling (foreman, 2026-11-05).** The test asserts the properties it is named for, from the task
+  times in the database, with no wall-clock bound. This is the first change on the branch to a test
+  that predates it: `git diff --diff-filter=M --name-only b61dbbe c84a4ee -- tests/` now lists
+  `tests/test_groups.py`.
+- **CI at `c84a4ee`.** Run `41974105408` passed all 14 jobs, including `tests (3.11)` through
+  `tests (3.14)`.
+
+### 1. The new test checks what it is named for (mutation)
+
+`task_intervals()` (`tests/test_groups.py:282`) reads `group`, `start_time` and `completion_time`
+for every task with `hs list … --json`. The test (`:295`) asserts four groups of two tasks. It then
+asserts **(a)** that within each group the two run intervals overlap (`max(starts) < min(ends)`,
+`:323`) and **(b)** that each group's last completion comes before the next group's first start
+(`:326-330`).
+
+| Variant (3.12.13, scratch extract) | New test | Old test (`256df35` body) |
+|---|---|---|
+| unchanged, `-N8` | pass | (fails on Linux CI, see above) |
+| `-N1` in place of `-N8` | **fails (a)**: "Group 1 ran serially"; the second task started 0.97 ms after the first completed | **passes** (14.9 s) |
+| `Task.increment_group` with no hold on incomplete tasks, next group = lowest unscheduled one | **fails (b)**: "Group 2 started before group 1 completed" (5.2 s); (a) held | fails (5.8 s against 10 s) |
+
+The old assertion never tested parallelism within a group: a single executor passes it, because
+eight serial seconds plus the backoff clear 10 s. It did catch group ordering, and the new test
+still catches it, now directly. **Coverage lost:** only a floor on the total run time, which in
+practice was a floor on the scheduler's backoff between groups. That is not a GOAL property; R9
+asks for the opposite direction. The return code, the sorted output, the three group-transition
+log lines and the 8 + 8 per-task completion lines are still asserted.
+
+### 2. Robustness (executed and by reading)
+
+- **Margins.** A scratch probe ran the same workload three times on 3.12.13 and printed the
+  margins. Overlap within each group was 1.010–1.032 s, against a threshold of 0, and the two
+  starts were at most 18 ms apart. The gap between groups was 1.999–2.025 s, against 0. The failing
+  margin under `-N1` is about 1 ms.
+- **Clock granularity.** Times are `datetime.now().astimezone()` taken by the client
+  (`client.py:755` start, `:784` completion) and stored to the microsecond. Both checks use a strict
+  `<`, so a tie fails rather than passes. A tie would need two causally ordered events, with a
+  database round trip between them, to land in the same microsecond.
+- **A missing time.** The helper asserts that both times are set before it parses them
+  (`tests/test_groups.py:288`), so a missing time fails with the record shown, not with a
+  `TypeError`. Pytest rewrites asserts throughout a test module, helper included. In a completed run
+  every row has both times: the client sets them on the normal path and on both early-exit paths
+  (`client.py:728-736`).
+- **Format and time zone.** `hs list --json` emits `isoformat(sep=' ')` (`core/types.py:60`). On the
+  test's SQLite site, `DateTime(timezone=True)` comes back naive (probe:
+  `"2026-11-05 00:36:53.259280"`, `tzinfo` None). `datetime.fromisoformat` parses that form, with or
+  without a fraction, on 3.11+, which is the project's floor. Every value comes from columns of one
+  type, so naive and aware values never mix. A server database would give aware values throughout,
+  but this test always runs on the `temp_site` SQLite file. CI's `tests (3.11)` passed.
+- **Dropped.** The times are naive local wall-clock time, so a DST fall-back or a clock step during
+  the 15 s run could misorder them. That is pre-existing storage behaviour, the CI runners use UTC,
+  and it is speculative, so it is not a finding.
+
+### 3. Docs
+
+`docs/security.rst:132-135` now says that the cleartext pair sets `TCP_NODELAY` "on each TCP
+connection where the platform allows it". That matches the code. `_no_delay`
+(`core/queue.py:70-82`) acts on `AF_INET`/`AF_INET6` stream sockets only and ignores `OSError`.
+`_no_delay_connection` (`:85-107`) returns where there is no descriptor to duplicate (Windows). The
+two ends are `_PlainListener.accept` (`:350`) and `_plain_client` (`:361`). A Sphinx HTML build of the
+extract renders the sentence and raises no warning on this page; the two warnings it does raise are
+pre-existing toctree warnings on other pages. **Cycle 10 P1: closed.**
+
+### Contract note (not a finding)
+
+GOAL R8 reads "the existing test suite SHALL pass with no existing test modified". `c84a4ee` modifies
+`test_group_parallel_execution_within_group` under the foreman's ruling. The ruling holds on the
+merits: the replacement is strictly stronger on both properties (§1), and all it gives up is a
+latency floor. However, `GOAL.md` carries no clarification for it, and the contract-drift check shows
+only the shaping commit `da987c2`. A dated R8 clarification in `GOAL.md` would let the locked
+contract and the branch agree before publish. That edit is the human's to make, not the reviewer's.
+
+### Requirement → evidence matrix (this cycle's delta)
+
+| R-ID | Touched by the delta | Evidence |
+|---|---|---|
+| R1–R7, R9 | no | CI at `c84a4ee` green on 3.11–3.14 and the server-database jobs |
+| R8 | one base test modified, by ruling | §1 and the contract note; `tests/test_groups.py` 11 passed on 3.12 and 3.14 |
+
+**Scope creep.** None. The change is the ruled test fix and cycle 10's P1 docs wording.
+
+### Verification run
+
+| Gate | Result |
+|---|---|
+| `test_group_parallel_execution_within_group`, 3.12.13 | 10/10 pass (15.0–16.1 s) |
+| the same test, 3.14.6 | 4/4 pass (15.3–16.2 s) |
+| `tests/test_groups.py`, 3.12.13 | 11 passed (63.0 s) |
+| `tests/test_groups.py`, 3.14.6 | 11 passed (62.4 s) |
+| margin probe, 3 runs, 3.12.13 | overlap ≥ 1.010 s, gap ≥ 1.999 s |
+| mutations (§1) | `-N1` fails (a); the ordering mutant fails (b) |
+| Sphinx HTML build | no warning on `security.rst` |
+| CI `41974105408` at `c84a4ee` | 14/14 jobs passed |
+
+### Human-gate triggers
+
+- No CONFIRMED finding, and `c84a4ee` touches no high-blast-radius file. A base test was changed
+  under the foreman's ruling, so the human gate already holds this step. This is cycle 11, past the
+  rubric's 2–3-cycle bound, and the human gate governs the loop.

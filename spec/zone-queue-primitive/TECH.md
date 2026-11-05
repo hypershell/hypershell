@@ -104,10 +104,10 @@ phases:
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: 1e79da67f4334c4d4eabd36639c0756ab8abf8b6
+  last_reviewed_commit: c84a4eedea2dfc2f8e5e1ba201e864526c63add4
   verdict: approved
   blocked_reason: ''
-  cycle: 10
+  cycle: 11
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 
