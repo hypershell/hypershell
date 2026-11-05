@@ -105,8 +105,8 @@ rather than documenting it as a hazard. The end goal is that any node (server, c
 be bounced without bringing the system down and recovers gracefully, behind one retry/backoff
 mechanism; not before SC26.
 
-*Horizon: near-term · Depends on: — · Refs: relay R9 is verbatim this machinery — build it once here
-and the relay's upstream connector inherits it; shares the `data/core.py` provider seam with turso*
+*Horizon: after SC26 · Depends on: — · Refs: the relay cycle builds the first instance of this machinery
+(relay R9, its upstream link); lift it into the shared mechanism here; shares the `data/core.py` provider seam with turso*
 **Seed:** [`issues/coordinator-resilience-retry-backoff.md`](issues/coordinator-resilience-retry-backoff.md)
 
 ## Ingest robustness: all-or-nothing submission, no length awareness

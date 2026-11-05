@@ -98,7 +98,7 @@ as a hazard. Operators see retries in the log as events, not as crashes.
   rows for a grace period, lets reconnecting clients reclaim their assignments or deliver their
   results under the original stamp, and reverts only what nobody claims. The shaping must decide
   this; it is the difference between at-least-once with re-runs and a true graceful bounce.
-- **2026-11-04: a starting point exists.** The relay cycle (`spec/relay/`) builds
+- **2026-11-04: a starting point exists.** The relay cycle (`spec/relay/`, on its feature branch until it lands) builds
   `core/reconnect.py` `UpstreamLink`: upstream calls on a worker thread with a deadline, a split
   between transport errors (retry) and fatal errors, full-jitter backoff from 1 s to 60 s that
   stays responsive to halt, and a durable outbox redelivered on reconnect. It was planned so that
