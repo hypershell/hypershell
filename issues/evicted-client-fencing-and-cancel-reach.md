@@ -26,7 +26,7 @@ the client returns, the Issue-#29 re-registration branch silently un-evicts it
 (`server.py:588-593`) without reconciling the tasks reverted out from under it.
 
 **Cancel never reaches a running process.** `Task.cancel_all` stamps rows terminal
-(`model.py:700-714`, correctly, so reverts cannot resurrect them) and `hs task update --cancel`
+(`model.py:700-714`, correctly, so reverts cannot resurrect them) and `hs update --cancel`
 warns about already-scheduled tasks (`task.py:1059`), but nothing signals any client. The process
 runs to completion and its writeback races the CANCEL row.
 
@@ -46,7 +46,7 @@ the dispatch work.
 ## Outcome / vision
 
 Eviction is a two-sided event: the server can tell an evicted client to stop, and a client that
-returns from a partition reconciles rather than silently resuming. `hs task update --cancel`
+returns from a partition reconciles rather than silently resuming. `hs update --cancel`
 reaches the running process. Duplicate concurrent execution stops being reachable through routine
 operational events.
 

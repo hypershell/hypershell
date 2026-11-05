@@ -292,7 +292,7 @@ a stance rather than an omission, and cross-host timing aggregates assume synchr
 
 Two symptoms of one gap: the server has no channel on which to say anything to a client. An evicted
 client is never told to stop, so a merely-partitioned node keeps executing while its tasks run
-elsewhere; and `hs task update --cancel` marks rows terminal without touching the process. Both need
+elsewhere; and `hs update --cancel` marks rows terminal without touching the process. Both need
 a server→client control path — and `zone`'s request-return dispatch surface is that seam, so this
 waits rather than building one twice.
 
@@ -330,6 +330,18 @@ it.
 
 *Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
 **Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
+
+## Contended Scheduler and `hs update` writes fail on a TimescaleDB hypertable
+
+On TimescaleDB 2.29+, a `task`-row UPDATE that waited on another writer's row lock matches 0 rows
+although the row still qualifies. The server's Confirm, revert and result writes now re-run in that
+case; the Scheduler's dispatch stamp and `retried` mark, `Task.cancel_all` and every `hs update`
+write do not. A contended stamp or mark exits the server mid-run (a late confirmation is an
+in-server contender), and an unmarked failed row would be retried twice; `hs update` reports a
+false "not found", commits partially, or silently skips rows.
+
+*Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); resilience*
+**Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: unshaped*
 
 ## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
 
