@@ -1,57 +1,85 @@
 ---
 slug: authkey-handling-hardening
-title: "The queue authentication key is never exposed to other users on client nodes"
+title: The queue authentication key is never exposed to other users on client nodes
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/authkey-handling-hardening
 base: develop
-current_phase: P1
-last_updated: "2026-11-05"
+current_phase: P2
+last_updated: '2026-11-05'
 phases:
-  - id: P1
-    name: "One client-launch function; --launcher and --mpi hand the key over in the environment"
-    status: pending
-    satisfies: [R1, R2, R3, R6, R7]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k 'launcher or mpi' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py"
-  - id: P2
-    name: "Autoscaling (fixed and dynamic) launches through the same function"
-    status: pending
-    satisfies: [R1, R2, R3, R6, R7]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k autoscaling && uv run pytest -p no:cacheprovider -q tests/test_autoscale.py"
-  - id: P3
-    name: "SSH launches through the same function, key on the ssh channel's standard input"
-    status: pending
-    satisfies: [R1, R2, R3, R6, R7]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k ssh && uv run pytest -p no:cacheprovider -q tests/test_cluster.py"
-  - id: P4
-    name: "Compatibility contract, cross-version check, and the docs revision"
-    status: pending
-    satisfies: [R4, R5, R8]
-    depends_on: [P2, P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py && uv run pytest -p no:cacheprovider -q -n auto && .agents/factory/bin/temp_site.sh sh -c \"seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2\""
+- id: P1
+  name: One client-launch function; --launcher and --mpi hand the key over in the
+    environment
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R6
+  - R7
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k 'launcher
+    or mpi' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
+- id: P2
+  name: Autoscaling (fixed and dynamic) launches through the same function
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R6
+  - R7
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k autoscaling
+    && uv run pytest -p no:cacheprovider -q tests/test_autoscale.py
+- id: P3
+  name: SSH launches through the same function, key on the ssh channel's standard
+    input
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R6
+  - R7
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k ssh
+    && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
+- id: P4
+  name: Compatibility contract, cross-version check, and the docs revision
+  status: pending
+  satisfies:
+  - R4
+  - R5
+  - R8
+  depends_on:
+  - P2
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py && uv
+    run pytest -p no:cacheprovider -q -n auto && .agents/factory/bin/temp_site.sh
+    sh -c "seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2"
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — The queue authentication key is never exposed to other users on client nodes
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above
@@ -86,7 +114,9 @@ code+state commit.
 - One phase per `hs-build` invocation; one atomic commit with the code and the `TECH.md` state
   change, subject `[fix] Build authkey-handling-hardening P<n>: …`. **No trailer.**
 - Do not touch `core/queue.py`, `client.py` or `server.py`. If a phase finds it must, STOP: that goes
-  back to sign-off (GOAL non-goals).
+  back to sign-off (GOAL non-goals). One exception, by maintainer ruling Q1 (PLAN §5, 2026-11-05):
+  `client.py` carries the smallest change that makes a client which reaches the server with no key
+  of its own name the likely cause (P1).
 - No CLI option or help text changes in this cycle. If one becomes necessary, the affected
   `docs/_include/*.rst` and `share/` completions change in the same commit (R8).
 - Docs prose uses top-level commands only (`hs list`, `hs info`, `hs wait`, `hs run`, `hs update`).
@@ -107,39 +137,59 @@ code+state commit.
 one client launch through it. The key reaches the clients through their environment only, and runs
 complete with TLS on and off, with and without `--zone`.
 
-- [ ] Create `tests/test_cluster_launch.py` (marked `integration`) with the shared harness from
+- [x] Create `tests/test_cluster_launch.py` (marked `integration`) with the shared harness from
       PLAN §6:
-  - [ ] the stand-in `launcher`, installed as `mpirun` too on a test-local `PATH`;
-  - [ ] the `--remote-exe` wrapper that runs this tree's `hypershell.main` with `sys.executable`;
-  - [ ] a helper that runs `hs cluster` in its own session with a timeout and kills the group on
+  - [x] the stand-in `launcher`, installed as `mpirun` too on a test-local `PATH`;
+  - [x] the `--remote-exe` wrapper that runs this tree's `hypershell.main` with `sys.executable`;
+  - [x] a helper that runs `hs cluster` in its own session with a timeout and kills the group on
         expiry;
-  - [ ] a helper that reads the stand-in's records, plus the key-property assertions: the key the
+  - [x] a helper that reads the stand-in's records, plus the key-property assertions: the key the
         client received is non-empty and is in no recorded argv;
-  - [ ] a helper that reads task results through the data model in the temp site;
-  - [ ] a log-capture helper: the in-process construction path, with records at every level.
-- [ ] Add the tests, parametrised over TLS on / `--no-tls`, plus one `--zone` case each:
+  - [x] a helper that reads task results through the data model in the temp site;
+  - [x] a log-capture helper: the in-process construction path, with records at every level.
+- [x] Add the tests, parametrised over TLS on / `--no-tls`, plus one `--zone` case each:
       `test_launcher_mode_keeps_key_off_command_lines`,
       `test_mpi_mode_keeps_key_off_command_lines`, and `test_launcher_mode_logs_never_hold_key`
       (R6). Run them on the unchanged code and record red.
-- [ ] Create `src/hypershell/cluster/launch.py` as PLAN §2.1 describes, with launcher-mode
+- [x] Create `src/hypershell/cluster/launch.py` as PLAN §2.1 describes, with launcher-mode
       handoff only. Leave the `ssh_host` branch for P3 (raise `NotImplementedError` until then):
-  - [ ] `AUTH_ENV`, `ClientLaunch` (`env`/`stdin` are `repr=False`), `client_launch()`;
-  - [ ] the `OMPI_MCA_mca_base_env_list` append;
-  - [ ] `start()` merges `{**os.environ, **load_task_env(), **env}` and never mutates
+  - [x] `AUTH_ENV`, `ClientLaunch` (`env`/`stdin` are `repr=False`), `client_launch()`;
+  - [x] the `OMPI_MCA_mca_base_env_list` append;
+  - [x] `start()` merges `{**os.environ, **load_task_env(), **env}` and never mutates
         `os.environ`;
-  - [ ] `describe()` returns the redacted argv.
-- [ ] Move `redact_secrets` into `launch.py`. Re-export it from `cluster/remote.py`, keeping it in
+  - [x] `describe()` returns the redacted argv.
+- [x] Move `redact_secrets` into `launch.py`. Re-export it from `cluster/remote.py`, keeping it in
       `__all__` and keeping its doctest.
-- [ ] `RemoteCluster.__init__`: replace the inline `client_args`/`client_argv` block with
+- [x] `RemoteCluster.__init__`: replace the inline `client_args`/`client_argv` block with
       `self.launch = client_launch(…)`. Keep `client_argv` as a read-only alias of
       `self.launch.argv`. In `run_with_exceptions`, log `describe()` at DEBUG as today, then call
       `self.launch.start(stdout=sys.stdout, stderr=sys.stderr)`.
-- [ ] Unit tests in the same file: `client_launch()` argv carries every option it carried before
+- [x] Unit tests in the same file: `client_launch()` argv carries every option it carried before
       (for the same inputs, minus `-k`); `os.environ` is unchanged after building and starting a
       launch; `repr(launch)` holds no key.
+- [x] Ruling Q1 (PLAN §5): a launched client that reaches the server with no key of its own exits
+      with an error naming the likely cause, not a bare authentication failure.
+  - [x] `test_launcher_mode_without_environment_names_the_cause`: a stand-in launcher that drops
+        the environment (keeping only `PATH`, `HOME` and the test's site/config isolation). The
+        client must exit `runtime_error` with the cause in its CRITICAL line. Red first.
+  - [x] `client.py`: `AUTH_ENV` and `LAUNCH_ENV_HINT`. `ClientApp.run` re-raises an
+        `AuthenticationError` with the hint appended when the key came from neither `-k` nor
+        `AUTH_ENV` (the key in use is `config.server.auth` and `AUTH_ENV` is unset). No option or
+        help text changes. `launch.py` imports `AUTH_ENV` from `client.py`; the reverse import
+        would cycle through `hypershell.cluster`.
+- **Build notes (P1).**
+  - The end-to-end runs bind `-H 127.0.0.1`, so clients never resolve the host's own name; a host
+    whose name does not resolve (some sandboxes and laptops) would otherwise hang the run.
+  - `client_options()` holds the shared option list; `client_launch()` adds the launcher words and
+    the handoff. P3 reuses it for the ssh branch.
+  - `ClientLaunch.start()` handles the environment only; P3 adds the `stdin` write.
+  - `test_launcher_mode_logs_never_hold_key` passes before and after (R6 held already: the
+    launchers redacted `-k`); it is the regression guard, not a red-first test.
+  - A run whose client fails to authenticate still leaves `hs cluster` waiting for clients, as any
+    failed client launch does today; the tests stop it when the client's exit is recorded.
 - **Verify:** `uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k 'launcher or mpi' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py`.
 - **Touches:** `src/hypershell/cluster/launch.py` (new), `src/hypershell/cluster/remote.py`,
-  `tests/test_cluster_launch.py` (new).
+  `src/hypershell/client.py` (ruling Q1 only), `tests/test_cluster_launch.py` (new).
 
 ## Phase P2 — Autoscaling (fixed and dynamic) launches through the same function
 **Satisfies:** R1, R2, R3, R6, R7 · **Depends on:** P1
@@ -210,7 +260,10 @@ guidance describe the hardened behaviour.
 - [ ] `docs/security.rst` § *Authentication Key*: replace the admonition titled *"The key is visible
       on the client command line in cluster launches"* with the hardened description in PLAN §2.3
       (environment for launcher modes and the pass-through requirement, ssh standard input with no
-      remote terminal, the key on no command line). Keep the `server.auth` plaintext sentence. Fix
+      remote terminal, the key on no command line). Ruling Q1: also say what a client prints when
+      the launcher drops the environment (the CRITICAL line names `HYPERSHELL_SERVER_AUTH` and the
+      launcher's environment as the likely cause), and that `--mpi` asks Open MPI to forward the
+      variable by name through `OMPI_MCA_mca_base_env_list`. Keep the `server.auth` plaintext sentence. Fix
       the § *Operational hardening* bullet, which says the key "is redacted from launch logs", if
       its wording now misleads.
 - [ ] `AGENTS.md`:
@@ -233,7 +286,9 @@ guidance describe the hardened behaviour.
 
 PLAN §7 is the plan. It runs on the maintainer's `hotfix/2.8.5` branch (base tag `2.8.4`) after
 this cycle lands on `develop`. `cluster/launch.py` is copied verbatim and the three call sites
-are hand-ported without `zone`/`from_json`. The same tests run, with the contract set frozen from
+are hand-ported without `zone`/`from_json`. `launch.py` imports `AUTH_ENV` from `client.py`, so
+the P1 `client.py` change (`AUTH_ENV`, `LAUNCH_ENV_HINT` and the `ClientApp.run` re-raise) ports
+with it. The same tests run, with the contract set frozen from
 2.8.0 and the tag-gated cross-version runs against 2.8.0 and 2.8.4 clients, plus a maintainer
 `build_archive.sh`/`drive.sh` check. Estimate: about half a day.
 
@@ -245,5 +300,5 @@ are hand-ported without `zone`/`from_json`. The same tests run, with the contrac
 4. Run the phase's `verify:` command — never advance on a checkbox alone.
 5. Amend this file if reality diverges (through `set_phase.py`; note the amendment in the commit
    body). STOP and escalate on a `GOAL.md` contradiction or any need to touch `core/queue.py`,
-   `client.py` or `server.py`.
+   `client.py` (beyond the ruling-Q1 diagnostic) or `server.py`.
 6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[fix]` commit; stop and report.

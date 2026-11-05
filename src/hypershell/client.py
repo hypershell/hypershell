@@ -1118,6 +1118,15 @@ DEFAULT_PORT: Final[int] = QueueConfig.port
 DEFAULT_AUTH: Final[str] = QueueConfig.auth
 """Default authentication key for server (**DO NOT USE THIS**)."""
 
+AUTH_ENV: Final[str] = 'HYPERSHELL_SERVER_AUTH'
+"""Environment variable read as the key default; `hs cluster` launchers hand the key over in it."""
+
+LAUNCH_ENV_HINT: Final[str] = (f'No key reached this client: {AUTH_ENV} is not set in its environment and '
+                               f'no -k was given. A client that \'hs cluster\' starts through a launcher '
+                               f'receives its key in {AUTH_ENV}, so the launcher most likely did not pass '
+                               f'the environment to the client (e.g., srun --export=NONE).')
+"""Likely cause named when a client without a key of its own fails to authenticate."""
+
 
 class ClientThread(Thread):
     """
@@ -1645,6 +1654,10 @@ class ClientApp(Application):
                        zone=self.zone)
         except gaierror:
             raise HostAddressInfo(f'Could not resolve host \'{self.host}\'')
+        except AuthenticationError as error:
+            if self.auth == config.server.auth and AUTH_ENV not in os.environ:
+                raise AuthenticationError(f'{error}\n{LAUNCH_ENV_HINT}') from error
+            raise
 
     def check_args(self: ClientApp) -> None:
         """Check for logical errors in command-line arguments."""
