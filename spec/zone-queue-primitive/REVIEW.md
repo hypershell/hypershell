@@ -2042,3 +2042,160 @@ connection.**
 - **F1** is CONFIRMED in `core/queue.py`, part of the high-blast-radius core. A human must sign off
   before any further step. Route: `/hs-build` to remediate F1 and F2, then a scoped cycle 10 over the
   fix.
+
+## Review cycle 10 (scoped) — approved (2026-11-04)
+
+- **Reviewed commit:** 1e79da67f4334c4d4eabd36639c0756ab8abf8b6  ·  **Base:** `b61dbbe` (merge base
+  with `origin/develop`, unchanged since cycle 8)  ·  **Date:** 2026-11-04
+- **Verdict:** approved. No CONFIRMED finding. One PLAUSIBLE LOW docs note for triage (P1). Cycle-9
+  F1 and F2 are closed.
+- **Cycle:** 10. The scope is `696f24d..1e79da6`: the single commit `1e79da6`, the remediation of
+  cycle 9's F1 (a process default socket timeout left the cleartext connection's shared descriptor
+  non-blocking) and F2 (docs). The whole `_no_delay_connection` / `_PlainListener` / `_plain_client`
+  path at HEAD was re-checked, since F1 lived there.
+- **Mode:** scoped to the remediation, one blind pass done inline by the orchestrator, with no
+  subagent (the foreman's direction). The inputs were `GOAL.md`, the spec-excluded diff
+  `696f24d..1e79da6`, the `AGENTS.md` invariants and the runnable repo. `PLAN.md`, `TECH.md` (beyond
+  its FSM block), `research/` and `META.md` were not read. Cycle 9's section was read only after the
+  findings below were formed, to check its findings are closed.
+- **Runs:** the worktree's 3.14.6 venv (read-only) and a scratch 3.12.13 venv built from `uv.lock`
+  (`uv sync --frozen --offline`). Pre-fix comparisons used a scratch pytest plugin that puts back the
+  `696f24d` body of `_no_delay_connection`; the tree was never edited. Pytest ran with the venv's
+  `bin` first on `PATH`, since two `test_queue_address_family.py` tests shell out to `hs`.
+
+### Pre-flight
+
+- **Contract drift.** `git log --oneline develop..HEAD -- spec/zone-queue-primitive/GOAL.md` shows
+  only the shaping commit `da987c2`.
+- **Commit in scope.** `1e79da6` is signed (`%G?` = `U`) and has no trailer.
+  `git diff --diff-filter=M --name-only b61dbbe 1e79da6 -- tests/` is empty (R8), and
+  `tests/test_queue_tls.py` is unchanged since `b819de6` (R4). The only test change is in the
+  branch-new `tests/test_queue.py`: `test_roundtrip`'s body moves into a `roundtrip()` helper it
+  still calls, and four new tests (six items with their parameters) are added, each tagged `unit`.
+
+### 1. The remediation holds (executed)
+
+- **Descriptor state.** A probe called `_no_delay_connection` on a live stock TCP connection under
+  no default timeout, `0.0` and `30.0`, with the connection preset blocking and non-blocking. It
+  compared `F_GETFL`, `F_GETFD`, `os.get_inheritable`, `os.get_blocking` and ten socket options
+  (`SO_KEEPALIVE`, `SO_REUSEADDR`, `SO_SNDBUF`, `SO_RCVBUF`, `SO_LINGER`, `SO_OOBINLINE`,
+  `SO_RCVLOWAT`, `SO_SNDLOWAT`, `SO_NOSIGPIPE`, `TCP_NODELAY`) before and after. On 3.12.13 and
+  3.14.6, in all six cases, only `TCP_NODELAY` changed. The blocking mode, the status flags and the
+  close-on-exec flag are untouched, including a connection that was already non-blocking.
+- **An exception inside.** With `_no_delay` patched to raise, the exception propagates, the mode is
+  restored (blocking and non-blocking presets) and the open-descriptor count is unchanged.
+- **Both ends, one process.** Under each default timeout, `_PlainListener.accept` and
+  `_plain_client` hand back blocking descriptors, for TCP and for `AF_UNIX` (which round-trips with
+  an authkey).
+- **The default timeout in one process only.** A HEAD server and a HEAD client in separate
+  processes, the timeout set only in the server and then only in the client: 50 rounds of `put`/`get`
+  plus a fresh client per round, both pass on 3.12 and 3.14. A stock `multiprocessing` client run
+  with `-I` (no HyperShell imported) against a HEAD server that has the timeout puts on all four
+  queues, and the server gets every item, on 3.12 and 3.14. With the `696f24d` body (run on 3.14.6)
+  the server-only split run and the stock-client run both fail with `OSError: bad message length`,
+  as cycle 9 recorded.
+- **Threads and descriptors.** Sixteen threads, each opening 20 clients and doing 5 round trips per
+  client in both directions through an in-process cleartext `QueueServer`, under a 30 s default
+  timeout and without one: 0 errors on 3.12 and 3.14, and the open-descriptor count returns to its
+  baseline after the server stops. With the `696f24d` body (3.14.6) all 16 threads fail with
+  `BlockingIOError`. 500 `_PlainListener`/`_plain_client` pairs under the timeout leave the count
+  unchanged.
+- **Races.** The duplicate's window (non-blocking between `socket.socket(fileno=)` and
+  `os.set_blocking`) exists only while the connection is private to the accepting or dialing thread:
+  `serve()` hands the connection to a handler thread after `accept` returns, and every `_plain_client`
+  caller (`connect`, proxies, `create`, `incref`, `decref`) dials a fresh connection.
+- **Python versions.** 3.12.13 and 3.14.6 behave the same in every probe. 3.11 is not installed on
+  this host and was not run; CPython applies the default timeout to a socket built on a descriptor in
+  the same way there, and `os.get_blocking` / `os.set_blocking` are long-standing on POSIX. The
+  `tests (3.11)` CI job was still pending when this was written.
+- **Wire.** Not re-run. The remediation adds `os.get_blocking` and `os.set_blocking` on a local
+  descriptor and sends no byte; the stock `-I` client run above and the new stock-pair tests cover the
+  connection layer. Cycle 9's matrix at `3a35be1` (12 pairs against `b819de6`, `2.8.4` and stock, on
+  3.12 and 3.14) stands.
+
+### 2. The new tests discriminate (mutation)
+
+The selected tests ran with a scratch plugin replacing `_no_delay_connection`; the tree was not
+edited.
+
+| Mutation | Result (3.12.13 and 3.14.6) |
+|---|---|
+| none (green control) | all pass |
+| `696f24d` body (no restore) | **4 fail**: `test_roundtrip_under_default_timeout[no-tls]`, `test_no_delay_connection_keeps_blocking_mode[blocking]`, `test_plain_listener_under_default_timeout`, `test_plain_client_under_default_timeout` |
+| restore by forcing blocking (3.14.6) | **1 fails**: `test_no_delay_connection_keeps_blocking_mode[non-blocking]` |
+
+The `[tls]` round trip passes under every mutation, as it should: TLS sets the option on the raw
+socket and never takes this path. The `default_timeout` fixture restores the previous default in a
+`finally`, so no test leaks it.
+
+### 3. Notes (dropped)
+
+- **`_cut` (`core/queue.py:500`)** builds a socket object on a duplicate with `socket.fromfd`, so
+  under a default timeout it too leaves a live connection's description non-blocking. It shuts both
+  directions down at once, so the handler sees end of file or a broken pipe either way. Server stop
+  with live connections under the timeout is exercised by `test_roundtrip_under_default_timeout[no-tls]`
+  and the thread probe above. Not a finding.
+- **The test helper `no_delay()` (`tests/test_queue.py:273`)** uses `socket.fromfd` and so clears
+  the blocking mode under `default_timeout`. In `test_no_delay_connection_keeps_blocking_mode` it runs
+  after the blocking assertion, so the test is unaffected. Not a finding.
+
+### Findings
+
+**P1 — LOW — PLAUSIBLE — `docs/security.rst` says the cleartext pair sets `TCP_NODELAY` on every TCP
+connection without the platform qualifier.**
+
+- **Where.** `docs/security.rst:132-133`: "Its pair is the stock listener and client, with
+  `TCP_NODELAY` set on each TCP connection."
+- **Why.** On Windows the cleartext path skips the option: `_no_delay_connection` returns when the
+  connection has no descriptor to duplicate (`core/queue.py:96`, its own comment names Windows), and
+  `docs/install.rst:82` lists Windows as supported. The same commit qualified `AGENTS.md:313` ("where
+  the platform allows it"), which was cycle 9's F2(b) point, but not this page.
+- **Evidence.** By reading only; there is no Windows host here, so it was not executed. It does not
+  block: the wire and the behaviour are unaffected. Suggested wording: "set on each TCP connection
+  where the platform allows it".
+
+### Cycle-9 findings
+
+- **F1 — closed.** Every F1 scenario now passes on 3.12 and 3.14: in-process, the timeout in the
+  server only, the timeout in the client only, and the stock `-I` client against a server that has the
+  timeout (§1). The new tests fail against the pre-fix body (§2).
+- **F2 — closed.** (a) `docs/security.rst` now says that `SecureManager` selects
+  `'hypershell-plain'` when TLS is off (`SecureManager(..., tls=None)._serializer` is
+  `'hypershell-plain'` on both Pythons), and that the framing, handshake and wire are the stock ones.
+  The serializer key appears on the wire only inside a pickled proxy, which HyperShell never sends
+  (cycle 9 §3). (b) `AGENTS.md:313-321` and the `_no_delay` docstring now say that the client writes
+  twice before a read and the server does so only under TLS 1.3, which agrees with cycle 9's
+  instrumented trace and the stock `deliver_challenge` / `answer_challenge` order, and the bullet
+  carries the platform qualifier. The
+  public page's missing qualifier is P1.
+
+### Requirement → evidence matrix (this cycle's delta)
+
+| R-ID | Touched by the delta | Evidence |
+|---|---|---|
+| R1, R2, R5, R7, R9 | no | suites below |
+| R3 | the cleartext pair | `test_roundtrip` and `test_roundtrip_under_default_timeout`, TLS on and off, 3.12 and 3.14 |
+| R4 | the cleartext pair | the stock `-I` client and split-process probes (§1); `test_queue_tls.py` unchanged; cycle 9's matrix stands |
+| R6 | four new tests in `test_queue.py` | §2: they fail against the pre-fix body and against a forced-blocking restore |
+| R8 | no base test modified | full suite below |
+
+**Scope creep.** None. The change is the F1 fix, its tests, and the F2 docs.
+
+### Verification run
+
+| Gate | Result |
+|---|---|
+| `tests/test_queue.py tests/test_queue_gc.py tests/test_queue_address_family.py`, 3.12.13 | 66 passed (59.5 s); cycle 9 had 60, and the new tests add 6 |
+| the same three files, 3.14.6 | 63 passed, 3 skipped (48.8 s) |
+| full suite, 3.12.13 | 775 passed, 79 skipped (7 min 52 s); cycle 9 had 769 |
+| descriptor-state probe, 3 timeouts × 2 presets | only `TCP_NODELAY` changes, 3.12 and 3.14 |
+| split-process and stock `-I` client probes | HEAD pass; `696f24d` body fails |
+| thread probe (16 × 20 clients) | HEAD 0 errors, descriptors back to baseline; `696f24d` body 16/16 fail |
+| mutations (§2) | both caught |
+| `unsupported_internals()` | `[]` on 3.12.13 and 3.14.6 |
+
+### Human-gate triggers
+
+- No CONFIRMED finding this cycle. Cycle 9's F1 sat in `core/queue.py` (high-blast-radius core), so
+  the human sign-off it required still governs the step to `/hs-publish`. This is cycle 10, past the
+  rubric's 2–3-cycle bound, and the human gate already governs the loop. P1 is for triage.
