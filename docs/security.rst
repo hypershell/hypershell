@@ -180,26 +180,39 @@ key generators used in the deployment guides below satisfy this policy.
     * **Launcher modes** (``--launcher``, ``--mpi`` and ``--autoscaling``). The launcher is
       started with the key in its environment, and must pass that environment through to the
       clients it starts. ``srun`` (with its default ``--export=ALL``), MPICH, Intel MPI and
-      Flux do. With ``--mpi``, the launch also asks Open MPI's ``mpirun`` to forward the
-      variable to remote ranks, by name, through ``OMPI_MCA_mca_base_env_list``; names already
-      set there are kept. A launcher set to drop the environment, such as
-      ``srun --export=NONE``, leaves its clients without the key, so they cannot authenticate.
+      Flux do. Only when the launcher is ``mpirun`` or ``mpiexec`` (``--mpi``, or a
+      ``--launcher`` whose first word is one of them) does the launch also ask Open MPI to
+      forward the variable to remote ranks, by name: through ``OMPI_MCA_mca_base_env_list``,
+      keeping names already set there, or, if the launcher's arguments already hold ``-x``
+      (Open MPI 4 does not accept both), by adding ``-x HYPERSHELL_SERVER_AUTH``. Any other
+      launcher, including ``srun``, and ``--autoscaling`` with no launcher, gets neither. A
+      launcher set to drop the environment, such as ``srun --export=NONE``, leaves its
+      clients without the key, so they cannot authenticate.
       Such a client exits with a ``CRITICAL`` error that names ``HYPERSHELL_SERVER_AUTH`` and
       the launcher not passing the environment as the likely cause.
 
     * **SSH** (``--ssh``). The key travels on the ssh channel's standard input. On each remote
       host a short POSIX ``sh`` step reads it into ``HYPERSHELL_SERVER_AUTH`` using shell
       builtins, exports it, and replaces itself with the client, so the key is on no command
-      line there either. The launch owns ssh's standard input and always passes ``-T``, so no
-      remote terminal is allocated. A ``-t`` or ``-tt`` in ``--ssh-args`` or ``ssh.args``
+      line there either. With ``--env``, the other ``HYPERSHELL_*`` variables of the launching
+      environment are still passed on ssh's command line, but ``HYPERSHELL_SERVER_AUTH`` never
+      is. The launch owns ssh's standard input and always passes ``-T``, so no remote
+      terminal is allocated. A ``-t`` or ``-tt`` in ``--ssh-args`` or ``ssh.args``
       therefore has no effect on client launches, and a bare ``-n`` there is dropped with a
       warning. If no key arrives, for example because a wrapper around ``ssh`` closes its
       standard input, the remote step prints a message naming ``HYPERSHELL_SERVER_AUTH`` and
       ssh's standard input, and exits before any client starts.
 
-    The key is also redacted from *HyperShell*'s own launch logs, at every level. Tasks run with
-    their client's environment, as they always have, and that environment includes
-    ``HYPERSHELL_SERVER_AUTH``.
+    The key is also redacted from *HyperShell*'s own launch logs, at every level.
+
+    Tasks run with their client's environment, except that the client does not pass
+    ``HYPERSHELL_SERVER_AUTH`` to them, and takes that name out of
+    ``OMPI_MCA_mca_base_env_list`` (keeping any other names, and dropping the variable if none
+    is left). Tasks therefore see neither the key nor the Open MPI parameter the launch set,
+    whatever the launch mode. A task that needs the key, for example one that starts its own
+    client of the same server, has to be given it explicitly, through the ``[export]`` section
+    of the configuration. This applies to clients from this release on; an older client under
+    a newer launcher still passes its environment to its tasks unchanged.
 
     A directly configured ``server.auth`` is stored in plaintext in the config file and printed
     verbatim by ``hs config get``; prefer the ``_eval`` / ``_env`` suffixes (see below) to

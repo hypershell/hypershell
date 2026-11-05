@@ -15,7 +15,7 @@ it into :const:`AUTH_ENV` before it starts the client.
 
 # Type annotations
 from __future__ import annotations
-from typing import Tuple, List, Dict, Iterable, Sequence, Optional, Final
+from typing import Tuple, List, Dict, FrozenSet, Iterable, Sequence, Optional, Final
 
 # Standard libs
 import io
@@ -27,18 +27,24 @@ from subprocess import Popen, PIPE
 # Internal libs
 from hypershell.core.config import load_task_env
 from hypershell.core.logging import Logger
-from hypershell.client import AUTH_ENV
+from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
 
 # Public interface
-__all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'SSH_NO_KEY_MESSAGE', 'ClientLaunch', 'client_launch',
+__all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'MPI_LAUNCHERS', 'SSH_NO_KEY_MESSAGE', 'ClientLaunch', 'client_launch',
            'ssh_launch_args', 'ssh_remote_script', 'redact_secrets']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
 
 
-OMPI_ENV_LIST: Final[str] = 'OMPI_MCA_mca_base_env_list'
-"""Open MPI parameter naming the environment variables `mpirun` forwards to remote ranks."""
+MPI_LAUNCHERS: Final[FrozenSet[str]] = frozenset({'mpirun', 'mpiexec'})
+"""Program names of launchers that Open MPI may provide, which forward the key variable only by name."""
+
+OMPI_FORWARD: Final[str] = '-x'
+"""The `mpirun` option that forwards one environment variable to remote ranks."""
+
+AUTH_ASSIGNMENT: Final[str] = f'{AUTH_ENV}='
+"""How a command-line word that assigns the key variable starts."""
 
 SSH_NO_KEY_MESSAGE: Final[str] = (f'hs cluster: no authentication key arrived on standard input for {AUTH_ENV}; '
                                   f'ssh must pass its standard input through to the remote command '
@@ -98,12 +104,14 @@ class ClientLaunch:
         """
         Shell-quoted command line for logging, with any key option value redacted.
 
-        The last word of an SSH launch (the one with `stdin`) is already quoted for the
-        remote shell and ssh sends it as it is, so it is shown as it is.
+        A word that assigns :const:`AUTH_ENV` (`NAME=value`) shows the name only. The last
+        word of an SSH launch (the one with `stdin`) is already quoted for the remote shell
+        and ssh sends it as it is, so it is shown as it is.
         """
+        argv = [AUTH_ASSIGNMENT + '***' if word.startswith(AUTH_ASSIGNMENT) else word for word in self.argv]
         if self.stdin is None:
-            return redact_secrets(self.argv, ['-k', '--auth'])
-        return redact_secrets(self.argv[:-1], ['-k', '--auth']) + ' ' + self.argv[-1]
+            return redact_secrets(argv, ['-k', '--auth'])
+        return redact_secrets(argv[:-1], ['-k', '--auth']) + ' ' + self.argv[-1]
 
 
 def client_launch(remote_exe: str,
@@ -135,14 +143,18 @@ def client_launch(remote_exe: str,
 
     Without `ssh_host`, the command line is `launcher`, then `launcher_args`, then
     `remote_exe client` with the shared client options. The key is handed over in the
-    environment as :const:`AUTH_ENV`, and :const:`OMPI_ENV_LIST` names that variable so
-    Open MPI's `mpirun` forwards it to remote ranks (other launchers ignore it).
+    environment as :const:`AUTH_ENV`. When the launcher is `mpirun` or `mpiexec`
+    (:const:`MPI_LAUNCHERS`), Open MPI is also asked to forward that variable, by name, to
+    remote ranks: through :const:`OMPI_ENV_LIST`, or, if the launcher's arguments already
+    hold `-x` (which Open MPI 4 does not accept together with that parameter), with one more
+    `-x` and the variable's name. Other launchers get neither.
 
     With `ssh_host`, the command line is `launcher` and `launcher_args`, then `-T` (no
     remote terminal, whatever those arguments or the ssh configuration ask for), the host,
-    `ssh_exports`, and a remote `sh -c` step (see :func:`ssh_remote_script`). The key is the
-    launch's standard input, and ssh gets the caller's environment unchanged. The launch owns
-    that input, so a bare `-n` among the ssh arguments is dropped (see :func:`ssh_launch_args`).
+    `ssh_exports` without any that assigns :const:`AUTH_ENV`, and a remote `sh -c` step (see
+    :func:`ssh_remote_script`). The key is the launch's standard input, and ssh gets the
+    caller's environment unchanged. The launch owns that input, so a bare `-n` among the ssh
+    arguments is dropped (see :func:`ssh_launch_args`).
 
     The calling process's environment is read, never modified.
 
@@ -161,11 +173,17 @@ def client_launch(remote_exe: str,
                              tls_enabled=tls_enabled, zone=zone)
     if ssh_host is not None:
         script = ssh_remote_script(remote_exe, options)
+        exports = [word for word in ssh_exports if not word.startswith(AUTH_ASSIGNMENT)]
         return ClientLaunch(argv=[*launcher[:1], *ssh_launch_args([*launcher[1:], *launcher_args]),
-                                  '-T', ssh_host, *ssh_exports, 'sh', '-c', shlex.quote(script)],
+                                  '-T', ssh_host, *exports, 'sh', '-c', shlex.quote(script)],
                             env={}, stdin=auth + '\n', inherit_env=True)
-    return ClientLaunch(argv=[*launcher, *launcher_args, remote_exe, 'client', *options],
-                        env={AUTH_ENV: auth, OMPI_ENV_LIST: ompi_env_list()})
+    launcher_words, env = [*launcher, *launcher_args], {AUTH_ENV: auth}
+    if launcher and os.path.basename(launcher[0]) in MPI_LAUNCHERS:
+        if OMPI_FORWARD in launcher_words[1:]:
+            launcher_words.extend([OMPI_FORWARD, AUTH_ENV])
+        else:
+            env[OMPI_ENV_LIST] = ompi_env_list()
+    return ClientLaunch(argv=[*launcher_words, remote_exe, 'client', *options], env=env)
 
 
 def ssh_launch_args(args: Sequence[str]) -> List[str]:

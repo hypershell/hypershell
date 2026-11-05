@@ -88,7 +88,7 @@ The tagless scratch copy also shows the tag-gated tests skipping (4 skipped vs 1
 
 | R-ID | Implemented by | Verified how | Status |
 |------|----------------|--------------|--------|
-| R1 | `cluster/launch.py` `client_launch()`/`ClientLaunch` (env for launcher modes; ssh stdin + remote `read`); call sites `remote.py`, `ssh.py` | e2e per mode with recorded argv/env/stdin (tests); nested-run drive (H1) | ❌ one residual (H1) |
+| R1 | `cluster/launch.py` `client_launch()`/`ClientLaunch` (env for launcher modes; ssh stdin + remote `read`); call sites `remote.py`, `ssh.py` | e2e per mode with recorded argv/env/stdin (tests); end-to-end drive (H1) | ❌ one residual (H1) |
 | R2 | all four process modes build through `client_launch()` | grep; per-mode e2e and mutation rows | ✅ |
 | R3 | unchanged client options via `client_options()`; old/new parity tests | e2e per mode × TLS/`--no-tls` (+`--zone`); full suite | ✅ (Open MPI ≤4 `-x` case: F1, plausible) |
 | R4 | `core/queue.py`, `server.py` untouched | by-hand cross-version run, both directions, TLS on/off | ✅ |
@@ -191,8 +191,8 @@ in scope by that ruling).
   is the F2 edge. Q1 in ssh mode (remote message stands in): holds (`test_ssh_mode_without_key_names_the_cause`).
 - Q2 / P4 ruling 1 (force `-T`; drop a bare `-n` with one WARNING; leave `-qn`): holds, values of
   value-taking options kept (`-l -n`, `-o -n`).
-- Q3 (tasks keep the variable; follow-up seed): code matches. H1 and F1(b) show two consequences
-  of that ruling the plan did not weigh; the maintainer may want to revisit it with them.
+- Q3 (tasks keep the variable; follow-up seed): code matches. F1(b) bears on that ruling; the
+  maintainer may want to revisit it.
 - P1 ruling (a failed launch leaves `hs cluster` waiting): unchanged behaviour, as ruled.
 - PLAN §2.1 `read … || exit` became an empty-value `case` test: stricter, fine.
 - Pre-existing, out of scope, already recorded in PLAN §5: config-file `server.auth_eval`/`auth_env`
@@ -201,3 +201,20 @@ in scope by that ruling).
   (a list, never `None`), so `ssh.args` from configuration reaches only library callers of
   `SSHCluster`; the new docs sentence about `-n`/`-t` "in `--ssh-args` or `ssh.args`" is accurate for
   both paths that exist.
+
+## Triage (human gate) — cycle 1
+
+Cycle 1 (`826449a`, reviewing `20d2509`) requested changes, with one CRITICAL (H1) and a
+`client.py` finding (F2), which trigger the human gate. The maintainer and the foreman ruled on
+2026-11-05; the rulings are recorded in PLAN §5 and TECH § *Review-1 remediation*.
+
+| Finding | Ruling | Remediation |
+|---|---|---|
+| H1 · CRITICAL · CONFIRMED | fix | No `--ssh --env` launch puts the key, or any value the launch hands over off the command line, on a command line or in a log line. The ssh branch of `client_launch()` drops any export that assigns `HYPERSHELL_SERVER_AUTH`; `describe()` shows such a word as `HYPERSHELL_SERVER_AUTH=***`. Tests: `test_ssh_env_export_never_carries_key`, `test_ssh_launch_exports_never_carry_key`, `test_client_launch_description_redacts_key_exports`. |
+| F1 · MEDIUM · PLAUSIBLE | fix | The Open MPI parameter is set only for `--mpi` or an `mpirun`/`mpiexec` launcher; beside a user's own `-x`, the launch appends `-x HYPERSHELL_SERVER_AUTH` instead. The client takes the launch's entry out of the parameter in its tasks' environment (other names kept; dropped if empty). Tests: `test_client_launch_sets_no_open_mpi_parameter_for_other_launchers`, `test_client_launch_forwards_key_by_name_beside_mpirun_x`, `test_launched_tasks_never_hold_key`, `test_task_environment_never_holds_key`. The real Open MPI 4 `-x` check stays with the foreman. |
+| F2 · LOW · CONFIRMED | fix | The hint keys on whether `-k` was given. Test: `test_client_names_missing_key_only_when_none_given[explicit-default-key]`. |
+| F3 · LOW · CONFIRMED | fix the docs | `docs/security.rst` names the launchers that set the parameter, the `-x` case, and that tasks see neither it nor the key. |
+| F4 · LOW | fix | (a) `test_client_names_missing_key_only_when_none_given` (wrong `-k`, wrong environment key) and `test_client_launch_start_survives_closed_input` pin the two surviving mutants. (b) CI fetches tag `2.9.0a4`. |
+| Q3 ruling | reversed (maintainer) | Strip it now: the client removes `HYPERSHELL_SERVER_AUTH` from every task's environment; a task that needs it is given it explicitly through `[export]`. Documented in `docs/security.rst`. |
+
+Next: a scoped cycle 2 of the remediation diff only.

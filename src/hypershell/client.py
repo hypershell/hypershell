@@ -471,8 +471,29 @@ DEFAULT_TEMPLATE: Final[str] = DEFAULT_TEMPLATE  # redefined for documentation p
 """Default command pattern for template expansion."""
 
 
+def inherited_task_env() -> Dict[str, str]:
+    """
+    The client's own environment as its tasks inherit it, without the authentication key.
+
+    :const:`AUTH_ENV` is left out, and its name is taken out of :const:`OMPI_ENV_LIST`, which
+    is left out too if no other name remains. The client's own environment is not modified.
+    """
+    env = {name: value for name, value in os.environ.items() if name != AUTH_ENV}
+    if OMPI_ENV_LIST in env:
+        names = [name for name in env.pop(OMPI_ENV_LIST).split(';') if name and name != AUTH_ENV]
+        if names:
+            env[OMPI_ENV_LIST] = ';'.join(names)
+    return env
+
+
 def task_env(task: Task, slot: int = 0, slot_count: int = 1) -> Dict[str, str]:
-    """Build environment dictionary for the given `task` and its executor `slot`."""
+    """
+    Build environment dictionary for the given `task` and its executor `slot`.
+
+    The task inherits the client's environment without the authentication key (see
+    :func:`inherited_task_env`); the configured task environment (`config.export`) is
+    applied over it, so a task is given the key only if that names it explicitly.
+    """
     task_data = task.to_json()
     try:
         # We have to flatten tag data separately, otherwise we'd have TASK_TAG='{...}'
@@ -480,7 +501,7 @@ def task_env(task: Task, slot: int = 0, slot_count: int = 1) -> Dict[str, str]:
     except Exception:  # noqa: any exception
         tag_data = {}
     return {
-        **os.environ,
+        **inherited_task_env(),
         **load_task_env(),
         **Namespace.from_dict(task_data).to_env().flatten(prefix='TASK'),
         **tag_data,
@@ -1121,6 +1142,9 @@ DEFAULT_AUTH: Final[str] = QueueConfig.auth
 AUTH_ENV: Final[str] = 'HYPERSHELL_SERVER_AUTH'
 """Environment variable read as the key default; `hs cluster` launchers hand the key over in it."""
 
+OMPI_ENV_LIST: Final[str] = 'OMPI_MCA_mca_base_env_list'
+"""Open MPI parameter naming the environment variables `mpirun` forwards to remote ranks."""
+
 LAUNCH_ENV_HINT: Final[str] = (f'No key reached this client: {AUTH_ENV} is not set in its environment and '
                                f'no -k was given. A client that \'hs cluster\' starts through a launcher '
                                f'receives its key in {AUTH_ENV}, so the launcher most likely did not pass '
@@ -1557,7 +1581,7 @@ class ClientApp(Application):
     port: int = config.server.port
     interface.add_argument('-p', '--port', type=int, default=port)
 
-    auth: str = config.server.auth
+    auth: Optional[str] = None  # Without -k, the key is config.server.auth (see run)
     interface.add_argument('-k', '--auth', default=auth)
 
     template: str = DEFAULT_TEMPLATE
@@ -1628,6 +1652,9 @@ class ClientApp(Application):
 
     def run(self: ClientApp) -> None:
         """Run client."""
+        auth_given = self.auth is not None
+        if not auth_given:
+            self.auth = config.server.auth
         try:
             self.check_args()
             self.enable_tls()
@@ -1655,7 +1682,7 @@ class ClientApp(Application):
         except gaierror:
             raise HostAddressInfo(f'Could not resolve host \'{self.host}\'')
         except AuthenticationError as error:
-            if self.auth == config.server.auth and AUTH_ENV not in os.environ:
+            if not auth_given and AUTH_ENV not in os.environ:
                 raise AuthenticationError(f'{error}\n{LAUNCH_ENV_HINT}') from error
             raise
 

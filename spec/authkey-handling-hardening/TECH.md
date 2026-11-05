@@ -3,16 +3,16 @@ slug: authkey-handling-hardening
 title: The queue authentication key is never exposed to other users on client nodes
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/authkey-handling-hardening
 base: develop
-current_phase: done
+current_phase: P1
 last_updated: '2026-11-05'
 phases:
 - id: P1
   name: One client-launch function; --launcher and --mpi hand the key over in the
     environment
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -24,7 +24,8 @@ phases:
   hammerable: false
   hill: downhill
   verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k 'launcher
-    or mpi' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
+    or mpi or task_environment or missing_key' && uv run pytest -p no:cacheprovider
+    -q tests/test_cluster.py tests/test_client.py
 - id: P2
   name: Autoscaling (fixed and dynamic) launches through the same function
   status: done
@@ -44,7 +45,7 @@ phases:
 - id: P3
   name: SSH launches through the same function, key on the ssh channel's standard
     input
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -56,11 +57,11 @@ phases:
   parallel: false
   hammerable: false
   hill: downhill
-  verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k ssh
-    && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
+  verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k 'ssh
+    or closed_input' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
 - id: P4
   name: Compatibility contract, cross-version check, and the docs revision
-  status: done
+  status: in_progress
   satisfies:
   - R4
   - R5
@@ -118,7 +119,9 @@ code+state commit.
 - Do not touch `core/queue.py`, `client.py` or `server.py`. If a phase finds it must, STOP: that goes
   back to sign-off (GOAL non-goals). One exception, by maintainer ruling Q1 (PLAN §5, 2026-11-05):
   `client.py` carries the smallest change that makes a client which reaches the server with no key
-  of its own name the likely cause (P1).
+  of its own name the likely cause (P1). A second, by the review-1 rulings below (Q3 reversed,
+  F2; maintainer, 2026-11-05): the client leaves the key variable out of every task's environment,
+  and the hint keys on whether `-k` was given.
 - No CLI option or help text changes in this cycle. If one becomes necessary, the affected
   `docs/_include/*.rst` and `share/` completions change in the same commit (R8).
 - Docs prose uses top-level commands only (`hs list`, `hs info`, `hs wait`, `hs run`, `hs update`).
@@ -383,6 +386,72 @@ guidance describe the hardened behaviour.
 - **Touches:** `tests/test_cluster_launch.py`, `docs/security.rst`, `AGENTS.md`,
   `.agents/factory/invariants.md`; by ruling 1, `src/hypershell/cluster/launch.py`,
   `src/hypershell/cluster/ssh.py` and the PLAN §2.3 correction.
+
+## Review-1 remediation (reopens P1, P3, P4)
+
+Review cycle 1 (`826449a`, reviewing `20d2509`) requested changes. The human gate is passed by
+the maintainer's and foreman's rulings of 2026-11-05, recorded in PLAN §5 and in REVIEW.md
+§ *Triage (human gate) — cycle 1*. Each item below went red on `826449a` before its change.
+
+- **Rulings (2026-11-05).**
+  - *Q3 reversed (maintainer): strip it now.* The client removes `HYPERSHELL_SERVER_AUTH` from
+    every task's environment. A task that needs the key has to be given it explicitly.
+  - *H1 · fix.* No `--ssh --env` launch puts the key, or any value the launch hands over off the
+    command line, on a command line or in a log line.
+  - *F1 · fix.* The Open MPI parameter is set only for an `mpirun`/`mpiexec` launcher; beside a
+    user's own `-x`, the launch adds `-x HYPERSHELL_SERVER_AUTH` (a name only) instead; the client
+    takes the launch's entry out of the parameter in its tasks' environment.
+  - *F2 · fix.* The Q1 hint fires only when no key came from `-k` or the environment, decided by
+    whether `-k` was given, not by its value.
+  - *F3 · fix the docs* to the F1 rule, and say tasks see neither the parameter nor the key.
+  - *F4 · fix.* Tests that pin the hint's silence and the closed-input path; CI fetches the
+    `2.9.0a4` tag so the tag-gated tests run.
+- [x] **P1 · Q3.** `client.py` `inherited_task_env()`: `task_env()` starts from the client's
+      environment without `AUTH_ENV`, with `AUTH_ENV` taken out of `OMPI_ENV_LIST` (dropped if
+      empty). `config.export` is applied over it, so it is the explicit way to give a task the key.
+      The client's own `os.environ` is unchanged. `OMPI_ENV_LIST` moves to `client.py` (re-exported
+      by `launch.py`). Tests: `test_launched_tasks_never_hold_key[launcher|mpi]` (end to end, a
+      user's own Open MPI names kept), `test_task_environment_never_holds_key` (4 cases), and
+      `test_task_environment_holds_key_only_when_exported` (the explicit path; passes before and
+      after).
+- [x] **P1 · F1.** `client_launch()` sets `OMPI_ENV_LIST` only when the launcher's first word is
+      `mpirun` or `mpiexec` (`MPI_LAUNCHERS`, by base name). If the launcher's words already hold
+      `-x`, it appends `-x HYPERSHELL_SERVER_AUTH` before the client and sets no parameter. Tests:
+      `test_client_launch_sets_no_open_mpi_parameter_for_other_launchers` (4 cases),
+      `test_client_launch_forwards_key_by_name_beside_mpirun_x` (2 cases), and
+      `test_client_launch_sets_open_mpi_parameter_for_mpi_launchers` (2 cases; passes before and
+      after).
+- [x] **P1 · F2, F4(a).** `ClientApp`'s `-k` defaults to `None`; `run()` records whether it was
+      given, then falls back to `config.server.auth`. The hint needs no `-k` and no `AUTH_ENV`.
+      Test: `test_client_names_missing_key_only_when_none_given` against a real `hs server`, four
+      cases: no key (hint), explicit default-value `-k` (no hint: red before), wrong `-k` and wrong
+      `AUTH_ENV` (no hint; these pin the "hint always fires" mutant).
+- [x] **P3 · H1.** The ssh branch of `client_launch()` drops any export word that assigns
+      `AUTH_ENV`. `describe()` shows a word that assigns `AUTH_ENV` as `HYPERSHELL_SERVER_AUTH=***`,
+      in every mode. Tests: `test_ssh_env_export_never_carries_key` (end to end, `--ssh --env`),
+      `test_ssh_launch_exports_never_carry_key` (builder and `SSHCluster(export_env=True)`), and
+      `test_client_launch_description_redacts_key_exports[launcher|ssh]`.
+- [x] **P3 · F4(a).** `test_client_launch_start_survives_closed_input`: a 1 MiB input to a child
+      that closes its standard input makes the write fail with `EPIPE` every time; `start()` must
+      return the process (pins the uncaught-`BrokenPipeError` mutant; passes before and after).
+- [x] **P4 · F3, Q3 docs.** `docs/security.rst`: the Open MPI forwarding is described per the F1
+      rule (which launchers, the `-x` case, none for other launchers); `--env` never carries
+      `HYPERSHELL_SERVER_AUTH`; tasks see neither the key nor the launch's Open MPI entry, a task
+      that needs the key is given it through `[export]`, and an older client does not strip it.
+      `AGENTS.md` (auth-token handoff) and `invariants.md` §11 match.
+- [x] **P4 · F4(b).** `.github/workflows/tests.yml`: the tests job fetches tag `2.9.0a4`
+      (`git fetch --no-tags --depth=1`), commented, so the contract and cross-version tests run in
+      CI. Checked in a local shallow clone: the tag then resolves, and `git show`/`git archive`
+      read its tree.
+- **Gate retunes (through `set_phase.py`).** P1's `-k` adds `task_environment or missing_key`
+  and `tests/test_client.py`; P3's adds `closed_input`.
+- **Red on 826449a:** 17 of the 24 new cases failed (both `test_launched_tasks_never_hold_key`,
+  the 4 `test_task_environment_never_holds_key`, 4 + 2 Open MPI launcher cases,
+  `test_ssh_env_export_never_carries_key`, `test_ssh_launch_exports_never_carry_key`, both
+  description cases, and the explicit-default `-k` hint case), each on its key-property or hint
+  assertion. The other 7 pass before and after, as noted above. Mutants re-run in scratch copies
+  of the fixed `src`: "hint always fires" fails 3 hint cases; "`BrokenPipeError` not caught" fails
+  `test_client_launch_start_survives_closed_input`.
 
 ---
 

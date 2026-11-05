@@ -59,6 +59,8 @@ def client_launch(remote_exe: str, address: Tuple[str, int], auth: str, *,
   …options]`. `env = {AUTH_ENV: auth}`, plus `OMPI_MCA_mca_base_env_list` with `AUTH_ENV` appended
   to any value already set (`;`-separated). That entry asks Open MPI's `mpirun` to forward the
   variable to remote ranks. Other launchers ignore it, and it carries a name, not a value.
+  *(Amended by review-1 ruling F1, 2026-11-05, §5: only an `mpirun`/`mpiexec` launcher gets the
+  entry, or `-x HYPERSHELL_SERVER_AUTH` when its arguments already hold `-x`.)*
   `start()` passes `env={**os.environ, **load_task_env(), **self.env}`, the same merge the
   launchers make today with the key added last so that it wins.
 - **SSH** (`ssh_host` set): `argv = [*launcher, *launcher_args, '-T', ssh_host, *ssh_exports, 'sh',
@@ -226,6 +228,30 @@ exception applied. The research was done inline and in sequence; see
   the same user only. Dropping it from task environments would touch `client.py`, and only 2.9
   clients would do it. Proposed: no change in this cycle; the maintainer decides.
   - **Ruling (maintainer, 2026-11-05): no change in this cycle;** recorded as a follow-up seed.
+  - **Ruling reversed (maintainer, 2026-11-05, review 1): strip it now.** The client removes
+    `HYPERSHELL_SERVER_AUTH` from every task's environment, with the smallest change where
+    `client.py` builds it, and takes that name out of `OMPI_MCA_mca_base_env_list` there. A task
+    that needs the key (one that starts its own client of the same server, say) has to be given
+    it explicitly; the configured task environment (`[export]`) is that way, and the docs say
+    so. Older clients under a newer launcher still pass it to their tasks.
+- **Review-1 rulings (maintainer and foreman, 2026-11-05).** Detail and tests in TECH
+  § *Review-1 remediation*.
+  - *H1 · fix.* No `--ssh --env` launch puts the key, or any value the launch hands over off the
+    command line, on a command line or in a log line: the `--env` exports never include
+    `HYPERSHELL_SERVER_AUTH`, and `describe()` redacts any word that assigns it.
+  - *F1 · fix.* The Open MPI parameter is set only for `--mpi` or a launcher whose first word is
+    `mpirun` or `mpiexec`. If that launcher's arguments already hold `-x`, the launch appends
+    `-x HYPERSHELL_SERVER_AUTH` (a name, never a value) instead, since Open MPI 4.1 and earlier
+    abort when `-x` and the parameter are both given. The client takes the launch's entry out of
+    the parameter in its tasks' environment and drops the variable if nothing is left, so a
+    task's own `mpirun -x` works and a user's other names are kept.
+  - *F2 · fix.* The Q1 hint fires only when no key came from `-k` or the environment. Whether
+    `-k` was given is tracked, not whether its value equals the configured or default key.
+  - *F3 · fix the docs.* `docs/security.rst` says exactly which launchers set the Open MPI
+    parameter (F1), and that tasks see neither it nor the key.
+  - *F4 · fix.* (a) Tests that pin the hint's silence for a wrong `-k` or a wrong
+    `HYPERSHELL_SERVER_AUTH`, and `ClientLaunch.start()`'s closed-input path. (b) CI fetches tag
+    `2.9.0a4` so the contract and cross-version tests run there.
 - **Risk: test runtime and hangs.** A client that fails to authenticate leaves a cluster waiting.
   Every new test runs `hs cluster` in its own session with a hard timeout and kills the process
   group on expiry.

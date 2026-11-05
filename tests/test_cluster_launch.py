@@ -25,6 +25,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import tarfile
 import subprocess
 from io import BytesIO
@@ -39,10 +40,13 @@ from cmdkit.app import exit_status
 
 # Internal libs
 from tests import create_taskfile_echo
+from hypershell import client as client_module
+from hypershell.client import DEFAULT_AUTH, task_env
 from hypershell.cluster.launch import AUTH_ENV, OMPI_ENV_LIST, ClientLaunch, client_launch
 from hypershell.core.logging import HOSTNAME
 from hypershell.cluster.remote import AutoScaler, AutoScalingCluster
 from hypershell.cluster.ssh import SSHCluster, DEFAULT_REMOTE_EXE
+from hypershell.data.model import Task
 
 
 pytestmark = mark.integration
@@ -1071,3 +1075,221 @@ def test_old_client_runs_under_new_launcher(old_client: StandIns, temp_site: Pat
     assert_key_not_in(key, run.stdout, run.stderr)
     assert_old_client_ran(old_client.read(), old_client)
     assert_run_complete(run, old_client, temp_site)
+
+
+# A task step that writes its own environment, as JSON, to a private file named for its task.
+DUMP_TASK_ENV: Final[str] = """\
+import os, sys, json
+path = os.path.join(sys.argv[1], os.environ['TASK_ID'] + '.json')
+with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
+    json.dump(dict(os.environ), stream)
+"""
+
+USER_OMPI_NAMES: Final[str] = 'USER_NAME_A;USER_NAME_B'
+"""Names a user already set in the Open MPI forwarding list; a task must still see them."""
+
+
+@mark.parametrize('mode', ['launcher', 'mpi'])
+def test_launched_tasks_never_hold_key(stand_ins: StandIns, temp_site: Path, tmp_path: Path, mode: str) -> None:
+    """A launched client's tasks see neither the key nor its name in the Open MPI list; a user's names stay."""
+    script = tmp_path / 'dump_task_env.py'
+    script.write_text(DUMP_TASK_ENV)
+    dumps = tmp_path / 'task-env'
+    dumps.mkdir(mode=0o700)
+    template = '{} && ' + shlex.join([sys.executable, str(script), str(dumps)])
+    launch_mode = [f'--launcher={stand_ins.launcher}'] if mode == 'launcher' else ['--mpi']
+    run = run_cluster(stand_ins, [*launch_mode, '-t', template], temp_site, True, None,
+                      env={OMPI_ENV_LIST: USER_OMPI_NAMES})
+    key = assert_key_off_command_lines(stand_ins.read())
+    assert_run_complete(run, stand_ins, temp_site)
+    environments = [json.loads(path.read_text()) for path in dumps.glob('*.json')]
+    assert len(environments) == TASK_COUNT
+    for env in environments:
+        holds_variable, holds_key = AUTH_ENV in env, key in json.dumps(env)
+        assert not holds_variable, 'A task received the key variable'
+        assert not holds_key, 'A task received the key'
+        assert env.get(OMPI_ENV_LIST) == USER_OMPI_NAMES
+
+
+@mark.parametrize('inherited, expected', [
+    pytest.param(None, None, id='unset'),
+    pytest.param(AUTH_ENV, None, id='launch-only'),
+    pytest.param(f'USER_NAME_A;{AUTH_ENV};USER_NAME_B', 'USER_NAME_A;USER_NAME_B', id='user-names-kept'),
+    pytest.param('USER_NAME_A', 'USER_NAME_A', id='user-only'),
+])
+def test_task_environment_never_holds_key(temp_site: Path, monkeypatch: MonkeyPatch,
+                                          inherited: Optional[str], expected: Optional[str]) -> None:
+    """A task's environment has no key variable, and the Open MPI list keeps only the user's own names."""
+    key = 'k' * 32
+    monkeypatch.setenv(AUTH_ENV, key)
+    if inherited is None:
+        monkeypatch.delenv(OMPI_ENV_LIST, raising=False)
+    else:
+        monkeypatch.setenv(OMPI_ENV_LIST, inherited)
+    env = task_env(Task.new('echo hello'))
+    assert AUTH_ENV not in env
+    assert key not in env.values()
+    assert env.get(OMPI_ENV_LIST) == expected
+    assert os.environ[AUTH_ENV] == key  # The client's own environment is unchanged
+
+
+def test_task_environment_holds_key_only_when_exported(temp_site: Path, monkeypatch: MonkeyPatch) -> None:
+    """A task gets the key variable only when the configured task environment names it explicitly."""
+    monkeypatch.setenv(AUTH_ENV, 'k' * 32)
+    monkeypatch.setattr(client_module, 'load_task_env', lambda: {AUTH_ENV: 'given-explicitly'})
+    env = task_env(Task.new('echo hello'))
+    assert env[AUTH_ENV] == 'given-explicitly'
+
+
+@mark.parametrize('launcher', [
+    pytest.param([], id='autoscaling-default'),
+    pytest.param(['srun'], id='srun'),
+    pytest.param(['flux', 'run'], id='flux'),
+    pytest.param(['launcher', 'mpirun'], id='mpirun-not-first'),
+])
+def test_client_launch_sets_no_open_mpi_parameter_for_other_launchers(monkeypatch: MonkeyPatch,
+                                                                      launcher: List[str]) -> None:
+    """A launch that does not start `mpirun` or `mpiexec` sets no Open MPI parameter."""
+    monkeypatch.delenv(OMPI_ENV_LIST, raising=False)
+    key = 'k' * 32
+    launch = client_launch('hs', ('localhost', 50001), key, launcher=launcher, num_threads=1, bundlesize=1,
+                           bundlewait=5, template='{}', delay_start=0, task_signalwait=10)
+    assert launch.env == {AUTH_ENV: key}
+
+
+@mark.parametrize('launcher', [
+    pytest.param(['mpiexec', '-n', '4'], id='mpiexec'),
+    pytest.param(['/opt/openmpi/bin/mpirun'], id='mpirun-path'),
+])
+def test_client_launch_sets_open_mpi_parameter_for_mpi_launchers(monkeypatch: MonkeyPatch,
+                                                                 launcher: List[str]) -> None:
+    """A launch that starts `mpirun` or `mpiexec` asks Open MPI to forward the key variable by name."""
+    monkeypatch.delenv(OMPI_ENV_LIST, raising=False)
+    launch = client_launch('hs', ('localhost', 50001), 'k' * 32, launcher=launcher, num_threads=1, bundlesize=1,
+                           bundlewait=5, template='{}', delay_start=0, task_signalwait=10)
+    assert launch.env[OMPI_ENV_LIST] == AUTH_ENV
+
+
+@mark.parametrize('launcher, launcher_args', [
+    pytest.param(['mpirun', '-x', 'LD_LIBRARY_PATH'], [], id='launcher-words'),
+    pytest.param(['mpiexec'], ['-np', '2', '-x', 'OMP_NUM_THREADS=2'], id='launcher-args'),
+])
+def test_client_launch_forwards_key_by_name_beside_mpirun_x(monkeypatch: MonkeyPatch, launcher: List[str],
+                                                            launcher_args: List[str]) -> None:
+    """With `-x` already given to `mpirun`, the launch adds `-x` and the variable's name, and no Open MPI parameter."""
+    monkeypatch.delenv(OMPI_ENV_LIST, raising=False)
+    key = 'k' * 32
+    launch = client_launch('hs', ('localhost', 50001), key, launcher=launcher, launcher_args=launcher_args,
+                           num_threads=1, bundlesize=1, bundlewait=5, template='{}', delay_start=0,
+                           task_signalwait=10)
+    assert launch.env == {AUTH_ENV: key}
+    start = launch.argv.index('hs')
+    assert launch.argv[:start] == [*launcher, *launcher_args, '-x', AUTH_ENV]
+    assert key not in ' '.join(launch.argv)
+    assert key not in launch.describe()
+
+
+def test_ssh_env_export_never_carries_key(stand_ins: StandIns, temp_site: Path) -> None:
+    """With --ssh --env, a key variable in the launching environment is on no command line and in no log line."""
+    held = 'h' * 128
+    run = run_cluster(stand_ins, ['--ssh', SSH_HOSTS[0], '--env'], temp_site, True, None,
+                      until=ssh_failed(stand_ins), env={AUTH_ENV: held})
+    records = stand_ins.read()
+    for record in records:
+        on_command_line = held in ' '.join(record['argv'])
+        assert not on_command_line, f'Key on the command line of {record["name"]}'
+        in_remote_command = held in record.get('remote', '')
+        assert not in_remote_command, 'Key in the remote command'
+    assert_key_not_in(held, run.stdout, run.stderr)
+    clients = [record for record in records if record['role'] == 'client']
+    assert clients and all(record['key'] and record['key'] != held for record in clients)
+    assert record_level_exported(records)
+    assert_run_complete(run, stand_ins, temp_site)
+
+
+def record_level_exported(records: List[Dict[str, Any]]) -> bool:
+    """Every client got the launching logging level, so --env still exported the other variables."""
+    return all(record['level'] == 'DEVEL' for record in records if record['role'] == 'client')
+
+
+def test_ssh_launch_exports_never_carry_key(monkeypatch: MonkeyPatch) -> None:
+    """An SSH launch drops any export of the key variable, from --env or from a caller, and keeps the rest."""
+    held = 'h' * 128
+    params = {**SSH_LAUNCH_BASE}
+    remote_exe, address = params.pop('remote_exe'), params.pop('address')
+    launch = client_launch(remote_exe, address, 'k' * 32, ssh_host='node-7',
+                           ssh_exports=['HYPERSHELL_SITE=/site', f'{AUTH_ENV}={held}'], **params)
+    _, after, _, _ = split_ssh_launch(launch.argv, 'node-7')
+    assert after[:-1] == ['HYPERSHELL_SITE=/site', 'sh', '-c']
+    assert held not in ' '.join(launch.argv) and held not in launch.describe()
+    monkeypatch.setenv(AUTH_ENV, held)
+    cluster = SSHCluster(nodelist=SSH_HOSTS, export_env=True, bind=(LOOPBACK, int(os.environ['HYPERSHELL_SERVER_PORT'])),
+                         tls=None)
+    for launch in cluster.launches:
+        assert held not in ' '.join(launch.argv) and held not in launch.describe()
+        assert any(word.startswith('HYPERSHELL_SERVER_PORT=') for word in launch.argv)
+
+
+@mark.parametrize('stdin', [pytest.param(None, id='launcher'), pytest.param('key', id='ssh')])
+def test_client_launch_description_redacts_key_exports(stdin: Optional[str]) -> None:
+    """A launch's log description never shows a value assigned to the key variable on its command line."""
+    held = 'h' * 128
+    argv = ['ssh', '-T', 'node-7', f'{AUTH_ENV}={held}', 'HYPERSHELL_SITE=/site', 'sh', '-c', "'true'"]
+    launch = ClientLaunch(argv=argv, env={}, stdin=stdin, inherit_env=stdin is not None)
+    description = launch.describe()
+    assert held not in description
+    assert f'{AUTH_ENV}=' in description and 'HYPERSHELL_SITE=/site' in description
+
+
+def test_client_launch_start_survives_closed_input() -> None:
+    """Starting a launch whose process closes its input before reading the key raises nothing."""
+    child = [sys.executable, '-c', 'import os, time; os.close(0); time.sleep(0.5)']
+    launch = ClientLaunch(argv=child, env={}, stdin='k' * (1 << 20) + '\n', inherit_env=True)
+    proc = launch.start()
+    assert proc.wait(timeout=30) == 0
+
+
+SERVER_KEY: Final[str] = 's' * 64
+"""The key the stand-alone server in the hint tests requires."""
+
+
+def start_server(temp_site: Path) -> Popen:
+    """Start `hs server` with :const:`SERVER_KEY` in its own session, once it accepts connections."""
+    taskfile = create_taskfile_echo(temp_site, count=1)
+    log = open(Path(temp_site) / 'server.log', mode='w')
+    proc = Popen(['hs', 'server', str(taskfile), '--no-db', '--no-tls', '-H', LOOPBACK, '-k', SERVER_KEY],
+                 env=dict(os.environ), stdin=DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    log.close()
+    deadline = time.monotonic() + 60
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            pytest.fail('Server exited early\n' + (Path(temp_site) / 'server.log').read_text()[-4000:])
+        try:
+            socket.create_connection((LOOPBACK, port), timeout=1).close()
+            return proc
+        except OSError:
+            time.sleep(0.2)
+    kill_group(proc)
+    pytest.fail('Server did not start')
+
+
+@mark.parametrize('client_args, env, hint', [
+    pytest.param([], {}, True, id='no-key'),
+    pytest.param(['-k', DEFAULT_AUTH], {}, False, id='explicit-default-key'),
+    pytest.param(['-k', 'w' * 64], {}, False, id='explicit-wrong-key'),
+    pytest.param([], {AUTH_ENV: 'w' * 64}, False, id='environment-wrong-key'),
+])
+def test_client_names_missing_key_only_when_none_given(temp_site: Path, client_args: List[str],
+                                                      env: Dict[str, str], hint: bool) -> None:
+    """A client that fails to authenticate names a missing key only when no key came from -k or the environment."""
+    server = start_server(temp_site)
+    try:
+        run = run_in_session(['hs', 'client', '-H', LOOPBACK, '--no-tls', '-T', '5', *client_args],
+                             {**os.environ, **env}, Path(temp_site), timeout=60, name='client')
+    finally:
+        kill_group(server)
+    assert run.status == exit_status.runtime_error, run.stderr[-4000:]
+    assert 'AuthenticationError' in run.stderr
+    named = 'No key reached this client' in run.stderr
+    assert named == hint, run.stderr[-4000:]
