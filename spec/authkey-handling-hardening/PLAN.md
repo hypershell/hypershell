@@ -201,15 +201,25 @@ exception applied. The research was done inline and in sequence; see
   - There is no fallback to the command line.
   - Proposed: accept and document, and have the maintainer check `--mpi` once on a real Open MPI 4
     and 5 install at review. The factory has no cluster access.
+  - **Ruling (maintainer, 2026-11-05): accept and fail clearly.**
+    - The docs state the requirement.
+    - A client started by `--launcher`/`--mpi` that reaches the server without the launch's key
+      exits with an error naming the likely cause: the launcher did not pass the environment. It
+      does not exit with a bare authentication failure.
+    - The smallest change that achieves this is in scope, including in `client.py` if needed.
+    - Before merge, the foreman checks `--launcher srun` on the test cluster, with the default
+      environment and with `--export=NONE`, and checks `--mpi` with the Open MPI it offers.
 - **Q2 (maintainer): SSH options.**
   - The launch now owns ssh's standard input and forces `-T`, so a user's `-n`/`-t`/`-tt` in
     `--ssh-args` or `config.ssh.args` no longer applies to client launches.
   - Clients still exit on idle and on server shutdown, as today.
   - Proposed: accept and document.
+  - **Ruling (maintainer, 2026-11-05): accept and document**, in the docs and the release notes.
 - **Q3 (maintainer, optional): task environment.** Tasks inherit `HYPERSHELL_SERVER_AUTH` from
   their client, as they inherit any `HYPERSHELL_*` variable a user sets. That makes it visible to
   the same user only. Dropping it from task environments would touch `client.py`, and only 2.9
   clients would do it. Proposed: no change in this cycle; the maintainer decides.
+  - **Ruling (maintainer, 2026-11-05): no change in this cycle;** recorded as a follow-up seed.
 - **Risk: test runtime and hangs.** A client that fails to authenticate leaves a cluster waiting.
   Every new test runs `hs cluster` in its own session with a hard timeout and kills the process
   group on expiry.
