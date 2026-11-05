@@ -88,6 +88,8 @@ Options
     Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 
     This feature allows for gracefully scaling down a cluster when task throughput subsides.
+    The timeout counts from when the client starts, after any ``--delay-start``, so the delay
+    does not count toward it.
 
 
 ``-W``, ``--task-timeout`` *SEC*

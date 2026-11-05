@@ -215,7 +215,7 @@ class RemoteCluster(Thread):
     """
 
     server: ServerThread
-    clients: Popen
+    clients: Optional[Popen] = None
     client_argv: List[str]
 
     def __init__(self: RemoteCluster,
@@ -304,6 +304,7 @@ class RemoteCluster(Thread):
     def run_with_exceptions(self: RemoteCluster) -> None:
         """Start child threads, wait."""
         self.server.start()
+        self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         log.debug('Launching clients: ' + redact_secrets(self.client_argv, ['-k']))
         self.clients = Popen(self.client_argv,
                              stdout=sys.stdout, stderr=sys.stderr,
@@ -314,7 +315,8 @@ class RemoteCluster(Thread):
     def stop(self: RemoteCluster, wait: bool = False, timeout: int = None) -> None:
         """Stop child threads before main thread."""
         self.server.stop(wait=wait, timeout=timeout)
-        self.clients.terminate()
+        if self.clients is not None:
+            self.clients.terminate()
         super().stop(wait=wait, timeout=timeout)
 
 
@@ -829,6 +831,7 @@ class AutoScalingCluster(Thread):
     def run_with_exceptions(self: AutoScalingCluster) -> None:
         """Start child threads, wait."""
         self.server.start()
+        self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         self.autoscaler.start()
         self.autoscaler.join()
         self.server.join()
