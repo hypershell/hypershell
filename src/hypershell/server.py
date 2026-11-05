@@ -198,10 +198,14 @@ class Scheduler(StateMachine):
             self.startup_phase = False
             self.poll = SERVER_POLL_MIN
             return SchedulerState.PACK
-        elif not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0 and not self.startup_phase:
+        elif (not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0
+              and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0
+              and not self.startup_phase):
+            # A failure written back after Task.next() is still retried before the run stops;
+            # retryable failures are counted after incomplete tasks so that write is always seen.
             return SchedulerState.FINAL
         else:
-            group_info = Task.increment_group(self.current_group, attempts=self.attempts)
+            group_info = Task.increment_group(self.current_group, attempts=self.attempts, eager=self.eager)
             if not group_info.viable:
                 if self.forever_mode:
                     log.warning(f'Failed task group {group_info.value} ({group_info.reason})')
