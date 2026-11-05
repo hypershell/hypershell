@@ -1829,3 +1829,216 @@ None.
   foreman re-runs the Linux check on the test cluster; CI is the final proof.
 - **FSM.** P1 reopened and closed again; status `in_review` for a scoped review of this delta. The
   cycle-8 verdict is untouched.
+
+## Review cycle 9 (scoped) — changes-requested (2026-11-04)
+
+- **Reviewed commit:** 3a35be1309044f4a622d07eba9e641371cc38932  ·  **Base:** `b61dbbe` (merge base
+  with `origin/develop`, unchanged since cycle 8)  ·  **Date:** 2026-11-04
+- **Verdict:** changes-requested. One CONFIRMED MEDIUM finding in `core/queue.py` (human gate) and
+  one CONFIRMED LOW docs finding.
+- **Cycle:** 9. The scope is everything since the cycle-8 approval at `f45a5cf`: `2f1285f` (the P7
+  evidence and its summary), `9f36de4` (the roadmap stamp) and `3a35be1` (the CI-found remediation
+  that sets `TCP_NODELAY` on every queue socket). The substance is `3a35be1`'s
+  `src/hypershell/core/queue.py` and `tests/test_queue.py`. The P7 evidence was checked for
+  sanitisation only.
+- **Mode:** one blind reviewer, inline, with no nested subagents. The inputs were `GOAL.md`, the
+  spec-excluded diff `f45a5cf..3a35be1`, the `AGENTS.md` invariants and the runnable repo.
+  `PLAN.md`, `TECH.md` (beyond its FSM block), `research/` and `META.md` were not read before the
+  findings were formed. Every run used `git archive` extracts of `3a35be1`, `f45a5cf`, `b819de6` and
+  `2.8.4` in a scratch directory, a throwaway 3.12.13 venv built with `uv run --frozen`, and the
+  worktree's 3.14.6 venv, used read-only.
+- **Not run by the reviewer:** `bench_queue.py compat`, as the foreman directed. The foreman's run,
+  approved by the maintainer, is cited in §1.
+
+### Pre-flight
+
+- **Contract drift.** `git log --oneline develop..HEAD -- spec/zone-queue-primitive/GOAL.md` shows
+  only the shaping commit `da987c2`.
+- **Commits in scope.** `2f1285f`, `9f36de4` and `3a35be1` are signed (`%G?` = `U`), and none has a
+  trailer. `git diff --diff-filter=M --name-only b61dbbe 3a35be1 -- tests/` is empty, so no base test
+  is modified (R8). `tests/test_queue_tls.py` is unchanged since `b819de6` (R4). The only test change
+  is the new test in the branch-new `tests/test_queue.py`.
+
+### 1. Wire compatibility (executed)
+
+- **Harness.** A script of about 120 lines, read in full, with four roles: a HyperShell server, a
+  HyperShell client, a stock `BaseManager` server (`get_server().serve_forever()` over four
+  `queue.Queue`s) and a stock `BaseManager` client. The two stock roles assert that `hypershell` was
+  never imported.
+- **Protocol on each of the four queues.**
+  1. The server side puts `server->{name}`.
+  2. The client gets it and calls `task_done`, so the server's `join()` returns.
+  3. The client puts `client->{name}`, and the server gets it.
+  4. The server puts the sentinel on `scheduled`, and the client must receive it.
+- **Results.** Every pair passed on 3.12.13 and on 3.14.6, with both exit codes 0 and the expected
+  serializer on each side:
+
+  | Server | Client | Cleartext | TLS |
+  |---|---|---|---|
+  | `3a35be1` | `3a35be1` | PASS | PASS |
+  | `3a35be1` | `b819de6` | PASS | PASS |
+  | `3a35be1` | `2.8.4` | PASS | PASS |
+  | `3a35be1` | stock `multiprocessing` | PASS | n/a |
+  | `b819de6` | `3a35be1` | PASS | PASS |
+  | `2.8.4` | `3a35be1` | PASS | PASS |
+  | stock `BaseManager` | `3a35be1` | PASS | n/a |
+
+  The serializer key never crosses the wire. A `3a35be1` client (`hypershell-plain`) and a stock
+  client (`pickle`) are interchangeable against the same servers.
+- **Foreman's run** (approved by the maintainer; attributed, not repeated): `bench_queue.py compat`,
+  `b819de6` against `3a35be1` in both directions, TLS on and off. All four combinations passed, with
+  200/200 tasks at exit 0 and every rc 0. Server `b819de6` with client HEAD took 6.6 s with TLS and
+  4.0 s without. Server HEAD with client `b819de6` took 4.0 s with TLS and 3.7 s without.
+
+### 2. The new test discriminates (mutation)
+
+Each mutation was applied to a scratch copy of the `3a35be1` extract, with the copy's `src` first on
+the path (confirmed by `hypershell.core.queue.__file__`). `test_connections_disable_nagle` ran on 3.12.
+
+| Mutation | `[no-tls]` | `[tls]` |
+|---|---|---|
+| none (green control) | pass | pass |
+| M1: `_PlainListener.accept` without `_no_delay_connection` | **FAIL** | pass |
+| M2: `_plain_client` without `_no_delay_connection` | **FAIL** | pass |
+| M3: `SecureListener.accept` without `_no_delay(raw)` | pass | **FAIL** |
+| M4: `secure_client` without `_no_delay(raw)` | pass | **FAIL** |
+| M5: `SecureManager` falls back to `'pickle'` when TLS is off | **FAIL** | pass |
+| M6: `_no_delay` sets nothing | **FAIL** | **FAIL** |
+
+The test catches all six. It checks the proxies' long-lived connection on both ends. The short-lived
+connections (`dummy`, `create`, `incref`, `decref`) go through the same `listener_client` pair.
+
+### 3. Edge probes (executed)
+
+- **AF_UNIX.** A `_PlainListener` and `_plain_client` pair on a filesystem socket round-trips. The
+  option is skipped on both ends, both descriptors stay blocking, and the open-descriptor count is
+  unchanged.
+- **An authkey on the listener.** The handshake runs inside the stock `accept`, and the option is set
+  after it on both ends. Stock `Client` against `_PlainListener`, and `_plain_client` against stock
+  `Listener`, both with authkeys, round-trip.
+- **Descriptor duplication.** `_no_delay_connection` was called 500 times each on a pipe connection
+  (not a socket), a closed connection and a live one, and once on an object whose `fileno()` raises
+  `ValueError`. It never raised, and the open-descriptor count did not change. `_plain_client` rejects
+  a `str` authkey with the stock `TypeError`, before dialing.
+- **Proxy unpickling.** A pickled cleartext proxy now names `hypershell-plain`. In a fresh `-I`
+  interpreter, unpickling it raises `KeyError: 'hypershell-plain'`. At `f45a5cf` the same unpickle got
+  past the key and failed authentication, as any proxy unpickled outside a spawn child does.
+  HyperShell has no path that pickles a proxy:
+  - clients run in-process (`ClientThread`) or as `Popen` argv (`cluster/remote.py`,
+    `cluster/ssh.py`, the autoscaler);
+  - `src/` has no `multiprocessing.Process` or pool;
+  - payloads are bytes;
+  - a forked child inherits the registration.
+
+  Dropped. The docs consequence is under F2.
+- **`_INTERNALS`.** The new entry checks a key this module registers at import, so it cannot fail by
+  itself. The pair also relies on two stock behaviours that no check covers: a manager's `Server`
+  builds its listener without an authkey, and the stock `Connection` exposes a descriptor. A change to
+  either only leaves the option unset; it does not break the connection. `unsupported_internals()` is
+  `[]` on 3.12 and 3.14. Not a finding.
+- **Latency on macOS loopback.** Connect plus `dummy` takes a median 3.0 ms at `3a35be1` and 2.9 ms at
+  `f45a5cf`. The stall the change removes does not show on this host's loopback. The Linux evidence is
+  the builder's record above.
+
+### Findings
+
+**F1 — MEDIUM — CONFIRMED — a process-wide socket default timeout breaks every cleartext queue
+connection.**
+
+- **Where.** `src/hypershell/core/queue.py:85-98` (`_no_delay_connection`; `socket.socket(fileno=fd)`
+  at `:93`), reached from `_PlainListener.accept` (`:340`) and `_plain_client` (`:351`).
+- **Cause.** CPython applies `socket.getdefaulttimeout()` to every new socket object. When it is not
+  `None`, the new object switches its descriptor to non-blocking. That flag belongs to the open file
+  description, which the `os.dup` copy shares with the connection's own descriptor, so it outlives
+  the duplicate's close. The stock `SocketListener.accept` and `SocketClient` call
+  `setblocking(True)` for exactly this reason, and the stock `Connection` reads with a blocking
+  `os.read`.
+- **Failure.** In any process that has called `socket.setdefaulttimeout(t)`, every cleartext queue
+  connection fails. One example is an application that embeds HyperShell through its documented
+  Python API (`docs/api/index.rst`).
+  - As a client: `QueueClient.connect()` raises `BlockingIOError: [Errno 35] Resource temporarily
+    unavailable` in the authentication handshake.
+  - As a server: the handler's handshake read fails, so an unmodified client gets
+    `OSError('bad message length')` and nothing reaches the queue. Clients shown failing: a stock
+    `multiprocessing` client (`-I`, no HyperShell), and `3a35be1`'s own client running without the
+    timeout.
+- **Scope.** TLS is unaffected: the option goes on the raw socket directly, and the same probe with
+  TLS passes. Under the same probe, `f45a5cf`, `b819de6` and `2.8.4` all pass, server and client in
+  one process, and `f45a5cf` also passes against the stock client. The regression is introduced in
+  this range.
+- **Causality.** A scratch copy of `3a35be1` that restores blocking mode on the duplicate before
+  closing it passes the probe.
+- **Contract.** R8 (no behaviour change) and R4 (a client built from the base connects to the new
+  server). `core/queue.py` is high-blast-radius, so a human gate is required.
+- **Direction (the builder's call).** Set the option without leaving the shared description
+  non-blocking. Either restore blocking mode, or set the option where the stock code still holds the
+  socket object. Add a unit test that runs the cleartext round trip under `socket.setdefaulttimeout`.
+- **Commands.** `probe_timeout.py inproc` was run on each extract with the extract's `src` on
+  `PYTHONPATH`. The script calls `socket.setdefaulttimeout(30)`, starts a cleartext `QueueServer`,
+  connects a `QueueClient`, and does `put`/`get`. The split-process runs, with the timeout set only in
+  the server or only in the client, and the stock `-I` client run against a server with the timeout
+  set, show each side alone.
+
+**F2 — LOW — CONFIRMED — docs no longer match the cleartext path.**
+
+- (a) **`docs/security.rst:130-133`** says that with TLS off, `SecureManager` "is byte-for-byte
+  equivalent to a stock `BaseManager` with the default `pickle` serializer". It now selects
+  `hypershell-plain`: `SecureManager(..., tls=None)._serializer == 'hypershell-plain'`. The wire is
+  still the stock one (§1), but the serializer statement is false, and a pickled cleartext proxy now
+  needs `hypershell.core.queue` to rebuild (§3). `3a35be1` updated the class docstring but not this
+  page.
+- (b) **`AGENTS.md:313-316`** says "Both ends write twice before a read during the handshake".
+  Cleartext connections were instrumented, logging `Connection._send` and `_recv` per thread. The
+  client writes twice in a row (`_WELCOME`, then its request). The server never writes twice in a
+  row on a connection. The server's double write is TLS 1.3's session tickets followed by the
+  challenge, as `_no_delay`'s own docstring (`queue.py:71-77`) states correctly.
+- (b, continued) The bullet's lead claim, "every queue connection ... on both ends", holds for
+  cleartext only on POSIX. On Windows, `_no_delay_connection` skips (its own comment at `:90`). This
+  was not executed here.
+
+### Requirement → evidence matrix (this cycle's delta)
+
+| R-ID | Touched by the delta | Evidence |
+|---|---|---|
+| R1, R2, R5, R7 | no | suites below |
+| R3 | `secure_client`, `SecureListener.accept`, the cleartext pair | `test_queue.py` on 3.12 and 3.14; §1 matrix |
+| R4 | the serializer key and the cleartext pair | §1: 12 pairs × 2 Pythons PASS; the foreman's compat run; `test_queue_tls.py` unchanged; **F1** breaks it under a default timeout |
+| R6 | new `test_connections_disable_nagle` | §2: 6/6 mutations caught |
+| R8 | no base test modified | full suite; **F1** is a behaviour change |
+| R9 | the motivation (the Linux delayed-ACK stall) | the builder's Linux record; not measurable on macOS loopback. The P7 multi-node evidence is at `f45a5cf`, before the remediation |
+
+**Scope creep.** None. The change serves R9 and CI health. `PLAIN_SERIALIZER` joins `__all__`.
+
+### P7 evidence sanitisation (`2f1285f`)
+
+- **Contents.** 2,466 JSON records (18 server, 2,448 client) and `SUMMARY.txt`. Every JSON key and
+  string value was enumerated: labels, run ids, versions, roles, start method and numbers only.
+- **Scan.** The evidence and every spec line added in the range were searched for:
+  - site and cluster names, and user names;
+  - home, scratch and project paths;
+  - `.edu` hosts and IPv4 addresses;
+  - scheduler terms (partition, account, qos, `sbatch`, `srun`);
+  - tool prefixes.
+
+  There were no hits in the evidence. The only hits in the spec text were false positives:
+  `127.0.0.1` in the cycle-8 table, and a checklist line that names the check.
+- **Summary.** `SUMMARY.txt` says "a test cluster" and names no site, account or node.
+- **Verdict.** Sanitised.
+
+### Verification run
+
+| Gate | Result |
+|---|---|
+| `tests/test_queue.py tests/test_queue_gc.py tests/test_queue_address_family.py`, 3.12.13 | 60 passed (58.8 s) |
+| the same three files, 3.14.6 | 57 passed, 3 skipped (48.6 s) |
+| full suite, 3.12.13 | 769 passed, 79 skipped (8 min 1 s); cycle 8 had 767, and the new test adds 2 |
+| wire-compat matrix (§1), 3.12.13 and 3.14.6 | 12/12 PASS on each |
+| mutation (§2) | 6/6 caught |
+| default-timeout probe (F1) | `3a35be1` FAIL; `f45a5cf`, `b819de6`, `2.8.4` pass; restore-blocking scratch copy passes |
+| `unsupported_internals()` | `[]` on 3.12.13 and 3.14.6 |
+
+### Human-gate triggers
+
+- **F1** is CONFIRMED in `core/queue.py`, part of the high-blast-radius core. A human must sign off
+  before any further step. Route: `/hs-build` to remediate F1 and F2, then a scoped cycle 10 over the
+  fix.

@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: done
@@ -104,10 +104,11 @@ phases:
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
-  last_reviewed_commit: f45a5cffab88d73df0308daf94d1c966025a5453
-  verdict: approved
-  blocked_reason: ''
-  cycle: 8
+  last_reviewed_commit: 3a35be1309044f4a622d07eba9e641371cc38932
+  verdict: changes-requested
+  blocked_reason: 'F1: socket default timeout breaks cleartext queue connections (_no_delay_connection);
+    F2 docs'
+  cycle: 9
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 
