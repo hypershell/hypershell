@@ -474,7 +474,7 @@ upstream credentials stop at the relay.
 
 *Horizon: mid-term · Depends on: zone (strictly) · Refs: leans on the scoped-writeback fix and
 inherits the resilience feature's reconnect/redelivery machinery as its R9*
-**Seed:** [`issues/relay.md`](issues/relay.md) · *status: shaped*
+**Seed:** [`issues/relay.md`](issues/relay.md) · *status: adopted:relay*
 
 ## Turso provider, partition-attached listing, and S3 captured output
 
