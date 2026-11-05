@@ -3,7 +3,7 @@ slug: authkey-handling-hardening
 title: The queue authentication key is never exposed to other users on client nodes
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/authkey-handling-hardening
 base: develop
 current_phase: done
@@ -75,10 +75,12 @@ phases:
     run pytest -p no:cacheprovider -q -n auto && .agents/factory/bin/temp_site.sh
     sh -c "seq 20 | uv run hsx -t 'echo {}' --launcher=env -N2 -H 127.0.0.1"
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 20d2509cb824039e490620719c16765aad3cc731
+  verdict: changes-requested
+  blocked_reason: 'Review cycle 1: residual key reach in one SSH option combination
+    (hidden lane), Q1 hint false positive, docs scope of the Open MPI parameter; human
+    gate'
+  cycle: 1
 ---
 # TECH.md — The queue authentication key is never exposed to other users on client nodes
 

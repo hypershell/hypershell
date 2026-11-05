@@ -38,3 +38,10 @@
   `docs/security.rst` for anything before it. Rationale that names the exposure goes into the
   `.security/issues/` seed (never staged), and the Step 9 report names that file by path.
 - **Confidence:** high · **Effort:** small
+
+## F4 — Review has no security-lane rule for public REVIEW.md, the seed's planning notes, or the hidden index
+`origin=hs-review:step-2,step-4 severity=high category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** On a `lane: security` cycle the run brief had to supply three rules the skill lacks: REVIEW.md is public, so a CONFIRMED finding that exposes a new weakness is recorded by kind only, with the detail in a new `.security/` note; the blind reviewer may read the hidden seed; and the reviewer may not edit `.security/ROADMAP.md`. The seed it allows also carries hs-plan's "Planning notes", that is, the author's rationale the blindness rule keeps from the reviewer.
+- **Skill cause:** Step 4 routes only *deferrals* to `.security/`, and assumes the reviewer writes the ROADMAP entry. It says nothing about redacting a blocking finding in the public REVIEW.md. Step 2's input list has no security-lane variant, so the plan's rationale reaches the reviewer through the seed. This weakens a non-negotiable gate (blind-review integrity), hence high.
+- **Recommended fix:** Add a security-lane variant. The reviewer gets the seed's Problem and evidence sections, not its planning notes. A finding that would reveal a live weakness goes to a new `.security/issues/` note and appears in REVIEW.md by kind and severity only. Indexing in `.security/ROADMAP.md` is left to the maintainer.
+- **Confidence:** high · **Effort:** small
