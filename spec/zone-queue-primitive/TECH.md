@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: blocked
+status: in_review
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: done
@@ -106,8 +106,7 @@ phases:
 review:
   last_reviewed_commit: 3a35be1309044f4a622d07eba9e641371cc38932
   verdict: changes-requested
-  blocked_reason: 'F1: socket default timeout breaks cleartext queue connections (_no_delay_connection);
-    F2 docs'
+  blocked_reason: ''
   cycle: 9
 ---
 # TECH.md — Serve the managed queues in-process on a threading primitive (zone, cycle 1)
@@ -870,6 +869,47 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   - **Not covered locally:** the Linux timing, which was not measured on this host. The foreman
     re-runs the Linux check on the test cluster, and CI is the final proof. No timing assertion was
     added.
+- **Remediation (review cycle 9; findings in [`REVIEW.md`](REVIEW.md), the foreman's rulings: F1
+  MEDIUM and F2 LOW accepted, `_INTERNALS` out of scope).** P1 was reopened for both.
+  - [x] **Red first** (`tests/test_queue.py`, a `default_timeout` fixture that sets
+        `socket.setdefaulttimeout(30)` and restores the previous value in a `finally`):
+        - `test_roundtrip_under_default_timeout[no-tls|tls]`: the existing round trip over all four
+          queues, server and client in one process (body shared with `test_roundtrip` through a
+          `roundtrip` helper);
+        - `test_plain_listener_under_default_timeout`: the server end alone. `_PlainListener` accepts
+          a stock blocking `Client` with an authkey; the accepted descriptor must stay blocking, then
+          the manager server's handshake order and one reply;
+        - `test_plain_client_under_default_timeout`: the client end alone. `_plain_client` against a
+          stock `Listener` without an authkey; the descriptor must stay blocking, then one echo;
+        - `test_no_delay_connection_keeps_blocking_mode[blocking|non-blocking]`: after
+          `_no_delay_connection`, the descriptor's mode is the one it had, and the option is set.
+
+        At `696f24d`'s source, on 3.12.16 and 3.14.10: 4 failed (`[no-tls]` round trip with
+        `BlockingIOError`, the listener and client tests, `[blocking]`), 2 passed (`[tls]` and
+        `[non-blocking]`, the controls).
+  - [x] **F1 fix** (`core/queue.py` `_no_delay_connection`). The duplicate's blocking mode is read
+        with `os.get_blocking` before the socket object is built on it, and put back with
+        `os.set_blocking` in a `finally` before the duplicate closes. The mode belongs to the shared
+        open file description, so the connection's own descriptor gets it back. No wire change.
+  - [x] **F2 fix.** `docs/security.rst`: cleartext `SecureManager` selects `hypershell-plain`, the
+        stock pair with `TCP_NODELAY`, and the wire is the stock one. `AGENTS.md` (Queue transport):
+        the option is set on every TCP connection where the platform allows it; the client writes
+        twice before a read, the server only under TLS 1.3; the cleartext pair puts back the
+        blocking mode. `_no_delay`'s docstring no longer says both ends write twice.
+  - **Gate record (macOS; the frozen offline dev venvs, lock unchanged since `f45a5cf`; worktree
+    `src` first on the path; isolated site; each run in its own process group under a kill timer).**
+    - **Red/green.** Red as above. Green: 8 passed (the 6 new cases and `test_connections_disable_nagle`)
+      on 3.12.16 and on 3.14.10.
+    - **Mutation.** Only the restore removed (`_no_delay(sock)` without the `try`/`finally`): the
+      same 4 fail, 2 pass, on 3.12.16. Restore forced to blocking (`os.set_blocking(fd, True)`):
+      `[non-blocking]` fails, 5 pass.
+    - **`tests/test_queue.py tests/test_queue_gc.py tests/test_queue_address_family.py`:** 3.12.16
+      66 passed (62.6 s); 3.14.10 63 passed, 3 skipped (50.1 s). Cycle 9's counts plus the 6 cases.
+    - **Full suite, 3.12.16:** 775 passed, 79 skipped (7 min 56 s). Cycle 9's 769 plus 6; same skips.
+    - **CLI drive** (`hsx -t 'echo {}' -N4` over `seq 200`, TLS on and then `--no-tls`, throwaway
+      site, free port), 3.12.16 and 3.14.10: 200 lines each run, `hs list --count` 400,
+      `hs list --failed --count` 0, exit 0; `unsupported_internals()` `[]`.
+    - **No base test modified:** `git diff --diff-filter=M --name-only b61dbbe -- tests/` is empty.
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
@@ -882,7 +922,8 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   `tests/test_queue_gc.py`, `AGENTS.md`, `ROADMAP.md`, one new seed and two amended seeds in `issues/`;
   review-6 remediation `tests/test_queue_gc.py`, `tests/test_queue.py` and `AGENTS.md`; the C10
   quick-review follow-up the same three; the develop merge's adaptation `tests/test_queue_gc.py`; the
-  CI-found remediation `src/hypershell/core/queue.py`, `tests/test_queue.py` and `AGENTS.md`.
+  CI-found remediation `src/hypershell/core/queue.py`, `tests/test_queue.py` and `AGENTS.md`; the
+  review-9 remediation the same three and `docs/security.rst`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1

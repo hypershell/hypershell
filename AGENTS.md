@@ -310,11 +310,15 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   has not registered as started: a new thread before its mark, one past its unregistration, or one
   that `threading` did not start (an entry left under a reused identifier by an ended thread does not
   count). Every other decref is the stock one, on the finalizing thread. A forked child drops the marks and waiting decrefs it inherits.
-- **Every queue connection sets `TCP_NODELAY` on both ends** (`core/queue.py` `_no_delay`): TLS in
-  `SecureListener.accept` and `secure_client`, cleartext through the `hypershell-plain` serializer's
-  `(Listener, Client)` pair. Both ends write twice before a read during the handshake, so with
-  Nagle's algorithm on, each new connection waits out a delayed ACK (about 40 ms on Linux). It is a
-  socket option only; the wire is unchanged.
+- **Every queue TCP connection sets `TCP_NODELAY` on both ends where the platform allows it**
+  (`core/queue.py` `_no_delay`): TLS in `SecureListener.accept` and `secure_client`, cleartext
+  through the `hypershell-plain` serializer's `(Listener, Client)` pair. The cleartext pair reaches
+  the stock connection's socket through a duplicated descriptor (skipped where there is none, as on
+  Windows) and puts back the descriptor's blocking mode, which a process default socket timeout
+  would otherwise clear. The client writes twice before a read (the handshake's last message, then
+  its first request); the server does so only under TLS 1.3 (its session tickets, then the
+  challenge). With Nagle's algorithm on, that second write waits out the peer's delayed ACK (about
+  40 ms on Linux) on every new connection. It is a socket option only; the wire is unchanged.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
   mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,

@@ -70,10 +70,10 @@ off on every TCP connection. The wire is the stock one, byte for byte."""
 def _no_delay(sock: socket.socket) -> None:
     """Turn off Nagle's algorithm on `sock` when it is a TCP socket; any other socket is left alone.
 
-    Both ends of a queue connection write twice before they read: the client sends the handshake's
-    last message and then its first request, and a TLS 1.3 server sends its session tickets and then
-    the challenge. With Nagle's algorithm on, the second write waits for the peer's delayed
-    acknowledgement (about 40 ms on Linux), on every new connection.
+    A queue client writes twice before it reads: the handshake's last message, then its first
+    request. A server does so only under TLS 1.3: its session tickets, then the challenge. With
+    Nagle's algorithm on, the second write waits for the peer's delayed acknowledgement (about 40 ms
+    on Linux), on every new connection.
     """
     if sock.family in (socket.AF_INET, socket.AF_INET6) and sock.type == socket.SOCK_STREAM:
         try:
@@ -84,18 +84,28 @@ def _no_delay(sock: socket.socket) -> None:
 
 def _no_delay_connection(conn: Connection) -> None:
     """Turn off Nagle's algorithm on the TCP socket behind a stock connection, through a duplicate of
-    its descriptor (the option belongs to the socket, not the descriptor)."""
+    its descriptor (the option belongs to the socket, not the descriptor).
+
+    The duplicate shares the connection's open file description, and with it the blocking mode. A
+    new socket object takes the process default timeout (:func:`socket.getdefaulttimeout`) and, when
+    there is one, makes the description non-blocking. The mode is put back before the duplicate
+    closes, since the stock connection reads with a blocking read.
+    """
     try:
         fd = os.dup(conn.fileno())
     except (OSError, ValueError, AttributeError):  # Closed, or not a descriptor here (Windows)
         return
     try:
+        blocking = os.get_blocking(fd)
         sock = socket.socket(fileno=fd)
     except OSError:  # Not a socket
         os.close(fd)
         return
     with sock:
-        _no_delay(sock)
+        try:
+            _no_delay(sock)
+        finally:
+            os.set_blocking(fd, blocking)
 
 
 class SecureConnection(_ConnectionBase):

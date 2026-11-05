@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Iterator, Optional
 
 # Standard libs
+import os
 import sys
 import time
 import queue
@@ -17,7 +18,7 @@ import _thread
 import threading
 import multiprocessing as mp
 from multiprocessing import util
-from multiprocessing.connection import Listener
+from multiprocessing.connection import Listener, Client, Connection, answer_challenge, deliver_challenge
 from multiprocessing.managers import Server, BaseManager, State
 
 # External libs
@@ -227,9 +228,20 @@ def test_two_servers_in_one_process(start_method: str) -> None:
         assert b.scheduled.get(timeout=WAIT) == b'second'
 
 
-@mark.unit
-def test_roundtrip(tls: Optional[TLSConfig]) -> None:
-    """Items cross every queue in both directions between a server thread and a remote client."""
+@fixture
+def default_timeout() -> Iterator[float]:
+    """A process default socket timeout, as an embedding application may set; the previous one is
+    restored after."""
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(30.0)
+    try:
+        yield 30.0
+    finally:
+        socket.setdefaulttimeout(previous)
+
+
+def roundtrip(tls: Optional[TLSConfig]) -> None:
+    """Pass items across every queue in both directions between a server thread and a client."""
     with QueueServer(make_config(tls=tls)) as server:
         client = connect('127.0.0.1', server.address[1], tls)
         for name in NAMES:
@@ -240,6 +252,22 @@ def test_roundtrip(tls: Optional[TLSConfig]) -> None:
             remote.put(b'up', timeout=WAIT)
             assert local.get(timeout=WAIT) == b'up'
             local.task_done()
+
+
+@mark.unit
+def test_roundtrip(tls: Optional[TLSConfig]) -> None:
+    """Items cross every queue in both directions between a server thread and a remote client."""
+    roundtrip(tls)
+
+
+@mark.unit
+def test_roundtrip_under_default_timeout(tls: Optional[TLSConfig], default_timeout: float) -> None:
+    """A process default socket timeout leaves the queue connections working, on both ends.
+
+    A new socket object takes the default timeout and, when there is one, makes its descriptor
+    non-blocking, while the stock connection reads with a blocking read.
+    """
+    roundtrip(tls)
 
 
 def no_delay(conn) -> bool:
@@ -268,6 +296,74 @@ def test_connections_disable_nagle(tls: Optional[TLSConfig]) -> None:
         with in_process._lock:
             server_conn, = in_process._live
             assert no_delay(server_conn)
+
+
+def tcp_pair() -> tuple[Connection, Connection]:
+    """The accepted and the dialed end of a stock blocking TCP connection on the loopback."""
+    with Listener(('127.0.0.1', 0)) as listener:
+        dialed = Client(listener.address)
+        return listener.accept(), dialed
+
+
+@mark.unit
+@mark.parametrize('blocking', [True, False], ids=['blocking', 'non-blocking'])
+def test_no_delay_connection_keeps_blocking_mode(default_timeout: float, blocking: bool) -> None:
+    """Setting ``TCP_NODELAY`` through a duplicate descriptor leaves the blocking mode as it was.
+
+    The mode belongs to the open file description that the duplicate shares with the connection,
+    and the socket object built on the duplicate takes the process default timeout.
+    """
+    accepted, dialed = tcp_pair()
+    with accepted, dialed:
+        os.set_blocking(dialed.fileno(), blocking)
+        queue_module._no_delay_connection(dialed)
+        assert os.get_blocking(dialed.fileno()) is blocking
+        assert no_delay(dialed)
+
+
+@mark.unit
+def test_plain_listener_under_default_timeout(default_timeout: float) -> None:
+    """The cleartext listener hands over a blocking connection, so a stock client's handshake and
+    first exchange go through, as with a manager's server (no `authkey` on the listener)."""
+    authkey = AUTH.encode()
+    replies = []
+    with queue_module._PlainListener(('127.0.0.1', 0)) as listener:
+
+        def dial() -> None:
+            with Client(listener.address, authkey=authkey) as conn:
+                replies.append(conn.recv())
+
+        thread = threading.Thread(target=dial, daemon=True)
+        thread.start()
+        with listener.accept() as conn:
+            assert os.get_blocking(conn.fileno())
+            deliver_challenge(conn, authkey)
+            answer_challenge(conn, authkey)
+            conn.send('ready')
+        thread.join(WAIT)
+    assert replies == ['ready']
+
+
+@mark.unit
+def test_plain_client_under_default_timeout(default_timeout: float) -> None:
+    """The cleartext client dials a blocking connection, so its handshake and first exchange with a
+    stock listener (no `authkey`, as a manager's server) go through."""
+    authkey = AUTH.encode()
+    with Listener(('127.0.0.1', 0)) as listener:
+
+        def serve() -> None:
+            with listener.accept() as conn:
+                deliver_challenge(conn, authkey)
+                answer_challenge(conn, authkey)
+                conn.send(conn.recv())
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        with queue_module._plain_client(listener.address, authkey=authkey) as conn:
+            assert os.get_blocking(conn.fileno())
+            conn.send('ping')
+            assert conn.recv() == 'ping'
+        thread.join(WAIT)
 
 
 @mark.unit
