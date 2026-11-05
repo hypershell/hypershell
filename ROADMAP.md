@@ -71,18 +71,6 @@ never got the same treatment.
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/task-start-spawn-guard.md`](issues/task-start-spawn-guard.md)
 
-## A late result can reopen a retried row
-
-One concrete path through the writeback hole above. An evicted client's late result writes
-`retried=False` and `next_id=None` back onto a row the scheduler has already retried, so the next
-`Task.next` writes a second retry row with the same `previous_id`. Only a pre-2.9 SQLite database,
-which keeps the old UNIQUE constraint, rejects it; anywhere else it is written silently. Found
-by reading, not yet reproduced; the seed asks for the test first. The scoped writeback probably
-closes it, in which case this retires with that cycle.
-
-*Horizon: near-term · Depends on: — · Refs: writeback fix (likely subsumes it)*
-**Seed:** [`issues/late-result-resets-retried.md`](issues/late-result-resets-retried.md)
-
 ## No process-group ownership; SIGTERM and Ctrl-C tear down without cleanup
 
 The kill escalation ladder is well built but targets only the `sh` wrapper, so walltime does not
