@@ -219,6 +219,10 @@ assignment: the row's `schedule_time` as dispatched, while `completion_time` is 
 (`Task.apply_results`). A stale or duplicate result is logged and dropped, so a late result from an
 evicted client cannot reopen a retried or cancelled row.
 
+A confirmation writes `client_id`/`client_host` only while `completion_time` is NULL
+(`Task.confirm_all`): one that arrives after the result, or after a cancel, leaves the row as it is,
+so the result's attribution stands.
+
 Pre-2.9 SQLite databases keep `UNIQUE` on both columns, because SQLite cannot drop them without a
 table rebuild. Normal operation never trips them; in the three cases above they raise
 `IntegrityError` instead.

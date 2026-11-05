@@ -32,6 +32,8 @@ subsystems.
   `revert_interrupted()` re-runs on next server start.
 - **Task-state transition logic belongs in `Task` classmethods**, not scattered into FSM driver
   files.
+- A confirmation writes the client only onto a row with `completion_time` NULL (`Task.confirm_all`);
+  a late one leaves a complete row's result attribution as it is.
 - **A 0-row UPDATE of a `task` row is not proof the row is gone or no longer qualifies.** On a
   TimescaleDB 2.29+ hypertable (the `timescale` provider), an UPDATE that waited on another
   transaction's row lock can match 0 rows although the row still qualifies. A task-row write another

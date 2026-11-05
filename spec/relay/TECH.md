@@ -1,111 +1,172 @@
 ---
 slug: relay
-title: "HyperShell Relay: two-level scheduling across administrative sites"
+title: 'HyperShell Relay: two-level scheduling across administrative sites'
 kind: feature
 appetite: big
 status: in_progress
 branch: feature/relay
 base: develop
-current_phase: P1
-last_updated: "2026-11-04"
+current_phase: P2
+last_updated: '2026-11-04'
 phases:
-  - id: P1
-    name: "Late-confirm fence: a confirmation never rewrites a completed row's attribution"
-    status: pending
-    satisfies: [R19, R20]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -f src/hypershell/core/dispatch.py && grep -q _get_dispatch src/hypershell/core/queue.py && grep -q CONTENDED_RERUNS src/hypershell/data/model.py && uv run pytest -v tests/test_writeback.py tests/test_contended_recovery.py tests/test_contended_write.py tests/test_zone_dispatch.py tests/test_server_fsm.py"
-  - id: P2
-    name: "hs relay process: [relay] config, private SQLite bound at import, local server up and down"
-    status: pending
-    satisfies: [R1, R10, R18, R20]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_db.py tests/test_main.py tests/test_completions.py tests/test_logging.py tests/test_initdb.py && uv run hs relay --help > /dev/null && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs"
-  - id: P3
-    name: "Upstream pull: zone identity, backlog gate, durable insert before confirm, upstream TLS"
-    status: pending
-    satisfies: [R2, R3, R8, R17, R20]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_connector.py tests/test_relay_fsm.py tests/test_relay_db.py tests/test_dispatch_version.py"
-  - id: P4
-    name: "Site run and return path: fleet, no local retry, outbox, leaf attribution, one-relay loopback"
-    status: pending
-    satisfies: [R1, R4, R5, R6, R16, R20]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_return.py tests/test_relay_connector.py tests/test_relay_fsm.py && uv run pytest -v tests/test_relay_workload.py -k one_relay"
-  - id: P5
-    name: "Credential fence and two-relay loopback with failover (delegation core complete)"
-    status: pending
-    satisfies: [R3, R6, R17, R20]
-    depends_on: [P4]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_launch.py tests/test_relay_workload.py && uv run pytest -v"
-  - id: P6
-    name: "Roster forwarding: heartbeat site/roster, client site/relay columns, HeartMonitor cascade"
-    status: pending
-    satisfies: [R7, R6, R20]
-    depends_on: [P5]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_roster.py tests/test_server_fsm.py tests/test_server.py tests/test_upgrade_cli.py tests/test_zone_dispatch.py tests/test_autoscale.py tests/test_relay_workload.py"
-  - id: P7
-    name: "R21 run A: relay drive, launcher wrapper, judge, local smoke, hand back (external wait follows)"
-    status: pending
-    satisfies: [R21, R20]
-    depends_on: [P5, P6]
-    parallel: true
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_judge.py && sh spec/relay/drive/relay_smoke.sh"
-  - id: P8
-    name: "Outage ride-through and restart durability: UpstreamLink, backoff, redelivery"
-    status: pending
-    satisfies: [R9, R5, R20]
-    depends_on: [P6]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_link.py tests/test_relay_outage.py tests/test_relay_fsm.py tests/test_relay_return.py tests/test_relay_workload.py"
-  - id: P9
-    name: "Multi-zone relays (one upstream identity per zone), per-zone fleets, relay docs and trust model"
-    status: pending
-    satisfies: [R2, R8, R18, R20]
-    depends_on: [P8]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs"
-  - id: P10
-    name: "R21 run B: judge the external multi-node evidence"
-    status: pending
-    satisfies: [R21]
-    depends_on: [P7, P9]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster"
+- id: P1
+  name: 'Late-confirm fence: a confirmation never rewrites a completed row''s attribution'
+  status: done
+  satisfies:
+  - R19
+  - R20
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: test -f src/hypershell/core/dispatch.py && grep -q _get_dispatch src/hypershell/core/queue.py
+    && grep -q CONTENDED_RERUNS src/hypershell/data/model.py && uv run pytest -v tests/test_writeback.py
+    tests/test_contended_recovery.py tests/test_contended_write.py tests/test_zone_dispatch.py
+    tests/test_server_fsm.py
+- id: P2
+  name: 'hs relay process: [relay] config, private SQLite bound at import, local server
+    up and down'
+  status: pending
+  satisfies:
+  - R1
+  - R10
+  - R18
+  - R20
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_db.py tests/test_main.py tests/test_completions.py
+    tests/test_logging.py tests/test_initdb.py && uv run hs relay --help > /dev/null
+    && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs
+- id: P3
+  name: 'Upstream pull: zone identity, backlog gate, durable insert before confirm,
+    upstream TLS'
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  - R8
+  - R17
+  - R20
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_connector.py tests/test_relay_fsm.py tests/test_relay_db.py
+    tests/test_dispatch_version.py
+- id: P4
+  name: 'Site run and return path: fleet, no local retry, outbox, leaf attribution,
+    one-relay loopback'
+  status: pending
+  satisfies:
+  - R1
+  - R4
+  - R5
+  - R6
+  - R16
+  - R20
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_return.py tests/test_relay_connector.py
+    tests/test_relay_fsm.py && uv run pytest -v tests/test_relay_workload.py -k one_relay
+- id: P5
+  name: Credential fence and two-relay loopback with failover (delegation core complete)
+  status: pending
+  satisfies:
+  - R3
+  - R6
+  - R17
+  - R20
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_launch.py tests/test_relay_workload.py
+    && uv run pytest -v
+- id: P6
+  name: 'Roster forwarding: heartbeat site/roster, client site/relay columns, HeartMonitor
+    cascade'
+  status: pending
+  satisfies:
+  - R7
+  - R6
+  - R20
+  depends_on:
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_roster.py tests/test_server_fsm.py tests/test_server.py
+    tests/test_upgrade_cli.py tests/test_zone_dispatch.py tests/test_autoscale.py
+    tests/test_relay_workload.py
+- id: P7
+  name: 'R21 run A: relay drive, launcher wrapper, judge, local smoke, hand back (external
+    wait follows)'
+  status: pending
+  satisfies:
+  - R21
+  - R20
+  depends_on:
+  - P5
+  - P6
+  parallel: true
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_judge.py && sh spec/relay/drive/relay_smoke.sh
+- id: P8
+  name: 'Outage ride-through and restart durability: UpstreamLink, backoff, redelivery'
+  status: pending
+  satisfies:
+  - R9
+  - R5
+  - R20
+  depends_on:
+  - P6
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_link.py tests/test_relay_outage.py tests/test_relay_fsm.py
+    tests/test_relay_return.py tests/test_relay_workload.py
+- id: P9
+  name: Multi-zone relays (one upstream identity per zone), per-zone fleets, relay
+    docs and trust model
+  status: pending
+  satisfies:
+  - R2
+  - R8
+  - R18
+  - R20
+  depends_on:
+  - P8
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs
+- id: P10
+  name: 'R21 run B: judge the external multi-node evidence'
+  status: pending
+  satisfies:
+  - R21
+  depends_on:
+  - P7
+  - P9
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — HyperShell Relay: two-level scheduling across administrative sites
 
 The **context engine and finite-state machine** for building relay. The YAML frontmatter above is
@@ -242,21 +303,35 @@ Until then each phase runs its verify **minus** these items, and records the sub
 **Goal:** a confirmation applied to a completed row leaves `client_id`/`client_host` as the
 result wrote them, keeping the contended-write discipline.
 
-- [ ] Build precondition above (as ruled: P1 builds on the current base; its zone items are deferred).
-- [ ] Red first: `tests/test_writeback.py::test_late_confirm_keeps_leaf_attribution` (submit,
+- [x] Build precondition above (as ruled: P1 builds on the current base; its zone items are deferred).
+- [x] Red first: `tests/test_writeback.py::test_late_confirm_keeps_leaf_attribution` (submit,
       dispatch one, receive a result attributed to a leaf, then confirm under another id; assert
       the leaf attribution survives). It fails on the unmodified tree for the right reason.
-- [ ] `data/model.py`: the confirm statement gains `completion_time IS NULL`; the zero-row
+- [x] `data/model.py`: the confirm statement gains `completion_time IS NULL`; the zero-row
       re-read on the confirm path reads `completion_time` and classifies missing / complete /
       open. *Complete* is settled: no re-run, no WARNING, one DEBUG line. Revert is unchanged.
-- [ ] `tests/test_contended_recovery.py::test_late_confirm_on_complete_row_is_not_contention`
+- [x] `tests/test_contended_recovery.py::test_late_confirm_on_complete_row_is_not_contention`
       (`contention.lose(id, 1)`; exactly one UPDATE and one SELECT; no WARNING).
-- [ ] PG companion in `tests/test_contended_write.py` (skipped without a PostgreSQL URL): the
-      confirm waits on a holder that sets `completion_time`, and classifies *complete*.
-- [ ] Existing confirm tests pass unmodified.
-- **Verify:** see frontmatter.
+- [x] PG companion in `tests/test_contended_write.py` (skipped without a PostgreSQL URL): the
+      confirm waits on a holder that sets `completion_time`, and classifies *complete*
+      (`test_contended_late_confirm_on_complete_row_is_settled`).
+- [x] Existing confirm tests pass unmodified — **amended:** all but one. The PG-only
+      `test_contended_confirm_records_client` had its holder set `completion_time` and asserted the
+      confirm still stamped the client, which is exactly what R19 forbids (its scenario is the new
+      companion's). It now holds the open row with a concurrent client write and asserts the
+      waited confirm stamps the client, so the open-row path keeps its PostgreSQL coverage.
+- [x] `AGENTS.md` (*Task lifecycle contract*) and `invariants.md` §1 gain one line each on the
+      confirm fence (the code moved; AGENTS is ground truth).
+- **Verify:** see frontmatter, minus the deferred zone items (Build precondition).
+- **Verified 2026-11-04** on the base `bd2faf9` (Python 3.12, a frozen venv first on `PATH` in place
+  of `uv run`): `grep -q CONTENDED_RERUNS` ok; `pytest -v tests/test_writeback.py
+  tests/test_contended_recovery.py tests/test_contended_write.py` 37 passed, 6 skipped (the
+  PostgreSQL tests; no server here). Deferred: the presence guard, `tests/test_zone_dispatch.py`,
+  `tests/test_server_fsm.py`. CLI drive: `seq 50 | hsx -t 'echo {}' -N4` in a throwaway site gave
+  50 output lines, 50 tasks, 50 succeeded, 0 failed, 0 with no `client_id`.
 - **Touches:** `src/hypershell/data/model.py`, `tests/test_writeback.py`,
-  `tests/test_contended_recovery.py`, `tests/test_contended_write.py`.
+  `tests/test_contended_recovery.py`, `tests/test_contended_write.py`, `AGENTS.md`,
+  `.agents/factory/invariants.md`.
 
 ## Phase P2 — `hs relay` process and the private database
 **Satisfies:** R1, R10, R18, R20 · **Depends on:** P1 · PLAN §2.1, §2.9

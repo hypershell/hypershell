@@ -330,6 +330,32 @@ def test_uncontended_confirm_and_revert_cost_one_update_per_row(contention, logs
     assert messages(logs, logging.DEBUG, 'Re-running contended') == []
 
 
+@mark.unit
+def test_late_confirm_on_complete_row_is_not_contention(contention, logs) -> None:
+    """A confirmation that finds its row already complete is settled: one UPDATE, one SELECT, no warning."""
+    task_id = submit()
+    copy = dispatch_all([task_id])[task_id]
+    leaf = (uuid(), 'leaf-a')
+    machine = receiver()
+    machine.tasks = returned([finish(copy, client=leaf)])
+    machine.update_tasks()
+    before = row(task_id)
+    if (before['client_id'], before['client_host']) != leaf or before['completion_time'] is None:
+        pytest.fail(f'The result for task ({task_id}) was not applied')
+    contention.clear()
+    logs.clear()
+    contention.lose(task_id, 1)
+
+    assert confirm([task_id]) is ConfirmState.UNLOAD
+
+    assert row(task_id) == before
+    assert contention.kinds(task_id) == ['UPDATE', 'SELECT']
+    assert reruns(logs, 'confirm', task_id) == []
+    settled = [message for message in messages(logs, logging.DEBUG, 'already complete') if f'({task_id})' in message]
+    assert len(settled) == 1, settled
+    assert messages(logs, logging.WARNING) == []
+
+
 def dispatched_and_confirmed(count: int = 1) -> List[Task]:
     """Dispatch and confirm `count` new tasks to the client; return their copies in submission order."""
     ids = [submit(f'echo {n}') for n in range(count)]

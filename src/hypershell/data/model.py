@@ -772,25 +772,27 @@ class Task(Entity):
 
     @classmethod
     @cache
-    def __row_statements(cls: Type[Task], names: Tuple[str, ...]) -> Tuple[Any, Any]:
-        """The UPDATE of one row by `id` for a set of columns, and the SELECT of that row's `id`.
+    def __row_statements(cls: Type[Task], names: Tuple[str, ...], open_only: bool) -> Tuple[Any, Any]:
+        """The UPDATE of one row by `id` for a set of columns, and the SELECT that looks the row up.
 
-        Built once per column set, with binds typed from the table and prefixed names, as for the
-        result statements.
+        With `open_only`, the UPDATE matches only while the row has no `completion_time`, and the
+        SELECT reads that `completion_time`; otherwise the SELECT reads the row's `id`. Built once
+        per column set, with binds typed from the table and prefixed names, as for the result
+        statements.
         """
         table = cls.__table__
         by_id = table.c.id == bindparam('r_id', type_=table.c.id.type)
         write = (
             update(table)
-            .where(by_id)
+            .where(by_id, *([table.c.completion_time.is_(None)] if open_only else []))
             .values({name: bindparam(f'r_{name}', type_=table.c[name].type) for name in names})
         )
-        exists = select(table.c.id).where(by_id)
+        exists = select(table.c.completion_time if open_only else table.c.id).where(by_id)
         return write, exists
 
     @classmethod
     def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any],
-                     path: str, consequence: str) -> List[str]:
+                     path: str, consequence: str, open_only: bool = False) -> List[str]:
         """Write the same `values` onto each task in `ids` by `id`, committing once; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
@@ -799,8 +801,11 @@ class Task(Entity):
         that still exists was missed because the write waited on another transaction's row lock,
         and the write is re-run, at most `CONTENDED_RERUNS` times. A row still not written after
         that is logged as a warning with the `consequence` and left as it is.
+
+        With `open_only`, the write applies only to a row that is not complete. A row found
+        complete is settled: it is left as it is, with no re-run and no warning.
         """
-        write, exists = cls.__row_statements(tuple(values))
+        write, exists = cls.__row_statements(tuple(values), open_only)
         params = {f'r_{name}': value for name, value in values.items()}
         attempts = 1 + CONTENDED_RERUNS
         landed = []
@@ -811,9 +816,13 @@ class Task(Entity):
                     if Session.execute(write, {**params, 'r_id': id}).rowcount == 1:
                         landed.append(id)
                         break
-                    if Session.execute(exists, {'r_id': id}).first() is None:
+                    found = Session.execute(exists, {'r_id': id}).first()
+                    if found is None:
                         raise StaleDataError(f'UPDATE statement on table \'{cls.__table__.name}\' expected to '
                                              f'update 1 row(s); 0 were matched (task {id})')
+                    if open_only and found[0] is not None:
+                        log.debug(f'Ignored {path} for task ({id}) - task already complete')
+                        break
                     if attempt < attempts:
                         log.debug(f'Re-running contended {path} write for task ({id}) '
                                   f'(attempt {attempt + 1} of {attempts})')
@@ -829,9 +838,13 @@ class Task(Entity):
 
     @classmethod
     def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str) -> List[str]:
-        """Record the client that confirmed the tasks identified by `ids`; return the ids recorded."""
+        """Record the client that confirmed the tasks identified by `ids`; return the ids recorded.
+
+        A task already complete keeps the client its result recorded: a confirmation that arrives
+        after the result (or after a cancel) writes nothing to it.
+        """
         return cls.__write_rows(ids, {'client_id': client_id, 'client_host': client_host},
-                                'confirm', 'client not recorded')
+                                'confirm', 'client not recorded', open_only=True)
 
     @classmethod
     def revert_all(cls: Type[Task], ids: List[str]) -> List[str]:
