@@ -9,6 +9,11 @@ relay and the zone name and logged when it starts. It asks only for as many task
 room for (its connected *clients* times its bundle size, ``relay.bundlesize``), and confirms the
 tasks it receives only once they are stored in the relay database. The upstream key comes from
 ``relay.upstream.auth`` (or its ``_env`` and ``_eval`` forms), never from the command line.
+The key never reaches the site: before its first *client* is launched, the relay removes from its
+own environment, which the site's *clients* and their tasks inherit, every relay setting
+(``HYPERSHELL_RELAY_*``), any variable holding the key, and ``HYPERSHELL_CONFIG_FILE`` when the
+file it names holds relay settings. It refuses to start if the *client* command line (launcher,
+launcher arguments or template) or a variable exported to tasks (``[export]``) would carry the key.
 
 At the site the relay runs its tasks on the *clients* it launches there, with a key it mints for
 each run. The site never retries a task: one that fails goes back upstream as it ended, and the

@@ -51,7 +51,7 @@ from hypershell.data.core import engine
 from hypershell.data.model import zone_name, DEFAULT_ZONE_NAME
 from hypershell.relay import store
 from hypershell.relay.store import ensure_tables
-from hypershell.relay.site import site_cluster, DEFAULT_SITE_PERIOD
+from hypershell.relay.site import site_cluster, fence_site, DEFAULT_SITE_PERIOD
 from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
                                        upstream_identity, upstream_config, DEFAULT_UPSTREAM_BUNDLESIZE,
                                        DEFAULT_UPSTREAM_HEARTRATE, DEFAULT_RETENTION)
@@ -142,7 +142,10 @@ class RelayThread(Thread):
 
     Upstream the relay is one client for its zone, under an identity derived from this relay and the
     zone name. It connects before anything else starts, so a server it cannot use (a version
-    mismatch, a wrong key) ends it before the site is touched. A puller requests work while the site
+    mismatch, a wrong key) ends it before the site is touched. Before that, the upstream key is fenced
+    off from the site: a client invocation that would carry it is refused, and the relay's environment,
+    which site clients and their tasks inherit, is cleared of relay settings and of anything holding
+    the key (see `hypershell.relay.site.fence_site`). A puller requests work while the site
     has room for it and confirms it once it is stored; a returner hands completed results back upstream
     through the relay's outbox; a heartbeat keeps the identity registered.
 
@@ -262,6 +265,7 @@ class RelayThread(Thread):
         log.debug('Started')
         log.info(f'Upstream identity {self.identity} for zone {self.zone or DEFAULT_ZONE_NAME}')
         upstream = self.upstream_config or upstream_config()
+        fence_site(self.cluster, key=upstream.auth)
         self.upstream = QueueClient(config=upstream)
         self.upstream.connect()
         log.info(f'Connected to upstream server {upstream.host}:{upstream.port}')
@@ -406,7 +410,8 @@ APP_HELP = f"""\
   client at the site that ran them, and are kept in the relay database until handed over.
 
   The upstream key comes from the configuration ([relay.upstream] auth), never from the
-  command line.
+  command line, and never reaches the site: relay settings, and any variable holding the
+  key, are removed from the environment the site's clients and tasks inherit.
 
   The relay database is always a private SQLite file, whatever database is configured,
   and the configured database is never opened. One relay runs per process, and a second

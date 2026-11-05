@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -77,7 +77,7 @@ phases:
     tests/test_relay_fsm.py && uv run pytest -v tests/test_relay_workload.py -k one_relay
 - id: P5
   name: Credential fence and two-relay loopback with failover (delegation core complete)
-  status: pending
+  status: done
   satisfies:
   - R3
   - R6
@@ -615,22 +615,100 @@ attributed to the leaf with the upstream `schedule_time`.
 **Goal:** the upstream key reaches no site client or task; two relays share a grouped workload;
 killing one relay fails its work over to the other with no task lost.
 
-- [ ] Env scrub before the fleet starts: `HYPERSHELL_RELAY_*` names and any variable whose value
+- [x] Env scrub before the fleet starts: `HYPERSHELL_RELAY_*` names and any variable whose value
       contains the upstream key; no upstream key on any argv.
-- [ ] `tests/test_relay_launch.py`: the scrubbed environment and the built client invocation
+- [x] `tests/test_relay_launch.py`: the scrubbed environment and the built client invocation
       exclude the key even when it is placed in the relay's environment on purpose.
-- [ ] `tests/test_relay_workload.py::test_two_relays_grouped_workload_with_retry`: one upstream
+- [x] `tests/test_relay_workload.py::test_two_relays_grouped_workload_with_retry`: one upstream
       (`hs server -r 1 -b 4 --restart`), two relays with two site clients each; 3 groups, one
       failing-then-retried task in a shared zone; all complete once; both sites ran work; group
       order holds; psutil `cmdline`/`environ` scan of site clients and their tasks finds no
       upstream key; primary sentinels absent; every process exits 0 within the deadline (halt on
       upstream shutdown).
-- [ ] `::test_failover_reverts_and_completes_elsewhere` (evict 10 s, short heartrate): SIGKILL relay
+- [x] `::test_failover_reverts_and_completes_elsewhere` (evict 10 s, short heartrate): SIGKILL relay
       B once rows are confirmed to it; its identity is evicted, its rows revert and complete at
       site A; no task lost.
-- [ ] Full suite passes.
+- [x] Full suite passes.
+- **Foreman rulings on P4's open points (2026-11-05), recorded as accepted:**
+  1. *Loopback launcher in tests.* Tests and local smokes launch site clients through the `env`
+     wrapper that swaps `-H` to `127.0.0.1`. The real dial-by-name path is exercised by the R21
+     multi-node runs (P7/P10), which the foreman runs. A `--advertise ADDR` option stays deferred;
+     if P9 or the R21 run shows it is needed, it is a P9 item.
+  2. *Stop order* (autoscaler, then scheduler, then drain): accepted. **Note for P8:** a site client
+     killed without a FINISHED beat delays the relay's shutdown until the relay-local server evicts
+     it (local evict, default 600 s).
+  3. *Return bundles* (upstream bundle size, `[relay] bundlewait`) and *the `-N 0` leftover-task
+     launch*: accepted. **Note for P8:** both are revisited with the outage work.
+- **Security-cycle overlap, restated.** A concurrent hardening cycle
+  (`fix/authkey-handling-hardening`, not yet on `develop`) changes how `AutoScalingCluster` launches
+  clients: one `client_launch()` builds the invocation and the site key is handed over in the
+  environment, not on `-k`. Relay does not depend on that branch now. When it lands, relay merges
+  `develop` and re-runs P4's and P5's verify. `fence_site` reads the built argv from
+  `cluster.autoscaler.machine.launcher`; if hardening moves it (or adds launch-time environment),
+  the fence follows the new place, and the site key then legitimately sits in each site client's
+  environment (it differs from the upstream key, which the fence and the scan check).
+- **Amendments (2026-11-05, build):**
+  - **The fence is `relay/site.py::fence_site`,** called by `RelayThread` once the upstream
+    configuration (and so the key) is resolved and before the upstream connect, so a refusal ends
+    the relay before anything starts. It (1) refuses (`CredentialFenceError`, exit
+    `runtime_error`, one CRITICAL line that never names the key) a site client invocation carrying
+    the key in any argument (launcher, launcher arguments, template); (2) refuses an exported task
+    variable (`[export]`, merged into every launch by `AutoScaler.scale` from `load_task_env()`)
+    carrying it, since that merge happens in `cluster/` and is not scrubbable from relay; (3)
+    scrubs `os.environ` of every `HYPERSHELL_RELAY_*` name, every variable whose name or value
+    contains the key (an empty key matches nothing), and `HYPERSHELL_CONFIG_FILE` when the file it
+    names holds a relay table or dotted relay key, holds the key, or cannot be read. Removed names
+    (never values) are logged at DEBUG. No `cluster/` edit.
+  - **Read the key before the fence.** cmdkit expands `auth_env` lazily from the environment, so
+    after the scrub `config.relay.upstream.auth` may no longer resolve. The relay holds the key in
+    its upstream `QueueConfig`, built before the fence; P8's reconnect must reuse that object, never
+    re-read the configuration.
+  - **Out of R17's reach (argv and environment only), for the P9 docs:** a site client on a host
+    that shares the relay's user or system configuration file reads whatever `[relay.upstream]`
+    holds there. The P9 trust-model section should advise `auth_env`/`auth_eval` or a relay-only
+    `HYPERSHELL_CONFIG_FILE` rather than a literal key in a shared file.
+  - **Gated workload.** The two-relay and failover tests put a barrier file in front of group 0, so
+    each site holds work at once before anything completes (both sites run work; relay B is
+    killed while its tasks are running) without sleeps as synchronisation. The waiting tasks are
+    small Python processes: macOS withholds the environment of its own system programs (`/bin/sh`,
+    `sleep`) from psutil, returning an empty mapping, which would make the task half of the scan
+    vacuous. The scan counts only processes whose environment it read, and requires at least two
+    site clients and one task per site. **Note for P7:** research 04 §2 assumes psutil `environ()`
+    works for every own process on macOS; `relay_smoke.sh` and the judge need the same guard
+    (count only readable environments; make the scanned task a non-system program).
+  - **Expected double execution under failover.** Tasks relay B held when it died may have started
+    at site B; they run again at site A after the revert. The failover test asserts that only
+    snapshot ids ran at both sites and that site A ran each task once. No stale or duplicate
+    result is expected under the kill variant (relay B never returns anything).
+  - Help text and `docs/_include/relay_desc.rst` describe the fence.
 - **Verify:** see frontmatter.
-- **Touches:** `src/hypershell/relay/`, `tests/test_relay_launch.py`, `tests/test_relay_workload.py`.
+- **Red first (2026-11-05):** on the unmodified relay source `tests/test_relay_launch.py` failed at
+  collection (`ImportError: fence_site`), and `test_two_relays_grouped_workload_with_retry` failed
+  on the key scan (`upstream key seen in 4 site processes`: both site clients and both running
+  tasks at relay A). The failover test passed on the unmodified source, as expected: failover is
+  P3/P4's confirm-and-evict mechanics, and P5 adds its test, not new code for it.
+- **Verified 2026-11-05** (venvs from `uv sync --frozen` on `PATH` in place of `uv run`):
+  - P5 verify, 3.12: `test_relay_launch.py` + `test_relay_workload.py` 22 passed (about 64 s), then
+    the full suite 997 passed, 85 skipped (PostgreSQL and other server-backed tests), no failure.
+  - Relay, zone, dispatch, server-FSM, contended-write, writeback, main and completion files, 3.14:
+    284 passed, 11 skipped.
+  - `unsupported_internals()` is `[]` on both.
+  - Loopback failover smoke (`temp_site.sh`, a scratch driver), 3.12 at INFO and 3.14 at DEBUG:
+    upstream `hs server --restart -r 1 -b 4` with TLS (`<auto>`) and evict 10 s, 121 tasks in 3
+    groups of 40 (`sleep 0.3`) plus one failing on its first attempt, all in zone `shared`; relays A
+    and B (`--zone shared -N 2`, loopback launcher, heartrate 1 s, the key also placed in a second
+    variable). Relay B and its site were SIGKILLed once at least 40 % of rows had completed and B
+    held confirmed rows (50 and 53 rows done; 2 and 1 rows held). Both runs: server and relay A
+    exit 0, B -9; 122 rows, all completed, 121 exit 0, the one failure `(3, attempt 1, retried)`;
+    both sites completed work (A 96–98, B 24–26), none attributed to a relay identity; every
+    held row completed at site A; B's identity evicted (one `Evicting client`, one `Reverting
+    orphaned tasks`), A's disconnected by its final beat, not evicted; zero stale and zero duplicate
+    result lines (none is expected under the kill variant); site A ran each task once, and the
+    only task run at both sites (3.14 run: 1) was one B held when killed; group order held; no key
+    in either relay's log or output; no primary sentinel created.
+- **Touches:** `src/hypershell/relay/` (`__init__.py`, `site.py`), `tests/test_relay_launch.py`,
+  `tests/test_relay_workload.py`, `docs/_include/relay_desc.rst`. No zone code, `client.py`,
+  `server.py`, `core/queue.py` or `cluster/` edit.
 
 ## Phase P6 — Roster forwarding
 **Satisfies:** R7, R6, R20 · **Depends on:** P5 · PLAN §2.7
