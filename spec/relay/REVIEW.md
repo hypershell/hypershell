@@ -213,3 +213,191 @@ auth_env`/`auth_eval` variant collision, and the advertised host ignoring the bi
 ### Optional completeness sub-pass
 
 - Not run (interim review; P6–P10 not yet built).
+
+## Review cycle 2 (scoped, P6 and the cycle-1 remediation) — changes requested (2026-11-05)
+
+- **Reviewed commit:** `e84ff17`  ·  **Range:** `d6e9d7d..e84ff17` (P6 `9810598`, remediation
+  `e84ff17`)  ·  **Base:** `develop`  ·  **Date:** 2026-11-05
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`
+- **Mode:** scoped, as the foreman directed: P6 reviewed fresh, and each of the twelve remediation
+  fixes verified. One reviewer, inline (no subagent): the correctness pass was formed from `GOAL.md`,
+  the spec-excluded diff (`git diff d6e9d7d..e84ff17 -- . ':(exclude)spec/'`), `invariants.md`, the
+  rubric and the runnable tree; `TECH.md` and the cycle-1 record were read only afterwards, to map
+  the fixes and check closure. All runs used an archived copy of `e84ff17` outside the worktree,
+  with the tree on `PYTHONPATH`; the worktree was left clean until this record.
+
+### Verification run
+
+- Full suite: 3.12, 1042 passed, 85 skipped; 3.14, 1039 passed, 88 skipped (PostgreSQL-backed
+  tests skip). The six relay test files three more times on 3.14: 129 passed each time, no flake (the suites
+  ran beside the process harness, so under load).
+- Process harness (not committed): a real upstream `hs server --forever` (SQLite, evict 10 s),
+  `hs relay -N 2` through a loopback launcher that records each site client's pid, environment and
+  configuration file, and tasks that record their own pid. Scenarios: upstream SIGKILL; upstream
+  SIGSTOP then SIGCONT; SIGUSR1, SIGUSR1 twice, SIGUSR1 then SIGINT, SIGINT twice, SIGTERM, all
+  mid-run; SIGUSR1 and SIGINT at 0.15–2.0 s after start; eight drains at 0–4.1 s into a
+  400-task run (relay bundle 3, upstream bundle 7) followed by an upstream drain; the relay frozen
+  (SIGSTOP) past upstream eviction, then resumed; two relays on one relay database; the key as
+  `auth`, `auth_env` and `auth_eval` with `HYPERSHELL_CONFIG_FILE` holding `[relay.upstream]`, an
+  explicit `[server.tls]` cert, `[client]`, `[task]`, `[export]`, and the key in a list item, a
+  nested inline table and an entry name; relay `TZ=Asia/Kolkata`, leaves `TZ=America/Los_Angeles`,
+  upstream `TZ=UTC`; a 2.9.0a4 upstream server with this relay, and a 2.9.0a4 client with this server.
+- In-process relay (real `hs server` upstream, real site clients) with one fault injected per run:
+  the puller's insert, the relay-local receiver, the relay-local scheduler, the returner, the
+  relay-local heart monitor.
+- Upstream heart monitor stepped in-process for roster spoofing (below).
+- Baseline: a stock `hs client` under server SIGKILL, SIGTERM and SIGINT, to tell inherited from new.
+- Mutations (one per copy of the tree, the relevant test files re-run): 19 mutants, 14 killed,
+  5 survived: four named under C2-2, C2-3 and the notes, and one equivalent (dropping the SIGTERM
+  to a site client leaves the SIGKILL after the grace period to end it).
+- Docs: the three changed includes parse clean under docutils. A Sphinx `-W` build was **not**
+  run: `sphinx_sitemap` needs an AF_UNIX listener, which the sandbox refuses, and running it outside
+  the sandbox was denied by the safety check.
+
+### Requirement → evidence matrix (reviewed scope)
+
+| R-ID | Implemented by (this range) | Verified how | Status |
+|------|-----------------------------|--------------|--------|
+| R1   | `RelayThread.abort`, `end_site_clients`, `wait_site` | lifecycle scenarios; fault injection | ⚠ C2-1 |
+| R3   | puller halts at its gate (A2); nullable stamp (A1) | eight drains; `--no-db` test | ✅ |
+| R6   | `UTCDateTime`, `store_utc`, `result_record` (A4) | cross-zone run; mutation | ✅ (wiring unpinned, C2-2) |
+| R7   | heartbeat `site`/`roster`, `client.site`/`relay`, roster cascade | stepped monitor; false eviction; mixed versions | ✅ |
+| R8   | size ≥ 1 (A3) | `-N 0`/`-1` refused (test) | ✅ |
+| R17  | `upstream_key` (B4), `site_config_copy` (B5), `[export]` test (B7) | three key forms end to end; mutation | ✅ |
+| R18  | `relay_desc.rst`, `relay_help.rst`, `config_param_ref.rst`, drain handler (B6) | read against behaviour | ⚠ C2-4, C2-5 |
+| R20  | the new and changed relay tests | suites; mutations | ⚠ C2-2, C2-3 |
+
+Unmapped changes (possible scope creep): none. `Client.reconnect` now also refreshes `server_id` /
+`server_host` for an ordinary client re-registering (issue #29 path); that serves R7 (a relay
+re-registering with a restarted upstream must count under it) and changes nothing for a client
+re-registering with the same server.
+
+### Findings
+
+#### [MEDIUM/CONFIRMED] C2-1 — A failed relay-local receiver leaves the relay running, and its tasks held, indefinitely
+- **Where:** `src/hypershell/relay/__init__.py:368` (`RelayThread.wait_site` watches the cluster
+  thread, the puller, the returner and the heartbeat, not the relay-local server's own threads);
+  the cause it misses is in `src/hypershell/server.py:1072` (`ServerThread` joins its scheduler
+  first, which in forever mode runs until told to stop, so a receiver that has died is never surfaced).
+- **Failure scenario:** any exception in the relay-local receiver (for instance an `OperationalError`
+  from the relay's SQLite file: disk full, a lock held past the busy timeout) ends that thread. Site
+  results are no longer written, the backlog never falls, the puller's gate stays shut, and the relay
+  keeps heartbeating upstream, so it is never evicted and nothing it holds is reverted. A held task
+  holds its group upstream, so the campaign stalls with no error on either side.
+- **Evidence:** in-process relay against a real `hs server` (8 tasks, `-N 2`), `Task.apply_results`
+  raising on its second call: 150 s later the relay thread is alive, `hypershell-receiver` is gone
+  from the thread list, 0 of 8 tasks are complete upstream, both site clients are alive. The same
+  harness with the fault elsewhere exits non-zero with no site client left: scheduler 2.2 s, returner
+  4.5 s, puller insert 10.5 s (`RelayInsertError`). A dead relay-local heart monitor degrades (no new
+  site registrations) but work goes on (8 of 8 complete).
+- **Touches:** R1, R3 (failover rests on the relay ending), and B1's bounded-exit contract. The fix
+  can stay in the relay (treat a dead receiver, confirm or heart monitor of the relay-local server
+  as a failure in `wait_site`, `stop_site` and `wait_returner`), with no `server.py` edit; a stock
+  `hs server` with a dead receiver behaves the same today, outside this scope.
+
+#### [LOW/CONFIRMED] C2-2 — A4's wiring is unpinned: removing `store_utc` from the relay passes every relay test
+- **Where:** `src/hypershell/relay/__init__.py:631`; `tests/test_relay_return.py` applies `store_utc`
+  in its own fixture, and no process test crosses time zones.
+- **Evidence:** mutant without the call: `test_relay_return.py`, `test_relay_db.py` and
+  `test_relay_workload.py`, 54 passed. The cross-zone run on that mutant returns each leaf time
+  48,604 s (13.5 h) off the instant reported; unmutated, the returned instant is 3.7 s old, as it
+  should be.
+- **Touches:** R6, R20. A process test with the relay and its leaves in different zones would pin it.
+
+#### [LOW/CONFIRMED] C2-3 — B6's test does not pin the relay's own drain handler
+- **Where:** `tests/test_relay_workload.py::test_drain_signal_finishes_everything_the_relay_holds`.
+- **Evidence:** mutant without `install_drain_handlers()` (`relay/__init__.py:634`): the drain test,
+  `test_relay_db.py` and `test_relay_fsm.py`, 56 passed. In two harness drains on that mutant the
+  stock path (the relay-local scheduler stopping on the signal) also completed everything the relay
+  held, because the relay-local dispatcher had already staged it; the test's shape cannot tell the
+  two apart. The fixed behaviour itself holds (eight drains, every held task returned, FINISHED).
+- **Touches:** R18 (the documented drain), R20.
+
+#### [LOW/CONFIRMED] C2-4 — The site's configuration copy outlives a relay ended by SIGTERM
+- **Where:** `docs/_include/relay_desc.rst:17` says the copy is "removed when the relay exits";
+  `RelayThread.release` runs on a clean drain, a failure and SIGINT, not on SIGTERM or SIGKILL
+  (SIGTERM is not captured, by design).
+- **Evidence:** SIGTERM mid-run, four runs (three key forms and a workload): the copy is still there
+  after exit. Its contents were checked: no key material, mode 0600, overwritten by the next run.
+- **Touches:** R18 (docs). Say when it is removed, or remove a stale copy at start.
+
+#### [LOW/CONFIRMED] C2-5 — Public docs name an internal build phase
+- **Where:** `docs/_include/config_param_ref.rst:624`, "Not read yet: used from P8 (outage
+  ride-through)". The B8 ruling's wording was taken literally; a user reading the reference has no
+  P8. TECH has P8 rewrite it; it must not ship as is.
+- **Touches:** R18, public-repo hygiene.
+
+### Notes (not findings)
+
+- **Roster from any authenticated peer** (asked). Reproduced: an ordinary client (no `site`)
+  heartbeating a roster can reconnect and re-attribute another client's row while that client is not
+  beating, and later mark it disconnected while it is beating; a direct re-registration does not
+  clear `site`/`relay` (`Client.reconnect` gets no relay fields). No path without a deliberately
+  forged heartbeat was found: leaf ids are per process and a relay's identity derives from its own
+  instance. Every key holder already has the pickle RPC, so this is not a weakening of the trust
+  model. Unpinned: a mutant without the `not in self.beats` filter (`server.py:806`) passes. Optional
+  hardening: process a roster only from a beat that names a site.
+- **Tasks outlive their site client** when the relay ends it or its server goes away. Inherited: a
+  stock client leaves its tasks on server SIGKILL, SIGTERM and SIGINT alike (baseline run); cycle 1
+  recorded the same.
+- **A stalled upstream** (SIGSTOP) neither fails nor ends the relay: the site keeps working and the
+  relay carries on after SIGCONT. No socket timeout, as for a stock client; outage handling is P8.
+- **Unpinned hardening in B5:** a mutant that keeps key-named entries in the copy passes (the case was
+  checked by hand: dropped). The 0600 mode and the clean-up are pinned.
+- **AGENTS.md** says USR1/USR2 "steer every polling FSM toward shutdown"; in a relay process they do
+  not reach the stock flag. TECH puts the relay notes in AGENTS.md in P9; they should cover this.
+
+### What held (executed)
+
+- **Lifecycle:** upstream SIGKILL → relay exit 5 in 11 s, no site client left; SIGUSR1 → exit 0, held
+  tasks completed, FINISHED; SIGUSR1 twice → exit 0; SIGUSR1 then SIGINT → exit 4 in 6.5 s, "Ended 2
+  site clients"; SIGINT twice → exit 4 in 1.9 s; SIGTERM → −15, site clients end on EOF; signals in
+  the first 2 s → bounded and clean (at 0.15 s the process predates any handler and dies of the
+  default action, as every `hs` command does). The handler leaves SIGINT and SIGTERM alone.
+- **A2:** eight drains: every received task completed upstream and returned, none in flight under
+  the relay's identity, no row left scheduled after the upstream drained.
+- **A4:** the deviation from "return as aware UTC" is sound. The record carries the exact instant
+  (+05:30, 3.7 s old), which a PostgreSQL/Timescale upstream stores as such. A SQLite upstream keeps
+  the relay host's wall clock (22:11 beside its own UTC schedule stamp of 16:41), the same skew a
+  stock client in another zone gives it today; UTC would only move the skew to UTC.
+- **B5:** in all three key forms the key is in no copy and no site client's environment; the copy
+  is 0600 and named by the site clients' `HYPERSHELL_CONFIG_FILE`; `[server.tls]`, `[client]`,
+  `[task]` and `[export]` survive; nested, listed and key-named values are dropped; site TLS verifies
+  and the workload completes. A second relay on the same database is refused before it touches the
+  first one's copy.
+- **P6:** this relay against a 2.9.0a4 server works (leaves are simply not listed); a 2.9.0a4 client
+  registers with this server (`site`/`relay` NULL); the upgrade adds both columns nullable (test),
+  which on PostgreSQL is a plain `ALTER TABLE … ADD COLUMN` of TEXT and UUID (read). False eviction:
+  relay evicted, leaves disconnected and not evicted; on resume relay and leaves reconnected, 12 of
+  12 completed, 2 late results refused as stale, drain exit 0. `count_connected` feeds only the
+  autoscaler's log; stop and drain go by heartbeats, which leaves never enter.
+- **Mutations killed:** the eviction and FINISHED cascades, dropped-leaf disconnect, the relay row
+  excluded from `count_connected`, the `server_id` refresh, optional heartbeat fields, the puller
+  dropping a reply on halt, the record's zone, the key layer order, the copy's mode, its clean-up,
+  `abort`'s idempotence guard, `end_site_clients` as a no-op, and the `[export]` check.
+
+### Cycle-1 closure
+
+| Finding | Status |
+|---|---|
+| A1 | Closed (`--no-db` test; stamps NULL, every task run once and returned). |
+| A2 | Closed (forced-interleaving test, mutation-killed; eight harness drains). |
+| A3 | Closed (`-N 0`/`-1` refused, test). |
+| A4 | Closed; deviation accepted (above). Wiring unpinned: C2-2. |
+| A5 | Deferred to P8 as ruled; unchanged. |
+| B1 | Closed for the cycle-1 scenario (exit 5 in 11 s, test bound 30 s) and the puller, returner and scheduler faults. Residual: C2-1. |
+| B2 | Closed (site clients ended; mutation-killed). Their tasks: inherited, as noted. |
+| B3 | Closed (environment and file, test). |
+| B4 | Closed (three forms end to end; layer order mutation-killed). |
+| B5 | Closed (above). Residual: C2-4 (docs). |
+| B6 | Closed in behaviour; handler unpinned: C2-3. |
+| B7 | Closed (removing the `[export]` check fails the new test). |
+| B8 | Closed as ruled; wording: C2-5. |
+
+### Human-gate triggers
+
+- C2-1 sits in `relay/__init__.py`; what it misses is `ServerThread`'s (core) wait order, and the
+  suggested fix needs no core edit. The cycle-1 trigger (credential fence, site-hop TLS) stands:
+  maintainer sign-off before `hs-publish`.
+- Cycle 2 of ≤3: a third cycle that does not converge escalates to the maintainer.

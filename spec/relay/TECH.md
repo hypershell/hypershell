@@ -3,7 +3,7 @@ slug: relay
 title: 'HyperShell Relay: two-level scheduling across administrative sites'
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/relay
 base: develop
 current_phase: P7
@@ -162,10 +162,11 @@ phases:
   hill: uphill
   verify: uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster
 review:
-  last_reviewed_commit: d6e9d7d
+  last_reviewed_commit: e84ff17
   verdict: changes-requested
-  blocked_reason: ''
-  cycle: 1
+  blocked_reason: 'Review cycle 2: relay-local receiver failure leaves the relay running
+    and its tasks held (C2-1); four LOW (C2-2..C2-5)'
+  cycle: 2
 ---
 # TECH.md — HyperShell Relay: two-level scheduling across administrative sites
 
