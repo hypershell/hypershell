@@ -29,7 +29,8 @@ default bind `localhost` (`src/hypershell/core/config.py:130`) is widened to `0.
 breaks when a user binds one interface on purpose, such as a cluster's internal network address:
 under `--ssh` or autoscaling the server listens only there, but the clients are told a name that
 may resolve to another interface, or not resolve from the client hosts at all. Every client then
-fails to connect, and the cluster waits with no error.
+fails to connect, and the cluster waits with no error
+(see [`cluster-waits-when-every-client-fails.md`](cluster-waits-when-every-client-fails.md)).
 
 Nor is there a way to name the advertised address separately from the bind. A server bound to
 `0.0.0.0` behind a name the clients must use, for instance the name on its TLS certificate, has no

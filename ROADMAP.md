@@ -359,6 +359,19 @@ a fallback to the default key. Pre-existing since 2.8.0.
 *Horizon: near-term, small · Depends on: — · Refs: `docs/security.rst`*
 **Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: unshaped*
 
+## `hs cluster` waits forever when every launched client fails
+
+When every client a cluster launched exits early, from an authkey or TLS mismatch, an unreachable
+address or a bad remote executable, `hs cluster` ignores their exit statuses and joins a server
+that has work left and no one to run it (`src/hypershell/cluster/remote.py:325-326`,
+`src/hypershell/cluster/ssh.py:321-323`). It never exits and names no failure; under autoscaling it
+relaunches into the same failure instead. It should exit non-zero with a clear error once every
+client has gone and work remains. Pre-existing since 2.8.0.
+
+*Horizon: near-term · Depends on: — · Refs: the advertised-host fix below (one way every client
+fails); failure-budget halt policy (the autoscaling bound)*
+**Seed:** [`issues/cluster-waits-when-every-client-fails.md`](issues/cluster-waits-when-every-client-fails.md) · *status: unshaped*
+
 ## `--ssh` and autoscaling tell clients the host's own name, whatever `-H` binds
 
 Launcher and `--mpi` clusters tell their clients the bind address unless it is `0.0.0.0`
