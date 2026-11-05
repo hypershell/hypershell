@@ -3,7 +3,7 @@ slug: zone-dispatch
 title: Zone-aware, demand-driven dispatch (zone, cycle 2)
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/zone-dispatch
 base: develop
 current_phase: done
