@@ -431,12 +431,18 @@ class Task(Entity):
             return TaskGroupInfo(submitted_task.group, f'no tasks scheduled - defaulting to earliest group')
 
     @classmethod
-    def increment_group(cls: Type[Task], previous_group: int, attempts: int) -> TaskGroupInfo:
+    def increment_group(cls: Type[Task], previous_group: int, attempts: int, eager: bool = False) -> TaskGroupInfo:
         """
         This should only be called if no tasks are returned by Task.next().
         Check the current group and increment if necessary with explanation.
         We assume all tasks in `previous_group` have already been scheduled (see Task.next()).
+        A group is held while it has incomplete tasks or failures still awaiting retry.
+        The next group is the lowest group holding incomplete tasks, which may be lower than
+        `previous_group` when tasks are submitted late.
         """
+        # Incomplete tasks are counted before retryable failures, so a result written back between
+        # the two checks is always seen by the second. Retryable failures are counted before
+        # exhausted ones, so a group holding both is held rather than halted.
         remaining = (
             Session.query(Task)
             .filter(Task.group == previous_group)
@@ -445,6 +451,9 @@ class Task(Entity):
         )
         if remaining > 0:
             return TaskGroupInfo(previous_group, f'waiting on {remaining} tasks to complete')
+        retryable = cls.count_retryable(attempts, previous_group, eager=eager)
+        if retryable > 0:
+            return TaskGroupInfo(previous_group, f'waiting on {retryable} failed tasks to be retried')
         failed_query = (
             Session.query(Task)
             .filter(Task.group == previous_group)
@@ -460,16 +469,20 @@ class Task(Entity):
             return TaskGroupInfo(previous_group,
                                  f'at least {failed} tasks exceeding allowed retries, example: {example.id}',
                                  False)
-        next_group = (
-            Session.query(Task.group)
-            .order_by(Task.group)
-            .filter(Task.group > previous_group)
-            .first()
-        )
-        if not next_group:
+        # The next group is chosen in one query, so rows committed while the checks above ran are
+        # never skipped; it is lower than the previous group when tasks were submitted late.
+        next_group = cls.lowest_incomplete_group()
+        if next_group is None:
             return TaskGroupInfo(previous_group, f'no task groups remain')
+        elif next_group == previous_group:
+            return TaskGroupInfo(previous_group, f'new tasks submitted')
         else:
-            return TaskGroupInfo(next_group[0])
+            return TaskGroupInfo(next_group)
+
+    @classmethod
+    def lowest_incomplete_group(cls: Type[Task]) -> Optional[int]:
+        """The smallest group holding a task that has not completed, or None."""
+        return Session.query(func.min(cls.group)).filter(cls.completion_time.is_(None)).scalar()
 
     @classmethod
     def select_new(cls: Type[Task], limit: int, group: int = None) -> List[Task]:
@@ -480,10 +493,9 @@ class Task(Entity):
         return query.limit(limit).all()
 
     @classmethod
-    def select_failed(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
-        """Select failed tasks for retry up to some `limit` under given number of `attempts`."""
+    def query_retryable(cls: Type[Task], attempts: int, group: int = None) -> Query:
+        """Query failed tasks still eligible for retry under given number of `attempts`."""
         query = (cls.query()
-                 .order_by(cls.completion_time)
                  .filter(cls.exit_status.isnot(None))
                  .filter(cls.exit_status != 0)
                  .filter(cls.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
@@ -491,7 +503,24 @@ class Task(Entity):
                  .filter(cls.retried.is_(False)))
         if group is not None:
             query = query.filter(cls.group == group)
-        return query.limit(limit).all()
+        return query
+
+    @classmethod
+    def select_failed(cls: Type[Task], attempts: int, limit: int, group: int = None) -> List[Task]:
+        """Select failed tasks for retry up to some `limit` under given number of `attempts`."""
+        return cls.query_retryable(attempts, group=group).order_by(cls.completion_time).limit(limit).all()
+
+    @classmethod
+    def count_retryable(cls: Type[Task], attempts: int, group: int, eager: bool = False) -> int:
+        """
+        Count failed tasks in `group` awaiting retry under given number of `attempts`.
+        The failures counted are exactly the failures Task.next() retries for the same
+        `group`, `attempts`, and `eager`. Without `eager`, failures are only retried when
+        `attempts` exceeds one.
+        """
+        if attempts <= 1 and not eager:
+            return 0
+        return cls.query_retryable(attempts, group=group).count()
 
     @classmethod
     def next(cls: Type[Task],
