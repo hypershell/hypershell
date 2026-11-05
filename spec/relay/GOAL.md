@@ -12,10 +12,10 @@
   time, and leans on the zone dispatch wire, so `hs-plan` should do its research pass.*
   **Calendar:** the maintainer wants relay shipped in a pre-release on `develop` by about
   **2026-11-13 (SC26)**. Zones Z1 + Z2 land first as 2.9.0a4, then a small security-hardening
-  cycle, then this cycle's build — about **5–6 days of build and review**. Twenty-one criteria
-  trip the size circuit-breaker twice over, and the topology half (R11–R16) depends on zone
-  autoscaling (Z3), which is not scheduled ahead of this cycle. The proposed SC26 cut is
-  **Clarification C1** below and is open: `hs-plan` does not start until the maintainer rules it.
+  cycle, then this cycle's build — about **5–6 days of build and review**. The maintainer ruled
+  the seed's **whole first phase** in scope for that pre-release (C1, 2026-11-04), knowing it is a
+  tight fit. The site-topology half (seed R11–R15 and R16's topology half) needs zone autoscaling
+  (Z3) and moved to [`issues/relay-topology.md`](../../issues/relay-topology.md).
 
 ## Problem
 
@@ -42,7 +42,7 @@ never built to survive (`AGENTS.md`: two servers on one database double-schedule
 A new long-running service, **`hs relay`**, runs at each site (started by the operator — a login
 node, a service host, `systemd`; the true server launches nothing across the boundary). Upstream,
 the relay is *just a client*: it connects with the upstream auth key and pinned TLS, requests
-work through Z2's work-request protocol advertising its zone and its own (large) bundle size,
+work through Z2's work-request protocol advertising its zone(s) and its own (large) bundle size,
 confirms, returns results and heartbeats — the upstream dispatch surface does not know relays
 exist. Inside, it is a complete little cluster: pulled tasks are inserted into a relay-local
 SQLite database from which an embedded server schedules to site clients (with their own zones and
@@ -50,14 +50,9 @@ bundle sizes) launched through the site's own launcher command. Completed tasks 
 attributed to the node that actually ran them, while in-flight tasks stay attributed to the relay
 — so the existing eviction and orphan-recovery machinery *is* the failover story: a site that
 dies has its unreturned tasks reverted and re-dispatched to surviving sites, and a late result
-from the dead site is refused by the result fence (#70) rather than overwriting the re-run.
-
-Under autoscaling, the true server stops launching processes and instead publishes a **desired
-topology**: per-site client counts computed from the group- and zone-scoped pressure signal,
-distributed by a **`fill`** policy (saturate sites in declared preference order — the SU-cost
-mode) or **`spread`** (distribute across live sites), under per-site `min`/`max`/`init`. Each
-relay watches the topology and reconciles only its own entry with its own launcher; scale-down
-remains idle-exit; a relay idles at zero clients, still connected, ready to grow.
+from the dead site is refused by the result fence (#70) rather than overwriting the re-run. A
+relay that loses its upstream keeps its site running and hands the results over when the link
+returns.
 
 The arithmetic this buys: ~100 relays × ~100 nodes ≈ 10,000 nodes behind ~100 upstream clients'
 worth of connections. To be explicit about what it does *not* buy: every task still schedules,
@@ -67,16 +62,21 @@ throughput; suitably-sized tasks remain the operating assumption. Security *impr
 the upstream key and cert material stop at the relay; leaf nodes only ever hold a per-site key
 minted fresh by their relay.
 
+Site-topology autoscaling — the true server publishing per-site client counts under `fill` /
+`spread` — is the next step and is not part of this cycle
+([`issues/relay-topology.md`](../../issues/relay-topology.md)).
+
 A user who never runs `hs relay` sees no change whatsoever.
 
 ## Acceptance criteria (the contract)
 
-R1–R18 are the seed's R-IDs, kept for traceability and amended only where `develop` or the zone
-cycles have moved under them (each amendment is cited in **Clarifications → Drift**). R19–R21 are
-new: a prerequisite the ROADMAP sequences "before relay" and the evidence this cycle owes.
-**Which of these this cycle carries is Clarification C1.**
+R1–R10 and R16–R18 are the seed's R-IDs, kept for traceability and amended only where `develop`
+or the zone cycles have moved under them (each amendment is cited in **Clarifications → Drift**).
+R11–R15 are **reserved, not carried**: they moved with R16's topology half to
+`issues/relay-topology.md` (C1). R19–R21 are new: a prerequisite the ROADMAP sequences "before
+relay", and the evidence this cycle owes.
 
-**Delegation core** *(usable against a plain `--forever` server; the seed's own first phase)*
+**Delegation core** *(usable against a plain `--forever` server)*
 
 - **R1** — The system SHALL provide `hs relay`, a long-running per-site service composing three
   roles in one process: an upstream connector (client role), a complete local server instance
@@ -89,7 +89,8 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   (`server.bundlemax`); the relay requests again rather than expecting a larger reply. IF the
   upstream server does not serve the work-request protocol, THEN the relay SHALL exit non-zero
   with the same single version error a client gives (Z2 R5). A relay serving multiple zones
-  requests work per zone *(see Drift D2 and C1: the proposed cut serves one zone per relay)*.
+  SHALL request work per zone, with demand for each zone it serves held independently upstream.
+  *(How, against Z2's demand map, is design question DQ1 — not a cut.)*
 - **R3** — WHEN a bundle is received, the relay SHALL insert its tasks into the relay-local
   database — preserving task ids, group, zone, tags, and the true server's scheduling stamps —
   and SHALL confirm receipt upstream only after the insert is durable. Upstream in-flight
@@ -125,38 +126,22 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   — scheduling already-pulled tasks and collecting completions durably — reconnect with backoff,
   and return buffered results on reconnection; a relay restart SHALL NOT lose
   completed-but-unreturned results. *(The seed expected to inherit reconnect/redelivery from
-  `coordinator-resilience-retry-backoff`; that seed is still `unshaped` and unscheduled — Drift
-  D7. C1 splits R9 into its restart-durability half and its outage-ride-through half.)*
+  `coordinator-resilience-retry-backoff`; that seed is still `unshaped` and unscheduled, so this
+  cycle builds it — Drift D7, DQ2.)*
 - **R10** — The relay-local database SHALL be private, disposable operational state at a
   dedicated default location; it SHALL be SQLite whatever database provider the user has
   configured (SQLite, PostgreSQL or `timescale`, #71); it SHALL NOT default to (or disturb) the
   user's configured primary database; and pruning (R5) SHALL keep it size-stable across campaigns.
 
-**Site-topology autoscaling** *(the seed's second phase; composes with zones autoscaling, Z3)*
+**Site-topology autoscaling** — **R11–R15: not carried.** Moved to
+[`issues/relay-topology.md`](../../issues/relay-topology.md) (`shaped`, depends on Z3); the IDs
+stay reserved here so the seed's numbering survives.
 
-- **R11** — The autoscale configuration SHALL accept an ordered set of named sites, each with
-  `min`/`max`/`init` client counts, and a site-distribution policy: **`fill`** (saturate sites in
-  declared order up to `max` before spilling to the next — the SU/cost-preference mode) or
-  **`spread`** (distribute demand across live sites, respecting per-site `min`/`max`).
-- **R12** — WHILE autoscaling with sites, the true server SHALL NOT launch client processes via a
-  local launcher; it SHALL derive total demand from the existing pressure signal (group- and
-  zone-scoped, per zones) and publish a **versioned desired topology** — per-site (and, where
-  zones are active, per-zone) client counts; each connected relay SHALL observe the current
-  topology and reconcile only its own site's entry using its own launcher.
-- **R13** — Only **live** sites (relay connected and heartbeating) SHALL receive topology
-  assignments; IF a site's relay disconnects or is evicted, THEN the topology SHALL be recomputed
-  over the remaining live sites while that site's unreturned tasks revert via existing orphan
-  recovery — together constituting graceful site failover.
-- **R14** — Relay registration/heartbeat SHALL carry the site identity, so the true server
-  accounts fleets and liveness per site and presentation can attribute clients and tasks to
-  sites.
-- **R15** — Scale-down SHALL remain idle-exit driven: a reduced topology entry means the relay
-  stops replacing exiting clients; site clients self-retire when no eligible work remains; the
-  relay itself SHALL remain connected at zero local clients (scale-to-zero, ready to regrow).
-- **R16** — Topology SHALL be optional: against an upstream that publishes none (a plain
-  `--forever` server, or a site not declared in policy), the relay SHALL maintain its own
-  locally-configured fleet size — the delegation core SHALL be fully usable without
-  site-topology autoscaling.
+- **R16** *(local-fleet half; amended)* — Against an upstream that publishes no topology — every
+  upstream, this cycle — the relay SHALL maintain its own locally-configured fleet size through
+  its launcher; the delegation core SHALL be fully usable without site-topology autoscaling.
+  *(The topology half — reconciling a published per-site entry, falling back for a site not in
+  policy — moved to `issues/relay-topology.md`.)*
 
 **Security & convention**
 
@@ -168,7 +153,8 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   `share/` completions in the same commit (repo convention), and `docs/security.rst` SHALL gain
   the relay trust model (two auth domains, TLS pinning across the WAN hop, process-table key
   exposure now confined within each site). The docs SHALL state the non-goals users will meet:
-  no throughput gain, no cross-site cancellation or output retrieval, and the limits C1 defers.
+  no throughput gain, no cross-site cancellation or output retrieval, and no site-topology
+  autoscaling yet.
 
 **Prerequisite and evidence** *(new)*
 
@@ -178,29 +164,36 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   discipline it follows today (`CONTENDED_RERUNS`, #75). *(From
   `issues/late-confirm-overwrites-attribution.md`, which the ROADMAP sequences "before relay" and
   which is still `unshaped` on `develop` — Drift D5; reproduced in-process during #70's review.
-  Whether it rides this cycle or lands first on its own is C2.)*
+  Rides this cycle per C2.)*
 - **R20** — New tests SHALL cover the relay path: durable insert before confirm; no local retry,
   a failure returned upstream and retried there; leaf attribution with the upstream
   `schedule_time` preserved; duplicate and stale returns writing nothing; the R8 bound holding;
+  roster forwarding and its removal on disconnect; a multi-zone relay receiving each zone's work
+  and only that; operation through an upstream outage with results delivered on reconnection;
   restart durability of completed-but-unreturned results; the upstream-credential fence (R17);
-  the relay-local database never touching the configured primary; and the relay re-entering on
-  timeout and halting on shutdown. A loopback run of one upstream server and two relays, each with
-  site clients, SHALL run a grouped workload that includes a task that fails and is retried, to
-  completion, with every task completed once upstream. The existing suite SHALL pass.
+  the relay-local database never touching the configured primary; the late-confirm fence (R19);
+  and the relay re-entering on timeout and halting on shutdown. A loopback run of one upstream
+  server and two relays, each with site clients, SHALL run a grouped workload that includes a task
+  that fails and is retried, to completion, with every task completed once upstream. The existing
+  suite SHALL pass.
 - **R21** — Before the pre-release, a **multi-node run on a test cluster** SHALL show, within that
   cluster's job limits: one node runs the upstream server; **two node groups act as two sites**,
   each running its own `hs relay` that launches site clients on its group's nodes with a site-local
   key. On a grouped workload with a failing-and-retried task: (a) every task reaches its final
   state once upstream, with group order kept; (b) every completed row names a leaf client of the
-  site that ran it, not a relay; (c) the upstream server holds connections for the relays only,
-  not for leaf clients; (d) **failover** — one site's relay is stopped mid-run, it is evicted, its
-  unreturned tasks revert and complete at the surviving site, and no task is lost; (e) the upstream
-  key appears in no site client's argv or environment. Records land under
-  `spec/relay/evidence/` following the zone drives' external-wait convention; the run is the
-  foreman's to perform.
+  site that ran it, not a relay, and the leaf clients appear upstream attributed to their site;
+  (c) the upstream server holds connections for the relays only, not for leaf clients;
+  (d) **failover** — one site's relay is stopped mid-run, it is evicted, its unreturned tasks
+  revert and complete at the surviving site, and no task is lost; (e) the upstream key appears in
+  no site client's argv or environment. Records land under `spec/relay/evidence/` following the
+  zone drives' external-wait convention; the run is the foreman's to perform.
 
 ## Non-goals (no-gos)
 
+- **Site-topology autoscaling** — seed R11–R15 and R16's topology half: ordered sites with
+  `min`/`max`/`init`, `fill`/`spread`, a versioned published topology, per-site liveness and
+  accounting, topology-driven scale-down. It needs zone autoscaling (Z3) and lives in
+  [`issues/relay-topology.md`](../../issues/relay-topology.md).
 - **Raising the throughput ceiling.** Every task still schedules, confirms, and completes through
   the true database; the relay scales *connection fan-out*, not tasks-per-second. Say so in docs.
 - **Cross-site cancellation propagation.** `hs update --cancel` cannot reach tasks already inserted
@@ -222,11 +215,11 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
 - **Template forwarding.** The execution template stays site-local client configuration (the
   relay operator sets it, exactly like a standalone `hs client -t`); campaign-specific templating
   across relays is already served by JSON mode (submit-side expansion, clients run verbatim).
-  Forwarding templates through the topology channel is a possible follow-up, not this.
-- **Per-zone differentiated sizing knobs** (unchanged zones non-goal). Per-**site**
-  `min`/`max`/`init` is the only differentiated sizing introduced here.
-- **An implicit "local site."** The true server keeps no built-in launcher in relay topologies;
-  local capacity = run a relay beside the server. One code path, one topology.
+- **Per-zone differentiated sizing knobs** (unchanged zones non-goal).
+- **An implicit "local site."** Local capacity = run a relay beside the server. One code path.
+- **General coordinator resilience.** R9 builds the relay's own upstream reconnect and redelivery;
+  making ordinary clients and the server survive coordinator blips stays with
+  `issues/coordinator-resilience-retry-backoff.md`.
 - **Changing the auth/TLS wire model** (pickle-framed RPC, HMAC challenge, no mTLS — as is), and
   **IPv6 on the upstream hop**: the relay dials upstream over IPv4 like every TLS client since #72
   (`issues/ipv6-server-listener.md` owns IPv6).
@@ -247,43 +240,52 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   server runs `max_retries=0`; the upstream retry machinery re-dispatches failures (possibly to a
   different site). Single owner of the id chain; no remapping.
 - **Q:** Site model — ordered list vs weights, and does the true server keep an implicit local
-  launcher? — **A:** **Ordered sites, no implicit local site** (resolved 2026-08-02). `fill`
-  order *is* the declared order (SU preference); weights/cost values are a possible follow-up.
+  launcher? — **A:** **Ordered sites, no implicit local site** (resolved 2026-08-02). Carried to
+  `issues/relay-topology.md` with the rest of the site model.
 - **Q:** Relay buffer depth? — **A:** **Bounded, demand-driven** (resolved 2026-08-02). The bound
   derives from the live local fleet, not a user knob; hoarding breaks fill/spread fidelity and
   widens the cancellation/duplicate windows. WAN latency is amortized by large bundles.
 - **2026-11-01 (Z2, maintainer alignment memo)** — "A relay counts as one client advertising a
   large size." Z2's dispatch staging was designed with that in mind.
 
-**Open — block `hs-plan`:**
+**Ruled at promotion** (maintainer, 2026-11-04):
 
-- **C1 — [NEEDS CLARIFICATION: the SC26 cut.]** The shaped scope does not fit about 5–6 days of
-  build and review, and R11–R16 cannot be built on rails that do not exist yet: per-zone pressure
-  and fleet accounting are zone's R13–R17 (Z3), which is not scheduled ahead of relay (Drift D3).
-  The seed's own split (delegation core first) is the starting point. Options:
-  - **A — Smallest relay that demos at SC26 (recommended).** This cycle carries **R1–R6, R8,
-    R10, R16 (fixed local fleet only), R17–R21**, with two narrowings: **R2** serves **one
-    upstream zone per relay** (default or named; the zone-name-equals-site-name pattern still
-    works), and **R9** keeps only its last clause — *a relay restart SHALL NOT lose
-    completed-but-unreturned results*. **R6**'s "rate math remains correct" clause becomes a
-    documented limitation: until the roster is forwarded, upstream rate, average-duration and ETA
-    figures leave out relay-executed tasks (they join on `client`). Deferred to a new shaped seed
-    **`issues/relay-topology.md`**, carrying the dated clarifications above: **R7, R9's
-    outage ride-through, R11–R15, R16's topology half, and multi-zone relays**. Demo: two sites,
-    leaf attribution, site failover, credentials confined — all of R21.
-  - **B — A plus the roster (R7).** Upstream presentation and rate math stay coherent at SC26,
-    at the cost of a `client` column, a heartbeat field tolerated by mixed-version fleets, and
-    roster semantics against the upstream `HeartMonitor` (eviction of a leaf the server never
-    talks to). Adds about a day and touches `server.py`'s heart monitor; tightest fit.
-  - **C — The seed's whole first phase: R1–R10 + R16–R21**, including outage ride-through
-    (reconnect with backoff, redelivery) built inside relay rather than inherited, and multi-zone
-    relays (needs one upstream identity per zone, Drift D2). Does not fit the window on any
-    reading of Z1's eight and Z2's three review cycles; would ship after SC26.
-  - *(Not offered: the whole seed. R11–R16 need Z3 first.)*
-- **C2 — [NEEDS CLARIFICATION: where R19 lands.]** (i) **In this cycle** as R19 (recommended:
-  small, no wire change, and the relay's leaf attribution is wrong without it); or (ii) as its
-  own `fix/` cycle from `issues/late-confirm-overwrites-attribution.md`, landed on `develop`
-  before relay's build, and dropped from this GOAL.
+- **C1 — Scope for the SC26 pre-release.** Shaping offered A (smallest demo relay: one zone per
+  relay, restart durability only, no roster), B (A plus the roster) and C (the seed's whole first
+  phase), and recommended A as the fit for about 5–6 days. The maintainer ruled: *"option **C**,
+  the seed's full first phase (R1–R10 plus R16–R21, including outage ride-through and multi-zone
+  relays). That is the target for the pre-release before SC26, even though you judged it a tight
+  fit."* Out, because it needs Z3: R11–R15 and R16's topology half, seeded as
+  `issues/relay-topology.md` (`shaped`) with its ROADMAP entry (resolved 2026-11-04).
+- **C2 — Where R19 lands.** Options were (i) inside this cycle or (ii) its own `fix/` cycle
+  first. The maintainer ruled: *"R19 rides inside the relay cycle."* (resolved 2026-11-04).
+- **Multi-zone conflict with Z2 is a design question, not a cut** (maintainer, 2026-11-04): the
+  plan resolves it — DQ1 below.
+
+**Design questions for `hs-plan`** (plan-level; each must be settled in `PLAN.md`/`TECH.md`, none
+narrows a requirement):
+
+- **DQ1 — Multi-zone relays against Z2's demand map (R2).** Z2 keys staging demand
+  `client_id → (zone, size)` (Z2 PLAN §2.2), so one relay identity requesting for two zones
+  overwrites its own demand, and `dispatcher.forget(client_id)` on its eviction would unstage only
+  the last zone it named. Resolve by either **(a)** the relay presenting **one upstream identity
+  per zone** it serves (each with its own requests, confirms and liveness), keeping the upstream
+  untouched; or **(b)** a **minimal additive change** to the demand map (e.g. keyed by
+  `(client_id, zone)`), compatible with Z2 — an ordinary single-zone client behaves exactly as Z2
+  specifies, the wire protocol and `PROTOCOL` number do not change, and Z2's tests pass
+  unmodified. If (b), R2's "no relay-specific changes" holds because the change is general, not
+  relay-aware; `TECH.md` records why it stays inside that line. Either way, failover (R3, R21 (d))
+  must revert and unstage every zone the relay held.
+- **DQ2 — Outage ride-through (R9).** Nothing to inherit (D7). Decide the reconnect and backoff
+  loop, what the relay does with its local fleet while disconnected (keep running, stop pulling),
+  and how buffered results are re-presented on reconnection — against the risk that upstream has
+  evicted the relay meanwhile, so many returns come back `STALE` by design. Shape it so the
+  resilience seed can later lift it rather than duplicate it.
+- **DQ3 — Roster semantics against the upstream `HeartMonitor` (R7).** Leaf clients exist
+  upstream but never heartbeat it directly. Decide how their liveness is represented (through the
+  relay's heartbeat or a dedicated message), that the monitor never evicts a leaf on its own
+  (eviction stays the relay's, and a relay eviction disconnects its roster), and that
+  `count_connected()` and the rate math stay correct (R6).
 
 **Drift since the seed was written** (re-confirmed 2026-11-04 against `origin/develop` `ab16902`
 (2.9.0a3), `origin/feature/zone-queue-primitive` `5b2ed9f` and `origin/feature/zone-dispatch`
@@ -299,17 +301,17 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   queue. Consequences for relay: each reply is clamped to `server.bundlemax` (default 1000), so a
   relay's "large size" pulls in several requests (R2, R8); old/new version mismatches are refused
   with one error (R2); the server's demand map is keyed `client_id → (zone, size)` (Z2 PLAN
-  §2.2), so one relay identity requesting for two zones would overwrite its own demand — a
-  multi-zone relay needs one upstream identity per zone or an upstream change, contradicting R2's
-  "no relay-specific changes" (C1); when a non-default zone loses its last client, its staged
-  pool is unstaged by id, which helps failover; and a zone with no client **holds the group**
-  (Z2 R10), so cross-site failover works only when both sites serve the zone the work is in —
-  R21 runs both sites in one zone. Z2's TECH on `origin` is behind the approved local head
-  (`b6fcb55`, review cycle 3 approved); only phase status and gate records differ.
+  §2.2), so a multi-zone relay needs one identity per zone or an additive change (DQ1); when a
+  non-default zone loses its last client, its staged pool is unstaged by id, which helps failover;
+  and a zone with no client **holds the group** (Z2 R10), so cross-site failover works only when
+  a surviving site serves the zone the work is in — R21 runs both sites in a shared zone. Z2's
+  TECH on `origin` is behind the approved local head (`b6fcb55`, review cycle 3 approved); only
+  phase status and gate records differ.
 - **D3 — Z3 (zone autoscaling) is not built and not scheduled before relay.** Z2's Clarification
   (2026-11-01) moved zone R13–R17 to Z3 and allows deferring it to `issues/zone-autoscale.md`.
   The seed's R11–R16 "ride the zones autoscaler rails"; those rails (per-zone pressure, per-zone
-  fleet accounting, `{zone}`/`HYPERSHELL_ZONE`) do not exist yet. Hence C1.
+  fleet accounting, `{zone}`/`HYPERSHELL_ZONE`) do not exist yet. Hence R11–R15 and R16's
+  topology half moved to `issues/relay-topology.md` (C1).
 - **D4 — #70 writeback-scoped-conditional.** `Receiver.update_tasks` no longer does
   `Task.update_all(to_dict())`; `Task.apply_results` writes only the 13 `result_columns`
   (`client_id`, `client_host`, `command`, timing, `exit_status`, output paths, `cores_max`,
@@ -320,7 +322,8 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   R6 amended). Leaf attribution via `client_id` is a result column, as #70's seed promised.
 - **D5 — The late-confirm overwrite is still open.** `Task.confirm_all` writes `client_id` and
   `client_host` by id unconditionally; `Confirm` and `Receiver` run in no fixed order. ROADMAP
-  sequences the fix "near-term, before relay"; its seed is `unshaped`. Hence R19 and C2.
+  sequences the fix "near-term, before relay"; its seed is `unshaped`. Hence R19, in this cycle
+  (C2).
 - **D6 — #71 timescale and #75 contended-write recovery.** The upstream `task` table may be a
   TimescaleDB hypertable, where a contended UPDATE can match 0 rows; `confirm_all`, `revert_all`
   and `apply_results` follow `CONTENDED_RERUNS`, and a `DEFERRED` result is held and re-presented
@@ -330,7 +333,7 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
 - **D7 — The resilience seed did not land first.** ROADMAP says "relay R9 is verbatim this
   machinery — build it once here and the relay's upstream connector inherits it", but
   `issues/coordinator-resilience-retry-backoff.md` is `unshaped` and unscheduled. R9's outage
-  half has nothing to inherit (C1).
+  half is built in this cycle (C1, DQ2).
 - **D8 — #74 group order.** The scheduler now chooses the lowest incomplete group atomically, so a
   late lower group runs instead of stranding. The seed's "group consistency is free" note still
   holds and is safer: a relay-local server advances to whichever group upstream releases.
@@ -339,18 +342,19 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
 - **D10 — #69 upgrade step and #73.** New columns (R7's site attribution) go through the in-place
   upgrade step: nullable or constant default, no per-column code. #73 only changes how the result
   statements are built; no effect on relay beyond throughput headroom.
-- **D11 — Touchpoint correction.** `DISTRIBUTED_ROLES` lives in `src/hypershell/core/logging.py`,
-  not `__init__.py` as the seed (and `AGENTS.md`) say.
+- **D11 — Touchpoint correction.** `DISTRIBUTED_ROLES` lives in `src/hypershell/core/logging.py`;
+  a new `relay` role (if it writes its own log) is added there. The seed lists it under
+  `__init__.py`, and `AGENTS.md` ("Working on this codebase as an agent") reads the same way;
+  fixing `AGENTS.md` waits for the plan.
 - **D12 — The security-hardening cycle lands between zones and relay.** R17/R18 are planned
   against the tree it leaves; `hs-plan` re-reads `docs/security.rst` and `core/tls.py` at that
   base rather than at `ab16902`.
 
 **Notes for `hs-plan`** (from the seed, updated for drift):
 
-- *Topology mechanics.* The managed queues are point-to-point — a broadcast "scaling channel" is
-  wrong-shaped. Model the topology as **versioned state relays fetch** — Z2's request/reply
-  surface is the natural carrier — on their heartbeat cadence; versioning makes application
-  idempotent. Final mechanism in `TECH.md`. (Only if C1 keeps R11–R16.)
+- *Calendar.* The scope is the maintainer's call (C1), made knowing it is tight. Plan phases so
+  the delegation core (R1–R6, R8, R10, R17, R19) is reviewable before R7, R9's outage half and
+  multi-zone, so review can start early; this orders the work and cuts nothing.
 - *Return path.* Retain the upstream `schedule_time` (and other received stamps) per task at
   insert; put it back on the returned record before the put. The upstream Receiver stays unchanged
   by design.
@@ -361,23 +365,24 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   highest-risk plumbing.
 - *Roster + heartbeat.* Piggyback the roster on the relay's heartbeat or a dedicated message —
   either way `Heartbeat` gains optional fields (site), and JSON pack/unpack must tolerate absence
-  for mixed-version fleets. (Only if C1 keeps R7.)
-- *`no_confirm` is incompatible with relay mode* — it disables the orphan recovery R3/R13 lean on.
+  for mixed-version fleets (DQ3).
+- *`no_confirm` is incompatible with relay mode* — it disables the orphan recovery R3 leans on.
   Refuse it on the relay CLI, and on the upstream server when relays register.
 - *Eviction window.* A relay's unreturned backlog exceeds a leaf client's; consider whether
   upstream `evict_after` (default 600 s) deserves a relay-aware default (R8 bounds the blast
-  radius either way). R21's failover leg needs a short eviction setting to fit the job limit.
+  radius either way). R21's failover leg needs a short eviction setting to fit the job limit. R9's
+  ride-through and eviction pull in opposite directions (DQ2).
 - *Group consistency is free* (D8).
-- *Zones composition.* Topology entries are per-site × per-zone where zones are active. A
-  dedicated per-relay zone remains a pure configuration pattern (zone name = site name), not a
-  mechanism — but see D2 on held groups.
+- *Zones composition.* A dedicated per-relay zone remains a pure configuration pattern (zone name
+  = site name), not a mechanism — but see D2 on held groups.
 
 ## Related materials
 
 - Seed: [`issues/relay.md`](../../issues/relay.md) (`status: adopted:relay`).
+- Carved remainder: [`issues/relay-topology.md`](../../issues/relay-topology.md) (`shaped`;
+  seed R11–R15 and R16's topology half; depends on Z3 and this cycle).
 - Dependencies: [`spec/zone-queue-primitive/`](../zone-queue-primitive/GOAL.md) (Z1) and
-  [`spec/zone-dispatch/`](../zone-dispatch/GOAL.md) (Z2), both approved, landing as 2.9.0a4;
-  [`issues/zone.md`](../../issues/zone.md) R13–R17 (Z3) for R11–R16.
+  [`spec/zone-dispatch/`](../zone-dispatch/GOAL.md) (Z2), both approved, landing as 2.9.0a4.
 - Related seeds: `issues/late-confirm-overwrites-attribution.md` (R19),
   `issues/coordinator-resilience-retry-backoff.md` (R9), `issues/stale-confirm-hides-orphan.md`,
   `issues/orphan-revert-loses-result.md`, `issues/evicted-client-fencing-and-cancel-reach.md`,
@@ -388,12 +393,12 @@ new: a prerequisite the ROADMAP sequences "before relay" and the evidence this c
   `cluster/relay.py`) — connector, embedded local server composition, returner, reconciler;
   `src/hypershell/__init__.py` (commands dict, `APP_HELP`); `src/hypershell/core/logging.py`
   (`DISTRIBUTED_ROLES`); `src/hypershell/core/dispatch.py` and `core/queue.py` (Z2's request
-  surface, unchanged by design); `src/hypershell/server.py` (`Confirm` for R19; `Receiver`
-  unchanged); `src/hypershell/data/model.py` (`Task.confirm_all` for R19); `src/hypershell/data/core.py`
-  (relay-local DB binding); `src/hypershell/core/config.py` (`[relay]` section);
-  `src/hypershell/cluster/remote.py` (launcher reuse; `AutoScaler` only if topology stays);
-  `src/hypershell/core/heartbeat.py` (only if the roster stays); `docs/security.rst`,
-  `docs/_include/*.rst`, `share/` completions.
+  surface; unchanged unless DQ1 picks (b)); `src/hypershell/server.py` (`Confirm` for R19,
+  `HeartMonitor` for the roster; `Receiver` unchanged); `src/hypershell/data/model.py`
+  (`Task.confirm_all` for R19, `Client` site attribution); `src/hypershell/core/heartbeat.py`
+  (optional site/roster fields); `src/hypershell/data/core.py` (relay-local DB binding);
+  `src/hypershell/core/config.py` (`[relay]` section); `src/hypershell/cluster/remote.py`
+  (launcher reuse); `docs/security.rst`, `docs/_include/*.rst`, `share/` completions.
 - Prior art: **glideinWMS** (per-site frontend/factory feeding a central pool), **HTCondor**
   flocking + glideins, **Balsam** multi-site daemons (closest DOE analog — site agents pull from
   a central service and drive the local batch system), Slurm federation, hierarchical
