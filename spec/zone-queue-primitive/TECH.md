@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: done
