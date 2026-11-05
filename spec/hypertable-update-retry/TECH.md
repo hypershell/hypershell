@@ -3,7 +3,7 @@ slug: hypertable-update-retry
 title: A task-row write that waited on a row lock still lands on a TimescaleDB hypertable
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/hypertable-update-retry
 base: develop
 current_phase: done

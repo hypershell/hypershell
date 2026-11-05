@@ -175,3 +175,5 @@ The foreman rules as judge (2026-11-04).
 | R7 notes (pg13/pg18 develop runs, which 2.31 build) | record | CI's develop runs on `0e8275e` (run 41906240784) show pg13/pg18 green; the foreman's develop-fails run used 2.31.0-pg18 Community by digest (EVIDENCE harness note). |
 
 Verdict after triage: approved.
+
+**Erratum to the cycle-1 triage (foreman, 2026-11-04).** The F1 row says `revert_interrupted` runs "before the Confirm and Receiver threads exist". That is wrong: `ServerThread.start_threads` starts Confirm and the Receiver before the Scheduler (`server.py`), so both are running when start-up calls `revert_interrupted`. The ruling stands on the reason the R4 audit gives: at that point nothing has been dispatched in this run, so no in-server writer holds or contends those rows. Its only possible contenders remain other processes, which are seeded.
