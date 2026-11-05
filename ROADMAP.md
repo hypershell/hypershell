@@ -166,18 +166,6 @@ untested; the seed asks for that test first.
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
-## An unsorted inline task file can run a higher group first
-
-`hs cluster FILE` and `hs server FILE` used to schedule while the file was still being ingested,
-so a file that listed group 1 before group 0 hung about half the time with group 0 stranded.
-`group-advance-strands-lower-group` reads a task file in full before scheduling begins, so its
-groups run in ascending order whatever order the file lists them in. The cost, accepted by the
-maintainer, is that a large file's first task waits until the whole file is in. Pre-existing since
-task groups were added.
-
-*Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: that cycle's GOAL Q1*
-**Seed:** [`issues/group-order-unsorted-inline-file.md`](issues/group-order-unsorted-inline-file.md) · *status: adopted:group-advance-strands-lower-group*
-
 ## Refuse a submission below the group the schedule has reached
 
 A `hs submit` into a group lower than the one an active schedule has already reached cannot keep
@@ -187,7 +175,7 @@ error naming both groups. The same rule covers a task file run onto an advanced 
 (`--restart`, `--update`, `--repeat`). Pipes into `hs cluster`/`hs server` stay best effort. This is
 a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
 
-*Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: overlaps
+*Horizon: near-term · Depends on: `group-advance-strands-lower-group` (landed, #74) · Refs: overlaps
 `issues/ingest-robustness.md` (same ingest path)*
 **Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
 
