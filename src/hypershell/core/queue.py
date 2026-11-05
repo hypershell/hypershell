@@ -26,8 +26,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from multiprocessing import util, ProcessError
 from multiprocessing.managers import BaseManager, BaseProxy, Server, State, AutoProxy, listener_client
-from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener,
-                                        answer_challenge, deliver_challenge, BUFSIZE)
+from multiprocessing.connection import (_ConnectionBase, Listener, SocketListener, Client, Connection,
+                                        address_type, answer_challenge, deliver_challenge, BUFSIZE)
 from queue import Queue, SimpleQueue
 
 try:
@@ -45,7 +45,7 @@ from hypershell.core.tls import (TLSConfig, install_process_context, build_serve
 
 # Public interface
 __all__ = [
-    'DEFAULT_REMOTE_TIMEOUT', 'DEFAULT_LOCAL_TIMEOUT', 'TLS_SERIALIZER',
+    'DEFAULT_REMOTE_TIMEOUT', 'DEFAULT_LOCAL_TIMEOUT', 'TLS_SERIALIZER', 'PLAIN_SERIALIZER',
     'SENTINEL', 'make_sentinel',
     'SecureConnection', 'SecureListener', 'secure_client', 'SecureManager',
     'QueueConfig', 'QueueInterface', 'QueueServer', 'QueueClient',
@@ -61,6 +61,41 @@ TLS_SERIALIZER: Final[str] = 'hypershell-tls'
 When a :class:`BaseManager` is constructed with this serializer, both ends route their
 traffic through :class:`SecureListener` / :func:`secure_client` instead of the cleartext
 stock pair."""
+
+PLAIN_SERIALIZER: Final[str] = 'hypershell-plain'
+"""Serializer key for cleartext queue traffic: the stock listener and client with Nagle's algorithm
+off on every TCP connection. The wire is the stock one, byte for byte."""
+
+
+def _no_delay(sock: socket.socket) -> None:
+    """Turn off Nagle's algorithm on `sock` when it is a TCP socket; any other socket is left alone.
+
+    Both ends of a queue connection write twice before they read: the client sends the handshake's
+    last message and then its first request, and a TLS 1.3 server sends its session tickets and then
+    the challenge. With Nagle's algorithm on, the second write waits for the peer's delayed
+    acknowledgement (about 40 ms on Linux), on every new connection.
+    """
+    if sock.family in (socket.AF_INET, socket.AF_INET6) and sock.type == socket.SOCK_STREAM:
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+
+
+def _no_delay_connection(conn: Connection) -> None:
+    """Turn off Nagle's algorithm on the TCP socket behind a stock connection, through a duplicate of
+    its descriptor (the option belongs to the socket, not the descriptor)."""
+    try:
+        fd = os.dup(conn.fileno())
+    except (OSError, ValueError, AttributeError):  # Closed, or not a descriptor here (Windows)
+        return
+    try:
+        sock = socket.socket(fileno=fd)
+    except OSError:  # Not a socket
+        os.close(fd)
+        return
+    with sock:
+        _no_delay(sock)
 
 
 class SecureConnection(_ConnectionBase):
@@ -221,6 +256,7 @@ class SecureListener:
         """Block on the listening socket and return a TLS-wrapped connection."""
         raw, self._last_accepted = self._socket.accept()
         raw.setblocking(True)
+        _no_delay(raw)
         try:
             ssl_sock = self._server_context().wrap_socket(raw, server_side=True)
         except Exception:
@@ -265,6 +301,7 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
         raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             raw.setblocking(True)
+            _no_delay(raw)
             raw.connect(address)
             servername = (cfg.servername if cfg is not None and cfg.servername else None)
             if servername is None and ctx.check_hostname:
@@ -291,6 +328,35 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
 # connections opened by BaseProxy._connect / _incref / _decref also pick this up via
 # `self._Client = listener_client[serializer][1]`, so every byte on the wire is encrypted.
 listener_client[TLS_SERIALIZER] = (SecureListener, secure_client)
+
+
+class _PlainListener(Listener):
+    """The stock listener, with Nagle's algorithm off on each accepted TCP connection."""
+
+    def accept(self: _PlainListener) -> Connection:
+        """Accept a connection as the stock listener does. A manager's server gives its listener no
+        `authkey`, so the option is set before the handshake."""
+        conn = super().accept()
+        _no_delay_connection(conn)
+        return conn
+
+
+def _plain_client(address, family=None, authkey: Optional[bytes] = None) -> Connection:
+    """The stock :func:`multiprocessing.connection.Client`, with Nagle's algorithm off on a TCP
+    connection before the authentication handshake."""
+    if authkey is not None and not isinstance(authkey, bytes):
+        raise TypeError('authkey should be a byte string')
+    conn = Client(address, family)
+    if (family or address_type(address)) == 'AF_INET':
+        _no_delay_connection(conn)
+    if authkey is not None:
+        answer_challenge(conn, authkey)
+        deliver_challenge(conn, authkey)
+    return conn
+
+
+# Cleartext managers (serializer=PLAIN_SERIALIZER) and their proxies use this pair the same way.
+listener_client[PLAIN_SERIALIZER] = (_PlainListener, _plain_client)
 
 
 def _child_bootstrap(cfg: Optional[TLSConfig], user_init, user_initargs) -> None:
@@ -340,7 +406,8 @@ _INTERNALS: Final[Tuple[Tuple[str, Callable[[], bool]], ...]] = (
     ('Listener keeps its socket at _listener._socket',
      lambda: '_listener' in _names(Listener.__init__) and '_socket' in _names(SocketListener.__init__)),
     ('listener_client maps serializers to (Listener, Client) pairs',
-     lambda: len(listener_client['pickle']) == 2 and TLS_SERIALIZER in listener_client),
+     lambda: (len(listener_client['pickle']) == 2
+              and TLS_SERIALIZER in listener_client and PLAIN_SERIALIZER in listener_client)),
     ('BaseManager sets _state, _address, _authkey and _serializer',
      lambda: {'_state', '_address', '_authkey', '_serializer'} <= set(_names(BaseManager.__init__))),
     ('State.INITIAL, State.STARTED and State.SHUTDOWN',
@@ -700,8 +767,9 @@ class SecureManager(BaseManager):
     When constructed with an active :class:`TLSConfig`, selects the ``hypershell-tls``
     serializer so that the stock multiprocessing machinery automatically picks our
     :class:`SecureListener` and :func:`secure_client` for both the server-side listener and
-    every per-proxy RPC connection. When ``tls`` is ``None`` (or inactive), defers entirely
-    to :class:`BaseManager` with the default ``pickle`` serializer.
+    every per-proxy RPC connection. When ``tls`` is ``None`` (or inactive), selects the
+    ``hypershell-plain`` serializer: the stock cleartext listener and client, with Nagle's
+    algorithm off on every connection.
     """
 
     def __init__(self: SecureManager,
@@ -712,8 +780,7 @@ class SecureManager(BaseManager):
                  **kwargs: Any) -> None:
         """Initialize with optional `tls`; flip to TLS serializer only when `tls` is active."""
         self._tls = tls if (tls is not None and tls.is_active()) else None
-        if self._tls is not None:
-            kwargs.setdefault('serializer', TLS_SERIALIZER)
+        kwargs.setdefault('serializer', TLS_SERIALIZER if self._tls is not None else PLAIN_SERIALIZER)
         super().__init__(address=address, authkey=authkey, **kwargs)
 
     def start(self: SecureManager,
@@ -834,8 +901,8 @@ class QueueInterface(SecureManager, ABC):
     def __init__(self: QueueInterface, config: QueueConfig) -> None:
         """Initialize queue interface."""
         self.config = config
-        # `tls` is forwarded to SecureManager: when None or inactive, SecureManager behaves
-        # exactly like a stock BaseManager (cleartext TCP), preserving the existing default.
+        # `tls` is forwarded to SecureManager: when None or inactive, the queue speaks the stock
+        # cleartext wire, preserving the existing default.
         super().__init__(address=(self.config.host, self.config.port),
                          authkey=self.config.auth.encode('ascii'), tls=self.config.tls)
 

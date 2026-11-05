@@ -242,6 +242,34 @@ def test_roundtrip(tls: Optional[TLSConfig]) -> None:
             local.task_done()
 
 
+def no_delay(conn) -> bool:
+    """Whether Nagle's algorithm is off (``TCP_NODELAY`` set) on the socket behind `conn`."""
+    with socket.fromfd(conn.fileno(), socket.AF_INET, socket.SOCK_STREAM) as sock:
+        return sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) != 0
+
+
+@mark.unit
+def test_connections_disable_nagle(tls: Optional[TLSConfig]) -> None:
+    """Both ends of a live queue connection set ``TCP_NODELAY``.
+
+    The handshake ends with two writes before a read on the client (and a TLS 1.3 server writes its
+    session tickets before its challenge), so with Nagle's algorithm on, each new connection waits
+    out the peer's delayed acknowledgement.
+    """
+    with QueueServer(make_config(tls=tls)) as server:
+        client = connect('127.0.0.1', server.address[1], tls)
+        client.scheduled.put(b'x', timeout=WAIT)
+        assert server.scheduled.get(timeout=WAIT) == b'x'
+        client_conn = client.scheduled._tls.connection
+        assert no_delay(client_conn)
+        in_process = server.shutdown._args[0]
+        # Only the proxies' shared connection stays open once the handshake connections close.
+        assert wait_until(lambda: len(in_process._live) == 1), len(in_process._live)
+        with in_process._lock:
+            server_conn, = in_process._live
+            assert no_delay(server_conn)
+
+
 @mark.unit
 def test_sentinel_reaches_remote_consumer(tls: Optional[TLSConfig]) -> None:
     """The shutdown sentinel arrives intact at a remote consumer."""

@@ -1797,3 +1797,35 @@ None.
 ### Human-gate triggers
 
 - None triggered: no CONFIRMED finding. P7 (the multi-node run) is still pending, as before.
+
+## CI-found remediation (Linux, 2026-11-04)
+
+- **Finding (CONFIRMED on a Linux test-cluster node, Rocky 8, Python 3.12.13).** PR #76's CI hung on
+  all four Pythons in `tests/test_queue_gc.py`'s TLS stall probes and ran into the 20-minute job
+  limit. The cause is Nagle's algorithm with Linux delayed ACK. The client side of the
+  `multiprocessing` handshake ends with write, write, read (the `_WELCOME`, then the caller's
+  request), and neither Z1's TLS path nor the stock listener and client set `TCP_NODELAY`, so every
+  new connection waits about 40 ms for the server's delayed ACK. TLS 1.3 adds a second stall: the
+  server writes its session tickets, then the challenge, as separate writes. It is not a deadlock:
+  each probe round opens 14–18 connections, the per-round watchdog never fired, and the time adds up.
+  It is not test-only either: every queue connection on Linux pays about 40 ms, and stock 2.8.x pays
+  it too.
+- **Evidence (Linux).** Raw write-write-read: 40.8 ms with Nagle, 0.0 ms with `TCP_NODELAY`. Stock
+  `multiprocessing` first request/reply: 40.7 ms against 0.1 ms. The four failing tests with
+  `TCP_NODELAY` forced through a `sitecustomize` patch: 4 passed in 35.8 s, where without it they ran
+  past 300 s.
+- **Ruling (foreman, 2026-11-04).** Fix it in Z1: set `TCP_NODELAY` on every queue socket, on both
+  ends, plain and TLS, through the smallest seam where the stock `Listener`/`Client` makes the socket,
+  with no global monkeypatch of the standard library, skipping non-TCP families. Old clients stay
+  compatible: a socket option only, no wire change. Red first with a deterministic socket-option
+  test; no CI dependence on timing.
+- **Fix.** `core/queue.py`: `_no_delay` on the raw socket before the TLS handshake in
+  `SecureListener.accept` and before `connect` in `secure_client`. Cleartext managers now select a
+  `hypershell-plain` serializer key registered in `listener_client` (the same mechanism as
+  `hypershell-tls`), whose pair is the stock `Listener` and `Client` with the option set on the
+  accepted or dialed socket before the authentication handshake. The serializer key never crosses
+  the wire.
+- **Evidence (local, macOS).** Recorded in TECH.md under P1 ("CI-found remediation (Linux)"). The
+  foreman re-runs the Linux check on the test cluster; CI is the final proof.
+- **FSM.** P1 reopened and closed again; status `in_review` for a scoped review of this delta. The
+  cycle-8 verdict is untouched.

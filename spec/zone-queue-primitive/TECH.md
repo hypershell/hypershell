@@ -3,7 +3,7 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: done
+status: in_review
 branch: feature/zone-queue-primitive
 base: develop
 current_phase: done
@@ -829,6 +829,46 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   - **C9 source:** none is left that serves only multi-address dialing. The address match was
     removed in the review-5 remediation, and `src/` has no `getaddrinfo`, `gethostbyname` or
     `create_connection`.
+- **CI-found remediation (Linux, 2026-11-04; finding, ruling and Linux evidence in
+  [`REVIEW.md`](REVIEW.md)).** PR #76's CI hung in `tests/test_queue_gc.py`'s TLS stall probes on all
+  four Pythons. The cause is Nagle's algorithm with Linux delayed ACK: no queue socket set
+  `TCP_NODELAY`, so the handshake's write-write-read cost every new connection about 40 ms. P1 was
+  reopened under the foreman's ruling: set `TCP_NODELAY` on every queue socket, on both ends, plain
+  and TLS, through the smallest seam, with no wire change.
+  - [x] **Red first** (`tests/test_queue.py::test_connections_disable_nagle`, TLS on and off). A live
+        `QueueServer` and `QueueClient` round-trip one item; the test reads `TCP_NODELAY` on the
+        client proxy's connection and on the server's one remaining live connection (under the
+        server's lock). At `9f36de4` (Python 3.12.16) both cases fail on the client-side assertion.
+  - [x] **Fix** (`core/queue.py`). `_no_delay(sock)` sets the option on `AF_INET`/`AF_INET6` stream
+        sockets only and ignores `OSError`. TLS: on the raw socket in `SecureListener.accept` before
+        the handshake, and in `secure_client` before `connect`. Cleartext: `SecureManager` selects a
+        new `PLAIN_SERIALIZER` (`hypershell-plain`) when TLS is off, registered in `listener_client`
+        like `hypershell-tls`. Its pair is `_PlainListener` (the stock `Listener`, setting the option
+        on each accepted connection, before the server's handshake) and `_plain_client` (the stock
+        `Client` without `authkey`, the option, then the stock `answer_challenge`/`deliver_challenge`).
+        Both reach the stock connection's socket through a duplicated descriptor. The serializer key
+        never crosses the wire; framing and handshake are the stock ones. The `_INTERNALS` registry
+        check also requires the new key. `AGENTS.md` gains one bullet under Queue transport.
+  - **Gate record (macOS; frozen offline dev venvs, lock unchanged since `f45a5cf`, run against a
+    `git archive` extract with this change applied and its `src` first on the path; each run in an
+    isolated site, in its own process group under a kill timer).**
+    - **Red/green.** Red at `9f36de4`: 2 failed (TLS and plain). Green: 2 passed on 3.12.16 and on
+      3.14.10. Mutations on the green tree: without the server-side option (both `accept`s), 2 fail
+      on the server assertion; without the client-side option (both clients), 2 fail on the client
+      assertion.
+    - **`tests/test_queue_address_family.py`, 3.12.16:** 8 passed.
+    - **`tests/test_queue_gc.py` + `tests/test_queue.py`, 3.12.16, 5 consecutive runs:** 52 passed
+      each (55.3 s, 45.7 s, 55.3 s, 55.3 s, 47.4 s).
+    - **Full suite:** 3.12.16 769 passed, 79 skipped (8 min 12 s); 3.14.10 766 passed, 82 skipped
+      (8 min 4 s). Cycle 8's counts plus the two new cases; the skips are the same (a server
+      database, the 2.8.3 fixture regeneration, and on 3.14 three Z1 probes by design).
+    - **`unsupported_internals()`:** `[]` on 3.12.16 and 3.14.10 (`test_shared_checks_pass`).
+    - **CLI drive** (`hsx -t 'echo {}' -N4` over `seq 200`, TLS on and then `--no-tls`, in a throwaway
+      site on a free port), 3.12.16 and 3.14.10: 200 output lines each run, `hs list --count` 400,
+      `hs list --failed --count` 0, exit 0.
+  - **Not covered locally:** the Linux timing, which was not measured on this host. The foreman
+    re-runs the Linux check on the test cluster, and CI is the final proof. No timing assertion was
+    added.
 - **Verify:** `uv run pytest -v tests/test_queue.py tests/test_queue_gc.py tests/test_queue_start.py
   tests/test_queue_limits.py tests/test_queue_tls.py`, then drive `hsx` with TLS on and with `--no-tls` in a `temp_site` (the
   frontmatter command).
@@ -840,7 +880,8 @@ stdio. This is the core, small and novel slice: everything else builds on it.
   `tests/test_queue_start.py`, `ROADMAP.md` and three seeds in `issues/`; review-5 remediation
   `tests/test_queue_gc.py`, `AGENTS.md`, `ROADMAP.md`, one new seed and two amended seeds in `issues/`;
   review-6 remediation `tests/test_queue_gc.py`, `tests/test_queue.py` and `AGENTS.md`; the C10
-  quick-review follow-up the same three; the develop merge's adaptation `tests/test_queue_gc.py`.
+  quick-review follow-up the same three; the develop merge's adaptation `tests/test_queue_gc.py`; the
+  CI-found remediation `src/hypershell/core/queue.py`, `tests/test_queue.py` and `AGENTS.md`.
 
 ## Phase P2 — Swap the four queues to queue.Queue with a pinned method surface
 **Satisfies:** R2, R3, R4, R6 · **Depends on:** P1
