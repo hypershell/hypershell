@@ -50,7 +50,7 @@ from hypershell.core.types import smart_coerce, JSONData, to_json_type
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, Source, JSON, CANCEL_STATUS
+from hypershell.data.model import Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME
 from hypershell.data import ensuredb, DATABASE_DIALECT
 
 # Public interface
@@ -62,7 +62,7 @@ log = Logger.with_name(__name__)
 
 
 SUBMIT_PROGRAM = 'hs task submit'
-SUBMIT_SYNOPSIS = f'{SUBMIT_PROGRAM} [-h] [-t TAG [TAG...]] -- ARGS...'
+SUBMIT_SYNOPSIS = f'{SUBMIT_PROGRAM} [-h] [-t TAG [TAG...]] [--zone NAME] -- ARGS...'
 SUBMIT_USAGE = f"""\
 Usage:
   {SUBMIT_SYNOPSIS}
@@ -77,6 +77,7 @@ Arguments:
 
 Options:
   -t, --tag    TAG...    Assign tags as `key:value`.
+      --zone   NAME      Zone of the task; only clients of this zone run it.
   -h, --help             Show this message and exit.\
 """
 
@@ -93,15 +94,24 @@ class TaskSubmitApp(Application):
     taglist: List[str] = []
     interface.add_argument('-t', '--tag', nargs='+', dest='taglist')
 
+    zone: Optional[str] = None
+    interface.add_argument('--zone', default=None)
+
     exceptions = {
         **get_shared_exception_mapping(__name__)
     }
 
     def run(self: TaskSubmitApp) -> None:
         """Submit task to database."""
+        if self.zone is not None:
+            try:
+                self.zone = zone_name(self.zone)
+            except ValueError as error:
+                raise ArgumentError(str(error)) from error
         ensuredb()
         self.check_tags()
-        task = Task.new(args=' '.join(self.argv), tag=self.tags)
+        zone = None if self.zone is None else Zone.ensure(self.zone)
+        task = Task.new(args=' '.join(self.argv), tag=self.tags, zone=zone)
         Task.add(task)
         print(task.id)
 
@@ -211,7 +221,9 @@ class TaskInfoApp(Application):
 
     def print_field(self: TaskInfoApp) -> None:
         """Print single field."""
-        if self.extract_field != 'tag':
+        if self.extract_field == 'zone':
+            print(resolve_zone(self.task.zone))
+        elif self.extract_field != 'tag':
             print(json.dumps(self.task.to_json().get(self.extract_field)).strip('"'))
         elif self.output_format == 'normal':
             print(', '.join(f'{k}:{v}' if v else k for k, v in self.task.tag.items()))
@@ -228,7 +240,9 @@ class TaskInfoApp(Application):
     def print_formatted(self: TaskInfoApp) -> None:
         """Format and print task metadata to console."""
         formatter = self.format_method[self.output_format]
-        output = formatter(self.task.to_json())  # NOTE: to_json() just means dict with converted value types
+        data = self.task.to_json()  # NOTE: to_json() just means dict with converted value types
+        data['zone'] = resolve_zone(self.task.zone)
+        output = formatter(data)
         if sys.stdout.isatty():
             output = Syntax(output, self.output_format, word_wrap=True,
                             theme = config.console.theme, background_color = 'default')
@@ -714,7 +728,7 @@ class TaskSearchApp(Application, SearchableMixin):
                 raise ArgumentError(
                     f'Refusing to list {matched:,} tasks (over {DATABASE_TOO_BIG:,}); pass --all to '
                     f'dump everything, --limit N to bound the result, or --count to count them')
-        self.print_output(query.all())
+        self.print_output(self.zone_names(query.all()))
 
     @staticmethod
     def print_tag_keys() -> None:
@@ -744,6 +758,14 @@ class TaskSearchApp(Application, SearchableMixin):
         else:
             for (value, ) in Session.query(distinct(Task.tag[name])).filter(Task.tag[name].isnot(None)):
                 print(value)
+
+    def zone_names(self: TaskSearchApp, results: List[Tuple]) -> List[Tuple]:
+        """Records with the zone id replaced by its name, for the formats that print fields as they are."""
+        if 'zone' not in self.field_names or self.output_format in ('normal', 'card'):
+            return results
+        index = self.field_names.index('zone')
+        names = Zone.names_for_ids([record[index] for record in results if record[index]])
+        return [(*record[:index], resolve_zone(record[index], names), *record[index + 1:]) for record in results]
 
     @functools.cached_property
     def print_output(self: TaskSearchApp) -> Callable[[List[Tuple]], None]:
@@ -791,9 +813,10 @@ class TaskSearchApp(Application, SearchableMixin):
         """Print semi-structured output with all field names."""
         tasks = [Task.from_dict(dict(zip(Task.columns, record))) for record in results]
         source_map = Source.paths_for_ids([task.source for task in tasks if task.source])
+        zone_map = Zone.names_for_ids([task.zone for task in tasks if task.zone])
         for task in tasks:
             print('---')
-            print_normal(task, source_map=source_map)
+            print_normal(task, source_map=source_map, zone_map=zone_map)
 
     @staticmethod
     def print_card(results: List[Tuple]) -> None:
@@ -802,12 +825,14 @@ class TaskSearchApp(Application, SearchableMixin):
         source_ids = [task.source for task in tasks if task.source]
         source_map = Source.paths_for_ids(source_ids)
         fingerprint_map = Source.fingerprints_for_ids(source_ids)
+        zone_map = Zone.names_for_ids([task.zone for task in tasks if task.zone])
         console = card_console()
         width = console.width
         for i, task in enumerate(tasks):
             if i:
                 console.print()  # A blank line separates adjacent cards.
-            console.print(render_card(task, width, source_map=source_map, fingerprint_map=fingerprint_map))
+            console.print(render_card(task, width, source_map=source_map, fingerprint_map=fingerprint_map,
+                                      zone_map=zone_map))
 
     def print_plain(self: TaskSearchApp, results: List[Tuple]) -> None:
         """Print plain text output with given field names, one task per line."""
@@ -1333,6 +1358,7 @@ NORMAL_MODE_TEMPLATE: Final[str] = """\
           id: {id} ({fingerprint})
        group: {group}
       source: {source} ({source_id})
+        zone: {zone}
         args: {args}
      command: {command}
        cores: {cores} (used: {cores_max})
@@ -1435,6 +1461,24 @@ def resolve_source(source: Optional[str], source_map: Optional[Dict[str, str]] =
     return format_source(path) if path else source
 
 
+def resolve_zone(zone: Optional[str], zone_map: Optional[Dict[str, str]] = None) -> str:
+    """
+    Resolve a task's `zone` id to the zone's name.
+
+    NULL is the default zone. A batched `zone_map` (id -> name) is consulted first to avoid an
+    N+1 lookup; otherwise a single `Zone.from_id` resolves it. An id with no zone row degrades to
+    the raw id rather than raising.
+    """
+    if not zone:
+        return DEFAULT_ZONE_NAME
+    if zone_map is not None:
+        return zone_map.get(zone, zone)
+    try:
+        return Zone.from_id(zone).name
+    except Zone.NotFound:
+        return zone
+
+
 def resolve_source_fingerprint(source: Optional[str],
                                fingerprint_map: Optional[Dict[str, str]] = None) -> Optional[str]:
     """
@@ -1455,14 +1499,16 @@ def resolve_source_fingerprint(source: Optional[str],
         return None
 
 
-def format_task_fields(task: Task, source_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+def format_task_fields(task: Task, source_map: Optional[Dict[str, str]] = None,
+                       zone_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     Prepare a task's columns as display values shared by the `normal` and `card` views.
 
     Every column is JSON-formatted first, then the human-friendly overrides are applied:
     durations/timeout as `timedelta`, memory via `format_bytes`, the resolved `source` path
-    plus its raw id (`source_id`), and tags flattened to `key:value` pairs. `source_map`
-    (id -> path) lets a multitask caller batch-resolve sources and avoid an N+1 lookup.
+    plus its raw id (`source_id`), the zone's name with its id (`zone`; the default zone by name
+    alone, and the raw id as `zone_id`), and tags flattened to `key:value` pairs. `source_map`
+    (id -> path) and `zone_map` (id -> name) let a multitask caller batch-resolve and avoid N+1 lookups.
     """
     data = {k: format_json(v) for k, v in task.to_dict().items()}
     data['waited'] = 'null' if task.waited is None else timedelta(seconds=int(task.waited))
@@ -1475,10 +1521,14 @@ def format_task_fields(task: Task, source_map: Optional[Dict[str, str]] = None) 
     data['timeout'] = 'null' if not task.timeout else timedelta(seconds=int(task.timeout))
     data['source_id'] = format_json(task.source)          # raw Source.id, shown in parens on `source`
     data['source'] = resolve_source(task.source, source_map)
+    data['zone_id'] = format_json(task.zone)
+    name = resolve_zone(task.zone, zone_map)
+    data['zone'] = name if not task.zone else f'{name} ({task.zone})'
     return data
 
 
-def print_normal(task: Task, source_map: Optional[Dict[str, str]] = None) -> None:
+def print_normal(task: Task, source_map: Optional[Dict[str, str]] = None,
+                 zone_map: Optional[Dict[str, str]] = None) -> None:
     """
     Print semi-structured task metadata with all field names.
 
@@ -1486,7 +1536,7 @@ def print_normal(task: Task, source_map: Optional[Dict[str, str]] = None) -> Non
     avoid an N+1 lookup; when omitted (e.g. `hs info`), the single source is resolved directly.
     """
     color = select_color(task.exit_status)
-    print(color(NORMAL_MODE_TEMPLATE.format(**format_task_fields(task, source_map))))
+    print(color(NORMAL_MODE_TEMPLATE.format(**format_task_fields(task, source_map, zone_map))))
 
 
 # The `card` view supports terminal widths in this range; a raw console width is clamped
@@ -1531,7 +1581,8 @@ def card_region(title: str, rows: List[Tuple[str, Any]]) -> Group:
 
 
 def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = None,
-                fingerprint_map: Optional[Dict[str, str]] = None) -> Panel:
+                fingerprint_map: Optional[Dict[str, str]] = None,
+                zone_map: Optional[Dict[str, str]] = None) -> Panel:
     """
     Build a `rich` card for one task (the `card` output format).
 
@@ -1547,7 +1598,7 @@ def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = N
     # One column below 90; two through 149; three only when wide enough that a full UUID
     # value does not fold mid-token. The identity header goes fully horizontal at >= 130.
     ncols = 1 if width < 90 else 2 if width < 150 else 3
-    data = format_task_fields(task, source_map)
+    data = format_task_fields(task, source_map, zone_map)
     label = task.status_label
     style = STATUS_STYLES.get(label, 'magenta')
     # The Source content-fingerprint rides in parens on the `source id` line, when the source has one.
@@ -1576,7 +1627,7 @@ def render_card(task: Task, width: int, source_map: Optional[Dict[str, str]] = N
     # responsive grid, so long source paths and the command line are never cramped into a cell.
     submission = card_region('submission', [('args', data['args']), ('command', data['command']),
                                             ('source', data['source']), ('source id', source_id),
-                                            ('exit status', data['exit_status'])])
+                                            ('zone', data['zone']), ('exit status', data['exit_status'])])
     metadata = [
         card_region('timing', [('submitted', data['submit_time']), ('scheduled', data['schedule_time']),
                                ('started', data['start_time']), ('completed', data['completion_time']),

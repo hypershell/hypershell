@@ -285,7 +285,7 @@ function _hs_task_submit() {
 		tag) _hs_complete_tags "${current}"; return ;;
 	esac
 
-	COMPREPLY=($(compgen -W "-h --help -t --tag --" -- "${current}"))
+	COMPREPLY=($(compgen -W "-h --help -t --tag --zone --" -- "${current}"))
 }
 
 
@@ -522,7 +522,7 @@ function _hs_submit() {
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 	local all_opts="-h --help -f --task-file --from-json -q --queue -H --host -p --port -k --auth
 	--no-tls --tls-key --tls-cert --tls-ca --template -t --tag -b --bundlesize -w --bundlewait
-	-c --cores -m --memory -W --timeout -g --group --repeat --update --initdb --"
+	-c --cores -m --memory -W --timeout -g --group --zone --repeat --update --initdb --"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then
@@ -579,7 +579,7 @@ function _hs_client() {
 	-H --host -p --port -k --auth --no-tls --tls-key --tls-cert --tls-ca
 	-d --delay-start --no-confirm -o --output -e --errors --capture
 	-C --client-cores -M --client-memory --monitor
-	-T --timeout -W --task-timeout -R --ratelimit -S --signalwait"
+	-T --timeout -W --task-timeout -R --ratelimit -S --signalwait --zone"
 
 	case "${previous}" in
 		-o | --output | -e | --errors | --tls-key | --tls-cert | --tls-ca)
@@ -682,7 +682,7 @@ function _hs_cluster() {
 	-d --delay-start --capture -o --output -e --errors -f --failures
 	-c --cores -m --memory -C --client-cores -M --client-memory --monitor
 	-T --timeout -W --task-timeout -R --ratelimit -S --signalwait
-	-A --autoscaling -F --factor -P --period -I --init-size -X --min-size -Y --max-size"
+	-A --autoscaling -F --factor -P --period -I --init-size -X --min-size -Y --max-size --zone"
 
 	if [ "${COMP_CWORD}" -eq 2 ]
 	then

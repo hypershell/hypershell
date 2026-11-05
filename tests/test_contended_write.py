@@ -48,7 +48,7 @@ from sqlalchemy.engine import Engine
 from hypershell.client import ClientInfo
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
-from hypershell.data.model import Task, serialize_tasks, deserialize_tasks
+from hypershell.data.model import Task, CANCEL_STATUS, serialize_tasks, deserialize_tasks
 from hypershell.server import Confirm, ConfirmState, Receiver
 from tests import main_lines
 from tests.test_timescale import (admin, ts_database, ts_site, database_engine, is_hypertable, uuid7,  # noqa: F401
@@ -325,3 +325,38 @@ def test_contended_orphan_revert_lands(contended_db) -> None:
     data = row(contended_db, task_id)
     assert data['schedule_time'] is None
     assert data['client_id'] is None
+
+
+def test_contended_staged_revert_lands(contended_db) -> None:
+    """A staged revert that waited on another write to its still-pending row reverts it."""
+    task_id = submit()
+    dispatch_one(task_id)
+    holder_sql = f'UPDATE task SET client_host = :client_host {BY_ID}'
+
+    outcome = contend(contended_db, holder_sql, {'client_host': 'holder', 'id': task_id},
+                      lambda: Task.revert_staged([task_id]))
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == 1
+    data = row(contended_db, task_id)
+    assert {name: data[name] for name in REVERTED} == {name: None for name in REVERTED}
+
+
+def test_contended_staged_revert_keeps_cancel(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """A staged revert that waited on a cancel of its row leaves the row cancelled."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = submit()
+    dispatch_one(task_id)
+    cancelled = datetime.now().astimezone()
+    holder_sql = ('UPDATE task SET schedule_time = :cancelled, completion_time = :cancelled, '
+                  f'exit_status = :status {BY_ID}')
+
+    outcome = contend(contended_db, holder_sql, {'cancelled': cancelled, 'status': CANCEL_STATUS, 'id': task_id},
+                      lambda: Task.revert_staged([task_id]))
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == 0
+    data = row(contended_db, task_id)
+    assert (data['schedule_time'], data['completion_time']) == (cancelled, cancelled)
+    assert data['exit_status'] == CANCEL_STATUS
+    assert warnings_with(caplog, 'staged revert') == []

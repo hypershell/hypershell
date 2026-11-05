@@ -15,7 +15,7 @@ lane: public
 Five small, independent defects clustered in the client/task-output path. Batched because each is a
 few lines, none is controversial, and they share reviewers and tests.
 
-- **Binary output crashes retrieval (M8).** `hs task info --stdout` and `hs task run`'s output
+- **Binary output crashes retrieval (M8).** `hs info --stdout` and `hs run`'s output
   print read capture files in text mode and stream them (`task.py:240-241`, `:422-430`); one
   non-UTF-8 byte raises `UnicodeDecodeError` into the generic traceback handler. The on-disk file
   is byte-faithful — only our reader faults. Fix: open `rb`, copy to `stdout.buffer`.

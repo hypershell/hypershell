@@ -1,6 +1,7 @@
 Launch client directly, run tasks in parallel.
 
-The client connects to the server and pulls bundles of tasks off the shared queue.
+The client connects to the server and, whenever it is ready for work, requests a bundle of tasks
+of its own size (``-b``/``--bundlesize``; the server's size when not given).
 These tasks are run locally by some number of a parallel task executors.
 
 The environment for tasks are the same as for the client. Standard output and error

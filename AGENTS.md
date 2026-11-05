@@ -77,7 +77,7 @@ Top-level package `src/hypershell/`:
 | `submit.py` | `SubmitApp` / `SubmitThread` / `LiveSubmitThread` — ingest commands from stdin/files, assign UUIDs, parse `# HYPERSHELL:` tags, write task rows. Also the source-gating for safe re-submission (`--restart`/`--repeat`/`--update`): `GatedSource`, `source_fingerprint_and_count`, `apply_source_gate`. |
 | `server.py` | `ServerThread`, the `Scheduler` FSM (load/pack/post bundles), and `HeartMonitor` (client eviction + task revert). |
 | `client.py` | `ClientThread`, `ClientScheduler` + `TaskExecutor` FSMs — pull bundles, run subprocesses, emit heartbeats, return results. |
-| `task.py` | The `task` CLI group and top-level `submit`/`info`/`wait`/`run`/`list`/`search`/`update` apps, incl. exit-status-colorized `hs list`. |
+| `task.py` | The top-level `info`/`wait`/`run`/`list`/`update` apps, incl. exit-status-colorized `hs list`, and the legacy `task` group (kept until v3). |
 | `core/` | Shared infrastructure (see below). |
 | `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection. `InitDBApp` (`hs initdb`) and the `initdb`/`checkdb`/`ensuredb` helpers live in `data/__init__.py`; the schema-upgrade step in `data/upgrade.py`. |
 | `data/model.py` | `Entity` base + `Task`, `Client`, and `Source` ORM models (`Source` records submission provenance for re-submission gating; `DIRECT_SOURCE_ID`/`STDIN_SOURCE_ID` are reserved source ids). **Most query/state logic lives as `Task` classmethods here.** |
@@ -156,13 +156,27 @@ replaces the other.
 ## Architecture & data flow
 
 ```
-submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─bundles→ [TCP queue] → client(ClientScheduler)
+submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─stages→ [zone pools] ←request─ client(ClientScheduler)
                        ▲                                                                      │ spawns subprocs
                        └──────────────── server writes exit/timing/output back ──────────────┘ returns results
 ```
 
-The queue exposes four `JoinableQueue`s over one manager: `scheduled` (task bundles),
-`completed` (results), `heartbeat` (client liveness), `confirmed` (bundle acks).
+The queue exposes four threading `queue.Queue`s served in-process by the manager's request
+handling: `scheduled` (task bundles submitted live, without a database), `completed` (results),
+`heartbeat` (client liveness), `confirmed` (bundle acks); and one `Dispatcher` (`core/dispatch.py`),
+whose two remotely callable methods are `request`, which hands work to clients, and
+`takes_submissions`, which `hs submit -q` calls to learn whether the server serves its live queue
+(only a server without a database does). The scheduler stages stamped tasks in one pool per zone;
+a client calls `request` with its id, zone and advertised size, and the call runs on the handler
+thread of that client's own connection and returns, on it, up to that many tasks
+cut from its zone's pool (JSON text both ways, bounded wait, first-come-first-served). There is no manager child process: `QueueServer.start` runs its own
+accept loop around the stock `multiprocessing.managers.Server` on daemon threads of the server
+process (`core/queue.py` `_InProcessServer`), whose handler threads and the server's own threads
+share the same queue objects. That loop leans on CPython privates; `tests/test_queue.py`
+`TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`)
+on the queues and a pinned two-method surface (`DISPATCH_EXPOSED`: `request` and
+`takes_submissions`) on the dispatcher; `tests/test_dispatch_version.py` pins the latter, so a
+method added to or dropped from that pickle-framed RPC surface fails a test.
 
 **Two modes change the picture — check for them before assuming DB behavior:**
 - `in_memory` (in-memory SQLite): the `Scheduler` is `None` and the server **skips all DB
@@ -257,8 +271,16 @@ Long-running work runs in **daemon threads** (`core/thread.py`) driving **state 
 
 **Shutdown/sentinel ordering is load-bearing.** Preserve the exact ordering in
 `ServerThread`/`ClientThread` (client: scheduler → executors → collector → heartbeat; server:
-submitter → scheduler → sentinels to heartbeat/receiver/confirm) and the submit flush
+submitter → scheduler → `dispatcher.finish()` (where per-client sentinels on `scheduled` used to
+be posted: clients drain their zone's staged tasks, then are told to shut down) → heartbeat join →
+staged revert (`ServerThread.revert_staged`: rows still staged, never delivered, go back to
+unscheduled) → sentinels to receiver/confirm) and the submit flush
 (`loader.join()` then `queue.put(None)`). Reordering drops the last results or hangs a join.
+**A staged revert never touches a completed or cancelled row.** Both staged reverts, at shutdown and
+when a zone's last client leaves (`Scheduler.revert_unstaged`), go through `Task.revert_staged`: a
+conditional update per row on `completion_time IS NULL`, so a row cancelled while staged stays
+cancelled and a deleted one is skipped; under contention it is re-run only while a fresh read finds
+the row still without a `completion_time`. Never revert staged ids with the unconditional `Task.revert_all`.
 The stream sentinel is `make_sentinel()` (`serialize(None)`); consumers detect end-of-stream
 by dequeuing it. **Remote-queue payloads go through `serialize_tasks`/`deserialize_tasks` and
 `heartbeat.pack` (JSON) — never put a live object or a literal `None` on a remote queue.**
@@ -289,6 +311,35 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   the placeholder key `DEFAULT_AUTH = '<not-secure>'` and enforces `AUTH_MINIMUM_LENGTH`
   (≥16) and `AUTH_ALLOWED_CHARS` (`[A-Za-z0-9._+/=-]`). Never weaken these; never remove the
   authkey to "disable TLS" (pass `tls=None` instead).
+- **The server process hosts the manager.** Queue connections, the HMAC handshake and the TLS
+  handshake are handled by threads of the server process itself (not a forked manager child). The
+  server's TLS context lives on its own listener, never in the process-wide slot that clients
+  install (`core/tls.py` `install_process_context`), so a same-process client with another TLS
+  config cannot affect it. The wire, auth and TLS behaviour are those of the stock manager,
+  unchanged. A failure to start serving (unsupported CPython internals, bind or listen error)
+  raises `QueueServerError` from `QueueServer.start`, which `ServerThread.start` re-raises. Since
+  every connection's descriptor lives in the server process, the accept loop refuses a connection
+  that would use the last `RESERVE` descriptors below the soft open-file limit (one WARNING per
+  interval), so the database and logs keep working; a server TLS context that cannot be built is
+  logged once at ERROR and connections fail closed. A queue client's proxy finalizer (its decref)
+  can run on any thread the cyclic GC picks, server threads included. So once `QueueClient.connect`
+  has made a proxy, a decref finalized on the server side goes to the `hypershell-queue-decref`
+  thread, which the process's first server starts (`core/queue.py` `_decref`). The server side is
+  decided by thread, never by address: every thread an in-process server starts (accept loop,
+  handlers, stop, the sender), any thread inside a server's start or stop, any thread in a TLS
+  handshake with a queue server (the accept loop runs it inline), and any thread that `threading`
+  has not registered as started: a new thread before its mark, one past its unregistration, or one
+  that `threading` did not start (an entry left under a reused identifier by an ended thread does not
+  count). Every other decref is the stock one, on the finalizing thread. A forked child drops the marks and waiting decrefs it inherits.
+- **Every queue TCP connection sets `TCP_NODELAY` on both ends where the platform allows it**
+  (`core/queue.py` `_no_delay`): TLS in `SecureListener.accept` and `secure_client`, cleartext
+  through the `hypershell-plain` serializer's `(Listener, Client)` pair. The cleartext pair reaches
+  the stock connection's socket through a duplicated descriptor (skipped where there is none, as on
+  Windows) and puts back the descriptor's blocking mode, which a process default socket timeout
+  would otherwise clear. The client writes twice before a read (the handshake's last message, then
+  its first request); the server does so only under TLS 1.3 (its session tickets, then the
+  challenge). With Nagle's algorithm on, that second write waits out the peer's delayed ACK (about
+  40 ms on Linux) on every new connection. It is a socket option only; the wire is unchanged.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
   mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,
@@ -362,7 +413,9 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   qualifies, at most `CONTENDED_RERUNS` times, each extra attempt logged at DEBUG; at the bound it
   logs a WARNING naming the task and the path and takes a safe outcome (never a crash, a silently
   stranded task, or a write that lands without its condition). A write that matches first time is
-  neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id) and
+  neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id),
+  `Task.revert_staged` (the same, conditional on `completion_time IS NULL`, and its re-check asks
+  the same: a row completed, cancelled or deleted meanwhile is skipped, never reverted) and
   `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
   held by the Receiver) are the pattern. Never use `bulk_update_mappings` or an ORM flush for such a
   write: they assert the total and raise `StaleDataError`. The Scheduler's `Task.next` stamp and
@@ -404,6 +457,10 @@ underlines (must be ≥ title length), `-------------------` section rules, `|br
 italics, first-person-plural voice. CLI help text is generated into `docs/_include/*.rst` — a
 CLI change updates those. Build with `uv run sphinx-build docs docs/_build` and confirm no new
 warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-existing).
+
+Current docs, notes, seeds and PRs name only the top-level commands: `hs list`, `hs info`,
+`hs wait`, `hs run`, `hs update`. The `hs task …` subcommands stay in the code for backwards
+compatibility until v3, but are never referenced.
 
 ## High-risk files & footguns (quick reference)
 

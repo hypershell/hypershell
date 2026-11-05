@@ -44,6 +44,9 @@ Options
     scheduling. This bypasses the database entirely, which is useful for transient
     workflows or when a database is not configured.
 
+    The server must be running without a database (``--no-db``). A server with a database
+    schedules only from it, so it refuses the submission and the command exits with an error.
+
     Requires ``-H``, ``-p``, and ``-k`` options to specify the server connection.
 
 ``-H``, ``--host`` *ADDR*
@@ -117,6 +120,14 @@ Options
 
     All tasks default to group 0 for backwards compatibility. Users can organize tasks into
     multiple groups (e.g., 0, 1, 2, ...) where lower-numbered groups execute first.
+
+``--zone`` *NAME*
+    Zone of the submitted tasks (default: none, the reserved default zone).
+
+    Only a client launched with the same ``--zone`` runs these tasks; a client given no
+    ``--zone`` runs only tasks without one. Zone names are arbitrary text (``default`` names the
+    default zone). Zones are recorded in the database, so ``--zone`` cannot be used with
+    ``--queue``. Zone is placement only: task groups still run in order across all zones.
 
 ``--initdb``
     Auto-initialize database.

@@ -25,10 +25,9 @@ See the deferral table in [`AGENTS.md`](AGENTS.md) for which lane a deferral bel
 prerequisites the feature cycles depend on rather than merely being urgent — those dependencies are
 named in each entry. Horizons are indicative; the stated dependencies are the hard constraints.
 
-Some seeds cite maintainer-local records under `.local/` — `IMPROVEMENTS.md` for the GNU Parallel
-comparison's finding ids (H\*, M\*, L\*), `timescale-ideas-transcript.txt` for the TimescaleDB notes.
-That directory is gitignored: the named review and the ids are stable, the paths are not resolvable
-from a clone.
+Some seeds cite a maintainer-local record under `.local/`: `IMPROVEMENTS.md`, for the GNU Parallel
+comparison's finding ids (H\*, M\*, L\*). That directory is gitignored: the named review and the
+ids are stable, the path is not resolvable from a clone.
 
 ---
 
@@ -57,7 +56,7 @@ it is in. A task whose argument line is `2026-11-02` or `20261102`, an ordinary 
 the client as a datetime, template expansion fails on it, and the task is recorded as a template
 error without running. Decoding by declared column type, not by guessing, removes the class.
 
-*Horizon: near-term · Depends on: — · Refs: found by the writeback fix's research*
+*Horizon: near-term · Depends on: — · Refs: found by `writeback-scoped-conditional`'s research*
 **Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md)
 
 ## Unguarded task start kills the executor and poisons the task
@@ -70,29 +69,6 @@ never got the same treatment.
 
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/task-start-spawn-guard.md`](issues/task-start-spawn-guard.md)
-
-## Result writeback is last-writer-wins over every column
-
-A returning result rewrites *every* column from the client's wire copy of the row — including
-`schedule_time`, `attempt`, `retried`, and the retry-chain links. Combined with the fact that an
-evicted client is never told to stop, a stale bundle can stamp a row "done" while another client is
-still running that command. Scoping the write to result columns and making it conditional on the
-row's owner and in-flight state closes the corruption without needing any new transport.
-
-*Horizon: near-term · Depends on: — · Refs: prerequisite for relay (R5/R6 inherit the return path)*
-**Seed:** [`issues/writeback-scoped-conditional.md`](issues/writeback-scoped-conditional.md)
-
-## A late result can reopen a retried row
-
-One concrete path through the writeback hole above. An evicted client's late result writes
-`retried=False` and `next_id=None` back onto a row the scheduler has already retried, so the next
-`Task.next` writes a second retry row with the same `previous_id`. Only a pre-2.9 SQLite database,
-which keeps the old UNIQUE constraint, rejects it; anywhere else it is written silently. Found
-by reading, not yet reproduced; the seed asks for the test first. The scoped writeback probably
-closes it, in which case this retires with that cycle.
-
-*Horizon: near-term · Depends on: — · Refs: writeback fix (likely subsumes it)*
-**Seed:** [`issues/late-result-resets-retried.md`](issues/late-result-resets-retried.md)
 
 ## No process-group ownership; SIGTERM and Ctrl-C tear down without cleanup
 
@@ -125,11 +101,26 @@ reconnect path at all, so one coordinator blip terminates the whole fleet; and c
 results die with whichever process was holding them. One invariant covers all three: **a transient
 failure of the coordinator path degrades to retry-with-backoff, never to process death and never to
 lost results.** Clients park unsent results and redeliver on reconnect, which closes the ack window
-rather than documenting it as a hazard.
+rather than documenting it as a hazard. The end goal is that any node (server, client or relay) can
+be bounced without bringing the system down and recovers gracefully, behind one retry/backoff
+mechanism; not before SC26.
 
-*Horizon: near-term · Depends on: — · Refs: relay R9 is verbatim this machinery — build it once here
-and the relay's upstream connector inherits it; shares the `data/core.py` provider seam with turso*
+*Horizon: after SC26 · Depends on: — · Refs: the relay cycle builds the first instance of this machinery
+(relay R9, its upstream link); lift it into the shared mechanism here; shares the `data/core.py` provider seam with turso*
 **Seed:** [`issues/coordinator-resilience-retry-backoff.md`](issues/coordinator-resilience-retry-backoff.md)
+
+## A client cut off partway through connecting hangs until evicted
+
+A client opens several queue connections as it starts. When the server accepts some and drops a
+later one, the thread that lost its connection dies with `EOFError`, but the client process keeps
+running and holds its confirmed tasks until the server evicts it (600 s by default). The client
+should exit promptly and non-zero so its tasks are recovered, or retry the connection within a
+bound. Seen at the open-file limit, where the server refuses new connections, with the same client
+behaviour on `b819de6`.
+
+*Horizon: near-term · Depends on: — · Refs: coordinator resilience (a reconnect path may subsume
+it); `spec/zone-queue-primitive/` (review cycle 2, C3)*
+**Seed:** [`issues/client-partial-connect-hang.md`](issues/client-partial-connect-hang.md)
 
 ## Ingest robustness: all-or-nothing submission, no length awareness
 
@@ -190,18 +181,6 @@ untested; the seed asks for that test first.
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
-## An unsorted inline task file can run a higher group first
-
-`hs cluster FILE` and `hs server FILE` used to schedule while the file was still being ingested,
-so a file that listed group 1 before group 0 hung about half the time with group 0 stranded.
-`group-advance-strands-lower-group` reads a task file in full before scheduling begins, so its
-groups run in ascending order whatever order the file lists them in. The cost, accepted by the
-maintainer, is that a large file's first task waits until the whole file is in. Pre-existing since
-task groups were added.
-
-*Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: that cycle's GOAL Q1*
-**Seed:** [`issues/group-order-unsorted-inline-file.md`](issues/group-order-unsorted-inline-file.md) · *status: adopted:group-advance-strands-lower-group*
-
 ## Refuse a submission below the group the schedule has reached
 
 A `hs submit` into a group lower than the one an active schedule has already reached cannot keep
@@ -211,7 +190,7 @@ error naming both groups. The same rule covers a task file run onto an advanced 
 (`--restart`, `--update`, `--repeat`). Pipes into `hs cluster`/`hs server` stay best effort. This is
 a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
 
-*Horizon: near-term · Depends on: `group-advance-strands-lower-group` · Refs: overlaps
+*Horizon: near-term · Depends on: `group-advance-strands-lower-group` (landed, #74) · Refs: overlaps
 `issues/ingest-robustness.md` (same ingest path)*
 **Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
 
@@ -296,8 +275,8 @@ elsewhere; and `hs update --cancel` marks rows terminal without touching the pro
 a server→client control path — and `zone`'s request-return dispatch surface is that seam, so this
 waits rather than building one twice.
 
-*Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half is closed
-separately by the writeback fix*
+*Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half was closed
+separately by `writeback-scoped-conditional` (#70)*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
 
 ## A task whose confirmation has not landed is invisible to orphan recovery
@@ -307,7 +286,7 @@ sets, and confirmations are not ordered against eviction. A client evicted befor
 is applied leaves its rows in flight with a NULL `client_id`, never reverted or redispatched; a late
 confirmation then names the already-evicted client. Either way the row waits until restart.
 
-*Horizon: mid-term · Depends on: — · Refs: writeback fix (same token); relay*
+*Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
 ## A late confirmation can overwrite the executing client's attribution
@@ -328,7 +307,7 @@ unconditional statement. A legitimate result committed in between is wiped and t
 with no sign to the operator. Making the revert conditional on the row still being in flight closes
 it.
 
-*Horizon: mid-term · Depends on: — · Refs: writeback fix (same shape); resilience*
+*Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same shape); resilience*
 **Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
 
 ## Contended Scheduler and `hs update` writes fail on a TimescaleDB hypertable
@@ -376,6 +355,87 @@ cheap now; the mechanism is reworked by the turso rotation work anyway.
 
 *Horizon: mid-term, low priority · Depends on: — · Refs: turso R8–R11*
 **Seed:** [`issues/rotatedb-lost-update-window.md`](issues/rotatedb-lost-update-window.md)
+
+## A queue proxy keeps the stock decref finalizer until its constructor returns
+
+In a process that serves queues in-process, a queue client's proxy gets the decref hand-off only
+after the stock proxy constructor returns. If a connection inside that constructor fails while the
+server is alive, the half-made proxy keeps the stock finalizer, and a collection on the server's
+accept loop can then stall it. Seen only with an injected failure; the window predates the hand-off.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, P4)*
+**Seed:** [`issues/queue-proxy-finalizer-swap-window.md`](issues/queue-proxy-finalizer-swap-window.md)
+
+## Handed-off decrefs can outlive their server and reach a same-port successor
+
+A handed-off decref waits for the one sender thread, which under churn falls behind, so it can
+reach a successor server on the same port instead of its own and release a live client's queue.
+Seen statistically under same-port restart stress in one process; no CLI path restarts that way.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, P5); the same-port restart entry below*
+**Seed:** [`issues/queue-decref-handoff-delay.md`](issues/queue-decref-handoff-delay.md)
+
+## A same-key, same-port restart in one process receives the old server's decrefs
+
+A dropped client of a stopped in-process server, collected after a same-key successor starts on
+the same port, sends its decrefs to the successor, which can release a queue a live client holds.
+A client that dials the restarted server by another name than its bind host can also reuse a
+connection cached for the old server. It came with the in-process server's same-port restart; no
+CLI path uses the same key and port.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
+**Seed:** [`issues/queue-stale-decref-same-port-restart.md`](issues/queue-stale-decref-same-port-restart.md)
+
+## A forked child of a serving process keeps the queue server's port
+
+A child forked from a process that serves queues in-process inherits the listening socket, so after
+the server shuts down the port cannot be bound again and new clients hang until the child exits. No
+CLI path forks a serving process; only library use sees it.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 5, Observations)*
+**Seed:** [`issues/queue-forked-child-keeps-listener.md`](issues/queue-forked-child-keeps-listener.md)
+
+## Server-owned queue proxies without reference counting
+
+The in-process queue server closes its "finalizer dials the server" stalls with thread rules that
+rest on CPython timing and private internals. The shared queues live as long as the server, so a
+client's proxies for them may not need reference counting at all. Proxies built as server-owned
+never send a decref, which would make the stall impossible by construction and could let the
+hand-off machinery retire. It needs a check of server-side refcount bookkeeping across reconnects
+first.
+
+*Horizon: mid-term · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
+**Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
+
+## `hs client -b` reads the submit section's key, not the client section's
+
+`hs client` takes its `-b`/`-w` defaults from `submit.bundlesize`/`submit.bundlewait`, while the
+configuration reference documents `[client]`. Since zone-dispatch a client advertises an explicit
+`-b` as the size it requests, so a `submit.bundlesize` set for `hs submit` is advertised by every
+client too.
+
+*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
+`spec/zone-dispatch/` (plan gate ruling N4)*
+**Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
+
+## `hs submit -q` cannot feed a server with a database
+
+`hs submit -q` puts bundles on a server's live queue, which only a server without a database
+serves. Against a server with a database, 2.8.x and 2.9.0a2 ran the tasks, but the server's Confirm
+and Receiver threads each died on an uncaught `StaleDataError`, after which it recorded no results
+for the rest of the run; at the unreleased `ec75169` only the Confirm thread died and those tasks'
+results were refused as stale. In zone-dispatch, before its review-1 remediation, the submission
+hung; it is now refused at once with a clear error. A host that can reach the server but not its
+database cannot add work to it.
+
+*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
+`spec/zone-dispatch/REVIEW.md` (cycle 1, F4; cycle 2, F6)*
+**Seed:** [`issues/queue-submit-database-server.md`](issues/queue-submit-database-server.md)
 
 ## The server cannot listen on IPv6
 
@@ -435,7 +495,7 @@ statements for every task, and the evidence points at its CPU as the throughput 
 scheduler and confirm paths may carry the same per-call cost, and batching results across bundles
 is a further option.
 
-*Horizon: mid-term · Depends on: `writeback-prebuilt-update` (the measurement method) ·
+*Horizon: mid-term · Depends on: `writeback-prebuilt-update` (landed, #73; the measurement method) ·
 Refs: —*
 **Seed:** [`issues/server-per-task-statement-overhead.md`](issues/server-per-task-statement-overhead.md) · *status: unshaped*
 
@@ -446,7 +506,8 @@ Refs: —*
 Shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
 drafted R-IDs. They carry `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
-drifted, then adopt largely as written.
+drifted, then adopt largely as written. The last two entries are `unshaped` test-infrastructure
+seeds split out of shipped cycles.
 
 ## Zone-aware demand-driven dispatch on a lighter queue primitive
 
@@ -459,8 +520,9 @@ autoscaling — while the homogeneous founding case behaves exactly as it does t
 managed queues move to the lighter threading primitive so per-client dispatch stops costing a pipe
 and a feeder thread each.
 
-*Horizon: near-term · Depends on: — · Refs: R1 (the queue-primitive swap) is independently shippable
-and should land first as its own de-risking phase*
+*Horizon: near-term · Depends on: — · Refs: ships in three cycles. R1 (the queue primitive) is
+carved into `zone-queue-primitive`; R2–R12 (dispatch and zones) into `zone-dispatch`; R13–R17
+(zone-aware autoscaling) follow from this seed*
 **Seed:** [`issues/zone.md`](issues/zone.md) · *status: shaped*
 
 ## Relay: two-level scheduling across administrative sites
@@ -472,8 +534,8 @@ down). `hs relay` is a per-site service that is just a client upstream and a com
 inside — roughly 100 relays × 100 nodes behind ~100 upstream sockets. Security improves at scale:
 upstream credentials stop at the relay.
 
-*Horizon: mid-term · Depends on: zone (strictly) · Refs: leans on the scoped-writeback fix and
-inherits the resilience feature's reconnect/redelivery machinery as its R9*
+*Horizon: mid-term · Depends on: zone (strictly) · Refs: leans on the scoped writeback that
+`writeback-scoped-conditional` shipped (#70) and inherits the resilience feature's reconnect/redelivery machinery as its R9*
 **Seed:** [`issues/relay.md`](issues/relay.md) · *status: adopted:relay*
 
 ## Relay site-topology autoscaling: fill and spread across sites
@@ -501,20 +563,6 @@ captured output from the execution host.
 `data/core.py` shares ground with the resilience feature's pragma defaults · Refs: R13–R15 soften
 relay's cross-site output non-goal*
 **Seed:** [`issues/turso.md`](issues/turso.md) · *status: shaped*
-
-## TimescaleDB provider: hypertables out of the box
-
-The `timescale` provider aliases exist and deliver nothing TimescaleDB-shaped — the schema comes up
-as plain PostgreSQL tables and the code says so at every startup. Since hypertables can partition
-directly on a UUIDv7 column, our primary key *is* the partition key, which makes HyperShell unusually
-well suited to it. An idempotent post-`create_all` pass converges the `task` table to a hypertable
-with compression and a policy, interrogating the environment rather than assuming it.
-
-*Horizon: mid-term · Depends on: soft — conforms to (or establishes) turso R4's per-provider seam ·
-Refs: **R1 is discharged** — `schema-upgrade-step` dropped the `previous_id`/`next_id` UNIQUE
-constraints (new databases, and existing PostgreSQL ones on upgrade; existing SQLite databases keep
-them, forward-only); R2–R10 are adopted into `timescale` (TS1)*
-**Seed:** [`issues/timescale.md`](issues/timescale.md) · *status: adopted:timescale*
 
 ## The whole test suite on a server database
 

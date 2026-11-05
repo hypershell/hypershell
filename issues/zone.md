@@ -17,14 +17,25 @@ shaped-as: zone
 > Promotion should re-confirm the scope against current `develop` and cite anything that has
 > drifted since this was written, then adopt it largely as written — do **not** re-litigate the
 > resolved clarifications.
+>
+> **R1 is carved out (2026-11-01).** It is being delivered as its own cycle,
+> [`spec/zone-queue-primitive/`](../spec/zone-queue-primitive/GOAL.md) (Z1). This seed stays
+> `shaped` and remains the candidate for the other two cycles: Z2 (R2–R12) and Z3 (R13–R17). When
+> Z1 lands, retire R1 from this seed only, not the seed itself.
+>
+> **R2–R12 are carved out (2026-11-02).** They are being delivered as cycle Z2,
+> [`spec/zone-dispatch/`](../spec/zone-dispatch/GOAL.md); that GOAL is the contract for them and
+> moves R12's autoscaler docs (`{zone}` / `HYPERSHELL_ZONE`) to Z3. This seed stays `shaped` as the
+> candidate for Z3 (R13–R17). When Z2 lands, retire R2–R12 from this seed only.
 
 - **slug:** zone
 - **kind:** feature
 - **appetite:** big  ·  *New `Zone` table + `task.zone` column, a client-advertised dispatch
-  request, a queue-primitive swap, and zone-aware autoscaling. **R1 (the `queue.Queue` swap) is a
-  near-zero-change, independently-shippable sub-change** that de-risks the rest and should be its own
-  first phase; zone-aware autoscaling (R13–R17) is the final phase, riding the same `group`-scoped
-  rails the autoscaler already uses.*
+  request, a queue-primitive swap, and zone-aware autoscaling. **R1 (the queue primitive) is an
+  independently-shippable sub-change** that de-risks the rest; it is carved into its own cycle,
+  `zone-queue-primitive`. It is not near-zero-change: the queues must move into the server process
+  (see the 2026-11-01 correction in Clarifications). Zone-aware autoscaling (R13–R17) is the final
+  phase, riding the same `group`-scoped rails the autoscaler already uses.*
 
 ## Problem
 
@@ -42,11 +53,13 @@ Two concrete limitations block closing that gap:
    server-side constant (`hsx` launches all clients with the same `bundlesize`) — a 4-core client
    and a 112-core client are handed the same amount of work.
 2. **The managed queue primitive doesn't scale by count.** The four managed queues are
-   `multiprocessing.JoinableQueue`s living behind the `BaseManager`. Because every access is
-   already a proxy RPC, that class's cross-process machinery — an OS pipe (file descriptors) plus a
-   background feeder thread per queue — is pure overhead in this configuration. Invisible at four
-   queues; fatal the moment you want per-client or per-profile queues, because it multiplies
-   feeder threads and file descriptors by the client count.
+   `multiprocessing.JoinableQueue`s served by a `BaseManager` running in a separate, forked
+   manager process. Each carries an OS pipe (file descriptors) plus a background feeder thread.
+   Invisible at four queues; fatal the moment you want per-client or per-profile queues, because it
+   multiplies feeder threads and file descriptors by the client count. *(Corrected 2026-11-01: the
+   earlier wording said "every access is already a proxy RPC", so that machinery was "pure
+   overhead". In fact the server's own threads use the queues directly, and the pipe and feeder
+   thread are what carry their items to the manager process.)*
 
 We want per-resource-type routing and per-client right-sizing **without** conceding the homogeneous
 founding case and **without** bloating the manager's footprint.
@@ -88,11 +101,14 @@ turnkey resource pinning are separate follow-ups — see Non-goals.
 
 ## Acceptance criteria (the contract)
 
-- **R1** — The manager's task queues SHALL be backed by threading `queue.Queue` rather than
+- **R1** — *(Carved into [`zone-queue-primitive`](../spec/zone-queue-primitive/GOAL.md), Z1,
+  2026-11-01; that GOAL is the contract for it.)* The manager's task queues SHALL be backed by
+  threading `queue.Queue` rather than
   `multiprocessing.JoinableQueue`, preserving the existing `put`/`get`/`join`/`task_done` behavior
   over the `BaseManager`, and SHALL NOT allocate a per-queue OS pipe or spawn a per-queue feeder
   thread. This SHALL be landable on its own, ahead of the dispatch/zone work.
-- **R2** — The default configuration — an unzoned submission consumed by the uniform fleet `hsx`
+- **R2** — *(R2–R12 carved into [`zone-dispatch`](../spec/zone-dispatch/GOAL.md), Z2,
+  2026-11-02; that GOAL is the contract for them.)* The default configuration — an unzoned submission consumed by the uniform fleet `hsx`
   launches — SHALL behave as it does today, with no throughput or manager-footprint regression.
 - **R3** — WHEN a client requests work, it SHALL advertise its identity and its own bundle size, and
   the scheduler SHALL size the returned bundle from the **requesting client's** advertised value
@@ -182,7 +198,10 @@ turnkey resource pinning are separate follow-ups — see Non-goals.
 - **Note (for `hs-plan`):** every path is manager-mediated — `LocalCluster` binds and connects
   `('localhost', port)` (`cluster/local.py`), so there is no fork-shared-queue path that would
   require `multiprocessing.Queue`. R1 is safe on local and remote alike. `queue.Queue` retains the
-  `join()`/`task_done()` the submit-flush drain relies on.
+  `join()`/`task_done()` the submit-flush drain relies on. *(Corrected 2026-11-01: this holds for
+  clients, not for the server. The server's own threads share the queues with the forked manager
+  process, so a plain swap breaks. See the Problem 2 correction below and
+  `spec/zone-queue-primitive/GOAL.md`.)*
 - **Note (for `hs-plan`):** the touched code — `server.py` (`Scheduler`), `client.py` (client FSM),
   `core/queue.py` (`QueueServer`) — is the load-bearing, **untested** concurrency core flagged in
   `AGENTS.md`. Add FSM/queue tests alongside (ideally before) the dispatch change, and keep the
@@ -198,7 +217,30 @@ turnkey resource pinning are separate follow-ups — see Non-goals.
   passes an `env` dict). The autoscaler cannot inject the client's own `--zone` (the launch runs the
   user's shim, which owns the `hs client` argv — building it would hit the "no shared client-argv
   builder" footgun), so the documented shim convention drives *both* the resource routing and
-  `hs client --zone=` from the one injected zone value to prevent drift.
+  `hs client --zone=` from the one injected zone value to prevent drift. *(Superseded 2026-11-01 by
+  alignment Q4 below: the autoscaler appends `--zone`.)*
+- **2026-11-01 — Zone ships in three cycles:** Z1 = R1 (`zone-queue-primitive`), Z2 = R2–R12,
+  Z3 = R13–R17 (Geoffrey, alignment cut).
+- **2026-11-01 — R1 keeps `BaseManager` by serving it inside the server process with our own
+  loop; the forked manager child goes away** (Geoffrey, alignment Q1a). Replacing `BaseManager`
+  and any transport rewrite remain a separate, later item.
+- **2026-11-01 — Problem 2 / R1 "near-zero-change" wording corrected:** server threads use the
+  queues directly across the fork; verified by experiment. A plain `queue.Queue` swap fails: under
+  `fork` the client never sees the server's put, and under `spawn` start fails with `cannot pickle
+  '_thread.lock' object`.
+- **2026-11-01 — Z1 ships in 2.9.0a2.**
+- **2026-11-01 — Dispatch staging and the R2 benchmark** (Geoffrey, alignment Q0): the server
+  stages work in per-zone pools, each `queuesize × the largest advertised bundle size` deep.
+  Staging stamps tasks as `Task.next` does today, and per-zone unstaging is by task id. Requests
+  are served first-come-first-served, with partial bundles.
+  R2's benchmark bar is at least 95% of 2.8.3's throughput, with a footprint no higher. A relay
+  counts as one client advertising a large size.
+- **2026-11-01 — Advertised bundle size** (Geoffrey, alignment Q2): the client advertises its
+  existing `-b` bundle size, and the server applies its own per-cut cap.
+- **2026-11-01 — Older clients** (Geoffrey, alignment Q3): a 2.8 client gets a clean disconnect,
+  and the server logs "client too old".
+- **2026-11-01 — Autoscaled client zone** (Geoffrey, alignment Q4): the autoscaler appends
+  `--zone` to the launched client command. This supersedes the earlier shim-convention note above.
 
 ## Related materials
 

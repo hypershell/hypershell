@@ -1,0 +1,51 @@
+{
+ "label": "feature",
+ "run_id": "run2-feature-r2-cap32",
+ "role": "server",
+ "hypershell": "2.9.0a2",
+ "python": "3.13.18",
+ "start_method": "fork",
+ "tls": 1,
+ "tasks": 20000,
+ "clients_expected": 6,
+ "clients_seen": 6,
+ "threads": 8,
+ "bundlesize": 4,
+ "client_bundlesize": 1,
+ "client_bundlewait": 1.0,
+ "server_rc": 0,
+ "submit_s": 5.468,
+ "server_wall_s": 53.174,
+ "db_span_s": 50.996,
+ "tasks_per_s": 400.0,
+ "p10_p90_tasks_per_s": 488.9,
+ "rows": 20400,
+ "retried": 400,
+ "incomplete": 0,
+ "exit_hist": {
+  "0": 20000,
+  "3": 400
+ },
+ "peak": {
+  "rss_mb": 97.1,
+  "threads": 26,
+  "fds": 28,
+  "children": 0,
+  "tree_rss_mb": 97.1,
+  "tree_threads": 26,
+  "tree_fds": 28
+ },
+ "zones": "default:40,cpu:30,gpu:30",
+ "groups": 3,
+ "retries": 1,
+ "cap": 32,
+ "fail_every": 50,
+ "zone_tasks": {
+  "default": 8160,
+  "cpu": 6120,
+  "gpu": 6120
+ },
+ "zone_mismatched_retries": 0,
+ "evictions": 0,
+ "group_order": true
+}

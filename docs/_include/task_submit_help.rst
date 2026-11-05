@@ -17,3 +17,9 @@ Options
     groups of tasks. They are defined with both a `key` and `value` (e.g., ``--tag file:a``).
     The default `value` for tags is blank. When searching with tags, not specifying a `value`
     will return any task with that `key` defined regardless of `value` (including blank).
+
+``--zone`` *NAME*
+    Zone of the task (default: none, the reserved default zone).
+
+    Only a client launched with the same ``--zone`` runs the task; a client given no ``--zone``
+    runs only tasks without one.

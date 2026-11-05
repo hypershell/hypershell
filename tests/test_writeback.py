@@ -341,6 +341,7 @@ def test_non_result_columns_are_never_written(task_db, logs) -> None:
     copy.next_id = uuid()
     copy.source = uuid()
     copy.fingerprint = 'f' * 64
+    copy.zone = uuid()
     copy.part = before['part'] + 3
     copy.tag = {'mutated': 'yes'}
     for name in OTHER_COLUMNS:
@@ -457,8 +458,9 @@ def test_result_columns_are_fixed() -> None:
     assert set(Task.columns) - set(Task.result_columns) == {
         'id', 'group', 'args', 'submit_id', 'submit_time', 'submit_host', 'cores', 'memory', 'timeout',
         'server_id', 'server_host', 'schedule_time', 'attempt', 'retried', 'previous_id', 'next_id',
-        'source', 'fingerprint', 'part', 'tag',
+        'source', 'fingerprint', 'zone', 'part', 'tag',
     }
+    assert 'zone' not in Task.result_columns
 
 
 @mark.unit

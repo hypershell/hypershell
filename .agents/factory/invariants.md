@@ -41,7 +41,8 @@ subsystems.
   still qualifies, at most `CONTENDED_RERUNS` times (DEBUG per extra attempt; at the bound a WARNING
   naming the task and path, and a safe outcome: no crash, no silently stranded task, no write that
   lands without its condition). A first-attempt match is neither re-run nor re-checked. Pattern:
-  `Task.confirm_all`/`revert_all`, `Task.apply_results` (`ResultOutcome.DEFERRED`). Never
+  `Task.confirm_all`/`revert_all`, `Task.revert_staged` (re-check on `completion_time IS NULL`, not
+  mere existence), `Task.apply_results` (`ResultOutcome.DEFERRED`). Never
   `bulk_update_mappings` or an ORM flush for such a write.
 
 ## 2. `exit_status` overloading
@@ -106,8 +107,15 @@ subsystems.
 ## 6. Shutdown / sentinel ordering — load-bearing
 
 - Preserve exact ordering. Client: scheduler → executors → collector → heartbeat. Server: submitter
-  → scheduler → sentinels to heartbeat/receiver/confirm. Submit flush: `loader.join()` **then**
-  `queue.put(None)`.
+  → scheduler → `dispatcher.finish()` (in place of the per-client sentinels on `scheduled`: requests
+  drain their zone's staged tasks, then get `shutdown`) → heartbeat join → staged revert
+  (`ServerThread.revert_staged`: rows still staged, never delivered, go back to unscheduled) →
+  sentinels to receiver/confirm. Submit flush: `loader.join()` **then** `queue.put(None)`.
+- **A staged revert never touches a completed or cancelled row.** Both staged reverts (at shutdown,
+  and `Scheduler.revert_unstaged` when a zone's last client leaves) use `Task.revert_staged`: a
+  conditional update per row on `completion_time IS NULL`, so a row cancelled while staged stays
+  cancelled and a deleted one is skipped; under contention it is re-run only while a fresh read finds
+  the row still without a `completion_time`. Never revert staged ids with the unconditional `Task.revert_all`.
 - Stream sentinel is `make_sentinel()` (`serialize(None)`).
 - **Remote-queue payloads** go through `serialize_tasks`/`deserialize_tasks` and `heartbeat.pack`
   (JSON) — **never** put a live object or a literal `None` on a remote queue.

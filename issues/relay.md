@@ -165,7 +165,7 @@ A user who never runs `hs relay` sees no change whatsoever.
   at a site — today's in-flight-bundle semantics with a deeper (but R8-bounded) buffer. Documented
   limitation.
 - **Cross-site captured-output retrieval.** `outpath`/`errpath`/`csvpath` name files on site
-  filesystems; the `hs task info` SFTP retrieval path is not extended across sites.
+  filesystems; the `hs info` SFTP retrieval path is not extended across sites.
 - **Relay-of-relay.** Two levels only; no deeper hierarchy.
 - **Exactly-once execution.** At-least-once is retained (eviction/revert plus zombie returns
   resolve last-writer-wins, exactly as today).
