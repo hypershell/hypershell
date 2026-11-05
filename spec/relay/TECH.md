@@ -3,7 +3,7 @@ slug: relay
 title: 'HyperShell Relay: two-level scheduling across administrative sites'
 kind: feature
 appetite: big
-status: in_progress
+status: blocked
 branch: feature/relay
 base: develop
 current_phase: P7
@@ -162,10 +162,10 @@ phases:
   hill: uphill
   verify: uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: d6e9d7d
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: remediation round (A1-A4, B1-B8) before P7'
+  cycle: 1
 ---
 # TECH.md — HyperShell Relay: two-level scheduling across administrative sites
 
