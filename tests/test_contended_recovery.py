@@ -6,16 +6,18 @@
 On a TimescaleDB 2.29+ hypertable, an UPDATE that waited on another transaction's row lock can
 match 0 rows although the row exists and still qualifies. SQLite never does that, so these tests
 inject it: a wrapper around the session's ``execute`` makes the next *k* UPDATEs of a chosen task
-report 0 matched rows without running. Every recovery path is driven in-process, as the server
-drives it (``Confirm.update_info``, ``Receiver.update_tasks``, ``Task.revert_orphaned``), and the
-wrapper's record of executed statements pins what an uncontended write costs. The real race, on a
+report 0 matched rows without running, optionally committing another writer's change to the row
+first, as the transaction it waited on would. Every recovery path is driven in-process, as the
+server drives it (``Confirm.update_info``, ``Receiver.update_tasks``, ``Task.revert_orphaned``,
+``Task.revert_staged``), and the wrapper's record of executed statements pins what an uncontended
+write costs. The real race, on a
 server database, is ``tests/test_contended_write.py``.
 """
 
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from pathlib import Path
 
 # Standard libs
@@ -27,7 +29,7 @@ from queue import Empty as QueueEmpty
 # External libs
 import pytest
 from pytest import mark, fixture
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, update, delete
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -38,7 +40,7 @@ from hypershell.client import ClientInfo
 from hypershell.data import core as data_core
 from hypershell.data import model
 from hypershell.data.core import Session
-from hypershell.data.model import Entity, Task, ResultOutcome, serialize_tasks, deserialize_tasks
+from hypershell.data.model import Entity, Task, ResultOutcome, CANCEL_STATUS, serialize_tasks, deserialize_tasks
 from hypershell.server import Confirm, ConfirmState, Receiver, ReceiverState
 
 
@@ -86,11 +88,18 @@ class Contention:
     def __init__(self, execute: Any) -> None:
         self.execute = execute
         self.losing: Dict[str, int] = {}
+        self.meanwhile: Dict[str, Callable[[], None]] = {}
         self.executed: List[Tuple[str, Optional[str], bool]] = []
 
-    def lose(self, task_id: str, count: int) -> None:
-        """Make the next `count` UPDATEs of task `task_id` match no row, without running them."""
+    def lose(self, task_id: str, count: int, meanwhile: Optional[Callable[[], None]] = None) -> None:
+        """Make the next `count` UPDATEs of task `task_id` match no row, without running them.
+
+        A `meanwhile` callable runs once, at the first of them: the other transaction's change,
+        committed while the write waited on its row lock.
+        """
         self.losing[task_id] = count
+        if meanwhile is not None:
+            self.meanwhile[task_id] = meanwhile
 
     def __call__(self, statement: Any, params: Any = None, *args: Any, **kwargs: Any) -> Any:
         kind = 'UPDATE' if getattr(statement, 'is_update', False) else (
@@ -100,6 +109,8 @@ class Contention:
         self.executed.append((kind, task_id, lost))
         if lost:
             self.losing[task_id] -= 1
+            if (change := self.meanwhile.pop(task_id, None)) is not None:
+                change()
             return Lost()
         return self.execute(statement, params, *args, **kwargs)
 
@@ -483,3 +494,112 @@ def test_in_memory_receiver_never_holds(contention, logs) -> None:
     assert machine.held == []
     assert messages(logs, logging.DEBUG, f'Completed task ({copy.id})')
     assert cycle(machine) is ReceiverState.UNLOAD
+
+
+def staged(count: int = 1) -> List[str]:
+    """Stamp `count` new tasks as the Scheduler does when it stages them for a zone; return their ids."""
+    ids = [submit(f'echo {n}') for n in range(count)]
+    dispatch_all(ids)
+    return ids
+
+
+def committed(engine: Engine, statement: Any) -> Callable[[], None]:
+    """A change to the task table committed by another connection, as another writer's transaction."""
+    def change() -> None:
+        with engine.begin() as conn:
+            if conn.execute(statement).rowcount != 1:
+                pytest.fail(f'The other writer matched no row: {statement}')
+    return change
+
+
+def cancelled(engine: Engine, task_id: str) -> Callable[[], None]:
+    """Cancel the task from another connection, as `hs update --cancel` does."""
+    now = datetime.now().astimezone()
+    table = Task.__table__
+    return committed(engine, update(table).where(table.c.id == task_id)
+                     .values(schedule_time=now, completion_time=now, exit_status=CANCEL_STATUS))
+
+
+def deleted(engine: Engine, task_id: str) -> Callable[[], None]:
+    """Delete the task's row from another connection."""
+    table = Task.__table__
+    return committed(engine, delete(table).where(table.c.id == task_id))
+
+
+@mark.unit
+def test_contended_staged_revert_lands_on_rerun(contention, logs) -> None:
+    """A staged revert that missed a row the first time re-runs and reverts it, in the same pass."""
+    ids = staged(3)
+    contention.lose(ids[1], 1)
+
+    assert Task.revert_staged(ids) == 3
+
+    assert all(row(task_id)['schedule_time'] is None for task_id in ids)
+    assert len(reruns(logs, 'staged revert', ids[1])) == 1
+    assert reruns(logs, 'staged revert', ids[1])[0].endswith(f'(attempt 2 of {attempts()})')
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_contended_staged_revert_exhausted_leaves_row_staged(contention, logs) -> None:
+    """At the bound, the row stays stamped and is reported, and the rest of the pass is reverted."""
+    ids = staged(3)
+    contention.clear()
+    contention.lose(ids[1], ALWAYS)
+
+    assert Task.revert_staged(ids) == 2
+
+    assert in_flight(row(ids[1]))
+    assert row(ids[0])['schedule_time'] is None and row(ids[2])['schedule_time'] is None
+    assert contention.kinds(ids[1]) == ['UPDATE', 'SELECT'] * attempts()
+    warnings = messages(logs, logging.WARNING)
+    assert len(warnings) == 1, warnings
+    assert f'({ids[1]})' in warnings[0] and 'staged revert' in warnings[0] and 'left in flight' in warnings[0]
+
+
+@mark.unit
+def test_staged_revert_keeps_row_cancelled_while_contended(task_db, contention, logs) -> None:
+    """A row cancelled by the transaction the revert waited on is not re-run and stays cancelled."""
+    ids = staged(2)
+    contention.clear()
+    contention.lose(ids[0], 1, meanwhile=cancelled(task_db, ids[0]))
+
+    assert Task.revert_staged(ids) == 1
+
+    data = row(ids[0])
+    assert data['exit_status'] == CANCEL_STATUS and data['completion_time'] is not None
+    assert row(ids[1])['schedule_time'] is None
+    assert contention.kinds(ids[0]) == ['UPDATE', 'SELECT']
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_staged_revert_skips_row_deleted_while_contended(task_db, contention, logs) -> None:
+    """A row deleted by the transaction the revert waited on is skipped without an error."""
+    ids = staged(2)
+    contention.clear()
+    contention.lose(ids[0], 1, meanwhile=deleted(task_db, ids[0]))
+
+    assert Task.revert_staged(ids) == 1
+
+    with task_db.connect() as conn:
+        assert conn.execute(text('SELECT count(*) FROM task')).scalar() == 1
+    assert row(ids[1])['schedule_time'] is None
+    assert contention.kinds(ids[0]) == ['UPDATE', 'SELECT']
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_uncontended_staged_revert_costs_one_update_per_row(contention, logs) -> None:
+    """A staged revert that matches first time is one UPDATE per row; a terminal row adds one SELECT."""
+    ids = staged(3)
+    Task.cancel(ids[2])
+
+    contention.clear()
+    assert Task.revert_staged(ids) == 2
+
+    assert contention.kinds() == ['UPDATE', 'UPDATE', 'UPDATE', 'SELECT']
+    assert [task_id for _, task_id, _ in contention.executed] == [ids[0], ids[1], ids[2], ids[2]]
+    assert row(ids[2])['exit_status'] == CANCEL_STATUS
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []

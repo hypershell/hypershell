@@ -62,9 +62,6 @@ or the negative template/resource sentinels in `client.py`) solely by this value
 scheduler's failure and retry queries filter it out explicitly.
 """
 
-REVERT_CHUNK: Final[int] = 500
-"""Most ids bound in one conditional revert statement (well within SQLite's and PostgreSQL's limits)."""
-
 CONTENDED_RERUNS: Final[int] = 3
 """Extra attempts for a task-row UPDATE that matched no row while the row still qualifies.
 
@@ -852,25 +849,28 @@ class Task(Entity):
 
     @classmethod
     @cache
-    def __row_statements(cls: Type[Task], names: Tuple[str, ...]) -> Tuple[Any, Any]:
+    def __row_statements(cls: Type[Task], names: Tuple[str, ...], pending: bool = False) -> Tuple[Any, Any]:
         """The UPDATE of one row by `id` for a set of columns, and the SELECT of that row's `id`.
 
-        Built once per column set, with binds typed from the table and prefixed names, as for the
-        result statements.
+        With `pending`, both match the row only while it has no `completion_time`, so the SELECT
+        asks whether the row still qualifies for the write, not merely whether it exists. Built
+        once per column set and condition, with binds typed from the table and prefixed names, as
+        for the result statements.
         """
         table = cls.__table__
         by_id = table.c.id == bindparam('r_id', type_=table.c.id.type)
+        match = (by_id, table.c.completion_time.is_(None)) if pending else (by_id, )
         write = (
             update(table)
-            .where(by_id)
+            .where(*match)
             .values({name: bindparam(f'r_{name}', type_=table.c[name].type) for name in names})
         )
-        exists = select(table.c.id).where(by_id)
+        exists = select(table.c.id).where(*match)
         return write, exists
 
     @classmethod
     def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any],
-                     path: str, consequence: str) -> List[str]:
+                     path: str, consequence: str, pending: bool = False) -> List[str]:
         """Write the same `values` onto each task in `ids` by `id`, committing once; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
@@ -879,8 +879,13 @@ class Task(Entity):
         that still exists was missed because the write waited on another transaction's row lock,
         and the write is re-run, at most `CONTENDED_RERUNS` times. A row still not written after
         that is logged as a warning with the `consequence` and left as it is.
+
+        With `pending`, the write and the look-up both require that the row has no
+        `completion_time`. A row that is completed, cancelled or gone no longer qualifies: it is
+        skipped, never re-run and never an error, whether it was so before the write or became so
+        in the transaction the write waited on.
         """
-        write, exists = cls.__row_statements(tuple(values))
+        write, exists = cls.__row_statements(tuple(values), pending)
         params = {f'r_{name}': value for name, value in values.items()}
         attempts = 1 + CONTENDED_RERUNS
         landed = []
@@ -892,6 +897,8 @@ class Task(Entity):
                         landed.append(id)
                         break
                     if Session.execute(exists, {'r_id': id}).first() is None:
+                        if pending:
+                            break
                         raise StaleDataError(f'UPDATE statement on table \'{cls.__table__.name}\' expected to '
                                              f'update 1 row(s); 0 were matched (task {id})')
                     if attempt < attempts:
@@ -925,28 +932,18 @@ class Task(Entity):
     def revert_staged(cls: Type[Task], ids: List[str]) -> int:
         """Revert tasks staged but never delivered, unless they have since become terminal or gone.
 
-        One conditional UPDATE matches only rows still without a `completion_time`, so the check and
-        the write are one atomic statement: a row cancelled (or otherwise completed) while staged keeps
-        its terminal state, and a deleted row matches nothing. The ids go in chunks that stay within
-        every database's limit on bound parameters, all in one transaction. Returns the number of rows
-        reverted, which may be fewer than the ids given.
+        Each row is one conditional UPDATE by `id` that matches only while the row has no
+        `completion_time`, so the check and the write are one atomic statement: a row cancelled (or
+        otherwise completed) while staged keeps its terminal state, and a deleted row matches
+        nothing. A row that matched nothing is re-run only while a fresh read finds it still without
+        a `completion_time` (a write that waited on another transaction's row lock), at most
+        `CONTENDED_RERUNS` times; one that no longer qualifies is skipped. The whole pass is one
+        transaction. Returns the number of rows reverted, which may be fewer than the ids given.
         """
-        reverted = 0
-        try:
-            for start in range(0, len(ids), REVERT_CHUNK):
-                reverted += Session.execute(
-                    update(cls)
-                    .where(cls.id.in_(ids[start:start + REVERT_CHUNK]),
-                           cls.completion_time.is_(None))
-                    .values(dict.fromkeys(cls.revert_columns))
-                    .execution_options(synchronize_session=False)
-                ).rowcount
-            Session.commit()
-        except Exception:
-            Session.rollback()
-            raise
-        log.trace(f'Reverted {reverted} of {len(ids)} staged tasks')
-        return reverted
+        reverted = cls.__write_rows(ids, dict.fromkeys(cls.revert_columns),
+                                    'staged revert', 'task left in flight', pending=True)
+        log.trace(f'Reverted {len(reverted)} of {len(ids)} staged tasks')
+        return len(reverted)
 
     @classmethod
     def revert(cls: Type[Task], id: str) -> None:

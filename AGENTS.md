@@ -273,9 +273,10 @@ staged revert (`ServerThread.revert_staged`: rows still staged, never delivered,
 unscheduled) → sentinels to receiver/confirm) and the submit flush
 (`loader.join()` then `queue.put(None)`). Reordering drops the last results or hangs a join.
 **A staged revert never touches a completed or cancelled row.** Both staged reverts, at shutdown and
-when a zone's last client leaves (`Scheduler.revert_unstaged`), go through `Task.revert_staged`: one
-conditional update on `completion_time IS NULL`, so a row cancelled while staged stays cancelled
-and a deleted one is skipped. Never revert staged ids with the unconditional `Task.revert_all`.
+when a zone's last client leaves (`Scheduler.revert_unstaged`), go through `Task.revert_staged`: a
+conditional update per row on `completion_time IS NULL`, so a row cancelled while staged stays
+cancelled and a deleted one is skipped; under contention it is re-run only while a fresh read finds
+the row still without a `completion_time`. Never revert staged ids with the unconditional `Task.revert_all`.
 The stream sentinel is `make_sentinel()` (`serialize(None)`); consumers detect end-of-stream
 by dequeuing it. **Remote-queue payloads go through `serialize_tasks`/`deserialize_tasks` and
 `heartbeat.pack` (JSON) — never put a live object or a literal `None` on a remote queue.**
@@ -408,7 +409,9 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   qualifies, at most `CONTENDED_RERUNS` times, each extra attempt logged at DEBUG; at the bound it
   logs a WARNING naming the task and the path and takes a safe outcome (never a crash, a silently
   stranded task, or a write that lands without its condition). A write that matches first time is
-  neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id) and
+  neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id),
+  `Task.revert_staged` (the same, conditional on `completion_time IS NULL`, and its re-check asks
+  the same: a row completed, cancelled or deleted meanwhile is skipped, never reverted) and
   `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
   held by the Receiver) are the pattern. Never use `bulk_update_mappings` or an ORM flush for such a
   write: they assert the total and raise `StaleDataError`. The Scheduler's `Task.next` stamp and
