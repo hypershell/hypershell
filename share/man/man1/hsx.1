@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HS" "1" "Nov 01, 2026" "2.8.3" "hypershell"
+.TH "HS" "1" "Nov 04, 2026" "2.8.4" "hypershell"
 .SH NAME
 hs \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -821,6 +821,8 @@ Mutually exclusive with both \fB\-\-output\fP and \fB\-\-errors\fP\&.
 Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 .sp
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
+The timeout counts from when the client starts, after any \fB\-\-delay\-start\fP, so the delay
+does not count toward it.
 .TP
 .B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit (default: none).
@@ -1774,6 +1776,15 @@ completed because it still holds failed tasks (after any \fB\-\-max\-retries\fP 
 exhausted), scheduling halts with a critical message; under \fB\-\-forever\fP the scheduler instead
 warns and waits for those tasks to be cleared or reverted (see \fBhs update\fP). Use
 \fB\-\-max\-retries\fP and \fB\-\-eager\fP to tune retry behavior within a group.
+.sp
+A task file given to \fBhs cluster\fP or \fBhs server\fP is read in full before scheduling begins, so
+its groups run in ascending order whatever order the file lists them in. Input on standard input
+or a pipe is scheduled as it arrives, which is best effort: a lower group that arrives after a
+higher group has started runs once the current group finishes, and \fIHyperShell\fP logs a warning
+naming both groups. The clients that \fBhs cluster\fP launches start once the file is read, so
+their \fB\-T\fP/\fB\-\-timeout\fP clock does not run while it is read. A client connected to
+\fBhs server\fP whose \fB\-T\fP/\fB\-\-timeout\fP is shorter than the time to read the file reaches that
+timeout and exits before any task is scheduled, and the server then waits for new clients.
 .sp
 Filter or update tasks by group with the \fB\-g\fP/\fB\-\-group\fP option of \fBhs list\fP and
 \fBhs update\fP\&.
