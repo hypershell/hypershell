@@ -1,0 +1,38 @@
+{
+ "label": "2.8.3",
+ "run_id": "2.8.3-n16-r3",
+ "role": "server",
+ "hypershell": "2.8.3",
+ "python": "3.13.18",
+ "start_method": "fork",
+ "tls": 1,
+ "tasks": 10000,
+ "clients_expected": 16,
+ "clients_seen": 16,
+ "threads": 1,
+ "bundlesize": 1,
+ "client_bundlesize": 1,
+ "client_bundlewait": 1.0,
+ "server_rc": 0,
+ "submit_s": 1.938,
+ "server_wall_s": 64.043,
+ "db_span_s": 59.983,
+ "tasks_per_s": 166.7,
+ "p10_p90_tasks_per_s": 175.2,
+ "rows": 10000,
+ "retried": 0,
+ "incomplete": 0,
+ "exit_hist": {
+  "0": 9900,
+  "3": 100
+ },
+ "peak": {
+  "rss_mb": 85.5,
+  "threads": 7,
+  "fds": 18,
+  "children": 1,
+  "tree_rss_mb": 157.3,
+  "tree_threads": 60,
+  "tree_fds": 83
+ }
+}

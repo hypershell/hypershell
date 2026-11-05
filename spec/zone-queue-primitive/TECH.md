@@ -3,10 +3,10 @@ slug: zone-queue-primitive
 title: Serve the managed queues in-process on a threading primitive (zone, cycle 1)
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/zone-queue-primitive
 base: develop
-current_phase: P7
+current_phase: done
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -93,14 +93,14 @@ phases:
 - id: P7
   name: 'Multi-node drive, run B: collect and judge the external evidence against
     2.8.3'
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on:
   - P6
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run python tests/cluster/compare.py spec/zone-queue-primitive/evidence/cluster
     --baseline 2.8.3 --candidate feature --control b819de6
 review:
@@ -1047,14 +1047,44 @@ external wait.
 **Goal:** commit the foreman's multi-node results as evidence and show unchanged results and
 throughput against 2.8.3, using `b819de6` as the attribution control.
 
-- [ ] If `spec/zone-queue-primitive/evidence/cluster/` is absent: `set_phase.py --phase P7
+- [x] If `spec/zone-queue-primitive/evidence/cluster/` is absent: `set_phase.py --phase P7
       --status blocked` with `blocked_reason: "awaiting multi-node evidence (run B)"`. Stop.
-- [ ] Check that the evidence is sanitized: no host names, user names, accounts, partitions or site
+      (Not needed: the evidence arrived before P7 ran, so P7 was never blocked.)
+- [x] Check that the evidence is sanitized: no host names, user names, accounts, partitions or site
       paths. If any is found, stop and ask; don't scrub silently.
-- [ ] Run `compare.py`. Write a short `evidence/cluster/SUMMARY.txt` with the per-config table,
+- [x] Run `compare.py`. Write a short `evidence/cluster/SUMMARY.txt` with the per-config table,
       median, spread and verdict for each label, and the footprint peaks.
-- [ ] On a regression at high N only, don't tune in-cycle. Record it and escalate to the foreman.
-      This is PLAN §5's main risk.
+- [x] On a regression at high N only, don't tune in-cycle. Record it and escalate to the foreman.
+      This is PLAN §5's main risk. (None: the feature's gap to 2.8.3 is smaller at N=256 than at
+      N=16.)
+- **Harness (foreman's note, verbatim).**
+
+  > One job on a test cluster: 4 whole nodes; the server on node 0 bound to 16 CPUs; clients on nodes 1–3, one executor each, cyclic; TLS on; SQLite; 10,000 tasks per run (halved from 20,000 so 18 runs fit the 1-hour limit), every 100th failing; bundle size 1 both ways. The harness is Z1's own `tests/cluster/drive.sh` at `f45a5cf`. Archives built by `build_archive.sh` with Python 3.13: `2.8.3` = `4d5771b`, `b819de6` = develop before writeback, `feature` = `f45a5cf` (Z1's final head, with develop through #75 merged). Labels interleaved within each (N, rep). All 18 runs exited 0 with 0 incomplete. Earlier runs on a second test cluster during review (1-CPU server binding, pre-#73 code) are superseded by this one and not used.
+
+- **Built notes.**
+  - **Evidence.** 18 run directories (labels `2.8.3`, `b819de6` and `feature`; N=16 and N=256; 3
+    reps each), holding only `server.json` and `client-*.json` (2,466 files). They were delivered
+    already scrubbed and are committed unchanged.
+  - **Sanitising re-check: clean.** Every key belongs to the drive's schema. The only string
+    values are the labels, run ids, the role, client indexes, `hypershell` (2.8.3, 2.9.0a1 and
+    2.9.0a2, matching each ref's `pyproject.toml`), `python` (3.13.18) and `start_method` (fork).
+    All files are ASCII, every `run_id` matches its directory, and a grep for site paths, domains,
+    `@`, scheduler terms and site names finds nothing.
+  - **Verdict: PASS (exit 0).** Results are identical across all 18 runs (`{"0": 9900, "3":
+    100}`). On p10–p90 medians, the feature is −3.2 tasks/s (−1.8%) against 2.8.3 at N=16 and
+    −2.5 (−1.4%) at N=256, inside a tolerance of 8.8 and 8.6 (the 5% floor binds). The control
+    `b819de6` is −4.9% and −5.1% against 2.8.3, so the feature is +5.3 and +6.3 tasks/s above it.
+    Footprint: tree children 0 vs 1, tree FDs 58 vs 84 (N=16) and 779 vs 803 (N=256). The table is
+    in `evidence/cluster/SUMMARY.txt`. The foreman's quick read (−0.9% and −0.7%) matches the
+    means: the full-span mean at N=16, and either mean at N=256. `compare.py` judges p10–p90
+    medians.
+  - **Matrix narrower than the P6 hand-back.** That hand-back asked for N ∈ {16, 128, ≥256 up to the
+    ceiling} with M ≥ 20000. This run has N ∈ {16, 256} with M = 10000, for the reason in the
+    foreman's note. GOAL R9's multi-node clause (unchanged results and throughput against 2.8.3)
+    is met, but PLAN §5's main risk, near the ~1,000-client ceiling, is tested only up to N=256.
+  - **Verify substitution.** `uv run` could not take the uv cache lock in the build sandbox. The
+    verify ran as `python tests/cluster/compare.py …` (the same arguments) under a frozen
+    standalone Python 3.13.18 venv. `compare.py` is standard library only.
 - **Verify:** the frontmatter command (`compare.py … --baseline 2.8.3 --candidate feature --control
   b819de6` exits 0).
 - **Touches:** `spec/zone-queue-primitive/evidence/cluster/` (new data only).
