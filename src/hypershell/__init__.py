@@ -30,6 +30,7 @@ from hypershell.cluster import ClusterApp, run_local, run_cluster, run_ssh
 from hypershell.task import TaskGroupApp, TaskInfoApp, TaskWaitApp, TaskRunApp, TaskSearchApp, TaskUpdateApp
 from hypershell.config import ConfigApp
 from hypershell.data import InitDBApp
+from hypershell.relay import RelayApp
 
 # Public interface
 __all__ = [
@@ -39,7 +40,7 @@ __all__ = [
     'ServerApp', 'serve_from', 'serve_file', 'serve_forever',
     'ClientApp', 'run_client',
     'ClusterApp', 'run_local', 'run_cluster', 'run_ssh',
-    'InitDBApp', 'ConfigApp',
+    'InitDBApp', 'ConfigApp', 'RelayApp',
     'TaskGroupApp', 'TaskInfoApp', 'TaskWaitApp', 'TaskRunApp', 'TaskSearchApp', 'TaskUpdateApp',
 ]
 
@@ -87,6 +88,7 @@ Commands:
   cluster                {ClusterApp.__doc__}
   server                 {ServerApp.__doc__}
   client                 {ClientApp.__doc__}
+  relay                  {RelayApp.__doc__}
   submit                 {SubmitApp.__doc__}
   initdb                 {InitDBApp.__doc__}
   info                   {TaskInfoApp.__doc__}
@@ -121,6 +123,7 @@ class HyperShellApp(ApplicationGroup):
         'cluster': ClusterApp,
         'server': ServerApp,
         'client': ClientApp,
+        'relay': RelayApp,
         'submit': SubmitApp,
         'config': ConfigApp,
         'initdb': InitDBApp,

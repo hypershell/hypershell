@@ -503,6 +503,101 @@
             For a *dynamic* autoscaling policy, this sets an upper limit on the number of launched
             clients. When this number is reached, scaling stops regardless of task pressure.
 
+``[relay]``
+    Section for the `relay` workflow, which connects a site to an upstream *server*.
+
+    ``.database``
+        Path to the relay database (default: <lib>/relay/<host>.db).
+
+        The relay database is always a private SQLite file, whatever ``[database]`` names; a relay
+        never opens the configured database. The default is named for the host, since a home
+        directory is often shared between hosts. A node-local disk is a good place for it.
+
+        See also ``--database`` command-line option.
+
+    ``.bind``
+        Bind address of the relay-local *server* (default: `0.0.0.0`).
+
+        The *clients* at the site connect here. See also ``--bind`` command-line option.
+
+    ``.port``
+        Port of the relay-local *server* (default: `50002`).
+
+        See also ``--port`` command-line option.
+
+    ``.bundlesize``
+        Size of task bundle for the relay-local *server* (default: `1`).
+
+    ``.bundlewait``
+        Seconds the relay waits before returning finished tasks upstream regardless of
+        `bundlesize` (default: `5`).
+
+    ``.poll``
+        Maximum polling interval of the relay-local scheduler in seconds (default: `1`).
+
+    ``.zone``
+        Zone the relay serves (default: none, the default zone).
+
+    ``.size``
+        Number of *clients* the relay keeps launched at its site (default: `1`).
+
+    ``.launcher``
+        Command prefix used to launch each *client* at the site (default: none).
+
+        An empty value launches clients directly as ``hs client ...``.
+
+    ``.launcher_args``
+        Extra arguments for the launcher (default: none).
+
+    ``.num_threads``
+        Executor threads for each *client* at the site (default: `1`).
+
+    ``.template``
+        Command template for the *clients* at the site (default: `{}`).
+
+    ``.timeout``
+        Seconds a *client* at the site waits for tasks before it exits (default: `0`, never).
+
+    ``[upstream]``
+        Connection to the upstream *server*. These settings are never read from ``[server]``,
+        so the *clients* at the site keep using the relay's own ``[server.tls]``.
+
+        ``.host``
+            Hostname of the upstream *server* (default: `localhost`).
+
+        ``.port``
+            Port of the upstream *server* (default: `50001`).
+
+        ``.auth``
+            Cryptographic key for the upstream *server*.
+
+            Use ``.auth_env`` or ``.auth_eval`` to keep it out of the file. The upstream key
+            stays in the relay: the *clients* at the site use a key the relay mints for each run.
+
+        ``.bundlesize``
+            Bundle size the relay advertises upstream (default: `1000`).
+
+        ``.heartrate``
+            Seconds between heartbeats to the upstream *server* (default: `10`).
+
+        ``.evict_hint``
+            Eviction period in seconds the relay assumes for the upstream *server* during an
+            outage (default: `600`).
+
+        ``[tls]``
+            ``.enabled``
+                Use TLS on the upstream connection (default: `true`).
+
+            ``.cert``
+                Upstream server certificate (default: `<auto>`).
+
+            ``.cafile``
+                Trust anchor for the upstream server (default: `<auto>`).
+
+            ``.fingerprint``
+                Pin the upstream server certificate fingerprint, e.g. ``SHA256:AB:CD:...``
+                (default: none).
+
 ``[console]``
     Rich text display and output parameters.
 

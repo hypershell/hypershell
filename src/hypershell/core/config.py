@@ -35,7 +35,9 @@ __all__ = [
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
     'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
     'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
-    'AUTH_ALLOWED_CHARS', 'AUTH_MINIMUM_LENGTH', 'find_available_ports'
+    'AUTH_ALLOWED_CHARS', 'AUTH_MINIMUM_LENGTH', 'find_available_ports',
+    'RELAY_PROCESS', 'RELAY_MARKER', 'RELAY_PRAGMAS', 'DEFAULT_RELAY_PORT', 'default_relay_database',
+    'relay_database_section',
 ]
 
 
@@ -184,6 +186,38 @@ default = Namespace({
         'theme': 'monokai',
     },
 
+    # The relay is a per-site service: a client upstream and a local server and fleet at its site.
+    # Its own database is always a private SQLite file (see `relay_database_section`).
+    'relay': {
+        'database': PARAM_UNSET,  # Path to the relay database (default: <lib>/relay/<host>.db)
+        'bind': '0.0.0.0',        # Bind address of the relay-local server (site clients connect here)
+        'port': 50_002,           # Port of the relay-local server (distinct from the server default)
+        'bundlesize': 1,          # Bundle size of the relay-local server
+        'bundlewait': 5,          # Seconds the relay waits before returning results regardless of size
+        'poll': 1,                # Max polling interval of the relay-local scheduler in seconds
+        'zone': PARAM_UNSET,      # Zone served by the relay (default zone if unset)
+        'size': 1,                # Number of site clients the relay keeps launched
+        'launcher': '',           # Command prefix to launch each site client (empty means 'hs client ...')
+        'launcher_args': '',      # Extra arguments for the launcher
+        'num_threads': 1,         # Executor threads per site client
+        'template': '{}',         # Command template for site clients
+        'timeout': 0,             # Site client idle timeout in seconds (never if 0)
+        'upstream': {
+            'host': 'localhost',    # Upstream server hostname
+            'port': 50_001,         # Upstream server port
+            'auth': DEFAULT_AUTH,   # Upstream key (use auth_env or auth_eval to keep it out of files)
+            'bundlesize': 1_000,    # Bundle size the relay advertises upstream
+            'heartrate': 10,        # Seconds between upstream heartbeats
+            'evict_hint': 600,      # Upstream eviction period the relay assumes during an outage
+            'tls': {
+                'enabled': True,            # Use --no-tls to disable on the upstream hop (not recommended)
+                'cert': '<auto>',           # Upstream server certificate or '<auto>'
+                'cafile': '<auto>',         # Trust anchor for the upstream server; '<auto>' mirrors the cert
+                'fingerprint': PARAM_UNSET, # Pin the upstream server fingerprint (e.g. 'SHA256:AB:CD:...')
+            },
+        },
+    },
+
     # NOTE: defining HYPERSHELL_EXPORT_XXX defines XXX within task env
     'export': {}
 })
@@ -322,6 +356,59 @@ try:
 except Exception as error:
     write_traceback(error, module=__name__)
     sys.exit(exit_status.bad_config)
+
+
+RELAY_MARKER: Final[str] = '_HYPERSHELL_RELAY'
+"""Private environment variable that marks a process started to run `hs relay`.
+
+It sits outside the `HYPERSHELL_` prefix, so it never reaches the configuration, and it is
+removed as soon as it is read, so no child process inherits it.
+"""
+
+RELAY_PRAGMAS: Final[Dict[str, str]] = {'synchronous': 'FULL'}
+"""SQLite pragmas for the relay database: a committed insert survives a power loss."""
+
+DEFAULT_RELAY_PORT: Final[int] = default.relay.port
+"""Default port of the relay-local server."""
+
+
+def default_relay_database() -> str:
+    """Default relay database path, scoped by host since home directories are shared between hosts."""
+    return os.path.join(default_path.lib, 'relay', f'{socket.gethostname().split(".", 1)[0]}.db')
+
+
+def relay_database_section(base: Namespace) -> Namespace:
+    """The database section a relay process uses in place of the configured one.
+
+    Always SQLite, whatever provider, URL or schema the configured section names, so a relay never
+    opens (or needs a driver for) the configured primary database. The file is `relay.database`,
+    or a host-scoped default under the site lib directory.
+    """
+    path_ = base.get('relay', {}).get('database', None)
+    if not path_ or path_ == PARAM_UNSET:
+        path_ = default_relay_database()
+    return Namespace({'provider': 'sqlite', 'file': os.path.abspath(os.path.expanduser(str(path_))),
+                      'pragmas': dict(RELAY_PRAGMAS)})
+
+
+def _relay_requested(argv: List[str] = None) -> bool:
+    """True if this process runs `hs relay`: the private marker is set, or the command line names it."""
+    if os.environ.pop(RELAY_MARKER, None):
+        return True
+    argv = sys.argv if argv is None else argv
+    program = os.path.splitext(os.path.basename(argv[0]))[0] if argv else ''
+    return program in ('hs', 'hyper-shell') and len(argv) > 1 and argv[1] == 'relay'
+
+
+RELAY_PROCESS: Final[bool] = _relay_requested()
+"""Set in a process that runs `hs relay`; its database section is the relay database.
+
+The swap happens here, before `hypershell.data` builds its engine from this configuration, so
+every module that reads the database section sees the relay database. One relay per process.
+"""
+
+if RELAY_PROCESS:
+    config['database'] = relay_database_section(config)
 
 
 ACTIVE_CONFIG_VARS: Final[List[str]] = [

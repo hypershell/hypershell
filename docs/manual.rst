@@ -19,6 +19,9 @@ hs server [-h] FILE ...
 hs client [-h] ...
     Run stand-alone client.
 
+hs relay [-h] [--bind ADDR] [--port NUM] [--database PATH]
+    Run relay for one site.
+
 hs submit [-h] [ARGS... | -f FILE] ...
     Submit one or more tasks.
 
@@ -86,6 +89,16 @@ Client Usage
 .. include:: _include/client_desc.rst
 
 .. include:: _include/client_help.rst
+
+
+Relay Usage
+-----------
+
+.. include:: _include/relay_usage.rst
+
+.. include:: _include/relay_desc.rst
+
+.. include:: _include/relay_help.rst
 
 
 Submit Usage

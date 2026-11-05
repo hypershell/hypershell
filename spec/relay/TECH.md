@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-04'
 phases:
 - id: P1
@@ -26,7 +26,7 @@ phases:
 - id: P2
   name: 'hs relay process: [relay] config, private SQLite bound at import, local server
     up and down'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R10
@@ -36,7 +36,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -v tests/test_relay_db.py tests/test_main.py tests/test_completions.py
     tests/test_logging.py tests/test_initdb.py && uv run hs relay --help > /dev/null
     && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs
@@ -338,28 +338,54 @@ result wrote them, keeping the contended-write discipline.
 **Goal:** `hs relay` starts a forever-mode local server on a private SQLite file whatever the
 configured provider, and stops cleanly; nothing upstream yet.
 
-- [ ] `core/config.py`: `[relay]` and `[relay.upstream]` defaults; `RELAY_PROCESS` and the
+- [x] `core/config.py`: `[relay]` and `[relay.upstream]` defaults; `RELAY_PROCESS` and the
       wholesale `config['database']` swap (marker or `hs|hyper-shell relay` argv), with
       `synchronous=FULL`; host-scoped default path under the site lib dir.
-- [ ] `src/hypershell/relay/__init__.py`: `RelayApp` (cmdkit `App`, shared exception mapping,
+- [x] `src/hypershell/relay/__init__.py`: `RelayApp` (cmdkit `App`, shared exception mapping,
       `exit_status` constants), re-exec when `RELAY_PROCESS` is false, sidecar `fcntl` lock,
       refuses `--no-confirm`; `RelayThread` composing (for now) a local `ServerThread`
       (`forever_mode=True`, `max_retries=0`, small `poll`) with a defined stop order.
-- [ ] `src/hypershell/relay/store.py`: `RelayBase` (own `MetaData`), `relay_task`, `relay_result`,
+- [x] `src/hypershell/relay/store.py`: `RelayBase` (own `MetaData`), `relay_task`, `relay_result`,
       created with `upgrade_schema(engine, metadata=RelayBase.metadata)`.
-- [ ] `__init__.py` (`commands`, `APP_HELP`, `__all__`); `core/logging.py` `DISTRIBUTED_ROLES`
+- [x] `__init__.py` (`commands`, `APP_HELP`, `__all__`); `core/logging.py` `DISTRIBUTED_ROLES`
       gains `relay`.
-- [ ] Docs in the same commit: `docs/_include/relay_{usage,help,desc}.rst`, `docs/cli/relay.rst`
-      (+ `docs/cli/index.rst`), `docs/_include/config_param_ref.rst` (`[relay]`); completions in
+- [x] Docs in the same commit: `docs/_include/relay_{usage,help,desc}.rst`, `docs/cli/relay.rst`
+      (+ `docs/cli/index.rst`, and `docs/manual.rst`'s synopsis and usage section),
+      `docs/_include/config_param_ref.rst` (`[relay]`); completions in
       `share/bash_completion.d/hs` and `share/zsh/site-functions/_hs`.
-- [ ] `tests/test_relay_db.py` (subprocess, `do_connect` recorder): PostgreSQL config on a closed
+- [x] `tests/test_relay_db.py` (subprocess, `do_connect` recorder): PostgreSQL config on a closed
       port and a second SQLite primary — only the relay file is opened, primary not created,
       `psycopg` not imported, `Task.__table__.schema is None`; the side tables never appear in a
       primary initialised by `hs initdb`; the lock refuses a second relay; the section builder over
       sqlite/postgres/timescale/url configs.
+- **Amendments (2026-11-04, build):**
+  - **CLI grows with the phases.** P2's `hs relay` takes only the options it implements:
+    `--bind`, `--port`, `--database` (and refuses `--no-confirm`, a hidden option). The upstream
+    options (`-H`, `-p`, `--no-tls`) arrive with P3 and the fleet options (`--zone`, `-N`,
+    `--launcher`, `--launcher-args`) with P4, each with its help snippet and completions in that
+    commit. The `[relay]`/`[relay.upstream]` config defaults are all in place now, as planned.
+  - **`--database` re-executes once.** The database is bound at import, so a `--database` naming
+    another file re-executes the relay with `HYPERSHELL_RELAY_DATABASE` set (an env-layer value,
+    which P5's scrub of `HYPERSHELL_RELAY_*` removes before the fleet starts). A private
+    `_HYPERSHELL_RELAY_REEXEC` marker stops a second re-exec.
+  - **P2's stop order.** A stock server that never had a client waits for its first one, so a
+    drained relay (USR1/USR2) would never exit. `RelayThread` stops the relay-local server itself
+    once its scheduler has finished. P4 replaces this with the cluster's own shutdown (§2.9).
+  - Default `[relay] bind` is `0.0.0.0` (site clients run on other nodes), default port `50002`.
 - **Verify:** see frontmatter.
+- **Verified 2026-11-04** on the base `bd2faf9` + P1 (Python 3.12, a frozen venv first on `PATH`
+  in place of `uv run`): `pytest -v tests/test_relay_db.py tests/test_main.py
+  tests/test_completions.py tests/test_logging.py tests/test_initdb.py` 140 passed; `hs relay
+  --help` exit 0; `bash -n` and `zsh -n` on the completions ok. No deferred items. CLI drive:
+  `hs relay --bind 127.0.0.1 --port <free>` in a throwaway site came up, exited 0 on SIGUSR1 within
+  the deadline, left the relay database (`task`, `client`, `source`, `relay_task`, `relay_result`)
+  under `<site lib>/relay/<host>.db`, and created no primary database. The PostgreSQL-config
+  test passes on a host with no `libpq`, so the relay process never needs the driver.
+- **Full suite at the end of P2** (Python 3.12, `pytest -v`): 713 passed, 80 skipped (PostgreSQL and
+  other server-backed tests), no failure, no rerun.
 - **Touches:** `src/hypershell/core/config.py`, `src/hypershell/relay/`, `src/hypershell/__init__.py`,
-  `src/hypershell/core/logging.py`, `docs/`, `share/`, `tests/test_relay_db.py`.
+  `src/hypershell/core/logging.py`, `docs/`, `share/`, `tests/test_relay_db.py`,
+  `tests/test_main.py`, `tests/test_logging.py`.
 
 ## Phase P3 — Upstream pull
 **Satisfies:** R2, R3, R8, R17, R20 · **Depends on:** P2 · PLAN §2.2
@@ -377,7 +403,8 @@ confirms; it never pulls past the backlog bound.
       (verbatim `schedule_time` text, `server_id`, `server_host`, identity) in one transaction;
       aware datetimes to relay-local time; confirm only after commit.
 - [ ] Upstream `QueueClient` built from `[relay.upstream]` (host, port, auth, TLS `cafile` /
-      `fingerprint`); `--no-tls` affects the upstream hop only.
+      `fingerprint`); `--no-tls` affects the upstream hop only. CLI `-H/--upstream-host`,
+      `-p/--upstream-port`, `--no-tls` with help snippets and completions (P2 amendment).
 - [ ] Heartbeat FSM: one `Heartbeat.new(uuid=<identity>)` per beat at `[relay.upstream] heartrate`.
 - [ ] Tests (`tests/test_relay_connector.py`, `tests/test_relay_fsm.py`) against a fake upstream:
       confirm follows the insert commit; a failed insert is never confirmed; no request at or
@@ -396,6 +423,8 @@ attributed to the leaf with the upstream `schedule_time`.
 - [ ] `relay/site.py`: replace P2's bare `ServerThread` with `AutoScalingCluster(source=None,
       max_retries=0, poll, bind, launcher, launcher_args, policy='fixed',
       init_size=min_size=max_size=N, tls=<local>, zone=<name>)`; no edit to `cluster/`.
+- [ ] CLI `--zone`, `-N/--size`, `--launcher`, `--launcher-args` with help snippets and
+      completions (P2 amendment).
 - [ ] Returner FSM (`START, COLLECT, SEND, MARK, FINAL, HALT`): move completed rows into
       `relay_result` in one transaction; restore `schedule_time`/`server_id`/`server_host` from
       `relay_task`; give naive timestamps the relay tz; bundle by bundlesize/bundlewait; mark
@@ -410,7 +439,8 @@ attributed to the leaf with the upstream `schedule_time`.
 - [ ] Drive once by hand in a throwaway site and record it in the commit body:
       `.agents/factory/bin/temp_site.sh sh -c "…hs server --forever… & …hs relay… & …; hs list"`.
 - **Verify:** see frontmatter.
-- **Touches:** `src/hypershell/relay/`, `tests/test_relay_return.py`, `tests/test_relay_workload.py`.
+- **Touches:** `src/hypershell/relay/`, `tests/test_relay_return.py`, `tests/test_relay_workload.py`,
+  `docs/_include/relay_*`, `docs/manual.rst`, `share/`.
 
 ## Phase P5 — Credential fence, two relays, failover (core complete)
 **Satisfies:** R3, R6, R17, R20 · **Depends on:** P4 · PLAN §2.3, §2.6 (failover)

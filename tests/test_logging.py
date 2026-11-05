@@ -63,6 +63,7 @@ _HOLDER = (
     ('cluster', 'cluster'),
     ('client', 'client'),
     ('submit', 'submit'),
+    ('relay', 'relay'),
     ('list', 'main'),
     ('info', 'main'),
     ('config', 'main'),
@@ -82,6 +83,7 @@ def test_default_file_is_host_scoped_except_main() -> None:
     assert os.path.basename(default_file_for('server')) == f'server-{HOSTNAME_SHORT}.log'
     assert os.path.basename(default_file_for('client')) == f'client-{HOSTNAME_SHORT}.log'
     assert os.path.basename(default_file_for('submit')) == f'submit-{HOSTNAME_SHORT}.log'
+    assert os.path.basename(default_file_for('relay')) == f'relay-{HOSTNAME_SHORT}.log'
 
 
 @mark.unit

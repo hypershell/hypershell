@@ -54,7 +54,7 @@ function _hs_complete_tags() {
 function _hs() {
 
 	local current="${COMP_WORDS[COMP_CWORD]}"
-	local all_opts="cluster server client submit initdb info wait run list update config -h --help -v --version --citation"
+	local all_opts="cluster server client relay submit initdb info wait run list update config -h --help -v --version --citation"
 
 	local i=1 cmd=
 	while [[ "${i}" -lt "${COMP_CWORD}" ]]
@@ -83,6 +83,7 @@ function _hs() {
 		submit)  _hs_submit      ;;
 		server)  _hs_server      ;;
 		client)  _hs_client      ;;
+		relay)   _hs_relay       ;;
 		cluster) _hs_cluster     ;;
 		info)    _hs_task_info   ;;
 		wait)    _hs_task_wait   ;;
@@ -599,6 +600,25 @@ function _hs_client() {
 		-T | --timeout)     COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}")); return ;;
 		-W | --task-timeout) COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}")); return ;;
 		-S | --signalwait)  COMPREPLY=($(compgen -W "1 5 10" -- "${current}")); return ;;
+	esac
+
+	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
+}
+
+
+# ---------------------------------------------------------------------------
+# relay
+# ---------------------------------------------------------------------------
+
+function _hs_relay() {
+	local current="${COMP_WORDS[COMP_CWORD]}"
+	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
+	local all_opts="-h --help --bind --port --database"
+
+	case "${previous}" in
+		--database) COMPREPLY=($(compgen -f -- "${current}")); return ;;
+		--bind)     COMPREPLY=($(compgen -W "0.0.0.0 localhost 127.0.0.1" -- "${current}")); return ;;
+		--port)     COMPREPLY=($(compgen -W "$(hs config get relay.port --raw 2>/dev/null)" -- "${current}")); return ;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
