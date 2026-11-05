@@ -347,6 +347,18 @@ Pre-existing since 2023 (`70bcc63`).
 *Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
 **Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: unshaped*
 
+## `auth_env` and `auth_eval` in a config file break every command
+
+`docs/security.rst` recommends `auth_eval` / `auth_env` to keep the authkey out of the config file,
+but the built-in defaults already define `server.auth` (`src/hypershell/core/config.py:132`), and
+cmdkit refuses a key that has more than one variant. With either suffix in a config file, every
+`hs` command, `hs config get` included, dies at import with `'auth' has more than one variant`.
+A variant should take precedence over the default, and an unset variable should be an error, never
+a fallback to the default key. Pre-existing since 2.8.0.
+
+*Horizon: near-term, small · Depends on: — · Refs: `docs/security.rst`*
+**Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: unshaped*
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
