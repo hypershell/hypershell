@@ -252,6 +252,38 @@ exception applied. The research was done inline and in sequence; see
   - *F4 · fix.* (a) Tests that pin the hint's silence for a wrong `-k` or a wrong
     `HYPERSHELL_SERVER_AUTH`, and `ClientLaunch.start()`'s closed-input path. (b) CI fetches tag
     `2.9.0a4` so the contract and cross-version tests run there.
+- **Review-2 rulings (foreman, for the maintainer; 2026-11-05).** Detail and tests in TECH
+  § *Review-2 remediation*.
+  - *N1 · fix.* The `--ssh --env` export words are built from the environment mapping itself:
+    `HYPERSHELL_SERVER_AUTH` is dropped from the mapping by name first, every value is quoted
+    with `shlex.quote` (one `NAME=value` word per variable, read back exactly by a POSIX shell),
+    and `describe()` redacts on the name a word assigns, parsed as a shell parses it, not on a
+    string prefix. `compile_env()` has no other caller; it now joins the same words.
+  - *N2 · fix.* A `{% … %}` template expansion runs in the client with the same stripped
+    environment as the task process: `Template` takes a `shell_env` callable and the client
+    hands it `inherited_task_env` (`core/template.py` does not import `client.py`). Submit-side
+    expansion is unchanged. The `{= … =}` lambda pattern is explicit user code with `os`
+    exposed; it stays, documented beside `[export]` as a deliberate way to reach the client's
+    environment.
+  - *N3 · fix.* Open MPI launchers are recognised by base name: `mpirun`/`mpiexec` and their
+    dotted variants (`mpirun.openmpi`, …), `orterun` and `prterun`. Only the first word counts,
+    so `srun mpirun` is not one (documented). `-x` is recognised as `-x`, `--x`, or either with
+    `=value`; Open MPI documents `-x <var>` only, and the launch always adds that documented
+    form, so recognising the other spellings is safe either way.
+  - *N4 · fix.* The CI tag fetch degrades: without the tag it prints a notice, exits 0, and the
+    tag-gated tests skip.
+  - *N5 · fix the docs.* `[export]` (or `HYPERSHELL_EXPORT_*`) hands tasks a key the operator
+    holds; a nested `hs cluster` run mints its own key and needs none from the outer run; the
+    "starts its own client of the same server" example is gone.
+  - *Real-cluster check (TLS).* Under default TLS, a launched client whose launcher dropped the
+    environment fails TLS certificate verification before it authenticates. Under the same
+    condition as the Q1 hint (no key from `-k` or the environment), that error now names the
+    same likely cause: the launcher did not pass the environment, so the client got neither its
+    key nor its TLS settings. Smallest change, in `client.py`.
+  - *Wording.* The absolute statements in invariants §11, AGENTS.md and `docs/security.rst` are
+    made exactly true: tasks get the key only explicitly (`[export]`, or a `{= =}` lambda that
+    reads the client's environment), and stripping keeps the key out of inherited environments,
+    not out of reach of same-user code that looks for it.
 - **Risk: test runtime and hangs.** A client that fails to authenticate leaves a cluster waiting.
   Every new test runs `hs cluster` in its own session with a hard timeout and kills the process
   group on expiry.

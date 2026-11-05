@@ -855,12 +855,11 @@ def test_ssh_launch_runs_client_under_sh_with_no_terminal(options: Dict[str, Any
     remote_exe, address = params.pop('remote_exe'), params.pop('address')
     launcher, launcher_args = params.pop('launcher'), params.pop('launcher_args')
     key = 'k' * 32
-    exports = ['HYPERSHELL_SITE=/site']
     launch = client_launch(remote_exe, address, key, launcher=launcher, launcher_args=launcher_args,
-                           ssh_host='node-7', ssh_exports=exports, **params)
+                           ssh_host='node-7', ssh_exports={'HYPERSHELL_SITE': '/site'}, **params)
     before, after, preamble, command = split_ssh_launch(launch.argv, 'node-7')
     assert before == [*launcher, *launcher_args, '-T']
-    assert after[:-1] == [*exports, 'sh', '-c']
+    assert after[:-1] == ['HYPERSHELL_SITE=/site', 'sh', '-c']
     assert command == previous_argv(remote_exe, address, [], [], **params)
     assert AUTH_ENV in preamble
     assert key not in ' '.join(launch.argv)
@@ -1146,6 +1145,8 @@ def test_task_environment_holds_key_only_when_exported(temp_site: Path, monkeypa
     pytest.param(['srun'], id='srun'),
     pytest.param(['flux', 'run'], id='flux'),
     pytest.param(['launcher', 'mpirun'], id='mpirun-not-first'),
+    pytest.param(['srun', 'mpirun.openmpi'], id='srun-mpirun'),
+    pytest.param(['mpirunner'], id='longer-name'),
 ])
 def test_client_launch_sets_no_open_mpi_parameter_for_other_launchers(monkeypatch: MonkeyPatch,
                                                                       launcher: List[str]) -> None:
@@ -1160,6 +1161,10 @@ def test_client_launch_sets_no_open_mpi_parameter_for_other_launchers(monkeypatc
 @mark.parametrize('launcher', [
     pytest.param(['mpiexec', '-n', '4'], id='mpiexec'),
     pytest.param(['/opt/openmpi/bin/mpirun'], id='mpirun-path'),
+    pytest.param(['mpirun.openmpi', '-np', '2'], id='mpirun-dotted'),
+    pytest.param(['/usr/bin/mpiexec.openmpi'], id='mpiexec-dotted'),
+    pytest.param(['orterun'], id='orterun'),
+    pytest.param(['/opt/openmpi/bin/prterun'], id='prterun'),
 ])
 def test_client_launch_sets_open_mpi_parameter_for_mpi_launchers(monkeypatch: MonkeyPatch,
                                                                  launcher: List[str]) -> None:
@@ -1173,6 +1178,8 @@ def test_client_launch_sets_open_mpi_parameter_for_mpi_launchers(monkeypatch: Mo
 @mark.parametrize('launcher, launcher_args', [
     pytest.param(['mpirun', '-x', 'LD_LIBRARY_PATH'], [], id='launcher-words'),
     pytest.param(['mpiexec'], ['-np', '2', '-x', 'OMP_NUM_THREADS=2'], id='launcher-args'),
+    pytest.param(['mpirun.openmpi', '--x', 'LD_LIBRARY_PATH'], [], id='double-dash'),
+    pytest.param(['orterun'], ['-x=OMP_NUM_THREADS'], id='equals'),
 ])
 def test_client_launch_forwards_key_by_name_beside_mpirun_x(monkeypatch: MonkeyPatch, launcher: List[str],
                                                             launcher_args: List[str]) -> None:
@@ -1218,7 +1225,7 @@ def test_ssh_launch_exports_never_carry_key(monkeypatch: MonkeyPatch) -> None:
     params = {**SSH_LAUNCH_BASE}
     remote_exe, address = params.pop('remote_exe'), params.pop('address')
     launch = client_launch(remote_exe, address, 'k' * 32, ssh_host='node-7',
-                           ssh_exports=['HYPERSHELL_SITE=/site', f'{AUTH_ENV}={held}'], **params)
+                           ssh_exports={'HYPERSHELL_SITE': '/site', AUTH_ENV: held}, **params)
     _, after, _, _ = split_ssh_launch(launch.argv, 'node-7')
     assert after[:-1] == ['HYPERSHELL_SITE=/site', 'sh', '-c']
     assert held not in ' '.join(launch.argv) and held not in launch.describe()
@@ -1293,3 +1300,114 @@ def test_client_names_missing_key_only_when_none_given(temp_site: Path, client_a
     assert 'AuthenticationError' in run.stderr
     named = 'No key reached this client' in run.stderr
     assert named == hint, run.stderr[-4000:]
+
+
+# Values a shell treats specially; each must reach the remote shell as exactly itself.
+AWKWARD_VALUES: Final[List[str]] = ['a\\', 'q"', "it's", '"', 'two words', '$(echo x) `echo y` $HOME', '']
+
+
+@mark.parametrize('value', [pytest.param(value, id=f'value-{index}') for index, value in enumerate(AWKWARD_VALUES)])
+def test_ssh_env_exports_quote_every_value(monkeypatch: MonkeyPatch, tmp_path: Path, value: str) -> None:
+    """With --env, every export reaches the remote shell as exactly its own value, and none carries the key."""
+    held = 'h' * 128
+    for name in [name for name in os.environ if name.startswith('HYPERSHELL_')]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv('HYPERSHELL_PROBE_A', value)
+    monkeypatch.setenv(AUTH_ENV, held)
+    monkeypatch.setenv('HYPERSHELL_PROBE_Z', value)
+    monkeypatch.setenv('HYPERSHELL_SERVER_PORT', str(50001))
+    cluster = SSHCluster(nodelist=['node-7'], export_env=True, bind=(LOOPBACK, 50001), tls=None)
+    launch, = cluster.launches
+    _, after, _, _ = split_ssh_launch(launch.argv, 'node-7')
+    exports = after[:-3]
+    assert held not in ' '.join(launch.argv) and held not in launch.describe()
+    # The remote shell gets the words joined, as ssh sends them; it must read back each value exactly.
+    output = tmp_path / 'remote-env.json'
+    dump = 'import os, sys, json; json.dump(dict(os.environ), open(sys.argv[1], "w"))'
+    probe = shlex.join([sys.executable, '-c', dump, str(output)])
+    subprocess.run(['/bin/sh', '-c', ' '.join([*exports, probe])], check=True, timeout=60,
+                   env={'PATH': '/usr/bin:/bin'})
+    remote = json.loads(output.read_text())
+    assert AUTH_ENV not in remote and held not in json.dumps(remote)
+    assert remote['HYPERSHELL_PROBE_A'] == value and remote['HYPERSHELL_PROBE_Z'] == value
+    assert remote['HYPERSHELL_SERVER_PORT'] == '50001'
+
+
+@mark.parametrize('word', [
+    pytest.param(f'"{AUTH_ENV}=h"', id='double-quoted'),
+    pytest.param(f"'{AUTH_ENV}'=h", id='quoted-name'),
+    pytest.param(f"{AUTH_ENV}='h'", id='quoted-value'),
+    pytest.param(f'HYPERSHELL_A=a {AUTH_ENV}=h', id='two-assignments'),
+    pytest.param(f'{AUTH_ENV}="h', id='unbalanced'),
+])
+def test_client_launch_description_redacts_key_however_quoted(word: str) -> None:
+    """A launch's log description redacts a word that assigns the key variable, however the word is quoted."""
+    launch = ClientLaunch(argv=['ssh', '-T', 'node-7', word, 'HYPERSHELL_SITE=/site', 'sh', '-c', "'true'"],
+                          env={}, stdin='key', inherit_env=True)
+    description = launch.describe()
+    assert word not in description and shlex.quote(word) not in description
+    assert '=h' not in description and "'h'" not in description
+    assert f'{AUTH_ENV}=***' in description and 'HYPERSHELL_SITE=/site' in description
+
+
+# Run as a template shell expansion: writes the environment it runs with, as JSON, to a private
+# file in the directory it is given, and prints nothing, so the task's command is just its args.
+DUMP_EXPANSION_ENV: Final[str] = """\
+import os, sys, json, uuid
+path = os.path.join(sys.argv[1], uuid.uuid4().hex + '.json')
+with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
+    json.dump(dict(os.environ), stream)
+"""
+
+
+def test_template_shell_expansion_never_sees_key(stand_ins: StandIns, temp_site: Path, tmp_path: Path) -> None:
+    """A launched client runs template shell expansions without the key, and with the rest of its environment."""
+    script = tmp_path / 'dump_expansion_env.py'
+    script.write_text(DUMP_EXPANSION_ENV)
+    dumps = tmp_path / 'expansion-env'
+    dumps.mkdir(mode=0o700)
+    template = '{% ' + shlex.join([sys.executable, str(script), str(dumps)]) + ' %}{}'
+    run = run_cluster(stand_ins, [f'--launcher={stand_ins.launcher}', '-t', template], temp_site, True, None,
+                      env={'USER_MARKER': 'kept', OMPI_ENV_LIST: USER_OMPI_NAMES})
+    key = assert_key_off_command_lines(stand_ins.read())
+    assert_run_complete(run, stand_ins, temp_site)
+    environments = [json.loads(path.read_text()) for path in dumps.glob('*.json')]
+    assert len(environments) == TASK_COUNT
+    for env in environments:
+        holds_variable, holds_key = AUTH_ENV in env, key in json.dumps(env)
+        assert not holds_variable, 'A template expansion received the key variable'
+        assert not holds_key, 'A template expansion received the key'
+        assert env.get('USER_MARKER') == 'kept'
+        assert env.get(OMPI_ENV_LIST) == USER_OMPI_NAMES
+
+
+# A launcher that drops the whole environment, as `srun --export=NONE` does where the client's site
+# and TLS settings came from that environment: the client starts with a home of its own, so it finds
+# neither its key nor the server's certificate. Its configuration file stays blank, as in every run.
+# With {keep_key}, it passes the key variable alone through, so the client has a key of its own.
+LAUNCHER_BARE_ENV_BODY: Final[str] = """\
+record('launcher')
+home = os.path.join(os.path.dirname(RECORDS), 'bare-home-' + uuid.uuid4().hex)
+os.mkdir(home, 0o700)
+env = {{'PATH': os.environ['PATH'], 'HOME': home, 'HYPERSHELL_CONFIG_FILE': '', 'HYPERSHELL_LOGGING_LEVEL': 'DEBUG'}}
+if {keep_key!r}:
+    env[{auth_env!r}] = os.environ[{auth_env!r}]
+os.chdir(home)
+os.execve(sys.argv[1], sys.argv[1:], env)
+"""
+
+
+@mark.parametrize('keep_key, hint', [pytest.param(False, True, id='no-key'), pytest.param(True, False, id='key-kept')])
+def test_launched_client_without_environment_names_cause_under_tls(stand_ins: StandIns, temp_site: Path,
+                                                                   keep_key: bool, hint: bool) -> None:
+    """Under TLS, a launched client that got no environment, and so no key, names the launcher's environment."""
+    body = LAUNCHER_BARE_ENV_BODY.format(keep_key=keep_key, auth_env=AUTH_ENV)
+    launcher = write_program(stand_ins.bin / 'launcher-bare-env', body, stand_ins.records)
+    run = run_cluster(stand_ins, [f'--launcher={launcher}'], temp_site, False, None,
+                      until=lambda: bool(stand_ins.exits()))
+    exits = stand_ins.exits()
+    assert [record['status'] for record in exits] == [exit_status.runtime_error], run.stderr[-4000:]
+    assert 'SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED]' in run.stderr, run.stderr[-4000:]
+    named = 'the launcher most likely did not pass the environment to the client' in run.stderr
+    assert named == hint, run.stderr[-4000:]
+    assert ('neither its key nor the TLS settings' in run.stderr) == hint

@@ -180,23 +180,35 @@ key generators used in the deployment guides below satisfy this policy.
     * **Launcher modes** (``--launcher``, ``--mpi`` and ``--autoscaling``). The launcher is
       started with the key in its environment, and must pass that environment through to the
       clients it starts. ``srun`` (with its default ``--export=ALL``), MPICH, Intel MPI and
-      Flux do. Only when the launcher is ``mpirun`` or ``mpiexec`` (``--mpi``, or a
-      ``--launcher`` whose first word is one of them) does the launch also ask Open MPI to
-      forward the variable to remote ranks, by name: through ``OMPI_MCA_mca_base_env_list``,
-      keeping names already set there, or, if the launcher's arguments already hold ``-x``
-      (Open MPI 4 does not accept both), by adding ``-x HYPERSHELL_SERVER_AUTH``. Any other
-      launcher, including ``srun``, and ``--autoscaling`` with no launcher, gets neither. A
+      Flux do. Only when the launcher is one Open MPI may provide does the launch also ask
+      Open MPI to forward the variable to remote ranks, by name: through
+      ``OMPI_MCA_mca_base_env_list``, keeping names already set there, or, if the launcher's
+      arguments already hold ``-x`` (also written ``--x``, or either with ``=``; Open MPI 4
+      does not accept ``-x`` together with that parameter), by adding
+      ``-x HYPERSHELL_SERVER_AUTH``. That is ``--mpi``, or a ``--launcher`` whose first word
+      has the base name ``mpirun``, ``mpiexec``, ``orterun`` or ``prterun``, or ``mpirun`` or
+      ``mpiexec`` with a dotted suffix, such as Debian's ``mpirun.openmpi`` (an MPICH name
+      such as ``mpiexec.hydra`` matches too; MPICH ignores the Open MPI parameter). Only the
+      first word counts: ``srun mpirun`` gets neither, as do ``srun``, any other launcher,
+      and ``--autoscaling`` with no launcher. If such a launcher needs Open MPI to forward
+      the variable, add ``-x HYPERSHELL_SERVER_AUTH`` (the name only) to ``--launcher``. A
       launcher set to drop the environment, such as ``srun --export=NONE``, leaves its
       clients without the key, so they cannot authenticate.
       Such a client exits with a ``CRITICAL`` error that names ``HYPERSHELL_SERVER_AUTH`` and
-      the launcher not passing the environment as the likely cause.
+      the launcher not passing the environment as the likely cause. With TLS on, where the
+      dropped environment also held the client's TLS settings, the client fails to verify the
+      server's certificate before it authenticates; when it has no key either, that error
+      names the same likely cause.
 
     * **SSH** (``--ssh``). The key travels on the ssh channel's standard input. On each remote
       host a short POSIX ``sh`` step reads it into ``HYPERSHELL_SERVER_AUTH`` using shell
       builtins, exports it, and replaces itself with the client, so the key is on no command
       line there either. With ``--env``, the other ``HYPERSHELL_*`` variables of the launching
-      environment are still passed on ssh's command line, but ``HYPERSHELL_SERVER_AUTH`` never
-      is. The launch owns ssh's standard input and always passes ``-T``, so no remote
+      environment are still passed on ssh's command line, one ``NAME=value`` word each, with
+      the value quoted for a POSIX shell, so a POSIX login shell on the remote host reads back
+      exactly that value, and no value can run into another word. ``HYPERSHELL_SERVER_AUTH`` is left out by name before any
+      word is built, so it is never among them, whatever the other values hold. (A name that
+      is not a valid shell variable name is left out too, with a warning.) The launch owns ssh's standard input and always passes ``-T``, so no remote
       terminal is allocated. A ``-t`` or ``-tt`` in ``--ssh-args`` or ``ssh.args``
       therefore has no effect on client launches, and a bare ``-n`` there is dropped with a
       warning. If no key arrives, for example because a wrapper around ``ssh`` closes its
@@ -208,11 +220,26 @@ key generators used in the deployment guides below satisfy this policy.
     Tasks run with their client's environment, except that the client does not pass
     ``HYPERSHELL_SERVER_AUTH`` to them, and takes that name out of
     ``OMPI_MCA_mca_base_env_list`` (keeping any other names, and dropping the variable if none
-    is left). Tasks therefore see neither the key nor the Open MPI parameter the launch set,
-    whatever the launch mode. A task that needs the key, for example one that starts its own
-    client of the same server, has to be given it explicitly, through the ``[export]`` section
-    of the configuration. This applies to clients from this release on; an older client under
-    a newer launcher still passes its environment to its tasks unchanged.
+    is left). The client runs the shell commands of ``{% %}`` template patterns, once per
+    task, with that same environment. So, whatever the launch mode, neither a task's
+    environment nor a ``{% %}`` command's holds the key or the Open MPI entry the launch set,
+    unless the configuration gives it explicitly. There are two explicit ways:
+
+    * An ``[export]`` entry for ``HYPERSHELL_SERVER_AUTH`` (or a
+      ``HYPERSHELL_EXPORT_HYPERSHELL_SERVER_AUTH`` variable) hands every task a key the
+      operator holds, such as the key of a hand-started ``hs server``. Its values are taken
+      literally, so it cannot carry the key an ``hs cluster`` run mints, which no one is shown.
+    * A ``{= =}`` lambda pattern is Python the client evaluates itself, with ``os`` exposed,
+      so ``os.environ`` there is the client's own environment, key included. A template that
+      reads it does so on purpose.
+
+    A task that runs a nested ``hs cluster`` needs neither: that run mints its own key for
+    its own server and clients. Keeping the key out of what tasks inherit keeps it out of
+    an environment a task dumps or logs by accident; it is not a barrier against task code
+    that looks for it, since tasks run as the same user as their client, which can generally
+    read the client's own process environment. This applies to clients from this release
+    on; an older client under a newer launcher still passes its environment to its tasks
+    unchanged.
 
     A directly configured ``server.auth`` is stored in plaintext in the config file and printed
     verbatim by ``hs config get``; prefer the ``_eval`` / ``_env`` suffixes (see below) to

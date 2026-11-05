@@ -158,11 +158,15 @@ subsystems.
 - `cluster/launch.py` `client_launch()` is the one client-invocation builder for `remote`/`ssh`/
   `autoscale` (`local` runs clients in-process): a change to launched-client arguments goes there.
   The key is never in a launched argv — environment (`HYPERSHELL_SERVER_AUTH`) for launcher modes,
-  ssh's stdin (forced `-T`, bare `-n` dropped, never among the `--env` exports) for `--ssh` — and
-  only options a 2.9.0a4 client accepts may be emitted (contract test). The Open MPI forwarding
-  (`OMPI_MCA_mca_base_env_list`, or `-x` beside a user's own `-x`) is for `mpirun`/`mpiexec`
-  launchers only, and the client strips the key variable and its Open MPI entry from every
-  task's environment.
+  ssh's stdin (forced `-T`, bare `-n` dropped) for `--ssh`, whose `--env` exports are built from
+  the variables by name (`ssh_env_exports()`: the key variable dropped first, every value
+  `shlex.quote`d), never by filtering words — and only options a 2.9.0a4 client accepts may be
+  emitted (contract test). The Open MPI forwarding (`OMPI_MCA_mca_base_env_list`, or `-x` beside a
+  user's own `-x`/`--x`) is for Open MPI launchers only (`is_mpi_launcher()`: the first word, by
+  base name; never `srun mpirun`). The client strips the key variable and its Open MPI entry from
+  every task's environment and from every `{% %}` template command's; a task gets the key only
+  explicitly, through `config.export` (a key the operator holds) or a `{= =}` lambda (client-side
+  Python reading the client's own `os.environ` on purpose).
 - In JSON mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
   expansion.
 - Advertised `HOSTNAME` must be routable from clients. The autoscaler never terminates clients

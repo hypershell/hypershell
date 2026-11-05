@@ -37,6 +37,7 @@ from types import TracebackType
 import os
 import sys
 import json
+import ssl
 import time
 import random
 import functools
@@ -721,7 +722,7 @@ class TaskExecutor(StateMachine):
         """Initialize task executor."""
         self.id = id
         self.slot_count = slot_count
-        self.template = Template(template)
+        self.template = Template(template, shell_env=inherited_task_env)
         self.inbound = inbound
         self.outbound = outbound
         self.redirect_output = redirect_output or sys.stdout
@@ -1150,6 +1151,14 @@ LAUNCH_ENV_HINT: Final[str] = (f'No key reached this client: {AUTH_ENV} is not s
                                f'receives its key in {AUTH_ENV}, so the launcher most likely did not pass '
                                f'the environment to the client (e.g., srun --export=NONE).')
 """Likely cause named when a client without a key of its own fails to authenticate."""
+
+LAUNCH_ENV_TLS_HINT: Final[str] = (f'No key reached this client either: {AUTH_ENV} is not set in its environment '
+                                   f'and no -k was given. A client that \'hs cluster\' starts through a launcher '
+                                   f'receives its key in {AUTH_ENV} and may take its TLS settings from the '
+                                   f'environment too, so the launcher most likely did not pass the environment to '
+                                   f'the client (e.g., srun --export=NONE), and the client got neither its key nor '
+                                   f'the TLS settings that let it trust the server.')
+"""Likely cause named when a client without a key of its own cannot verify the server's certificate."""
 
 
 class ClientThread(Thread):
@@ -1684,6 +1693,10 @@ class ClientApp(Application):
         except AuthenticationError as error:
             if not auth_given and AUTH_ENV not in os.environ:
                 raise AuthenticationError(f'{error}\n{LAUNCH_ENV_HINT}') from error
+            raise
+        except ssl.SSLCertVerificationError as error:
+            if not auth_given and AUTH_ENV not in os.environ:
+                raise ssl.SSLCertVerificationError(error.errno, f'{error}\n{LAUNCH_ENV_TLS_HINT}') from error
             raise
 
     def check_args(self: ClientApp) -> None:

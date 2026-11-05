@@ -15,11 +15,12 @@ it into :const:`AUTH_ENV` before it starts the client.
 
 # Type annotations
 from __future__ import annotations
-from typing import Tuple, List, Dict, FrozenSet, Iterable, Sequence, Optional, Final
+from typing import Tuple, List, Dict, FrozenSet, Iterable, Mapping, Sequence, Optional, Final
 
 # Standard libs
 import io
 import os
+import re
 import shlex
 from dataclasses import dataclass, field
 from subprocess import Popen, PIPE
@@ -31,20 +32,26 @@ from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
 
 # Public interface
 __all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'MPI_LAUNCHERS', 'SSH_NO_KEY_MESSAGE', 'ClientLaunch', 'client_launch',
-           'ssh_launch_args', 'ssh_remote_script', 'redact_secrets']
+           'is_mpi_launcher', 'ssh_env_exports', 'ssh_launch_args', 'ssh_remote_script', 'redact_secrets']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
 
 
-MPI_LAUNCHERS: Final[FrozenSet[str]] = frozenset({'mpirun', 'mpiexec'})
+MPI_LAUNCHERS: Final[FrozenSet[str]] = frozenset({'mpirun', 'mpiexec', 'orterun', 'prterun'})
 """Program names of launchers that Open MPI may provide, which forward the key variable only by name."""
+
+MPI_LAUNCHER_VARIANTS: Final[FrozenSet[str]] = frozenset({'mpirun', 'mpiexec'})
+"""Names also recognised with a dotted suffix, as packages install them (`mpirun.openmpi`)."""
 
 OMPI_FORWARD: Final[str] = '-x'
 """The `mpirun` option that forwards one environment variable to remote ranks."""
 
-AUTH_ASSIGNMENT: Final[str] = f'{AUTH_ENV}='
-"""How a command-line word that assigns the key variable starts."""
+OMPI_FORWARD_FORMS: Final[FrozenSet[str]] = frozenset({'-x', '--x'})
+"""Spellings of :const:`OMPI_FORWARD` that count as already given (also with `=value`)."""
+
+SHELL_NAME: Final[re.Pattern] = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
+"""A name a POSIX shell can assign in a `NAME=value` word."""
 
 SSH_NO_KEY_MESSAGE: Final[str] = (f'hs cluster: no authentication key arrived on standard input for {AUTH_ENV}; '
                                   f'ssh must pass its standard input through to the remote command '
@@ -104,11 +111,13 @@ class ClientLaunch:
         """
         Shell-quoted command line for logging, with any key option value redacted.
 
-        A word that assigns :const:`AUTH_ENV` (`NAME=value`) shows the name only. The last
-        word of an SSH launch (the one with `stdin`) is already quoted for the remote shell
-        and ssh sends it as it is, so it is shown as it is.
+        A word that assigns :const:`AUTH_ENV` shows the name only: each word is parsed as a
+        shell would parse it, and any `NAME=value` it holds whose name is :const:`AUTH_ENV`
+        redacts the whole word, however the word is quoted. The last word of an SSH launch
+        (the one with `stdin`) is already quoted for the remote shell and ssh sends it as it
+        is, so it is shown as it is.
         """
-        argv = [AUTH_ASSIGNMENT + '***' if word.startswith(AUTH_ASSIGNMENT) else word for word in self.argv]
+        argv = [f'{AUTH_ENV}=***' if assigns_key(word) else word for word in self.argv]
         if self.stdin is None:
             return redact_secrets(argv, ['-k', '--auth'])
         return redact_secrets(argv[:-1], ['-k', '--auth']) + ' ' + self.argv[-1]
@@ -121,7 +130,7 @@ def client_launch(remote_exe: str,
                   launcher: Sequence[str] = (),
                   launcher_args: Sequence[str] = (),
                   ssh_host: Optional[str] = None,
-                  ssh_exports: Sequence[str] = (),
+                  ssh_exports: Optional[Mapping[str, str]] = None,
                   num_threads: int,
                   bundlesize: int,
                   bundlewait: int,
@@ -143,18 +152,20 @@ def client_launch(remote_exe: str,
 
     Without `ssh_host`, the command line is `launcher`, then `launcher_args`, then
     `remote_exe client` with the shared client options. The key is handed over in the
-    environment as :const:`AUTH_ENV`. When the launcher is `mpirun` or `mpiexec`
-    (:const:`MPI_LAUNCHERS`), Open MPI is also asked to forward that variable, by name, to
+    environment as :const:`AUTH_ENV`. When the launcher's first word is an Open MPI launcher
+    (see :func:`is_mpi_launcher`), Open MPI is also asked to forward that variable, by name, to
     remote ranks: through :const:`OMPI_ENV_LIST`, or, if the launcher's arguments already
     hold `-x` (which Open MPI 4 does not accept together with that parameter), with one more
-    `-x` and the variable's name. Other launchers get neither.
+    `-x` and the variable's name. Other launchers get neither, including one that starts an
+    MPI launcher itself (`srun mpirun`).
 
     With `ssh_host`, the command line is `launcher` and `launcher_args`, then `-T` (no
     remote terminal, whatever those arguments or the ssh configuration ask for), the host,
-    `ssh_exports` without any that assigns :const:`AUTH_ENV`, and a remote `sh -c` step (see
-    :func:`ssh_remote_script`). The key is the launch's standard input, and ssh gets the
-    caller's environment unchanged. The launch owns that input, so a bare `-n` among the ssh
-    arguments is dropped (see :func:`ssh_launch_args`).
+    one `NAME=value` word for each of `ssh_exports` (see :func:`ssh_env_exports`, which never
+    exports :const:`AUTH_ENV`), and a remote `sh -c` step (see :func:`ssh_remote_script`).
+    The key is the launch's standard input, and ssh gets the caller's environment unchanged.
+    The launch owns that input, so a bare `-n` among the ssh arguments is dropped (see
+    :func:`ssh_launch_args`).
 
     The calling process's environment is read, never modified.
 
@@ -173,17 +184,69 @@ def client_launch(remote_exe: str,
                              tls_enabled=tls_enabled, zone=zone)
     if ssh_host is not None:
         script = ssh_remote_script(remote_exe, options)
-        exports = [word for word in ssh_exports if not word.startswith(AUTH_ASSIGNMENT)]
+        exports = ssh_env_exports(ssh_exports or {})
         return ClientLaunch(argv=[*launcher[:1], *ssh_launch_args([*launcher[1:], *launcher_args]),
                                   '-T', ssh_host, *exports, 'sh', '-c', shlex.quote(script)],
                             env={}, stdin=auth + '\n', inherit_env=True)
     launcher_words, env = [*launcher, *launcher_args], {AUTH_ENV: auth}
-    if launcher and os.path.basename(launcher[0]) in MPI_LAUNCHERS:
-        if OMPI_FORWARD in launcher_words[1:]:
+    if launcher and is_mpi_launcher(launcher[0]):
+        if any(is_forward_option(word) for word in launcher_words[1:]):
             launcher_words.extend([OMPI_FORWARD, AUTH_ENV])
         else:
             env[OMPI_ENV_LIST] = ompi_env_list()
     return ClientLaunch(argv=[*launcher_words, remote_exe, 'client', *options], env=env)
+
+
+def is_mpi_launcher(program: str) -> bool:
+    """
+    True if `program`, by its base name, is a launcher Open MPI may provide.
+
+    That is a name in :const:`MPI_LAUNCHERS`, or `mpirun`/`mpiexec` with a dotted suffix
+    (`mpirun.openmpi`). Only the program itself counts, never a later word.
+
+    Example:
+        >>> [is_mpi_launcher(name) for name in ('/usr/bin/mpirun.openmpi', 'prterun', 'srun')]
+        [True, True, False]
+    """
+    name = os.path.basename(program)
+    return name in MPI_LAUNCHERS or name.split('.', 1)[0] in MPI_LAUNCHER_VARIANTS
+
+
+def is_forward_option(word: str) -> bool:
+    """True if `word` gives Open MPI's `-x` option (`-x`, `--x`, or either with `=value`)."""
+    return word.split('=', 1)[0] in OMPI_FORWARD_FORMS
+
+
+def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
+    """
+    One `NAME=value` word per variable in `env`, for the remote shell of an SSH launch.
+
+    :const:`AUTH_ENV` is left out by name before anything is quoted. Each value is quoted
+    with :func:`shlex.quote`, so a POSIX shell reads it back as exactly that value, and
+    no value can join or split words. A name that a shell cannot assign is left out.
+
+    Example:
+        >>> ssh_env_exports({'HYPERSHELL_A': 'a b', AUTH_ENV: 'secret', 'HYPERSHELL_B': 'b'})
+        ["HYPERSHELL_A='a b'", 'HYPERSHELL_B=b']
+    """
+    words = []
+    for name, value in env.items():
+        if name == AUTH_ENV:
+            continue
+        if not SHELL_NAME.fullmatch(name):
+            log.warning(f'Not exporting {name!r} to remote clients: not a shell variable name')
+            continue
+        words.append(f'{name}={shlex.quote(value)}')
+    return words
+
+
+def assigns_key(word: str) -> bool:
+    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name is :const:`AUTH_ENV`."""
+    try:
+        tokens = shlex.split(word)
+    except ValueError:  # Unbalanced quotes: look at the word as it is
+        tokens = word.split()
+    return any(token.split('=', 1)[0] == AUTH_ENV and '=' in token for token in tokens)
 
 
 def ssh_launch_args(args: Sequence[str]) -> List[str]:

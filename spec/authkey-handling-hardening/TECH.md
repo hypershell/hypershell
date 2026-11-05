@@ -3,16 +3,16 @@ slug: authkey-handling-hardening
 title: The queue authentication key is never exposed to other users on client nodes
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/authkey-handling-hardening
 base: develop
-current_phase: done
+current_phase: P1
 last_updated: '2026-11-05'
 phases:
 - id: P1
   name: One client-launch function; --launcher and --mpi hand the key over in the
     environment
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -24,8 +24,8 @@ phases:
   hammerable: false
   hill: downhill
   verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k 'launcher
-    or mpi or task_environment or missing_key' && uv run pytest -p no:cacheprovider
-    -q tests/test_cluster.py tests/test_client.py
+    or mpi or task_environment or missing_key or template_shell or under_tls' && uv
+    run pytest -p no:cacheprovider -q tests/test_cluster.py tests/test_client.py
 - id: P2
   name: Autoscaling (fixed and dynamic) launches through the same function
   status: done
@@ -45,7 +45,7 @@ phases:
 - id: P3
   name: SSH launches through the same function, key on the ssh channel's standard
     input
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -58,10 +58,10 @@ phases:
   hammerable: false
   hill: downhill
   verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k 'ssh
-    or closed_input' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
+    or closed_input or redacts' && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
 - id: P4
   name: Compatibility contract, cross-version check, and the docs revision
-  status: done
+  status: in_progress
   satisfies:
   - R4
   - R5
@@ -120,7 +120,9 @@ code+state commit.
   `client.py` carries the smallest change that makes a client which reaches the server with no key
   of its own name the likely cause (P1). A second, by the review-1 rulings below (Q3 reversed,
   F2; maintainer, 2026-11-05): the client leaves the key variable out of every task's environment,
-  and the hint keys on whether `-k` was given.
+  and the hint keys on whether `-k` was given. A third, by the review-2 rulings (2026-11-05):
+  `{% %}` template expansions get the tasks' environment, and the client's TLS verification
+  failure carries the same hint under the same condition.
 - No CLI option or help text changes in this cycle. If one becomes necessary, the affected
   `docs/_include/*.rst` and `share/` completions change in the same commit (R8).
 - Docs prose uses top-level commands only (`hs list`, `hs info`, `hs wait`, `hs run`, `hs update`).
@@ -467,6 +469,68 @@ the maintainer's and foreman's rulings of 2026-11-05, recorded in PLAN §5 and i
     the task's environment: exit 0, each of 4 tasks printed `key=0 ompi=USER_A`.
   - Not run here (no cluster access): the real `srun` and Open MPI 4 `-x` checks stay with the
     foreman, as PLAN §5 Q1 and REVIEW F1 say.
+
+---
+
+## Review-2 remediation (reopens P1, P3, P4)
+
+Review cycle 2 (`faac45d`, reviewing `a18f672`) requested changes. The rulings are the foreman's
+of 2026-11-05, recorded in PLAN §5 (*Review-2 rulings*). Each item went red on `faac45d` before
+its change, and each change was mutation-checked in a scratch copy of the fixed tree.
+
+- [x] **P3 · N1.** `launch.py` `ssh_env_exports()`: one `NAME=value` word per variable, built
+      from the mapping, `AUTH_ENV` dropped by name first, every value `shlex.quote`d, and a name
+      a shell cannot assign skipped with a warning. `client_launch(ssh_exports=…)` now takes the
+      mapping; `SSHCluster` passes `Namespace.from_env('HYPERSHELL')`, and `compile_env()` joins
+      the same words. `describe()` redacts any word that, parsed as a shell parses it, assigns
+      `AUTH_ENV` (`assigns_key()`). Tests: `test_ssh_env_exports_quote_every_value` (7 value
+      shapes, the key between two neighbours; the words run through a real `/bin/sh`, which must
+      read back each value exactly and see no key) and
+      `test_client_launch_description_redacts_key_however_quoted` (5 word shapes). Two existing
+      builder tests pass the mapping now.
+- [x] **P1 · N2.** `core/template.py`: `Template(template, shell_env=None)`; `expand_shell` runs
+      with `env=dict(shell_env())` when it is given, the process environment otherwise (submit
+      side, unchanged). `client.py` `TaskExecutor` passes `shell_env=inherited_task_env`. Test:
+      `test_template_shell_expansion_never_sees_key`, a real `hs cluster --launcher` run (stand-in
+      launcher) whose `{% %}` command records its environment for each of 4 tasks: no key
+      variable, no key, a user variable and a user's Open MPI names kept.
+- [x] **P1 · N3.** `launch.py` `is_mpi_launcher()`: the first word's base name is in
+      `MPI_LAUNCHERS` (`mpirun`, `mpiexec`, `orterun`, `prterun`), or is `mpirun`/`mpiexec` with a
+      dotted suffix. `is_forward_option()`: `-x`, `--x`, or either with `=value`. Tests: the three
+      Open MPI launcher tests gain `mpirun-dotted`, `mpiexec-dotted`, `orterun`, `prterun`,
+      `srun-mpirun`, `longer-name`, `double-dash` and `equals` cases.
+- [x] **P1 · TLS hint.** `client.py` `LAUNCH_ENV_TLS_HINT`: `ClientApp.run()` re-raises an
+      `ssl.SSLCertVerificationError` with the hint when no key came from `-k` or the environment
+      (the Q1 condition); exit status stays 5. Test:
+      `test_launched_client_without_environment_names_cause_under_tls[no-key|key-kept]`: a stand-in
+      launcher that drops the whole environment (fresh home, so the client finds neither its key
+      nor the server's certificate); with the key variable kept, the same failure carries no hint.
+- [x] **P4 · N4.** `.github/workflows/tests.yml`: the tag fetch is followed by
+      `|| echo "::notice::…"`. Checked with the step's own text against local bare origins in a
+      `--depth=1 --no-tags` clone: without the tag, notice printed, exit 0, tag absent; with it,
+      exit 0 and the tag resolves. The pre-fix step exits 128 on the tagless origin.
+- [x] **P4 · N5, wording.** `docs/security.rst`: which launchers get Open MPI forwarding, by base
+      name (with `srun mpirun` stated, and adding `-x HYPERSHELL_SERVER_AUTH` by hand for it);
+      `--env` words quoted for a POSIX shell, the key left out by name; tasks and `{% %}` commands
+      hold no key unless given explicitly, the two explicit ways (`[export]` for a key the
+      operator holds, and a `{= =}` lambda reading the client's environment); a nested
+      `hs cluster` mints its own key; stripping is not a barrier against same-user code; the TLS
+      hint. `docs/_include/templates.rst` (`{% %}` environment, `{= =}` sees the client's) and
+      `docs/_include/cluster_help.rst` (`--env` leaves the key out). `AGENTS.md` (auth-token
+      handoff) and `invariants.md` §11 match.
+- **Gate retunes (through `set_phase.py`).** P1's `-k` adds `template_shell or under_tls`; P3's
+  adds `redacts`.
+- **Red on faac45d:** 21 of 34 selected cases failed, each on its key-property, quoting, hint or
+  launcher assertion: 6 of 7 export value shapes (the empty value passes before and after), 3 of 5
+  description shapes (the two that start with the literal assignment pass before and after), the
+  `{% %}` run, the TLS `no-key` case, 4 + 2 Open MPI launcher cases, and 3 + 1 existing builder
+  tests that now pass the mapping. `srun-mpirun`, `longer-name` and TLS `key-kept` pass before and
+  after (they pin silence).
+- **Mutants (scratch copy of the fixed tree, its own venv), all 13 killed:** values not quoted
+  (8 failures); key not dropped (8); `describe()` by prefix (3); client passes no `shell_env`,
+  `expand_shell` ignores it, `shell_env` empty (1 each, the `{% %}` run); no dotted variants (3);
+  no `orterun`/`prterun` (3); prefix match on the launcher name (1); bare `-x` only (2); TLS hint
+  never fires (1); TLS hint ignores the condition (1); no `basename` (3).
 
 ---
 

@@ -351,16 +351,24 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   **never puts it on a command line** (no `-k` in any launched argv, local or remote).
   Launcher modes (`--launcher`, `--mpi`, `--autoscaling`) hand it over in the launched
   process's environment as `HYPERSHELL_SERVER_AUTH`, so the launcher must pass the environment
-  through; only an `mpirun`/`mpiexec` launcher also names it for Open MPI
-  (`OMPI_MCA_mca_base_env_list`, or `-x HYPERSHELL_SERVER_AUTH` when the launcher args already
-  hold `-x`). `--ssh` writes it to ssh's standard input with a forced `-T` (a bare `-n` in the
-  ssh args is dropped; `--env` exports never carry it), and a remote `sh` step reads it into
-  that variable and `exec`s the client. The launching process's own `os.environ` is never
-  modified; `ClientLaunch.env`/`stdin` are `repr=False` and `describe()` (redacted, including
-  any `HYPERSHELL_SERVER_AUTH=` word) is the only thing logged. The client never passes
-  `HYPERSHELL_SERVER_AUTH`, or its name in the Open MPI list, to tasks (`task_env()`); only
-  `config.export` can give a task the key. The full posture is `docs/security.rst`
-  (authoritative).
+  through; only an Open MPI launcher also names it for Open MPI (`is_mpi_launcher()`: the
+  first word's base name is `mpirun`, `mpiexec`, `orterun`, `prterun`, or `mpirun`/`mpiexec`
+  with a dotted suffix; `srun mpirun` is not one) through `OMPI_MCA_mca_base_env_list`, or
+  `-x HYPERSHELL_SERVER_AUTH` when the launcher args already hold `-x` (or `--x`, either
+  with `=`). `--ssh` writes it to ssh's standard input with a forced `-T` (a bare `-n` in the
+  ssh args is dropped), and a remote `sh` step reads it into that variable and `exec`s the
+  client; `--env` exports are built by `ssh_env_exports()` from the variables themselves,
+  `HYPERSHELL_SERVER_AUTH` dropped by name first and every value `shlex.quote`d, so they never
+  carry it. The launching process's own `os.environ` is never modified; `ClientLaunch.env`/
+  `stdin` are `repr=False` and `describe()` (redacted, including any word that, parsed as a
+  shell parses it, assigns `HYPERSHELL_SERVER_AUTH`) is the only thing logged. The client
+  never passes `HYPERSHELL_SERVER_AUTH`, or its name in the Open MPI list, to a task's
+  environment (`task_env()`) or to a `{% %}` template command (`Template(shell_env=
+  inherited_task_env)`). A task gets the key only explicitly: `config.export` (a key the
+  operator holds; never a run's minted key), or a `{= =}` lambda, which is client-side Python
+  with `os` exposed and reads the client's environment on purpose. Tasks run as the client's
+  user, so this keeps the key out of inherited environments, not out of reach of code that
+  looks for it. The full posture is `docs/security.rst` (authoritative).
 
 ## Cluster orchestration
 

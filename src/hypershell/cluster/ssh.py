@@ -27,7 +27,7 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
-from hypershell.cluster.launch import ClientLaunch, client_launch, ssh_launch_args
+from hypershell.cluster.launch import ClientLaunch, client_launch, ssh_env_exports, ssh_launch_args
 
 # Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
@@ -274,7 +274,7 @@ class SSHCluster(Thread):
                                    from_json=from_json,
                                    tls=tls)
         launcher = shlex.split(launcher)
-        launcher_env = shlex.split('' if not export_env else compile_env())
+        launcher_env = dict(Namespace.from_env('HYPERSHELL')) if export_env else {}
         if launcher_args is None:
             launcher_args = shlex.split(config.ssh.get('args', ''))
         # NOTE: checked once here, so a dropped `-n` is reported once, not once per host
@@ -405,5 +405,10 @@ class NodeList(list):
 
 
 def compile_env() -> str:
-    """Build environment variable argument expansion for remote client launch command."""
-    return ' '.join([f'{key}="{value}"' for key, value in Namespace.from_env('HYPERSHELL').items()])
+    """
+    The `NAME=value` words an SSH launch with `--env` exports, joined for a shell command line.
+
+    Built by :func:`~hypershell.cluster.launch.ssh_env_exports` from the ``HYPERSHELL_*``
+    environment: every value is shell-quoted, and the authentication key is never among them.
+    """
+    return ' '.join(ssh_env_exports(Namespace.from_env('HYPERSHELL')))
