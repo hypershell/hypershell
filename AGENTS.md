@@ -161,8 +161,13 @@ submit ─writes rows→ [DB] ←reads pending─ server(Scheduler FSM) ─bundl
                        └──────────────── server writes exit/timing/output back ──────────────┘ returns results
 ```
 
-The queue exposes four `JoinableQueue`s over one manager: `scheduled` (task bundles),
-`completed` (results), `heartbeat` (client liveness), `confirmed` (bundle acks).
+The queue exposes four threading `queue.Queue`s served in-process by the manager's request
+handling: `scheduled` (task bundles), `completed` (results), `heartbeat` (client liveness),
+`confirmed` (bundle acks). There is no manager child process: `QueueServer.start` runs its own
+accept loop around the stock `multiprocessing.managers.Server` on daemon threads of the server
+process (`core/queue.py` `_InProcessServer`), whose handler threads and the server's own threads
+share the same queue objects. That loop leans on CPython privates; `tests/test_queue.py`
+`TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`).
 
 **Two modes change the picture — check for them before assuming DB behavior:**
 - `in_memory` (in-memory SQLite): the `Scheduler` is `None` and the server **skips all DB
@@ -285,6 +290,35 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   the placeholder key `DEFAULT_AUTH = '<not-secure>'` and enforces `AUTH_MINIMUM_LENGTH`
   (≥16) and `AUTH_ALLOWED_CHARS` (`[A-Za-z0-9._+/=-]`). Never weaken these; never remove the
   authkey to "disable TLS" (pass `tls=None` instead).
+- **The server process hosts the manager.** Queue connections, the HMAC handshake and the TLS
+  handshake are handled by threads of the server process itself (not a forked manager child). The
+  server's TLS context lives on its own listener, never in the process-wide slot that clients
+  install (`core/tls.py` `install_process_context`), so a same-process client with another TLS
+  config cannot affect it. The wire, auth and TLS behaviour are those of the stock manager,
+  unchanged. A failure to start serving (unsupported CPython internals, bind or listen error)
+  raises `QueueServerError` from `QueueServer.start`, which `ServerThread.start` re-raises. Since
+  every connection's descriptor lives in the server process, the accept loop refuses a connection
+  that would use the last `RESERVE` descriptors below the soft open-file limit (one WARNING per
+  interval), so the database and logs keep working; a server TLS context that cannot be built is
+  logged once at ERROR and connections fail closed. A queue client's proxy finalizer (its decref)
+  can run on any thread the cyclic GC picks, server threads included. So once `QueueClient.connect`
+  has made a proxy, a decref finalized on the server side goes to the `hypershell-queue-decref`
+  thread, which the process's first server starts (`core/queue.py` `_decref`). The server side is
+  decided by thread, never by address: every thread an in-process server starts (accept loop,
+  handlers, stop, the sender), any thread inside a server's start or stop, any thread in a TLS
+  handshake with a queue server (the accept loop runs it inline), and any thread that `threading`
+  has not registered as started: a new thread before its mark, one past its unregistration, or one
+  that `threading` did not start (an entry left under a reused identifier by an ended thread does not
+  count). Every other decref is the stock one, on the finalizing thread. A forked child drops the marks and waiting decrefs it inherits.
+- **Every queue TCP connection sets `TCP_NODELAY` on both ends where the platform allows it**
+  (`core/queue.py` `_no_delay`): TLS in `SecureListener.accept` and `secure_client`, cleartext
+  through the `hypershell-plain` serializer's `(Listener, Client)` pair. The cleartext pair reaches
+  the stock connection's socket through a duplicated descriptor (skipped where there is none, as on
+  Windows) and puts back the descriptor's blocking mode, which a process default socket timeout
+  would otherwise clear. The client writes twice before a read (the handshake's last message, then
+  its first request); the server does so only under TLS 1.3 (its session tickets, then the
+  challenge). With Nagle's algorithm on, that second write waits out the peer's delayed ACK (about
+  40 ms on Linux) on every new connection. It is a socket option only; the wire is unchanged.
 - **Wire format:** the multiprocessing `BaseManager` RPC **framing is `pickle`** (an RCE
   surface — a party who reaches the port *and* holds the key, or an active MITM in `insecure`
   mode, can do more than enqueue tasks). HyperShell's **payloads are JSON** (`core/types`,

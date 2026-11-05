@@ -109,6 +109,19 @@ mechanism; not before SC26.
 (relay R9, its upstream link); lift it into the shared mechanism here; shares the `data/core.py` provider seam with turso*
 **Seed:** [`issues/coordinator-resilience-retry-backoff.md`](issues/coordinator-resilience-retry-backoff.md)
 
+## A client cut off partway through connecting hangs until evicted
+
+A client opens several queue connections as it starts. When the server accepts some and drops a
+later one, the thread that lost its connection dies with `EOFError`, but the client process keeps
+running and holds its confirmed tasks until the server evicts it (600 s by default). The client
+should exit promptly and non-zero so its tasks are recovered, or retry the connection within a
+bound. Seen at the open-file limit, where the server refuses new connections, with the same client
+behaviour on `b819de6`.
+
+*Horizon: near-term · Depends on: — · Refs: coordinator resilience (a reconnect path may subsume
+it); `spec/zone-queue-primitive/` (review cycle 2, C3)*
+**Seed:** [`issues/client-partial-connect-hang.md`](issues/client-partial-connect-hang.md)
+
 ## Ingest robustness: all-or-nothing submission, no length awareness
 
 One undecodable byte aborts a whole task file, and one malformed tag raises out of the loader after
@@ -343,6 +356,62 @@ cheap now; the mechanism is reworked by the turso rotation work anyway.
 *Horizon: mid-term, low priority · Depends on: — · Refs: turso R8–R11*
 **Seed:** [`issues/rotatedb-lost-update-window.md`](issues/rotatedb-lost-update-window.md)
 
+## A queue proxy keeps the stock decref finalizer until its constructor returns
+
+In a process that serves queues in-process, a queue client's proxy gets the decref hand-off only
+after the stock proxy constructor returns. If a connection inside that constructor fails while the
+server is alive, the half-made proxy keeps the stock finalizer, and a collection on the server's
+accept loop can then stall it. Seen only with an injected failure; the window predates the hand-off.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, P4)*
+**Seed:** [`issues/queue-proxy-finalizer-swap-window.md`](issues/queue-proxy-finalizer-swap-window.md)
+
+## Handed-off decrefs can outlive their server and reach a same-port successor
+
+A handed-off decref waits for the one sender thread, which under churn falls behind, so it can
+reach a successor server on the same port instead of its own and release a live client's queue.
+Seen statistically under same-port restart stress in one process; no CLI path restarts that way.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, P5); the same-port restart entry below*
+**Seed:** [`issues/queue-decref-handoff-delay.md`](issues/queue-decref-handoff-delay.md)
+
+## A same-key, same-port restart in one process receives the old server's decrefs
+
+A dropped client of a stopped in-process server, collected after a same-key successor starts on
+the same port, sends its decrefs to the successor, which can release a queue a live client holds.
+A client that dials the restarted server by another name than its bind host can also reuse a
+connection cached for the old server. It came with the in-process server's same-port restart; no
+CLI path uses the same key and port.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
+**Seed:** [`issues/queue-stale-decref-same-port-restart.md`](issues/queue-stale-decref-same-port-restart.md)
+
+## A forked child of a serving process keeps the queue server's port
+
+A child forked from a process that serves queues in-process inherits the listening socket, so after
+the server shuts down the port cannot be bound again and new clients hang until the child exits. No
+CLI path forks a serving process; only library use sees it.
+
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycle 5, Observations)*
+**Seed:** [`issues/queue-forked-child-keeps-listener.md`](issues/queue-forked-child-keeps-listener.md)
+
+## Server-owned queue proxies without reference counting
+
+The in-process queue server closes its "finalizer dials the server" stalls with thread rules that
+rest on CPython timing and private internals. The shared queues live as long as the server, so a
+client's proxies for them may not need reference counting at all. Proxies built as server-owned
+never send a decref, which would make the stall impossible by construction and could let the
+hand-off machinery retire. It needs a check of server-side refcount bookkeeping across reconnects
+first.
+
+*Horizon: mid-term · Depends on: the in-process queue server (zone R1) · Refs:
+`spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
+**Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
+
 ## The server cannot listen on IPv6
 
 Both transports listen on IPv4 only, so a server is unreachable on an IPv6-only host or network and
@@ -426,8 +495,9 @@ autoscaling — while the homogeneous founding case behaves exactly as it does t
 managed queues move to the lighter threading primitive so per-client dispatch stops costing a pipe
 and a feeder thread each.
 
-*Horizon: near-term · Depends on: — · Refs: R1 (the queue-primitive swap) is independently shippable
-and should land first as its own de-risking phase*
+*Horizon: near-term · Depends on: — · Refs: ships in three cycles. R1 (the queue primitive) is
+carved into `zone-queue-primitive`; R2–R12 (dispatch and zones) and R13–R17 (zone-aware
+autoscaling) follow from this seed*
 **Seed:** [`issues/zone.md`](issues/zone.md) · *status: shaped*
 
 ## Relay: two-level scheduling across administrative sites

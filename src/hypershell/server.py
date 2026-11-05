@@ -932,7 +932,6 @@ class ServerThread(Thread):
         self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures)
         self.heartmonitor = HeartMonitorThread(queue=self.queue, evict_after=evict_after,
                                                in_memory=in_memory, no_confirm=no_confirm)
-        log.info(f'Server listening on {address[0]}:{address[1]}')
         super().__init__(name='hypershell-server')
 
     def run_with_exceptions(self: ServerThread) -> None:
@@ -948,12 +947,18 @@ class ServerThread(Thread):
         log.debug('Done')
 
     def start(self: ServerThread) -> None:
-        """Override default start method to wait for queue to be ready."""
+        """Override default start method to wait for queue to be ready.
+
+        A failure to start the queue (e.g., the address is in use) is raised here, in the caller.
+        """
         super().start()
         while not self.queue:  # None until initialized by __init__()
             time.sleep(0.1)
         while not self.queue.ready:
+            if not self.is_alive():
+                self.join()  # Re-raises the exception that ended the thread before the queue was ready
             time.sleep(0.1)
+        log.info(f'Server listening on {self.queue.config.host}:{self.queue.config.port}')
 
     def start_threads(self: ServerThread) -> None:
         """Start child threads; with file input, scheduling starts once the whole file is submitted."""
