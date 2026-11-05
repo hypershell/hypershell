@@ -12,8 +12,8 @@ lane: public
 
 ## Problem
 
-The in-process queue server (zone R1, `spec/zone-queue-primitive/`) serves the four shared queues
-to clients over the multiprocessing manager protocol. Each client proxy carries a `util.Finalize`
+The in-process queue server (`zone-queue-primitive`, #76, `spec/zone-queue-primitive/`) serves the
+four shared queues to clients over the multiprocessing manager protocol. Each client proxy carries a `util.Finalize`
 whose stock callback, `BaseProxy._decref`, opens a connection to the server and waits for a reply.
 The cyclic garbage collector can run that finalizer on any thread. When the client lives in the
 server's own process, that thread can be one only the server's accept loop could unblock, and the
