@@ -155,16 +155,38 @@ the zone cycles' **external wait** convention for P10:
   processes** (one relay per process; no in-process dial of the local server). Done means
   `COUNT(exit_status = 0) == M`, never "no incomplete rows".
 
-## Build precondition (before P1)
+## Build precondition (amended 2026-11-04)
 
-- Relay builds from `develop` **after Z1 (#76) and Z2 (`feature/zone-dispatch`) have merged**. The
-  first build step is to bring this branch onto that `develop` (`git merge origin/develop`, signed,
-  or a rebase of the spec-only commits: nothing conflicts, since this branch carries only
-  `spec/relay/`). P1's verify fails fast without the zone code (`core/dispatch.py`,
-  `_get_dispatch`, `CONTENDED_RERUNS`). That is not a red verify: `hs-build` marks P1 `blocked` with
-  `blocked_reason: "awaiting develop with Z1 and Z2"` and stops.
+- **As planned:** relay builds from `develop` after Z1 (#76) and Z2 (`feature/zone-dispatch`) have
+  merged, by bringing this branch onto that `develop` (`git merge origin/develop`, signed).
+- **As ruled (foreman, 2026-11-04):** zones are not on `develop` yet; Z1 is held by a Linux-only CI
+  slowdown under diagnosis. To use the time, **P1 and P2 build now on the current base**
+  (`origin/develop` `bd2faf9`, 2.8.4 merged back; it carries #75's `CONTENDED_RERUNS`). Neither
+  phase needs zone code: P1 is a `data/model.py` change on the confirm path, which Z1 and Z2 do not
+  touch; P2 composes a plain `ServerThread`. If either could not be built honestly without zone
+  code, the builder stops and reports.
+- **Blocking precondition, now before P3.** P3 is the first phase that needs zone code (`PROTOCOL`,
+  the work-request reply, `test_dispatch_version.py`). Before P3 starts, this branch merges a
+  `develop` that carries Z1 and Z2 and runs every deferred verify item below; any red one is a red
+  gate for the phase it belongs to. Until then `hs-build` marks P3 `blocked` with
+  `blocked_reason: "awaiting develop with Z1 and Z2"` and stops (not counted against `attempts`).
 - Z2's own merge obligations (among them `revert_staged` through #75's contended-write helper) are
   Z2's; relay builds on the merged result and does not redo them.
+
+### Deferred verify items (need zone code; run after the zone merge, before P3)
+
+The frontmatter `verify:` strings stay as planned: they are the full gates, re-run once zones land.
+Until then each phase runs its verify **minus** these items, and records the substitution:
+
+| Phase | Deferred item | Why |
+|---|---|---|
+| P1 | `test -f src/hypershell/core/dispatch.py && grep -q _get_dispatch src/hypershell/core/queue.py` (the zone-code presence guard) | Z2 code, not on the base |
+| P1 | `tests/test_zone_dispatch.py` | Z2 test, not on the base |
+| P1 | `tests/test_server_fsm.py` | Z1 test, not on the base (the ruling's list names the guard and the two dispatch files; this file is Z1's, so it is deferred on the same ground) |
+| P3 | `tests/test_dispatch_version.py` | Z2 test; P3 itself waits for the zone merge |
+| P6 | `tests/test_server_fsm.py`, `tests/test_zone_dispatch.py` | as P1; P6 runs after the zone merge in any case |
+
+`grep -q CONTENDED_RERUNS src/hypershell/data/model.py` is #75, present on the base, and runs.
 
 ## Security-cycle overlap (binding in every phase; PLAN §2.8)
 
@@ -180,22 +202,23 @@ the zone cycles' **external wait** convention for P10:
   extraction is dropped.
 - Relay never touches `cluster/ssh.py`, `cluster/local.py` or `client.py`.
 
-## Open rulings for the plan gate (PLAN §5)
+## Plan-gate rulings (foreman, 2026-11-04; PLAN §5)
 
-- **N1 — R5's DEFERRED clause.** Recommend: accept the *handed over* reading (mark `returned` only
-  after `completed.put` returns; never on `QueueFull`, timeout or link error). Alternatives: amend
-  R5's wording; add a general result acknowledgement (out of appetite).
-- **N2 — R9 against an upstream restart.** Recommend: record that pre-restart results are delivered
-  and refused STALE by design; landed results are promised only when the upstream process survived.
-- **N3 — R21's evidence build.** Recommend: evidence from a head at or after P6 is acceptable;
-  re-run on the final head if allocation time allows (about 20 min).
-- **N4 — Fleet API under the security cycle.** Recommend: ask the hardening plan to expose one
-  autoscaling client-invocation function; otherwise P9 extracts it after hardening lands.
-- **N5 — Calendar.** Serial estimate ≈ 7–8.5 builder-days against 5–6 days of build and review.
-  Recommend: start review at the P5 checkpoint; run P7 beside P8; the maintainer decides whether
-  P8/P9 slip past the pre-release or follow in the next one.
-- **N6 — Ten phases** (above the ~8 soft breaker). Recommend: accept, given C1 and the request for
-  incremental review; P7 and P10 are evidence bookkeeping.
+- **N1 — R5's DEFERRED clause.** Accepted as proposed: the *handed over* reading. A `relay_result`
+  row is marked `returned` only after `completed.put` returns; never on `QueueFull`, a timeout or a
+  link error.
+- **N2 — R9 across an upstream restart.** Accepted: R9 promises **landed** results only when the
+  upstream process survived the outage (a partition). Across an upstream restart the relay still
+  delivers its buffered results, and the restarted server refuses them `STALE` by design (it
+  reverted every in-flight row at start).
+- **N3 — R21's evidence build.** Evidence from any head at or after P6 is accepted; it is re-run on
+  the final head if the allocation allows.
+- **N4 — Fleet API under the security cycle.** The foreman asks the hardening cycle's plan to put the
+  autoscaling client invocation behind one function. P9 stays gated as planned (starts only after
+  hardening has landed and been merged here).
+- **N5 — Calendar.** Maintainer: *"Everything, accept the risk."* All ten phases target the last
+  pre-release before about 2026-11-13. Review starts after P5 (the delegation-core checkpoint).
+- **N6 — Ten phases.** Accepted.
 
 ## Build-day estimates
 
@@ -219,7 +242,7 @@ the zone cycles' **external wait** convention for P10:
 **Goal:** a confirmation applied to a completed row leaves `client_id`/`client_host` as the
 result wrote them, keeping the contended-write discipline.
 
-- [ ] Build precondition above (merge onto `develop` with Z1 + Z2).
+- [ ] Build precondition above (as ruled: P1 builds on the current base; its zone items are deferred).
 - [ ] Red first: `tests/test_writeback.py::test_late_confirm_keeps_leaf_attribution` (submit,
       dispatch one, receive a result attributed to a leaf, then confirm under another id; assert
       the leaf attribution survives). It fails on the unmodified tree for the right reason.
