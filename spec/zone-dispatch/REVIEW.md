@@ -575,3 +575,109 @@ None.
 ### Human-gate triggers
 
 **None.** There is no CONFIRMED finding. The diff is prose plus one unit test, and it changes no source. The TimescaleDB merge obligation from the cycle-2 triage is outside this diff and was not checked.
+
+## Review cycle 4 (scoped) — approved (2026-11-05)
+
+- **Reviewed commit:** 58da7dc5a6d653f3b626e864c67bda62a4663554  ·  **Base:** `develop` at `50748c6`  ·  **Scope:** `git diff b6fcb55..58da7dc -- . ':(exclude)spec/'`
+- **Verdict:** approved. No finding.
+- **Cycle:** 4. Cycle 3 approved `f8a078f`; this cycle covers only what came after `b6fcb55`.
+- **Mode:** scoped, as the foreman directed.
+  - `4b63594`: the merge of develop `50748c6`. It brings Z1 final (#76: in-process queue server, `TCP_NODELAY` on every queue connection, the `hypershell-plain` serializer, blocking-mode restore), #72, #73, #74, #75, #77 and the 2.8.4/2.9.0a3 release merges.
+  - `d093c3f`: the staged-revert merge obligation.
+  - `58da7dc`: records only.
+  - The blind pass ran inline in the orchestrator, with no subagent (foreman's deviation from Step 2).
+  - Inputs: `GOAL.md`, the scoped diff, the `AGENTS.md` invariants and the runnable repo.
+  - `TECH.md` (*Merge obligations*, *Build status*) and cycles 1–3 of this file were read only after the findings were formed. No `debate`, no `completeness`.
+
+### Pre-flight
+
+- **Contract.** `git log develop..HEAD -- spec/zone-dispatch/GOAL.md` shows only `1554030` (shape) and `8a0a7b0` (clarifications, 2026-11-02). The contract did not move.
+- **Tree.** Clean at `58da7dc`, equal to `origin/feature/zone-dispatch`. Draft PR #78 is open into `develop`.
+
+### Merge reproduction (lost changes)
+
+- **Against `ec75169`.** `git merge-tree --write-tree --merge-base=ec75169 b6fcb55 50748c6` conflicts in exactly the seven files the merge commit names. Every other path of that tree equals `4b63594`.
+- **Against Z1's own head.** `git merge-base b6fcb55 origin/feature/zone-queue-primitive` is `ec75169`, and Z1's head equals `50748c6` on `src/`, `tests/` and `.github/`. The natural merge gives the same seven conflicts and the same result elsewhere. So `ec75169` is the right base, and nothing auto-merged was dropped.
+- **The seven resolutions** differ from the conflicted tree only at the conflict hunks, plus `Scheduler.next_tasks`. That is develop's auto-merged body, which the resolution rewrites to take the refills. Each side's content is kept:
+  - `client.py`: `start()` resets the idle clock (#74) and returns `REQUEST` (Z2).
+  - `core/queue.py`, `tests/test_queue.py`: the import lists are the union.
+  - `.github/workflows/tests.yml`: both PostgreSQL modules run.
+  - `ROADMAP.md`: all three entries are kept.
+  - `data/model.py`: the imports are the union; #75's `revert_all` takes `Task.revert_columns`.
+  - `server.py`: #74's first-group choice and `mark_group_started`, around Z2's per-zone loads.
+- **Columns.** `Task.revert_columns` equals develop's 13-column revert dict, name for name. `zone` is not cleared, so a reverted task keeps its zone. Z2 adds no other `task` column and no staged marker: staging is in memory.
+- **Tests.** The merge leaves Z2's own test modules unmodified (`git diff b6fcb55 58da7dc -- tests` touches only develop's modules and `d093c3f`'s additions).
+- **Invariants.** `AGENTS.md` and `invariants.md` carry both sides' clauses: `CONTENDED_RERUNS`, the lowest-group advance, file input submitted in full, `revert_staged`, `dispatcher.finish`, and the plain serializer with Nagle off.
+
+### Verification run
+
+Every local run had its own process group under a kill timer and used a throwaway site. Scratch drivers live outside the repository, and no tracked file was touched.
+
+- **Full suite, 3.12.** uv `--locked`, in a separate environment: **893 passed, 84 skipped**, in 10 m 22 s.
+  - 83 of the skips are gated on PostgreSQL or TimescaleDB, and one is the fixture regeneration.
+  - The 2 warnings are the known fork `DeprecationWarning`s in `test_logging.py`.
+- **#74 and Z2 together, 3.14.** Twenty-three modules in one run: **293 passed, 13 skipped**. 10 skips are gated on PostgreSQL and 3 on the Python version. Unraisable and unhandled-thread exceptions were errors.
+  - #74: `test_group_order`, `test_groups`, `test_retry_gate`.
+  - Z2: `test_zone_*`, `test_dispatch*`, `test_client_request`, `test_server_fsm`.
+  - #75: `test_contended_recovery`, `test_contended_write`.
+  - Queue: `test_queue`, `test_queue_gc`, `test_queue_address_family`.
+  - Also `test_writeback`, `test_writeback_statement`, `test_restart`, `test_cancel`.
+- **Cross-zone group scenarios: 31/31 checks.** A scratch driver runs the merged `Scheduler` in-process on its own `Dispatcher`. Clients are simulated by `request` calls with `wait` 0. Results go back through a separate session, as the Receiver writes them. The database is SQLite.
+  - **S1.** Two served zones, with groups 0–3 interleaved across them. Delivery is non-decreasing by group. All 16 tasks are delivered once, each to its zone's client, and the run reaches FINAL with no late-group warning.
+  - **S2.** A zone with no client. Group 1's `gpu` tasks hold the default zone's group 2: nothing is delivered in 30 passes, there is no FINAL, and one "waiting on zone gpu" line is logged. Once a `gpu` client arrives, delivery runs 1, 1, 2, 2 and reaches FINAL.
+  - **S3.** An empty-database start. Tasks arrive (`gpu` group 1, default group 2) with only a default client. The current group becomes 1, the lowest across zones; `first_group_pending` stays set; nothing is delivered. Once a `gpu` client arrives, delivery runs 1, 1, 2, 2, then FINAL. `highest_started_group` is 2, and there is no late-group warning.
+  - **S4.** Retries, with 2 attempts, eager off and on. The failed `gpu` task's retry row is in zone `gpu`, is delivered only to the `gpu` client, and group 2 starts only after it. Reaches FINAL.
+  - **S5.** A late lower group in another zone (stream input). `gpu` group 1 is committed while group 2 runs. It runs after group 2, with one late-group warning, then FINAL.
+  - **S6.** A zone's last client leaves mid-group. Its staged rows are reverted, group 2 is held, and a new `gpu` client finishes the run in order.
+  - **S7.** An empty database with no submitter does not stop.
+- **Live CLI** (`temp_site.sh`, `--no-tls`).
+  - **L1: 9/9 checks.** `hs server -r 1` runs database tasks in groups 0–3 across the default and `gpu` zones. One `gpu` task fails once. Two clients: `hs client --zone gpu -T 15` and `hs client -T 15`.
+    - All three processes exit 0, and all 9 rows complete.
+    - By the schedule and completion times, each group finished before the next was staged.
+    - Each client ran a single zone.
+    - The retry kept zone `gpu`, links back to the failed row, and ran on the `gpu` client.
+  - **L2: 5/5 checks.** `hs cluster tasks.in -N2 --zone gpu` on a file listing groups 2, 0, 1, 0, 2, which is #74's file-input path plus a zone. All 5 tasks complete, in group order, all in zone `gpu`.
+- **Dispatcher connections: 4/4 cases.** A probe drives a live `QueueServer` and `QueueClient` and sends `request` from a worker thread, as `ClientScheduler` does. Cases: TLS off and on, each with no default timeout and with `socket.setdefaulttimeout(30)`.
+  - Both ends of the dispatcher's connection have `TCP_NODELAY` set and stay blocking.
+  - A second request on the same connection is answered.
+  - The dispatcher proxy is a registry proxy, so it takes the serializer's listener and client pair. No separate path exists.
+- **Version skew: 20/20 checks.** A small script of the reviewer's own runs `git archive` extracts of 2.8.4 and `b819de6` on the same 3.14, with TLS off and on. `tests/bench/bench_queue.py compat` was not run.
+  - **Merged server, old client.** The old client exits in about 0.4 s (rc 5). The server logs "Client too old … from 127.0.0.1:<port>" and keeps serving: a merged client then runs 3/3 tasks, and both exit 0.
+  - **Old in-memory server, merged client.** The client exits rc 5 in 0.3 s with exactly one error, which names protocol 1 and the mismatch.
+  - So the handshake through the `hypershell-plain` pair still interoperates with stock-pickle endpoints in both directions, and R5 holds on the merged build.
+- **`pending` mode, `d093c3f`.**
+  - **Tests.** Its five SQLite fault-injection tests pass.
+  - **Mutation.** A pytest plugin swaps `Task.__row_statements` for an existence-only re-check SELECT. Two of the five tests fail: the cancelled-meanwhile test and the uncontended cost pin. So the qualifying re-check is what keeps a row cancelled mid-contention. The deleted-meanwhile test still passes under this mutant, because `pending` skips a missing row either way. Against the non-pending helper it raises, as the commit body states.
+  - **Non-pending behaviour.** The diff changes only `match` and adds `if pending: break`. #75's tests pass on 3.12, on 3.14, and in CI's PostgreSQL and TimescaleDB jobs.
+  - **One transaction.** `__write_rows` commits once after every row and rolls back on any exception. In every cost run below, no row was left in flight and the cancelled row stayed cancelled.
+  - **Cost.** Measured on SQLite, with N staged rows of which one is cancelled. Statements are counted as cursor executes:
+
+    | N | `revert_staged` (per row): statements · time | Pre-merge chunked bulk: statements · time |
+    |---|---|---|
+    | 1,000 | 1,003 · 21.6 ms | 4 · 5.5 ms |
+    | 10,000 | 10,003 · 207.7 ms | 22 · 53.9 ms |
+    | 50,000 | 50,003 · 1,053.6 ms | 102 · 235.1 ms |
+
+- **CI at the end of this cycle:** run `41981137757` on `58da7dc`, all 14 checks pass.
+  - **tests:** 3.11–3.14.
+  - **PostgreSQL:** pg13 and pg18, 142 passed and 16 skipped each.
+  - **TimescaleDB:** `timescale`, `timescale-oss` and `timescale-floor`, 157 passed and 1 skipped each.
+  - In all five database jobs, `test_contended_write.py`'s two new staged-revert race tests (lands; keeps a cancel) PASSED, and `test_zone_postgres.py` passed 3/3.
+
+### Findings
+
+None.
+
+**Dropped under refutation** (recorded, not findings):
+
+- **The staged revert costs one statement per row.** That is 4–5× the old chunked UPDATE on SQLite, and one round trip per row on a networked PostgreSQL.
+  - **It is bounded.** A zone's pool holds at most `queuesize + 1` chunks, and a chunk is capped at `bundlemax` (1000). With defaults that is at most 2,000 rows per zone.
+  - **Shutdown sees only leftovers.** `dispatcher.finish()` lets requests drain the pools, so the shutdown pass reverts only rows no client took.
+  - **It is the prescribed pattern.** #75 adopted the same per-row write for `revert_all` and `confirm_all`, and `AGENTS.md` now prescribes it.
+  - It has no correctness effect.
+- **At the re-run bound, a staged row stays stamped,** in no pool, until `revert_interrupted` at the next start, and a WARNING is logged. That is the invariant's prescribed safe outcome, identical to `revert_all`'s. It needs four consecutive contended misses on one row.
+- **Probing a connection can make it non-blocking.** A socket object built on a duplicate descriptor under a process default timeout makes the shared connection non-blocking. The reviewer's first `TCP_NODELAY` probe did exactly this, and its own second request then failed with `BlockingIOError`. The product's `_no_delay_connection` restores the mode. `tests/test_queue.py`'s `no_delay` helper has the same shape, but no test calls it under a default timeout. This is test-side only and outside this diff.
+
+### Human-gate triggers
+
+**None.** There is no CONFIRMED finding. The diff does touch the high-blast-radius core (`server.py`, `data/model.py`, `client.py`, `core/queue.py`) and the staged-revert DB-lifecycle invariant. Each of those is covered above by executed evidence.
