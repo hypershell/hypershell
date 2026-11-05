@@ -14,7 +14,7 @@ that cannot authenticate can never hang the suite.
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Callable, Dict, Final, Iterable, List, Optional, Set
+from typing import IO, Any, Callable, Dict, Final, Iterable, List, Optional, Set
 
 # Standard libs
 import os
@@ -22,6 +22,7 @@ import sys
 import json
 import time
 import shlex
+import shutil
 import signal
 from pathlib import Path
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ from tests import create_taskfile_echo
 from hypershell.cluster.launch import AUTH_ENV, OMPI_ENV_LIST, ClientLaunch, client_launch
 from hypershell.core.logging import HOSTNAME
 from hypershell.cluster.remote import AutoScaler, AutoScalingCluster
+from hypershell.cluster.ssh import SSHCluster, DEFAULT_REMOTE_EXE
 
 
 pytestmark = mark.integration
@@ -60,12 +62,13 @@ LOOPBACK: Final[str] = '127.0.0.1'
 STAND_IN_HEAD: Final[str] = """\
 #!{python}
 import os, sys, json, uuid
+RECORDS = {records!r}
 def record(role, **fields):
-    path = os.path.join({records!r}, f'{{uuid.uuid4().hex}}.json')
+    path = os.path.join(RECORDS, f'{{uuid.uuid4().hex}}.json')
     with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
         json.dump({{'role': role, 'name': os.path.basename(sys.argv[0]), 'argv': sys.argv,
                     'key': os.environ.get({auth_env!r}), 'ompi': os.environ.get({ompi_env!r}),
-                    **fields}}, stream)
+                    'level': os.environ.get('HYPERSHELL_LOGGING_LEVEL'), **fields}}, stream)
 """
 
 # A launcher that passes its environment through, as `srun` and `mpirun` do by default.
@@ -90,6 +93,40 @@ record('launcher')
 argv = sys.argv[1:]
 argv[argv.index('-H') + 1] = {LOOPBACK!r}
 os.execv(argv[0], argv)
+"""
+
+# A stand-in for `ssh`. It parses its options as ssh does, records its command line and the remote
+# command, and saves its standard input to a private file (nothing under -n, since ssh then reads
+# /dev/null). It runs the remote command with `sh -c`, as sshd runs it under a login shell, with that
+# input and without the logging level, which a remote login would not inherit unless --env sends
+# it. The cluster advertises the host's own name, so the stand-in points the client at the loopback
+# address the run binds.
+SSH_BODY: Final[str] = f"""\
+import subprocess
+WITH_VALUE = set('BbcDEeFIiJLlmOoPpQRSWw')
+args, index, flags = sys.argv[1:], 0, set()
+while index < len(args) and args[index].startswith('-'):
+    word, index = args[index], index + 1
+    for position, letter in enumerate(word[1:]):
+        if letter in WITH_VALUE:
+            index += int(position == len(word) - 2)
+            break
+        flags.add(letter)
+host, remote = args[index], ' '.join(args[index + 1:])
+data = b'' if 'n' in flags else sys.stdin.buffer.read()
+stdin_path = os.path.join(RECORDS, uuid.uuid4().hex + '.stdin')
+with os.fdopen(os.open(stdin_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stream:
+    stream.write(data)
+record('launcher', host=host, flags=sorted(flags), remote=remote, stdin=stdin_path)
+advertised = {' -H ' + shlex.quote(HOSTNAME) + ' '!r}
+if remote.count(advertised) != 1:
+    sys.exit('stand-in ssh: expected the advertised host once in the remote command')
+env = {{name: value for name, value in os.environ.items() if name != 'HYPERSHELL_LOGGING_LEVEL'}}
+with open(stdin_path, 'rb') as stream:
+    status = subprocess.call(['/bin/sh', '-c', remote.replace(advertised, {' -H ' + LOOPBACK + ' '!r})],
+                             stdin=stream, env=env)
+record('ssh-exit', status=status)
+sys.exit(status)
 """
 
 # The remote executable: runs this tree's `hypershell.main` under the test's interpreter.
@@ -137,6 +174,26 @@ with open(output, mode='w') as stream:
     json.dump(records, stream)
 """
 
+# Builds and runs an SSH cluster in-process, capturing every log record at every level.
+CAPTURE_SSH_LOGS: Final[str] = """\
+import sys, json, logging
+from hypershell.cluster.ssh import SSHCluster
+records = []
+class Capture(logging.Handler):
+    def emit(self, record):
+        records.append({'level': record.levelname, 'name': record.name, 'message': record.getMessage()})
+logger = logging.getLogger('hypershell')
+logger.addHandler(Capture(level=1))
+logger.setLevel(1)
+remote_exe, port, output = sys.argv[1:]
+cluster = SSHCluster(source=[f'echo {n}' for n in range(4)], nodelist=['node-a'], remote_exe=remote_exe,
+                     bind=('127.0.0.1', int(port)), in_memory=True, tls=None)
+cluster.start()
+cluster.join()
+with open(output, mode='w') as stream:
+    json.dump(records, stream)
+"""
+
 # Builds and runs an autoscaling cluster in-process, capturing every log record at every level.
 # Autoscaling clusters do not exit on their own: once every task has completed the records are
 # written, and the test kills the run's process group.
@@ -178,6 +235,7 @@ class StandIns:
     launcher: Path
     launcher_drop_env: Path
     autoscale_launcher: Path
+    ssh: Path
     remote_exe: Path
 
     def read(self: StandIns) -> List[Dict[str, Any]]:
@@ -200,7 +258,7 @@ def write_program(path: Path, body: str, records: Path) -> Path:
 
 @pytest.fixture
 def stand_ins(tmp_path: Path) -> StandIns:
-    """Stand-in launcher (also installed as `mpirun`) and remote executable."""
+    """Stand-in launcher (also installed as `mpirun`), `ssh`, and remote executable."""
     bin_dir = tmp_path / 'bin'
     records = tmp_path / 'records'
     bin_dir.mkdir()
@@ -209,9 +267,10 @@ def stand_ins(tmp_path: Path) -> StandIns:
     write_program(bin_dir / 'mpirun', LAUNCHER_BODY, records)
     launcher_drop_env = write_program(bin_dir / 'launcher-drop-env', LAUNCHER_DROP_ENV_BODY, records)
     autoscale_launcher = write_program(bin_dir / 'autoscale-launcher', AUTOSCALE_LAUNCHER_BODY, records)
+    ssh = write_program(bin_dir / 'ssh', SSH_BODY, records)
     remote_exe = write_program(bin_dir / 'hs-client-under-test', CLIENT_BODY, records)
     return StandIns(bin=bin_dir, records=records, launcher=launcher, launcher_drop_env=launcher_drop_env,
-                    autoscale_launcher=autoscale_launcher, remote_exe=remote_exe)
+                    autoscale_launcher=autoscale_launcher, ssh=ssh, remote_exe=remote_exe)
 
 
 @dataclass
@@ -224,16 +283,18 @@ class Run:
 
 
 def run_in_session(argv: List[str], env: Dict[str, str], workdir: Path,
-                   until: Callable[[], bool] = None, timeout: float = RUN_TIMEOUT, name: str = 'run') -> Run:
+                   until: Callable[[], bool] = None, timeout: float = RUN_TIMEOUT, name: str = 'run',
+                   stdin: IO = None) -> Run:
     """
     Run `argv` in its own session; kill its process group when it ends.
 
     The run ends when the process exits, when `until()` turns true (status is then None),
     or at `timeout`, which fails the test. Its output is kept in `workdir` under `name`.
+    Its input is `stdin`, or nothing.
     """
     stdout_path, stderr_path = workdir / f'{name}.stdout', workdir / f'{name}.stderr'
     with open(stdout_path, mode='w') as stdout, open(stderr_path, mode='w') as stderr:
-        proc = Popen(argv, env=env, stdin=DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
+        proc = Popen(argv, env=env, stdin=stdin or DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
         deadline = time.monotonic() + timeout
         status = None
         try:
@@ -593,3 +654,205 @@ def test_autoscaling_mode_starts_every_client_through_one_launch(tmp_path: Path)
                 client.wait()
     assert [path.read_text() for path in tmp_path.iterdir()] == [key, key]
     assert dict(os.environ) == before
+
+
+SSH_HOSTS: Final[List[str]] = ['node-a', 'node-b']
+"""Hosts each SSH run launches a client on (each one reaches the stand-in `ssh`)."""
+
+QUOTED_TEMPLATE: Final[str] = '{} "it\'s a b"'
+"""A template with a space and a single quote, which must reach the client intact."""
+
+
+def ssh_failed(stand_ins: StandIns) -> Callable[[], bool]:
+    """A check that some remote command run by the stand-in `ssh` has failed (the run cannot complete)."""
+    return lambda: any(record['status'] != 0 for record in stand_ins.read() if record['role'] == 'ssh-exit')
+
+
+def assert_ssh_key_off_command_lines(records: List[Dict[str, Any]]) -> str:
+    """The key is on no command line and no remote command; it came on ssh's input into the client's environment."""
+    launchers = [record for record in records if record['role'] == 'launcher']
+    clients = [record for record in records if record['role'] == 'client']
+    assert launchers, 'No ssh was launched'
+    stdin_keys = {Path(record['stdin']).read_text().strip() for record in launchers}
+    keys = keys_seen(records) | {key for key in stdin_keys if key}
+    assert keys, 'No key reached any launched process'
+    for key in keys:
+        for record in records:
+            on_command_line = key in ' '.join(record['argv'])
+            assert not on_command_line, f'Key on the command line of {record["name"]}'
+            in_remote_command = key in record.get('remote', '')
+            assert not in_remote_command, 'Key in the remote command'
+    key, = keys
+    for record in launchers:
+        assert Path(record['stdin']).read_text() == key + '\n', 'ssh did not receive the key on its input'
+        assert record['key'] is None, 'ssh itself held the key in its environment'
+    assert clients, 'No client was launched'
+    for record in clients:
+        assert record['key'] == key, 'Client did not receive the key in its environment'
+    return key
+
+
+SSH_CASES: Final[List] = [
+    pytest.param(False, None, False, '{}', id='tls'),
+    pytest.param(True, None, False, '{}', id='no-tls'),
+    pytest.param(False, 'blue', False, '{}', id='tls-zone'),
+    pytest.param(True, None, True, '{}', id='no-tls-env'),
+    pytest.param(True, None, False, QUOTED_TEMPLATE, id='no-tls-quoted-template'),
+]
+
+
+@mark.parametrize('no_tls, zone, export_env, template', SSH_CASES)
+def test_ssh_mode_keeps_key_off_command_lines(stand_ins: StandIns, temp_site: Path, no_tls: bool,
+                                              zone: Optional[str], export_env: bool, template: str) -> None:
+    """With --ssh, the key travels on ssh's input into each client's environment, and on no command line."""
+    mode = ['--ssh', ','.join(SSH_HOSTS), '-t', template, *(['--env'] if export_env else [])]
+    run = run_cluster(stand_ins, mode, temp_site, no_tls, zone, until=ssh_failed(stand_ins))
+    records = stand_ins.read()
+    key = assert_ssh_key_off_command_lines(records)
+    assert_key_not_in(key, run.stdout, run.stderr)
+    launchers = [record for record in records if record['role'] == 'launcher']
+    assert sorted(record['host'] for record in launchers) == SSH_HOSTS
+    assert all('T' in record['flags'] for record in launchers), 'A remote terminal may be allocated'
+    clients = [record for record in records if record['role'] == 'client']
+    assert len(clients) == len(SSH_HOSTS)
+    for record in clients:
+        argv = record['argv']
+        assert argv[argv.index('-t') + 1] == template
+        assert record['level'] == ('DEVEL' if export_env else None)
+        if zone is not None:
+            assert argv[argv.index('--zone') + 1] == zone
+    assert_run_complete(run, stand_ins, temp_site)
+
+
+def test_ssh_mode_logs_never_hold_key(stand_ins: StandIns, temp_site: Path) -> None:
+    """Building and running an SSH cluster logs no key, at any level, in any process."""
+    script = Path(temp_site) / 'capture_ssh_logs.py'
+    script.write_text(CAPTURE_SSH_LOGS)
+    output = Path(temp_site) / 'records.json'
+    run = run_in_session([sys.executable, str(script), str(stand_ins.remote_exe),
+                          os.environ['HYPERSHELL_SERVER_PORT'], str(output)], run_env(stand_ins), Path(temp_site))
+    assert run.status == exit_status.success, run.stderr[-4000:]
+    logged = json.loads(output.read_text())
+    assert any(record['level'] == 'DEBUG' and 'Launching client' in record['message'] for record in logged)
+    records = stand_ins.read()
+    keys = keys_seen(records) | {Path(record['stdin']).read_text().strip()
+                                 for record in records if record['role'] == 'launcher'}
+    key, = keys - {''}
+    assert_key_not_in(key, *(record['message'] for record in logged), run.stdout, run.stderr)
+
+
+def test_ssh_mode_without_key_names_the_cause(stand_ins: StandIns, temp_site: Path) -> None:
+    """A client launch whose ssh passes no input exits before the client starts, naming the cause."""
+    run = run_cluster(stand_ins, ['--ssh', SSH_HOSTS[0], '--ssh-args=-n'], temp_site, True, None,
+                      until=ssh_failed(stand_ins))
+    records = stand_ins.read()
+    assert [record['status'] for record in records if record['role'] == 'ssh-exit'] == [1], run.stderr[-4000:]
+    assert not [record for record in records if record['role'] == 'client']
+    assert f'no authentication key arrived on standard input for {AUTH_ENV}' in run.stderr
+
+
+SSH_LAUNCH_BASE: Final[Dict[str, Any]] = {
+    'remote_exe': '~/bin/hs', 'address': ('node-1', 50001), 'launcher': ['ssh'],
+    'launcher_args': ['-tt', '-o', 'BatchMode=yes'], 'num_threads': 4, 'bundlesize': 2, 'bundlewait': 5,
+    'template': QUOTED_TEMPLATE, 'delay_start': -1.5, 'task_signalwait': 10,
+}
+
+
+def split_ssh_launch(argv: List[str], host: str) -> tuple:
+    """The ssh words before the host, the words after it, and the remote client command line."""
+    before, after = argv[:argv.index(host)], argv[argv.index(host) + 1:]
+    script, = shlex.split(after[-1])
+    preamble, command = script.split('; exec ', 1)
+    return before, after, preamble, shlex.split(command)
+
+
+@mark.parametrize('options', LAUNCH_OPTIONS)
+def test_ssh_launch_runs_client_under_sh_with_no_terminal(options: Dict[str, Any]) -> None:
+    """An ssh launch forces no terminal, runs `sh -c` with no key in it, and keeps every client option."""
+    params = {**SSH_LAUNCH_BASE, **options}
+    remote_exe, address = params.pop('remote_exe'), params.pop('address')
+    launcher, launcher_args = params.pop('launcher'), params.pop('launcher_args')
+    key = 'k' * 32
+    exports = ['HYPERSHELL_SITE=/site']
+    launch = client_launch(remote_exe, address, key, launcher=launcher, launcher_args=launcher_args,
+                           ssh_host='node-7', ssh_exports=exports, **params)
+    before, after, preamble, command = split_ssh_launch(launch.argv, 'node-7')
+    assert before == [*launcher, *launcher_args, '-T']
+    assert after[:-1] == [*exports, 'sh', '-c']
+    assert command == previous_argv(remote_exe, address, [], [], **params)
+    assert AUTH_ENV in preamble
+    assert key not in ' '.join(launch.argv)
+    assert launch.stdin == key + '\n'
+    assert launch.inherit_env and launch.env == {}
+    assert key not in repr(launch) and key not in launch.describe()
+    assert launch.describe().endswith(' sh -c ' + after[-1])  # Logged as ssh sends it
+
+
+LOGIN_SHELLS: Final[List[str]] = ['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh']
+"""Login shells a remote account may have; the launch must work under each one."""
+
+# Records the command line it ran with and the key its environment holds.
+PROBE: Final[str] = """\
+#!{python}
+import os, sys, json
+with open({output!r}, mode='w') as stream:
+    json.dump({{'argv': sys.argv[1:], 'key': os.environ.get({auth_env!r})}}, stream)
+"""
+
+
+@mark.parametrize('shell', LOGIN_SHELLS)
+def test_ssh_launch_reads_key_under_any_login_shell(tmp_path: Path, shell: str) -> None:
+    """The remote command works under any login shell; without a key it stops before the client starts."""
+    shell_path = shutil.which(shell)
+    if shell_path is None:
+        pytest.skip(f'{shell} is not installed')
+    output = tmp_path / 'probe.json'
+    probe = tmp_path / 'probe'
+    probe.write_text(PROBE.format(python=sys.executable, output=str(output), auth_env=AUTH_ENV))
+    probe.chmod(0o700)
+    params = {**SSH_LAUNCH_BASE, 'remote_exe': str(probe), 'zone': 'blue'}
+    remote_exe, address = params.pop('remote_exe'), params.pop('address')
+    launcher, launcher_args = params.pop('launcher'), params.pop('launcher_args')
+    key = 'k' * 32
+    launch = client_launch(remote_exe, address, key, launcher=launcher, launcher_args=launcher_args,
+                           ssh_host='node-7', **params)
+    remote = ' '.join(launch.argv[launch.argv.index('node-7') + 1:])  # What ssh sends the login shell
+    env = {'PATH': os.environ.get('PATH', ''), 'HOME': str(tmp_path)}  # No dotfiles from the developer
+    for name, data in [('with-key', launch.stdin), ('no-key', '')]:
+        (tmp_path / name).write_text(data)
+        with open(tmp_path / name) as stdin:
+            run = run_in_session([shell_path, '-c', remote], env, tmp_path, timeout=30, name=name, stdin=stdin)
+        if name == 'with-key':
+            assert run.status == 0, run.stderr
+            probed = json.loads(output.read_text())
+            assert probed['key'] == key
+            assert probed['argv'] == previous_argv(remote_exe, address, [], [], **params)[1:]
+            output.unlink()
+        else:
+            assert run.status == 1, run.stderr
+            assert f'no authentication key arrived on standard input for {AUTH_ENV}' in run.stderr
+            assert not output.exists()
+        assert key not in run.stdout + run.stderr
+
+
+@mark.parametrize('options', [
+    pytest.param({}, id='defaults'),
+    pytest.param({'no_confirm': True, 'capture': True, 'monitor': True, 'client_cores': 8, 'client_memory': 1024,
+                  'client_timeout': 60, 'task_timeout': 30, 'ratelimit': 5, 'zone': 'blue'}, id='every-option'),
+])
+def test_ssh_mode_launches_each_host_with_every_client_option(options: Dict[str, Any]) -> None:
+    """The SSH cluster builds one launch per host with the client options it built inline, and no key."""
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    cluster = SSHCluster(nodelist=SSH_HOSTS, launcher_args=['-o', 'BatchMode=yes'], num_threads=4, bundlesize=2,
+                         bundlewait=5, template=QUOTED_TEMPLATE, delay_start=-1.5, task_signalwait=10,
+                         bind=(LOOPBACK, port), tls=None, **options)
+    assert [launch.argv for launch in cluster.launches] == cluster.client_argv
+    for host, launch in zip(SSH_HOSTS, cluster.launches):
+        before, after, _, command = split_ssh_launch(launch.argv, host)
+        assert before == ['ssh', '-o', 'BatchMode=yes', '-T']
+        assert after[:-1] == ['sh', '-c']
+        assert command == previous_argv(DEFAULT_REMOTE_EXE, (HOSTNAME, port), [], [], num_threads=4,
+                                        bundlesize=2, bundlewait=5, template=QUOTED_TEMPLATE, delay_start=-1.5,
+                                        task_signalwait=10, tls_enabled=False, **options)
+        assert not set(launch.argv) & KEY_OPTIONS
+    assert len({launch.stdin for launch in cluster.launches}) == 1

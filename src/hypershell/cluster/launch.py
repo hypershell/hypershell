@@ -5,9 +5,11 @@
 Client launch for cluster modes that start clients as separate processes.
 
 Every such mode builds its client invocation through :func:`client_launch`.
-The authentication key never appears on a command line it builds: launcher modes
+The authentication key never appears on a command line it builds. Launcher modes
 hand the key to the client in the launched process's environment, as
-:const:`AUTH_ENV`, which every client reads as the default for its key.
+:const:`AUTH_ENV`, which every client reads as the default for its key. SSH launches
+write the key to ssh's standard input, and a POSIX `sh` step on the remote host reads
+it into :const:`AUTH_ENV` before it starts the client.
 """
 
 
@@ -16,21 +18,28 @@ from __future__ import annotations
 from typing import Tuple, List, Dict, Iterable, Sequence, Optional, Final
 
 # Standard libs
+import io
 import os
 import shlex
 from dataclasses import dataclass, field
-from subprocess import Popen
+from subprocess import Popen, PIPE
 
 # Internal libs
 from hypershell.core.config import load_task_env
 from hypershell.client import AUTH_ENV
 
 # Public interface
-__all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'ClientLaunch', 'client_launch', 'redact_secrets']
+__all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'SSH_NO_KEY_MESSAGE', 'ClientLaunch', 'client_launch',
+           'ssh_remote_script', 'redact_secrets']
 
 
 OMPI_ENV_LIST: Final[str] = 'OMPI_MCA_mca_base_env_list'
 """Open MPI parameter naming the environment variables `mpirun` forwards to remote ranks."""
+
+SSH_NO_KEY_MESSAGE: Final[str] = (f'hs cluster: no authentication key arrived on standard input for {AUTH_ENV}; '
+                                  f'the ssh launch must pass its standard input to the remote command '
+                                  f'(ssh -n prevents this)')
+"""Printed on the remote host, before any client starts, when an SSH launch delivers no key."""
 
 
 @dataclass(frozen=True)
@@ -52,15 +61,38 @@ class ClientLaunch:
         Start one client process.
 
         The launched process gets the inherited environment, the task environment
-        from configuration, and the additions in `env`, in that order. The environment
-        of the calling process is never modified.
+        from configuration, and the additions in `env`, in that order; or, with
+        `inherit_env`, exactly the inherited environment. The environment of the
+        calling process is never modified. When there is `stdin`, it is written to
+        the process's standard input, which is then closed.
         """
         env = None if self.inherit_env else {**os.environ, **load_task_env(), **self.env}
-        return Popen(self.argv, env=env, **popen_options)
+        if self.stdin is None:
+            return Popen(self.argv, env=env, **popen_options)
+        proc = Popen(self.argv, env=env, stdin=PIPE, **popen_options)
+        data = self.stdin if isinstance(proc.stdin, io.TextIOBase) else self.stdin.encode()
+        try:
+            proc.stdin.write(data)
+            proc.stdin.flush()
+        except BrokenPipeError:
+            pass  # The process is already gone; its exit status reports the failure
+        finally:
+            try:
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
+        return proc
 
     def describe(self: ClientLaunch) -> str:
-        """Shell-quoted command line for logging, with any key option value redacted."""
-        return redact_secrets(self.argv, ['-k', '--auth'])
+        """
+        Shell-quoted command line for logging, with any key option value redacted.
+
+        The last word of an SSH launch (the one with `stdin`) is already quoted for the
+        remote shell and ssh sends it as it is, so it is shown as it is.
+        """
+        if self.stdin is None:
+            return redact_secrets(self.argv, ['-k', '--auth'])
+        return redact_secrets(self.argv[:-1], ['-k', '--auth']) + ' ' + self.argv[-1]
 
 
 def client_launch(remote_exe: str,
@@ -70,7 +102,7 @@ def client_launch(remote_exe: str,
                   launcher: Sequence[str] = (),
                   launcher_args: Sequence[str] = (),
                   ssh_host: Optional[str] = None,
-                  ssh_exports: Sequence[str] = (),  # noqa: unused until ssh launches build here
+                  ssh_exports: Sequence[str] = (),
                   num_threads: int,
                   bundlesize: int,
                   bundlewait: int,
@@ -90,11 +122,17 @@ def client_launch(remote_exe: str,
     """
     Build the client invocation for a cluster launch.
 
-    The command line is `launcher`, then `launcher_args`, then `remote_exe client` with the
-    shared client options. The key is handed over in the environment as :const:`AUTH_ENV`,
-    and :const:`OMPI_ENV_LIST` names that variable so Open MPI's `mpirun` forwards it to
-    remote ranks (other launchers ignore it). The calling process's environment is read,
-    never modified.
+    Without `ssh_host`, the command line is `launcher`, then `launcher_args`, then
+    `remote_exe client` with the shared client options. The key is handed over in the
+    environment as :const:`AUTH_ENV`, and :const:`OMPI_ENV_LIST` names that variable so
+    Open MPI's `mpirun` forwards it to remote ranks (other launchers ignore it).
+
+    With `ssh_host`, the command line is `launcher` and `launcher_args`, then `-T` (no
+    remote terminal, whatever those arguments or the ssh configuration ask for), the host,
+    `ssh_exports`, and a remote `sh -c` step (see :func:`ssh_remote_script`). The key is the
+    launch's standard input, and ssh gets the caller's environment unchanged.
+
+    The calling process's environment is read, never modified.
 
     Example:
         >>> launch = client_launch('hs', ('node-1', 50001), 'x' * 32, launcher=['srun'],
@@ -103,16 +141,43 @@ def client_launch(remote_exe: str,
         >>> launch.describe()
         "srun hs client -H node-1 -p 50001 -N 4 -b 1 -w 5 -t '{}' -d 0 -S 10 --no-tls"
     """
-    if ssh_host is not None:
-        raise NotImplementedError('SSH client launch is not built here yet')
     options = client_options(address, num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                              template=template, delay_start=delay_start, task_signalwait=task_signalwait,
                              no_confirm=no_confirm, capture=capture, monitor=monitor,
                              client_cores=client_cores, client_memory=client_memory,
                              client_timeout=client_timeout, task_timeout=task_timeout, ratelimit=ratelimit,
                              tls_enabled=tls_enabled, zone=zone)
+    if ssh_host is not None:
+        script = ssh_remote_script(remote_exe, options)
+        return ClientLaunch(argv=[*launcher, *launcher_args, '-T', ssh_host, *ssh_exports,
+                                  'sh', '-c', shlex.quote(script)],
+                            env={}, stdin=auth + '\n', inherit_env=True)
     return ClientLaunch(argv=[*launcher, *launcher_args, remote_exe, 'client', *options],
                         env={AUTH_ENV: auth, OMPI_ENV_LIST: ompi_env_list()})
+
+
+def ssh_remote_script(remote_exe: str, options: List[str]) -> str:
+    """
+    The POSIX `sh` script an SSH launch runs on the remote host.
+
+    It reads one line from standard input into :const:`AUTH_ENV` with shell builtins only,
+    so the key is on no command line on the remote host either. If no key arrives it prints
+    :const:`SSH_NO_KEY_MESSAGE` and exits 1 before any client starts. Otherwise it exports
+    the variable and replaces itself with the client. The options are shell-quoted, so any
+    template or name survives; `remote_exe` is not, so `~` and variables in it still expand.
+
+    The launch passes the script as one single-quoted word to `sh -c`, so the remote
+    account's login shell only has to parse that one word, whatever shell it is.
+
+    Example:
+        >>> script = ssh_remote_script('hs', ['-H', 'node-1', '-t', "echo {} it's"])
+        >>> print(script.split('; exec ')[1])
+        hs client -H node-1 -t 'echo {} it'"'"'s'
+    """
+    return (f'IFS= read -r {AUTH_ENV}; '
+            f'case ${AUTH_ENV} in "") echo "{SSH_NO_KEY_MESSAGE}" >&2; exit 1;; esac; '
+            f'export {AUTH_ENV}; '
+            f'exec {remote_exe} client {shlex.join(options)}')
 
 
 def client_options(address: Tuple[str, int],

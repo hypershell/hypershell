@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/authkey-handling-hardening
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -44,7 +44,7 @@ phases:
 - id: P3
   name: SSH launches through the same function, key on the ssh channel's standard
     input
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -55,7 +55,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k ssh
     && uv run pytest -p no:cacheprovider -q tests/test_cluster.py
 - id: P4
@@ -237,25 +237,63 @@ complete.
 standard input and is read into the client's environment by the remote `sh` preamble. Runs
 complete with TLS on and off, with `--zone`, and with `--env`.
 
-- [ ] Add the stand-in `ssh` to the harness. It records its argv and the remote command, saves its
+- [x] Add the stand-in `ssh` to the harness. It records its argv and the remote command, saves its
       standard input to a `0600` file under `tmp_path`, and runs the remote command with `sh -c`,
       feeding that input back (PLAN §6).
-- [ ] Add `test_ssh_mode_keeps_key_off_command_lines`, parametrised over TLS on/off, plus a
+- [x] Add `test_ssh_mode_keeps_key_off_command_lines`, parametrised over TLS on/off, plus a
       `--zone` case, an `--env` (`export_env`) case, and a template that contains a space and a
       single quote. Assert that the saved input carries the key, which appears in no argv and no
       remote command string. Add `test_ssh_mode_logs_never_hold_key`. Record red.
-- [ ] Implement the `ssh_host` branch of `client_launch()` as PLAN §2.1 describes:
-  - [ ] `-T` after the user's ssh args, then `ssh_exports`, then `sh -c <quoted preamble>`;
-  - [ ] `remote_exe` stays unquoted, and the options are `shlex.join`ed;
-  - [ ] the preamble exits 1 with a message if no key line arrives;
-  - [ ] `inherit_env=True`, and `stdin` is the key line;
-  - [ ] `start()` uses `stdin=PIPE`, writes, closes, and ignores `BrokenPipeError`.
-- [ ] `SSHCluster.__init__`: replace the per-host argv block with
+- [x] Implement the `ssh_host` branch of `client_launch()` as PLAN §2.1 describes:
+  - [x] `-T` after the user's ssh args, then `ssh_exports`, then `sh -c <quoted preamble>`;
+  - [x] `remote_exe` stays unquoted, and the options are `shlex.join`ed;
+  - [x] the preamble exits 1 with a message if no key line arrives;
+  - [x] `inherit_env=True`, and `stdin` is the key line;
+  - [x] `start()` uses `stdin=PIPE`, writes, closes, and ignores `BrokenPipeError`.
+- [x] `SSHCluster.__init__`: replace the per-host argv block with
       `self.launches = [client_launch(…, ssh_host=host, ssh_exports=launcher_env) for host in nodelist]`.
       Keep `client_argv` as `[l.argv for l in self.launches]`. `run_with_exceptions` logs
       `describe()` per host and calls `start(stdout=…, stderr=…)`.
-- [ ] Unit test: with `ssh_host` set, the argv ends in `['sh', '-c', <script>]`, where `-T` follows
+- [x] Unit test: with `ssh_host` set, the argv ends in `['sh', '-c', <script>]`, where `-T` follows
       the user args, and the script holds no key.
+- **Build notes (P3).**
+  - **Ruling on P2's open point (maintainer, 2026-11-05).** The autoscaler and `--ssh` hand clients
+    the host's own name, not the `-H` bind address. This cycle doesn't change that (the advertised
+    host is unchanged: PLAN §3, invariants §11). The stand-in `ssh` uses P2's approach: it records its argv,
+    the remote command and its standard input, then points the client's `-H` at the loopback
+    address; the key assertions read what it recorded. A follow-up public seed covers "the
+    advertised host ignores the bind address".
+  - The remote step is `IFS= read -r HYPERSHELL_SERVER_AUTH`, a `case` test for an empty value,
+    `export`, then `exec <remote_exe> client <options>`: shell syntax and builtins only, so the key
+    is on no command line on the remote side either, and nothing echoes it. It sets only the
+    variable every 2.8.x and 2.9 client already reads when no `-k` is given (R5 on 2.8).
+  - Login shells: `test_ssh_launch_reads_key_under_any_login_shell` sends the remote command the
+    way ssh does (words joined by spaces) to `<shell> -c`, with and without a key, for sh, bash,
+    zsh, dash, ksh, csh, tcsh and fish; a shell that is not installed is skipped (fish, on the build
+    host). Under fish, a backslash just before a single quote in the template is read as an escape
+    inside the outer quotes; that is no different from today, where fish parses the whole remote
+    command line.
+  - Quoting: one `shlex` layer for every option; a template with a space, a double quote and a
+    single quote reaches the client intact, end to end. `remote_exe` stays unquoted as before, so
+    `~` and `$VAR` expand and a path with spaces still needs the user's own quoting.
+  - Ruling Q1 in ssh mode: a launch whose key does not arrive never starts a client. The remote
+    step prints `SSH_NO_KEY_MESSAGE` (it names `HYPERSHELL_SERVER_AUTH`, ssh's standard input and
+    `ssh -n`) and exits 1 (`test_ssh_mode_without_key_names_the_cause`). The client's own
+    diagnostic cannot fire in this mode, since the variable is always set when the client starts.
+    `hs cluster` then waits, as after any failed client launch (P1 ruling).
+  - Q2 finding: `-T` after the user's arguments overrides `-t`/`-tt`, but nothing overrides `-n`.
+    With `-n` in `--ssh-args` or `config.ssh.args`, ssh reads `/dev/null`, so the key never arrives
+    and the launch fails with the message above. PLAN §2.3's "`-n` ... no effect" does not hold;
+    the P4 docs wording waits on the maintainer's ruling.
+  - The launch now owns ssh's standard input (a pipe it closes after the key line), so ssh no
+    longer shares `hs cluster`'s own standard input.
+  - `describe()` shows an ssh launch's last word as ssh sends it (quoted once, for the remote
+    shell), not quoted again for a local shell.
+  - `test_ssh_mode_logs_never_hold_key` passes before and after (the ssh launcher redacted `-k`
+    already); it is the regression guard, not a red-first test.
+  - Further tests: `test_ssh_launch_runs_client_under_sh_with_no_terminal` (the TECH unit test,
+    over the shared option sets) and `test_ssh_mode_launches_each_host_with_every_client_option`
+    (one launch per host, one key, `client_argv` is the list of their argvs).
 - **Verify:** `uv run pytest -p no:cacheprovider -rs tests/test_cluster_launch.py -k ssh && uv run pytest -p no:cacheprovider -q tests/test_cluster.py`.
 - **Touches:** `src/hypershell/cluster/launch.py`, `src/hypershell/cluster/ssh.py`,
   `tests/test_cluster_launch.py`.
@@ -281,7 +319,9 @@ guidance describe the hardened behaviour.
       remote terminal, the key on no command line). Ruling Q1: also say what a client prints when
       the launcher drops the environment (the CRITICAL line names `HYPERSHELL_SERVER_AUTH` and the
       launcher's environment as the likely cause), and that `--mpi` asks Open MPI to forward the
-      variable by name through `OMPI_MCA_mca_base_env_list`. Keep the `server.auth` plaintext sentence. Fix
+      variable by name through `OMPI_MCA_mca_base_env_list`. For `--ssh`, say what the remote step
+      prints when no key arrives, that `-t`/`-tt` no longer apply, and what `-n` does (P3 build
+      notes: it stops the key arriving), worded to the maintainer's ruling on `-n`. Keep the `server.auth` plaintext sentence. Fix
       the § *Operational hardening* bullet, which says the key "is redacted from launch logs", if
       its wording now misleads.
 - [ ] `AGENTS.md`:
