@@ -531,6 +531,9 @@ function _hs_client() {
 function _hs_relay() {
     _arguments -s \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-H --upstream-host)'{-H,--upstream-host}'[Hostname of upstream server (default: localhost)]:host:_hs_known_hosts' \
+        '(-p --upstream-port)'{-p,--upstream-port}'[Port of upstream server (default: 50001)]:port:_hs_ports' \
+        '--no-tls[Disable TLS to upstream server (not recommended)]' \
         '--bind[Bind address of relay-local server (default: 0.0.0.0)]:address:(0.0.0.0 localhost 127.0.0.1)' \
         '--port[Port of relay-local server (default: 50002)]:port:_hs_ports' \
         '--database[Path to relay database]:database file:_files'

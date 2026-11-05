@@ -7,7 +7,8 @@ The configuration swaps the database section in a relay process before the datab
 built. The integration tests run each relay as its own process under a wrapper that records every
 database connection the process opens (a SQLAlchemy ``do_connect`` listener installed before
 HyperShell is imported) and reports, at exit, what was opened and whether the PostgreSQL driver was
-ever imported. Each relay is started, seen ready, drained with SIGUSR1, and must exit cleanly.
+ever imported. Each relay is started, seen ready, drained with SIGUSR1, and must exit cleanly. A
+queue server in the test process stands in for the upstream server the relays connect to.
 """
 
 
@@ -35,6 +36,7 @@ from cmdkit.config import Namespace
 # Internal libs
 from hypershell.core.config import (relay_database_section, default_relay_database, _relay_requested,
                                     RELAY_MARKER, RELAY_PRAGMAS)
+from hypershell.core.queue import QueueServer, QueueConfig
 from hypershell.data.model import Entity
 from hypershell.relay import RelayThread
 from hypershell.relay.store import RelayBase
@@ -45,6 +47,7 @@ DEADLINE = 60.0  # Seconds for a relay to come up, and again for it to exit once
 POLL = 0.05      # Seconds between looks at a relay's log.
 
 READY = 'Relay-local server ready'
+UPSTREAM_AUTH = 'relay-db-upstream-key-0123456789'
 RELAY_TABLES = {'relay_task', 'relay_result'}
 
 # Runs `hs` with every database connection recorded; the report is written at exit. Everything sits
@@ -139,7 +142,14 @@ class Relay:
 
 
 @fixture
-def relays(tmp_path: Path) -> Iterator[Any]:
+def upstream() -> Iterator[QueueServer]:
+    """A queue server on loopback (cleartext) standing in for the upstream server."""
+    with QueueServer(QueueConfig(host='127.0.0.1', port=0, auth=UPSTREAM_AUTH, size=2)) as server:
+        yield server
+
+
+@fixture
+def relays(tmp_path: Path, upstream: QueueServer) -> Iterator[Any]:
     """Start relays as separate processes under the recorder; kill any left at the end of the test."""
     started: List[Relay] = []
     site = tmp_path / 'site'
@@ -152,7 +162,11 @@ def relays(tmp_path: Path) -> Iterator[Any]:
         name = f'relay-{len(started)}'
         environ = {**os.environ, 'HYPERSHELL_SITE': str(site), 'HYPERSHELL_LOGGING_LEVEL': 'DEBUG',
                    'HYPERSHELL_CONFIG_FILE': str(config) if config else '',
-                   'RELAY_TEST_REPORT': str(tmp_path / f'{name}.json'), **env}
+                   'RELAY_TEST_REPORT': str(tmp_path / f'{name}.json'),
+                   'HYPERSHELL_RELAY_UPSTREAM_HOST': '127.0.0.1',
+                   'HYPERSHELL_RELAY_UPSTREAM_PORT': str(upstream.address[1]),
+                   'HYPERSHELL_RELAY_UPSTREAM_AUTH': UPSTREAM_AUTH,
+                   'HYPERSHELL_RELAY_UPSTREAM_TLS_ENABLED': 'false', **env}
         environ.pop('HYPERSHELL_DATABASE_FILE', None)
         if marker:
             environ[RELAY_MARKER] = '1'

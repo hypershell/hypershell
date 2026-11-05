@@ -579,8 +579,12 @@
         ``.host``
             Hostname of the upstream *server* (default: `localhost`).
 
+            See also ``--upstream-host`` command-line option.
+
         ``.port``
             Port of the upstream *server* (default: `50001`).
+
+            See also ``--upstream-port`` command-line option.
 
         ``.auth``
             Cryptographic key for the upstream *server*.
@@ -590,6 +594,9 @@
 
         ``.bundlesize``
             Bundle size the relay advertises upstream (default: `1000`).
+
+            The relay never asks for more than this at once, nor for more than its site has room
+            for: its connected *clients* times ``relay.bundlesize``, less the tasks it holds.
 
         ``.heartrate``
             Seconds between heartbeats to the upstream *server* (default: `10`).
@@ -601,6 +608,8 @@
         ``[tls]``
             ``.enabled``
                 Use TLS on the upstream connection (default: `true`).
+
+                See also ``--no-tls`` command-line option.
 
             ``.cert``
                 Upstream server certificate (default: `<auto>`).

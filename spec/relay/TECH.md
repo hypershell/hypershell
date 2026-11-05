@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -43,7 +43,7 @@ phases:
 - id: P3
   name: 'Upstream pull: zone identity, backlog gate, durable insert before confirm,
     upstream TLS'
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -54,7 +54,7 @@ phases:
   - P2
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -v tests/test_relay_connector.py tests/test_relay_fsm.py tests/test_relay_db.py
     tests/test_dispatch_version.py
 - id: P4
@@ -436,27 +436,81 @@ deferred P1 verifies. P3 is not started here.
 **Goal:** the relay requests work as one ordinary client for its zone, inserts it durably, then
 confirms; it never pulls past the backlog bound.
 
-- [ ] `relay/upstream.py`: identity `uuid5(relay instance, zone name)`, logged at start; the
+- [x] `relay/upstream.py`: identity `uuid5(relay instance, zone name)`, logged at start; the
       puller FSM (`START, GATE, REQUEST, INSERT, CONFIRM, FINAL, HALT`) with finite waits and
       `check_signal()` in GATE; request text built here with `PROTOCOL` from `core/dispatch.py`;
       an error reply or `QueueVersionError` exits non-zero with the client's error; `shutdown:
       true` begins drain.
-- [ ] GATE: backlog vs `connected site clients × local bundlesize`; request size
+- [x] GATE: backlog vs `connected site clients × local bundlesize`; request size
       `min(bound − backlog, upstream bundlesize)`.
-- [ ] `relay/store.py` insert: upsert task (stamps and client fields cleared) + `relay_task`
+- [x] `relay/store.py` insert: upsert task (stamps and client fields cleared) + `relay_task`
       (verbatim `schedule_time` text, `server_id`, `server_host`, identity) in one transaction;
       aware datetimes to relay-local time; confirm only after commit.
-- [ ] Upstream `QueueClient` built from `[relay.upstream]` (host, port, auth, TLS `cafile` /
+- [x] Upstream `QueueClient` built from `[relay.upstream]` (host, port, auth, TLS `cafile` /
       `fingerprint`); `--no-tls` affects the upstream hop only. CLI `-H/--upstream-host`,
       `-p/--upstream-port`, `--no-tls` with help snippets and completions (P2 amendment).
-- [ ] Heartbeat FSM: one `Heartbeat.new(uuid=<identity>)` per beat at `[relay.upstream] heartrate`.
-- [ ] Tests (`tests/test_relay_connector.py`, `tests/test_relay_fsm.py`) against a fake upstream:
+- [x] Heartbeat FSM: one `Heartbeat.new(uuid=<identity>)` per beat at `[relay.upstream] heartrate`.
+- [x] Tests (`tests/test_relay_connector.py`, `tests/test_relay_fsm.py`) against a fake upstream:
       confirm follows the insert commit; a failed insert is never confirmed; no request at or
       above the bound, one below it; a re-dispatched id upserts and refreshes its stamp; version
       error exit; re-enter on timeout, halt on halt and on signal.
+- **Amendments (2026-11-05, build):**
+  - **"Connected" is the relay-local server's own registrations.** The gate counts `client` rows
+    with `server_id` = this relay instance and no `disconnected_at` (`store.count_connected`), not
+    `Client.count_connected`, which keys on `Task.latest_server()` and reads zero until the
+    relay-local server has scheduled a task, so the gate would never open. Rows left by an earlier
+    relay run on the same file carry another `server_id` and do not count.
+  - **Insert failures.** A failed insert (a SQLAlchemy error, e.g. a locked file) is rolled back
+    whole, logged, and tried again after `poll`, up to `INSERT_ATTEMPTS` = 3; then the puller
+    raises `RelayInsertError` and the relay exits non-zero. The bundle is never confirmed either
+    way (upstream it stays in the cut-to-confirm window, a GOAL non-goal).
+  - **Local `part` is 0.** The partition index is the relay database's own; the received value
+    is not kept.
+  - **The connect comes first.** `RelayThread` connects upstream before the relay-local server
+    starts, so a version mismatch, a wrong key or a refused connection ends the relay before the
+    site is touched (one CRITICAL line, as for a client). Until P8 an unreachable upstream at start
+    is fatal. Consequently P2's process tests in `tests/test_relay_db.py` now run against a stand-in
+    upstream (a queue server in the test process, configured through `HYPERSHELL_RELAY_UPSTREAM_*`
+    with TLS off); their assertions are unchanged.
+  - **Ending upstream.** On an upstream `shutdown` reply the puller ends and the relay waits for its
+    local backlog to finish before it stops the relay-local server (§2.9); a drain signal ends the
+    puller and the local scheduler together, as in P2. The FINISHED heartbeat is sent only when
+    every received task's result has been handed over (`store.count_held` = 0, keyed on
+    `relay_result.state = returned`, P4's outbox). Otherwise the relay logs a WARNING and stops
+    beating, leaving its identity to upstream eviction, which reverts the tasks it still holds: a
+    FINISHED beat would end the registration without that revert and strand them. In P3 nothing is
+    returned yet, so a relay that pulled anything never sends FINISHED.
+  - **Zone from configuration.** P3 reads `[relay] zone` (unset → default zone, which requests with
+    no `zone`, as a client does); `--zone` arrives with P4 as planned.
+  - The relay's exception map gains the client's transport entries (`EOFError`,
+    `ConnectionResetError`, `ConnectionRefusedError`, `AuthenticationError`).
 - **Verify:** see frontmatter.
-- **Touches:** `src/hypershell/relay/`, `tests/test_relay_connector.py`, `tests/test_relay_fsm.py`,
-  `docs/_include/relay_*` and `share/` if options change.
+- **Red first (2026-11-05):** the two new test files failed at collection on the unmodified tree
+  (`ModuleNotFoundError: hypershell.relay.upstream`); after the build, P2's process tests in
+  `tests/test_relay_db.py` failed 6 of 27 with `ConnectionRefusedError` (no upstream) until they
+  were given the stand-in upstream above.
+- **Verified 2026-11-05** (venvs from `uv sync --frozen` on `PATH` in place of `uv run`):
+  - P3 verify: 64 passed on 3.12, and inside the 3.14 set below.
+  - Full suite, 3.12: 957 passed, 85 skipped (PostgreSQL and other server-backed tests), no failure.
+  - Relay, zone, dispatch, server-FSM, contended-write and writeback files, 3.14: 206 passed, 11
+    skipped.
+  - `tests/test_main.py`, `tests/test_completions.py` pass on both; `hs relay --help` ok;
+    `bash -n`/`zsh -n` ok; `unsupported_internals()` is `[]` on both.
+  - Loopback smoke, both versions, throwaway site, upstream `hs server --forever` with TLS
+    (`<auto>` material shared in the site), 20 tasks: (A) `hs relay -H … -p …` with no site
+    client registered its logged identity upstream (`client` row connected), was dispatched and
+    confirmed 0 tasks, exited 0 on SIGUSR1, and its FINISHED beat disconnected the row (not
+    evicted); the relay file held no task row and no primary was touched. (B) a relay run from a
+    small driver (to read the minted site key) with one `hs client` on the relay-local port: the
+    upstream dispatched 20 requests of 1 task each, all 20 rows confirmed upstream to the relay
+    identity and none completed upstream (no return path until P4); the relay file holds 20 rows
+    completed with exit 0 by the site client, and all 20 `relay_task` stamps equal the upstream
+    `schedule_time` text and `server_id`.
+- **Touches:** `src/hypershell/relay/` (`__init__.py`, `store.py`, new `upstream.py`),
+  `tests/test_relay_connector.py`, `tests/test_relay_fsm.py`, `tests/test_relay_db.py` (stand-in
+  upstream), `docs/_include/relay_{usage,help,desc}.rst`, `docs/_include/config_param_ref.rst`,
+  `docs/manual.rst`, `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`. No zone code,
+  `client.py`, `server.py` or `core/queue.py` edit.
 
 ## Phase P4 — Site run and return path
 **Satisfies:** R1, R4, R5, R6, R16, R20 · **Depends on:** P3 · PLAN §2.3
