@@ -68,3 +68,24 @@
 - **Recommended fix:** Say that when the GOAL carries a scope ruling, the breaker becomes a recorded
   plan-gate ruling with the phase count and the reason, not a pause.
 - **Confidence:** med · **Effort:** small
+
+## F5 — The rubric checks new process tests by mutation, not for timing dependence
+`origin=hs-review:step-2 severity=low category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** The review-2 remediation's C2-1 process test passed three runs in a row on an
+  idle host. It also passed the cycle-3 reviewer's first full-suite run and was mutation-killed.
+  Under eight concurrent copies it failed 3 of 8, because its injected fault fires on the
+  collector's empty bundles, not on the result it claims to wait for (REVIEW C3-2). Nothing in the
+  rubric or the build's verify asks a new process test to run under load. The reviewer found the
+  flake only by happening to add a concurrency repeat.
+- **Skill cause:** The rubric asks for mutation and for executed evidence. It says nothing about
+  repeating new timing-sensitive integration tests concurrently, so "three runs, no flake"
+  (sequential, idle) passes as evidence.
+- **Recommended fix:** In the rubric (and `hs-build`'s gate for process tests), require each new
+  integration test that drives real processes to pass N concurrent copies, for example 8 with
+  distinct `--basetemp`, run in the foreground (a background job inherits SIGINT ignored). The
+  pass count goes in the record.
+- **Confidence:** med · **Effort:** small
+
+**What worked well:** fault injection by a pre-import patch script, with the process marked a relay
+so it does not re-execute, plus a trigger file to arm the fault. It turned "any server thread dies"
+into seven real-process runs in under a minute.

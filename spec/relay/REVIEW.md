@@ -401,3 +401,203 @@ re-registering with the same server.
   suggested fix needs no core edit. The cycle-1 trigger (credential fence, site-hop TLS) stands:
   maintainer sign-off before `hs-publish`.
 - Cycle 2 of ≤3: a third cycle that does not converge escalates to the maintainer.
+
+## Review cycle 3 (scoped, the cycle-2 remediation) — approved, with follow-ups (2026-11-05)
+
+- **Reviewed commit:** `c872680`  ·  **Range:** `a9d82e7..c872680` (remediation of C2-1..C2-5 and
+  the roster guard)  ·  **Base:** `develop`  ·  **Date:** 2026-11-05
+- **Verdict:** approved. This approves P1–P6 and the two remediation rounds as built; P7–P10 remain.
+  It holds only if the foreman sanctions C3-1 (below). If the foreman does not, C3-1 blocks, and the
+  remedy is to take C2-4 back to a docs-only fix.
+- **Cycle:** 3 of ≤3. This is the last cycle the run allows. Anything that blocks goes to the maintainer.
+- **Mode:** scoped, as the foreman directed. One reviewer worked inline, with no subagent. The findings
+  were formed from `GOAL.md`, the spec-excluded diff (`git diff a9d82e7..c872680 -- . ':(exclude)spec/'`),
+  `invariants.md`, `AGENTS.md`, the rubric and the runnable tree. `TECH.md` and the cycle-1/2 record
+  were read only afterwards, to check closure. Every run used `git archive c872680` copies outside the
+  worktree, with the copy's `src/` on `PYTHONPATH`. Each command ran under a process-group kill
+  timer. The worktree was untouched until this record.
+
+### Verification run
+
+- **Full suite:** 3.12 with `-n auto`: 1063 passed, 85 skipped (the PostgreSQL-backed tests skip). On 3.14,
+  the seven relay files, `test_server_fsm.py` and `test_main.py` with `-n auto`: 246 passed.
+- **Fault injection:** real `hs server --forever` upstream (SQLite, evict 10 s), a relay process
+  marked a relay before import with one fault patched in, armed by a trigger file once two site
+  tasks run, `HYPERSHELL_CONFIG_FILE` holding `[relay.upstream]` so a site copy exists. The faults
+  were a scheduler raise, a heart-monitor raise, a heart monitor ending cleanly out of turn, a receiver
+  ending cleanly out of turn, a confirm raise, a confirm ending cleanly, and an autoscaler raise.
+- **Signals:** SIGTERM at 0.0, 0.3, 0.6, 1.0, 1.5 and 2.5 s after start. SIGTERM then a second
+  SIGTERM, and SIGTERM then SIGINT, both with site clients that ignore SIGTERM. SIGTERM during the
+  relay thread's own failure abort. `hs server` and `hs cluster` under SIGTERM. One process that
+  installs the relay's handler and then runs `ServerApp`.
+- **Roster guard:** the upstream heart monitor stepped in-process. Tests: a relay claiming a disconnected
+  ordinary client, a relay naming another relay's own row, re-registration after an upstream restart,
+  and re-registration after eviction under the same identity.
+- **Wire:** this relay against a 2.9.0a4 `hs server` (`git archive 2.9.0a4`) on 8 tasks.
+  Heartbeats were cross-unpacked both ways between the 2.9.0a4 and `c872680` `Heartbeat`.
+- **Mutations:** one per copy, each run against the test that claims to pin it:
+  - `store_utc` removed
+  - `install_drain_handlers` made a no-op
+  - `check_site()` dropped from `wait_site`
+  - `install_terminate_handler()` dropped
+  - roster guard disabled
+  - `check_site(stopping=True)` dropped from `stop_site`
+
+  **6 of 6 killed.**
+- **Flakiness:** the four new process tests were run as eight concurrent copies of the C2-1 test,
+  six concurrent copies of the C2-2, C2-3 and C2-4 tests, and once in an `-n 8` batch.
+- **Docs:** a Sphinx `-W --keep-going` build, run outside the sandbox (`sphinx_sitemap` needs
+  AF_UNIX). That was allowed this time.
+
+### Requirement → evidence matrix (reviewed scope)
+
+| R-ID | Implemented by (this range) | Verified how | Status |
+|------|-----------------------------|--------------|--------|
+| R1   | `RelayThread.check_site`, `RelayPartEnded`, `wait_site`/`stop_site` | seven real-process faults; unit tests; 2 mutants | ✅ (test flaky: C3-2) |
+| R3   | failover through the abort path (no FINISHED) | upstream evicts and reverts in every fault probe | ✅ |
+| R6   | `store_utc` wiring pinned | cross-zone test; mutant killed (13.5 h) | ✅ |
+| R7   | roster guard in `HeartMonitor.update_roster` | stepped monitor; test; mutant killed; 2.9.0a4 interop | ✅ |
+| R17  | site copy removed on SIGTERM/SIGINT | signal probes; test; mutant killed | ✅ (docs: C3-3) |
+| R18  | `relay_desc.rst`, `config_param_ref.rst`, `hs relay --help` | read against behaviour; Sphinx `-W` | ⚠ C3-3 |
+| R20  | new tests for C2-1..C2-4 and the guard | mutations 6/6; concurrency repeats | ⚠ C3-2 |
+
+Unmapped changes: none. The roster guard is the cycle-2 note's optional hardening, applied to R7.
+
+### Findings
+
+#### [CRITICAL-class by the rubric / CONFIRMED] C3-1 — `hs relay` now captures SIGTERM; AGENTS.md §Signals and invariants.md §8 say it is never captured, and no ruling records the deviation
+- **Blocks or follow-up:** follow-up, conditional on the foreman's sanction. Without that sanction it blocks.
+- **Where:**
+  - `src/hypershell/relay/__init__.py:144-168`: `terminate_handler`, `install_terminate_handler`
+    and `end_by_signal`.
+  - `:721`: the handler is installed in `RelayApp.run`.
+  - `:695-707`: re-delivery in `RelayApp.main`.
+  - The texts it contradicts are `AGENTS.md:295` and `.agents/factory/invariants.md:132`:
+    "`SIGINT`/`SIGTERM` are deliberately not captured".
+- **Evidence:**
+  - SIGTERM mid-run and at 0.0–2.5 s after start: the handler runs the abort path (the "Stopping"
+    sequence is logged), removes the copy, and the process still dies by SIGTERM (−15).
+  - `hs server` and `hs cluster` from the same tree still die by the default action (−15).
+  - One process that installs the relay's handler and then runs `ServerApp` in-process gives
+    `RelayTerminated` with a traceback and exit 1. The handler is never restored after the relay
+    returns. This matters only for in-process reuse, because `hs relay` re-executes into a process
+    of its own.
+- **Why it is not recorded:** TECH's C2-4 entry calls the change "the signal's semantics kept".
+  P9's lockstep item for `AGENTS.md` and `invariants.md` names §10/§11 only. Cycle 2 already routed
+  the related §Signals prose (USR1/USR2 never reach the stock flag in a relay) to P9.
+- **Why follow-up rather than block:** the code is the intended fix for C2-4. It keeps what the
+  invariant protects: no core command captures SIGTERM, nothing goes through `check_signal()`, and
+  the relay process still ends by SIGTERM. The fix is text, in files P9 already edits in lockstep.
+  The feature does not merge before P10.
+- **Remedy (P9):** `AGENTS.md` §Signals and `invariants.md` §8 gain a relay carve-out:
+  - SIGUSR1/SIGUSR2 drain through the relay's own handler and never set `RECEIVED`.
+  - SIGTERM is caught in `hs relay` only. It ends the relay through its exit path and is then
+    re-delivered with the default action.
+  - A second SIGTERM ends the process at once.
+  - The handler is process-lifetime, one relay per process.
+
+#### [LOW/CONFIRMED] C3-2 — The C2-1 process test is timing-dependent: its fault fires on the site clients' empty bundles, not on "the first result"
+- **Blocks or follow-up:** follow-up (P8). The change is to the test only. The behaviour the test
+  means to pin held in all seven fault probes, and the fix is one line.
+- **Where:**
+  - `tests/test_relay_workload.py:522-537`: `FAULTY_RECEIVER_RELAY` raises on every
+    `apply_results` call.
+  - `:644-650`: the test must see two running site tasks before the receiver dies, and its comment
+    says "The first result to reach the relay-local receiver ends it".
+  - A site client's collector sends `serialize_tasks([])`, which is `b'[]'` and truthy, every
+    bundle wait (`src/hypershell/client.py:417-423`; 1 s here). The receiver then calls
+    `apply_results([])`.
+- **Evidence:**
+  - With the barrier never touched, the faulty relay exits 5 with the injected error and 0 tasks
+    completed, in 3 of 3 runs.
+  - Of eight concurrent copies, three failed. Two failed with `assert len(clients) == 2`, which got 0
+    because the relay had already ended them. One timed out after 240 s waiting for two site tasks,
+    because the relay aborted before they were seen.
+  - In the `-n 8` batch, one run failed the same way.
+  - Sequential runs on an idle host pass. That is why the remediation's "three runs, no flake" saw
+    nothing.
+- **Fix:** raise only when `results` is non-empty, or arm the fault from a file the test writes
+  after it sees the two tasks.
+
+#### [LOW/CONFIRMED] C3-3 — "Only a relay killed outright (SIGKILL) leaves it behind" is not so: a second SIGTERM also leaves the copy
+- **Blocks or follow-up:** follow-up (P9 docs). The copy holds no key (0600, checked in cycle 2),
+  and the next relay on that database overwrites it.
+- **Where:** `docs/_include/relay_desc.rst:19-21` against `relay/__init__.py:146`. The handler resets
+  SIGTERM to its default first, by design.
+- **Evidence:** SIGTERM, then a second SIGTERM while site clients ignore the first: exit −15, and the
+  copy is left. SIGTERM then SIGINT: exit 4, and the copy is removed.
+- **Fix:** "killed outright (SIGKILL, or a second SIGTERM while it ends)".
+
+### Notes (not findings)
+
+- **Tasks outlive their site client on abort, as cycle 2 noted (inherited).** This was seen again
+  in every fault probe: the barrier tasks were reparented into the relay's process group. The cause
+  is that a stock client does not handle SIGTERM (§8). A launcher with a step manager ends them.
+- **SIGTERM during the relay thread's own failure abort.** The main thread's `abort()` returns at
+  once, because the abort has already started, and the process ends by SIGTERM before the SIGKILL
+  escalation runs. Site clients that ignore SIGTERM still exit within 1 s of losing their server, so
+  no orphan was left.
+- **A dead relay-local receiver makes the abort wait out `STOP_TIMEOUT`** ("Relay-local server did
+  not stop within 10.0 seconds - leaving it"). The exit stays bounded: probes exited 0.6–11.6 s
+  after the fault, and the C2-1 test bound is 30 s.
+- **The roster guard keeps the rule it states.** A roster can still claim a disconnected
+  *ordinary* client's row (relay NULL) and mark it connected under the sender. Only a key holder
+  forging a heartbeat can do that, which is within the trust model; legitimate flows never produce
+  it. P9's "roster on the holder" identity keeps the guard compatible with multi-zone relays. A
+  conflicting entry logs a WARNING on every heartbeat.
+- **The SIGINT case of the C2-4 test fails if pytest itself runs with SIGINT ignored** (6 of 6 as a
+  background job of a non-interactive shell). This is POSIX job semantics, not the relay.
+
+### What held (executed)
+
+- **C2-1 supervision.** In all seven faults the relay exited 5 and left no site client. It sent no
+  FINISHED and removed the copy. The upstream evicted the relay and reverted the 2 tasks it held.
+  - Fault to exit: scheduler 1.6 s, autoscaler 0.6 s, heart monitor ended out of turn 2.1 s,
+    confirm (raise or clean end) 5.0 s, heart-monitor raise 10.2 s, receiver ended out of turn
+    11.6 s. The last two are each bounded by the thread's own 10 s wait.
+  - The out-of-turn messages name the right pair, for example "hypershell-heartmonitor ended while
+    hypershell-scheduler still runs".
+  - The chain order matches `ServerThread.run_with_exceptions` (scheduler → heart monitor →
+    receiver → confirm → server). Only the server writes sentinels. The returner and the upstream
+    heartbeat end only after `wait_site`.
+  - A normal drain is not misread. The drain test passed 6 of 6 concurrently and in the full suite.
+- **C2-4 signals.**
+  - SIGTERM at every startup delay and mid-run: −15, copy removed, no site client left.
+  - SIGINT: 4, copy removed. A second SIGINT: 4, copy removed.
+  - `hs server` and `hs cluster` are unaffected (−15).
+- **Roster guard.**
+  - Another relay's leaf is neither re-attributed nor disconnected (test; mutant killed).
+  - A relay's own row cannot be claimed by another relay.
+  - Re-registration after an upstream restart, and after eviction under the same identity, is
+    accepted.
+- **Wire.** Against a 2.9.0a4 upstream, 8 of 8 tasks completed by leaves. The upstream listed only
+  the relay and logged no errors. A 2.9.0a4 heartbeat unpacks here with `site`/`roster` None, and
+  this relay's heartbeat unpacks in 2.9.0a4 with the extra fields ignored.
+- **C2-2, C2-3 and C2-4 tests:** 6 of 6 concurrent passes, and each is mutation-killed.
+- **Docs.** Sphinx `-W`: 3 warnings, the known pre-existing ones (`manual.rst` twice and
+  `cli/task_submit.rst`), none from relay pages. `evict_hint` does not appear in the built HTML.
+  The docs contain no `hs task …`, and the diff contains no internal names.
+
+### Cycle-2 closure
+
+| Finding | Status |
+|---|---|
+| C2-1 | Closed. Every relay-local server thread and the autoscaler are watched, and seven real faults take the bounded failure path. Residual: the test is flaky (C3-2). |
+| C2-2 | Closed. The cross-zone process test is mutation-killed (leaf times 13.5 h off). |
+| C2-3 | Closed. The drain test holds an unstaged backlog and is mutation-killed. |
+| C2-4 | Closed in behaviour. The copy is removed on SIGTERM and SIGINT, and the process ends −15 / 4 (mutation-killed). Residuals: C3-1 (invariant text) and C3-3 (doc sentence). |
+| C2-5 | Closed. `evict_hint` is gone from the public docs and the built HTML; the default stays in config. |
+| Roster note | The guard was added and is mutation-killed. The ordinary-client roster path remains within the trust model (notes). |
+| AGENTS USR1/USR2 note | Still routed to P9, and now carries SIGTERM too (C3-1). |
+
+### Human-gate triggers
+
+- **C3-1** needs the foreman's explicit sanction of the SIGTERM capture. P9's
+  `AGENTS.md`/`invariants.md` item must then add §8 (Signals) to its lockstep list.
+- No CONFIRMED finding touches a high-blast-radius file. The guard's `server.py` edit held under
+  every probe.
+- The cycle-1 trigger stands: maintainer sign-off on the credential fence and the site-hop TLS
+  before `hs-publish`.
+- **Follow-ups for the build:**
+  - C3-2: fix the test in P8.
+  - C3-1 text and C3-3: in P9.
