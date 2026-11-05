@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HS" "1" "Nov 04, 2026" "2.9.0a3" "hypershell"
+.TH "HS" "1" "Nov 05, 2026" "2.9.0a4" "hypershell"
 .SH NAME
 hs \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -93,7 +93,7 @@ Stand up the \fBserver\fP on its own and scale \fBclients\fP as desired, and \fB
 \fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-f PATH]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP
 \fB[\-\-ssh [HOST... | \-\-ssh\-group NAME] [\-\-env] | \-\-mpi | \-\-launcher=ARGS...]\fP
 \fB[\-\-no\-db [\-\-no\-confirm] | \-\-initdb]\fP \fB[\-d SEC]\fP \fB[\-T SEC]\fP \fB[\-W SEC]\fP \fB[\-S SEC]\fP \fB[\-R NUM]\fP
-\fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP
+\fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP \fB[\-\-zone NAME]\fP
 \fB[\-\-autoscaling [MODE] [\-P SEC] [\-F VALUE] [\-I NUM] [\-X NUM] [\-Y NUM]]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
@@ -249,6 +249,13 @@ Disable database (submit directly to clients).
 By default, a scheduler thread selects tasks from a database that were previously submitted.
 With \fB\-\-no\-db\fP enabled, there is no scheduler and instead the \fIsubmit\fP thread publishes
 bundles directly to the queue.
+.TP
+.B \fB\-\-zone\fP \fINAME\fP
+Zone of the submitted tasks and of every client the cluster launches (default: none).
+.sp
+The tasks read from \fIFILE\fP (or \fB\-\-from\-json\fP) are placed in this zone, and each client is
+launched with the same \fB\-\-zone\fP, so it runs them. Zones are recorded in the database, so
+\fB\-\-zone\fP cannot be used with \fB\-\-no\-db\fP\&.
 .TP
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
@@ -557,8 +564,8 @@ See the \fIsecurity\fP section for peer verification modes.
 .sp
 Launch server, schedule directly or asynchronously from database.
 .sp
-The server includes a scheduler component that pulls tasks from the database and offers
-them up on a distributed queue to clients. It also has a receiver that collects the results
+The server includes a scheduler component that pulls tasks from the database and stages them
+for clients, which request bundles of them when they are ready for work. It also has a receiver that collects the results
 of finished tasks. Optionally, the server can submit tasks (\fIFILE\fP). When submitting tasks,
 the \fB\-w\fP/\fB\-\-bundlewait\fP and \fB\-b\fP/\fB\-\-bundlesize\fP options are the same as for the
 \fIsubmit\fP workflow.
@@ -566,8 +573,9 @@ the \fB\-w\fP/\fB\-\-bundlewait\fP and \fB\-b\fP/\fB\-\-bundlesize\fP options ar
 With \fB\-\-max\-retries\fP greater than zero, the scheduler will check for a non\-zero exit status
 for tasks and re\-submit them if their previous number of attempts is less.
 .sp
-Tasks are bundled and clients pull them in these bundles. However, by default the bundle size
-is one, meaning that at small scales there is greater concurrency.
+Tasks are bundled for each client at the size it asks for, or at the server\(aqs \fB\-b\fP/\fB\-\-bundlesize\fP
+when it asks for none. By default the bundle size is one, meaning that at small scales there is
+greater concurrency.
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -602,7 +610,8 @@ Size of task bundle (default: 1).
 The default value allows for greater concurrency and responsiveness on small scales. This is
 used by the \fIsubmit\fP thread to accumulate bundles for either database commits and/or publishing
 to the queue. If a database is in use, the scheduler thread selects tasks from the database in
-batches of this size.
+batches of this size. It is also the size of the bundle given to a client that advertises no
+size of its own (a client\(aqs \fB\-b\fP is its advertised size).
 .sp
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
@@ -767,13 +776,14 @@ See the \fIsecurity\fP section for peer verification modes.
 \fB[\-N NUM]\fP \fB[\-t TEMPLATE]\fP \fB[\-b SIZE]\fP \fB[\-w SEC]\fP \fB[\-H ADDR]\fP \fB[\-p PORT]\fP
 \fB[\-k KEY]\fP \fB[\-\-capture | [\-o PATH] [\-e PATH]]\fP \fB[\-\-no\-confirm]\fP
 \fB[\-d SEC]\fP \fB[\-T SEC]\fP \fB[\-W SEC]\fP \fB[\-S SEC]\fP \fB[\-R NUM]\fP
-\fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP
+\fB[\-C NUM]\fP \fB[\-M MEM]\fP \fB[\-\-monitor]\fP \fB[\-\-zone NAME]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
 Launch client directly, run tasks in parallel.
 .sp
-The client connects to the server and pulls bundles of tasks off the shared queue.
+The client connects to the server and, whenever it is ready for work, requests a bundle of tasks
+of its own size (\fB\-b\fP/\fB\-\-bundlesize\fP; the server\(aqs size when not given).
 These tasks are run locally by some number of a parallel task executors.
 .sp
 The environment for tasks are the same as for the client. Standard output and error
@@ -798,7 +808,14 @@ arguments (e.g., file paths) to be transformed into some common form; such as
 See section on \fItemplates\fP\&.
 .TP
 .B \fB\-b\fP, \fB\-\-bundlesize\fP \fISIZE\fP
-Size of task bundle (default: 1).
+Size of task bundle to request from the server and to return results in (default: the
+server\(aqs).
+.sp
+When given (on the command line, by \fBHYPERSHELL_SUBMIT_BUNDLESIZE\fP, or in a configuration
+file as \fBsubmit.bundlesize\fP), the client advertises this size and the server replies with
+up to this many tasks, never more than its cap (\fBserver.bundlemax\fP). When not given, the
+client advertises no size and the server uses its own \fB\-\-bundlesize\fP; finished tasks are then
+returned in bundles of the built\-in default (1).
 .sp
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
@@ -813,6 +830,13 @@ the \fIserver\fP will push out a bundle after this period of time regardless of 
 it has reached the preferred bundle size.
 .sp
 See also \fB\-\-bundlesize\fP\&.
+.TP
+.B \fB\-\-zone\fP \fINAME\fP
+Run only tasks of this zone (default: none, tasks without a zone).
+.sp
+The client names its zone when it requests work, and the server replies with tasks of that
+zone only. A client given no \fB\-\-zone\fP (or \fB\-\-zone default\fP) runs only tasks submitted
+without one. See \fB\-\-zone\fP on \fIsubmit\fP\&.
 .TP
 .B \fB\-H\fP, \fB\-\-host\fP \fIADDR\fP
 Hostname or IP address to connect with server (default: localhost).
@@ -954,7 +978,7 @@ See the \fIsecurity\fP section for peer verification modes.
 .B \fBhs\fP \fBsubmit\fP \fB[\-h]\fP \fB[ARGS... | \-f FILE | \-\-from\-json SPEC]\fP
 \fB[\-q [\-H ADDR] [\-p NUM] [\-k KEY] | \-\-initdb]\fP
 \fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-W SEC]\fP \fB[\-g NUM]\fP
-\fB[\-\-repeat | \-\-update]\fP \fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP
+\fB[\-\-repeat | \-\-update]\fP \fB[\-\-template CMD]\fP \fB[\-t TAG...]\fP \fB[\-\-zone NAME]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
 .UNINDENT
 .sp
@@ -965,7 +989,8 @@ If a single positional argument refers to a non\-executable file path,
 tasks will be read from the file, one per line (use \fB\-f\fP/\fB\-\-task\-file\fP to be explicit).
 .sp
 Tasks are accumulated and published in bundles to the database by default.
-With \fB\-q\fP/\fB\-\-queue\fP, tasks are submitted directly to a live queue, bypassing the database.
+With \fB\-q\fP/\fB\-\-queue\fP, tasks are submitted directly to a live queue, bypassing the database;
+the server must be running without a database (\fB\-\-no\-db\fP).
 The \fB\-b\fP/\fB\-\-bundlesize\fP and \fB\-w\fP/\fB\-\-bundlewait\fP options control the
 size of these bundles and how long to wait before flushing tasks regardless of
 how many have accumulated.
@@ -1045,6 +1070,9 @@ When enabled, tasks are sent directly to a running server\(aqs queue for immedia
 scheduling. This bypasses the database entirely, which is useful for transient
 workflows or when a database is not configured.
 .sp
+The server must be running without a database (\fB\-\-no\-db\fP). A server with a database
+schedules only from it, so it refuses the submission and the command exits with an error.
+.sp
 Requires \fB\-H\fP, \fB\-p\fP, and \fB\-k\fP options to specify the server connection.
 .TP
 .B \fB\-H\fP, \fB\-\-host\fP \fIADDR\fP
@@ -1118,6 +1146,14 @@ workflow management without requiring explicit DAG\-based definitions.
 .sp
 All tasks default to group 0 for backwards compatibility. Users can organize tasks into
 multiple groups (e.g., 0, 1, 2, ...) where lower\-numbered groups execute first.
+.TP
+.B \fB\-\-zone\fP \fINAME\fP
+Zone of the submitted tasks (default: none, the reserved default zone).
+.sp
+Only a client launched with the same \fB\-\-zone\fP runs these tasks; a client given no
+\fB\-\-zone\fP runs only tasks without one. Zone names are arbitrary text (\fBdefault\fP names the
+default zone). Zones are recorded in the database, so \fB\-\-zone\fP cannot be used with
+\fB\-\-queue\fP\&. Zone is placement only: task groups still run in order across all zones.
 .TP
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
@@ -1229,7 +1265,7 @@ Unique task UUID.
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
 Format task info ([normal], card, json, yaml). The \fBcard\fP format renders the task as a
-richly\-formatted, bordered panel with a color\-coded status badge (see \fBtask search\fP).
+richly\-formatted, bordered panel with a color\-coded status badge (see \fBhs list\fP).
 .TP
 .B \fB\-\-json\fP
 Format metadata output as JSON.
@@ -1287,7 +1323,7 @@ Time in seconds to wait between polling (default: 5).
 .B \fB\-i\fP, \fB\-\-info\fP
 Print task info after completion.
 .sp
-See \fBtask info\fP command.
+See \fBhs info\fP command.
 .TP
 .B \fB\-f\fP, \fB\-\-format\fP \fIFORMAT\fP
 Format task info ([normal], card, json, yaml).
@@ -2315,7 +2351,16 @@ batches of this size.
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
 .sp
+It is also the size of the bundle given to a client that advertises no size of its own.
+.sp
 See also \fB\-b\fP/\fB\-\-bundlesize\fP command\-line option.
+.TP
+.B \fB\&.bundlemax\fP
+Most tasks the server hands a client in one reply (default: \fI1000\fP).
+.sp
+A client advertises its own bundle size (its \fB\-b\fP); the server never replies with more
+than this many tasks, whatever a client asks for. The effective cap is never smaller than
+the server\(aqs own \fB\&.bundlesize\fP\&. There is no command\-line option.
 .TP
 .B \fB\&.attempts\fP
 Attempts for auto\-retry on failed tasks (default: \fI1\fP).
@@ -2488,6 +2533,11 @@ The default value allows for greater concurrency and responsiveness on small sca
 Using larger bundles is a good idea for large distributed workflows; specifically, it is best
 to coordinate bundle size with the number of executors in use by each client.
 .sp
+The \fIclient\fP reads its \fB\-b\fP/\fB\-\-bundlesize\fP default from this key. When it is set (here
+or by \fBHYPERSHELL_SUBMIT_BUNDLESIZE\fP), a client advertises it as the size of bundle it
+requests; when it is left at the built\-in default, a client advertises no size and the
+server uses its own.
+.sp
 See also \fB\-b\fP/\fB\-\-bundlesize\fP command\-line option.
 .TP
 .B \fB\&.bundlewait\fP
@@ -2634,7 +2684,7 @@ Rich text display and output parameters.
 .TP
 .B \fB\&.theme\fP
 Color scheme to use by default in output (default: \fImonokai\fP), such as with
-\fBhs info\fP and \fBhs search\fP\&.
+\fBhs info\fP and \fBhs list\fP\&.
 .sp
 This option is passed to the \X'tty: link https://rich.readthedocs.io/en/latest/'\fI\%rich\fP\X'tty: link' library.
 .UNINDENT
