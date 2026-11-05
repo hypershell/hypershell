@@ -359,6 +359,20 @@ a fallback to the default key. Pre-existing since 2.8.0.
 *Horizon: near-term, small · Depends on: — · Refs: `docs/security.rst`*
 **Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: unshaped*
 
+## `--ssh` and autoscaling tell clients the host's own name, whatever `-H` binds
+
+Launcher and `--mpi` clusters tell their clients the bind address unless it is `0.0.0.0`
+(`src/hypershell/cluster/remote.py:309`), but `--ssh` (`src/hypershell/cluster/ssh.py:305`) and
+autoscaling (`src/hypershell/cluster/remote.py:850`) always pass the host's own name. A server bound
+to one interface on purpose then tells its clients a name that may not reach it, and there is no
+option to name the advertised address apart from the bind, which TLS certificate names also need.
+One rule for every mode, and an override such as `--advertise`, would also serve the relay's own
+downstream address.
+
+*Horizon: near-term, small · Depends on: — · Refs: relay (its downstream listener needs the same
+rule)*
+**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
