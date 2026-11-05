@@ -8,6 +8,8 @@ client's. Before the first launch the relay refuses a client invocation or an ex
 that would carry the upstream key, and scrubs its own environment of relay settings and of anything
 holding the key. Here the key is put in the relay's environment on purpose, under several names, and
 must reach neither the scrubbed environment nor the command line a site client is launched with.
+A configuration file holding relay settings or the key is replaced, for the site, by a private copy
+without them. The key itself may be given in any of its documented forms.
 """
 
 
@@ -20,16 +22,21 @@ import os
 import sys
 import json
 import time
+import stat
+import tomllib
 from pathlib import Path
 
 # External libs
 import pytest
 from pytest import mark
 from cmdkit.app import exit_status
+from cmdkit.config import Configuration, Namespace
 
 # Internal libs
+from hypershell.core.config import DEFAULT_AUTH, ConfigurationError
 from hypershell.relay.site import (site_cluster, fence_site, scrub_environment, check_invocation, check_exports,
-                                   CredentialFenceError)
+                                   CredentialFenceError, site_config_copy)
+from hypershell.relay.upstream import upstream_key
 from tests.test_relay_db import relays, upstream, free_port, UPSTREAM_AUTH, DEADLINE, POLL  # noqa: fixtures
 
 
@@ -95,7 +102,7 @@ def test_scrub_with_no_key_removes_only_relay_settings() -> None:
     ('[server]\nauth = "something-else"\n# a relay is configured elsewhere\n', False),
 ])
 def test_scrub_drops_a_config_file_holding_relay_settings(tmp_path: Path, text: str, removed: bool) -> None:
-    """The configuration file variable goes when its file holds relay settings or the key, and only then."""
+    """With nowhere to write a copy, the file variable goes when its file holds relay settings or the key."""
     path = tmp_path / 'config.toml'
     path.write_text(text)
     environ = relay_environment(config_file=str(path))
@@ -103,12 +110,107 @@ def test_scrub_drops_a_config_file_holding_relay_settings(tmp_path: Path, text: 
     assert ('HYPERSHELL_CONFIG_FILE' not in environ) is removed
 
 
+SITE_SETTINGS = f'''\
+[server.tls]
+cert = "/certs/site.pem"
+cafile = "/certs/site.pem"
+[client]
+bundlesize = 2
+[task]
+timeout = 60
+[export]
+TOOL_HOME = "/opt/tool"
+TOKEN = "Bearer {KEY}"
+'''
+
+
 @mark.unit
-def test_scrub_drops_an_unreadable_config_file(tmp_path: Path) -> None:
-    """A configuration file that cannot be read is not handed on."""
+@mark.parametrize('text, copied', [
+    (f'[relay.upstream]\nauth = "{KEY}"\nheartrate = 2\n[relay]\nsize = 4\n' + SITE_SETTINGS, True),
+    ('relay.upstream.auth_eval = "cat keyfile"\n[logging]\nlevel = "INFO"\n', True),
+    (f'[server]\nauth = "{KEY}"\nport = 50001\n', True),
+    ('[logging]\nlevel = "INFO"\n[client]\nbundlesize = 2\n', False),
+])
+def test_scrub_gives_the_site_a_copy_without_relay_settings(tmp_path: Path, text: str, copied: bool) -> None:
+    """A file holding relay settings or the key is replaced by a private copy without them, keeping the rest."""
+    path, target = tmp_path / 'config.toml', tmp_path / 'relay.db.site.toml'
+    path.write_text(text)
+    environ = relay_environment(config_file=str(path))
+    removed = scrub_environment(KEY, environ, site_config=str(target))
+    assert 'HYPERSHELL_CONFIG_FILE' not in removed
+    if not copied:
+        assert environ['HYPERSHELL_CONFIG_FILE'] == str(path) and not target.exists()
+        return
+    assert environ['HYPERSHELL_CONFIG_FILE'] == str(target)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    copy, original = target.read_text(), tomllib.loads(text)
+    assert KEY not in copy
+    settings = tomllib.loads(copy)
+    assert 'relay' not in settings
+    expected = {name: value for name, value in original.items() if name != 'relay'}
+    if 'export' in expected:
+        assert settings.pop('export') == {'TOOL_HOME': '/opt/tool'}
+        expected.pop('export')
+    if 'server' in expected:
+        expected['server'] = {name: value for name, value in expected['server'].items() if KEY not in str(value)}
+    assert settings == expected
+
+
+@mark.unit
+def test_scrub_drops_an_unreadable_config_file(tmp_path: Path, caplog) -> None:
+    """A configuration file that cannot be read is not handed on, with a warning."""
     environ = relay_environment(config_file=str(tmp_path / 'missing.toml'))
-    scrub_environment(KEY, environ)
+    with caplog.at_level('WARNING', logger='hypershell.relay.site'):
+        scrub_environment(KEY, environ, site_config=str(tmp_path / 'copy.toml'))
     assert 'HYPERSHELL_CONFIG_FILE' not in environ
+    assert 'site clients will run without it' in caplog.text
+    assert not (tmp_path / 'copy.toml').exists()
+
+
+@mark.unit
+def test_site_config_copy_replaces_an_existing_copy_privately(tmp_path: Path) -> None:
+    """A copy left by an earlier run is overwritten and made private again."""
+    path, target = tmp_path / 'config.toml', tmp_path / 'copy.toml'
+    path.write_text('[relay]\nsize = 2\n[client]\nbundlesize = 3\n')
+    target.write_text('stale = true\n')
+    target.chmod(0o644)
+    assert site_config_copy(str(path), KEY, str(target)) == str(target)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert tomllib.loads(target.read_text()) == {'client': {'bundlesize': 3}}
+
+
+# --- The upstream key ---------------------------------------------------------------------------
+
+
+def layered(**layers: dict) -> Configuration:
+    """A configuration over the built-in relay defaults, with the given layers on top."""
+    default = Namespace({'relay': {'upstream': {'auth': DEFAULT_AUTH, 'port': 50001}}})
+    return Configuration(default=default, **{name: Namespace(layer) for name, layer in layers.items()})
+
+
+@mark.unit
+def test_upstream_key_forms(monkeypatch) -> None:
+    """The key may be literal, from a variable or from a command; the highest layer setting one decides."""
+    monkeypatch.setenv('MY_RELAY_KEY', KEY)
+    assert upstream_key(layered()) == DEFAULT_AUTH
+    assert upstream_key(layered(user={'relay': {'upstream': {'auth': 'literal-key'}}})) == 'literal-key'
+    assert upstream_key(layered(user={'relay': {'upstream': {'auth_env': 'MY_RELAY_KEY'}}})) == KEY
+    assert upstream_key(layered(user={'relay': {'upstream': {'auth_eval': 'echo evaluated-key'}}})) == 'evaluated-key'
+    assert upstream_key(layered(user={'relay': {'upstream': {'auth': 'from-user-file'}}},
+                                env={'relay': {'upstream': {'auth_env': 'MY_RELAY_KEY'}}})) == KEY
+    assert upstream_key(layered(user={'relay': {'upstream': {'auth_env': 'MY_RELAY_KEY'}}},
+                                env={'relay': {'upstream': {'auth': 'from-environment'}}})) == 'from-environment'
+
+
+@mark.unit
+def test_upstream_key_refuses_two_forms_in_one_place(monkeypatch) -> None:
+    """Two forms of the key in one layer are refused, naming the forms and never the key."""
+    monkeypatch.setenv('MY_RELAY_KEY', KEY)
+    with pytest.raises(ConfigurationError) as caught:
+        upstream_key(layered(user={'relay': {'upstream': {'auth': 'literal', 'auth_env': 'MY_RELAY_KEY'}}}))
+    assert 'auth, auth_env' in str(caught.value) and KEY not in str(caught.value)
+    with pytest.raises(ConfigurationError):
+        upstream_key(layered(user={'relay': {'upstream': {'auth_env': 'NOT_SET_ANYWHERE_RELAY'}}}))
 
 
 @mark.unit
@@ -241,6 +343,44 @@ def test_relay_refuses_a_template_carrying_the_key(relays, tmp_path: Path) -> No
 
     assert relay.wait_exit() == exit_status.runtime_error
     assert 'Upstream key found in the site client command line' in relay.text()
+    assert UPSTREAM_AUTH not in relay.text()
+    assert launches(tmp_path) == []
+    assert 'Relay-local server ready' not in relay.text()
+
+
+@mark.integration
+@mark.parametrize('form', ['auth_env', 'auth_eval'])
+def test_relay_takes_the_upstream_key_from_a_variable_or_a_command(relays, tmp_path: Path, form: str) -> None:
+    """The documented ways to keep the key out of the file work: the relay connects upstream with it."""
+    config = tmp_path / 'relay.toml'
+    value = 'MY_RELAY_KEY' if form == 'auth_env' else 'printf %s "$MY_RELAY_KEY"'
+    config.write_text(f'[relay.upstream]\n{form} = {json.dumps(value)}\n')
+    relay = relays(config=config, HYPERSHELL_RELAY_UPSTREAM_AUTH=None, MY_RELAY_KEY=UPSTREAM_AUTH)
+    relay.wait_ready()
+    assert 'Connected to upstream server' in relay.text()
+    assert relay.drain() == exit_status.success
+    assert UPSTREAM_AUTH not in relay.text()
+
+
+@mark.integration
+@mark.parametrize('source', ['environment', 'file'])
+def test_relay_refuses_an_exported_task_variable_carrying_the_key(relays, tmp_path: Path, source: str) -> None:
+    """An [export] variable holding the key, the real path into every site launch, ends the relay before any launch."""
+    launcher = recording_launcher(tmp_path)
+    if source == 'environment':
+        relay = relays('-N', '2', '--launcher', str(launcher), HYPERSHELL_EXPORT_FENCE_PROBE=f'probe:{UPSTREAM_AUTH}')
+    else:
+        config = tmp_path / 'relay.toml'
+        config.write_text(f'[export]\nFENCE_PROBE = "probe:{UPSTREAM_AUTH}"\n')
+        relay = relays('-N', '2', '--launcher', str(launcher), config=config)
+
+    deadline = time.monotonic() + DEADLINE
+    while relay.proc.poll() is None:
+        assert not launches(tmp_path), f'a site client was launched with the key exported:\n{relay.text()}'
+        assert time.monotonic() < deadline, f'relay neither refused nor launched:\n{relay.text()}'
+        time.sleep(POLL)
+    assert relay.proc.returncode == exit_status.runtime_error
+    assert 'Upstream key found in an exported task variable' in relay.text()
     assert UPSTREAM_AUTH not in relay.text()
     assert launches(tmp_path) == []
     assert 'Relay-local server ready' not in relay.text()

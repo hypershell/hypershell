@@ -41,12 +41,12 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 # Internal libs
-from hypershell.core.config import config, PARAM_UNSET
+from hypershell.core.config import config, PARAM_UNSET, DEFAULT_AUTH, ConfigurationError
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.queue import QueueConfig, QueueVersionError, PROTOCOL, DEFAULT_REMOTE_TIMEOUT
-from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
+from hypershell.core.signal import check_signal, SIGUSR1, SIGUSR2
 from hypershell.core.thread import Thread
 from hypershell.core.tls import from_namespace as tls_from_namespace
 from hypershell.core.dispatch import build_version
@@ -55,7 +55,8 @@ from hypershell.data.model import DEFAULT_ZONE_NAME
 from hypershell.relay import store
 
 # Public interface
-__all__ = ['upstream_identity', 'upstream_config', 'relay_site', 'request_text', 'read_reply', 'RelayInsertError',
+__all__ = ['upstream_identity', 'upstream_config', 'upstream_key', 'relay_site', 'request_text', 'read_reply',
+           'RelayInsertError', 'drain_signalled',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
            'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
            'HeartbeatState', 'UpstreamHeartbeat', 'UpstreamHeartbeatThread',
@@ -103,12 +104,49 @@ def upstream_config(host: Optional[str] = None, port: Optional[int] = None, no_t
     """
     section = config.relay.upstream
     tls = None if no_tls else tls_from_namespace(section.get('tls'))
-    return QueueConfig(host=host or section.host, port=int(port or section.port), auth=str(section.auth), tls=tls)
+    return QueueConfig(host=host or section.host, port=int(port or section.port), auth=upstream_key(), tls=tls)
+
+
+AUTH_VARIANTS: Final[Tuple[str, ...]] = ('auth', 'auth_env', 'auth_eval')
+"""The forms the upstream key may take in `[relay.upstream]`: literal, from a variable, from a command."""
+
+
+def upstream_key(base: Any = None) -> str:
+    """The upstream key: `[relay.upstream] auth`, `auth_env` or `auth_eval` from the highest layer setting one.
+
+    Each configuration layer (built-in defaults, then system, user and local files, then the
+    environment) is looked at from the top, and the first that sets any form of the key decides it,
+    so a file's `auth_env` takes precedence over the built-in `auth` rather than colliding with it.
+    Two forms in one layer are refused. With none set anywhere, the built-in default key is used.
+    """
+    base = config if base is None else base
+    for name, layer in reversed(list(base.namespaces.items())):
+        section = layer.get('relay', {}).get('upstream', {})
+        given = [variant for variant in AUTH_VARIANTS if variant in section]
+        if not given:
+            continue
+        if len(given) > 1:
+            raise ConfigurationError(f'More than one form of relay.upstream.auth ({", ".join(given)}) '
+                                     f'in one configuration layer ({name})')
+        try:
+            value = getattr(section, 'auth')
+        except Exception as error:
+            raise ConfigurationError(f'Could not resolve relay.upstream.{given[0]} '
+                                     f'({error.__class__.__name__})') from None
+        if value is None:
+            raise ConfigurationError(f'relay.upstream.{given[0]} resolves to nothing ({name})')
+        return str(value)
+    return DEFAULT_AUTH
 
 
 def relay_site(site: Optional[str] = None) -> str:
     """The site a relay names upstream: `site` (from `[relay] site`) when set, else the relay's host name."""
     return HOSTNAME if site in (None, '', PARAM_UNSET) else str(site)
+
+
+def drain_signalled() -> bool:
+    """True once the process has received a drain signal (SIGUSR1 or SIGUSR2) through the stock handler."""
+    return check_signal() in (SIGUSR1, SIGUSR2)
 
 
 def request_text(identity: str, zone: Optional[str], size: int, wait: float) -> str:
@@ -149,6 +187,10 @@ class UpstreamPuller(StateMachine):
     The gate holds while the tasks in the relay database not yet complete reach the bound: the
     relay-local server's connected clients times `local_bundlesize`. Below the bound it asks for the
     gap, at most `bundlesize`. Every wait is finite and re-enters.
+
+    Pulling ends at the gate: on a drain (`drain` returns true) or once told to halt. A request
+    already sent is always seen through first: its reply is inserted and confirmed before the
+    machine stops, so a bundle cut for the relay upstream is never dropped.
     """
 
     queue: Any
@@ -160,6 +202,8 @@ class UpstreamPuller(StateMachine):
     poll: float
     wait_request: float
     server_id: str
+    drain: Callable[[], bool]
+    stopping: bool
 
     size: int
     bundle: List[Dict[str, Any]]
@@ -171,7 +215,8 @@ class UpstreamPuller(StateMachine):
 
     def __init__(self: UpstreamPuller, queue: Any, engine: Engine, identity: str, zone: Optional[str] = None,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, local_bundlesize: int = 1, poll: float = 1,
-                 wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE) -> None:
+                 wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE,
+                 drain: Callable[[], bool] = drain_signalled) -> None:
         """Initialize with the upstream connection, the relay database and the zone identity."""
         self.queue = queue
         self.engine = engine
@@ -182,11 +227,14 @@ class UpstreamPuller(StateMachine):
         self.poll = poll
         self.wait_request = wait
         self.server_id = server_id
+        self.drain = drain
+        self.stopping = False
         self.size = 0
         self.bundle = []
         self.task_ids = []
         self.insert_failures = 0
         self.wake = threading.Event()
+        self.retry = threading.Event()  # Never set: a retry waits its full interval, even when stopping.
 
     @functools.cached_property
     def actions(self: UpstreamPuller) -> Dict[PullerState, Callable[[], PullerState]]:
@@ -205,9 +253,11 @@ class UpstreamPuller(StateMachine):
         return PullerState.GATE
 
     def gate(self: UpstreamPuller) -> PullerState:
-        """Ask for work only below the backlog bound; end on a drain signal."""
-        if (signal := check_signal()) in (SIGUSR1, SIGUSR2):
-            log.warning(f'Signal interrupt ({SIGNAL_MAP[signal]}) - no more upstream requests')
+        """Ask for work only below the backlog bound; end on a drain or once told to halt."""
+        if self.stopping:  # atomic
+            return PullerState.FINAL
+        if self.drain():
+            log.warning('Drain requested - no more upstream requests')
             return PullerState.FINAL
         bound = store.count_connected(self.engine, self.server_id) * self.local_bundlesize
         backlog = store.count_backlog(self.engine)
@@ -219,6 +269,8 @@ class UpstreamPuller(StateMachine):
 
     def request(self: UpstreamPuller) -> PullerState:
         """Request up to `size` tasks under the zone identity (the upstream server bounds the wait)."""
+        if self.stopping:  # atomic; once past here the request is sent and its reply seen through
+            return PullerState.FINAL
         text = request_text(self.identity, self.zone, self.size, self.wait_request)
         reply = read_reply(self.queue.dispatcher.request(text))
         if reply['tasks']:
@@ -240,7 +292,7 @@ class UpstreamPuller(StateMachine):
                 raise RelayInsertError(f'Could not insert {len(self.bundle)} received tasks into relay database '
                                        f'after {self.insert_failures} attempts ({error})') from error
             log.error(f'Failed to insert {len(self.bundle)} received tasks - trying again ({error})')
-            self.wake.wait(self.poll)
+            self.retry.wait(self.poll)
             return PullerState.INSERT
         self.insert_failures = 0
         self.bundle = []
@@ -262,8 +314,8 @@ class UpstreamPuller(StateMachine):
         return PullerState.HALT
 
     def halt(self: UpstreamPuller) -> None:
-        """Halt, ending any wait at once."""
-        super().halt()
+        """Stop at the gate, ending any wait there at once; a request already sent is inserted and confirmed first."""
+        self.stopping = True
         self.wake.set()
 
 
@@ -272,19 +324,20 @@ class UpstreamPullerThread(Thread):
 
     def __init__(self: UpstreamPullerThread, queue: Any, engine: Engine, identity: str, zone: Optional[str] = None,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, local_bundlesize: int = 1, poll: float = 1,
-                 wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE) -> None:
+                 wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE,
+                 drain: Callable[[], bool] = drain_signalled) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-puller')
         self.machine = UpstreamPuller(queue=queue, engine=engine, identity=identity, zone=zone,
                                       bundlesize=bundlesize, local_bundlesize=local_bundlesize, poll=poll,
-                                      wait=wait, server_id=server_id)
+                                      wait=wait, server_id=server_id, drain=drain)
 
     def run_with_exceptions(self: UpstreamPullerThread) -> None:
         """Run machine."""
         self.machine.run()
 
-    def stop(self: UpstreamPullerThread, wait: bool = False, timeout: Optional[int] = None) -> None:
-        """Stop machine."""
+    def stop(self: UpstreamPullerThread, wait: bool = False, timeout: Optional[float] = None) -> None:
+        """Stop machine at its gate (a request already sent is inserted and confirmed first)."""
         log.debug('Stopping (puller)')
         self.machine.halt()
         super().stop(wait=wait, timeout=timeout)

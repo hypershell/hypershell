@@ -12,7 +12,11 @@ server alone retries tasks, so a failure at the site is a completed row like any
 The upstream key stays with the relay. Site clients inherit the relay's environment when they are
 launched, and tasks inherit their client's, so before the first launch `fence_site` refuses a client
 invocation or an exported task variable that carries the key, and removes from the relay's own
-environment every relay setting and every variable that would hand the key on.
+environment every relay setting and every variable that would hand the key on. A configuration file
+named by `HYPERSHELL_CONFIG_FILE` that holds relay settings or the key is not handed on: the site gets
+a private copy without them, so its clients keep the file's other settings (`[server.tls]` among them).
+
+The relay owns the clients it launches: `end_site_clients` ends any still running when it stops.
 
 Example:
     >>> from hypershell.relay.site import site_cluster, fence_site
@@ -23,11 +27,16 @@ Example:
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Optional, Tuple, Final, Mapping, MutableMapping, Sequence
+from typing import Any, List, Optional, Tuple, Final, Mapping, MutableMapping, Sequence
 
 # Standard libs
 import os
-import re
+import time
+import tomllib
+import subprocess
+
+# External libs
+import tomlkit
 
 # Internal libs
 from hypershell.core.config import config, load_task_env
@@ -37,7 +46,8 @@ from hypershell.cluster.remote import AutoScalingCluster
 
 # Public interface
 __all__ = ['site_cluster', 'SITE_POLICY', 'DEFAULT_SITE_PERIOD', 'fence_site', 'scrub_environment',
-           'check_invocation', 'check_exports', 'CredentialFenceError', 'FENCED_PREFIX']
+           'check_invocation', 'check_exports', 'CredentialFenceError', 'FENCED_PREFIX', 'site_config_copy',
+           'end_site_clients']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -84,42 +94,85 @@ FENCED_PREFIX: Final[str] = 'HYPERSHELL_RELAY_'
 CONFIG_FILE_VAR: Final[str] = 'HYPERSHELL_CONFIG_FILE'
 """Environment variable naming the one configuration file a process reads."""
 
-RELAY_SECTION: Final[re.Pattern] = re.compile(r'^\s*(\[\s*relay\s*[.\]]|relay\s*\.)', re.MULTILINE)
-"""A relay table or dotted relay key in a TOML configuration file."""
-
 
 class CredentialFenceError(RuntimeError):
     """The upstream key would reach the site's clients or their tasks."""
 
 
-def names_relay_config(path: str, key: str) -> bool:
-    """True if the configuration file at `path` holds relay settings or the upstream key.
+_DROPPED: Final[object] = object()
+"""Marks a configuration value left out of the site's copy."""
 
-    A file that cannot be read is treated as relay configuration (a site client gains nothing by it).
+
+def without_key(value: Any, key: str) -> Any:
+    """`value` (parsed TOML) with every string holding `key`, and every entry named with it, left out."""
+    if isinstance(value, dict):
+        kept = {name: without_key(item, key) for name, item in value.items() if not (key and key in name)}
+        return {name: item for name, item in kept.items() if item is not _DROPPED}
+    if isinstance(value, list):
+        return [item for item in (without_key(item, key) for item in value) if item is not _DROPPED]
+    if isinstance(value, str) and key and key in value:
+        return _DROPPED
+    return value
+
+
+def site_config_copy(path: str, key: str, target: Optional[str]) -> Optional[str]:
+    """The configuration file the site should be given in place of the one at `path`.
+
+    That is `path` itself when the file holds neither relay settings nor the key. Otherwise a copy
+    without the `[relay]` table (and so `[relay.upstream]`) and without any value holding the key is
+    written to `target`, readable by its owner only, and `target` is returned. None if `path` cannot
+    be read or parsed, or a copy is needed and cannot be written.
     """
     try:
-        with open(os.path.expanduser(path), mode='r', errors='replace') as stream:
-            text = stream.read()
-    except OSError:
-        return True
-    return bool(RELAY_SECTION.search(text)) or bool(key and key in text)
+        with open(os.path.expanduser(path), mode='rb') as stream:
+            original = tomllib.load(stream)
+    except (OSError, ValueError) as error:
+        log.warning(f'Could not read configuration file for the site ({error.__class__.__name__}) - '
+                    f'site clients will run without it')
+        return None
+    copy = without_key({name: value for name, value in original.items() if name != 'relay'}, key)
+    if copy == original:
+        return path
+    if not target:
+        log.warning('Nowhere to write a copy of the configuration file for the site - '
+                    'site clients will run without it')
+        return None
+    try:
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, mode='w') as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(tomlkit.dumps(copy))
+    except OSError as error:
+        log.warning(f'Could not write a copy of the configuration file for the site ({error}) - '
+                    f'site clients will run without it')
+        return None
+    return target
 
 
-def scrub_environment(key: str, environ: Optional[MutableMapping[str, str]] = None) -> List[str]:
+def scrub_environment(key: str, environ: Optional[MutableMapping[str, str]] = None,
+                      site_config: Optional[str] = None) -> List[str]:
     """Remove from `environ` (the process environment by default) what must not reach the site.
 
-    Removed: every relay setting (`HYPERSHELL_RELAY_*`), the configuration file variable when the file
-    it names holds relay settings or the key, and any variable whose name or value contains the key.
-    Returns the names removed, sorted; values are never returned or logged.
+    Removed: every relay setting (`HYPERSHELL_RELAY_*`) and any variable whose name or value contains
+    the key. The configuration file variable, when the file it names holds relay settings or the key,
+    is pointed at a copy without them written to `site_config` (see `site_config_copy`); it is removed
+    only if no such copy can be made. Returns the names removed, sorted; values are never returned or
+    logged.
     """
     environ = os.environ if environ is None else environ
     removed = []
     for name, value in list(environ.items()):
-        if (name.startswith(FENCED_PREFIX)
-                or (key and (key in name or key in value))
-                or (name == CONFIG_FILE_VAR and value and names_relay_config(value, key))):
+        if name.startswith(FENCED_PREFIX) or (key and (key in name or key in value)):
             del environ[name]
             removed.append(name)
+        elif name == CONFIG_FILE_VAR and value:
+            given = site_config_copy(value, key, site_config)
+            if given is None:
+                del environ[name]
+                removed.append(name)
+            elif given != value:
+                environ[name] = given
+                log.debug('Site configuration file is a copy without relay settings')
     return sorted(removed)
 
 
@@ -139,18 +192,54 @@ def check_exports(exports: Mapping[str, str], key: str) -> None:
 
 def fence_site(cluster: AutoScalingCluster, key: str,
                environ: Optional[MutableMapping[str, str]] = None,
-               exports: Optional[Mapping[str, str]] = None) -> List[str]:
+               exports: Optional[Mapping[str, str]] = None,
+               site_config: Optional[str] = None) -> List[str]:
     """Keep the upstream key from the site before its first client is launched.
 
     The client invocation and the exported task variables are checked (a leak there is refused, with
-    `CredentialFenceError`); the environment the clients will inherit is scrubbed. Read the key, and
-    anything configured through the environment, before calling this: relay settings are gone after.
-    Returns the names of the variables removed.
+    `CredentialFenceError`); the environment the clients will inherit is scrubbed, and a configuration
+    file it names is replaced by a copy written to `site_config` if need be. Read the key, and anything
+    configured through the environment, before calling this: relay settings are gone after. Returns
+    the names of the variables removed.
     """
     check_invocation(cluster.autoscaler.machine.launcher, key)
     check_exports(load_task_env() if exports is None else exports, key)
-    removed = scrub_environment(key, environ)
+    removed = scrub_environment(key, environ, site_config=site_config)
     if removed:
         shown = ['<redacted>' if key and key in name else name for name in removed]
         log.debug(f'Removed from site environment: {", ".join(shown)}')
     return removed
+
+
+def end_site_clients(cluster: AutoScalingCluster, grace: float, patience: float = 0) -> int:
+    """End every site client the cluster launched that is still running; return how many were ended.
+
+    Each is given `patience` seconds to exit by itself, then SIGTERM, then SIGKILL if it is still
+    running `grace` seconds later. Stop the autoscaler first, or it may launch more.
+    """
+    running = [proc for proc in list(cluster.autoscaler.machine.clients) if proc.poll() is None]
+    deadline = time.monotonic() + patience
+    for proc in running:
+        try:
+            proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            pass
+    running = [proc for proc in running if proc.poll() is None]
+    for proc in running:
+        log.debug(f'Terminating site client ({proc.pid})')
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + grace
+    for proc in running:
+        try:
+            proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            log.warning(f'Killing site client ({proc.pid}) still running {grace} seconds after SIGTERM')
+            try:
+                proc.kill()
+                proc.wait(timeout=grace)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                pass
+    return len(running)

@@ -11,9 +11,13 @@ tasks it receives only once they are stored in the relay database. The upstream 
 ``relay.upstream.auth`` (or its ``_env`` and ``_eval`` forms), never from the command line.
 The key never reaches the site: before its first *client* is launched, the relay removes from its
 own environment, which the site's *clients* and their tasks inherit, every relay setting
-(``HYPERSHELL_RELAY_*``), any variable holding the key, and ``HYPERSHELL_CONFIG_FILE`` when the
-file it names holds relay settings. It refuses to start if the *client* command line (launcher,
-launcher arguments or template) or a variable exported to tasks (``[export]``) would carry the key.
+(``HYPERSHELL_RELAY_*``) and any variable holding the key. When ``HYPERSHELL_CONFIG_FILE`` names a
+file that holds relay settings or the key, the site is given a copy of it instead, without the
+``[relay]`` section and without any value holding the key, readable by its owner only, kept beside
+the relay database and removed when the relay exits; the site's *clients* keep the file's other
+settings, ``[server.tls]`` among them. (If the file cannot be read, the site gets none.) It refuses
+to start if the *client* command line (launcher, launcher arguments or template) or a variable
+exported to tasks (``[export]``) would carry the key.
 
 At the site the relay runs its tasks on the *clients* it launches there, with a key it mints for
 each run. The site never retries a task: one that fails goes back upstream as it ended, and the
@@ -26,7 +30,12 @@ The relay's heartbeat names its site (``relay.site``, by default the relay's hos
 never heartbeat upstream themselves: they disconnect there when they leave the site, and all at once
 when the relay finishes or is evicted.
 When the upstream *server* shuts down, the relay finishes the tasks it holds, returns every result,
-and ends its upstream registration; SIGUSR1 or SIGUSR2 stop it asking for more work in the same way.
+and ends its upstream registration. SIGUSR1 or SIGUSR2, sent to the relay process, do the same: the
+relay stops asking for work, its site finishes every task the relay holds (those not yet started
+too), and the results go back before the registration ends. SIGINT and SIGTERM end the relay at
+once. If the relay fails (the upstream connection is lost, say), it ends the *clients* it launched
+and exits with a non-zero status; the upstream *server* puts back the tasks it held when it evicts
+the relay.
 
 The relay database is always a private SQLite file, whatever database is configured, and the
 configured database is never opened. One relay runs per process, and a second relay refuses to

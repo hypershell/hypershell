@@ -9,8 +9,13 @@ in every user's primary database. They are created only in a relay process, on t
 
 `relay_task` keeps the upstream assignment of each task the relay received, exactly as the upstream
 server stamped it. The relay-local server re-stamps, reverts and clears the `task` row's own columns,
-and SQLite drops a datetime's offset, so the upstream `schedule_time` is kept here as the verbatim
-text it arrived as; a result is matched upstream against that exact stamp.
+so the upstream `schedule_time` is kept here as the verbatim text it arrived as; a result is matched
+upstream against that exact stamp. An upstream server running without a database stamps nothing, so
+its tasks are kept with no stamp, and their results go back with none, as a client returns them.
+
+SQLite keeps no offset with a datetime, so the relay database keeps every datetime in UTC and reads it
+back as such (`store_utc`): a time a site client reported comes back upstream as the same instant,
+whatever the relay host's offset then, or across a repeated hour when clocks go back.
 
 `relay_result` is the outbox: completed local rows, each held as the record that goes upstream,
 until it has been handed over.
@@ -35,8 +40,8 @@ which these writers never touch.
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, List, Mapping, Optional, Tuple
-from datetime import datetime
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from datetime import datetime, timezone
 
 # Standard libs
 import json
@@ -45,7 +50,7 @@ import threading
 # External libs
 from sqlalchemy import MetaData, select, func, and_, exists, delete, update, bindparam
 from sqlalchemy.engine import Engine
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert, DATETIME as SQLITE_DATETIME
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import Text, DateTime
 
@@ -57,6 +62,7 @@ from hypershell.data.upgrade import upgrade_schema
 
 # Public interface
 __all__ = ['RelayBase', 'RelayTask', 'RelayResult', 'RESULT_PENDING', 'RESULT_RETURNED', 'ensure_tables',
+           'UTCDateTime', 'store_utc',
            'LOCAL_STAMP_COLUMNS', 'local_row', 'insert_received', 'count_backlog', 'count_connected', 'count_held',
            'roster',
            'result_record', 'collect_results', 'pending_results', 'mark_returned', 'prune_returned',
@@ -91,7 +97,7 @@ class RelayTask(RelayBase):
     __tablename__ = 'relay_task'
 
     id: Mapped[str] = mapped_column(Text, primary_key=True, nullable=False)
-    schedule_time: Mapped[str] = mapped_column(Text, nullable=False)  # Verbatim, as received
+    schedule_time: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Verbatim, as received (or none)
     server_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     server_host: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     identity: Mapped[str] = mapped_column(Text, nullable=False)  # Upstream client id that confirmed it
@@ -110,6 +116,46 @@ class RelayResult(RelayBase):
     returned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class UTCDateTime(SQLITE_DATETIME):
+    """SQLite datetime kept in UTC: an aware value is stored as its UTC time, and read back aware (UTC).
+
+    A naive value is taken as this host's local time, as `datetime.astimezone` takes it.
+    """
+
+    def bind_processor(self: UTCDateTime, dialect: Any) -> Callable[[Any], Any]:
+        process = super().bind_processor(dialect)
+
+        def bind(value: Any) -> Any:
+            if isinstance(value, datetime):
+                value = value.astimezone(timezone.utc).replace(tzinfo=None)
+            return process(value) if process else value
+        return bind
+
+    def result_processor(self: UTCDateTime, dialect: Any, coltype: Any) -> Callable[[Any], Any]:
+        process = super().result_processor(dialect, coltype)
+
+        def result(value: Any) -> Any:
+            value = process(value) if process else value
+            if isinstance(value, datetime) and value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value
+        return result
+
+
+def store_utc(engine: Engine) -> None:
+    """Keep every datetime in the relay database `engine` in UTC (see `UTCDateTime`).
+
+    Call it before the engine's first statement: SQLAlchemy keeps a type's implementation once used.
+    Raises RuntimeError if the engine already settled on another one.
+    """
+    dialect = engine.dialect
+    dialect.colspecs = {**dialect.colspecs, DateTime: UTCDateTime}
+    for table in (Task.__table__, Client.__table__, RelayTask.__table__, RelayResult.__table__):
+        for column in table.columns:
+            if isinstance(column.type, DateTime) and not isinstance(column.type.dialect_impl(dialect), UTCDateTime):
+                raise RuntimeError(f'Relay database datetimes already bound ({table.name}.{column.name})')
+
+
 def ensure_tables(engine: Engine) -> List[str]:
     """Create or upgrade the relay-only tables in the relay database; return the changes made."""
     return upgrade_schema(engine, metadata=RelayBase.metadata)
@@ -123,8 +169,9 @@ def local_row(record: Dict[str, Any]) -> Dict[str, Any]:
     """The relay-local task row for a task `record` as received (decoded JSON).
 
     Every column is taken from the record, except the scheduling and client columns, which are
-    cleared, and the partition index, which is this database's own (main, 0). Timestamps are read as datetimes and given in this host's local time, since SQLite keeps
-    no offset; keys that are not task columns are ignored.
+    cleared, and the partition index, which is this database's own (main, 0). Timestamps are read
+    as datetimes, a naive one taken as this host's local time (the relay database keeps them in UTC;
+    see `store_utc`); keys that are not task columns are ignored.
     """
     row = {}
     for name, kind in Task.columns.items():
@@ -216,13 +263,15 @@ def result_record(row: Mapping[str, Any], stamp: Mapping[str, Any]) -> Dict[str,
 
     The result columns are the leaf's, as the relay-local server wrote them. The upstream stamp
     (`schedule_time`, `server_id`, `server_host`) replaces the relay-local one, with `schedule_time`
-    as the verbatim text it arrived as, so the result matches the assignment it answers exactly.
-    Timestamps read from the relay database carry no offset; they are given this host's.
+    as the verbatim text it arrived as, so the result matches the assignment it answers exactly
+    (an unstamped task goes back unstamped). Timestamps go back as the instant they were stored, in
+    this host's local time, as a client on this host gives its own; one read with no offset (a
+    database not kept in UTC) is taken as local time.
     """
     record = {}
     for name in Task.columns:
         value = row[name]
-        if isinstance(value, datetime) and value.tzinfo is None:
+        if isinstance(value, datetime):
             value = value.astimezone()
         record[name] = to_json_type(value)
     record['schedule_time'] = stamp['schedule_time']

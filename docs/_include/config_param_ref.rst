@@ -564,7 +564,7 @@
         The upstream *server* records the relay, and the *clients* at its site, under this name.
 
     ``.size``
-        Number of *clients* the relay keeps launched at its site (default: `1`).
+        Number of *clients* the relay keeps launched at its site (default: `1`, at least `1`).
 
         See also ``-N``, ``--size`` command-line option.
 
@@ -605,8 +605,10 @@
         ``.auth``
             Cryptographic key for the upstream *server*.
 
-            Use ``.auth_env`` or ``.auth_eval`` to keep it out of the file. The upstream key
-            stays in the relay: the *clients* at the site use a key the relay mints for each run.
+            Use ``.auth_env`` or ``.auth_eval`` to keep it out of the file; whichever form is set
+            in the highest-precedence place is used (two forms in one place are refused). The
+            upstream key stays in the relay: the *clients* at the site use a key the relay mints for
+            each run.
 
         ``.bundlesize``
             Bundle size the relay advertises upstream (default: `1000`).
@@ -619,7 +621,7 @@
 
         ``.evict_hint``
             Eviction period in seconds the relay assumes for the upstream *server* during an
-            outage (default: `600`).
+            outage (default: `600`). Not read yet: used from P8 (outage ride-through).
 
         ``[tls]``
             ``.enabled``

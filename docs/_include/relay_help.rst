@@ -26,8 +26,8 @@ Options
 ``-N``, ``--size`` *NUM*
     Number of *clients* the relay keeps launched at its site (default: 1).
 
-    A *client* that exits is launched again. With 0 no *client* is launched, and the relay asks
-    upstream for nothing. See also ``relay.size``.
+    A *client* that exits is launched again. The size must be at least 1: with no *client* at the
+    site the relay would never ask upstream for work. See also ``relay.size``.
 
 ``--launcher`` *CMD*
     Command prefix used to launch each *client* at the site (default: none).
@@ -45,13 +45,13 @@ Options
     Bind address of the relay-local *server* (default: 0.0.0.0).
 
     The *clients* at the site connect to the relay here, so it must be reachable from the
-    nodes they run on.
+    nodes they run on. See also ``relay.bind``.
 
 ``--port`` *NUM*
     Port of the relay-local *server* (default: 50002).
 
     The default differs from the *server* default (50001), so a relay can run beside a
-    *server* on the same host.
+    *server* on the same host. See also ``relay.port``.
 
 ``--database`` *PATH*
     Path to the relay database (default: <lib>/relay/<host>.db).

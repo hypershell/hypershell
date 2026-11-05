@@ -199,7 +199,7 @@ default = Namespace({
         'retention': 300,         # Seconds a returned result is kept in the relay database
         'zone': PARAM_UNSET,      # Zone served by the relay (default zone if unset)
         'site': PARAM_UNSET,      # Site name the relay gives upstream (default: the relay's host name)
-        'size': 1,                # Number of site clients the relay keeps launched
+        'size': 1,                # Number of site clients the relay keeps launched (at least 1)
         'launcher': '',           # Command prefix to launch each site client (empty means 'hs client ...')
         'launcher_args': '',      # Extra arguments for the launcher
         'num_threads': 1,         # Executor threads per site client
@@ -371,7 +371,7 @@ removed as soon as it is read, so no child process inherits it.
 RELAY_PRAGMAS: Final[Dict[str, str]] = {'synchronous': 'FULL'}
 """SQLite pragmas for the relay database: a committed insert survives a power loss."""
 
-DEFAULT_RELAY_PORT: Final[int] = default.relay.port
+DEFAULT_RELAY_PORT: Final[int] = config.relay.port
 """Default port of the relay-local server."""
 
 

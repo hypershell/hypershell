@@ -3,7 +3,7 @@ slug: relay
 title: 'HyperShell Relay: two-level scheduling across administrative sites'
 kind: feature
 appetite: big
-status: blocked
+status: in_review
 branch: feature/relay
 base: develop
 current_phase: P7
@@ -164,7 +164,7 @@ phases:
 review:
   last_reviewed_commit: d6e9d7d
   verdict: changes-requested
-  blocked_reason: 'review cycle 1: remediation round (A1-A4, B1-B8) before P7'
+  blocked_reason: ''
   cycle: 1
 ---
 # TECH.md — HyperShell Relay: two-level scheduling across administrative sites
@@ -801,6 +801,160 @@ and disconnect with their relay; `count_connected` and the rate math stay correc
   edit. Wire: two optional heartbeat keys, packed only when set; a beat without them decodes as
   before, and an older server ignores them.
 
+## Review-1 remediation round (2026-11-05)
+**Not a phase.** It fixes the findings of the interim review (`REVIEW.md`, cycle 1, at `d6e9d7d`),
+red first, on the P6 head `9810598`, under the foreman's rulings recorded there. P7 is not started.
+No zone code (`core/dispatch.py`, `core/queue.py`, `client.py`, `server.py`) or `cluster/` edit.
+
+- **A1 (`--no-db` upstream).** `relay_task.schedule_time` is nullable: an in-memory upstream stamps
+  nothing, the task is kept with no stamp, and its result goes back with none (`server_id` /
+  `server_host` none too), as a stock client returns it. An in-memory upstream has no result fence
+  and no failover (its HeartMonitor logs its one ERROR for a relay). *Test:*
+  `test_relay_workload.py::test_relay_against_a_server_without_a_database` (8 tasks, each run once,
+  all returned, FINISHED). *Red:* the relay never ran a task (insert refused on the NULL stamp).
+  A relay database created before this round keeps the old `NOT NULL` (the upgrade step only adds
+  columns); relay databases are disposable (R10).
+- **A2 (halt mid-request).** `UpstreamPuller.halt` no longer halts the machine wherever it is: it
+  marks it stopping, and the machine ends at its gate (or before sending a request). A request
+  already sent is inserted and confirmed first; insert retries wait their full interval even when
+  stopping. `finish_upstream` stops the puller (bounded), and decides FINISHED only once it has
+  stopped, reading `count_held` then; a puller that does not stop in time gets no FINISHED.
+  *Tests:* `test_relay_fsm.py::test_puller_halted_mid_request_inserts_and_confirms_the_reply` (the
+  fake upstream holds the request on an event; `stop()` lands, then the reply: 3 inserted, held,
+  one confirmation) and `::test_puller_halt_ends_at_the_gate`, which replaces
+  `test_puller_halts_on_halt` (that test pinned the defect: HALT from INSERT and CONFIRM).
+  *Red:* `inserted 0 == 3`.
+- **A3 (size 0).** `hs relay` refuses a size below 1 (`ArgumentError`, exit `bad_argument`: "Site size
+  must be at least 1 …"); help, `relay_help.rst` and the config reference say so. *Test:*
+  `test_relay_fsm.py::test_relay_refuses_a_site_of_no_clients[0,-1]`. *Red:* `-N 0` started.
+  The P3/P4 process tests that ran `-N 0` to have no site client now run `-N 1` with a launcher that
+  starts none (`true`; `HYPERSHELL_RELAY_LAUNCHER` takes its path, since the word alone reads as a
+  boolean); their assertions are unchanged.
+- **A4 (leaf times).** `store.store_utc(engine)`, called by `RelayApp.run` before the engine's first
+  statement, binds SQLite's `DateTime` on the relay engine's dialect (instance `colspecs`, a
+  documented SQLAlchemy hook) to `UTCDateTime`: every datetime is stored as UTC and read back aware
+  (UTC); a naive one is taken as local time, as before. It refuses an engine that already settled on
+  the stock type. `result_record` returns each time as that instant in the relay host's zone.
+  **Deviation from the ruling's "return them as aware UTC", for the foreman:** the instant is exact
+  either way, but a SQLite upstream keeps wall clock only, so `+00:00` results would sit hours off
+  the upstream's own local stamps (`hs list`, and the workload tests' group-order checks, which
+  compare upstream `completion_time` with the next group's `schedule_time`). Returning the instant in
+  the relay's zone is what a stock client on the relay host sends. Flipping to UTC is one line in
+  `result_record`. *Tests:* `test_relay_return.py::test_leaf_times_return_as_the_instants_reported`
+  (the first and the second 01:30 of 2026-11-01, stored under `America/New_York`, returned under
+  `America/New_York`, `UTC` and, stored under `UTC`, `Asia/Kolkata`: stored text is UTC, returned
+  instants equal, one hour apart), `::test_relay_database_matches_an_instant_in_any_offset` (the
+  relay-local server's stamp match), `::test_store_utc_refuses_an_engine_already_in_use`. *Red:*
+  stored wall clock `01:30`/`01:30`. Rows a relay database held before this round were local wall
+  clock; disposable, as above.
+- **B1 (never exits).** The relay's failure path is one idempotent `RelayThread.abort` (first call
+  only; `RelayThread.stop` calls it): puller, autoscaler, then the site clients (B2), then the site
+  cluster only if alive, stopped once from a helper thread joined with `STOP_TIMEOUT` (10 s), since
+  the stock server's stop can block on its one-slot queue; then returner and heartbeat (no FINISHED).
+  Each wait is bounded and a part's own failure is not re-raised there. `RelayApp.run` stops the
+  thread on any exception (including `KeyboardInterrupt`) and re-raises, so the exit is non-zero.
+  The clean path now watches the heartbeat and returner while it waits for the site to stop and
+  the returner to flush, so an upstream lost during a drain also takes the failure path. *Test:*
+  `test_relay_workload.py::test_relay_exits_and_ends_its_site_when_upstream_dies` (upstream SIGKILLed
+  with two site tasks running; the relay exits non-zero within 30 s; in B's lifecycle harness it
+  exited with status 5 between 10 and 15 s after the kill, the default 10 s heartrate being most of it). *Red:* still running at 30 s.
+- **B2 (orphaned site clients).** `site.end_site_clients(cluster, grace, patience)`: the autoscaler's
+  own `Popen` handles, SIGTERM, then SIGKILL after `CLIENT_GRACE` (5 s); `client.py` unedited. Every
+  exit but a clean drain ends them in `abort` ("Ended N site clients"); after a clean drain any still
+  running after the grace (one that never connected) is ended too. Their tasks are not chased (a
+  stock client's SIGTERM leaves its tasks as well; the non-finding below). *Test:* the B1 test asserts
+  both site clients are gone when the relay has exited. *Red:* both alive.
+- **B3 (`[relay] port`).** `DEFAULT_RELAY_PORT` and `RelayApp.port` read `config.relay.port`, as
+  `ServerApp` reads `config.server.port`. *Test:* `test_relay_db.py::test_relay_port_from_configuration`
+  (environment and file). *Red:* bound 50002.
+- **B4 (`auth_env`/`auth_eval`).** `relay.upstream.upstream_key()` resolves the key layer by layer, from
+  the top: the first configuration layer setting any of `auth`, `auth_env`, `auth_eval` decides, two
+  forms in one layer are refused (`ConfigurationError`, naming the forms, never the key), and with
+  none the built-in default applies. `upstream_config` and `check_args` use it. It lives in
+  `relay/upstream.py` and touches `[relay.upstream]` only; the built-in `auth` default stays. The same
+  layered lookup would fix `[server]` (the follow-up seed below). *Tests:*
+  `test_relay_launch.py::test_upstream_key_forms`, `::test_upstream_key_refuses_two_forms_in_one_place`,
+  `::test_relay_takes_the_upstream_key_from_a_variable_or_a_command[auth_env,auth_eval]`. *Red:* "'auth'
+  has more than one variant".
+- **B5 (config-file scrub).** `scrub_environment` no longer drops `HYPERSHELL_CONFIG_FILE` for relay
+  settings: `site.site_config_copy` parses the file (`tomllib`), and if it holds `[relay]` (tables or
+  dotted keys) or the key, writes a copy without the `relay` table and without any string value (or
+  name) holding the key, via `tomlkit`, mode 0600 (`os.open` + `fchmod`, so an older copy is made
+  private again), at `<relay database>.site.toml`, and points the variable there. A file holding
+  neither is passed on unchanged. A file that cannot be read or parsed, or a copy that cannot be
+  written, keeps the old behaviour (dropped) with a WARNING. `RelayThread.release` removes the copy
+  when the relay ends (clean or not). *Tests:*
+  `test_relay_launch.py::test_scrub_gives_the_site_a_copy_without_relay_settings` (four files),
+  `::test_scrub_drops_an_unreadable_config_file` (now with the WARNING),
+  `::test_site_config_copy_replaces_an_existing_copy_privately`, and B's scenario end to end,
+  `test_relay_workload.py::test_site_clients_keep_the_relay_config_file_without_relay_settings`
+  (explicit `[server.tls]` cert: the site client's variable names the 0600 copy, which has the TLS
+  table and no key or relay table; 4 of 4 tasks complete; the copy is gone after exit). *Red:* no site
+  task ever ran (certificate verification failed in a relaunch loop).
+- **B6 (drain signal). Went the first way: behaviour now matches the doc.** `RelayApp.run` installs
+  its own SIGUSR1/SIGUSR2 handler (`install_drain_handlers`, main thread), which sets the relay's
+  `DRAIN` event and nothing else, so the stock process-wide flag the relay-local scheduler reads is
+  never set and the scheduler keeps going. The puller takes a `drain` callable (the relay passes
+  `DRAIN` or the stock flag) and ends at its gate ("Drain requested - no more upstream requests").
+  The site then finishes every task the relay holds, started or not, the results go back, and
+  FINISHED goes out. No zone-code edit. `relay_desc.rst` and `hs relay --help` say exactly this, and
+  that SIGINT/SIGTERM end the relay at once. *Test:*
+  `test_relay_workload.py::test_drain_signal_finishes_everything_the_relay_holds` (16 gated tasks,
+  bound 8, SIGUSR1 while the site runs 2 and the relay holds more; every received task completes
+  upstream, the rest were never pulled, FINISHED, no eviction). *Red:* no drain line; the relay ended
+  "not finishing upstream".
+- **B7 (`[export]` test gap).** `test_relay_launch.py::test_relay_refuses_an_exported_task_variable_carrying_the_key`
+  drives the real `[export]` path (from the environment and from a file) through a relay process with
+  a recording launcher: refused with exit `runtime_error`, no launch, the key in no output. It passes on
+  the fixed and the unfixed source (the check was right; the test was missing). *Mutation:* with the
+  `check_exports` call replaced by `pass`, both cases fail ("a site client was launched with the key
+  exported") while the other fence tests still pass.
+- **B8 (`evict_hint`).** P8 reads it, as planned (the `UpstreamLink` warning and the cut-off for
+  replaying confirmations); noted under P8. The config reference marks it "Not read yet: used from P8".
+- **A5 (site evict fixed at 600 s): deferred to P8**, noted there. No `cluster/` edit this round.
+- **Follow-up public seeds, for the foreman to file (not filed here):**
+  1. *`[server] auth_env` / `auth_eval` collide with the built-in `auth`* ("more than one variant"),
+     on `develop` before this branch; `upstream_key`'s layered lookup is one fix.
+  2. *The advertised host ignores the bind address:* `AutoScalingCluster` gives clients `-H HOSTNAME`
+     whatever `bind` is, which matters to a future `--advertise`.
+- **Non-findings (recorded, not changed):** a `--no-tls` relay against a TLS upstream hangs silently at
+  connect, and SIGTERM/SIGINT orphan running tasks; a stock client does both.
+- **Verify / gates (2026-11-05;** venvs from `uv sync --frozen` on `PATH` in place of `uv run`, each
+  run under a process-group kill timer):
+  - **Red first:** every new test above failed on the P6 source (`9810598`, a scratch export on
+    `PYTHONPATH`) for its finding's reason, except B7's, which passes there by design and is
+    mutation-checked instead. Unit and process tests whose module imports the new names ran red
+    from a scratch copy with those imports stubbed.
+  - Full suite, 3.12: 1042 passed, 85 skipped (PostgreSQL and other server-backed tests), no failure.
+  - Relay, zone, dispatch, contended-write, writeback, upgrade, server-FSM and autoscale files, 3.14:
+    343 passed, 64 skipped.
+  - `unsupported_internals()` is `[]` on both; `hs relay --help` shows the new paragraph and `-N` text.
+  - Loopback smokes (`temp_site.sh`, a scratch driver), 3.12 and 3.14, TLS on the upstream hop
+    (`<auto>`): **one relay** (P4's shape: 50 tasks in 2 groups plus a first-attempt failure, `-N 2`):
+    51 rows completed, the failure `(3, attempt 1, retried)`, every `client_id` a leaf, FINISHED,
+    nothing stale, duplicate or evicted, 51 results returned. **Two relays plus failover** (P5's shape:
+    121 tasks in 3 groups plus the failure, zone `shared`, evict 10 s, heartrate 1 s, B SIGKILLed at
+    ≥ 40 % while holding confirmed rows): 122 rows completed, A 83 / B 39, B's held rows completed at
+    A, B evicted once, no task run twice, no stale or duplicate, no key in any output. **Roster** (P6's
+    shape: 41 tasks plus the failure, a raw four-key heartbeat, `[relay] site` = `site-a`): mid-run the
+    relay and its 2 leaves at `site-a` (`relay` = the identity) beside the old-style client,
+    `count_connected` 3; 43 rows completed; every row disconnected, none evicted; no ERROR upstream.
+    One earlier failover run on 3.12 killed B inside the cut-to-confirm window (two rows cut for B and
+    never confirmed) and upstream then waited on them, as GOAL's non-goal says it will; the driver
+    now kills B only when no row is cut and unconfirmed, and the runs above passed.
+  - B's lifecycle, drain, config-file, port and auth scenarios re-run against the fix: upstream killed
+    → relay exit 5 within 15 s, no site client left; SIGUSR1 with 8 held → exit 0 after 20 s, 8
+    completed, 0 stranded, final beat; explicit `[server.tls]` → 0 client exits, 4 of 4 completed;
+    `auth_env` / `auth_eval` (re-run with `-N 1`, since the scenario passed `-N 0`, now refused) →
+    the relay reaches its upstream connect. The port scenario also passed `-N 0`; its test covers it.
+- **FSM:** top status `in_review` for the scoped review cycle 2 of the reviewed scope (verdict and
+  cycle left as cycle 1 set them; cycle 2's verdict moves them); `current_phase` stays P7.
+- **Touches:** `src/hypershell/relay/` (`__init__.py`, `site.py`, `store.py`, `upstream.py`),
+  `src/hypershell/core/config.py` (`DEFAULT_RELAY_PORT`, a size comment), `docs/_include/relay_desc.rst`,
+  `docs/_include/relay_help.rst`, `docs/_include/config_param_ref.rst`, `tests/test_relay_fsm.py`,
+  `tests/test_relay_db.py`, `tests/test_relay_launch.py`, `tests/test_relay_return.py`,
+  `tests/test_relay_workload.py`. No completion change (no new option).
+
 ## Phase P7 — R21 run A: relay drive, smoke, hand back
 **Satisfies:** R21, R20 · **Depends on:** P5, P6 · PLAN §6; [04 §2](research/04-evidence-and-tests.md)
 **Goal:** a committed, site-neutral run script the foreman can run on a 4-node, 1-hour test
@@ -851,6 +1005,14 @@ reconnection they are handed over; a relay restart loses nothing.
       and upstream, evict 600 s): partition after local completion, results land after restore;
       blackhole stall detected within the deadline; SIGKILL during a partition, restart on the same
       file, restore: unreturned rows land (APPLIED or DUPLICATE), none lost.
+- **From review cycle 1 (deferred here):**
+  - *A5.* The site server's eviction period is fixed at 600 s: `cluster/remote.py` builds
+    `AutoScalingCluster`'s `ServerThread` with no `evict_after`, so `[server] evict` never reaches the
+    relay's site (a site client killed without a FINISHED beat holds up a drain that long; P5 ruling 2's
+    note). It predates this branch. Fix it here, after the hardening cycle's `cluster/remote.py`
+    changes have merged (pass the evict period through, or compose the site server in relay).
+  - *B8.* `relay.upstream.evict_hint` is read here (the `UpstreamLink` warning and the replay cut-off
+    below); the config reference says "used from P8" until then.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/core/reconnect.py`, `src/hypershell/relay/`,
   `tests/test_relay_link.py`, `tests/test_relay_outage.py`.

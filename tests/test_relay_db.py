@@ -23,6 +23,7 @@ import json
 import time
 import signal
 import socket
+import shutil
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -47,6 +48,7 @@ DEADLINE = 60.0  # Seconds for a relay to come up, and again for it to exit once
 POLL = 0.05      # Seconds between looks at a relay's log.
 
 READY = 'Relay-local server ready'
+NO_CLIENT = shutil.which('true')  # A launcher that starts no site client (a path: the word alone reads as a boolean)
 UPSTREAM_AUTH = 'relay-db-upstream-key-0123456789'
 RELAY_TABLES = {'relay_task', 'relay_result'}
 
@@ -158,7 +160,7 @@ def relays(tmp_path: Path, upstream: QueueServer) -> Iterator[Any]:
     recorder.write_text(RECORDER)
 
     def start(*args: str, config: Optional[Path] = None, marker: bool = False,
-              program: Optional[List[str]] = None, **env: str) -> Relay:
+              program: Optional[List[str]] = None, **env: Optional[str]) -> Relay:
         name = f'relay-{len(started)}'
         environ = {**os.environ, 'HYPERSHELL_SITE': str(site), 'HYPERSHELL_LOGGING_LEVEL': 'DEBUG',
                    'HYPERSHELL_CONFIG_FILE': str(config) if config else '',
@@ -167,7 +169,8 @@ def relays(tmp_path: Path, upstream: QueueServer) -> Iterator[Any]:
                    'HYPERSHELL_RELAY_UPSTREAM_PORT': str(upstream.address[1]),
                    'HYPERSHELL_RELAY_UPSTREAM_AUTH': UPSTREAM_AUTH,
                    'HYPERSHELL_RELAY_UPSTREAM_TLS_ENABLED': 'false',
-                   'HYPERSHELL_RELAY_SIZE': '0', **env}
+                   'HYPERSHELL_RELAY_SIZE': '1', 'HYPERSHELL_RELAY_LAUNCHER': NO_CLIENT, **env}
+        environ = {name: value for name, value in environ.items() if value is not None}  # None unsets
         environ.pop('HYPERSHELL_DATABASE_FILE', None)
         if marker:
             environ[RELAY_MARKER] = '1'
@@ -393,3 +396,20 @@ def test_relay_refuses_no_confirm(relays) -> None:
     assert relay.wait_exit() == exit_status.bad_argument
     assert 'cannot run with --no-confirm' in relay.text()
     assert not list(relays.site.glob('*/relay/*.db'))
+
+
+@mark.integration
+@mark.parametrize('source', ['environment', 'file'])
+def test_relay_port_from_configuration(relays, tmp_path: Path, source: str) -> None:
+    """With no --port, the relay-local server listens on the configured port, as a server does."""
+    port = free_port()
+    program = [sys.executable, str(tmp_path / 'hs'), 'relay', '--bind', '127.0.0.1']
+    if source == 'environment':
+        relay = relays(program=program, HYPERSHELL_RELAY_PORT=str(port))
+    else:
+        config = tmp_path / 'relay.toml'
+        config.write_text(f'[relay]\nport = {port}\n')
+        relay = relays(program=program, config=config)
+    relay.wait_ready()
+    assert f'{READY} on 127.0.0.1:{port}' in relay.text()
+    assert relay.drain() == exit_status.success

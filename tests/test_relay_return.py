@@ -9,6 +9,9 @@ server does it, received and inserted by the relay, run at the site (its local r
 relay-local server writes a leaf's result), and returned by the returner machine, stepped one action
 at a time against a fake upstream queue. The bytes the returner puts are then applied upstream through
 the server's own result path, so every outcome (APPLIED, DUPLICATE, STALE) is the upstream server's.
+
+The relay database keeps its datetimes in UTC, so a leaf's times go back upstream as the instants the
+leaf reported, across a change of the relay host's zone and through the hour clocks repeat.
 """
 
 
@@ -17,17 +20,20 @@ from __future__ import annotations
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 # Standard libs
+import os
 import json
+import time
 import sqlite3
 from pathlib import Path
 from queue import Queue, Full as QueueFull
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 # External libs
 import pytest
 from pytest import mark, fixture
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
 
 # Internal libs
@@ -396,3 +402,110 @@ def test_prune_keeps_results_within_the_retention_and_pending_ones(upstream_db: 
     assert rows(relay_db, 'SELECT id, state FROM relay_result') == [(records[1]['id'], RESULT_PENDING)]
     assert rows(relay_db, 'SELECT id FROM relay_task') == [(records[1]['id'], )]
     assert store.count_held(relay_db) == 1
+
+
+# --- Times kept in UTC ---------------------------------------------------------------------------
+
+
+EDT, EST = timezone(timedelta(hours=-4)), timezone(timedelta(hours=-5))
+FIRST_HALF_PAST_ONE = datetime(2026, 11, 1, 1, 30, tzinfo=EDT)   # 05:30 UTC, before clocks go back
+SECOND_HALF_PAST_ONE = datetime(2026, 11, 1, 1, 30, tzinfo=EST)  # 06:30 UTC, the same wall clock an hour on
+
+
+@fixture
+def local_zone() -> Iterator[Any]:
+    """Set this process's local time zone (`TZ`); the original is restored at the end."""
+    original = os.environ.get('TZ')
+
+    def set_zone(name: str) -> None:
+        os.environ['TZ'] = name
+        time.tzset()
+
+    try:
+        yield set_zone
+    finally:
+        if original is None:
+            os.environ.pop('TZ', None)
+        else:
+            os.environ['TZ'] = original
+        time.tzset()
+
+
+@fixture
+def utc_relay_db(tmp_path: Path) -> Iterator[Engine]:
+    """A fresh relay database keeping its datetimes in UTC, as a relay process does."""
+    engine = create_engine(f'sqlite:///{tmp_path / "relay.db"}', connect_args={'check_same_thread': False})
+    store.store_utc(engine)
+    Entity.metadata.create_all(engine)
+    ensure_tables(engine)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
+def receive_one(engine: Engine) -> str:
+    """Receive one task, stamped upstream; return its id."""
+    task = Task.new(args='echo times')
+    task.schedule_time = datetime.now().astimezone()
+    record = json.loads(json.dumps(task.to_json()))
+    store.insert_received(engine, [record], identity=IDENTITY)
+    return task.id
+
+
+@mark.unit
+@mark.parametrize('stored_in, returned_in', [
+    ('America/New_York', 'America/New_York'),
+    ('America/New_York', 'UTC'),
+    ('UTC', 'Asia/Kolkata'),
+])
+def test_leaf_times_return_as_the_instants_reported(utc_relay_db: Engine, local_zone: Any,
+                                                    stored_in: str, returned_in: str) -> None:
+    """Leaf times in the repeated hour come back as the same instants, whatever the relay's zone meanwhile."""
+    local_zone(stored_in)
+    task_id = receive_one(utc_relay_db)
+    table = Task.__table__
+    with utc_relay_db.begin() as conn:  # As the relay-local server writes the leaf's result
+        conn.execute(table.update().where(table.c.id == task_id).values(
+            client_id=LEAF[0], client_host=LEAF[1], exit_status=0,
+            start_time=FIRST_HALF_PAST_ONE, completion_time=SECOND_HALF_PAST_ONE))
+    with sqlite3.connect(utc_relay_db.url.database) as db:
+        stored = db.execute('SELECT start_time, completion_time FROM task').fetchone()
+    assert stored == ('2026-11-01 05:30:00.000000', '2026-11-01 06:30:00.000000')
+
+    local_zone(returned_in)
+    assert store.collect_results(utc_relay_db) == 1
+    (_, text), = store.pending_results(utc_relay_db, limit=10)
+    sent = json.loads(text)
+    started, completed = (datetime.fromisoformat(sent[name]) for name in ('start_time', 'completion_time'))
+    assert started == FIRST_HALF_PAST_ONE and completed == SECOND_HALF_PAST_ONE
+    assert completed - started == timedelta(hours=1)
+    assert completed.utcoffset() == SECOND_HALF_PAST_ONE.astimezone(ZoneInfo(returned_in)).utcoffset()
+
+
+@mark.unit
+def test_relay_database_matches_an_instant_in_any_offset(utc_relay_db: Engine, local_zone: Any) -> None:
+    """A stamp matches the same instant given in any offset, and reads back aware, as the relay-local server needs."""
+    local_zone('America/New_York')
+    task_id = receive_one(utc_relay_db)
+    stamp = datetime.now().astimezone()
+    table = Task.__table__
+    with utc_relay_db.begin() as conn:
+        conn.execute(table.update().where(table.c.id == task_id).values(schedule_time=stamp))
+    for given in (stamp, stamp.astimezone(timezone.utc), stamp.astimezone(ZoneInfo('Asia/Kolkata'))):
+        with utc_relay_db.connect() as conn:
+            found = conn.execute(select(table.c.id, table.c.schedule_time).where(table.c.schedule_time == given)).all()
+        assert found == [(task_id, stamp)]
+        assert found[0][1].tzinfo is not None
+
+
+@mark.unit
+def test_store_utc_refuses_an_engine_already_in_use(tmp_path: Path) -> None:
+    """Once the engine has written a datetime its type is settled; switching then would mix two conventions."""
+    engine = create_engine(f'sqlite:///{tmp_path / "relay.db"}')
+    Entity.metadata.create_all(engine)
+    ensure_tables(engine)
+    receive_one(engine)
+    with pytest.raises(RuntimeError, match='already bound'):
+        store.store_utc(engine)
+    engine.dispose()

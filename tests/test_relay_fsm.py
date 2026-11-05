@@ -4,11 +4,12 @@
 """The relay's upstream machines re-enter on timeout and halt on halt, on signal and on shutdown.
 
 The puller, the returner and the heartbeat are stepped one action at a time against a fake upstream,
-and run in their threads to show a stop ends them within a deadline. The relay process itself is run
-against a queue server in this process standing in for the upstream server, with no site clients
-launched: it registers its zone identity there, pulls nothing while it has no site clients, and
-drains on SIGUSR1; against a server without the work-request protocol it exits with the client's one
-version error.
+and run in their threads to show a stop ends them within a deadline. A halted puller stops at its
+gate: a request it has already sent is inserted and confirmed first. The relay process itself is run
+against a queue server in this process standing in for the upstream server, with a launcher that
+starts no site client: it registers its zone identity there, pulls nothing while it has no site
+clients, and drains on SIGUSR1; against a server without the work-request protocol it exits with the
+client's one version error; and it refuses a site of no clients.
 """
 
 
@@ -24,6 +25,7 @@ import json
 import time
 import signal
 import socket
+import threading
 import subprocess
 from pathlib import Path
 from queue import Queue, Full as QueueFull
@@ -140,13 +142,64 @@ def test_puller_finals_on_signal_before_requesting(relay_db: Engine, monkeypatch
 
 
 @mark.unit
-def test_puller_halts_on_halt(relay_db: Engine, no_signal) -> None:
-    """A halted puller's next state is HALT, from any state."""
-    machine = puller(relay_db, FakeDispatcher())
-    for state in (PullerState.GATE, PullerState.REQUEST, PullerState.INSERT, PullerState.CONFIRM):
+def test_puller_halt_ends_at_the_gate(relay_db: Engine, no_signal) -> None:
+    """A halted puller ends at its gate, or before sending a request; one already sent is seen through."""
+    connect_clients(relay_db, 1)
+    for state in (PullerState.GATE, PullerState.REQUEST):
+        fake = FakeDispatcher(reply(dispatched('echo a')))
+        machine = puller(relay_db, fake)
         machine.state = state
         machine.halt()
+        machine.state = machine.next()
+        assert machine.state is PullerState.FINAL
         assert machine.next() is PullerState.HALT
+        assert fake.requests == []
+
+    confirmed = Queue()
+    machine = puller(relay_db, FakeDispatcher(reply(dispatched('echo b'))), confirmed=confirmed)
+    assert machine.gate() is PullerState.REQUEST
+    machine.state = machine.request()
+    assert machine.state is PullerState.INSERT
+    machine.halt()
+    for expected in (PullerState.CONFIRM, PullerState.GATE, PullerState.FINAL, PullerState.HALT):
+        machine.state = machine.next()
+        assert machine.state is expected
+    assert confirmed.qsize() == 1
+
+
+class HeldRequest(FakeDispatcher):
+    """Holds each request until released, as an upstream server holds one until it has tasks to cut."""
+
+    def __init__(self, *replies: dict) -> None:
+        super().__init__(*replies)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def request(self, text_: str) -> str:
+        self.entered.set()
+        assert self.release.wait(DEADLINE)
+        return super().request(text_)
+
+
+@mark.unit
+def test_puller_halted_mid_request_inserts_and_confirms_the_reply(relay_db: Engine, no_signal) -> None:
+    """A puller told to stop while its request is outstanding inserts and confirms the reply before it ends."""
+    connect_clients(relay_db, 3)
+    records = dispatched('echo a', 'echo b', 'echo c')
+    fake, confirmed = HeldRequest(reply(records)), Queue()
+    thread = UpstreamPullerThread(queue=upstream(fake, confirmed), engine=relay_db, identity=upstream_identity(None),
+                                  bundlesize=1000, local_bundlesize=1, poll=POLL)
+    thread.start()
+    assert fake.entered.wait(DEADLINE)
+    thread.stop()  # The halt lands while the request is outstanding ...
+    fake.release.set()  # ... and only then does the reply arrive.
+    thread.join(timeout=DEADLINE)
+    assert not thread.is_alive()
+
+    assert store.count_backlog(relay_db) == 3 and store.count_held(relay_db) == 3
+    info = confirmed.get_nowait()
+    assert sorted(json.loads(info)['task_ids']) == sorted(record['id'] for record in records)
+    assert confirmed.empty() and len(fake.requests) == 1
 
 
 @mark.unit
@@ -413,8 +466,11 @@ def loopback_port() -> int:
         return sock.getsockname()[1]
 
 
-def start_relay(tmp_path: Path, port: int, auth: str = AUTH) -> Tuple[subprocess.Popen, Path]:
-    """Start `hs relay` against an upstream on loopback `port`, in its own process group."""
+def start_relay(tmp_path: Path, port: int, auth: str = AUTH, *args: str) -> Tuple[subprocess.Popen, Path]:
+    """Start `hs relay` against an upstream on loopback `port`, in its own process group.
+
+    Its one site client is launched through `true`, which exits at once: the site never has a client.
+    """
     site = tmp_path / 'site'
     site.mkdir(exist_ok=True)
     log = tmp_path / 'relay.log'
@@ -423,7 +479,8 @@ def start_relay(tmp_path: Path, port: int, auth: str = AUTH) -> Tuple[subprocess
     env.pop('HYPERSHELL_DATABASE_FILE', None)
     with open(log, mode='w') as stream:
         proc = subprocess.Popen(['hs', 'relay', '--bind', '127.0.0.1', '--port', str(loopback_port()),
-                                 '-H', '127.0.0.1', '-p', str(port), '--no-tls', '-N', '0'],
+                                 '-H', '127.0.0.1', '-p', str(port), '--no-tls', '-N', '1', '--launcher', 'true',
+                                 *args],
                                 env=env, stdout=subprocess.DEVNULL, stderr=stream, start_new_session=True)
     return proc, log
 
@@ -488,3 +545,21 @@ def test_relay_against_old_server_exits_with_one_version_error(tmp_path: Path) -
     assert len(critical) == 1, lines
     assert 'QueueVersionError' in critical[0] and 'work-request protocol' in critical[0]
     assert not any(READY in line for line in lines)
+
+
+@mark.integration
+@mark.parametrize('size', ['0', '-1'])
+def test_relay_refuses_a_site_of_no_clients(tmp_path: Path, size: str) -> None:
+    """A relay with no site client would never ask for work; a size below 1 is refused at start."""
+    proc, log = start_relay(tmp_path, closed_port(), AUTH, '-N', size)
+    try:
+        assert proc.wait(DEADLINE) == exit_status.bad_argument, log.read_text()
+    finally:
+        finish(proc)
+    assert f'Site size must be at least 1 (given {size})' in log.read_text()
+    assert READY not in log.read_text()
+
+
+def closed_port() -> int:
+    """A loopback port nothing listens on."""
+    return loopback_port()

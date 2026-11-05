@@ -30,7 +30,10 @@ import sys
 import time
 import errno
 import shlex
+import platform
+import threading
 import functools
+from signal import signal as register
 
 # External libs
 from multiprocessing import AuthenticationError
@@ -41,6 +44,7 @@ from cmdkit.config import Namespace
 # Internal libs
 from hypershell.core.config import (config, RELAY_PROCESS, RELAY_MARKER, DEFAULT_RELAY_PORT, DEFAULT_AUTH,
                                     PARAM_UNSET, relay_database_section)
+from hypershell.core.signal import SIGUSR1, SIGUSR2
 from hypershell.core.exceptions import get_shared_exception_mapping, handle_exception, handle_disconnect
 from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.queue import QueueClient, QueueConfig
@@ -50,11 +54,12 @@ from hypershell.data import ensuredb
 from hypershell.data.core import engine
 from hypershell.data.model import zone_name, DEFAULT_ZONE_NAME
 from hypershell.relay import store
-from hypershell.relay.store import ensure_tables
-from hypershell.relay.site import site_cluster, fence_site, DEFAULT_SITE_PERIOD
+from hypershell.relay.store import ensure_tables, store_utc
+from hypershell.relay.site import site_cluster, fence_site, end_site_clients, DEFAULT_SITE_PERIOD
 from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
-                                       upstream_identity, upstream_config, relay_site, DEFAULT_UPSTREAM_BUNDLESIZE,
-                                       DEFAULT_UPSTREAM_HEARTRATE, DEFAULT_RETENTION)
+                                       upstream_identity, upstream_config, upstream_key, relay_site,
+                                       drain_signalled, DEFAULT_UPSTREAM_BUNDLESIZE, DEFAULT_UPSTREAM_HEARTRATE,
+                                       DEFAULT_RETENTION)
 from hypershell.cluster.remote import AutoScalingCluster
 from hypershell.server import ServerThread
 
@@ -65,7 +70,8 @@ except ImportError:  # pragma: no cover (not available on Windows)
 
 # Public interface
 __all__ = ['RelayThread', 'RelayApp', 'DEFAULT_RELAY_BIND', 'DEFAULT_RELAY_PORT', 'DEFAULT_RELAY_POLL',
-           'DEFAULT_RELAY_SIZE', 'lock_database', 'RelayDatabaseLocked']
+           'DEFAULT_RELAY_SIZE', 'lock_database', 'RelayDatabaseLocked', 'DRAIN', 'install_drain_handlers',
+           'STOP_TIMEOUT', 'CLIENT_GRACE']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -94,6 +100,37 @@ DEFAULT_RELAY_LAUNCHER_ARGS: Final[str] = config.relay.launcher_args
 
 STOP_CHECK_INTERVAL: Final[float] = 1.0
 """Seconds between the relay's checks on whether the relay-local server should stop."""
+
+STOP_TIMEOUT: float = 10.0
+"""Seconds each part of a failing relay is given to stop before the relay goes on without it."""
+
+CLIENT_GRACE: float = 5.0
+"""Seconds a site client is given to exit after SIGTERM before it is killed."""
+
+DRAIN: Final[threading.Event] = threading.Event()
+"""Set when this relay process is told to drain (SIGUSR1 or SIGUSR2, see `install_drain_handlers`)."""
+
+
+def drain_handler(signum: int, frame: object) -> None:  # noqa: unused frame
+    """Mark the relay as draining; nothing else in the process sees the signal."""
+    DRAIN.set()
+
+
+def install_drain_handlers() -> None:
+    """Take SIGUSR1 and SIGUSR2 for the relay alone (call from the main thread).
+
+    The stock handler records the signal for the whole process, so the relay-local scheduler would
+    stop at once and abandon the site's backlog. Here the signal only ends pulling: the site finishes
+    every task the relay holds, the results go back, and the upstream registration ends cleanly.
+    """
+    if platform.system() != 'Windows':
+        register(SIGUSR1, drain_handler)
+        register(SIGUSR2, drain_handler)
+
+
+def draining() -> bool:
+    """True once the relay has been told to drain, by its own handler or the stock one."""
+    return DRAIN.is_set() or drain_signalled()
 
 REEXEC_MARKER: Final[str] ='_HYPERSHELL_RELAY_REEXEC'
 """Private environment variable set on a relay re-executed to bind its database."""
@@ -151,10 +188,14 @@ class RelayThread(Thread):
     and listing the site clients connected now, so upstream they appear attributed to the site and
     disconnect with the relay.
 
-    The relay ends when pulling is over (an upstream shutdown or a drain signal) and the site has
-    finished what it holds, or when a drain signal ends the site's scheduling. It then stops launching
-    site clients, lets the site server tell them to finish, returns every result still held, and ends
-    its upstream registration with a final heartbeat if nothing it received is left without a result.
+    The relay ends when pulling is over (an upstream shutdown or a drain) and the site has finished
+    what it holds. It then stops launching site clients, lets the site server tell them to finish,
+    returns every result still held, and ends its upstream registration with a final heartbeat if
+    nothing it received is left without a result.
+
+    If any part fails (the upstream connection is lost, say), the relay stops every part once, each
+    within a bounded wait, ends the site clients it launched (SIGTERM, then SIGKILL after a grace
+    period) and raises the failure, leaving its identity to upstream eviction.
 
     Args:
         address (tuple, optional):
@@ -213,6 +254,10 @@ class RelayThread(Thread):
 
         period (int, optional):
             Seconds between checks on the site clients (an exited one is replaced at the next).
+
+        site_config (str, optional):
+            Path the site's copy of the configuration file is written to, if one is needed
+            (see `hypershell.relay.site.fence_site`). Default: beside the relay database.
     """
 
     cluster: AutoScalingCluster
@@ -225,6 +270,8 @@ class RelayThread(Thread):
     puller: Optional[UpstreamPullerThread] = None
     returner: Optional[UpstreamReturnerThread] = None
     heartbeat: Optional[UpstreamHeartbeatThread] = None
+    site_config: Optional[str]
+    aborted: bool = False
 
     def __init__(self: RelayThread,
                  address: Tuple[str, int] = (DEFAULT_RELAY_BIND, DEFAULT_RELAY_PORT),
@@ -244,7 +291,8 @@ class RelayThread(Thread):
                  template: str = '{}',
                  client_timeout: Optional[int] = None,
                  retention: int = DEFAULT_RETENTION,
-                 period: int = DEFAULT_SITE_PERIOD) -> None:
+                 period: int = DEFAULT_SITE_PERIOD,
+                 site_config: Optional[str] = None) -> None:
         """Initialize the site and the upstream side."""
         self.cluster = site_cluster(address=address, bundlesize=bundlesize, bundlewait=bundlewait, poll=poll,
                                     tls=tls, zone=zone, size=size, launcher=launcher, launcher_args=launcher_args,
@@ -261,6 +309,9 @@ class RelayThread(Thread):
         self.upstream_bundlesize = upstream_bundlesize
         self.heartrate = heartrate
         self.retention = retention
+        database_file = config.database.get('file', None)
+        self.site_config = site_config or (f'{database_file}.site.toml' if database_file else None)
+        self.ending = threading.Lock()
         super().__init__(name='hypershell-relay')
 
     @property
@@ -273,37 +324,37 @@ class RelayThread(Thread):
         log.debug('Started')
         log.info(f'Upstream identity {self.identity} for zone {self.zone or DEFAULT_ZONE_NAME} at site {self.site}')
         upstream = self.upstream_config or upstream_config()
-        fence_site(self.cluster, key=upstream.auth)
-        self.upstream = QueueClient(config=upstream)
-        self.upstream.connect()
-        log.info(f'Connected to upstream server {upstream.host}:{upstream.port}')
-        self.heartbeat = UpstreamHeartbeatThread(queue=self.upstream, identity=self.identity,
-                                                 heartrate=self.heartrate, site=self.site,
-                                                 roster=functools.partial(store.roster, engine, INSTANCE))
-        self.puller = UpstreamPullerThread(queue=self.upstream, engine=engine, identity=self.identity,
-                                           zone=self.zone, bundlesize=self.upstream_bundlesize,
-                                           local_bundlesize=self.bundlesize, poll=self.poll)
-        self.returner = UpstreamReturnerThread(queue=self.upstream, engine=engine,
-                                               bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
-                                               poll=self.poll, retention=self.retention)
-        self.cluster.start()
-        self.wait_ready()
-        log.info(f'Relay-local server ready on {self.server.queue.config.host}:{self.server.queue.config.port}')
-        self.heartbeat.start()
-        self.returner.start()
-        self.puller.start()
         try:
+            fence_site(self.cluster, key=upstream.auth, site_config=self.site_config)
+            self.upstream = QueueClient(config=upstream)
+            self.upstream.connect()
+            log.info(f'Connected to upstream server {upstream.host}:{upstream.port}')
+            self.heartbeat = UpstreamHeartbeatThread(queue=self.upstream, identity=self.identity,
+                                                     heartrate=self.heartrate, site=self.site,
+                                                     roster=functools.partial(store.roster, engine, INSTANCE))
+            self.puller = UpstreamPullerThread(queue=self.upstream, engine=engine, identity=self.identity,
+                                               zone=self.zone, bundlesize=self.upstream_bundlesize,
+                                               local_bundlesize=self.bundlesize, poll=self.poll, drain=draining)
+            self.returner = UpstreamReturnerThread(queue=self.upstream, engine=engine,
+                                                   bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
+                                                   poll=self.poll, retention=self.retention)
+            self.cluster.start()
+            self.wait_ready()
+            log.info(f'Relay-local server ready on {self.server.queue.config.host}:{self.server.queue.config.port}')
+            self.heartbeat.start()
+            self.returner.start()
+            self.puller.start()
             self.wait_site()
             self.stop_site()
             self.returner.flush()
-            self.returner.join()
+            self.wait_returner()
+            self.finish_upstream()
+            self.reap_site_clients()
         except Exception:
-            self.puller.stop(wait=True)
-            self.cluster.stop(wait=True)
-            self.returner.stop(wait=True)
-            self.heartbeat.stop(wait=True)
+            self.abort()
             raise
-        self.finish_upstream()
+        finally:
+            self.release()
         log.debug('Done')
 
     def wait_ready(self: RelayThread) -> None:
@@ -341,7 +392,7 @@ class RelayThread(Thread):
 
         The site server tells its clients to finish once scheduling is over and waits for them, so
         every result they hold reaches the relay database first. A site server that never had a client
-        would wait for its first one, so it is stopped outright.
+        would wait for its first one, so it is stopped outright. A failure upstream meanwhile is raised.
         """
         self.cluster.autoscaler.stop()
         scheduler = self.server.scheduler
@@ -350,25 +401,95 @@ class RelayThread(Thread):
         if self.server.heartmonitor.machine.startup_phase:
             log.debug('No site client ever connected - stopping relay-local server')
             self.server.stop(wait=True)
-        self.cluster.join()
+        while self.cluster.is_alive():
+            self.cluster.join(timeout=STOP_CHECK_INTERVAL)
+            self.check_upstream()
+        self.cluster.join()  # Raises the failure that ended the site, if any.
+
+    def wait_returner(self: RelayThread) -> None:
+        """Wait for the returner to hand back everything held; a failure upstream meanwhile is raised."""
+        while self.returner.is_alive():
+            self.returner.join(timeout=STOP_CHECK_INTERVAL)
+            self.check_upstream()
+        self.returner.join()  # Raises the returner's failure, if any.
+
+    def check_upstream(self: RelayThread) -> None:
+        """Raise the failure of the heartbeat or the returner, if either has ended with one."""
+        for thread in (self.heartbeat, self.returner):
+            if thread is not None and thread.ident is not None and not thread.is_alive():
+                thread.join()  # Raises its failure, if any.
 
     def finish_upstream(self: RelayThread) -> None:
         """Stop pulling, then end the upstream registration.
 
-        The final heartbeat goes upstream only when every received task's result has been handed
-        over. Otherwise the identity is left to the upstream server's eviction, which puts the tasks
-        it still holds back in the queue for other clients.
+        A request the puller has already sent is inserted and confirmed before it stops, and only
+        once it has stopped is it known what the relay holds. The final heartbeat goes upstream only
+        when every received task's result has been handed over. Otherwise the identity is left to the
+        upstream server's eviction, which puts the tasks it still holds back in the queue for other
+        clients.
         """
-        self.puller.stop(wait=True)
-        self.puller.join()
+        self.puller.stop(wait=True, timeout=STOP_TIMEOUT)
+        if self.puller.is_alive():
+            log.warning(f'Upstream puller did not stop within {STOP_TIMEOUT} seconds - not finishing upstream '
+                        f'(the upstream server will evict {self.identity} and revert what it holds)')
+            self.heartbeat.stop(wait=True, timeout=STOP_TIMEOUT)
+            return
         held = store.count_held(engine)
         if held:
             log.warning(f'Holding {held} tasks with no result returned upstream - not finishing upstream '
                         f'(the upstream server will evict {self.identity} and revert them)')
-            self.heartbeat.stop(wait=True)
+            self.heartbeat.stop(wait=True, timeout=STOP_TIMEOUT)
         else:
             self.heartbeat.signal_finished()
-        self.heartbeat.join()
+            self.heartbeat.join(timeout=STOP_TIMEOUT)
+
+    def reap_site_clients(self: RelayThread) -> None:
+        """After a clean drain, end any site client still running after the grace period (one that never connected)."""
+        if ended := end_site_clients(self.cluster, grace=CLIENT_GRACE, patience=CLIENT_GRACE):
+            log.warning(f'Ended {ended} site clients still running after the site finished')
+
+    def abort(self: RelayThread) -> None:
+        """Stop every part of the relay once, each within a bounded wait, and end the site clients it launched.
+
+        Safe to call more than once, and from any thread: only the first call does anything. A part
+        that does not stop in time is left behind (every thread here is a daemon).
+        """
+        with self.ending:
+            if self.aborted:
+                return
+            self.aborted = True
+        log.warning('Stopping')
+        self.stop_quietly(self.puller)
+        self.stop_quietly(self.cluster.autoscaler)
+        if ended := end_site_clients(self.cluster, grace=CLIENT_GRACE):
+            log.warning(f'Ended {ended} site clients')
+        if self.cluster.is_alive():
+            stopper = threading.Thread(target=self.stop_quietly, args=(self.cluster, ),
+                                       name='hypershell-relay-stop', daemon=True)
+            stopper.start()
+            stopper.join(timeout=STOP_TIMEOUT)
+            if stopper.is_alive():
+                log.warning(f'Relay-local server did not stop within {STOP_TIMEOUT} seconds - leaving it')
+        self.stop_quietly(self.returner)
+        self.stop_quietly(self.heartbeat)
+
+    @staticmethod
+    def stop_quietly(thread: Optional[Thread]) -> None:
+        """Stop `thread` if it was started, waiting at most `STOP_TIMEOUT`; its failure is not raised here."""
+        if thread is None or thread.ident is None:
+            return
+        try:
+            thread.stop(wait=True, timeout=STOP_TIMEOUT)
+        except Exception as error:
+            log.debug(f'Stopped {thread.name} ({error.__class__.__name__}: {error})')
+
+    def release(self: RelayThread) -> None:
+        """Remove the site's copy of the configuration file, if one was written."""
+        if self.site_config and os.path.exists(self.site_config):
+            try:
+                os.remove(self.site_config)
+            except OSError as error:
+                log.warning(f'Could not remove site configuration file ({error})')
 
     @property
     def scheduling_over(self: RelayThread) -> bool:
@@ -376,17 +497,9 @@ class RelayThread(Thread):
         scheduler = self.server.scheduler
         return scheduler is not None and scheduler.ident is not None and not scheduler.is_alive()
 
-    def stop(self: RelayThread, wait: bool = False, timeout: int = None) -> None:
-        """Stop the puller, the site (if it started), the returner and the heartbeat, then this thread."""
-        log.warning('Stopping')
-        if self.puller is not None:
-            self.puller.stop(wait=wait, timeout=timeout)
-        if self.cluster.ident is not None:
-            self.cluster.stop(wait=wait, timeout=timeout)
-        if self.returner is not None:
-            self.returner.stop(wait=wait, timeout=timeout)
-        if self.heartbeat is not None:
-            self.heartbeat.stop(wait=wait, timeout=timeout)
+    def stop(self: RelayThread, wait: bool = False, timeout: Optional[float] = None) -> None:
+        """Stop every part of the relay once (see `abort`), then this thread."""
+        self.abort()
         super().stop(wait=wait, timeout=timeout)
 
 
@@ -420,9 +533,13 @@ APP_HELP = f"""\
   Upstream, the site's clients are listed under the relay and its site ([relay] site,
   default: this host's name) while they are connected, and disconnect with the relay.
 
-  The upstream key comes from the configuration ([relay.upstream] auth), never from the
-  command line, and never reaches the site: relay settings, and any variable holding the
-  key, are removed from the environment the site's clients and tasks inherit.
+  The upstream key comes from the configuration ([relay.upstream] auth, auth_env or
+  auth_eval), never from the command line, and never reaches the site: relay settings, and
+  any variable holding the key, are removed from the environment the site's clients and
+  tasks inherit, and they are given the configuration file without the relay settings.
+
+  SIGUSR1 or SIGUSR2 drain the relay: it asks for no more work, finishes what it holds and
+  returns the results. If the relay fails, it ends the site's clients and exits non-zero.
 
   The relay database is always a private SQLite file, whatever database is configured,
   and the configured database is never opened. One relay runs per process, and a second
@@ -433,7 +550,7 @@ Options:
   -p, --upstream-port NUM   Port of upstream server (default: {DEFAULT_UPSTREAM_PORT}).
       --no-tls              Disable TLS to upstream server (not recommended).
       --zone          NAME  Zone this relay serves (default: the default zone).
-  -N, --size          NUM   Number of clients kept launched at the site (default: {DEFAULT_RELAY_SIZE}).
+  -N, --size          NUM   Clients kept launched at the site, at least 1 (default: {DEFAULT_RELAY_SIZE}).
       --launcher      CMD   Command prefix that launches each client (default: none).
       --launcher-args ARGS  Extra arguments for the launcher.
       --bind          ADDR  Bind address of relay-local server (default: {DEFAULT_RELAY_BIND}).
@@ -476,7 +593,7 @@ class RelayApp(Application):
     bind: str = DEFAULT_RELAY_BIND
     interface.add_argument('--bind', default=bind)
 
-    port: int = DEFAULT_RELAY_PORT
+    port: int = config.relay.port
     interface.add_argument('--port', type=int, default=port)
 
     database: Optional[str] = None
@@ -511,8 +628,10 @@ class RelayApp(Application):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.lock = lock_database(path)
         log.info(f'Relay database {path}')
+        store_utc(engine)
         ensuredb()
         ensure_tables(engine)
+        install_drain_handlers()
         thread = RelayThread.new(address=(self.bind, self.port),
                                  bundlesize=config.relay.bundlesize,
                                  bundlewait=config.relay.bundlewait,
@@ -532,20 +651,23 @@ class RelayApp(Application):
                                  retention=config.relay.retention)
         try:
             thread.join()
-        except Exception:
+        except BaseException:
             thread.stop()
             raise
+        finally:
+            thread.release()
 
     def check_args(self: RelayApp) -> None:
         """Fail invalid arguments; warn of an insecure upstream connection."""
         if self.no_confirm:
             raise ArgumentError('A relay cannot run with --no-confirm (upstream failover rests on confirmation)')
-        if config.relay.upstream.auth == DEFAULT_AUTH:
+        if upstream_key() == DEFAULT_AUTH:
             log.warning('Using default upstream key - do not use this in production!')
         if self.no_tls or not config.relay.upstream.tls.get('enabled', True):
             log.warning('TLS to upstream server is disabled - this is not recommended for production!')
-        if self.size < 0:
-            raise ArgumentError(f'Site size must not be negative (given {self.size})')
+        if self.size < 1:
+            raise ArgumentError(f'Site size must be at least 1 (given {self.size}): '
+                                f'with no client at the site the relay never asks for work')
         try:
             shlex.split(self.launcher_args or '')
             shlex.split(self.launcher or '')
