@@ -82,10 +82,10 @@ Additional instructions provided with the invocation: $ARGUMENTS
   a whole release cycle, and `/hs-publish` merges to `develop` — that is where "landed" is decided.
 - **Never delete anything under `.security/`.** That lane is gitignored, so a deletion there leaves no
   commit and no history: the file is simply gone, and the closed finding is exactly what a later audit
-  asks for. Retire it by moving its `.security/ROADMAP.md` entry to that file's § *Not scheduled*
-  terminal records, updating `.security/STATUS.md` (the overlay that is the source of truth for where
-  a finding stands), and keeping the `.security/issues/` file. Never `git add` a path under
-  `.security/`, and never name one in a commit message.
+  asks for. **Hidden-lane retirement follows `.security/README.md`**, which governs that lane and
+  overrides this skill where they differ: remediated seeds and findings are *moved* aside into
+  `.security/retired/`, never removed, and each finding's own `status:` line is the record of where
+  it stands. Never `git add` a path under `.security/`, and never name one in a commit message.
 - **A GOAL is negotiated down from a seed.** Anything the cycle cut and still wants must survive
   retirement. Step 4 checks this against `GOAL.md` § *Non-goals*; it is the one failure here that
   loses work rather than leaving litter.
@@ -130,13 +130,13 @@ are H1 siblings of the Parts, not entries, and are never removed by a retirement
 deliberately: every entry has exactly one and no section header has one, so the count stays right
 even if a non-entry `## ` subsection is ever introduced.
 
-Hidden `.security/ROADMAP.md` mirrors the convention with two differences that matter here: its
-entries are **numbered** (`## 1. Get the authkey off the process table` … `## 6.`), so moving one
-renumbers the survivors, and its italic line reads `*Severity: … · Effort: … · Depends on: … ·
-Findings: F08*`. Its terminal section is `## Not scheduled`, and like the public *Settled questions*
-it holds **bullets, not blocks**. Two further `## ` sections are not entries: `## Working notes`
-(prose) and `## Standing at the 2026-08 re-assessment` — a severity **count table** that closing a
+Hidden `.security/ROADMAP.md` mirrors the convention with differences that matter here: its
+entries are **numbered** (`## 1. …`), so moving one renumbers the survivors, and its italic line
+carries `Severity`, `Effort`, `Depends on` and the `Findings` ids it covers. Its terminal section is
+`## Not scheduled`, and like the public *Settled questions* it holds **bullets, not blocks**. Other
+`## ` sections are not entries — working notes, and a severity **count table** that closing a
 finding falsifies, so Step 5 updates it by hand; no `{slug}`-keyed sweep will find it.
+`.security/README.md` is the authority on the lane's layout; read it before editing the lane.
 
 ### Step 2 — Pre-flight
 Clean tree; non-empty → STOP. Confirm you are on `develop`; this skill does not run on a
@@ -232,13 +232,16 @@ grep -rnE 'Part [IVX]+' ROADMAP.md .security/ROADMAP.md issues/ .agents/ --inclu
 ```
 Never fold this into a seed's retirement silently — raise it in the preview as its own confirmation.
 
-Security-lane seeds are **moved, not deleted**, per the safety rule above: rewrite the
-`.security/ROADMAP.md` entry as a **bullet** under § *Not scheduled* (that section holds bullets, not
-`## N.` blocks) with a one-line note of what closed it, renumber the surviving entries, correct the
-severity counts in § *Standing at the 2026-08 re-assessment* — a closed finding falsifies that table
-and no sweep in Step 6 will catch it — record the remediation in `.security/STATUS.md`, and keep the
-`.security/issues/` file. Do not edit
-`findings/F*.md` — dated evidence, under the same rule as `spec/`. None of this is committable, so the
+Security-lane seeds are **moved, not deleted**, per the safety rule above, and as
+`.security/README.md` prescribes: rewrite the `.security/ROADMAP.md` entry as a **bullet** under
+§ *Not scheduled* (that section holds bullets, not `## N.` blocks) with a one-line note of what
+closed it, renumber the surviving entries, correct the lane's severity counts — a closed finding
+falsifies that table and no sweep in Step 6 will catch it — and move the seed file into
+`.security/retired/`. Each finding the cycle remediated gets its own `status:` line updated (the
+finding file is the record; its dated evidence text is left as written) and moves into
+`.security/retired/` too; `.security/STATUS.md` is brought into line with it. Retire only what a
+landed cycle shipped: a seed or finding that merely *looks* covered stays active, with at most a
+neutral "check at plan time" note, for its own cycle to decide. None of this is committable, so the
 run report is the only place these edits are visible; name them there.
 
 ### Step 6 — Repair what the removal broke
@@ -348,7 +351,7 @@ decide whether to carry it into a `META.md` themselves.
   at — where nothing else in the repository shows the question was asked. For shipped public work the
   refutation is free: someone re-filing it greps the code and finds it already done, and
   `spec/{slug}/` holds the account. **The hidden lane is the exception:** `.security/ROADMAP.md`
-  § *Not scheduled* holds those two stances *and* remediated findings (Step 5), because a gitignored
-  lane has no git history to refute a re-filing with.
+  § *Not scheduled* holds those two stances *and* remediated work (Step 5), and `.security/retired/`
+  keeps the retired files, because a gitignored lane has no git history to refute a re-filing with.
 - This skill never touches `src/hypershell/`, never advances an FSM, never tags or cuts a release
   (`/hs-release` does that), and never ships to `master`.
