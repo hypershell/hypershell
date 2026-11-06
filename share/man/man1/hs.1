@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HS" "1" "Nov 04, 2026" "2.8.4" "hypershell"
+.TH "HS" "1" "Nov 05, 2026" "2.8.5" "hypershell"
 .SH NAME
 hs \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -274,7 +274,8 @@ See \fIconfiguration\fP section.
 .TP
 .B \fB\-E\fP, \fB\-\-env\fP
 Send environment variables. Only for \fB\-\-ssh\fP mode, all \fBHYPERSHELL_\fP prefixed environment
-variables can be exported to the remote clients.
+variables can be exported to the remote clients, except \fBHYPERSHELL_SERVER_AUTH\fP, which is
+never sent this way.
 .TP
 .B \fB\-\-remote\-exe\fP \fIPATH\fP
 Path to remote executable on the client side.
