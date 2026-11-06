@@ -4,7 +4,7 @@ title: 'Launch-path follow-ups: accurate no-key hints, template docs, an export-
   test'
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/launch-hint-followups
 base: develop
 current_phase: done
