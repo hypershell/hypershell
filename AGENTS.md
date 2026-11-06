@@ -81,7 +81,7 @@ Top-level package `src/hypershell/`:
 | `core/` | Shared infrastructure (see below). |
 | `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection. `InitDBApp` (`hs initdb`) and the `initdb`/`checkdb`/`ensuredb` helpers live in `data/__init__.py`; the schema-upgrade step in `data/upgrade.py`. |
 | `data/model.py` | `Entity` base + `Task`, `Client`, and `Source` ORM models (`Source` records submission provenance for re-submission gating; `DIRECT_SOURCE_ID`/`STDIN_SOURCE_ID` are reserved source ids). **Most query/state logic lives as `Task` classmethods here.** |
-| `cluster/` | `__init__.py` (`ClusterApp`/`hsx`), `local.py` (`LocalCluster`), `remote.py` (`RemoteCluster`, `AutoScalingCluster`), `ssh.py` (`SSHCluster`). |
+| `cluster/` | `__init__.py` (`ClusterApp`/`hsx`), `local.py` (`LocalCluster`), `remote.py` (`RemoteCluster`, `AutoScalingCluster`), `ssh.py` (`SSHCluster`), `launch.py` (`client_launch()`, the one launched-client builder). |
 
 `core/` modules: `sys` (import-time `sys.path` sanitizer), `config`, `logging`, `signal`,
 `exceptions`, `fsm` (`StateMachine`), `thread` (`Thread` base), `queue` (transport +
@@ -347,10 +347,28 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   verifying the real server fails. Distributed TLS needs a shared cert, `server.tls.cafile`,
   or a `fingerprint` pin. **Cert/key material is not forwarded to launched clients** — only
   the disabled state (`--no-tls`) is propagated.
-- **Auth-token exposure:** each cluster launch mints a fresh `secrets.token_hex(64)` and
-  passes it to clients as `-k <auth>` **on the command line** — visible in `ps`/`/proc`
-  locally and on remote hosts. `redact_secrets()` only sanitizes log output, not the process
-  table. The full posture is `docs/security.rst` (authoritative).
+- **Auth-token handoff:** each cluster launch mints a fresh `secrets.token_hex(64)` and
+  **never puts it on a command line** (no `-k` in any launched argv, local or remote).
+  Launcher modes (`--launcher`, `--mpi`, `--autoscaling`) hand it over in the launched
+  process's environment as `HYPERSHELL_SERVER_AUTH`, so the launcher must pass the environment
+  through; only an Open MPI launcher also names it for Open MPI (`is_mpi_launcher()`: the
+  first word's base name is `mpirun`, `mpiexec`, `orterun`, `prterun`, or `mpirun`/`mpiexec`
+  with a dotted suffix; `srun mpirun` is not one) through `OMPI_MCA_mca_base_env_list`, or
+  `-x HYPERSHELL_SERVER_AUTH` when the launcher args already hold `-x` (or `--x`, either
+  with `=`). `--ssh` writes it to ssh's standard input with a forced `-T` (a bare `-n` in the
+  ssh args is dropped), and a remote `sh` step reads it into that variable and `exec`s the
+  client; `--env` exports are built by `ssh_env_exports()` from the variables themselves,
+  `HYPERSHELL_SERVER_AUTH` dropped by name first and every value `shlex.quote`d, so they never
+  carry it. The launching process's own `os.environ` is never modified; `ClientLaunch.env`/
+  `stdin` are `repr=False` and `describe()` (redacted, including any word that, parsed as a
+  shell parses it, assigns `HYPERSHELL_SERVER_AUTH`) is the only thing logged. The client
+  never passes `HYPERSHELL_SERVER_AUTH`, or its name in the Open MPI list, to a task's
+  environment (`task_env()`) or to a `{% %}` template command (`Template(shell_env=
+  inherited_task_env)`). A task gets the key only explicitly: `config.export` (a key the
+  operator holds; never a run's minted key), or a `{= =}` lambda, which is client-side Python
+  with `os` exposed and reads the client's environment on purpose. Tasks run as the client's
+  user, so this keeps the key out of inherited environments, not out of reach of code that
+  looks for it. The full posture is `docs/security.rst` (authoritative).
 
 ## Cluster orchestration
 
@@ -361,9 +379,13 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   per host; `config.ssh.args` for options), with `a[00-32].cluster` nodelist expansion.
   **paramiko is NOT used here** — paramiko lives only in `core/remote.py` for SFTP task-output
   retrieval. (The `docs/security.rst` claim that `SSHCluster` uses paramiko is inaccurate.)
-- There is no shared client-argv builder — a change to launched-client arguments must be
-  replicated across `local`/`remote`/`ssh`/`autoscale`. In JSON mode, clients must be sent
-  `DEFAULT_TEMPLATE` (never the user template) to avoid double expansion. The advertised
+- **`cluster/launch.py` `client_launch()` is the one client-invocation builder** for every
+  mode that starts clients as processes (`RemoteCluster`, `AutoScalingCluster`, `SSHCluster`):
+  it owns the shared client options and the key handoff, so a change to launched-client
+  arguments goes there (and only options a 2.9.0a4 client accepts may be emitted; a contract
+  test pins this). `LocalCluster` runs its clients in-process and builds no argv. In JSON
+  mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
+  expansion. The advertised
   `HOSTNAME` must be routable from clients. The `AutoScaler` never terminates clients (they
   self-exit on idle) and silently ignores `no_confirm`/`in_memory`/`forever`/`restart`.
 
@@ -475,7 +497,8 @@ compatibility until v3, but are never referenced.
   install; no mTLS; keep the post-handshake fingerprint check.
 - **`core/fsm.py|thread.py|signal.py`** — load-bearing, untested; the vestigial `__should_halt`
   flag and sticky global `RECEIVED` are subtle.
-- **`cluster/remote.py|ssh.py`** — per-mode argv builders that must change together; fresh
+- **`cluster/launch.py|remote.py|ssh.py`** — every launched client is built by
+  `client_launch()`; the key goes in the environment or on ssh's stdin, never in argv; fresh
   auth token; `HOSTNAME` routability; autoscaler never terminates clients.
 - `submit.py` queue-mode silently ignores `-t/--tag` (leaves `group=None`) — asymmetric vs DB
   mode; tag/attribute resolution actually happens in `Task.new`.

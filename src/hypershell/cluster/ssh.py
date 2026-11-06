@@ -27,7 +27,7 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
-from hypershell.cluster.remote import redact_secrets
+from hypershell.cluster.launch import ClientLaunch, client_launch, ssh_env_exports, ssh_launch_args
 
 # Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
@@ -211,7 +211,7 @@ class SSHCluster(Thread):
 
     server: ServerThread
     clients: List[Popen]
-    client_argv: List[List[str]]
+    launches: List[ClientLaunch]
 
     def __init__(self: SSHCluster,
                  source: Iterable[str] = None,
@@ -274,50 +274,39 @@ class SSHCluster(Thread):
                                    from_json=from_json,
                                    tls=tls)
         launcher = shlex.split(launcher)
-        launcher_env = shlex.split('' if not export_env else compile_env())
+        launcher_env = dict(Namespace.from_env('HYPERSHELL')) if export_env else {}
         if launcher_args is None:
             launcher_args = shlex.split(config.ssh.get('args', ''))
-        client_args = []
-        if no_confirm:
-            client_args.append('--no-confirm')
-        if capture:
-            client_args.append('--capture')
-        if monitor:
-            client_args.append('--monitor')
-        if client_cores is not None:
-            client_args.extend(['-C', str(client_cores)])
-        if client_memory is not None:
-            client_args.extend(['-M', str(client_memory)])
-        if client_timeout is not None:
-            client_args.extend(['-T', str(client_timeout)])
-        if task_timeout is not None:
-            client_args.extend(['-W', str(task_timeout)])
-        if ratelimit is not None:
-            client_args.extend(['-R', str(ratelimit)])
-        if tls is None:
-            # TLS material is resolved by each client from its own site/config (identical to
-            # the server's on a shared filesystem); only the disabled state must be propagated.
-            client_args.append('--no-tls')
-        if zone is not None:
-            # The remote shell re-parses the command line, so the name is quoted.
-            client_args.extend(['--zone', shlex.quote(zone)])
-        self.client_argv = [
-            [*launcher, *launcher_args, host, *launcher_env, remote_exe, 'client', '-H', HOSTNAME,
-             '-p', str(bind[1]), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-             '-t', f'\'{client_template}\'', '-k', auth, '-d', str(delay_start),
-             '-S', str(task_signalwait), *client_args]
+        # NOTE: checked once here, so a dropped `-n` is reported once, not once per host
+        launcher, launcher_args = launcher[:1], ssh_launch_args([*launcher[1:], *launcher_args])
+        self.launches = [
+            client_launch(remote_exe, (HOSTNAME, bind[1]), auth,
+                          launcher=launcher, launcher_args=launcher_args,
+                          ssh_host=host, ssh_exports=launcher_env,
+                          num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
+                          template=client_template, delay_start=delay_start,
+                          task_signalwait=task_signalwait, no_confirm=no_confirm,
+                          capture=capture, monitor=monitor,
+                          client_cores=client_cores, client_memory=client_memory,
+                          client_timeout=client_timeout, task_timeout=task_timeout,
+                          ratelimit=ratelimit, tls_enabled=tls is not None, zone=zone)
             for host in nodelist
         ]
         super().__init__(name='hypershell-cluster')
+
+    @property
+    def client_argv(self: SSHCluster) -> List[List[str]]:
+        """Command line that launches the client on each host (holds no key)."""
+        return [launch.argv for launch in self.launches]
 
     def run_with_exceptions(self: SSHCluster) -> None:
         """Start child threads, wait."""
         self.clients = []  # NOTE: empty for stop() until the clients are launched
         self.server.start()
         self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
-        for argv in self.client_argv:
-            log.debug('Launching client: ' + redact_secrets(argv, ['-k']))
-            self.clients.append(Popen(argv, stdout=sys.stdout, stderr=sys.stderr))
+        for launch in self.launches:
+            log.debug('Launching client: ' + launch.describe())
+            self.clients.append(launch.start(stdout=sys.stdout, stderr=sys.stderr))
         for client in self.clients:
             client.wait()
         self.server.join()
@@ -416,5 +405,10 @@ class NodeList(list):
 
 
 def compile_env() -> str:
-    """Build environment variable argument expansion for remote client launch command."""
-    return ' '.join([f'{key}="{value}"' for key, value in Namespace.from_env('HYPERSHELL').items()])
+    """
+    The `NAME=value` words an SSH launch with `--env` exports, joined for a shell command line.
+
+    Built by :func:`~hypershell.cluster.launch.ssh_env_exports` from the ``HYPERSHELL_*``
+    environment: every value is shell-quoted, and the authentication key is never among them.
+    """
+    return ' '.join(ssh_env_exports(Namespace.from_env('HYPERSHELL')))
