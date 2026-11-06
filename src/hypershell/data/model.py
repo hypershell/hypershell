@@ -19,7 +19,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, select, bindparam, or_
+from sqlalchemy import Column, Index, func, text, update, select, bindparam, or_, cast
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
@@ -674,9 +674,10 @@ class Task(Entity):
         if retryable > 0:
             return TaskGroupInfo(previous_group, f'waiting on {retryable} failed tasks to be retried')
         # The count and the example are one statement: a row deleted after it was counted (a relay's
-        # completed rows leave for its outbox) can never leave a count with no example.
+        # completed rows leave for its outbox) can never leave a count with no example. The example is
+        # the least id as text: PostgreSQL's native uuid has no `min`.
         failed, example = (
-            Session.query(func.count(cls.id), func.min(cls.id))
+            Session.query(func.count(cls.id), func.min(cast(cls.id, Text)))
             .filter(Task.group == previous_group)
             .filter(cls.exit_status.isnot(None))
             .filter(cls.exit_status != 0)

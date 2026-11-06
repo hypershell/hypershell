@@ -1902,3 +1902,16 @@ follow-ups.
   - Gates here (macOS, no PostgreSQL): `-m unit` 858 passed, 3 skipped on 3.14 and on 3.15; the relay
     integration tests 39 passed on 3.15; the other integration tests 450 passed, 86 skipped on 3.15
     (`-n 6`). The full suite on Linux is the foreman's run.
+- 2026-11-06: review cycle 8, C8-1. The one-statement group check took its example as `min(task.id)`.
+  On PostgreSQL and TimescaleDB the id is a native `uuid`, which has no `min`, so every such server's
+  scheduler would fail with `function min(uuid) does not exist` the first time it checked a group.
+  The PostgreSQL CI job never reached `Task.increment_group`, so CI stayed green. Fix: the example is
+  `min(CAST(task.id AS TEXT))`, which renders the same on both dialects (a no-op cast on SQLite) and
+  keeps the count and the example in one statement. Red first, in a test-only commit before the fix:
+  `tests/test_zone_postgres.py::test_group_checks_on_native_uuid_ids` (the PostgreSQL job, on every
+  server in its matrix) runs `Task.current_group` before and after scheduling, then
+  `Task.increment_group` holding the group on a spent failure that it names and advancing once the
+  failure is marked retried. `tests/test_relay_return.py::test_group_check_example_renders_for_postgresql`
+  renders the statement for PostgreSQL with no server, and requires the cast. Gates here (macOS):
+  `-m unit` 859 passed, 3 skipped on 3.14 and 3.15; relay integration 39 passed on 3.15. The
+  PostgreSQL test needs a server, so it was not run here; the PostgreSQL job runs it.
