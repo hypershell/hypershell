@@ -235,9 +235,12 @@ key generators used in the deployment guides below satisfy this policy.
       ``HYPERSHELL_EXPORT_HYPERSHELL_SERVER_AUTH`` variable) hands every task a key the
       operator holds, such as the key of a hand-started ``hs server``. Its values are taken
       literally, so it cannot carry the key an ``hs cluster`` run mints, which no one is shown.
-    * A ``{= =}`` lambda pattern is Python the client evaluates itself, with ``os`` exposed,
-      so ``os.environ`` there is the client's own environment, key included. A template that
-      reads it does so on purpose.
+    * A ``{= =}`` lambda pattern is Python evaluated, with ``os`` exposed, in the process that
+      expands the template, so ``os.environ`` there is that process's own environment. For a
+      client that ``hs cluster`` starts as a process of its own (through a launcher, ``--mpi``,
+      ``--ssh`` or autoscaling), that includes ``HYPERSHELL_SERVER_AUTH``; under the default
+      local mode it holds the variable only if the environment that started ``hs cluster`` set
+      it (see :ref:`templates <templates>`). A template that reads it does so on purpose.
 
     A task that runs a nested ``hs cluster`` needs neither: that run mints its own key for
     its own server and clients.
