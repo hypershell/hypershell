@@ -35,4 +35,5 @@ def announcement(release: str, base: str = '') -> Optional[str]:
             f'Items marked &ldquo;Added in version {marker}&rdquo; or &ldquo;Changed in version '
             f'{marker}&rdquo; are not in {stable}. '
             f'Install the pre-release with <code>pip install --pre hypershell</code>. '
-            f'See <a href="{base}/whats_new.html">What&rsquo;s new in {line}</a>.')
+            f'Some may not be in a pre-release yet. '
+            f'See <a href="{base}/whats_new.html">What&rsquo;s new in {line}</a>, which says which are.')

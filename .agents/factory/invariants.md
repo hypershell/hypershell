@@ -7,8 +7,9 @@ this drifts, fix it). Two consumers:
 - **`hs-plan` (gate):** before research *and* after PLAN/TECH is drafted, walk the sections a change
   touches and confirm the design honors each. Record any bend in PLAN's deviation-justification
   table.
-- **`hs-review` (footgun list):** a violation of any invariant here is **auto-CRITICAL** and, when it
-  touches the high-blast-radius core, forces a human sign-off gate.
+- **`hs-review` (footgun list):** a violation of any invariant in §1–§11 is **auto-CRITICAL** and,
+  when it touches the high-blast-radius core, forces a human sign-off gate. A §12 project-convention
+  violation grades **HIGH** (`review-rubric.md`'s severity table).
 
 Only invoke the sections relevant to the change — do not manufacture findings against untouched
 subsystems.

@@ -64,7 +64,7 @@ Additional instructions provided with the invocation: $ARGUMENTS
 - **Refute before reporting.** Try to disprove each candidate; classify `CONFIRMED` (reproduced) vs
   `PLAUSIBLE` (needs human triage). Default to dropping when uncertain.
 - **Scope is narrow:** correctness bugs, GOAL R-ID gaps, AGENTS.md invariant violations
-  (auto-CRITICAL), and scope creep (changes mapping to no R-ID). **No style nits, no speculative
+  (auto-CRITICAL, except §12 conventions, which grade HIGH), and scope creep (changes mapping to no R-ID). **No style nits, no speculative
   hardening** — a gap-hunting reviewer manufactures gaps.
 - **Read-only session.** This skill makes no source edits; it writes `REVIEW.md` and updates the
   `TECH.md` `review` block via `set_phase.py`.

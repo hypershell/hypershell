@@ -43,6 +43,11 @@ Upgrading from 2.8
   then continue. If the lock is still held after 15 minutes, the upgrade stops with an error naming
   what it waited on and leaves the schema unchanged (2.9.0a2, :pr:`69`).
 
+- **Tasks that never ran have new exit codes.** A task whose template failed to expand now records
+  exit status -1001 (it was -2), and one that couldn't get its local resources records -1002 (it was
+  -3). The old values were the same as deaths by ``SIGINT`` and ``SIGQUIT``. Rows written before the
+  upgrade keep -2 and -3, so ``hs list --signal INT`` and ``--signal QUIT`` match them too (2.9.0a1,
+  :commit:`27db1b0`).
 - **Queue submission needs a server without a database.** ``hs submit -q`` works only against a
   server started with ``--no-db``. A server with a database schedules only from it, so it refuses
   the submission and ``hs submit`` exits with an error. In 2.8 the tasks ran but their results were
@@ -144,9 +149,9 @@ Listing and updating tasks
   :commit:`210a93e`; :ref:`hs list <cli_task_search>`).
 
 - **Signals and cancellation.** ``-X``/``--cancelled`` and ``--signal NAME`` on ``hs list`` and ``hs
-  update`` match cancelled tasks and tasks killed by a signal, and ``SIGHUP`` cancels a running task
-  on its client (2.9.0a1, :commit:`27db1b0`; :ref:`hs list <cli_task_search>`, :ref:`hs update
-  <cli_task_update>`).
+  update`` match cancelled tasks and tasks killed by a signal. A task that never ran now records
+  -1001 or -1002 instead of a value that reads as a signal; see the upgrade caution above (2.9.0a1,
+  :commit:`27db1b0`; :ref:`hs list <cli_task_search>`, :ref:`hs update <cli_task_update>`).
 
 Logging
 ^^^^^^^
@@ -178,6 +183,11 @@ Fixes
 - **Descriptors kept for the server.** The server refuses a queue connection that would use one of
   the last 32 file descriptors below its open-file limit, and logs a warning, so it can still open
   its database and log files (2.9.0a4, :pr:`76`).
+- **A clear hint for the cron extra.** Log rotation without ``croniter`` installed stops with a
+  one-line hint to install the ``cron`` extra (2.9.0a2, :commit:`f4448a3`).
+- **Logging across forks and on lockless filesystems.** A forked process no longer inherits the
+  parent's log file descriptors, and on a filesystem without lock support logging falls back cleanly
+  instead of failing (2.9.0a2, :commit:`ede1487`; :ref:`per-process log files <logging_files>`).
 
 -------------------
 
