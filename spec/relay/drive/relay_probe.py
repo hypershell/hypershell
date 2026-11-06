@@ -92,6 +92,20 @@ SERVER_POLL = setting('HSD_SERVER_POLL', 2, int)
 RELAY_BUNDLESIZE = setting('HSD_RELAY_BUNDLESIZE', 4 * THREADS, int)
 TLS = setting('HSD_TLS', '1') == '1'
 
+# The relay's backlog bound, mirrored from `hypershell.relay` (`site_bundlesize`) and
+# `hypershell.relay.upstream` (`BACKLOG_FACTOR`), not imported: importing HyperShell here would build its
+# configuration and database engine inside the drive's own processes. tests/test_relay_judge.py checks the
+# mirror against the code.
+BACKLOG_FACTOR = 2
+
+
+def relay_bound(connected: int) -> int:
+    """The most unfinished tasks a relay holds: two site bundles per connected site client.
+
+    The site bundle size is the relay's bundle size, never below a site client's executor threads.
+    """
+    return connected * max(1, RELAY_BUNDLESIZE, THREADS) * BACKLOG_FACTOR
+
 
 def run_dir() -> Path:
     """The shared run directory (transport only)."""
@@ -634,7 +648,7 @@ def relay(site: str) -> int:
                     connected = db.execute('SELECT COUNT(*) FROM client WHERE disconnected_at IS NULL').fetchone()[0]
                 samples += 1
                 peak_backlog = max(peak_backlog, backlog)
-                peak_bound = max(peak_bound, connected * RELAY_BUNDLESIZE)
+                peak_bound = max(peak_bound, relay_bound(connected))
             except sqlite3.Error:
                 pass
         if flag('abort').exists() or now >= deadline:

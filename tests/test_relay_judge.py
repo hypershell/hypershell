@@ -294,3 +294,38 @@ def test_main_requires_named_variants(judge, tmp_path: Path, capsys) -> None:
     assert judge.main([str(tmp_path), '--require', 'kill']) == 0
     assert judge.main([str(tmp_path), '--require', 'kill,none']) == 1
     assert 'none' in capsys.readouterr().out
+
+
+PROBE = Path(__file__).parent.parent / 'spec' / 'relay' / 'drive' / 'relay_probe.py'
+
+
+@fixture(scope='module')
+def probe():
+    """The drive's roles module, loaded from its path with its default settings (nothing runs on load)."""
+    spec = importlib.util.spec_from_file_location('relay_probe', PROBE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@mark.unit
+@mark.parametrize('connected', [0, 1, 2, 4])
+def test_probe_records_the_bound_the_relay_enforces(probe, connected: int) -> None:
+    """The bound a relay record carries is the relay's own: two site bundles per connected site client."""
+    from hypershell.relay import site_bundlesize
+    from hypershell.relay.upstream import BACKLOG_FACTOR
+    bundlesize = site_bundlesize(probe.RELAY_BUNDLESIZE, probe.THREADS)
+    assert probe.BACKLOG_FACTOR == BACKLOG_FACTOR
+    assert probe.relay_bound(connected) == connected * bundlesize * BACKLOG_FACTOR
+
+
+@mark.unit
+def test_relay_holding_two_bundles_per_client_passes(judge, probe) -> None:
+    """A relay at its full bound (two bundles per client, as on the drive's defaults) passes; above it fails."""
+    records = good_run('none')
+    bound = probe.relay_bound(2)
+    for site in ('A', 'B'):
+        records[f'relay-{site}'].update(peak_backlog=bound, peak_bound=bound)
+    assert 'relay.backlog' not in failed(judge, records)
+    records['relay-A']['peak_backlog'] = bound + 1
+    assert 'relay.backlog' in failed(judge, records)

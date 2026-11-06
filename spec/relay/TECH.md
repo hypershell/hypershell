@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay
 base: develop
-current_phase: P7
+current_phase: P9
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -122,7 +122,7 @@ phases:
   verify: uv run pytest -v tests/test_relay_judge.py && sh spec/relay/drive/relay_smoke.sh
 - id: P8
   name: 'Outage ride-through and restart durability: UpstreamLink, backoff, redelivery'
-  status: in_progress
+  status: done
   satisfies:
   - R9
   - R5
@@ -131,7 +131,7 @@ phases:
   - P6
   parallel: false
   hammerable: false
-  hill: crest
+  hill: downhill
   verify: uv run pytest -v tests/test_relay_link.py tests/test_relay_outage.py tests/test_relay_fsm.py
     tests/test_relay_return.py tests/test_relay_workload.py
 - id: P9
@@ -1505,6 +1505,30 @@ reconnection they are handed over; a relay restart loses nothing.
   - Throughput: the table above (PASS, 1.26×).
   - Not run here: the full suite on 3.12, the relay files on 3.14, the P8 verify as written, the P7
     verify and its smoke (all start servers).
+- **Linux gates (foreman, test cluster, at `1393af6`, 2026-11-05) — P8 done.**
+  - Full suite, Python 3.12, `-n auto` on 32 CPUs: 1295 passed, 4 failed under load. Three are known
+    timing flakes (`test_busy_port_raises_from_start[no-tls]`, `test_waits_for_slow_peer_upgrade`,
+    `test_server_keeps_its_files_at_the_open_file_limit`); the fourth,
+    `test_two_relays_grouped_workload_with_retry`, timed out at 205 s under that load and passed in the
+    serial P8 verify below.
+  - Relay test files plus `test_cluster_launch.py`, Python 3.14, `-n 8`: 401 passed.
+  - P8 verify as written: 115 passed.
+  - P7 judge (`tests/test_relay_judge.py`): passed. P7 smoke: every check passed but `relay.backlog`.
+  - R21 on 3 nodes at `1393af6`: every functional check passed in all three variants (kill 139 s,
+    pause 119 s, none 99 s for 2000 × 1 s tasks on 32 executors; run A at `24176a6` did 947 in 300 s);
+    only `relay.backlog` failed (peak 128 of a recorded bound 64).
+  - **`relay.backlog` was the probe, not the relay (fixed at P8 closure).** P8 doubled the relay's bound
+    (`BACKLOG_FACTOR`, two site bundles per connected client) but `relay_probe.py` still recorded
+    `connected × RELAY_BUNDLESIZE`, so every real run read as twice its bound (cluster 128/64, smoke
+    32/16), i.e. exactly at the true bound. The probe now records `relay_bound(connected)` =
+    connected × `max(1, RELAY_BUNDLESIZE, THREADS)` × `BACKLOG_FACTOR`, **mirrored** from
+    `hypershell.relay.site_bundlesize` and `hypershell.relay.upstream.BACKLOG_FACTOR`, not imported
+    (importing HyperShell would build its configuration and database engine inside the drive's role
+    processes). `tests/test_relay_judge.py` checks the mirror against the code
+    (`test_probe_records_the_bound_the_relay_enforces`, red first: 4 failed, `no attribute 'relay_bound'`)
+    and that a relay at its full bound passes while one above it fails
+    (`test_relay_holding_two_bundles_per_client_passes`). `peak_bound` keeps its meaning (the bound the
+    relay enforces; it was mis-computed), so the evidence schema stays 2.
 - **Touches:** `src/hypershell/core/reconnect.py` (new), `src/hypershell/relay/` (`__init__.py`, `upstream.py`,
   `store.py`, `site.py`), `src/hypershell/core/config.py` (`[relay] poll`, `[relay.upstream] deadline`,
   `backoff`), `src/hypershell/cluster/remote.py` (`AutoScalingCluster(evict_after=…)`, A5),
