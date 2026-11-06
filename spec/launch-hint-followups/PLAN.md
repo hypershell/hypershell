@@ -87,8 +87,9 @@ follow the statement they refer to. Three edits do that:
   gives it explicitly." The paragraph's last sentence, "This applies to clients from this release on;
   …", moves with them, because it also referred to that statement and would otherwise follow the
   nested-run sentence.
-- "There are two explicit ways:" no longer follows "explicitly". It becomes "The configuration can
-  give a task the key in two explicit ways:".
+- "There are two explicit ways:" no longer follows "explicitly". It becomes "A task can be given
+  the key in two explicit ways:". (Amended at build: the first draft, "The configuration can give a
+  task the key …", fitted `[export]` but not the `{= =}` bullet, which is a template.)
 - The nested-run sentence stays after the bullets, unchanged.
 
 Every other word is unchanged.

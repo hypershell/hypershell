@@ -4,10 +4,10 @@ title: 'Launch-path follow-ups: accurate no-key hints, template docs, an export-
   test'
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/launch-hint-followups
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -35,7 +35,7 @@ phases:
   verify: uv run pytest -n auto tests/test_cluster_launch.py -k shell_cannot_assign
 - id: P3
   name: Accurate template docs and the approved security sentence; final gates
-  status: pending
+  status: done
   satisfies:
   - R4
   - R6
@@ -44,8 +44,9 @@ phases:
   - P2
   parallel: false
   hammerable: false
-  hill: uphill
-  verify: uv run pytest -n auto && uv run sphinx-build -W --keep-going -E docs docs/_build
+  hill: downhill
+  verify: 'uv run pytest -n auto && uv run sphinx-build -W --keep-going -E -q docs
+    docs/_build 2>&1 | grep WARNING  # expect exactly the two known toctree warnings'
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -113,12 +114,13 @@ client with no key from any source still does.
 **Goal:** `templates.rst` says what the probes in PLAN §4 show; `security.rst` carries the approved
 wording; the full suite and the docs build pass.
 
-- [ ] `docs/_include/templates.rst`: rewrite the `{% %}` environment paragraph and the `{= =}`
+- [x] `docs/_include/templates.rst`: rewrite the `{% %}` environment paragraph and the `{= =}`
   sentence per PLAN §2.3.
-- [ ] `docs/security.rst`: replace the sentence with the approved text, moved per PLAN §2.3 so that
+- [x] `docs/security.rst`: replace the sentence with the approved text, moved per PLAN §2.3 so that
   "This" follows what it refers to.
-- [ ] Full suite under `-n auto` (Python 3.14) and the Sphinx build. Record both below.
-- **Verify:** `uv run pytest -n auto && uv run sphinx-build -W --keep-going -E docs docs/_build`.
+- [x] Full suite under `-n auto` (Python 3.14) and the Sphinx build. Record both below.
+- **Verify:** `uv run pytest -n auto && uv run sphinx-build -W --keep-going -E -q docs docs/_build 2>&1 | grep WARNING`;
+  green means the suite passes and the build lists exactly the two known toctree warnings (see Conventions).
 - **Touches:** `docs/_include/templates.rst`, `docs/security.rst`.
 
 ---
@@ -154,3 +156,26 @@ perl process-group kill timer.
   `-NAME` and ` NAME`). The mutant is killed.
 - **Restored:** `git checkout -- src/hypershell/cluster/launch.py`; `git diff` on `src/` empty; the
   same command → **3 passed**.
+
+### P3 — docs and final gates
+
+- **R4, checked by execution** (PLAN §4 table, throwaway sites):
+  - A `{% %}` command gets neither the `TASK_*` variables nor the key variable in any mode.
+  - It gets an `[export]` value only under `--launcher`, where `ClientLaunch.start` has put the
+    value in the client's own environment.
+  - A `{= =}` lambda reads the key variable as `True` under `--launcher`, and as `False` under local
+    `hs cluster` and under a hand-started `hs client -k`.
+  - The SSH remote step leaves the key variable in the client process's environment.
+
+  The new `templates.rst` text states exactly these.
+- **R6:** the approved two sentences are verbatim. They now follow "… unless the configuration gives
+  it explicitly.", so "This" refers to keeping the key out of task environments. "This applies to
+  clients from this release on; …" moved with them. "There are two explicit ways:" became "A task
+  can be given the key in two explicit ways:". The nested-run sentence stays after the bullets.
+  (Amendment: PLAN §2.3 first had "The configuration can give a task the key …". That wording does
+  not fit the `{= =}` bullet, so PLAN is updated to match.)
+- **Full suite**, `pytest -n auto`, Python 3.14.6: **1005 passed, 88 skipped**, 0 failed. That is
+  the cycle-3 review's 1000 passed plus the 5 new cases.
+- **Sphinx** `-W --keep-going -E`: exit 1 with exactly the two known warnings (`cli/task_submit.rst`,
+  `manual.rst`: "document isn't included in any toctree"). That is identical to `d2a460f`. Nothing
+  comes from `security.rst` or `templates.rst`; both pages render the new text.
