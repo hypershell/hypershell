@@ -11,7 +11,9 @@
 #   (c) the upstream server holds connections for the relays only, never for leaf clients;
 #   (d) failover: relay B is stopped mid-run (kill, or pause), evicted, its unreturned tasks revert
 #       and complete at site A, and no task is lost (variant none is the control);
-#   (e) the upstream key appears in no site client's (or task's) argv or environment.
+#   (e) the upstream key appears in no site client's (or task's) argv or environment. Also recorded:
+#       each site client holds its site key in its environment (HYPERSHELL_SERVER_AUTH), and no
+#       command line and no task holds it.
 #
 # Runs inside one Slurm allocation of at least 3 nodes (or on one machine with HSD_MODE=local, see
 # relay_smoke.sh). Node 0 runs the upstream server; the remaining nodes split into site A (the first

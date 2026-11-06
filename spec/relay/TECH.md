@@ -267,6 +267,11 @@ item runs with P3's gate; it already passes on the merged tree. The P6 items run
   foreman ruling (N4). If hardening already exposes one invocation function, P9 uses it and the
   extraction is dropped.
 - Relay never touches `cluster/ssh.py`, `cluster/local.py` or `client.py`.
+- **Landed and merged (2026-11-05).** `fix/authkey-handling-hardening` is #80 on `develop`
+  (`d2a460f`), merged into this branch with the site-client launch moved onto it; see *Merge round —
+  `origin/develop` `d2a460f`* after the review-2 round. It exposes one invocation function,
+  `cluster/launch.py` `client_launch()`, so P9's extraction is dropped (P9 below), and the P9 gate on
+  the hardening cycle is met.
 
 ## Plan-gate rulings (foreman, 2026-11-04; PLAN §5)
 
@@ -1058,6 +1063,94 @@ roster guard). The key reaches no new place.
   `docs/_include/relay_desc.rst`, `docs/_include/config_param_ref.rst`, `tests/test_relay_workload.py`,
   `tests/test_relay_fsm.py`, `tests/test_relay_roster.py`, this file.
 
+## Merge round — `origin/develop` `d2a460f`, authkey hardening (2026-11-05)
+**Not a phase.** It brings #80 (`fix/authkey-handling-hardening`), the 2.9.0a4 bump and #79's roadmap
+changes onto relay, and moves the relay's site-client launch onto `client_launch()`. P7 stays
+`in_progress`, waiting on the foreman's external run.
+
+- **Merge** (`72cb1bb`, signed): no textual conflict. `AGENTS.md`, `invariants.md`, `ROADMAP.md` and
+  `issues/relay.md` auto-merged; develop's `spec/authkey-handling-hardening/` and new seeds come in
+  verbatim.
+- **Semantic conflict (1).** `AutoScaler` now holds a `ClientLaunch` (`launch`) in place of its argv
+  (`launcher`), so `fence_site`, which read `cluster.autoscaler.machine.launcher`, raised
+  `AttributeError` and every relay start exited 5 on the merge commit alone (4 relay-launch tests red
+  there). Nothing else in relay read the argv.
+- **The relay's one launch path is the stock one.** The relay starts site clients only through its
+  site cluster's `AutoScaler` (fixed policy), which launches every client with the cluster's one
+  `ClientLaunch` from `client_launch()` (`cluster/remote.py` `AutoScalingCluster`, `AutoScaler.scale`).
+  Relay builds no argv and starts no other process (only the re-exec of itself), and `cluster/` is not
+  edited. So, with the site key: never on a site client's command line (handed over as
+  `HYPERSHELL_SERVER_AUTH` in the launched environment; for an Open MPI launcher also named in
+  `OMPI_MCA_mca_base_env_list`); never in a task's environment or a `{% %}` command's (the client
+  strips it). The relay supports `--launcher`/`--launcher-args` only; `--ssh`/`--mpi` are `hs cluster`
+  modes it does not have. A launcher that does not pass the environment through (`srun
+  --export=NONE`, a bare `ssh host` prefix) now leaves site clients without a key: they fail with the
+  client's no-key hint rather than authenticating. That is #80's behaviour for `hs cluster
+  --launcher` too, and the relay docs now say the launcher must pass the environment.
+- **Rewired.** `relay/site.py`: `site_launch(cluster)` returns `cluster.launch`; `check_invocation`
+  takes the `ClientLaunch` and refuses the upstream key in its argv or in any variable it adds to a
+  client's environment; `fence_site` checks `site_launch(cluster)`. The scrub is unchanged: the launch
+  builds each client's environment at launch time from the scrubbed `os.environ`, the `[export]`
+  variables (still checked) and the site key, in that order, so the site key wins over any
+  `HYPERSHELL_SERVER_AUTH` the relay host sets, and an upstream key set there is scrubbed by value
+  first.
+- **Site configuration copy against the new path.** Unchanged and still right: the copy drops the
+  `[relay]` table and every value holding the upstream key. A `[server] auth` left in the copy (or in
+  a file passed on unchanged) cannot shadow the site key, because the environment layer outranks every
+  file (checked: `HYPERSHELL_SERVER_AUTH` beats `[server] auth` in `HYPERSHELL_CONFIG_FILE`). If a
+  launcher drops the environment, the client falls back to that file or the default and fails
+  authentication; the upstream key is in neither.
+- **Upstream key (R17, R21 (e)).** Unchanged: it reaches no site client by argv, environment, the
+  configuration copy or the launch's added variables, and the relay never sets
+  `HYPERSHELL_SERVER_AUTH` to it (the site key is minted by the site cluster).
+- **Tests (red first).** `tests/test_relay_launch.py`: `test_client_invocation_excludes_the_key` (the
+  launch's argv holds no key option and neither key; its environment additions are exactly the site
+  key; the autoscaler launches with that object), `test_open_mpi_launcher_forwards_the_site_key_by_name_only`,
+  `test_invocation_check_covers_what_the_launch_adds_to_the_environment`, and
+  `test_relay_launches_site_clients_without_the_key` (a recording launcher: no `-k`/`--auth`, one
+  128-character site key in each launch's environment, on no argument, in no relay output).
+  `tests/test_relay_workload.py::test_site_key_reaches_site_clients_in_their_environment_only`: one
+  relay, two site clients and a gated task whose environment can be read; psutil finds the site key in both clients'
+  environments, on no command line, in no task's environment; the site template
+  `: {% printenv HYPERSHELL_SERVER_AUTH || echo unset %}; {}` records `: unset;` in every command
+  upstream. *Red:* on the pre-merge source (`b532c65`, a scratch export on `PYTHONPATH`, the new
+  imports stubbed) the process tests failed for the reason (`-k` on the recorded argv; site clients
+  without the key in their environment) and the unit test at its first line (no `launch`).
+  *Mutations* (scratch copies of the merged source): tasks inheriting `os.environ`, and `{% %}`
+  expanding without `shell_env`, both fail the workload test (`site key in 2 task environments`; the
+  second through `TASK_COMMAND`, which carries the expanded command).
+- **P7 drive.** Still captures R21 (e) as written: the watcher scans site clients and tasks for the
+  upstream key, and the site key now in each client's environment is not the upstream key. It now
+  also records, per leaf node (counts only; the site keys stay in the watcher's memory), site clients
+  holding `HYPERSHELL_SERVER_AUTH`, site processes with `-k`/`--auth` or a site key on their command
+  line, and tasks holding the variable or a site key (`relay_probe.py`, record schema 2). The judge
+  checks them as `e.site_key.handoff` / `.argv` / `.tasks` on schema 2 records and judges schema 1
+  records (an earlier head's drive) without them (`relay_judge.py`; 8 new judge tests, red against the
+  old judge: 10 failed). `relay_launch.sh` already passes `--export=ALL`; it is now what lets site
+  clients authenticate, not only what makes (e) non-vacuous.
+- **Verified 2026-11-05** (venvs from `uv sync --frozen` on `PATH` in place of `uv run`, the sandbox
+  off only for that sync; each run under a process-group kill timer; no process of these runs left):
+  - Full suite, 3.12, `-n auto`: 1251 passed, 86 skipped (PostgreSQL and other server-backed tests).
+  - Relay files and `tests/test_cluster_launch.py`, 3.14, `-n auto`: 353 passed, 1 skipped, twice in a
+    row. Two earlier runs on a loaded host (other worktrees' suites running) failed 2 each:
+    `test_relay_exits_and_ends_its_site_when_its_receiver_dies` both times (review cycle 3's C3-2, the
+    fault armed before any result: ruled to P8), `test_failover_reverts_and_completes_elsewhere` once
+    (passed serially at once; reason not captured), and the new site-key test once, which waited for
+    two running tasks where one client may hold the whole local bundle; it now waits for one readable
+    task and both clients, and passed 6 of 6 run concurrently.
+  - P4 verify, 3.12: 75 passed; one-relay workload 1 passed. P5 verify, 3.12: 44 passed (serial), then
+    the full suite above.
+  - P7 verify (project `.venv`, Python 3.15): judge tests 75 passed; `relay_smoke.sh` with
+    `HSD_SMOKE_RUNS="kill pause none"`: PASS (41, 41, 39 checks; 160 s); every leaf record shows both
+    site clients holding the site key, 0 on a command line, 0 of 33–89 scanned tasks holding it, 0
+    upstream-key hits. *Red:* the same smoke (variant none) on the pre-merge source fails exactly
+    `e.site_key.handoff` (0 of 4 clients) and `e.site_key.argv` (4 processes).
+- **Touches:** merge commit (develop's files); `src/hypershell/relay/site.py`, `src/hypershell/relay/__init__.py`
+  (help and docstring), `docs/_include/relay_desc.rst`, `docs/_include/relay_help.rst`,
+  `tests/test_relay_launch.py`, `tests/test_relay_workload.py`, `tests/test_relay_judge.py`,
+  `spec/relay/drive/` (`relay_probe.py`, `relay_judge.py`, `relay_drive.sh`, `relay_launch.sh`), this
+  file. No `cluster/`, `client.py`, `server.py` or zone-code edit.
+
 ## Phase P7 — R21 run A: relay drive, smoke, hand back
 **Satisfies:** R21, R20 · **Depends on:** P5, P6 · PLAN §6; [04 §2](research/04-evidence-and-tests.md)
 **Goal:** a committed, site-neutral run script the foreman can run in one Slurm allocation, proven by
@@ -1133,6 +1226,11 @@ a local smoke, and an exact run matrix handed back.
   - *Check (c)'s address half* (upstream peers within the relay nodes' addresses) is recorded but only
     judged in slurm mode; with one node per site every site node hosts a relay, so the ownership half
     (no upstream connection from any site process, per node) is what decides it.
+- **Maintainer approvals (2026-11-05).** The four deviations above are approved: (1) 3 nodes by
+  default with one shared zone (no multi-zone site A); (2) relay bundle size 4 × threads; (3) a
+  non-`--forever` upstream that ends the run and tells the relays to shut down; (4) META F6: P7 stays
+  `in_progress` (hill `crest`) after a green verify, waiting on the foreman's external run, and P10's
+  judging of the delivered records closes R21.
 - **Red first (2026-11-05):** `tests/test_relay_judge.py` written before the judge: 66 errors
   (`FileNotFoundError`, no judge). With the judge: 67 passed (one test case corrected: the address
   check is judged only when the record says it applies, so the bad case sets it).
@@ -1186,6 +1284,12 @@ a local smoke, and an exact run matrix handed back.
     long enough for the 30 s eviction to come first (`d.triggered` fails); raise `HSD_EVICT` then.
     (6) Relays must reach node 0 by its Slurm name (in its certificate), and site nodes the relay
     node by its host name. (7) If the run is slow, lower `HSD_TASKS` before raising the budget.
+    (8) *Since the authkey merge (2026-11-05):* a site client's key reaches it only in the environment,
+    so the launcher's `--export=ALL` is now what lets site clients authenticate; an `--export` in
+    `HSD_SRUN_ARGS`/`HSD_LEAF_SRUN_ARGS` comes after it and wins, so do not put one there. A client
+    that got no key logs the client's no-key hint (`HYPERSHELL_SERVER_AUTH is not set`) and exits;
+    the relay relaunches it each `[autoscale] period`. Records are now schema 2 with three more
+    checks (`e.site_key.*`); records from a drive before the merge (schema 1) are judged without them.
 - **Touches:** `spec/relay/drive/` (`relay_drive.sh`, `relay_launch.sh`, `relay_probe.py`,
   `relay_task.py`, `relay_judge.py`, `relay_smoke.sh`), `tests/test_relay_judge.py`, this file.
 
@@ -1220,6 +1324,8 @@ reconnection they are handed over; a relay restart loses nothing.
     relay's site (a site client killed without a FINISHED beat holds up a drain that long; P5 ruling 2's
     note). It predates this branch. Fix it here, after the hardening cycle's `cluster/remote.py`
     changes have merged (pass the evict period through, or compose the site server in relay).
+    They merged on 2026-11-05 (merge round above); #80 left `AutoScalingCluster`'s `ServerThread`
+    call as it was.
   - *B8.* `relay.upstream.evict_hint` is read here (the `UpstreamLink` warning and the replay cut-off
     below). Since review cycle 2 the public config reference does not list it: document it when
     implemented (the checklist item above).
@@ -1239,16 +1345,19 @@ non-goals.
       `launcher`, `launcher_args`, `size`.
 - [ ] Puller cycles zones with a short `wait`; per-zone gate; confirm under the requesting zone's
       identity; heartbeat every identity, roster on the holder.
-- [ ] `cluster/remote.py`: minimal, behaviour-preserving extraction of `AutoScalingCluster`'s
-      client-invocation build into a module function, used by `AutoScalingCluster` and by relay
-      for extra zone fleets (`AutoScalerThread`); skipped if hardening already exposes one.
-      `tests/test_autoscale.py` and `tests/test_cluster.py` pass unmodified.
+- [ ] ~~`cluster/remote.py`: minimal, behaviour-preserving extraction of `AutoScalingCluster`'s
+      client-invocation build into a module function~~ **Dropped (merge round, 2026-11-05):**
+      hardening exposes `cluster/launch.py` `client_launch()`. Extra zone fleets build their
+      `ClientLaunch` with it and run an `AutoScalerThread(launch, …)`; each zone's fleet goes through
+      the credential fence (`check_invocation` on its launch). No `cluster/` edit.
 - [ ] Tests: `test_relay_connector.py::test_each_zone_requests_independently` (demand holds one
       entry per identity; Z2 dispatcher untouched); `test_relay_workload.py::
       test_multizone_relay_takes_only_its_zones` (a zone with no client stays unscheduled);
       failover of a two-zone relay reverts and unstages both zones.
 - [ ] Docs: `docs/security.rst` gains a relay section (two auth domains, TLS pinning across the WAN
-      hop, key exposure confined within each site); `docs/cli/relay.rst` states the non-goals (no
+      hop, key exposure confined within each site; since #80 no key is on any site process's
+      command line, so state the site key's handoff in the site client's environment as #80's
+      section does, not process-table exposure); `docs/cli/relay.rst` states the non-goals (no
       throughput gain, no cross-site cancellation or output retrieval, no site-topology
       autoscaling, synchronised clocks needed for eviction); `docs/database.rst` (relay-local file,
       node-local disk advice); help snippets and completions for the multi-zone options.

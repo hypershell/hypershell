@@ -11,7 +11,8 @@
 #                   HSD_LAUNCH_STATE) gets one job step that overlaps the steps already there:
 #                   $HSD_SRUN --overlap --nodes=1 --ntasks=1 --nodelist=NODE --export=ALL \
 #                         $HSD_SRUN_ARGS $HSD_LEAF_SRUN_ARGS <client command ...>
-#                   (--export=ALL forwards the environment whatever the site's default is.)
+#                   (--export=ALL forwards the environment whatever the site's default is. The
+#                   client needs it: its site key arrives there, never on its command line.)
 #   HSD_MODE=local  runs the client here, dialing the relay on loopback (-H 127.0.0.1) rather than
 #                   by host name, since a host's own name need not resolve to an address its
 #                   firewall lets through.

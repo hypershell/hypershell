@@ -9,6 +9,10 @@ launches the site clients with it, and launches another whenever one exits. It s
 its own (no source; its server runs forever on the relay database) and never retries: the upstream
 server alone retries tasks, so a failure at the site is a completed row like any other.
 
+Every site client is launched through the cluster's one `ClientLaunch` (see
+`hypershell.cluster.launch.client_launch`): the site key is handed over in the client's environment,
+never on its command line, and a client passes it to none of its tasks.
+
 The upstream key stays with the relay. Site clients inherit the relay's environment when they are
 launched, and tasks inherit their client's, so before the first launch `fence_site` refuses a client
 invocation or an exported task variable that carries the key, and removes from the relay's own
@@ -27,7 +31,7 @@ Example:
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, List, Optional, Tuple, Final, Mapping, MutableMapping, Sequence
+from typing import Any, List, Optional, Tuple, Final, Mapping, MutableMapping
 
 # Standard libs
 import os
@@ -42,12 +46,13 @@ import tomlkit
 from hypershell.core.config import config, load_task_env
 from hypershell.core.logging import Logger
 from hypershell.core.tls import TLSConfig
+from hypershell.cluster.launch import ClientLaunch
 from hypershell.cluster.remote import AutoScalingCluster
 
 # Public interface
-__all__ = ['site_cluster', 'SITE_POLICY', 'DEFAULT_SITE_PERIOD', 'fence_site', 'scrub_environment',
-           'check_invocation', 'check_exports', 'CredentialFenceError', 'FENCED_PREFIX', 'site_config_copy',
-           'end_site_clients']
+__all__ = ['site_cluster', 'site_launch', 'SITE_POLICY', 'DEFAULT_SITE_PERIOD', 'fence_site',
+           'scrub_environment', 'check_invocation', 'check_exports', 'CredentialFenceError', 'FENCED_PREFIX',
+           'site_config_copy', 'end_site_clients']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -86,6 +91,11 @@ def site_cluster(address: Tuple[str, int],
                               policy=SITE_POLICY, period=period,
                               init_size=size, min_size=size, max_size=size,
                               tls=tls, zone=zone)
+
+
+def site_launch(cluster: AutoScalingCluster) -> ClientLaunch:
+    """The invocation every site client of `cluster` is launched with: its command line holds no key."""
+    return cluster.launch
 
 
 FENCED_PREFIX: Final[str] = 'HYPERSHELL_RELAY_'
@@ -176,9 +186,14 @@ def scrub_environment(key: str, environ: Optional[MutableMapping[str, str]] = No
     return sorted(removed)
 
 
-def check_invocation(argv: Sequence[str], key: str) -> None:
-    """Raise `CredentialFenceError` if the site client invocation carries the key in any argument."""
-    if key and any(key in str(arg) for arg in argv):
+def check_invocation(launch: ClientLaunch, key: str) -> None:
+    """Raise `CredentialFenceError` if the site client invocation carries the key.
+
+    That is any argument of its command line, or any variable it adds to a client's environment
+    (which holds the site key, never the upstream one).
+    """
+    added = [text for item in launch.env.items() for text in item]
+    if key and any(key in str(arg) for arg in [*launch.argv, *added]):
         raise CredentialFenceError('Upstream key found in the site client command line '
                                    '(launcher, launcher arguments or template) - not launching site clients')
 
@@ -202,7 +217,7 @@ def fence_site(cluster: AutoScalingCluster, key: str,
     configured through the environment, before calling this: relay settings are gone after. Returns
     the names of the variables removed.
     """
-    check_invocation(cluster.autoscaler.machine.launcher, key)
+    check_invocation(site_launch(cluster), key)
     check_exports(load_task_env() if exports is None else exports, key)
     removed = scrub_environment(key, environ, site_config=site_config)
     if removed:

@@ -51,6 +51,7 @@ from pytest import mark
 
 # Internal libs
 from hypershell.core.config import RELAY_MARKER
+from hypershell.cluster.launch import AUTH_ENV
 from hypershell.core.logging import HOSTNAME
 from hypershell.core.tls import ensure_default_materials
 from tests.conftest import free_port
@@ -454,6 +455,67 @@ def test_failover_reverts_and_completes_elsewhere(group: Group) -> None:
     assert 'Upstream heartbeat - final' in text and key not in text
     assert not (group.site / 'relay-b' / 'primary-sentinel.db').exists()
     assert not (group.site / 'relay-a' / 'primary-sentinel.db').exists()
+
+
+KEY_PROBE_TEMPLATE = ': {% printenv ' + AUTH_ENV + ' || echo unset %}; {}'
+"""Site template whose shell expansion records whether the expanding command saw the site key."""
+
+
+def scan_site_key(relay: Any, barrier: Path) -> Dict[str, Any]:
+    """Where the site key is among the processes a relay launched (environments that could be read).
+
+    `keys` is the set of keys the site clients hold in their environment; `argv` counts processes with
+    one of them on their command line, `tasks` the running tasks scanned, and `task_hits` those holding
+    the key variable or a key in their environment.
+    """
+    procs = []
+    for proc in site_processes(relay):
+        try:
+            procs.append((proc.cmdline(), proc.environ()))
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            continue
+    procs = [(cmdline, environ) for cmdline, environ in procs if environ]
+    clients = [environ for cmdline, environ in procs if 'client' in cmdline]
+    keys = {environ[AUTH_ENV] for environ in clients if environ.get(AUTH_ENV)}
+    tasks = [environ for cmdline, environ in procs if any(str(barrier) in arg for arg in cmdline)]
+    return {'clients': len(clients), 'keyed_clients': sum(1 for environ in clients if environ.get(AUTH_ENV)),
+            'keys': keys, 'tasks': len(tasks),
+            'argv': sum(1 for cmdline, _ in procs if any(k in arg for k in keys for arg in cmdline)),
+            'task_hits': sum(1 for environ in tasks
+                             if AUTH_ENV in environ or any(k in v for k in keys for v in environ.values()))}
+
+
+@mark.integration
+def test_site_key_reaches_site_clients_in_their_environment_only(group: Group) -> None:
+    """The relay's site clients get the site key in their environment; no command line and no task gets it.
+
+    The site template expands a shell command (``{% %}``) that prints the key variable, and every
+    command recorded upstream shows it unset there too.
+    """
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    deadline = time.monotonic() + DEADLINE
+    barrier = group.site / 'barrier'
+    server = start_upstream(group, port, key, deadline, barrier)
+    relay = start_site_relay(group, 'relay-a', port, key, HYPERSHELL_RELAY_TEMPLATE=KEY_PROBE_TEMPLATE)
+
+    # Both clients, and a task whose environment can be read (a task's shell may withhold its own).
+    found = until(lambda: (scan := scan_site_key(relay, barrier))['tasks'] >= 1 and scan['clients'] >= 2 and scan,
+                  deadline, 'a readable task running at the site')
+    assert found['keyed_clients'] == found['clients'], f'site clients without the site key: {found}'
+    site_key, = found['keys']
+    assert len(site_key) == 128 and key not in site_key
+    assert found['argv'] == 0, f'site key on {found["argv"]} command lines'
+    assert found['task_hits'] == 0, f'site key in {found["task_hits"]} task environments'
+    barrier.touch()
+
+    assert group.wait(server, deadline) == 0, group.text('server')
+    assert group.wait(relay, deadline) == 0, group.text('relay-a')
+    tasks = rows(Path(os.environ['HYPERSHELL_DATABASE_FILE']), 'SELECT * FROM task')
+    check_upstream_rows(tasks)
+    assert all(task['command'].startswith(': unset; ') for task in tasks), \
+        [task['command'][:24] for task in tasks if not task['command'].startswith(': unset; ')]
+    text = group.text('relay-a') + group.text('relay-a', 'out')
+    assert site_key not in text and key not in text
 
 
 # --- Lifecycle and configuration --------------------------------------------------------------

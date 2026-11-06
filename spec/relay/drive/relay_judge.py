@@ -8,6 +8,10 @@ A run is one directory of JSON records written by `relay_drive.sh`: `upstream.js
 server's node), `relay-A.json` and `relay-B.json` (one per relay), and `leaf-<site>-<n>.json` (one
 per site node). Records hold counts and booleans only: no host, user, path or key.
 
+Schema 2 leaf records also count where the site key was seen: site clients must hold it in their
+environment (how `hs relay` hands it over), and no command line and no task may hold it. Schema 1
+records, from a drive before that, are judged without those checks.
+
     relay_judge.py DIR [--require kill,pause,none]
 
 DIR is one run's directory or a directory of runs. Every run found is judged and printed with each
@@ -27,7 +31,8 @@ import argparse
 from pathlib import Path
 
 
-SCHEMA = 1
+SCHEMA = 2
+SCHEMAS = (1, 2)
 VARIANTS = ('kill', 'pause', 'none')
 SITES = ('A', 'B')
 
@@ -73,8 +78,10 @@ def judge_run(records: Records) -> List[Check]:
     missing += [f'leaf-{s}-*' for s in SITES if not leaves(records, s)]
     if not check('records.present', present, f'missing: {", ".join(missing)}' if missing else ''):
         return checks
-    check('records.schema', all(r.get('schema') == SCHEMA for r in records.values()),
-          f'expected schema {SCHEMA}')
+    schemas = {r.get('schema') for r in records.values()}
+    check('records.schema', len(schemas) == 1 and schemas <= set(SCHEMAS),
+          f'expected one schema of {SCHEMAS}, found {sorted(map(str, schemas))}')
+    schema = up.get('schema')
     marked = sorted({s for r in records.values() for s in strings(r) if '/' in s or '@' in s})
     check('records.scrubbed', not marked, f'{len(marked)} values look like paths or addresses')
 
@@ -183,6 +190,20 @@ def judge_run(records: Records) -> List[Check]:
           f'{total(every_leaf, "untokened_clients")} site clients without the relay\'s environment (not forwarded)')
     check('e.logs', int(up.get('key_in_server_log') or 0) == 0 and all(r.get('key_in_logs') == 0 for r in (ra, rb)),
           'the key appeared in a log')
+
+    # The site key reaches each site client in its environment, and no command line or task.
+    if schema == 2:
+        fields = ('site_key_clients', 'site_key_argv', 'site_key_tasks')
+        recorded = all(field in leaf for leaf in every_leaf for field in fields)
+        check('e.site_key.handoff', recorded and total(every_leaf, 'clients_scanned') > 0
+              and total(every_leaf, 'site_key_clients') == total(every_leaf, 'clients_scanned'),
+              f'{total(every_leaf, "site_key_clients")} of {total(every_leaf, "clients_scanned")} site clients '
+              f'held the site key in their environment' + ('' if recorded else ' (fields missing)'))
+        check('e.site_key.argv', recorded and total(every_leaf, 'site_key_argv') == 0,
+              f'{total(every_leaf, "site_key_argv")} site processes with a key option or the site key on their '
+              f'command line')
+        check('e.site_key.tasks', recorded and total(every_leaf, 'site_key_tasks') == 0,
+              f'{total(every_leaf, "site_key_tasks")} tasks held the site key in their environment')
 
     # The relay database never touches the primary; each relay has one identity; R8's bound holds.
     check('relay.primary', all(r.get('primary_db_created') is False for r in (ra, rb)),

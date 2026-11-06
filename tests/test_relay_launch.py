@@ -8,6 +8,7 @@ client's. Before the first launch the relay refuses a client invocation or an ex
 that would carry the upstream key, and scrubs its own environment of relay settings and of anything
 holding the key. Here the key is put in the relay's environment on purpose, under several names, and
 must reach neither the scrubbed environment nor the command line a site client is launched with.
+The site key the relay mints reaches each site client in its environment, never on its command line.
 A configuration file holding relay settings or the key is replaced, for the site, by a private copy
 without them. The key itself may be given in any of its documented forms.
 """
@@ -34,8 +35,9 @@ from cmdkit.config import Configuration, Namespace
 
 # Internal libs
 from hypershell.core.config import DEFAULT_AUTH, ConfigurationError
-from hypershell.relay.site import (site_cluster, fence_site, scrub_environment, check_invocation, check_exports,
-                                   CredentialFenceError, site_config_copy)
+from hypershell.cluster.launch import ClientLaunch, AUTH_ENV, OMPI_ENV_LIST
+from hypershell.relay.site import (site_cluster, site_launch, fence_site, scrub_environment, check_invocation,
+                                   check_exports, CredentialFenceError, site_config_copy)
 from hypershell.relay.upstream import upstream_key
 from tests.test_relay_db import relays, upstream, free_port, UPSTREAM_AUTH, DEADLINE, POLL  # noqa: fixtures
 
@@ -215,20 +217,43 @@ def test_upstream_key_refuses_two_forms_in_one_place(monkeypatch) -> None:
 
 @mark.unit
 def test_client_invocation_excludes_the_key(monkeypatch) -> None:
-    """With the key in the relay's environment, the site client command line never carries it."""
+    """With the key in the relay's environment, the site client invocation never carries it.
+
+    The site key is handed over in the client's environment only: no key option and no key on the
+    command line, and the autoscaler launches with exactly this invocation.
+    """
     for name, value in relay_environment().items():
         monkeypatch.setenv(name, value)
     cluster = site_cluster(address=('127.0.0.1', free_port()), size=2, launcher='srun --exact',
                            launcher_args=['--mpi=none'], zone='gpu')
-    argv = cluster.autoscaler.machine.launcher
+    launch = site_launch(cluster)
+    assert cluster.autoscaler.machine.launch is launch
+    argv = launch.argv
     assert argv[:3] == ['srun', '--exact', '--mpi=none'] and 'client' in argv
     assert not any(KEY in arg for arg in argv)
-    site_key = argv[argv.index('-k') + 1]
+    assert '-k' not in argv and '--auth' not in argv
+    site_key = cluster.server.queue.config.auth
     assert site_key != KEY and len(site_key) == 128
+    assert not any(site_key in arg for arg in argv)
+    assert launch.env == {AUTH_ENV: site_key} and launch.stdin is None and not launch.inherit_env
+    assert site_key not in launch.describe()
 
     environ = dict(os.environ)
     assert fence_site(cluster, KEY, environ=environ, exports={}) != []
     assert not holds_key(environ)
+
+
+@mark.unit
+def test_open_mpi_launcher_forwards_the_site_key_by_name_only() -> None:
+    """An Open MPI launcher is told to forward the site key variable, by name; the key stays off the command line."""
+    cluster = site_cluster(address=('127.0.0.1', free_port()), size=2, launcher='mpirun -np 1')
+    launch = site_launch(cluster)
+    site_key = cluster.server.queue.config.auth
+    assert launch.argv[:3] == ['mpirun', '-np', '1'] and '-k' not in launch.argv
+    assert not any(site_key in arg for arg in launch.argv)
+    assert launch.env[AUTH_ENV] == site_key
+    assert AUTH_ENV in launch.env[OMPI_ENV_LIST].split(';') and site_key not in launch.env[OMPI_ENV_LIST]
+    fence_site(cluster, KEY, environ={}, exports={})
 
 
 @mark.unit
@@ -272,8 +297,18 @@ def test_exported_task_variable_carrying_the_key_is_refused() -> None:
 @mark.unit
 def test_invocation_check_ignores_an_empty_key() -> None:
     """An empty key is not found in every argument."""
-    check_invocation(['env', 'hs', 'client', '-k', 'site'], '')
+    check_invocation(ClientLaunch(argv=['env', 'hs', 'client'], env={AUTH_ENV: 'site'}), '')
     check_exports({'A': 'b'}, '')
+
+
+@mark.unit
+def test_invocation_check_covers_what_the_launch_adds_to_the_environment() -> None:
+    """A variable the launch would add to a client's environment holding the key is refused too."""
+    check_invocation(ClientLaunch(argv=['hs', 'client'], env={AUTH_ENV: 'site'}), KEY)
+    for env in ({AUTH_ENV: KEY}, {'EXTRA': f'x{KEY}x'}, {f'N_{KEY}': '1'}):
+        with pytest.raises(CredentialFenceError) as caught:
+            check_invocation(ClientLaunch(argv=['hs', 'client'], env=env), KEY)
+        assert KEY not in str(caught.value)
 
 
 # --- A relay process ---------------------------------------------------------------------------
@@ -323,6 +358,7 @@ def test_relay_launches_site_clients_without_the_key(relays, tmp_path: Path) -> 
         time.sleep(POLL)
 
     assert relay.drain() == exit_status.success
+    site_keys = set()
     for launch in launches(tmp_path):
         assert not any(UPSTREAM_AUTH in arg for arg in launch['argv'])
         assert not any(UPSTREAM_AUTH in name or UPSTREAM_AUTH in value for name, value in launch['environ'].items())
@@ -330,8 +366,14 @@ def test_relay_launches_site_clients_without_the_key(relays, tmp_path: Path) -> 
         assert {'MY_UPSTREAM_KEY', 'WRAPPED'}.isdisjoint(launch['environ'])
         assert launch['environ']['SITE_MARK'] == 'a'
         assert 'client' in launch['argv']
-        assert launch['argv'][launch['argv'].index('-k') + 1] != UPSTREAM_AUTH
-    assert UPSTREAM_AUTH not in relay.text()
+        # The site key arrives in the environment only, never on the command line.
+        assert '-k' not in launch['argv'] and '--auth' not in launch['argv']
+        site_key = launch['environ'].get(AUTH_ENV, '')
+        assert len(site_key) == 128 and site_key != UPSTREAM_AUTH
+        assert not any(site_key in arg for arg in launch['argv'])
+        site_keys.add(site_key)
+    assert len(site_keys) == 1, 'site clients of one relay run got different keys'
+    assert UPSTREAM_AUTH not in relay.text() and site_keys.pop() not in relay.text()
 
 
 @mark.integration

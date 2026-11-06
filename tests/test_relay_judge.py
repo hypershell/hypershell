@@ -47,7 +47,7 @@ def upstream(variant: str) -> Dict[str, Any]:
     triggered = variant != 'none'
     dups = snapshot if variant == 'kill' else 0
     return {
-        'schema': 1, 'role': 'upstream', 'run_id': f'smoke-r1-{variant}', 'label': 'feature',
+        'schema': 2, 'role': 'upstream', 'run_id': f'smoke-r1-{variant}', 'label': 'feature',
         'mode': 'slurm' if variant == 'kill' else 'local',
         'variant': variant, 'hypershell': '2.9.0a4', 'python': '3.12.13', 'tls': True,
         'nodes': {'total': 3, 'A': 1, 'B': 1},
@@ -77,7 +77,7 @@ def relay(variant: str, site: str) -> Dict[str, Any]:
     """A clean relay record for `site` under `variant`."""
     action = variant if site == 'B' else 'none'
     return {
-        'schema': 1, 'role': 'relay', 'run_id': f'smoke-r1-{variant}', 'site': site,
+        'schema': 2, 'role': 'relay', 'run_id': f'smoke-r1-{variant}', 'site': site,
         'rc': -9 if action == 'kill' else 0, 'identities': 1, 'leaves_launched': 2, 'action': action,
         'local_rows_left': None if action == 'kill' else 0, 'results_pending': None if action == 'kill' else 0,
         'results_returned': 150, 'peak_backlog': 4, 'peak_bound': 4, 'backlog_samples': 40,
@@ -88,10 +88,11 @@ def relay(variant: str, site: str) -> Dict[str, Any]:
 def leaf(variant: str, site: str, node: int) -> Dict[str, Any]:
     """A clean leaf-node record."""
     return {
-        'schema': 1, 'role': 'leaf', 'run_id': f'smoke-r1-{variant}', 'site': site, 'node': node,
+        'schema': 2, 'role': 'leaf', 'run_id': f'smoke-r1-{variant}', 'site': site, 'node': node,
         'hosts_relay': True, 'samples': 50, 'procs_scanned': 30, 'env_unreadable': 0, 'clients_scanned': 2,
         'tasks_scanned': 25, 'launchers_scanned': 2, 'key_hits': 0, 'fenced_names_seen': 0, 'key_probe_seen': 0,
         'untokened_clients': 0, 'upstream_conns_max': 0, 'executions': 150,
+        'site_key_clients': 2, 'site_key_argv': 0, 'site_key_tasks': 0,
     }
 
 
@@ -143,7 +144,8 @@ BAD = [
     # Records: the run is complete and scrubbed.
     ('kill', drop('relay-B'), 'records.present'),
     ('kill', drop('leaf-B-2'), 'records.present'),
-    ('none', edit('upstream.schema', 2), 'records.schema'),
+    ('none', edit('upstream.schema', 1), 'records.schema'),
+    ('none', lambda records: [record.update(schema=3) for record in records.values()], 'records.schema'),
     ('none', edit('leaf-A-1.note', 'ran on /some/path'), 'records.scrubbed'),
     ('none', edit('upstream.completed', False), 'run.completed'),
     ('none', edit('upstream.server_rc', 1), 'run.server'),
@@ -201,6 +203,11 @@ BAD = [
     ('none', edit('leaf-B-2.untokened_clients', 1), 'e.forwarded'),
     ('none', edit('relay-A.key_in_logs', 1), 'e.logs'),
     ('none', edit('upstream.key_in_server_log', 1), 'e.logs'),
+    # The site key: in each site client's environment, on no command line, in no task.
+    ('none', edit('leaf-A-1.site_key_clients', 1), 'e.site_key.handoff'),
+    ('kill', edit('leaf-B-2.site_key_argv', 2), 'e.site_key.argv'),
+    ('pause', edit('leaf-A-1.site_key_tasks', 1), 'e.site_key.tasks'),
+    ('none', lambda records: records['leaf-B-2'].pop('site_key_tasks'), 'e.site_key.tasks'),
     # The relay database never touches the primary; the backlog stays under its bound.
     ('none', edit('relay-B.primary_db_created', True), 'relay.primary'),
     ('none', edit('relay-A.peak_backlog', 5), 'relay.backlog'),
@@ -216,6 +223,20 @@ def test_bad_run_fails_its_check(judge, variant: str, mutate, check: str) -> Non
     records = copy.deepcopy(good_run(variant))
     mutate(records)
     assert check in failed(judge, records)
+
+
+@mark.unit
+@mark.parametrize('variant', VARIANTS)
+def test_schema_1_run_passes_without_the_site_key_checks(judge, variant: str) -> None:
+    """Records from the drive before the site-key fields are judged on everything else."""
+    records = good_run(variant)
+    for record in records.values():
+        record['schema'] = 1
+        for field in ('site_key_clients', 'site_key_argv', 'site_key_tasks'):
+            record.pop(field, None)
+    checks = judge.judge_run(records)
+    assert all(ok for _, ok, _ in checks), [c for c in checks if not c[1]]
+    assert not any(name.startswith('e.site_key') for name, _, _ in checks)
 
 
 @mark.unit

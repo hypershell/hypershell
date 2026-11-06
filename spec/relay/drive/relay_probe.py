@@ -44,7 +44,7 @@ from collections import Counter
 import psutil
 
 
-SCHEMA = 1
+SCHEMA = 2
 SITES = ('A', 'B')
 IDENTITY = re.compile(r'Upstream identity ([0-9a-f-]{36}) for zone (\S+) at site (\S+)')
 UUID = r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
@@ -53,6 +53,8 @@ CONFIRMED = re.compile(r'Confirmed (\d+) tasks \(.*?: ' + UUID + r'\)')
 EVICTING = re.compile(r'Evicting client \(.*?: ' + UUID + r'\)')
 REVERTING = re.compile(r'Reverting orphaned tasks \(.*?: ' + UUID + r'\)')
 HS_NAMES = ('hs', 'hyper-shell')
+SITE_KEY_VAR = 'HYPERSHELL_SERVER_AUTH'  # A launched client receives its key here, never on its command line.
+KEY_OPTIONS = ('-k', '--auth')
 
 
 # --- Settings and shared files -----------------------------------------------------------------
@@ -752,7 +754,9 @@ def watch(site: str, node: str, hosts_relay: str) -> int:
     key, token, me = read_key(), read_token(), os.getpid()
 
     seen: Dict[str, Set[int]] = {name: set() for name in (
-        'procs', 'unreadable', 'clients', 'tasks', 'launchers', 'key', 'fenced', 'probe', 'untokened')}
+        'procs', 'unreadable', 'clients', 'tasks', 'launchers', 'key', 'fenced', 'probe', 'untokened',
+        'site_keyed', 'site_key_argv', 'site_key_tasks')}
+    site_keys: Set[str] = set()  # Site keys seen in client environments: kept in memory, never written.
     samples = conns_max = 0
     while not (flag('relays.finished').exists() or flag('abort').exists() or time.monotonic() >= deadline):
         info = flag(f'relay-{site}.info')
@@ -782,10 +786,19 @@ def watch(site: str, node: str, hosts_relay: str) -> int:
                 seen['procs'].add(proc.pid)
                 if 'relay_task.py' in ' '.join(cmdline):
                     seen['tasks'].add(proc.pid)
+                    if SITE_KEY_VAR in environ or any(k in v for k in site_keys for v in environ.values()):
+                        seen['site_key_tasks'].add(proc.pid)
                 elif command == 'client' and not launcher(cmdline):
                     seen['clients'].add(proc.pid)
+                    if environ.get(SITE_KEY_VAR):
+                        seen['site_keyed'].add(proc.pid)
+                        site_keys.add(environ[SITE_KEY_VAR])
+                    if any(option in cmdline for option in KEY_OPTIONS):
+                        seen['site_key_argv'].add(proc.pid)
                 else:
                     seen['launchers'].add(proc.pid)
+                if any(k in arg for k in site_keys for arg in cmdline):
+                    seen['site_key_argv'].add(proc.pid)
                 if any(key in arg for arg in cmdline) or any(key in n or key in v for n, v in environ.items()):
                     seen['key'].add(proc.pid)
                 if any(n.startswith('HYPERSHELL_RELAY_') for n in environ):
@@ -808,6 +821,8 @@ def watch(site: str, node: str, hosts_relay: str) -> int:
               'tasks_scanned': len(seen['tasks']), 'launchers_scanned': len(seen['launchers']),
               'key_hits': len(seen['key']), 'fenced_names_seen': len(seen['fenced']),
               'key_probe_seen': len(seen['probe']), 'untokened_clients': len(seen['untokened']),
+              'site_key_clients': len(seen['site_keyed']), 'site_key_argv': len(seen['site_key_argv']),
+              'site_key_tasks': len(seen['site_key_tasks']),
               'upstream_conns_max': conns_max, 'executions': len(lines)}
     publish_json(out_dir() / f'leaf-{site}-{node}.json', record)
     publish(flag(f'watch-{site}-{node}.finished'), 'ok\n')

@@ -214,8 +214,8 @@ class RelayThread(Thread):
 
     The site is a stock autoscaling cluster (see `hypershell.relay.site`): a server in forever mode on
     the relay database, with local retries off, and a fixed fleet of site clients launched with a key
-    minted for this run only. The upstream server alone retries tasks, so a failure at the site is a
-    completed row like any other.
+    minted for this run only, handed to each in its environment, never on its command line. The
+    upstream server alone retries tasks, so a failure at the site is a completed row like any other.
 
     Upstream the relay is one client for its zone, under an identity derived from this relay and the
     zone name. It connects before anything else starts, so a server it cannot use (a version
@@ -614,6 +614,8 @@ APP_HELP = f"""\
   auth_eval), never from the command line, and never reaches the site: relay settings, and
   any variable holding the key, are removed from the environment the site's clients and
   tasks inherit, and they are given the configuration file without the relay settings.
+  Site clients receive the relay's own site key in their environment, never on their
+  command line, so the launcher must pass the environment through.
 
   SIGUSR1 or SIGUSR2 drain the relay: it asks for no more work, finishes what it holds and
   returns the results. SIGINT or SIGTERM end it at once, with the site's clients. If the

@@ -22,8 +22,10 @@ a copy writes over it. The relay refuses to start if the *client* command line (
 arguments or template) or a variable exported to tasks (``[export]``) would carry the key.
 
 At the site the relay runs its tasks on the *clients* it launches there, with a key it mints for
-each run. The site never retries a task: one that fails goes back upstream as it ended, and the
-upstream *server* decides whether to run it again. Each result goes back attributed to the *client*
+each run. Each *client* receives that key in its environment (``HYPERSHELL_SERVER_AUTH``), never on
+its command line, and passes it to none of its tasks, so the launcher must pass the environment
+through to the *client*. The site never retries a task: one that fails goes back upstream as it
+ended, and the upstream *server* decides whether to run it again. Each result goes back attributed to the *client*
 at the site that ran it, matched to the assignment the upstream *server* made. Results are kept in
 the relay database until they have been handed over, and for a while after (``relay.retention``).
 The relay's heartbeat names its site (``relay.site``, by default the relay's host name) and lists the

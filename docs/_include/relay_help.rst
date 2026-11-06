@@ -34,7 +34,9 @@ Options
 
     With none, *clients* run directly on the relay's host. Otherwise each is launched as
     ``CMD [ARGS...] hyper-shell client ...`` (e.g., ``srun``). The *clients* connect back to the
-    relay by its host name. See also ``relay.launcher``.
+    relay by its host name. The launcher must pass the environment through: each *client*
+    receives the site key there (``HYPERSHELL_SERVER_AUTH``), never on its command line.
+    See also ``relay.launcher``.
 
 ``--launcher-args`` *ARGS*
     Extra arguments for the launcher, placed after it (quoted as one argument).
