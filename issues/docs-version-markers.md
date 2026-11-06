@@ -1,5 +1,5 @@
 ---
-status: shaped
+status: adopted:docs-version-markers
 kind: docs
 appetite: small
 lane: public

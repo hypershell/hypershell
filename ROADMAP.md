@@ -633,7 +633,7 @@ cautions, builds the docs in CI with warnings as errors, and widens the same-com
 user-visible changes update their prose page and carry a marker.
 
 *Horizon: near-term, small · Depends on: — · Refs: `docs-and-runtime-surfacing` (a separate gap)*
-**Seed:** [`issues/docs-version-markers.md`](issues/docs-version-markers.md) · *status: shaped*
+**Seed:** [`issues/docs-version-markers.md`](issues/docs-version-markers.md) · *status: adopted:docs-version-markers*
 
 ## The whole test suite on a server database
 
