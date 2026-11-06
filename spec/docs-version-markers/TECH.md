@@ -3,7 +3,7 @@ slug: docs-version-markers
 title: Mark what is new in the docs, now that the published site tracks develop
 kind: docs
 appetite: small
-status: in_review
+status: blocked
 branch: feature/docs-version-markers
 base: develop
 current_phase: done
@@ -62,10 +62,11 @@ phases:
     .agents/skills/hs-publish/SKILL.md .agents/skills/hs-release/SKILL.md | wc -l
     | grep -qx ' *8'
 review:
-  last_reviewed_commit: 93c1e5f
+  last_reviewed_commit: ff5cc61
   verdict: changes-requested
-  blocked_reason: ''
-  cycle: 1
+  blocked_reason: 'cycle 2: F5-F12 (exit-code remap, SIGHUP false marker, bundlesize,
+    release mislink, fixes, notice, severity, full-release page)'
+  cycle: 2
 ---
 # TECH.md — Mark what is new in the docs, now that the published site tracks `develop`
 

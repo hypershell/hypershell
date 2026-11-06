@@ -92,3 +92,57 @@ on `/`, `/cli/relay.html` and `/api/data.html` with a working link; "Added in ve
   than the argument. Remediated in P3.
 - The seed's "template environment rules" line is corrected in the seed. `GOAL.md` is locked and the
   same clause there stays: it does not change any R-ID.
+
+## Review cycle 2 — changes-requested (2026-11-06)
+
+- **Reviewed commit:** ff5cc61 (graded diff outside `spec/` identical to `c067ecc`) · **Mode:** fresh
+  blind pass over the full spec-excluded diff.
+- **Contract drift:** `ff5cc61` adds one dated clarification to `GOAL.md`: a change that reached
+  `develop` as a direct commit is linked with `:commit:`. That is Geoffrey's ruling (chat,
+  2026-11-06), not a silent drift.
+- **Cycle-1 findings:** F1, F3 and F4 verified fixed (the AST comparison now finds every autodoc'd
+  parameter change marked except F3 below; the notice link is absolute; the rubric reads HIGH).
+
+### Verification run
+
+- Strict HTML build exit 0; a temporary broken ref → exit 1, reverted; `-b man -W` clean, no HTML
+  leakage. All 14 `:pr:` links → the right merged PR; the four `:commit:` targets resolve and have
+  no PR. Every pre-release attribution checked with `git merge-base --is-ancestor`.
+- Throwaway-site runs comparing `uvx hypershell==2.8.5` with `develop`:
+  - a resource-error task: `-3` on 2.8.5, `-1002` on develop;
+  - a task that kills itself with `SIGHUP`: `-1`, one attempt, no retry under `-r 2`, on 2.8.5.
+- Notice logic exercised for a6, dev, rc, a7.dev3 (notice) and 2.9.0, 2.9.1, post1 (none).
+
+### Findings
+
+- **[MEDIUM/CONFIRMED] F5 — What's new omits the exit-code remap.** `27db1b0` (2.9.0a1) moved the
+  template-error code from -2 to -1001 and the resource-error code from -3 to -1002. Older rows keep
+  -2 and -3 and now read as SIGINT and SIGQUIT under `--signal`. Neither a change entry nor an upgrade
+  caution says so. (R3)
+- **[MEDIUM/CONFIRMED] F6 — false marker: `SIGHUP` cancellation is 2.8.5 behaviour.**
+  `docs/cli/task_update.rst:18-20` and the What's new "Signals and cancellation" entry present it as
+  2.9. A 2.8.5 run records -1 and does not retry. (R1 non-goal)
+- **[MEDIUM/CONFIRMED] F7 — client API markers name only `zone`.** #78 also changed `bundlesize` on
+  `run_client` and `ClientThread`: the default is now `None`, and the value is the size the client
+  requests. `docs/api/client.rst:26`, `:44`. (R1)
+- **[MEDIUM/CONFIRMED] F8 — `hs-release` Step 3a.1 would mislink the `:commit:` markers.** It
+  completes every marker "with no `:pr:`", and its `-S'<marker line>'` search finds this docs
+  cycle's commit, so the three `:commit:`-only markers would get this PR's number. (R5)
+- **[LOW/CONFIRMED] F9 — What's new omits two 2.9.0a2 fixes:** the clean `cron` extra hint
+  (`f4448a3`), and the fork descriptor leak and lockless-filesystem fallback in logging
+  (`ede1487`). (R3)
+- **[LOW/CONFIRMED] F10 — the notice doesn't say the site can describe unreleased work,** as the
+  GOAL clarification says it should. (R2)
+- **[LOW/CONFIRMED] F11 — `hs-review` and `invariants.md` still call every invariant violation
+  auto-CRITICAL,** while the rubric grades §12 HIGH. (R5)
+- **[LOW/PLAUSIBLE] F12 — at a full release, `hs-release` Step 3a.2 says to start "a fresh page"**
+  without saying which file is live. The notice and the harness all point at `whats_new.rst`. (R5)
+
+### Human-gate triggers
+
+- None: docs and harness only.
+
+### Orchestrator triage
+
+All eight are taken. F12 is resolved by keeping `docs/whats_new.rst` as the live page for the
+development line and copying it to a per-line record at a full release. This is cycle 2 of ≤3.
