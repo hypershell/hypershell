@@ -91,8 +91,8 @@ reports and applies exactly the rows its filter selects.
   § Data layer specifics.
 - Related: [`stale-confirm-hides-orphan`](stale-confirm-hides-orphan.md) (Confirm against eviction
   ordering; the late confirmation that contends with `Task.next`),
-  [`late-confirm-overwrites-attribution`](late-confirm-overwrites-attribution.md) (a confirmation
-  applied to a completed row; the contender of the `retried` mark),
+  `spec/relay/` R19 (#82: a confirmation applied to a completed row now writes only while the row
+  is incomplete; named above as the contender of the `retried` mark),
   [`orphan-revert-loses-result`](orphan-revert-loses-result.md) (the revert's condition is still
   "the row exists"; a conditional revert would change what "still qualifies" means for it),
   [`coordinator-resilience-retry-backoff`](coordinator-resilience-retry-backoff.md) (thread death

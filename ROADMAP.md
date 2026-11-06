@@ -291,17 +291,6 @@ confirmation then names the already-evicted client. Either way the row waits unt
 *Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
-## A late confirmation can overwrite the executing client's attribution
-
-Confirmations and results are applied by separate threads in no fixed order. A confirmation applied
-after the result rewrites the completed row's attribution with the confirming client's id. Harmless
-for ordinary clients; wrong for relay, which confirms under its own id and returns results
-attributed to the leaf client that ran them. Conditioning the confirmation on an incomplete row
-needs no wire change.
-
-*Horizon: near-term, before relay · Depends on: — · Refs: relay (return path, leaf attribution)*
-**Seed:** [`issues/late-confirm-overwrites-attribution.md`](issues/late-confirm-overwrites-attribution.md)
-
 ## Orphan recovery can discard a result that lands while it runs
 
 Reverting an evicted client's tasks reads the in-flight rows, then reverts them by id in a separate,

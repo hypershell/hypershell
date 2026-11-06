@@ -68,9 +68,9 @@ whether or not that client's confirmation had been applied when it was evicted.
 - The token `writeback-scoped-conditional` uses for results, the dispatched `schedule_time`, would
   let a confirmation be matched to its dispatch if it carried it per task id. Whether recovery needs
   that, or a bound on how long a dispatched row may stay unconfirmed, is for `/hs-plan`.
-- Related: `issues/late-confirm-overwrites-attribution.md` (confirmations applied by id alone and
-  unordered, relay-facing), `issues/evicted-client-fencing-and-cancel-reach.md`, `spec/relay/`
-  (#82; its GOAL lists this window, widened by a relay's bundle size, as a non-goal).
+- Related: `issues/evicted-client-fencing-and-cancel-reach.md`, `spec/relay/` (#82; its R19 made a
+  confirmation leave a completed row alone, though confirmations are still applied by id alone and
+  unordered, and its GOAL lists this window, widened by a relay's bundle size, as a non-goal).
 - Found by: `writeback-scoped-conditional` plan research, 2026-11-02. Corrected by that cycle's
   review (cycle 1, F2): the first version had the row reverted and rescheduled to a second client,
   which eviction cannot do to a row with no `client_id`.
