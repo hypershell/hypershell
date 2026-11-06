@@ -306,6 +306,9 @@ earlier rank's rotated or compressed files (e.g. ``client-<host>-3.20260101.log.
 active writer; these dangling rotated leaves are legitimate and are left untouched — remove them
 yourself if you no longer need them.
 
+.. versionchanged:: 2.9.0
+   :pr:`54`: lock sidecars are removed on a clean exit and swept after a crash.
+
 |
 
 Parameters

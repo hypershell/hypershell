@@ -99,6 +99,11 @@
         (requires the ``uuid7`` extra; see the TimescaleDB section of :ref:`database <database>`).
         Support for other providers may be considered in the future.
 
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               :pr:`71`: the ``timescale`` provider.
+
     ``.file``
         Only applicable for SQLite provider.
         SQLite does not understand any other connection detail.
@@ -148,6 +153,11 @@
         ``orderby`` (``"id DESC"``), ``policy`` (``true``), and ``compress_after``
         (``"4 weeks"``). For example ``timescale = { chunk_interval = "1 day" }``.
         See the TimescaleDB section of :ref:`database <database>`.
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+               :pr:`71`
 
     ``*``
         Any additional arguments are forwarded to the provider, e.g., ``encoding = 'utf-8'``.
@@ -209,12 +219,22 @@
 
         See also ``-b``/``--bundlesize`` command-line option.
 
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               :pr:`78`: the size for a client that advertises none.
+
     ``.bundlemax``
         Most tasks the server hands a client in one reply (default: `1000`).
 
         A client advertises its own bundle size (its ``-b``); the server never replies with more
         than this many tasks, whatever a client asks for. The effective cap is never smaller than
         the server's own ``.bundlesize``. There is no command-line option.
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+               :pr:`78`
 
     ``.attempts``
         Attempts for auto-retry on failed tasks (default: `1`).
@@ -388,6 +408,11 @@
 
         See also ``-b``/``--bundlesize`` command-line option.
 
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               :pr:`78`: a client advertises it as the size it requests.
+
     ``.bundlewait``
         Seconds to wait before flushing tasks (default: `5`).
 
@@ -519,6 +544,11 @@
 
 ``[relay]``
     Section for the `relay` workflow, which connects a site to an upstream *server*.
+
+    .. only:: html
+
+        .. versionadded:: 2.9.0
+           :pr:`82`
 
     ``.database``
         Path to the relay database (default: <lib>/relay/<host>.db).

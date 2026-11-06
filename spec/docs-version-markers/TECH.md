@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: feature/docs-version-markers
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-06'
 phases:
 - id: P1
@@ -22,7 +22,7 @@ phases:
     html docs docs/_build/html && grep -q 'sphinx-build -W' .github/workflows/tests.yml
 - id: P2
   name: Audit and mark every 2.9 page and section, with inventory and check
-  status: pending
+  status: done
   satisfies:
   - R1
   depends_on:
@@ -112,16 +112,23 @@ exists for P2's markers.
 **Goal:** every passage describing behaviour 2.8.5 lacks or does differently carries a
 `versionadded`/`versionchanged` 2.9.0 marker with its `:pr:`, and the audit is recorded.
 
-- [ ] Gather inputs: `git diff 2.8.5 develop -- docs`; `gh release view 2.9.0a{1..6} --json body`.
-- [ ] Classify each candidate *new* / *changed* / *not 2.9*; map each to its PR.
-- [ ] Write `spec/docs-version-markers/markers.md`: one row per marker (file · scope · directive ·
+- [x] Gather inputs: `git diff 2.8.5 develop -- docs`; `gh release view 2.9.0a{1..6} --json body`.
+- [x] Classify each candidate *new* / *changed* / *not 2.9*; map each to its PR.
+- [x] Write `spec/docs-version-markers/markers.md`: one row per marker (file · scope · directive ·
       PR · first pre-release), then the release-note items judged to need no marker, each with its
       reason.
-- [ ] Place the markers per PLAN § "The marker convention": page-level for wholly new pages,
+- [x] Place the markers per PLAN § "The marker convention": page-level for wholly new pages,
       section-level elsewhere, beside the `.. include::` for generated help, after the
       `autofunction` for API entries. Prefer one section marker listing items over many line markers.
-- [ ] Write `spec/docs-version-markers/check_markers.py` (stdlib): every inventory row is present in
+- [x] Write `spec/docs-version-markers/check_markers.py` (stdlib): every inventory row is present in
       its file with directive, `2.9.0` and `:pr:`; every 2.9.0 marker in `docs/` is in the inventory.
+- *Amended in build:* four 2.9 changes reached `develop` as direct commits with no pull request
+      (`hs list --all` and its result guard, colorized listings, signal mapping, container images).
+      Their markers link the commit through a `:commit:` extlink added beside `:pr:` in
+      `docs/conf.py`, and the check accepts either. The database guide predates 2.9, so it gets
+      section markers (Initialization, Relay Database, TimescaleDB), not a page marker.
+      `_include/config_param_ref.rst` also feeds the man page, so its markers sit in
+      `.. only:: html`.
 - **Verify:** the strict build exits 0, and the check exits 0.
 - **Touches:** `docs/**/*.rst` (not `_include/*_help.rst` / `*_usage.rst`), `spec/docs-version-markers/`.
 

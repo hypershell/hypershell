@@ -44,9 +44,11 @@ extensions = [
 ]
 
 # :pr:`82` links pull request #82. Version markers (versionadded/versionchanged) carry one, so a
-# reader can see the change that shipped the behaviour.
+# reader can see the change that shipped the behaviour. :commit:`961fb22` links a commit, for the
+# few changes that reached develop without a pull request.
 extlinks = {
     'pr': ('https://github.com/hypershell/hypershell/pull/%s', '#%s'),
+    'commit': ('https://github.com/hypershell/hypershell/commit/%s', '%s'),
 }
 
 # The Tutorial, blog, and roadmap pages moved to the hypershell.org site. sphinx-reredirects emits a

@@ -33,6 +33,9 @@ Architecture
 Components
 ^^^^^^^^^^
 
+.. versionchanged:: 2.9.0
+   :pr:`76`: the server process serves the queues itself, with no separate manager process.
+
 *HyperShell* is built on Python's :class:`multiprocessing.managers.BaseManager` infrastructure,
 serving threading :class:`queue.Queue` objects from within the server process. The runtime
 decomposes into three roles:
@@ -499,6 +502,9 @@ Relays
 ------
 
 |
+
+.. versionadded:: 2.9.0
+   :pr:`82`
 
 A relay (``hs relay``, see :ref:`cli_relay`) joins a site to an upstream *server* across a wide-area
 network. It is a *client* upstream and a *server* at its site, so it stands between two

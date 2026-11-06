@@ -102,6 +102,9 @@ Initialization
 
 |
 
+.. versionchanged:: 2.9.0
+   :pr:`69`: a database from an earlier release is upgraded in place on first use.
+
 SQLite is automatically initialized upon opening the connection but
 Postgres must be explicitly initialized via ``hs initdb`` or at launch with
 the ``--initdb`` command-line option.
@@ -134,6 +137,9 @@ Relay Database
 
 |
 
+.. versionadded:: 2.9.0
+   :pr:`82`
+
 A relay (``hs relay``) keeps its own database, apart from the one configured here. It is always a
 private SQLite file, whatever ``[database]`` names (PostgreSQL included), and the configured database
 is never opened by a relay process. It holds the tasks the relay has received and not yet finished,
@@ -162,6 +168,9 @@ TimescaleDB
 -----------
 
 |
+
+.. versionadded:: 2.9.0
+   :pr:`71`
 
 `TimescaleDB <https://github.com/timescale/timescaledb>`_ is a PostgreSQL extension for
 time-series data. It splits a large table into *chunks* by time (a *hypertable*) and can convert

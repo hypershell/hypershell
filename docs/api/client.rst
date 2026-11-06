@@ -23,6 +23,9 @@ Functions
 
 .. autofunction:: run_client
 
+.. versionchanged:: 2.9.0
+   :pr:`78`: the ``zone`` parameter.
+
 -------------------
 
 Classes
@@ -37,6 +40,9 @@ Classes
     .. automethod:: start
     .. automethod:: join
     .. automethod:: stop
+
+.. versionchanged:: 2.9.0
+   :pr:`78`: the ``zone`` parameter.
 
 |
 

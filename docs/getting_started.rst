@@ -196,6 +196,10 @@ expansion. Many meta-patterns are supported (see full overview of :ref:`template
 
         hsx tasks.in -N4 -t 'CUDA_VISIBLE_DEVICES={slot} python train.py {}'
 
+.. versionadded:: 2.9.0
+   ``TASK_SLOT``, ``TASK_SLOT_COUNT`` and the ``{slot}`` and ``{slot_count}`` patterns
+   (:pr:`52`).
+
 Capturing `stdout` and `stderr` is supported directly in fact with the ``--capture`` option.
 See the full documentation for environment variables under :ref:`configuration <config>`.
 
@@ -229,5 +233,8 @@ tool can be executed directly without an intermediate flat task file.
     Where ``plan.json`` contains a ``chunks`` list of task objects, e.g.
     ``{"chunk_id": "chunk_001", "seqid": "Chr1", "start": 1, "end": 5000000}``. The value is
     ``FILE[@path]``; the optional dotted ``path`` locates the list within the document.
+
+.. versionadded:: 2.9.0
+   ``--from-json`` (:pr:`48`).
 
 |

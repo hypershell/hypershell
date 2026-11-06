@@ -20,6 +20,9 @@ Named Fields
 
 |
 
+.. versionadded:: 2.9.0
+   :pr:`48`
+
 When tasks are submitted from a JSON file with ``--from-json`` (see the ``submit``
 command), each task object's keys become available as named template fields. A
 ``{key}`` pattern expands to that key's value for the given task, and the keys also
@@ -44,6 +47,9 @@ Execution Slot
 ^^^^^^^^^^^^^^
 
 |
+
+.. versionadded:: 2.9.0
+   :pr:`52`
 
 Each client runs ``N`` task executors (set with ``-N``/``--num-threads``); every executor owns
 a fixed **slot** for its lifetime, a zero-based index in ``0 .. N-1``. Two patterns expose it so a

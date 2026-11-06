@@ -17,4 +17,7 @@ Description
 
 |
 
+.. versionadded:: 2.9.0
+   ``--zone`` (:pr:`78`).
+
 .. include:: ../_include/task_submit_help.rst

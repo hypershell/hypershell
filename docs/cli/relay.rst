@@ -3,6 +3,9 @@
 Relay
 =====
 
+.. versionadded:: 2.9.0
+   :pr:`82`
+
 Usage
 -----
 

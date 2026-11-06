@@ -272,6 +272,9 @@ release workflow's identity, with no long-lived signing key) and can be verified
             --certificate-identity-regexp 'https://github.com/hypershell/hypershell/.*' \
             ghcr.io/hypershell/hypershell:latest
 
+.. versionadded:: 2.9.0
+   Published, signed container images (:commit:`ee03014`).
+
 
 -------------------
 
