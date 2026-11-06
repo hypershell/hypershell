@@ -89,3 +89,15 @@
 **What worked well:** fault injection by a pre-import patch script, with the process marked a relay
 so it does not re-execute, plus a trigger file to arm the fault. It turned "any server thread dies"
 into seven real-process runs in under a minute.
+
+## F6 — No rule for a "run A" phase that is built but waits on an external run
+`origin=hs-build:P7 severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** P7 builds the multi-node drive and passes its verify, but R21 is shown only by the
+  foreman's later run; the foreman had to rule that P7 stays `in_progress` (waiting on the run), not `done`.
+- **Skill cause:** Step 5 knows only "verify green → `done`, advance `current_phase`"; the external-wait
+  convention in the TECH field reference covers the judging phase (`blocked` until evidence) but not the
+  build-and-hand-back phase before it.
+- **Recommended fix:** in Step 5, add: for a phase whose TECH body hands back to an external run, a green
+  verify leaves it `in_progress` (hill `crest`), `current_phase` unchanged, with the hand-back recorded in
+  the body; the judging phase's arrival of evidence closes it.
+- **Confidence:** med · **Effort:** small

@@ -109,7 +109,7 @@ phases:
 - id: P7
   name: 'R21 run A: relay drive, launcher wrapper, judge, local smoke, hand back (external
     wait follows)'
-  status: pending
+  status: in_progress
   satisfies:
   - R21
   - R20
@@ -118,7 +118,7 @@ phases:
   - P6
   parallel: true
   hammerable: false
-  hill: uphill
+  hill: crest
   verify: uv run pytest -v tests/test_relay_judge.py && sh spec/relay/drive/relay_smoke.sh
 - id: P8
   name: 'Outage ride-through and restart durability: UpstreamLink, backoff, redelivery'
@@ -285,6 +285,17 @@ item runs with P3's gate; it already passes on the merged tree. The P6 items run
 - **N5 — Calendar.** Maintainer: *"Everything, accept the risk."* All ten phases target the last
   pre-release before about 2026-11-13. Review starts after P5 (the delegation-core checkpoint).
 - **N6 — Ten phases.** Accepted.
+
+## Review-3 rulings (maintainer, 2026-11-05)
+
+- **C3-1 — sanctioned as a carve-out.** `hs relay` catches SIGTERM, cleans up (site clients ended,
+  the site config copy removed) and re-delivers it, so the process still dies by SIGTERM; USR1/USR2
+  drain; a second SIGTERM ends it at once. P9 adds this relay carve-out to `AGENTS.md` §Signals and
+  to `invariants.md` §8.
+- **C3-2 → P8.** The C2-1 process test is timing-dependent: raise the fault only when `results` is
+  non-empty.
+- **C3-3 → P9.** Docs: a second SIGTERM also leaves the site config copy behind.
+- None of the three is done in P7; each is an item in its phase below.
 
 ## Build-day estimates
 
@@ -1049,34 +1060,134 @@ roster guard). The key reaches no new place.
 
 ## Phase P7 — R21 run A: relay drive, smoke, hand back
 **Satisfies:** R21, R20 · **Depends on:** P5, P6 · PLAN §6; [04 §2](research/04-evidence-and-tests.md)
-**Goal:** a committed, site-neutral run script the foreman can run on a 4-node, 1-hour test
-cluster allocation, proven by a local smoke, and an exact run matrix handed back.
+**Goal:** a committed, site-neutral run script the foreman can run in one Slurm allocation, proven by
+a local smoke, and an exact run matrix handed back.
+**Status:** built and smoke-tested (2026-11-05); `in_progress`, **waiting on the foreman's external run**
+(not done). P10 judges the delivered records.
 
-- [ ] `spec/relay/drive/relay_drive.sh` (roles `upstream`, `relay`, `leaf`; `HSD_*` environment
-      only; reuses `tests/cluster/build_archive.sh`; `drive.sh` untouched): node 0 upstream
-      `hs server --forever -r 1` with evict 30 s; site A = nodes 1–2 (survives); site B = node 3
-      (relay killed at `HSD_KILL_AT`, default 40 % of tasks completed; `HSD_FAILOVER=kill|pause|none`);
-      shared zone; upstream key in a 0600 transport file, exported only into the `hs relay`
-      process; relays log their identities to a transport file (never evidence).
-- [ ] `spec/relay/drive/relay_launch.sh`: the launcher wrapper (step launch by default, which
-      forwards the environment so check (e) bites; `ssh` and local modes); environment passed
-      through untouched.
-- [ ] Checks recorded as counts and booleans only (no host, user or path): (a) rows, retries,
-      group order, executions vs kill snapshot; (b) completed rows name leaves of the site that ran
-      them, upstream `client` rows per site; (c) upstream connections from relays only, zero from
-      any leaf process; (d) relay B identity evicted, snapshot completed at site A; (e) no upstream
-      key in any leaf process's `cmdline`/`environ` (`procs_scanned > 0`); R10 sentinel and
-      R8 peak backlog.
-- [ ] `spec/relay/drive/relay_judge.py` (stdlib only) + `tests/test_relay_judge.py` (synthetic
-      records, loads the judge by path).
-- [ ] `spec/relay/drive/relay_smoke.sh`: one host, one upstream, two relays (own ports, own site
-      dirs), M = 300, 3 groups, one retry, evict 10 s, kill variant, then the judge and a host/user
-      grep. It never deletes: it prints its scratch path for the foreman.
-- [ ] Hand-back note in this file: run matrix (r1 kill, r2 pause, r3 no-failover control), the
-      exact `HSD_*` values, the 54-minute guard, evidence layout
-      `spec/relay/evidence/cluster/<run_id>/{upstream,relay-A,relay-B,leaf-*}.json`.
-- **Verify:** see frontmatter.
-- **Touches:** `spec/relay/drive/`, `tests/test_relay_judge.py`.
+- [x] `spec/relay/drive/relay_drive.sh` — one script that performs R21 (a)–(e) inside one Slurm
+      allocation of ≥ 3 nodes (`HSD_MODE=slurm`, the default) or on one machine (`HSD_MODE=local`).
+      Node 0 (from `scontrol show hostnames "$SLURM_JOB_NODELIST"`) runs the upstream server; the
+      rest split into site A (first `HSD_SITE_A_SIZE`, default half rounded up) and site B. Every role
+      is one job step, `$HSD_SRUN --overlap --nodes=1 --ntasks=1 --nodelist=NODE --export=ALL
+      $HSD_SRUN_ARGS`: the upstream role on node 0, a relay on each site's first node, a watcher on
+      every site node. Runs the matrix `HSD_RUNS` (default `kill pause none`), judges each run, skips a
+      run that could end past `HSD_BUDGET` (default 840 s). `relay_drive.sh submit` wraps itself in
+      `sbatch` (`HSD_ACCOUNT`, `HSD_PARTITION`, `HSD_SUBMIT_NODES`, `HSD_TIME_LIMIT`,
+      `HSD_SBATCH_ARGS`). Isolation: every `HYPERSHELL_*` variable is unset, and every process reads
+      only the run's own `HYPERSHELL_CONFIG_FILE` (logging only); each role sets its own
+      `HYPERSHELL_SITE`. Site-specific values come only from variables with neutral defaults
+      (`HS`, `HSD_SETUP` for module loads, `HSD_SRUN`, `HSD_SRUN_ARGS`, `HSD_LEAF_SRUN_ARGS`, the
+      `submit` ones); the script names no site, cluster, account, partition, path, host or user.
+- [x] `spec/relay/drive/relay_launch.sh` — the relays' `--launcher`: in slurm mode, one overlapping
+      job step per site client on the next node of the site (round robin under a `mkdir` lock),
+      `--export=ALL` so the environment reaches the client whatever the site default, so (e) tests the
+      relay's own scrub; in local mode, the client runs here, dialing loopback (P5 ruling 1). The
+      environment passes through untouched.
+- [x] `spec/relay/drive/relay_probe.py` — the roles (psutil, run with the venv's `python` beside
+      `HS`): `upstream` (submit, server, sampler, failover director, collector), `relay SITE`
+      (the relay and its supervisor), `watch SITE NODE R` (per-node process scan), `workload`,
+      `sweep` (local mode: ends anything of the run left). `relay_task.py` is the task: a Python
+      process (readable environment on every platform, P5 note) that appends `<site> <task id>` to a
+      node-local execution log, sleeps, and fails once when asked.
+- [x] Records, counts and booleans only (no host, user, path or key), under `HSD_RESULTS/<run_id>/`:
+      `upstream.json` (a)–(d) and the connection series; `relay-A.json`, `relay-B.json` (exit,
+      identity count, leaves, outbox state, peak backlog vs bound, upstream connections, primary
+      sentinel, key in logs); `leaf-<site>-<n>.json` (processes scanned: clients, tasks, launchers;
+      key hits; `HYPERSHELL_RELAY_*` names; the key-carrying probe variable; clients without the
+      relay's environment; upstream connections from site processes; executions). Transport
+      (`HSD_WORK/<run_id>/`: key 0600, token, flags, identities, leaf ids, snapshot, logs) is never
+      evidence.
+- [x] `spec/relay/drive/relay_judge.py` (stdlib only; `DIR [--require kill,pause,none]`, DIR one run
+      or a directory of runs) + `tests/test_relay_judge.py` (67 unit tests: a good run of each variant
+      passes; 59 bad runs each fail the named check; CLI over a tree, one run, no runs, `--require`).
+- [x] `spec/relay/drive/relay_smoke.sh` — `HSD_MODE=local` on one machine: three local "nodes" with
+      their own node-local directories, 300 tasks in 3 groups, one failing once, evict 10 s, relay
+      heartbeat 1 s, 2 clients × 2 threads per site, kill variant (`HSD_SMOKE_RUNS` for more); then the
+      judge, and a grep of the records for the host name, the user name and every run's key. It never
+      deletes; it prints its scratch path.
+- [x] Hand-back note (below).
+- **Amendments (2026-11-05, build), for the foreman:**
+  - *One orchestrating script per allocation* (the foreman's brief), not per-role invocations from a
+    foreman-written batch script as the zone drives and the plan had it. It installs nothing: `HS` names
+    the venv under test (no `tests/cluster/build_archive.sh`); `drive.sh` is untouched.
+  - *3 nodes by default* (one per site), not 4; any count ≥ 3 works. Site A is no longer multi-zone:
+    multi-zone relays are P9, and R21 does not ask for them. One shared zone (`HSD_ZONE`, `shared`).
+  - *Non-`--forever` upstream* (`hs server --restart -r 1 -b 8 -Q 2`, evict `HSD_EVICT`, DEBUG log):
+    it ends when every task is done and tells the relays to shut down, so a clean run also shows
+    "halt on upstream shutdown"; the plan's `--forever` would need the drive to stop it.
+  - *Failover at a settled moment.* Killing relay B inside the cut-to-confirm window strands rows
+    (GOAL non-goal; it bit P5's scratch driver once). The director, once `HSD_KILL_AT` of the rows are
+    complete and B holds confirmed rows, has B's supervisor SIGSTOP the relay, waits `HSD_SETTLE`
+    (longer than a request's upstream wait), and acts only if the upstream DEBUG log shows every task
+    dispatched to B's identity confirmed: then it snapshots B's held rows and releases B as killed
+    (SIGKILL) or paused (`HSD_PAUSE`, then SIGCONT); otherwise B continues and it tries again (up to
+    `HSD_FAILOVER_ATTEMPTS`, 10). The snapshot is taken while B is frozen, so it is exactly what B
+    held. A killed relay's site clients are ended by its supervisor once the run is over.
+  - *Relay bundle size 4 × threads* (`HSD_RELAY_BUNDLESIZE`). With it equal to the thread count, R8's
+    bound (connected clients × local bundle size) holds only what runs, and each refill pays a
+    request round trip: the first smoke took 123 s for 300 short tasks. Four times the threads gives
+    the site a buffer; the bound is still R8's and is recorded (`peak_backlog ≤ peak_bound`).
+  - *Defaults for 3 nodes:* `HSD_TASKS=2000`, `HSD_SLEEP=1.0`, `HSD_FAILING=3` (one per group),
+    `HSD_THREADS=8`, `HSD_CLIENTS_PER_NODE=2`, `HSD_EVICT=30`, `HSD_HEARTRATE=5`, `HSD_TIMEOUT=300`.
+  - *Check (c)'s address half* (upstream peers within the relay nodes' addresses) is recorded but only
+    judged in slurm mode; with one node per site every site node hosts a relay, so the ownership half
+    (no upstream connection from any site process, per node) is what decides it.
+- **Red first (2026-11-05):** `tests/test_relay_judge.py` written before the judge: 66 errors
+  (`FileNotFoundError`, no judge). With the judge: 67 passed (one test case corrected: the address
+  check is judged only when the record says it applies, so the bad case sets it).
+- **Verified 2026-11-05:**
+  - Verify as written (`uv run pytest -v tests/test_relay_judge.py && sh spec/relay/drive/relay_smoke.sh`,
+    sandbox off for the uv cache; `uv run` built the project `.venv`): 67 passed; smoke PASS (kill:
+    38 checks, 66 s).
+  - Smoke with venv 3.12 (`HS=.venv-312/bin/hs`), all three variants: **kill** — 301 rows, B frozen
+    once and killed holding 16 confirmed rows, B evicted and reverted once, all 16 completed at site A,
+    7 ran at both sites (all in the snapshot), 0 stale or duplicate, relay exits 0 / −9; **pause** —
+    B held 16, evicted once, every one of its late results refused stale (16), exits 0 / 0;
+    **none** — every task ran once, no eviction. Each: key hits 0 over 28–98 scanned site processes
+    per node, no `HYPERSHELL_RELAY_*` name or probe variable at the site, no upstream connection from
+    any site process, upstream peak 6 connections (3 per relay), backlog peak 16 of bound 16, no
+    primary sentinel, the key in no log or record, 0 processes left for the sweep.
+  - Slurm path rehearsed locally with stand-in `srun`/`scontrol` (scratch, not committed; the
+    stand-in dials loopback, since this sandbox cannot resolve its own host name): 5 nodes, sites of
+    2 nodes each, round-robin client steps on both nodes of each site, every watcher reporting; every
+    check passed except `b.site`, as expected there (fake node names are not the host's name).
+  - No process of these runs left afterwards (psutil scan).
+- **Hand-back: how the foreman runs it (run A; P10 judges run B's records).**
+  - *Prerequisites:* the repository checkout (for `spec/relay/drive/`) and the venv under test on the
+    shared filesystem, readable from every node; `HS` = that venv's `bin/hs` (beside it, `python`
+    with psutil and `hyper-shell`, both installed with HyperShell). Run from a directory on a shared,
+    coherent filesystem (scratch); `HSD_WORK` defaults to `./relay-drive` there.
+  - *Submit (3 nodes, ≤ 20 min wall):*
+    ```
+    HS=<venv>/bin/hs HSD_LABEL=<short sha> HSD_RUN_ID=relay-<short sha> \
+    HSD_ACCOUNT=<account> HSD_PARTITION=<partition> HSD_SRUN_ARGS='--gres=none' \
+    HSD_SETUP='<module loads, if the venv needs them>' \
+        sh spec/relay/drive/relay_drive.sh submit
+    ```
+    (Inside an existing allocation instead: the same variables without the `submit` ones, then
+    `sh spec/relay/drive/relay_drive.sh`.) Matrix: r1 kill, r2 pause, r3 none, about 8–10 min in
+    all; a run that could end past 840 s is skipped and counted as a failure.
+  - *Output:* the job log `relay-drive/relay-drive-<jobid>.out` prints each run's verdict and the
+    judge's failing checks. Evidence: `relay-drive/results/<run_id>/{upstream,relay-A,relay-B,
+    leaf-A-1,leaf-B-2}.json` with `<run_id>` = `relay-<sha>-r1-kill`, `-r2-pause`, `-r3-none`. Copy
+    **only** `results/*` into `spec/relay/evidence/cluster/`; never the transport
+    (`relay-drive/<run_id>/`: key, logs, ids). P10's verify then is
+    `uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster` (add
+    `--require kill,pause,none` for the full matrix).
+  - *Watch for:* (1) nested job steps: every step uses `--overlap`; if steps wait with "Requested
+    nodes are busy", the site needs more step flags in `HSD_SRUN_ARGS`. (2) Environment forwarding:
+    the launcher passes `--export=ALL`; if site clients still lack the relay's environment,
+    `e.forwarded`/`e.scanned` fail rather than pass vacuously. (3) Host names: `b.site` compares each
+    leaf's `gethostname()` (short) with the Slurm node names; if they differ on that cluster, the
+    check fails while attribution is right; look at the transport `upstream.log`. (4) `HSD_NODE_TMP`
+    (default `TMPDIR` or `/tmp`) must be the same node-local path on every node. (5) The failover
+    handshake polls flag files across nodes; on a filesystem with slow attribute caching it can take
+    long enough for the 30 s eviction to come first (`d.triggered` fails); raise `HSD_EVICT` then.
+    (6) Relays must reach node 0 by its Slurm name (in its certificate), and site nodes the relay
+    node by its host name. (7) If the run is slow, lower `HSD_TASKS` before raising the budget.
+- **Touches:** `spec/relay/drive/` (`relay_drive.sh`, `relay_launch.sh`, `relay_probe.py`,
+  `relay_task.py`, `relay_judge.py`, `relay_smoke.sh`), `tests/test_relay_judge.py`, this file.
 
 ## Phase P8 — Outage ride-through and restart durability
 **Satisfies:** R9, R5, R20 · **Depends on:** P6 · PLAN §2.5
@@ -1100,6 +1211,9 @@ reconnection they are handed over; a relay restart loses nothing.
 - [ ] Document `relay.upstream.evict_hint` when implemented (`docs/_include/config_param_ref.rst`,
       under `[relay.upstream]`). Review cycle 2 (C2-5) took it out of the public docs until then;
       its default stays in `core/config.py`.
+- [ ] *C3-2 (review cycle 3, ruled 2026-11-05):* make
+      `test_relay_exits_and_ends_its_site_when_its_receiver_dies` deterministic: the injected
+      `apply_results` fault fires only when `results` is non-empty.
 - **From review cycle 1 (deferred here):**
   - *A5.* The site server's eviction period is fixed at 600 s: `cluster/remote.py` builds
     `AutoScalingCluster`'s `ServerThread` with no `evict_after`, so `[server] evict` never reaches the
@@ -1141,6 +1255,10 @@ non-goals.
 - [ ] `AGENTS.md`: relay in the repository map and footguns (one relay per process; import-time
       database swap; relay-only tables; no in-process dial of the local server); `DISTRIBUTED_ROLES`
       location (D11). `invariants.md` §10/§11 notes in lockstep.
+- [ ] *C3-1 (ruled 2026-11-05):* the relay SIGTERM carve-out in `AGENTS.md` §Signals and
+      `invariants.md` §8 (catch, clean up, re-deliver; USR1/USR2 drain; a second SIGTERM ends at once).
+- [ ] *C3-3 (ruled 2026-11-05):* `relay_desc.rst` / `hs relay --help`: a second SIGTERM also leaves
+      the site config copy behind (not only SIGKILL).
 - [ ] Full suite passes.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/relay/`, `src/hypershell/cluster/remote.py` (extraction only),
