@@ -157,9 +157,11 @@ Skip for a patch: patch releases come from `master`, whose docs the site no long
    `:pr:` and no `:commit:`) gets one: the number from the squash commit that added that marker.
    Find it with `git blame -L <n>,<n> -- <file>` on the marker's directive line, not with `git log
    -S` on it: every marker of a line has the same directive text, so `-S` returns every commit that
-   added one. Squash subjects end `(#NN)`. That commit is the feature's own, since a marker lands
-   with its change. A change that landed as a direct
-   commit gets `:commit:` with its short SHA instead. Never touch a marker that already has a link.
+   added one. That commit is the feature's own, since a marker lands with its change. Get its pull
+   request from GitHub (`gh api repos/hypershell/hypershell/commits/<sha>/pulls`), not from the
+   subject: most squash subjects end `(#NN)`, but some merges into `develop` don't. Only a commit
+   with no pull request gets `:commit:` with its short SHA. Never touch a marker that already has a
+   link.
 2. In `docs/whats_new.rst`, move each *Not yet released* entry into its topic group (an upgrade
    caution under *Upgrading*, a feature or change under its area in *New and changed*, a fix under
    *Fixes*), give it this version and its link inline as the other entries do (`(X.Y.ZaN,
