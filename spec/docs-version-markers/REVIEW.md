@@ -190,3 +190,25 @@ that are live today and linked from no built page. Noted for the PR body.
 
 - None: docs and harness only. **Escalated anyway:** this is the third cycle without convergence
   (`hs-review` bound), so the next step is Geoffrey's.
+
+## Review cycle 4 — approved (2026-11-06)
+
+- **Mode:** a scoped delta check, chosen by Geoffrey at the three-cycle bound (chat, 2026-11-06). A
+  fresh blind reviewer checked only F13–F18 against the fix, `627b2f1`, using
+  `git diff 7b06e71 627b2f1`.
+- **Result:** all six fixed, with nothing new introduced. Evidence:
+  - `gh pr view` merge commits for #48, #54, #56, #71 and #76;
+  - `git merge-base --is-ancestor` attributions;
+  - the strict HTML and man builds, with the new markers rendered;
+  - the `git blame` lookup tested in three scratch repos (two same-version markers in one file,
+    adjacent same-shaped sections, an identical directive directly above another), all correct.
+- **One older finding, fixed by the orchestrator after the check:** [LOW/CONFIRMED] `hs-release`
+  Step 3a.1 said squash subjects end `(#NN)`. Seven merges into `develop` don't, and that is how
+  F14 happened. In `3a28887` the step looks up the commit's PR with `gh api …/commits/<sha>/pulls`.
+  Checked by hand: `ede1487` → [54], `f4448a3` → [56], `27db1b0` → []. The change is one
+  sentence of harness text and adds no new check.
+- **R6** stays post-landing. After merge, the live site must show:
+  - `/whats_new.html` returns 200;
+  - the notice on `/` and on nested pages, with a working link;
+  - `/cli/relay.html` reads "Added in version 2.9.0" and links `pull/82`;
+  - `/_include/*.html` now returns 404 (expected, since the build excludes `_include`).

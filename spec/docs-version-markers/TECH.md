@@ -62,10 +62,10 @@ phases:
     .agents/skills/hs-publish/SKILL.md .agents/skills/hs-release/SKILL.md | wc -l
     | grep -qx ' *8'
 review:
-  last_reviewed_commit: 7b06e71
-  verdict: changes-requested
+  last_reviewed_commit: 3a28887
+  verdict: approved
   blocked_reason: ''
-  cycle: 3
+  cycle: 4
 ---
 # TECH.md — Mark what is new in the docs, now that the published site tracks `develop`
 
