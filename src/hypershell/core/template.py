@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, Callable, Final
+from typing import Dict, Callable, Final, Mapping, Optional
 from types import ModuleType
 
 # Standard libs
@@ -43,13 +43,21 @@ EXPOSED_MODULES: Dict[str, ModuleType] = {
 
 
 class Template:
-    """Manage template expansion from command arguments."""
+    """
+    Manage template expansion from command arguments.
+
+    A shell pattern (``{% ... %}``) runs its command with the environment `shell_env()`
+    returns, or, without `shell_env`, with this process's own environment.
+    """
 
     _template: str
+    shell_env: Optional[Callable[[], Mapping[str, str]]]
 
-    def __init__(self: Template, template: str = DEFAULT_TEMPLATE) -> None:
+    def __init__(self: Template, template: str = DEFAULT_TEMPLATE,
+                 shell_env: Optional[Callable[[], Mapping[str, str]]] = None) -> None:
         """Initialize template with input `args` and `template` for expansion."""
         self.template = template
+        self.shell_env = shell_env
 
     @property
     def template(self: Template) -> str:
@@ -178,10 +186,10 @@ class Template:
         else:
             raise self.FailedExpansion(f'Invalid slice expression \'{key}\'')
 
-    @staticmethod
-    def expand_shell(args: str, key: str) -> str:
-        """Expand `key` as a shell command with @ replaced with `args`."""
-        return subprocess.check_output(key.replace('@', args), shell=True).decode().strip()
+    def expand_shell(self: Template, args: str, key: str) -> str:
+        """Expand `key` as a shell command with @ replaced with `args` (environment: see :class:`Template`)."""
+        env = None if self.shell_env is None else dict(self.shell_env())
+        return subprocess.check_output(key.replace('@', args), shell=True, env=env).decode().strip()
 
     def expand_lambda(self: Template, args: str, key: str) -> str:
         """Expand `key` as a lambda expression in `x` and evaluate against `args`."""
