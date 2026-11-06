@@ -157,7 +157,8 @@ Options
 
 ``-E``, ``--env``
     Send environment variables. Only for ``--ssh`` mode, all ``HYPERSHELL_`` prefixed environment
-    variables can be exported to the remote clients.
+    variables can be exported to the remote clients, except ``HYPERSHELL_SERVER_AUTH``, which is
+    never sent this way.
 
 ``--remote-exe`` *PATH*
     Path to remote executable on the client side.

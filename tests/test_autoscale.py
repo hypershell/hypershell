@@ -19,12 +19,15 @@ from cmdkit.app import exit_status
 # Internal libs
 from tests import main, create_taskfile
 from hypershell.cluster.remote import AutoScaler, AutoScalerState
+from hypershell.cluster.launch import client_launch
 from hypershell.data.model import Task, Client, TaskGroupInfo
 
 
 def make_scaler(policy: str, clients: int = 0, **opts) -> AutoScaler:
     """New scaler with `clients` stand-ins for launched client processes."""
-    scaler = AutoScaler(launcher=['hs', 'client'], policy=policy, **opts)
+    launch = client_launch('hs', ('localhost', 0), 'x' * 32, num_threads=1, bundlesize=1, bundlewait=5,
+                           template='{}', delay_start=0, task_signalwait=10)
+    scaler = AutoScaler(launch=launch, policy=policy, **opts)
     scaler.clients = [None] * clients  # Only len() is consulted by check methods
     return scaler
 
