@@ -683,3 +683,34 @@ def test_starting_group_while_the_unscheduled_tasks_are_deleted(site_session: En
     assert deleted == [None]
     assert rows(site_session, 'SELECT id FROM task') == []
     assert info.value == DEFAULT_TASK_GROUP
+
+
+@mark.unit
+def test_group_check_example_renders_for_postgresql(site_session: Engine) -> None:
+    """The group check's example aggregate compiles, for PostgreSQL, over the id as text.
+
+    On PostgreSQL the task id is a native `uuid`, which has no `min`; the statement must never take a
+    bare `min(task.id)` there. Rendered only (no PostgreSQL server needed).
+    """
+    from sqlalchemy import event
+    from sqlalchemy.dialects import postgresql
+
+    store.insert_received(site_session, [upstream_record('exit 3')], identity=IDENTITY)
+    task, = Task.next(limit=1, group=0)
+    assert Task.apply_results([leaf_result(task, exit_status=3)]) == [ResultOutcome.APPLIED]
+    rendered = []
+
+    def render(state) -> None:
+        """Compile each statement the group check runs as PostgreSQL would receive it."""
+        rendered.append(str(state.statement.compile(dialect=postgresql.dialect())))
+
+    session = Session()
+    event.listen(session, 'do_orm_execute', render)
+    try:
+        held = Task.increment_group(0, attempts=1)
+    finally:
+        event.remove(session, 'do_orm_execute', render)
+    assert not held.viable and task.id in held.reason
+    example, = [sql for sql in rendered if 'attempt >=' in sql]
+    assert 'min(task.id)' not in example
+    assert 'min(CAST(task.id AS TEXT))' in example
