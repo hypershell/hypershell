@@ -3,10 +3,10 @@ slug: relay
 title: 'HyperShell Relay: two-level scheduling across administrative sites'
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/relay
 base: develop
-current_phase: P7
+current_phase: done
 last_updated: '2026-11-06'
 phases:
 - id: P1
@@ -109,7 +109,7 @@ phases:
 - id: P7
   name: 'R21 run A: relay drive, launcher wrapper, judge, local smoke, hand back (external
     wait follows)'
-  status: in_progress
+  status: done
   satisfies:
   - R21
   - R20
@@ -118,7 +118,7 @@ phases:
   - P6
   parallel: true
   hammerable: false
-  hill: crest
+  hill: downhill
   verify: uv run pytest -v tests/test_relay_judge.py && sh spec/relay/drive/relay_smoke.sh
 - id: P8
   name: 'Outage ride-through and restart durability: UpstreamLink, backoff, redelivery'
@@ -151,7 +151,7 @@ phases:
   verify: uv run pytest -v && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs
 - id: P10
   name: 'R21 run B: judge the external multi-node evidence'
-  status: pending
+  status: done
   satisfies:
   - R21
   depends_on:
@@ -159,8 +159,9 @@ phases:
   - P9
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster
+    --require kill,pause,none
 review:
   last_reviewed_commit: d4a2ec8
   verdict: approved
@@ -1155,8 +1156,18 @@ changes onto relay, and moves the relay's site-client launch onto `client_launch
 **Satisfies:** R21, R20 · **Depends on:** P5, P6 · PLAN §6; [04 §2](research/04-evidence-and-tests.md)
 **Goal:** a committed, site-neutral run script the foreman can run in one Slurm allocation, proven by
 a local smoke, and an exact run matrix handed back.
-**Status:** built and smoke-tested (2026-11-05); `in_progress`, **waiting on the foreman's external run**
-(not done). P10 judges the delivered records.
+**Status:** done (2026-11-06). Built and smoke-tested on 2026-11-05; the foreman's external runs
+followed, and P10 judged run B's records (PASS). Run history, from the foreman's job ledger:
+- *Run A* (3 nodes, at `24176a6`, 2026-11-05): FAIL on relay throughput. Kill completed 947 of 2000
+  and pause 999 within the 300 s deadline; none was skipped by the budget. Upstream, the relay asked
+  for a few tasks at a time once its backlog neared the bound (a trickle of about 3 tasks/s on 32
+  executors). The same runs failed `a.group_order` and `d.completed`, artifacts of the incomplete
+  runs. Fixed in P8 (the low-water gate, gap-sized requests, the backlog factor 2, the site bundle
+  never below the threads; see P8's throughput rider).
+- *Rerun* (3 nodes, at `1393af6`, 2026-11-06): every functional check passed in all three variants
+  (139 s, 119 s and 99 s). Only `relay.backlog` failed (peak 128 against a recorded bound of 64): the
+  probe recorded the pre-P8 bound. Fixed in `8a0f3b3` (the probe mirrors the factor, pinned by a test).
+- *Run B* (3 nodes, at `d4a2ec8`, 2026-11-06): PASS, kill 41/41, pause 41/41, none 39/39 (P10).
 
 - [x] `spec/relay/drive/relay_drive.sh` — one script that performs R21 (a)–(e) inside one Slurm
       allocation of ≥ 3 nodes (`HSD_MODE=slurm`, the default) or on one machine (`HSD_MODE=local`).
@@ -1710,11 +1721,23 @@ follow-ups.
 ## Phase P10 — R21 run B: judge the evidence
 **Satisfies:** R21 · **Depends on:** P7, P9
 **Goal:** the foreman's multi-node records pass every check (a)–(e).
+**Status:** done (2026-11-06).
 
-- [ ] External wait: blocked until `spec/relay/evidence/cluster/` exists (see field reference).
-- [ ] Re-scrub the delivered records (no host, user, path, key); run the judge; write
-      `spec/relay/evidence/cluster/SUMMARY.txt` with each run's verdict and the build commit it ran.
-- **Verify:** see frontmatter.
+- [x] External wait: the foreman's run B at `d4a2ec8` (2026-11-06; 3 nodes: upstream, site A, site B;
+      2000 × 1 s tasks in 3 groups with 3 failing once and retried; 2 clients × 8 threads per site
+      node; TLS on). Its `results/*` records were copied, unchanged, to
+      `spec/relay/evidence/cluster/` (15 files, three runs); nothing of the transport (keys, logs,
+      identities) was copied.
+- [x] Re-scrubbed: every key and every string value in the records was listed and searched for
+      host, user, cluster, account, partition and path names: none. The only strings are the
+      variants, roles, site letters, `slurm`, the versions, the build commit and the run ids. Nothing
+      was relabelled. The run ids carry the allocation's job number (`relay-d4a2ec8-<job>-r1-kill`),
+      which is not one of those names; it is kept so the records stay exactly as the drive wrote them.
+- [x] Judged: `relay_judge.py spec/relay/evidence/cluster --require kill,pause,none`: kill PASS
+      (41 checks), pause PASS (41), none PASS (39); `relay_judge: PASS (3 runs)`, under `uv run` and
+      under a plain `python3 -I`. `SUMMARY.txt` there gives each run's verdict and the build commit.
+- **Verify:** see frontmatter (now with `--require kill,pause,none`, so the gate needs all three
+  variants).
 - **Touches:** `spec/relay/evidence/`.
 
 ---
