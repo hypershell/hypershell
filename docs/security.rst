@@ -128,9 +128,10 @@ TLS.
 
 The :class:`hypershell.core.queue.SecureManager` class selects this serializer when an active
 :class:`hypershell.core.tls.TLSConfig` is supplied. If TLS is disabled (or no configuration
-is found), ``SecureManager`` is byte-for-byte equivalent to a stock ``BaseManager`` with
-the default ``pickle`` serializer, so cleartext deployments remain supported for
-constrained environments.
+is found), ``SecureManager`` selects the ``'hypershell-plain'`` serializer instead. Its pair is
+the stock listener and client, with ``TCP_NODELAY`` set on each TCP connection where the
+platform allows it. The framing, the handshake, and every byte on the wire are those of a stock
+``BaseManager``, so cleartext deployments remain supported for constrained environments.
 
 |
 
