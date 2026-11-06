@@ -26,6 +26,7 @@ import time
 import stat
 import tomllib
 from pathlib import Path
+from datetime import timedelta
 
 # External libs
 import pytest
@@ -34,7 +35,8 @@ from cmdkit.app import exit_status
 from cmdkit.config import Configuration, Namespace
 
 # Internal libs
-from hypershell.core.config import DEFAULT_AUTH, ConfigurationError
+from hypershell.core.config import config, DEFAULT_AUTH, ConfigurationError
+from hypershell.relay import RelayThread, site_bundlesize
 from hypershell.cluster.launch import ClientLaunch, AUTH_ENV, OMPI_ENV_LIST
 from hypershell.relay.site import (site_cluster, site_launch, fence_site, scrub_environment, check_invocation,
                                    check_exports, CredentialFenceError, site_config_copy)
@@ -254,6 +256,29 @@ def test_open_mpi_launcher_forwards_the_site_key_by_name_only() -> None:
     assert launch.env[AUTH_ENV] == site_key
     assert AUTH_ENV in launch.env[OMPI_ENV_LIST].split(';') and site_key not in launch.env[OMPI_ENV_LIST]
     fence_site(cluster, KEY, environ={}, exports={})
+
+
+@mark.unit
+def test_site_server_evicts_after_the_configured_period() -> None:
+    """The site server takes its eviction period from the relay (`[server] evict`), not a fixed 600 seconds."""
+    cluster = site_cluster(address=('127.0.0.1', free_port()), evict_after=45)
+    assert cluster.server.heartmonitor.machine.evict_after == timedelta(seconds=45)
+    relay = RelayThread(address=('127.0.0.1', free_port()), evict=30)
+    assert relay.server.heartmonitor.machine.evict_after == timedelta(seconds=30)
+    assert RelayThread(address=('127.0.0.1', free_port())).server.heartmonitor.machine.evict_after == \
+        timedelta(seconds=config.server.evict)
+
+
+@mark.unit
+@mark.parametrize('bundlesize, num_threads, expected', [(1, 8, 8), (32, 8, 32), (1, 1, 1), (4, 0, 4)])
+def test_site_bundle_size_is_never_below_the_executor_threads(bundlesize: int, num_threads: int,
+                                                               expected: int) -> None:
+    """Site clients ask for, and the puller's bound counts, at least one task per executor thread at once."""
+    assert site_bundlesize(bundlesize, num_threads) == expected
+    relay = RelayThread(address=('127.0.0.1', free_port()), bundlesize=bundlesize, num_threads=num_threads)
+    argv = relay.cluster.launch.argv
+    assert argv[argv.index('-b') + 1] == str(expected)
+    assert relay.bundlesize == expected and relay.server.scheduler.machine.bundlesize == expected
 
 
 @mark.unit

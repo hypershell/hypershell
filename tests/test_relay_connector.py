@@ -149,22 +149,35 @@ def test_no_request_without_site_clients(relay_db: Engine) -> None:
 
 
 @mark.unit
-def test_no_request_at_or_above_the_bound_one_below_it(relay_db: Engine) -> None:
-    """At or above connected clients times the local bundle size nothing is requested; below it, the gap is."""
+def test_no_request_above_the_low_water_mark_then_the_whole_gap(relay_db: Engine) -> None:
+    """The bound is connected clients times the local bundle size, twice over; above half of it nothing is
+    requested, and at or below half the whole gap is asked for at once (one large request, not a trickle)."""
     connect_clients(relay_db, 2)
     connect_clients(relay_db, 3, server_id=str(uuid()))  # Another relay-local server's clients do not count.
-    ids = add_backlog(relay_db, 4)
+    ids = add_backlog(relay_db, 5)
     fake = FakeDispatcher()
     machine = puller(relay_db, fake, local_bundlesize=2)
-    assert machine.gate() is PullerState.GATE  # Backlog 4, bound 4.
+    assert machine.bound() == 8
+    assert machine.gate() is PullerState.GATE  # Backlog 5, above the low-water mark 4.
     with relay_db.begin() as conn:
         conn.execute(Task.__table__.update().where(Task.__table__.c.id == ids[0])
                      .values(completion_time=datetime.now().astimezone(), exit_status=0))
-    assert machine.gate() is PullerState.REQUEST  # Backlog 3, bound 4.
+    assert machine.gate() is PullerState.REQUEST  # Backlog 4, at the low-water mark.
     assert fake.requests == []
     assert machine.request() is PullerState.GATE
     request, = fake.requests
-    assert request['size'] == 1
+    assert request['size'] == 4  # The gap to the bound, not the one task that just finished.
+
+
+@mark.unit
+def test_request_never_exceeds_the_upstream_bundle_size(relay_db: Engine) -> None:
+    """A gap larger than the advertised upstream bundle size is asked for one bundle at a time."""
+    connect_clients(relay_db, 10)
+    fake = FakeDispatcher()
+    machine = puller(relay_db, fake, local_bundlesize=8, bundlesize=50)
+    assert machine.gate() is PullerState.REQUEST
+    machine.request()
+    assert [request['size'] for request in fake.requests] == [50]
 
 
 @mark.unit
@@ -202,7 +215,7 @@ def test_request_is_an_ordinary_work_request(relay_db: Engine) -> None:
     assert request['client'] == upstream_identity('gpu') != INSTANCE
     assert request['host'] == HOSTNAME
     assert request['zone'] == 'gpu'
-    assert request['size'] == 6
+    assert request['size'] == 12  # Three clients, bundles of two, twice over.
     assert 0 < request['wait'] <= 2
 
 
@@ -397,12 +410,12 @@ def test_real_dispatcher_serves_the_relay_as_a_client(relay_db: Engine) -> None:
                                  bundlesize=1000, local_bundlesize=1, poll=POLL)
         assert machine.gate() is PullerState.REQUEST
         assert machine.request() is PullerState.INSERT
-        assert server.dispatcher.demand == {upstream_identity('gpu'): (zone_id('gpu'), 2)}
+        assert server.dispatcher.demand == {upstream_identity('gpu'): (zone_id('gpu'), 4)}  # Two clients, twice.
         assert machine.insert() is PullerState.CONFIRM
         assert machine.confirm() is PullerState.GATE
         info = ClientInfo.unpack_or_none(server.confirmed.get(timeout=5))
         assert info.client_id == upstream_identity('gpu')
-        assert info.task_ids == [record['id'] for record in records[:2]]
-        assert machine.gate() is PullerState.GATE  # Two received, two clients: the bound is met.
+        assert info.task_ids == [record['id'] for record in records]
+        assert machine.gate() is PullerState.GATE  # Three held: above the low-water mark (two).
     stamps = dict(rows(relay_db, 'SELECT id, schedule_time FROM relay_task'))
-    assert stamps == {record['id']: record['schedule_time'] for record in records[:2]}
+    assert stamps == {record['id']: record['schedule_time'] for record in records}

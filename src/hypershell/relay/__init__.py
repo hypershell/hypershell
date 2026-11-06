@@ -48,6 +48,7 @@ from hypershell.core.signal import SIGUSR1, SIGUSR2, SIGTERM
 from hypershell.core.exceptions import get_shared_exception_mapping, handle_exception, handle_disconnect
 from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.queue import QueueClient, QueueConfig
+from hypershell.core.reconnect import UpstreamLink
 from hypershell.core.thread import Thread
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.data import ensuredb
@@ -59,7 +60,7 @@ from hypershell.relay.site import site_cluster, fence_site, end_site_clients, DE
 from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
                                        upstream_identity, upstream_config, upstream_key, relay_site,
                                        drain_signalled, DEFAULT_UPSTREAM_BUNDLESIZE, DEFAULT_UPSTREAM_HEARTRATE,
-                                       DEFAULT_RETENTION)
+                                       DEFAULT_RETENTION, LINK_STAGES)
 from hypershell.cluster.remote import AutoScalingCluster
 from hypershell.server import ServerThread
 
@@ -71,7 +72,9 @@ except ImportError:  # pragma: no cover (not available on Windows)
 # Public interface
 __all__ = ['RelayThread', 'RelayApp', 'DEFAULT_RELAY_BIND', 'DEFAULT_RELAY_PORT', 'DEFAULT_RELAY_POLL',
            'DEFAULT_RELAY_SIZE', 'lock_database', 'RelayDatabaseLocked', 'DRAIN', 'install_drain_handlers',
-           'STOP_TIMEOUT', 'CLIENT_GRACE', 'RelayPartEnded', 'RelayTerminated', 'install_terminate_handler']
+           'STOP_TIMEOUT', 'CLIENT_GRACE', 'RelayPartEnded', 'RelayTerminated', 'install_terminate_handler',
+           'site_bundlesize', 'DEFAULT_UPSTREAM_DEADLINE', 'DEFAULT_UPSTREAM_BACKOFF', 'DEFAULT_EVICT_HINT',
+           'DEFAULT_SITE_EVICT']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -80,8 +83,20 @@ log = Logger.with_name(__name__)
 DEFAULT_RELAY_BIND: Final[str] = config.relay.bind
 """Default bind address of the relay-local server."""
 
-DEFAULT_RELAY_POLL: Final[int] = config.relay.poll
+DEFAULT_RELAY_POLL: Final[float] = config.relay.poll
 """Default polling interval of the relay-local scheduler in seconds."""
+
+DEFAULT_UPSTREAM_DEADLINE: Final[float] = config.relay.upstream.deadline
+"""Default seconds an upstream call may take before the upstream link counts as down."""
+
+DEFAULT_UPSTREAM_BACKOFF: Final[float] = config.relay.upstream.backoff
+"""Default longest wait in seconds between attempts to reach the upstream server again."""
+
+DEFAULT_EVICT_HINT: Final[float] = config.relay.upstream.evict_hint
+"""Default seconds of upstream outage after which the upstream server has likely evicted the relay."""
+
+DEFAULT_SITE_EVICT: Final[int] = config.server.evict
+"""Default seconds the relay-local server waits on a silent site client before evicting it."""
 
 DEFAULT_RELAY_BUNDLESIZE: Final[int] = config.relay.bundlesize
 """Default bundle size of the relay-local server."""
@@ -208,6 +223,16 @@ def lock_database(path: str) -> Optional[IO]:
     return stream
 
 
+def site_bundlesize(bundlesize: int, num_threads: int) -> int:
+    """The relay-local bundle size: `bundlesize`, but never below a site client's executor threads.
+
+    A site client asks for one bundle at a time and holds at most a bundle in waiting, so a bundle
+    smaller than its executor threads leaves executors idle between round trips (`num_threads` of 0,
+    one per core, is unknown here and adds no floor).
+    """
+    return max(1, int(bundlesize), int(num_threads or 0))
+
+
 class RelayThread(Thread):
     """
     Run a relay within a dedicated thread.
@@ -219,7 +244,8 @@ class RelayThread(Thread):
 
     Upstream the relay is one client for its zone, under an identity derived from this relay and the
     zone name. It connects before anything else starts, so a server it cannot use (a version
-    mismatch, a wrong key) ends it before the site is touched. Before that, the upstream key is fenced
+    mismatch, a wrong key) ends it before the site is touched; a server it cannot reach yet is tried
+    again with backoff until it answers. Before that, the upstream key is fenced
     off from the site: a client invocation that would carry it is refused, and the relay's environment,
     which site clients and their tasks inherit, is cleared of relay settings and of anything holding
     the key (see `hypershell.relay.site.fence_site`). A puller requests work while the site
@@ -233,8 +259,14 @@ class RelayThread(Thread):
     returns every result still held, and ends its upstream registration with a final heartbeat if
     nothing it received is left without a result.
 
-    If any part fails (the upstream connection is lost, say), the relay stops every part once, each
-    within a bounded wait, ends the site clients it launched (SIGTERM, then SIGKILL after a grace
+    The upstream connection is a link that rides through outages (see `hypershell.core.reconnect`):
+    every call has a deadline, and a lost connection is made again with backoff while the site keeps
+    running and completed results stay in the outbox. Once the link is back the relay beats first
+    (registering again if it was evicted), sends again a confirmation the outage cut off (unless the
+    outage outlasted `evict_hint`), hands back what the outbox holds, and only then asks for more.
+
+    If any part fails (a dead receiver, or an upstream server it can no longer use), the relay stops
+    every part once, each within a bounded wait, ends the site clients it launched (SIGTERM, then SIGKILL after a grace
     period) and raises the failure, leaving its identity to upstream eviction. A part that dies
     without raising is a failure too: the relay watches its own threads and every thread of the
     relay-local server (see `check_site`), so a dead receiver, say, never leaves it holding tasks
@@ -246,7 +278,8 @@ class RelayThread(Thread):
             See :const:`DEFAULT_RELAY_BIND` and :const:`DEFAULT_RELAY_PORT`.
 
         bundlesize (int, optional):
-            Bundle size of the relay-local server. See :const:`DEFAULT_RELAY_BUNDLESIZE`.
+            Bundle size of the relay-local server and its site clients, never below `num_threads`.
+            See :const:`DEFAULT_RELAY_BUNDLESIZE`.
 
         bundlewait (int, optional):
             Seconds to wait before flushing tasks, at the site and upstream.
@@ -301,6 +334,22 @@ class RelayThread(Thread):
         site_config (str, optional):
             Path the site's copy of the configuration file is written to, if one is needed
             (see `hypershell.relay.site.fence_site`). Default: beside the relay database.
+
+        deadline (float, optional):
+            Seconds an upstream call may take before the link counts as down.
+            See :const:`DEFAULT_UPSTREAM_DEADLINE`.
+
+        backoff (float, optional):
+            Longest wait in seconds between attempts to reach the upstream server again.
+            See :const:`DEFAULT_UPSTREAM_BACKOFF`.
+
+        evict_hint (float, optional):
+            Seconds of upstream outage after which the upstream server has likely evicted the relay.
+            See :const:`DEFAULT_EVICT_HINT`.
+
+        evict (int, optional):
+            Seconds the relay-local server waits on a silent site client before evicting it.
+            See :const:`DEFAULT_SITE_EVICT`.
     """
 
     cluster: AutoScalingCluster
@@ -309,7 +358,7 @@ class RelayThread(Thread):
     site: str
     identity: str
     upstream_config: Optional[QueueConfig]
-    upstream: Optional[QueueClient] = None
+    link: Optional[UpstreamLink] = None
     puller: Optional[UpstreamPullerThread] = None
     returner: Optional[UpstreamReturnerThread] = None
     heartbeat: Optional[UpstreamHeartbeatThread] = None
@@ -335,12 +384,17 @@ class RelayThread(Thread):
                  client_timeout: Optional[int] = None,
                  retention: int = DEFAULT_RETENTION,
                  period: int = DEFAULT_SITE_PERIOD,
-                 site_config: Optional[str] = None) -> None:
+                 site_config: Optional[str] = None,
+                 deadline: float = DEFAULT_UPSTREAM_DEADLINE,
+                 backoff: float = DEFAULT_UPSTREAM_BACKOFF,
+                 evict_hint: float = DEFAULT_EVICT_HINT,
+                 evict: int = DEFAULT_SITE_EVICT) -> None:
         """Initialize the site and the upstream side."""
+        bundlesize = site_bundlesize(bundlesize, num_threads)
         self.cluster = site_cluster(address=address, bundlesize=bundlesize, bundlewait=bundlewait, poll=poll,
                                     tls=tls, zone=zone, size=size, launcher=launcher, launcher_args=launcher_args,
                                     num_threads=num_threads, template=template, client_timeout=client_timeout,
-                                    period=period)
+                                    period=period, evict_after=evict)
         self.server = self.cluster.server
         self.bundlesize = bundlesize
         self.bundlewait = bundlewait
@@ -352,6 +406,9 @@ class RelayThread(Thread):
         self.upstream_bundlesize = upstream_bundlesize
         self.heartrate = heartrate
         self.retention = retention
+        self.deadline = deadline
+        self.backoff = backoff
+        self.evict_hint = evict_hint
         database_file = config.database.get('file', None)
         self.site_config = site_config or (f'{database_file}.site.toml' if database_file else None)
         self.ending = threading.Lock()
@@ -369,16 +426,22 @@ class RelayThread(Thread):
         upstream = self.upstream_config or upstream_config()
         try:
             fence_site(self.cluster, key=upstream.auth, site_config=self.site_config)
-            self.upstream = QueueClient(config=upstream)
-            self.upstream.connect()
-            log.info(f'Connected to upstream server {upstream.host}:{upstream.port}')
-            self.heartbeat = UpstreamHeartbeatThread(queue=self.upstream, identity=self.identity,
+            # The link holds the upstream configuration (and so the key) read before the fence:
+            # every reconnection builds its client from this object, never from configuration again.
+            self.link = UpstreamLink(functools.partial(QueueClient, config=upstream),
+                                     name=f'upstream server {upstream.host}:{upstream.port}',
+                                     deadline=self.deadline, evict_hint=self.evict_hint,
+                                     backoff_cap=self.backoff, stages=LINK_STAGES)
+            self.link.start()
+            if not self.wait_link():
+                return
+            self.heartbeat = UpstreamHeartbeatThread(queue=self.link, identity=self.identity,
                                                      heartrate=self.heartrate, site=self.site,
                                                      roster=functools.partial(store.roster, engine, INSTANCE))
-            self.puller = UpstreamPullerThread(queue=self.upstream, engine=engine, identity=self.identity,
+            self.puller = UpstreamPullerThread(queue=self.link, engine=engine, identity=self.identity,
                                                zone=self.zone, bundlesize=self.upstream_bundlesize,
                                                local_bundlesize=self.bundlesize, poll=self.poll, drain=draining)
-            self.returner = UpstreamReturnerThread(queue=self.upstream, engine=engine,
+            self.returner = UpstreamReturnerThread(queue=self.link, engine=engine,
                                                    bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
                                                    poll=self.poll, retention=self.retention)
             self.cluster.start()
@@ -392,6 +455,7 @@ class RelayThread(Thread):
             self.returner.flush()
             self.wait_returner()
             self.finish_upstream()
+            self.link.stop(timeout=STOP_TIMEOUT)
             self.reap_site_clients()
         except Exception:
             self.abort()
@@ -399,6 +463,18 @@ class RelayThread(Thread):
         finally:
             self.release()
         log.debug('Done')
+
+    def wait_link(self: RelayThread) -> bool:
+        """Wait for the first upstream connection; false if the relay was stopped first.
+
+        An upstream server that cannot be reached yet is tried again with backoff (the link logs it);
+        one that refuses the relay for good (another protocol, a wrong key) ends it here, with the
+        client's error, before the site is touched.
+        """
+        while not self.link.wait_up(timeout=STOP_CHECK_INTERVAL):
+            if self.aborted:
+                return False
+        return not self.aborted
 
     def wait_ready(self: RelayThread) -> None:
         """Wait for the relay-local server to listen; raise its failure if the site ends first."""
@@ -545,6 +621,8 @@ class RelayThread(Thread):
                 log.warning(f'Relay-local server did not stop within {STOP_TIMEOUT} seconds - leaving it')
         self.stop_quietly(self.returner)
         self.stop_quietly(self.heartbeat)
+        if self.link is not None:
+            self.link.stop(timeout=STOP_TIMEOUT)
 
     @staticmethod
     def stop_quietly(thread: Optional[Thread]) -> None:
@@ -616,6 +694,10 @@ APP_HELP = f"""\
   tasks inherit, and they are given the configuration file without the relay settings.
   Site clients receive the relay's own site key in their environment, never on their
   command line, so the launcher must pass the environment through.
+
+  If the upstream server cannot be reached, the site keeps running and results are kept in
+  the relay database; the relay connects again with backoff, then returns them before it
+  asks for more work.
 
   SIGUSR1 or SIGUSR2 drain the relay: it asks for no more work, finishes what it holds and
   returns the results. SIGINT or SIGTERM end it at once, with the site's clients. If the
@@ -737,7 +819,11 @@ class RelayApp(Application):
                              num_threads=config.relay.num_threads,
                              template=config.relay.template,
                              client_timeout=config.relay.timeout or None,
-                             retention=config.relay.retention)
+                             retention=config.relay.retention,
+                             deadline=config.relay.upstream.deadline,
+                             backoff=config.relay.upstream.backoff,
+                             evict_hint=config.relay.upstream.evict_hint,
+                             evict=config.server.evict)
         try:
             thread.start()
             thread.join()

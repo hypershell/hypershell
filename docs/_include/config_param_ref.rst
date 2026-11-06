@@ -540,14 +540,20 @@
         See also ``--port`` command-line option.
 
     ``.bundlesize``
-        Size of task bundle for the relay-local *server* (default: `1`).
+        Size of task bundle for the relay-local *server* and the *clients* at its site
+        (default: `1`).
+
+        It is never smaller than ``relay.num_threads``: a *client* asks for one bundle at a time,
+        so a smaller bundle would leave its executors idle between requests.
 
     ``.bundlewait``
         Seconds the relay waits before returning finished tasks upstream regardless of
         `bundlesize` (default: `5`).
 
     ``.poll``
-        Maximum polling interval of the relay-local scheduler in seconds (default: `1`).
+        Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).
+
+        Received tasks wait at most this long before the relay-local *server* hands them out.
 
     ``.retention``
         Seconds a result is kept in the relay database after it has been returned upstream
@@ -613,11 +619,37 @@
         ``.bundlesize``
             Bundle size the relay advertises upstream (default: `1000`).
 
-            The relay never asks for more than this at once, nor for more than its site has room
-            for: its connected *clients* times ``relay.bundlesize``, less the tasks it holds.
+            The relay holds at most twice its connected *clients* times ``relay.bundlesize`` in
+            unfinished tasks. It asks for more only once half of that is left, and then for the
+            whole difference (never more than this size at once), so the site has a second round
+            of work ready while the first runs.
 
         ``.heartrate``
             Seconds between heartbeats to the upstream *server* (default: `10`).
+
+        ``.deadline``
+            Seconds a call to the upstream *server* may take before the relay takes the connection
+            as lost (default: `30`).
+
+            While the upstream *server* cannot be reached, the site keeps running and finished
+            tasks are kept in the relay database; the relay connects again, with backoff, and then
+            returns them before it asks for more work.
+
+        ``.backoff``
+            Longest wait in seconds between attempts to reach the upstream *server* again
+            (default: `60`).
+
+            Each wait is drawn at random up to a bound that starts at one second and doubles with
+            each failed attempt, up to this value.
+
+        ``.evict_hint``
+            Seconds of lost contact after which the relay takes the upstream *server* to have
+            evicted it (default: `600`, the *server*'s own default ``server.evict``).
+
+            Set it to the upstream ``server.evict``. Past it, the relay warns that the results it
+            holds will likely be refused as stale (the upstream *server* has put those tasks back
+            for other *clients*), and it does not repeat a confirmation the outage cut off. The
+            results are still returned when the connection comes back.
 
         ``[tls]``
             ``.enabled``

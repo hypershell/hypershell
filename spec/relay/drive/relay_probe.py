@@ -571,7 +571,14 @@ def relay(site: str) -> int:
     home.mkdir(parents=True, exist_ok=True)
     database = tmp / f'relay-{site}.db'
     port = free_port(bind_address())
+    # Executor threads per site client come from a configuration file: a variable cannot name a key with
+    # an underscore in it (HYPERSHELL_RELAY_NUM_THREADS would set `relay.num.threads`). The relay hands
+    # its site a copy of this file without the [relay] table.
+    config = home / 'relay.toml'
+    config.write_text(Path(os.environ['HYPERSHELL_CONFIG_FILE']).read_text()
+                      + f'\n[relay]\nnum_threads = {THREADS}\n')
     env = dict(os.environ,
+               HYPERSHELL_CONFIG_FILE=str(config),
                HYPERSHELL_SITE=str(home),
                HYPERSHELL_DATABASE_FILE=str(home / 'primary-sentinel.db'),
                HYPERSHELL_LOGGING_LEVEL='INFO',
@@ -581,7 +588,6 @@ def relay(site: str) -> int:
                HYPERSHELL_RELAY_UPSTREAM_HEARTRATE=str(HEARTRATE),
                HYPERSHELL_RELAY_BUNDLESIZE=str(RELAY_BUNDLESIZE),
                HYPERSHELL_RELAY_BUNDLEWAIT='1',
-               HYPERSHELL_RELAY_NUM_THREADS=str(THREADS),
                HSD_KEY_PROBE=f'probe:{key}',  # The key under another name, on purpose: the fence must drop it.
                HSD_SITE=site, HSD_RUN_TOKEN=token, HSD_EXEC_LOG=str(tmp / 'exec.log'),
                HSD_SITE_NODES=' '.join(nodes), HSD_LAUNCH_STATE=str(tmp / f'launch-{site}'))

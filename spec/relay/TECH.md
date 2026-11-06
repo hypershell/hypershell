@@ -122,7 +122,7 @@ phases:
   verify: uv run pytest -v tests/test_relay_judge.py && sh spec/relay/drive/relay_smoke.sh
 - id: P8
   name: 'Outage ride-through and restart durability: UpstreamLink, backoff, redelivery'
-  status: pending
+  status: in_progress
   satisfies:
   - R9
   - R5
@@ -131,7 +131,7 @@ phases:
   - P6
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: crest
   verify: uv run pytest -v tests/test_relay_link.py tests/test_relay_outage.py tests/test_relay_fsm.py
     tests/test_relay_return.py tests/test_relay_workload.py
 - id: P9
@@ -1298,40 +1298,221 @@ a local smoke, and an exact run matrix handed back.
 **Goal:** while upstream is unreachable the site keeps running and results stay durable; on
 reconnection they are handed over; a relay restart loses nothing.
 
-- [ ] `core/reconnect.py::UpstreamLink`: link worker per role with a call deadline; transport vs
+- [x] `core/reconnect.py::UpstreamLink`: link worker per role with a call deadline; transport vs
       fatal classification; full-jitter backoff (1 s → 60 s) on the halt event; epoch; logging
       cadence and the `evict_hint` warning; injected clock/rng/sleep. No `core/queue.py` change.
-- [ ] Puller, returner, heartbeat: `WAIT_LINK` state (1 s re-entry); on up: heartbeat all
+- [x] Puller, returner, heartbeat: `WAIT_LINK` state (1 s re-entry); on up: heartbeat all
       identities → replay confirms only for an outage shorter than `evict_hint` → drain outbox →
       pull.
-- [ ] Upstream restart detection by `server_id` change: delete unstarted local rows with the old
+- [x] Upstream restart detection by `server_id` change: delete unstarted local rows with the old
       `server_id`.
-- [ ] `tests/test_relay_link.py` (unit, injected clock): backoff sequence, classification,
+- [x] `tests/test_relay_link.py` (unit, injected clock): backoff sequence, classification,
       cadence, worker retirement on overrun, fatal exit.
-- [ ] `tests/test_relay_outage.py` (integration, pass/close/blackhole TCP forwarder between relay
+- [x] `tests/test_relay_outage.py` (integration, pass/close/blackhole TCP forwarder between relay
       and upstream, evict 600 s): partition after local completion, results land after restore;
       blackhole stall detected within the deadline; SIGKILL during a partition, restart on the same
       file, restore: unreturned rows land (APPLIED or DUPLICATE), none lost.
-- [ ] Document `relay.upstream.evict_hint` when implemented (`docs/_include/config_param_ref.rst`,
+- [x] Document `relay.upstream.evict_hint` when implemented (`docs/_include/config_param_ref.rst`,
       under `[relay.upstream]`). Review cycle 2 (C2-5) took it out of the public docs until then;
       its default stays in `core/config.py`.
-- [ ] *C3-2 (review cycle 3, ruled 2026-11-05):* make
+- [x] *C3-2 (review cycle 3, ruled 2026-11-05):* make
       `test_relay_exits_and_ends_its_site_when_its_receiver_dies` deterministic: the injected
       `apply_results` fault fires only when `results` is non-empty.
 - **From review cycle 1 (deferred here):**
-  - *A5.* The site server's eviction period is fixed at 600 s: `cluster/remote.py` builds
+  - [x] *A5.* The site server's eviction period is fixed at 600 s: `cluster/remote.py` builds
     `AutoScalingCluster`'s `ServerThread` with no `evict_after`, so `[server] evict` never reaches the
     relay's site (a site client killed without a FINISHED beat holds up a drain that long; P5 ruling 2's
     note). It predates this branch. Fix it here, after the hardening cycle's `cluster/remote.py`
     changes have merged (pass the evict period through, or compose the site server in relay).
     They merged on 2026-11-05 (merge round above); #80 left `AutoScalingCluster`'s `ServerThread`
     call as it was.
-  - *B8.* `relay.upstream.evict_hint` is read here (the `UpstreamLink` warning and the replay cut-off
+  - [x] *B8.* `relay.upstream.evict_hint` is read here (the `UpstreamLink` warning and the replay cut-off
     below). Since review cycle 2 the public config reference does not list it: document it when
     implemented (the checklist item above).
+- [x] *Failover test that failed once under load (merge round, 2026-11-05):* investigate; fix if a test or
+      timing defect.
+- [x] *Throughput rider (foreman, 2026-11-05; below):* measure both sides of the relay, fix the
+      bottlenecks with defaults that need no tuning, add a local relay-vs-direct check (target ≤ 1.5×
+      direct wall time for 2000 × 0.2 s tasks at 32 executors), and answer the R21 run A
+      `a.group_order` / `d.completed` question.
+- **Amendments (2026-11-05, build):**
+  - **The link.** `UpstreamLink` (`core/reconnect.py`) holds one connected `QueueClient` and runs each
+    role's calls (`puller`, `returner`, `heartbeat`) on that role's worker thread with a deadline
+    (`[relay.upstream] deadline`, default 30 s). A transport error (`EOFError` or any `OSError`: resets,
+    refusals, timeouts, non-verification TLS errors) or an overrun takes the link down for that
+    connection and raises `LinkDown`; the worker is retired (a stuck one is abandoned and ends with its
+    socket). A fatal error (`QueueVersionError`, `AuthenticationError`, `TLSError`,
+    `SSLCertVerificationError`) fails the link: it is raised unchanged to every caller and waiter, so the
+    relay exits as a client would (one CRITICAL line, from the app). Any other error (`QueueFull`) is the
+    caller's. A reconnector thread dials again: each attempt on a throwaway thread with the same
+    deadline, waits `uniform(0, min(cap, 2ⁿ))` s between attempts (cap `[relay.upstream] backoff`,
+    default 60 s) on the halt event. Each connection is a new epoch with new worker threads, which is
+    what avoids the per-thread proxy connection cache (research 02 §2); the old client's manager is
+    marked shut down so its proxy finalizers never dial an unreachable peer. Logging as planned: one
+    WARNING down, INFO at attempts 2, 4, 8, … and at least every 5 min, one WARNING past `evict_hint`,
+    one WARNING on reconnect with the outage length. `FixedLink`/`as_link` wrap a connected client (calls
+    in place, always up), so the machines also take a plain client (the existing unit tests' fakes).
+  - **Order after a reconnection, by link stages.** Each connection has two stages, `beat` (passed by
+    the first heartbeat on it) and `drain` (passed when the returner finds nothing pending, or sends a
+    partial bundle, on it). The heartbeat beats first; the returner sends only after `beat` and sends
+    at once while catching up (not at the bundle wait); the puller replays a lost confirmation only after
+    `beat`, and requests only after `beat` and `drain`. The first connection follows the same order.
+  - **Confirm replay.** A confirmation lost with the link (`LinkDown` from its put) is replayed once the
+    link is back if `link.outage` (last success before the outage to the reconnection) is below
+    `evict_hint`; otherwise it is dropped with a WARNING and the tasks still run (their results land
+    if upstream kept the assignment, else they are refused stale). A puller told to stop while it
+    waits for the link ends there (a pending confirmation is dropped with a WARNING). A request lost
+    with the link goes back to `WAIT_LINK` (a reply cut for it upstream is the cut-to-confirm non-goal).
+  - **An unreachable upstream at start is no longer fatal (deviation for review, the conservative
+    reading).** The relay keeps P3's order: it connects before the site starts, so a server that refuses
+    it for good still ends it before anything is launched; a server it cannot reach yet is retried with
+    backoff ("Cannot reach upstream server …"), and the site starts once it answers. A relay restarted
+    during a partition therefore waits for its upstream server before running anything; it then returns
+    the results its earlier run held. The other reading, starting the site at once, would run held tasks
+    through a long outage after a restart but give up "a refused relay never touches its site".
+  - **Upstream loss is no longer a relay failure (R9).** Review cycle 1's B1 scenario (upstream killed →
+    relay exits non-zero within 30 s) contradicts R9 now. Its process test is replaced by
+    `test_relay_rides_through_its_upstream_server_dying_and_restarting` (upstream SIGKILLed with tasks held;
+    the site keeps running and holds every result; a server restarted on the same port refuses the 4 held
+    results as stale (N2), the relay runs the tasks again under their new assignments, and all complete
+    once) and `test_relay_exits_and_ends_its_site_when_its_upstream_server_comes_back_unusable` (a server
+    with another key on the same port: the relay exits non-zero within 30 s with `AuthenticationError`
+    and ends both site clients), which keeps B1's bounded-exit contract for real failures.
+  - **Restart detection** (`store.drop_superseded`, inside `insert_received`'s transaction): a received
+    record whose `server_id` differs from a held task's drops the held tasks of the other instance that
+    the relay-local server has not scheduled (local `schedule_time IS NULL`, re-checked in the DELETE),
+    with their stamps; started ones run on and return STALE; ids in the bundle are kept. One INFO line.
+  - **New settings** `[relay.upstream] deadline` (30) and `backoff` (60), documented with `evict_hint` in
+    the config reference and `relay_desc.rst`; `hs relay --help` gains one outage paragraph. They are
+    single words on purpose: a variable cannot set a key with an underscore (see the rider's finding 4).
+  - **A5.** `AutoScalingCluster` gains `evict_after` (default `DEFAULT_EVICT`, behaviour unchanged for
+    every other caller), passed to its `ServerThread`; the relay passes `[server] evict`
+    (`site_cluster(evict_after=…)`, `RelayThread(evict=…)`). This is the one `cluster/` edit, as A5
+    allowed. `relay_desc.rst` says a silent site client is evicted after `server.evict` seconds.
+  - **C3-2.** The injected receiver fault fires only on a non-empty `results`; the original
+    `apply_results` handles an empty one. The test's "put back" check now reads rows with no client and
+    no completion: with the larger bound the relay holds all four tasks, and the upstream scheduler may
+    stage the reverted rows again at once (stamping `schedule_time`).
+  - **P5 ruling notes for P8, revisited.** (2) A site client killed without a FINISHED beat now holds a
+    drain up for `[server] evict` (A5), not a fixed 600 s. (3) Return bundles keep the upstream bundle
+    size and `[relay] bundlewait`, except that after a reconnection the outbox goes back at once; `-N 0`
+    is refused since review cycle 1 (A3), so the leftover-task launch no longer arises. The key-reuse rule
+    (merge-round note: "P8's reconnect must reuse that object") holds: the link's factory is
+    `QueueClient(config=<the upstream QueueConfig built before the fence>)`; configuration is never read
+    again.
+  - **Drain with the link down** waits for the link: the returner holds what it has until it can hand
+    it over (SIGINT/SIGTERM still end the relay at once).
+- **The failover test (`test_failover_reverts_and_completes_elsewhere`).** It passed 6 of 6 run
+  concurrently on the P7 head, so the one failure under load was not reproduced; its reason was found
+  by reading the test against the dispatch path. It killed relay B as soon as B held one confirmed,
+  running task. At that moment B could still be (a) inside a request whose reply upstream had cut
+  (rows stamped, no client: the cut-to-confirm window, a GOAL non-goal), which strands those rows and the
+  run never ends, or (b) about to confirm more rows than the snapshot holds, so a task B ran outside the
+  snapshot fails `dup ⊆ snapshot`; and (c) its roster might not yet be upstream (the larger P8 bound made
+  this one fire: the leaves B launched were missing from the upstream `client` table). A test timing
+  defect, fixed in the test: B is killed only once it is *settled* (`settled()`): both site clients
+  connected and listed upstream, everything the upstream log dispatched to B confirmed and equal to B's
+  local backlog, and either B above its low-water mark (it asks for nothing) or no group-0 task upstream
+  without a client (a request finds nothing). The snapshot is then exact and no reply can be cut for B.
+- **Throughput rider (foreman, 2026-11-05).** R21 run A at `24176a6` (3 nodes, kill variant) completed 947
+  of 2000 one-second tasks in its 300 s deadline, about 3 tasks/s, with upstream dispatching 1–2 tasks
+  per request after the first bundle.
+  - *Measured* with a local driver (2000 × `sleep 0.2`, 4 site clients × 8 threads, upstream `hs server
+    --restart`, every other setting at its default), on both sides of the relay:
+    1. **Upstream: a trickle.** The gate asked for `bound − backlog`, so once the backlog neared the bound
+       each request was for the 1–2 tasks just finished, each a round trip through the upstream
+       dispatcher (upstream log: 589 dispatches, sizes 1–4).
+    2. **Bound too small.** `bound = connected × [relay] bundlesize` = 4 × 1 = 4 tasks for 32 executors.
+    3. **Site clients one task per request.** They were launched with `-b [relay] bundlesize` = 1, and a
+       client holds at most one bundle in waiting, so every task was its own request (relay log: 2000
+       dispatches of 1).
+    4. **The relay-local scheduler idles after each insert.** With no task in its database it backs off
+       up to `[relay] poll` (1 s), and a relay insert does not wake it (only a cut or new demand does).
+       After the fixes above, each cycle still showed ~0.7 s between `Received 40 tasks` and the next
+       `Scheduled 8 tasks` (relay DEBUG log), so the site ran ~40 tasks/s against 160 possible.
+    5. **The drive's site clients ran one executor each.** `HYPERSHELL_RELAY_NUM_THREADS` never reached
+       `[relay] num_threads`: a variable cannot set a key with an underscore (cmdkit reads it as
+       `relay.num.threads`; checked: `config.relay.num_threads` stays 1). R21 run A's sites had 2
+       executors per node, not 16. The same holds for every underscored key (`launcher_args`,
+       `evict_hint`, …): `HYPERSHELL_RELAY_LAUNCHER_ARGS` even replaces `relay.launcher` with a table.
+  - *Fixed* (defaults, no tuning): (1) **low-water mark**: the gate asks only when the backlog is at or
+    below half the bound, and then for the whole gap (at most the upstream bundle size), so requests are
+    few and large; the gate re-checks every 0.1 s (`GATE_WAIT`). (2) **bound** = connected clients ×
+    local bundle size × 2 (`BACKLOG_FACTOR`), so a second round is ready while the first runs. (3) **site
+    bundle size** = `max([relay] bundlesize, [relay] num_threads)` (`site_bundlesize`), used for the site
+    clients' `-b`, the relay-local server and the bound. (4) **`[relay] poll` default 1 → 0.1 s**, so a
+    received bundle waits at most 0.1 s before the relay-local scheduler takes it (the plan's "use
+    `ServerThread`'s poll, no dispatcher wake-up"; zone code untouched). (5) **drive**: `relay_probe.py`
+    gives each relay a configuration file (the run's file plus `[relay] num_threads`) instead of the
+    variable; the relay hands its site a copy without `[relay]`. No evidence-schema change; no other
+    drive default changed.
+  - *Numbers* (same machine, Python 3.12, `spec/relay/drive/relay_throughput.py`, ideal 12.5 s):
+    | run | direct `hs cluster -N 32` | relay | ratio |
+    |---|---|---|---|
+    | `24176a6`, driver (DEBUG; site clients at 1 thread, finding 5) | 31.3 s | 657.9 s | 21 |
+    | `24176a6`, `relay_throughput.py` (8 threads; stopped, see below) | — | 362 tasks in 125 s (≈ 690 s) | ≈ 33 |
+    | fixes 1–3, `[relay] poll` 1 s (driver, DEBUG) | — | 71.5 s | — |
+    | P8 (driver, INFO, twice) | 21.0 / 20.9 s | 25.2 / 25.2 s | 1.20 |
+    | P8 (`relay_throughput.py`) | 21.1 s | 26.6 s | **1.26** (PASS ≤ 1.5) |
+    Upstream dispatch after the fix: 63 replies, mostly 32 tasks; relay-local: 250 replies of 8. The
+    `relay_throughput.py` run at `24176a6` was stopped at the semaphore alert after 362 tasks (2.9 tasks/s,
+    as on the cluster); the driver run at `24176a6` completed.
+  - *R8 reading (deviation for review).* R8 asks for a bound "on the order of connected clients × local
+    bundle size"; it is now twice that, with the bundle size floored at the executor threads. The relay
+    still never pulls while the bound is met, and the duplicate/cancel windows stay bounded by it.
+  - *R21 run A's `a.group_order` and `d.completed`.* Both are artifacts of the incomplete run, not
+    failover bugs. `relay_probe.py` sets `group_order` false whenever an earlier group has an incomplete
+    row (`None in done`) or a later group was never scheduled (`not out`), so any run cut off by the
+    deadline fails it by construction (1053 rows were incomplete). Upstream gating cannot start group
+    g+1 while group g has an incomplete row, and a failover only reverts B's rows of the current group
+    to unscheduled, so it cannot break the order. The one way a complete run could fail the check is
+    clock skew: `completion_time` is the leaf's clock and `schedule_time` the upstream server's, so a site
+    clock ahead of the upstream's by more than a result's return latency (≥ the relay's bundle wait)
+    would read as overlap. `d.completed` (18 of 64 held tasks completed at A) is the same deadline:
+    site A was running at ~1.5 tasks/s with one executor per client (finding 5).
+- **Follow-up public seed, for the foreman to file (not filed here):** a `HYPERSHELL_*` variable cannot set
+  a configuration key with an underscore in it (`num_threads`, `launcher_args`, `evict_hint`, `bundle…`
+  in other sections), and one whose prefix names another key replaces that key with a table
+  (`HYPERSHELL_RELAY_LAUNCHER_ARGS` turns `relay.launcher` into a table). Present on `develop` (cmdkit's
+  variable mapping), not relay-specific.
+- **Red first (2026-11-05),** new and changed tests against the `24176a6` source (a scratch export on
+  `PYTHONPATH`): `test_relay_link.py` and `test_relay_fsm.py` fail at collection
+  (`ModuleNotFoundError: hypershell.core.reconnect`), `test_relay_launch.py` too (`site_bundlesize`);
+  `test_no_request_above_the_low_water_mark_then_the_whole_gap` fails (`no attribute 'bound'`; the old
+  gate holds at backlog 4 of bound 4); `test_upstream_restart_drops_held_tasks_not_yet_started` fails
+  (the superseded task is kept). The process tests (`test_relay_outage.py`, the two new workload tests)
+  were not run against the old source: the build host ran out of POSIX semaphores before that step (see
+  *Gates*). By construction they fail there: the old relay exits on its first transport error (B1), so
+  it never logs "Lost connection" and never holds a result through an outage.
 - **Verify:** see frontmatter.
-- **Touches:** `src/hypershell/core/reconnect.py`, `src/hypershell/relay/`,
-  `tests/test_relay_link.py`, `tests/test_relay_outage.py`.
+- **Gates (2026-11-05): partial, the rest handed to the foreman.** Mid-build the build host ran out of named
+  POSIX semaphores (`kern.posix.sem.max`; `multiprocessing.Lock()` fails with ENOSPC), so nothing that starts
+  a server can run here until a reboot (foreman's operations alert). P8 is therefore left `in_progress`
+  with its verify not yet run as written; the foreman runs the commands below on a Linux test cluster at
+  this commit. Run here before the host ran out (venvs on `PATH` in place of `uv run`, each under a
+  process-group kill timer; none of these processes left):
+  - All relay test files, Python 3.12, `-n 4`: 289 passed, 2 failed, both fixed and re-run green (the
+    real-dispatcher connector test pinned the old bound; the version-error test saw two CRITICAL lines,
+    one from the link, now DEBUG).
+  - Concurrency (META F5): `test_relay_outage.py` plus the failover, ride-through and receiver tests, 6
+    copies at once: 6 × 6 passed (66–75 s each). `test_failover_reverts_and_completes_elsewhere` alone, 6
+    copies at once on the P7 head: 6 of 6 passed.
+  - The two new workload tests (`…comes_back_unusable`, `…rides_through…`): passed.
+  - Unit tests of the relay files (no server), 3.12: 236 passed; 3.14: 141 passed (link, FSM, connector,
+    return, launch).
+  - Sphinx `-W --keep-going` (sandbox off): only the three known warnings (`manual.rst` ×2,
+    `cli/task_submit.rst`).
+  - Throughput: the table above (PASS, 1.26×).
+  - Not run here: the full suite on 3.12, the relay files on 3.14, the P8 verify as written, the P7
+    verify and its smoke (all start servers).
+- **Touches:** `src/hypershell/core/reconnect.py` (new), `src/hypershell/relay/` (`__init__.py`, `upstream.py`,
+  `store.py`, `site.py`), `src/hypershell/core/config.py` (`[relay] poll`, `[relay.upstream] deadline`,
+  `backoff`), `src/hypershell/cluster/remote.py` (`AutoScalingCluster(evict_after=…)`, A5),
+  `docs/_include/config_param_ref.rst`, `docs/_include/relay_desc.rst`, `tests/test_relay_link.py` (new),
+  `tests/test_relay_outage.py` (new), `tests/test_relay_fsm.py`, `tests/test_relay_connector.py`,
+  `tests/test_relay_return.py`, `tests/test_relay_launch.py`, `tests/test_relay_workload.py`,
+  `spec/relay/drive/relay_probe.py`, `spec/relay/drive/relay_throughput.py` (new). No zone code
+  (`core/dispatch.py`, `core/queue.py`, `server.py`), `client.py` or completion change (no new option).
 
 ## Phase P9 — Multi-zone relays and relay docs
 **Satisfies:** R2, R8, R18, R20 · **Depends on:** P8 · PLAN §2.6, §2.8

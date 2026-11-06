@@ -24,6 +24,9 @@ Received tasks enter the relay database in one transaction (`insert_received`): 
 the relay-local server's own unscheduled task, and its `relay_task` row. Only once that transaction
 has committed does the relay confirm them upstream. A task received again (upstream reverted it and
 dispatched it anew) drops any result still held for its earlier assignment in the same transaction.
+A received task stamped by another upstream server instance than the tasks held (the upstream server
+restarted, and so put back everything unfinished) drops, in the same transaction, the held tasks the
+earlier instance assigned that have not started here (`drop_superseded`).
 
 Completed rows leave the task table for the outbox in one transaction (`collect_results`), each as
 the record that goes upstream: the leaf's result with the upstream stamp restored. Moving them out
@@ -49,7 +52,7 @@ import threading
 
 # External libs
 from sqlalchemy import MetaData, select, func, and_, exists, delete, update, bindparam
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert, DATETIME as SQLITE_DATETIME
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import Text, DateTime
@@ -58,6 +61,7 @@ from sqlalchemy.types import Text, DateTime
 from hypershell.core.types import JSONData, to_json_type
 from hypershell.core.heartbeat import RosterEntry, ClientState
 from hypershell.data.model import Task, Client, DEFAULT_ZONE_ID
+from hypershell.core.logging import Logger
 from hypershell.data.upgrade import upgrade_schema
 
 # Public interface
@@ -66,7 +70,10 @@ __all__ = ['RelayBase', 'RelayTask', 'RelayResult', 'RESULT_PENDING', 'RESULT_RE
            'LOCAL_STAMP_COLUMNS', 'local_row', 'insert_received', 'count_backlog', 'count_connected', 'count_held',
            'roster',
            'result_record', 'collect_results', 'pending_results', 'mark_returned', 'prune_returned',
-           'COLLECT_BATCH', 'PRUNE_BATCH']
+           'COLLECT_BATCH', 'PRUNE_BATCH', 'drop_superseded']
+
+# Initialize logger
+log = Logger.with_name(__name__)
 
 
 RESULT_PENDING = 'pending'
@@ -210,11 +217,37 @@ def insert_received(engine: Engine, records: List[Dict[str, Any]], identity: str
         index_elements=['id'], set_={name: stamp_insert.excluded[name] for name in stamps[0] if name != 'id'})
     ids = [record['id'] for record in records]
     results = RelayResult.__table__
+    servers = {record.get('server_id') for record in records} - {None}
     with _WRITE_LOCK, engine.begin() as conn:
+        for server_id in servers:
+            if dropped := drop_superseded(conn, server_id, keep=ids):
+                log.info(f'Upstream server restarted (new server id {server_id}): dropped {dropped} tasks '
+                         f'not yet started here, which it has already put back')
         conn.execute(task_upsert, tasks)
         conn.execute(stamp_upsert, stamps)
         conn.execute(delete(results).where(results.c.id.in_(ids)))
     return ids
+
+
+def drop_superseded(conn: Connection, server_id: str, keep: List[str] = ()) -> int:
+    """Delete held tasks another upstream server instance assigned, not yet started here; return how many.
+
+    A task received from an upstream server whose id differs from `server_id` was assigned before that
+    server restarted, and a server reverts every unfinished task when it starts, so upstream it is no
+    longer this relay's. Only a task the relay-local server has not yet scheduled (no local
+    `schedule_time`) is dropped, with its upstream stamp; one already started runs on, and its result
+    goes back to be refused as stale. Tasks in `keep` (received just now) are left alone.
+    """
+    table, stamps = Task.__table__, RelayTask.__table__
+    query = (select(stamps.c.id).join(table, table.c.id == stamps.c.id)
+             .where(stamps.c.server_id.isnot(None), stamps.c.server_id != server_id,
+                    table.c.schedule_time.is_(None), table.c.completion_time.is_(None)))
+    ids = [id for id in conn.execute(query).scalars() if id not in set(keep)]
+    if not ids:
+        return 0
+    dropped = conn.execute(delete(table).where(table.c.id.in_(ids), table.c.schedule_time.is_(None))).rowcount
+    conn.execute(delete(stamps).where(stamps.c.id.in_(ids), ~exists().where(table.c.id == stamps.c.id)))
+    return dropped
 
 
 def count_backlog(engine: Engine, zone: Optional[str] = None) -> int:

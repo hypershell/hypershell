@@ -17,8 +17,9 @@ clients and their tasks) can be scanned for the upstream key while they run. Kil
 (with its site) while it holds confirmed tasks leaves them to the upstream server's eviction, which
 puts them back in the queue for the other relay.
 
-A relay also works against an upstream server running without a database, ends (non-zero) with its
-site when the upstream server dies or its own relay-local receiver does, finishes everything it holds
+A relay also works against an upstream server running without a database, rides through its upstream
+server dying and coming back (its held results then refused as stale, and the tasks run again), ends
+(non-zero) with its site when its upstream server comes back refusing it or its own relay-local receiver dies, finishes everything it holds
 when told to drain (what it has not yet staged too), returns the times its site clients report as the
 instants they were from another time zone, and hands its site clients the relay's configuration file
 without the relay settings in it, a copy it removes when SIGINT or SIGTERM ends it.
@@ -54,6 +55,7 @@ from hypershell.core.config import RELAY_MARKER
 from hypershell.cluster.launch import AUTH_ENV
 from hypershell.core.logging import HOSTNAME
 from hypershell.core.tls import ensure_default_materials
+from hypershell.relay.upstream import BACKLOG_FACTOR
 from tests.conftest import free_port
 from tests.test_dispatch_workload import Group, group, wait_listening, RUNNING  # noqa: fixture
 from tests import create_taskfile
@@ -305,6 +307,24 @@ def leaves_of(group: Group, name: str) -> Set[str]:
     return {row['id'] for row in rows(group.site / name / 'relay.db', 'SELECT id FROM client')}
 
 
+def settled(group: Group, name: str, upstream: Path, identity: str, size: int = 2) -> bool:
+    """Relay `name` can be cut no more work: all `size` site clients are connected (and listed upstream),
+    everything dispatched to it is confirmed and held in its database, and either it holds more than its
+    low-water mark (so it asks for nothing) or no task upstream is left unclaimed (so a request finds nothing)."""
+    relay_db = group.site / name / 'relay.db'
+    connected = rows(relay_db, 'SELECT count(*) AS n FROM client WHERE disconnected_at IS NULL')[0]['n']
+    local = {row['id'] for row in rows(relay_db, 'SELECT id FROM task WHERE completion_time IS NULL')}
+    held = set(held_upstream(upstream, identity))
+    dispatched = sum(int(n) for n in re.findall(rf'Dispatched (\d+) tasks to client {identity}', group.text('server')))
+    unclaimed = rows(upstream, 'SELECT count(*) AS n FROM task WHERE client_id IS NULL AND completion_time IS NULL '
+                               'AND "group" = 0')[0]['n']
+    low_water = connected * BACKLOG_FACTOR // 2  # Local bundle size 1.
+    forwarded = rows(upstream, f"SELECT count(*) AS n FROM client WHERE relay = '{identity}' "
+                               f"AND id <> '{identity}'")[0]['n']  # Its roster reached upstream.
+    return (connected == size and forwarded == size and bool(local) and local == held
+            and dispatched == len(held) and (len(local) > low_water or unclaimed == 0))
+
+
 def check_upstream_rows(tasks: List[Dict[str, Any]]) -> None:
     """Every task completed upstream, the one failure retried once, and groups ran in order."""
     assert len(tasks) == GROUPS * PER_GROUP + 2
@@ -407,10 +427,13 @@ def test_failover_reverts_and_completes_elsewhere(group: Group) -> None:
     identities = {name: identity_of(group, name, deadline) for name in relays}
     upstream = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
 
-    # Relay B holds confirmed tasks, already running at its site; relay A holds some too.
+    # Relay B holds confirmed tasks, already running at its site; relay A holds some too. B is killed
+    # only once it can be cut nothing more: otherwise a reply cut for it but not yet confirmed would
+    # stay in flight upstream with no client (the cut-to-confirm window), and the run would never end.
     for name, relay in relays.items():
         until(lambda: running_tasks(relay, barrier) and held_upstream(upstream, identities[name]),
               deadline, f'tasks held at {name}')
+    until(lambda: settled(group, 'relay-b', upstream, identities['relay-b']), deadline, 'relay B settled')
     snapshot = held_upstream(upstream, identities['relay-b'])
     site_b = [proc.pid for proc in site_processes(relays['relay-b'])]
     os.killpg(relays['relay-b'].pid, signal.SIGKILL)
@@ -521,7 +544,7 @@ def test_site_key_reaches_site_clients_in_their_environment_only(group: Group) -
 # --- Lifecycle and configuration --------------------------------------------------------------
 
 
-EXIT_BOUND = 30  # Seconds a relay may take to exit once its upstream server has died.
+EXIT_BOUND = 30  # Seconds a relay may take to exit once it has failed.
 
 
 def waiting_tasks(site: Path, barrier: Path, count: int) -> List[str]:
@@ -586,8 +609,14 @@ import sys
 from hypershell.data import model
 
 
+original = model.Task.apply_results
+
+
 def apply_results(cls, results):
-    raise RuntimeError('injected failure in the relay-local receiver')
+    # Only a write of real results fails: the receiver may also flush an empty batch on its own.
+    if results:
+        raise RuntimeError('injected failure in the relay-local receiver')
+    return original(results)
 
 
 # Only the relay-local server's receiver writes results back in a relay process.
@@ -599,7 +628,7 @@ sys.exit(main(['relay', *sys.argv[1:]]))
 
 
 def start_faulty_relay(group: Group, upstream_port: int, key: str, size: int) -> Any:
-    """Start a relay process whose relay-local receiver fails on the first result it writes.
+    """Start a relay process whose relay-local receiver fails on the first results it writes (never on none).
 
     The process is marked as a relay before it imports anything, so it binds the relay database
     at import and runs the relay without re-executing (which would drop the fault).
@@ -654,8 +683,11 @@ def test_relay_against_a_server_without_a_database(group: Group) -> None:
 
 
 @mark.integration
-def test_relay_exits_and_ends_its_site_when_upstream_dies(group: Group) -> None:
-    """With its upstream server killed mid-run, the relay exits non-zero within the bound and leaves no site client."""
+def test_relay_rides_through_its_upstream_server_dying_and_restarting(group: Group) -> None:
+    """With its upstream server killed mid-run the relay keeps its site running and holds the results; once a
+    new server answers on the same port it hands them over (refused as stale: the restarted server put every
+    unfinished task back), drops nothing it still needs, runs the tasks again under their new assignments, and
+    every task completes once upstream."""
     port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
     deadline = time.monotonic() + DEADLINE
     barrier = group.site / 'barrier'
@@ -664,22 +696,76 @@ def test_relay_exits_and_ends_its_site_when_upstream_dies(group: Group) -> None:
     assert group.wait(submit, deadline) == 0, group.text('submit')
     server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
     wait_listening(server, port, group, 'server')
-    relay = start_relay(group, 'relay', port, key, size=2)
+    relay = start_relay(group, 'relay', port, key, size=2, HYPERSHELL_RELAY_UPSTREAM_HEARTRATE='1',
+                        HYPERSHELL_RELAY_UPSTREAM_DEADLINE='3', HYPERSHELL_RELAY_UPSTREAM_BACKOFF='2')
+    upstream, relay_db = Path(os.environ['HYPERSHELL_DATABASE_FILE']), group.site / 'relay.db'
+    try:
+        identity = until(lambda: IDENTITY.search(group.text('relay')), deadline, 'relay identity').group(1)
+        until(lambda: running_tasks(relay, barrier) >= 2 and len(held_upstream(upstream, identity)) == 4,
+              deadline, 'every task held, two running')
+        clients = [proc.pid for proc in site_clients(relay)]
+        first = {row['id']: row['schedule_time'] for row in rows(upstream, 'SELECT id, schedule_time FROM task')}
+
+        os.killpg(server.pid, signal.SIGKILL)
+        server.wait(timeout=EXIT_BOUND)
+        until(lambda: 'Lost connection to upstream server' in group.text('relay'), deadline, 'the link down')
+        barrier.touch()
+        until(lambda: rows(relay_db, "SELECT count(*) AS n FROM relay_result WHERE state = 'pending'") == [{'n': 4}],
+              deadline, 'every result held in the outbox')
+        assert alive(relay.pid) and all(alive(pid) for pid in clients), 'the site did not keep running'
+
+        restarted = group.start('server-again', 'server', '--restart', '-b', '1',
+                                '-H', 'localhost', '-p', str(port), '-k', key)
+        assert group.wait(restarted, deadline) == 0, group.text('server-again')
+        assert group.wait(relay, deadline) == 0, group.text('relay')
+    finally:
+        release(group, relay, barrier)
+
+    tasks = rows(upstream, 'SELECT * FROM task')
+    assert len(tasks) == 4 and all(task['exit_status'] == 0 for task in tasks)
+    assert all(task['schedule_time'] != first[task['id']] for task in tasks)  # Each landed on its new assignment.
+    server_log, relay_log = group.text('server-again'), group.text('relay')
+    assert server_log.count('Refused stale result') == 4  # The held results answered assignments put back.
+    assert 'Reconnected to upstream server' in relay_log
+    assert 'Upstream heartbeat - final' in relay_log
+
+
+@mark.integration
+def test_relay_exits_and_ends_its_site_when_its_upstream_server_comes_back_unusable(group: Group) -> None:
+    """An upstream server that answers again but refuses the relay for good (another key) is a failure: the relay
+    exits non-zero within the bound, with the error, and leaves no site client."""
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    deadline = time.monotonic() + DEADLINE
+    barrier = group.site / 'barrier'
+    taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 4))
+    submit = group.start('submit', 'submit', str(taskfile))
+    assert group.wait(submit, deadline) == 0, group.text('submit')
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    wait_listening(server, port, group, 'server')
+    relay = start_relay(group, 'relay', port, key, size=2, HYPERSHELL_RELAY_UPSTREAM_HEARTRATE='1',
+                        HYPERSHELL_RELAY_UPSTREAM_DEADLINE='3', HYPERSHELL_RELAY_UPSTREAM_BACKOFF='2')
     try:
         until(lambda: running_tasks(relay, barrier) >= 2, deadline, 'two site tasks running')
         clients = [proc.pid for proc in site_clients(relay)]
         assert len(clients) == 2
-
         os.killpg(server.pid, signal.SIGKILL)
         server.wait(timeout=EXIT_BOUND)
+        until(lambda: 'Lost connection to upstream server' in group.text('relay'), deadline, 'the link down')
+        assert alive(relay.pid)
+
+        other = group.start('server-other', 'server', '--forever', '-H', 'localhost', '-p', str(port),
+                            '-k', secrets.token_hex(16))
+        wait_listening(other, port, group, 'server-other')
         try:
             status = relay.wait(timeout=EXIT_BOUND)
         except subprocess.TimeoutExpired:
-            pytest.fail(f'relay still running {EXIT_BOUND} seconds after its upstream server died:\n'
+            pytest.fail(f'relay still running {EXIT_BOUND} seconds after its upstream server refused it:\n'
                         f'{group.text("relay")}')
-        assert status not in (0, None), group.text('relay')
+        relay_log = group.text('relay')
+        assert status not in (0, None), relay_log
+        assert 'AuthenticationError' in relay_log
         assert not any(alive(pid) for pid in clients), 'a site client outlived the relay'
-        assert 'Ended 2 site clients' in group.text('relay')
+        assert 'Ended 2 site clients' in relay_log
     finally:
         release(group, relay, barrier)
 
@@ -726,8 +812,8 @@ def test_relay_exits_and_ends_its_site_when_its_receiver_dies(group: Group) -> N
         until(lambda: (rows(upstream, f"SELECT evicted FROM client WHERE id = '{identity}'") == [{'evicted': 1}]
                        and not held_upstream(upstream, identity)),
               deadline, 'the relay evicted upstream and its tasks put back')
-        reverted = rows(upstream, 'SELECT id FROM task WHERE client_id IS NULL AND schedule_time IS NULL '
-                                  'AND completion_time IS NULL')
+        # Put back: no client and not complete (the upstream scheduler may have staged them again at once).
+        reverted = rows(upstream, 'SELECT id FROM task WHERE client_id IS NULL AND completion_time IS NULL')
         assert set(held) <= {row['id'] for row in reverted}
     finally:
         release(group, relay, barrier)

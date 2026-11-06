@@ -195,7 +195,7 @@ default = Namespace({
         'port': 50_002,           # Port of the relay-local server (distinct from the server default)
         'bundlesize': 1,          # Bundle size of the relay-local server
         'bundlewait': 5,          # Seconds the relay waits before returning results regardless of size
-        'poll': 1,                # Max polling interval of the relay-local scheduler in seconds
+        'poll': 0.1,              # Max polling interval of the relay-local scheduler in seconds
         'retention': 300,         # Seconds a returned result is kept in the relay database
         'zone': PARAM_UNSET,      # Zone served by the relay (default zone if unset)
         'site': PARAM_UNSET,      # Site name the relay gives upstream (default: the relay's host name)
@@ -212,6 +212,8 @@ default = Namespace({
             'bundlesize': 1_000,    # Bundle size the relay advertises upstream
             'heartrate': 10,        # Seconds between upstream heartbeats
             'evict_hint': 600,      # Upstream eviction period the relay assumes during an outage
+            'deadline': 30,         # Seconds an upstream call may take before the link counts as down
+            'backoff': 60,          # Longest wait in seconds between attempts to reach upstream again
             'tls': {
                 'enabled': True,            # Use --no-tls to disable on the upstream hop (not recommended)
                 'cert': '<auto>',           # Upstream server certificate or '<auto>'

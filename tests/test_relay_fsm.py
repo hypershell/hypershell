@@ -55,6 +55,8 @@ from hypershell.relay.store import ensure_tables
 from hypershell.relay.upstream import (UpstreamPuller, UpstreamPullerThread, PullerState, UpstreamHeartbeat,
                                        UpstreamHeartbeatThread, HeartbeatState, UpstreamReturner,
                                        UpstreamReturnerThread, ReturnerState, upstream_identity)
+from hypershell.core.reconnect import UpstreamLink
+from hypershell.relay.upstream import LINK_STAGES
 from tests.test_relay_connector import FakeDispatcher, upstream, connect_clients, dispatched, reply, POLL
 from tests.test_dispatch_version import stock_server, AUTH as OLD_SERVER_AUTH
 
@@ -457,6 +459,226 @@ def test_heartbeat_thread_sends_finished_and_ends() -> None:
     assert not thread.is_alive()
     states = [Heartbeat.unpack_or_none(queue.get_nowait()).state for _ in range(queue.qsize())]
     assert states == [ClientState.RUNNING, ClientState.FINISHED]
+
+
+# --- Through the upstream link -----------------------------------------------------------------
+
+
+class FakeUpstream:
+    """A fake upstream reached through a real link: every connection shares its queues; `down` refuses one."""
+
+    def __init__(self, dispatcher: Optional[FakeDispatcher] = None, confirmed: Optional[Any] = None) -> None:
+        self.down = False
+        self.queues = upstream(dispatcher or FakeDispatcher(), confirmed)
+        self.queues.completed = Queue()
+
+    def client(self) -> SimpleNamespace:
+        outer = self
+
+        class Client(SimpleNamespace):
+            def connect(self) -> None:
+                if outer.down:
+                    raise ConnectionRefusedError('upstream down')
+
+        return Client(**vars(self.queues))
+
+
+@fixture
+def link_to() -> Iterator[Any]:
+    """Make started links to fake upstreams (fast backoff); stop them all afterwards."""
+    links = []
+
+    def make(fake: FakeUpstream, **options: Any) -> UpstreamLink:
+        link = UpstreamLink(fake.client, stages=LINK_STAGES, backoff_base=0.01, backoff_cap=0.02, **options)
+        links.append(link)
+        link.start()
+        assert link.wait_up(DEADLINE)
+        return link
+    try:
+        yield make
+    finally:
+        for link in links:
+            link.stop(DEADLINE)
+
+
+def take_down(fake: FakeUpstream, link: UpstreamLink) -> None:
+    """Take the link down and keep it down until `fake.down` is cleared."""
+    fake.down = True
+    link.mark_down(link.epoch, 'test outage')
+    assert not link.is_up()
+
+
+class FailsOnce(Queue):
+    """A queue whose first put fails on the transport, as a lost connection does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures = 1
+
+    def put(self, item, block=True, timeout=None):
+        if self.failures:
+            self.failures -= 1
+            raise EOFError('connection closed')
+        super().put(item, block, timeout)
+
+
+@mark.unit
+def test_puller_waits_for_the_link_and_its_stages_before_requesting(relay_db: Engine, no_signal, link_to) -> None:
+    """A new connection is used for requests only after a heartbeat and the outbox drain have passed on it."""
+    connect_clients(relay_db, 1)
+    fake = FakeUpstream(FakeDispatcher(reply([])))
+    link = link_to(fake)
+    machine = UpstreamPuller(queue=link, engine=relay_db, identity=upstream_identity(None), poll=POLL)
+    assert machine.gate() is PullerState.WAIT_LINK
+    link.passed('beat')
+    assert machine.wait_link() is PullerState.WAIT_LINK  # Within its bounded wait: the drain is still to come.
+    link.passed('drain')
+    assert machine.wait_link() is PullerState.GATE
+    assert machine.gate() is PullerState.REQUEST
+    assert machine.request() is PullerState.GATE
+    assert len(fake.queues.dispatcher.requests) == 1
+
+
+@mark.unit
+def test_puller_request_lost_with_the_link_waits_for_it(relay_db: Engine, no_signal, link_to) -> None:
+    """A request the link loses sends the puller to wait for the link, not to fail."""
+
+    class Breaks(FakeDispatcher):
+        def request(self, text_: str) -> str:
+            raise ConnectionResetError('reset')
+
+    connect_clients(relay_db, 1)
+    fake = FakeUpstream(Breaks())
+    link = link_to(fake)
+    for stage in ('beat', 'drain'):
+        link.passed(stage)
+    machine = UpstreamPuller(queue=link, engine=relay_db, identity=upstream_identity(None), poll=POLL)
+    assert machine.gate() is PullerState.REQUEST
+    assert machine.request() is PullerState.WAIT_LINK
+    assert not machine.unconfirmed
+
+
+@mark.unit
+def test_puller_sends_a_lost_confirmation_again_after_a_short_outage(relay_db: Engine, no_signal, link_to) -> None:
+    """A confirmation lost with the link is sent again once the link is back and has carried a heartbeat."""
+    connect_clients(relay_db, 1)
+    confirmed = FailsOnce()
+    fake = FakeUpstream(FakeDispatcher(reply(dispatched('echo a'))), confirmed)
+    link = link_to(fake, evict_hint=600)
+    for stage in ('beat', 'drain'):
+        link.passed(stage)
+    machine = UpstreamPuller(queue=link, engine=relay_db, identity=upstream_identity(None), poll=POLL)
+    machine.gate()
+    machine.request()
+    assert machine.insert() is PullerState.CONFIRM
+    assert machine.confirm() is PullerState.WAIT_LINK and machine.unconfirmed
+    assert until(lambda: link.is_up() and link.epoch == 2)
+    assert machine.wait_link() is PullerState.WAIT_LINK  # No heartbeat on the new connection yet.
+    link.passed('beat')
+    assert machine.wait_link() is PullerState.CONFIRM
+    assert machine.confirm() is PullerState.GATE
+    info = json.loads(confirmed.get_nowait())
+    assert info['client_id'] == upstream_identity(None) and len(info['task_ids']) == 1
+
+
+@mark.unit
+def test_puller_drops_a_lost_confirmation_after_an_outage_past_the_evict_hint(relay_db: Engine, no_signal,
+                                                                              link_to, caplog) -> None:
+    """After an outage longer than the eviction hint, a lost confirmation is not sent: the tasks run on here."""
+    connect_clients(relay_db, 1)
+    confirmed = FailsOnce()
+    fake = FakeUpstream(FakeDispatcher(reply(dispatched('echo a'))), confirmed)
+    link = link_to(fake, evict_hint=0)
+    for stage in ('beat', 'drain'):
+        link.passed(stage)
+    machine = UpstreamPuller(queue=link, engine=relay_db, identity=upstream_identity(None), poll=POLL)
+    machine.gate()
+    machine.request()
+    machine.insert()
+    assert machine.confirm() is PullerState.WAIT_LINK
+    assert until(lambda: link.is_up() and link.epoch == 2)
+    link.passed('beat')
+    assert machine.wait_link() is PullerState.GATE
+    assert confirmed.empty() and not machine.unconfirmed
+    assert store.count_backlog(relay_db) == 1  # Still held, to run here.
+    assert 'Not confirming 1 tasks upstream after an outage' in caplog.text
+
+
+@mark.unit
+def test_puller_stopping_while_the_link_is_down_ends(relay_db: Engine, no_signal, link_to) -> None:
+    """A puller told to stop while it waits for the link ends rather than waiting on."""
+    fake = FakeUpstream()
+    link = link_to(fake)
+    take_down(fake, link)
+    machine = UpstreamPuller(queue=link, engine=relay_db, identity=upstream_identity(None), poll=POLL)
+    assert machine.gate() is PullerState.WAIT_LINK
+    machine.halt()
+    assert machine.wait_link() is PullerState.FINAL
+
+
+@mark.unit
+def test_returner_holds_results_while_down_and_sends_them_first(relay_db: Engine, link_to) -> None:
+    """While the link is down completed rows still move to the outbox; once it is back they go at once."""
+    fake = FakeUpstream()
+    link = link_to(fake)
+    take_down(fake, link)
+    task_id = complete_one(relay_db)
+    machine = UpstreamReturner(queue=link, engine=relay_db, bundlesize=100, bundlewait=3600, poll=POLL,
+                               retention=300)
+    assert machine.collect() is ReturnerState.WAIT_LINK
+    assert store.count_backlog(relay_db) == 0  # Moved to the outbox meanwhile.
+    assert machine.wait_link() is ReturnerState.COLLECT
+    assert machine.collect() is ReturnerState.WAIT_LINK
+
+    fake.down = False
+    assert until(lambda: link.is_up())
+    assert machine.collect() is ReturnerState.WAIT_LINK  # Results wait for the heartbeat on the new link.
+    link.passed('beat')
+    assert machine.collect() is ReturnerState.SEND  # At once, though the bundle wait is an hour.
+    assert machine.send() is ReturnerState.MARK
+    assert not link.is_passed('drain')
+    assert machine.mark() is ReturnerState.COLLECT
+    assert link.is_passed('drain')
+    assert [task['id'] for task in json.loads(fake.queues.completed.get_nowait())] == [task_id]
+
+
+@mark.unit
+def test_returner_send_lost_with_the_link_stays_pending(relay_db: Engine, link_to) -> None:
+    """A bundle the link loses is not marked; it is sent again once the link is back."""
+    fake = FakeUpstream()
+    fake.queues.completed = FailsOnce()
+    link = link_to(fake)
+    link.passed('beat')
+    task_id = complete_one(relay_db)
+    machine = UpstreamReturner(queue=link, engine=relay_db, bundlesize=100, bundlewait=0, poll=POLL, retention=300)
+    assert machine.collect() is ReturnerState.SEND
+    assert machine.send() is ReturnerState.WAIT_LINK
+    assert store.count_held(relay_db) == 1
+    assert until(lambda: link.is_up() and link.epoch == 2)
+    link.passed('beat')
+    assert machine.wait_link() is ReturnerState.COLLECT
+    assert machine.collect() is ReturnerState.SEND
+    assert machine.send() is ReturnerState.MARK and machine.mark() is ReturnerState.COLLECT
+    assert [task['id'] for task in json.loads(fake.queues.completed.get_nowait())] == [task_id]
+    assert store.count_held(relay_db) == 0
+
+
+@mark.unit
+def test_heartbeat_waits_for_the_link_then_beats_and_passes_its_stage(link_to) -> None:
+    """A beat lost with the link waits for it; the first beat on the new connection passes the beat stage."""
+    fake = FakeUpstream()
+    link = link_to(fake)
+    machine = UpstreamHeartbeat(queue=link, identity=upstream_identity(None), heartrate=60)
+    assert machine.submit() is HeartbeatState.WAIT and link.is_passed('beat')
+    take_down(fake, link)
+    assert machine.submit() is HeartbeatState.WAIT_LINK
+    assert machine.wait_link() is HeartbeatState.WAIT_LINK
+    fake.down = False
+    assert until(lambda: link.is_up())
+    assert not link.is_passed('beat')
+    assert machine.wait_link() is HeartbeatState.SUBMIT
+    assert machine.submit() is HeartbeatState.WAIT and link.is_passed('beat')
+    assert fake.queues.heartbeat.qsize() == 2
 
 
 # --- The relay's watch on its parts ---------------------------------------------------------------

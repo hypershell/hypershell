@@ -28,7 +28,8 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.data.model import Task, Client
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
+from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL,
+                               DEFAULT_EVICT)
 from hypershell.cluster.launch import ClientLaunch, client_launch, redact_secrets
 
 # Public interface
@@ -723,6 +724,10 @@ class AutoScalingCluster(Thread):
             Zone whose tasks the clients run (default: the default zone).
             Tasks this cluster submits are placed in the same zone.
 
+        evict_after (int, optional):
+            Period in seconds the server waits on a client's heartbeat before evicting it.
+            See :const:`~hypershell.server.DEFAULT_EVICT`.
+
     Example:
         >>> from hypershell.cluster import AutoScalingCluster
         >>> cluster = AutoScalingCluster.new(
@@ -779,6 +784,7 @@ class AutoScalingCluster(Thread):
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
                  zone: Optional[str] = None,
+                 evict_after: int = DEFAULT_EVICT,
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
@@ -800,6 +806,7 @@ class AutoScalingCluster(Thread):
                                    redirect_failures=redirect_failures,
                                    template=template,
                                    from_json=from_json,
+                                   evict_after=evict_after,
                                    tls=tls)
         if launcher_args is None:
             launcher_args = []

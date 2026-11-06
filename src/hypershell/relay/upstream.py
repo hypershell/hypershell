@@ -50,6 +50,7 @@ from hypershell.core.signal import check_signal, SIGUSR1, SIGUSR2
 from hypershell.core.thread import Thread
 from hypershell.core.tls import from_namespace as tls_from_namespace
 from hypershell.core.dispatch import build_version
+from hypershell.core.reconnect import LinkDown, as_link
 from hypershell.client import ClientInfo
 from hypershell.data.model import DEFAULT_ZONE_NAME
 from hypershell.relay import store
@@ -90,6 +91,33 @@ DEFAULT_RETURN_BUNDLEWAIT: Final[int] = config.relay.bundlewait
 
 PRUNE_INTERVAL: float = 60.0
 """Longest time in seconds between prunes of returned results (shorter with a shorter retention)."""
+
+BACKLOG_FACTOR: Final[int] = 2
+"""The backlog bound is this many bundles per connected site client: one running, one ready behind it."""
+
+GATE_WAIT: float = 0.1
+"""Longest single wait at the puller's gate in seconds, so a site that runs short is refilled promptly."""
+
+LINK_WAIT: float = 1.0
+"""Longest single wait for the upstream link in seconds, so a waiting machine re-enters often."""
+
+STAGE_BEAT: Final[str] = 'beat'
+"""Link stage passed by the first heartbeat on a new connection."""
+
+STAGE_DRAIN: Final[str] = 'drain'
+"""Link stage passed once the outbox holds nothing pending on a new connection."""
+
+LINK_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, STAGE_DRAIN)
+"""The stages of the relay's upstream link, in the order they are passed after a reconnection."""
+
+CONFIRM_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, )
+"""Stages passed before a lost confirmation is sent again (the identity is registered again first)."""
+
+RETURN_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, )
+"""Stages passed before results are handed back."""
+
+PULL_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, STAGE_DRAIN)
+"""Stages passed before work is requested (held results go back first)."""
 
 
 def upstream_identity(zone: Optional[str], instance: str = INSTANCE) -> str:
@@ -176,24 +204,36 @@ class PullerState(State, Enum):
     REQUEST = 2
     INSERT = 3
     CONFIRM = 4
-    FINAL = 5
-    HALT = 6
+    WAIT_LINK = 5
+    FINAL = 6
+    HALT = 7
 
 
 class UpstreamPuller(StateMachine):
     """
     Request work upstream for one zone, insert it durably, then confirm it.
 
-    The gate holds while the tasks in the relay database not yet complete reach the bound: the
-    relay-local server's connected clients times `local_bundlesize`. Below the bound it asks for the
-    gap, at most `bundlesize`. Every wait is finite and re-enters.
+    The gate holds while the tasks in the relay database not yet complete exceed the low-water mark,
+    half the bound: the relay-local server's connected clients times `local_bundlesize`, times
+    `BACKLOG_FACTOR`. At or below it the puller asks for the whole gap, at most `bundlesize`, so it
+    asks seldom and in large bundles, and the site has a second round of work ready while the first
+    runs. Every wait is finite and re-enters.
+
+    Every upstream call goes through the link (see `hypershell.core.reconnect`). While the link is down
+    the puller waits for it (WAIT_LINK); pulling resumes once the link is back, has carried a heartbeat
+    and has handed over what the outbox held (the link's `beat` and `drain` stages). A confirmation the
+    link lost is sent again first, unless the outage outlasted the link's eviction hint: the upstream
+    server has then likely evicted this identity and put those tasks back, perhaps for another client,
+    and a late confirmation would claim them from it. The tasks still run here, and their results
+    still land if the upstream server kept the assignment.
 
     Pulling ends at the gate: on a drain (`drain` returns true) or once told to halt. A request
     already sent is always seen through first: its reply is inserted and confirmed before the
-    machine stops, so a bundle cut for the relay upstream is never dropped.
+    machine stops, so a bundle cut for the relay upstream is never dropped while the link holds.
     """
 
     queue: Any
+    link: Any
     engine: Engine
     identity: str
     zone: Optional[str]
@@ -209,6 +249,7 @@ class UpstreamPuller(StateMachine):
     bundle: List[Dict[str, Any]]
     task_ids: List[str]
     insert_failures: int
+    unconfirmed: bool
 
     state = PullerState.START
     states = PullerState
@@ -217,8 +258,9 @@ class UpstreamPuller(StateMachine):
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, local_bundlesize: int = 1, poll: float = 1,
                  wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE,
                  drain: Callable[[], bool] = drain_signalled) -> None:
-        """Initialize with the upstream connection, the relay database and the zone identity."""
+        """Initialize with the upstream link (or a connected client), the relay database and the zone identity."""
         self.queue = queue
+        self.link = as_link(queue)
         self.engine = engine
         self.identity = identity
         self.zone = zone
@@ -233,6 +275,7 @@ class UpstreamPuller(StateMachine):
         self.bundle = []
         self.task_ids = []
         self.insert_failures = 0
+        self.unconfirmed = False
         self.wake = threading.Event()
         self.retry = threading.Event()  # Never set: a retry waits its full interval, even when stopping.
 
@@ -244,6 +287,7 @@ class UpstreamPuller(StateMachine):
             PullerState.REQUEST: self.request,
             PullerState.INSERT: self.insert,
             PullerState.CONFIRM: self.confirm,
+            PullerState.WAIT_LINK: self.wait_link,
             PullerState.FINAL: self.finalize,
         }
 
@@ -252,17 +296,23 @@ class UpstreamPuller(StateMachine):
         log.debug(f'Started (puller: {self.identity})')
         return PullerState.GATE
 
+    def bound(self: UpstreamPuller) -> int:
+        """Most unfinished tasks the relay holds: connected site clients times the local bundle size, twice over."""
+        return store.count_connected(self.engine, self.server_id) * self.local_bundlesize * BACKLOG_FACTOR
+
     def gate(self: UpstreamPuller) -> PullerState:
-        """Ask for work only below the backlog bound; end on a drain or once told to halt."""
+        """Ask for work only at or below the low-water mark, and only on a ready link; end on a drain or halt."""
         if self.stopping:  # atomic
             return PullerState.FINAL
         if self.drain():
             log.warning('Drain requested - no more upstream requests')
             return PullerState.FINAL
-        bound = store.count_connected(self.engine, self.server_id) * self.local_bundlesize
+        if not self.link.ready(PULL_STAGES):
+            return PullerState.WAIT_LINK
+        bound = self.bound()
         backlog = store.count_backlog(self.engine)
-        if backlog >= bound:
-            self.wake.wait(self.poll)
+        if bound == 0 or backlog > bound // 2:
+            self.wake.wait(min(self.poll, GATE_WAIT))
             return PullerState.GATE
         self.size = min(bound - backlog, self.bundlesize)
         return PullerState.REQUEST
@@ -272,7 +322,12 @@ class UpstreamPuller(StateMachine):
         if self.stopping:  # atomic; once past here the request is sent and its reply seen through
             return PullerState.FINAL
         text = request_text(self.identity, self.zone, self.size, self.wait_request)
-        reply = read_reply(self.queue.dispatcher.request(text))
+        try:
+            answer = self.link.call('puller', lambda client: client.dispatcher.request(text))
+        except LinkDown:
+            log.debug(f'Upstream request lost with the link ({self.identity})')
+            return PullerState.WAIT_LINK
+        reply = read_reply(answer)
         if reply['tasks']:
             self.bundle = reply['tasks']
             log.debug(f'Received {len(self.bundle)} tasks ({self.identity})')
@@ -300,12 +355,38 @@ class UpstreamPuller(StateMachine):
 
     def confirm(self: UpstreamPuller) -> PullerState:
         """Confirm the inserted tasks upstream under the zone identity."""
-        info = ClientInfo(client_id=self.identity, client_host=HOSTNAME, task_ids=self.task_ids)
+        info = ClientInfo(client_id=self.identity, client_host=HOSTNAME, task_ids=self.task_ids).pack()
         try:
-            self.queue.confirmed.put(info.pack(), timeout=DEFAULT_REMOTE_TIMEOUT)
+            self.link.call('puller', lambda client: client.confirmed.put(info, timeout=DEFAULT_REMOTE_TIMEOUT))
         except QueueFull:
             return PullerState.CONFIRM
+        except LinkDown:
+            self.unconfirmed = True
+            return PullerState.WAIT_LINK
         log.debug(f'Confirmed {len(self.task_ids)} tasks ({self.identity})')
+        self.unconfirmed = False
+        self.task_ids = []
+        return PullerState.GATE
+
+    def wait_link(self: UpstreamPuller) -> PullerState:
+        """Wait for the link; then confirm what the link lost (unless the outage was too long), or go to the gate."""
+        if self.stopping:  # atomic
+            if self.unconfirmed:
+                log.warning(f'Not confirming {len(self.task_ids)} tasks upstream (link down while stopping); '
+                            f'they still run here')
+            return PullerState.FINAL
+        if not self.link.wait_ready(CONFIRM_STAGES if self.unconfirmed else PULL_STAGES, timeout=LINK_WAIT):
+            return PullerState.WAIT_LINK
+        if not self.unconfirmed:
+            return PullerState.GATE
+        if self.link.outage < self.link.evict_hint:
+            log.debug(f'Confirming {len(self.task_ids)} tasks again after the link came back ({self.identity})')
+            return PullerState.CONFIRM
+        log.warning(f'Not confirming {len(self.task_ids)} tasks upstream after an outage of '
+                    f'{self.link.outage:.0f} seconds (past {self.link.evict_hint:g}): the upstream server has '
+                    f'likely put them back; they still run here')
+        self.unconfirmed = False
+        self.task_ids = []
         return PullerState.GATE
 
     def finalize(self: UpstreamPuller) -> PullerState:
@@ -349,8 +430,9 @@ class ReturnerState(State, Enum):
     COLLECT = 1
     SEND = 2
     MARK = 3
-    FINAL = 4
-    HALT = 5
+    WAIT_LINK = 4
+    FINAL = 5
+    HALT = 6
 
 
 class UpstreamReturner(StateMachine):
@@ -362,9 +444,15 @@ class UpstreamReturner(StateMachine):
     the last send. A bundle is marked returned only after its put returns; a put that does not return
     leaves it pending, to be sent again. Returned results are pruned after `retention` seconds. Told to
     flush, it sends whatever it holds at once and ends once nothing is left.
+
+    While the upstream link is down, completed rows still move into the outbox, which keeps them
+    durable, and nothing is sent (WAIT_LINK). Once the link is back and has carried a heartbeat, the
+    outbox goes back oldest first, at once rather than at the bundle wait, and the link's `drain`
+    stage is passed when nothing is left pending, which lets the puller ask for work again.
     """
 
     queue: Any
+    link: Any
     engine: Engine
     bundlesize: int
     bundlewait: float
@@ -382,8 +470,9 @@ class UpstreamReturner(StateMachine):
     def __init__(self: UpstreamReturner, queue: Any, engine: Engine,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, bundlewait: float = DEFAULT_RETURN_BUNDLEWAIT,
                  poll: float = 1, retention: float = DEFAULT_RETENTION) -> None:
-        """Initialize with the upstream connection and the relay database."""
+        """Initialize with the upstream link (or a connected client) and the relay database."""
         self.queue = queue
+        self.link = as_link(queue)
         self.engine = engine
         self.bundlesize = max(1, int(bundlesize))
         self.bundlewait = bundlewait
@@ -393,6 +482,7 @@ class UpstreamReturner(StateMachine):
         self.previous_send = time.monotonic()
         self.previous_prune = time.monotonic()
         self.flushing = False
+        self.epoch = 0
         self.wake = threading.Event()
 
     @functools.cached_property
@@ -402,6 +492,7 @@ class UpstreamReturner(StateMachine):
             ReturnerState.COLLECT: self.collect,
             ReturnerState.SEND: self.send,
             ReturnerState.MARK: self.mark,
+            ReturnerState.WAIT_LINK: self.wait_link,
             ReturnerState.FINAL: self.finalize,
         }
 
@@ -423,15 +514,24 @@ class UpstreamReturner(StateMachine):
             self.wake.wait(self.poll)
             return ReturnerState.COLLECT
         if not pending:
+            self.link.passed(STAGE_DRAIN)
             if flushing:
                 return ReturnerState.FINAL
             self.wake.wait(self.poll)
             return ReturnerState.COLLECT
+        if not self.link.ready(RETURN_STAGES):
+            return ReturnerState.WAIT_LINK
         waited = time.monotonic() - self.previous_send
-        if flushing or len(pending) >= self.bundlesize or waited >= self.bundlewait:
+        catching_up = not self.link.is_passed(STAGE_DRAIN)
+        if flushing or catching_up or len(pending) >= self.bundlesize or waited >= self.bundlewait:
             self.sent = pending
             return ReturnerState.SEND
         self.wake.wait(min(self.poll, self.bundlewait - waited))
+        return ReturnerState.COLLECT
+
+    def wait_link(self: UpstreamReturner) -> ReturnerState:
+        """Wait for the link to carry results again, then collect (completed rows keep moving to the outbox)."""
+        self.link.wait_ready(RETURN_STAGES, timeout=min(LINK_WAIT, self.poll))
         return ReturnerState.COLLECT
 
     def prune(self: UpstreamReturner) -> None:
@@ -446,10 +546,14 @@ class UpstreamReturner(StateMachine):
     def send(self: UpstreamReturner) -> ReturnerState:
         """Put the bundle upstream, as a client returns its results."""
         bundle = ('[' + ', '.join(record for _, record in self.sent) + ']').encode('utf-8')
+        self.epoch = self.link.epoch
         try:
-            self.queue.completed.put(bundle, timeout=DEFAULT_REMOTE_TIMEOUT)
+            self.link.call('returner', lambda client: client.completed.put(bundle, timeout=DEFAULT_REMOTE_TIMEOUT))
         except QueueFull:
             return ReturnerState.SEND
+        except LinkDown:
+            self.sent = []  # Still pending: sent again once the link is back.
+            return ReturnerState.WAIT_LINK
         self.previous_send = time.monotonic()
         return ReturnerState.MARK
 
@@ -463,6 +567,8 @@ class UpstreamReturner(StateMachine):
             return ReturnerState.MARK
         log.debug(f'Returned {len(self.sent)} results upstream' +
                   ('' if marked == len(self.sent) else f' ({len(self.sent) - marked} superseded meanwhile)'))
+        if len(self.sent) < self.bundlesize:  # What was pending fit in one bundle: the outbox has caught up.
+            self.link.passed(STAGE_DRAIN, self.epoch)
         self.sent = []
         return ReturnerState.COLLECT
 
@@ -513,8 +619,9 @@ class HeartbeatState(State, Enum):
     START = 0
     SUBMIT = 1
     WAIT = 2
-    FINAL = 3
-    HALT = 4
+    WAIT_LINK = 3
+    FINAL = 4
+    HALT = 5
 
 
 class UpstreamHeartbeat(StateMachine):
@@ -525,9 +632,14 @@ class UpstreamHeartbeat(StateMachine):
     `roster` (the site clients connected now, a whole snapshot each time). A change in the roster is
     sent at the next wait step rather than when the next beat is due. A roster that cannot be read
     is left out of that beat, so upstream keeps the last one it was sent.
+
+    While the upstream link is down the heartbeat waits for it (WAIT_LINK) and beats as soon as it is
+    back: that first beat registers the identity again if the upstream server evicted it, and passes
+    the link's `beat` stage, after which confirmations, results and requests follow.
     """
 
     queue: Any
+    link: Any
     identity: str
     heartrate: float
     previous: float
@@ -542,8 +654,9 @@ class UpstreamHeartbeat(StateMachine):
     def __init__(self: UpstreamHeartbeat, queue: Any, identity: str,
                  heartrate: float = DEFAULT_UPSTREAM_HEARTRATE, site: Optional[str] = None,
                  roster: Optional[Callable[[], List[RosterEntry]]] = None) -> None:
-        """Initialize with the upstream connection and the zone identity."""
+        """Initialize with the upstream link (or a connected client) and the zone identity."""
         self.queue = queue
+        self.link = as_link(queue)
         self.identity = identity
         self.heartrate = heartrate
         self.site = site
@@ -559,6 +672,7 @@ class UpstreamHeartbeat(StateMachine):
             HeartbeatState.START: self.start,
             HeartbeatState.SUBMIT: self.submit,
             HeartbeatState.WAIT: self.wait,
+            HeartbeatState.WAIT_LINK: self.wait_link,
             HeartbeatState.FINAL: self.finalize,
         }
 
@@ -571,11 +685,16 @@ class UpstreamHeartbeat(StateMachine):
         """Send one heartbeat under the zone identity."""
         state = self.client_state  # atomic
         roster = self.read_roster() if state is ClientState.RUNNING else None
-        beat = Heartbeat.new(uuid=self.identity, state=state, site=self.site, roster=roster)
+        beat = Heartbeat.new(uuid=self.identity, state=state, site=self.site, roster=roster).pack()
+        epoch = self.link.epoch
         try:
-            self.queue.heartbeat.put(beat.pack(), timeout=DEFAULT_REMOTE_TIMEOUT)
+            self.link.call('heartbeat', lambda client: client.heartbeat.put(beat, timeout=DEFAULT_REMOTE_TIMEOUT))
         except QueueFull:
             return HeartbeatState.SUBMIT
+        except LinkDown:
+            self.sent_roster = None  # Sent whole again once the link is back.
+            return HeartbeatState.WAIT_LINK
+        self.link.passed(STAGE_BEAT, epoch)
         self.previous = time.monotonic()
         if roster is not None:
             self.sent_roster = roster
@@ -596,6 +715,12 @@ class UpstreamHeartbeat(StateMachine):
             return HeartbeatState.SUBMIT
         self.wake.wait(min(remaining, HEARTBEAT_WAIT_STEP))
         return HeartbeatState.WAIT
+
+    def wait_link(self: UpstreamHeartbeat) -> HeartbeatState:
+        """Wait for the link, then beat at once."""
+        if self.link.wait_ready(timeout=LINK_WAIT):
+            return HeartbeatState.SUBMIT
+        return HeartbeatState.WAIT_LINK
 
     def read_roster(self: UpstreamHeartbeat) -> Optional[List[RosterEntry]]:
         """The current roster, or None if there is none to send or it cannot be read now."""

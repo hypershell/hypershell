@@ -64,6 +64,9 @@ SITE_POLICY: Final[str] = 'fixed'
 DEFAULT_SITE_PERIOD: Final[int] = config.autoscale.period
 """Default seconds between checks on the site clients (one that exited is replaced at the next)."""
 
+DEFAULT_SITE_EVICT: Final[int] = config.server.evict
+"""Default seconds the site server waits on a silent site client before evicting it (`[server] evict`)."""
+
 
 def site_cluster(address: Tuple[str, int],
                  bundlesize: int = 1,
@@ -77,12 +80,13 @@ def site_cluster(address: Tuple[str, int],
                  num_threads: int = 1,
                  template: str = '{}',
                  client_timeout: Optional[int] = None,
-                 period: int = DEFAULT_SITE_PERIOD) -> AutoScalingCluster:
+                 period: int = DEFAULT_SITE_PERIOD,
+                 evict_after: int = DEFAULT_SITE_EVICT) -> AutoScalingCluster:
     """The relay's site cluster: a forever server on the relay database and `size` site clients.
 
     Site clients are launched with `launcher` (empty runs them directly on this host) and dial this
     host by name, so the relay must be reachable from wherever they run. They serve `zone` (None is
-    the default zone).
+    the default zone). The site server evicts a site client silent for `evict_after` seconds.
     """
     return AutoScalingCluster(source=None, num_threads=num_threads, template=template,
                               bundlesize=bundlesize, bundlewait=bundlewait, bind=address,
@@ -90,7 +94,7 @@ def site_cluster(address: Tuple[str, int],
                               max_retries=0, poll=poll, client_timeout=client_timeout,
                               policy=SITE_POLICY, period=period,
                               init_size=size, min_size=size, max_size=size,
-                              tls=tls, zone=zone)
+                              tls=tls, zone=zone, evict_after=evict_after)
 
 
 def site_launch(cluster: AutoScalingCluster) -> ClientLaunch:

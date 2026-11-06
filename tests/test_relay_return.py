@@ -270,6 +270,35 @@ class CheckedQueue(Queue):
 
 
 @mark.unit
+def test_upstream_restart_drops_held_tasks_not_yet_started(upstream_db: Engine, relay_db: Engine) -> None:
+    """Tasks stamped by a restarted upstream server (a new server id) drop the held tasks the earlier instance
+    assigned that have not started here, since it put them all back when it started; one already started runs
+    on, and one sent again is kept under its new assignment."""
+    old = dispatch_upstream('echo a', 'echo b', 'echo c')
+    receive(relay_db, old)
+    started, again, dropped = (record['id'] for record in old)
+    table = Task.__table__
+    with relay_db.begin() as conn:  # The relay-local server has scheduled one of them.
+        conn.execute(table.update().where(table.c.id == started).values(schedule_time=datetime.now().astimezone()))
+
+    restarted = str(uuid())
+    resent = {**old[1], 'server_id': restarted, 'schedule_time': datetime.now().astimezone().isoformat()}
+    new, = dispatch_upstream('echo d')
+    new['server_id'] = restarted
+    store.insert_received(relay_db, [resent, new], identity=IDENTITY)
+    held = {id for id, in rows(relay_db, 'SELECT id FROM task')}
+    assert held == {started, again, new['id']} and dropped not in held
+    stamps = dict(rows(relay_db, 'SELECT id, server_id FROM relay_task'))
+    assert stamps == {started: old[0]['server_id'], again: restarted, new['id']: restarted}
+
+    # Further tasks from the same instance drop nothing more: the started task runs on.
+    more, = dispatch_upstream('echo e')
+    more['server_id'] = restarted
+    store.insert_received(relay_db, [more], identity=IDENTITY)
+    assert {id for id, in rows(relay_db, 'SELECT id FROM task')} == {started, again, new['id'], more['id']}
+
+
+@mark.unit
 def test_completed_rows_move_to_the_outbox_and_are_marked_after_the_put(upstream_db: Engine,
                                                                          relay_db: Engine) -> None:
     """Completed rows leave the task table for the outbox; they are marked returned only once the put returns."""
