@@ -1304,6 +1304,7 @@ def start_server(temp_site: Path) -> Popen:
     pytest.param(['-k', DEFAULT_AUTH], {}, None, False, id='explicit-default-key'),
     pytest.param(['-k', 'w' * 64], {}, None, False, id='explicit-wrong-key'),
     pytest.param([], {AUTH_ENV: 'w' * 64}, None, False, id='environment-wrong-key'),
+    pytest.param([], {AUTH_ENV: DEFAULT_AUTH}, None, False, id='environment-default-key'),
     pytest.param([], {}, 'w' * 64, False, id='config-wrong-key'),
 ])
 def test_client_names_missing_key_only_when_none_given(temp_site: Path, client_args: List[str],

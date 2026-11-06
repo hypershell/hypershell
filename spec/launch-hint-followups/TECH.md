@@ -4,7 +4,7 @@ title: 'Launch-path follow-ups: accurate no-key hints, template docs, an export-
   test'
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/launch-hint-followups
 base: develop
 current_phase: done
@@ -180,3 +180,49 @@ perl process-group kill timer.
 - **Sphinx** `-W --keep-going -E`: exit 1 with exactly the two known warnings (`cli/task_submit.rst`,
   `manual.rst`: "document isn't included in any toctree"). That is identical to `d2a460f`. Nothing
   comes from `security.rst` or `templates.rst`; both pages render the new text.
+
+---
+
+## Review-1 remediation
+
+Review cycle 1 (`c1b9616`, reviewing `b80c6b2`) requested changes: F1 and F2, both LOW. The
+foreman accepted both as the reviewer proposed. P1 (R3) and P3 (R4) were reopened and closed again
+through `set_phase.py`, and the FSM returns to `in_review` for a cycle 2 scoped to these two items.
+O1 (already a seed) and O2 (`security.rst`, waiting on the maintainer) are out of scope and
+untouched.
+
+- [x] **F1 (P3, R4).** `docs/_include/templates.rst`: the local-mode `{= =}` sentence now makes
+  the same exception the next sentence makes for a client started by hand. It reads: "Under the
+  default local mode, whose client runs inside the `hs cluster` process, it includes the variable
+  only if the environment that starts `hs cluster` already sets it: the key that run mints is
+  never put in that process's environment."
+- [x] **F2 (P1, R3).** `test_client_names_missing_key_only_when_none_given` gains
+  `environment-default-key`: `HYPERSHELL_SERVER_AUTH` set to the placeholder, no `-k`, expect no
+  hint.
+
+### Evidence
+
+Python 3.14.6, worktree venv, every run under a perl process-group kill timer.
+
+- **F1 probes** (throwaway sites, `echo 1 | hs cluster --no-db --no-tls` with template
+  `echo lambda={= os.environ.get('HYPERSHELL_SERVER_AUTH', 'absent')[:6] =}`; the launcher is
+  `--launcher=env`, which passes its environment through):
+
+  | Run | starting shell exports the variable | lambda reads |
+  |---|---|---|
+  | local `hs cluster` | no | `absent` |
+  | local `hs cluster` | yes (`userow…`) | `userow`, the shell's value |
+  | `--launcher` | no | `0742da`, the run's own key |
+  | `--launcher` | yes (`userow…`) | `93612c`, the run's own key |
+
+  Every run exited 0. The new local-mode sentence and the unchanged launcher sentence state
+  exactly this.
+- **F2 green:** `pytest -n auto tests/test_cluster_launch.py -k names_missing_key` → **6 passed**.
+- **Mutant H2** (`AUTH_ENV not in os.environ` dropped from `no_key` in `ClientApp.run`):
+  `pytest -n auto tests/test_cluster_launch.py` → **1 failed, 115 passed, 1 skipped**. The one
+  failure is `…none_given[environment-default-key]` (hint present, expected absent). The mutant is
+  killed. Restored with `git checkout -- src/hypershell/client.py`; `git diff src/` empty; the module
+  → **116 passed, 1 skipped**.
+- **Full suite**, `pytest -n auto`: **1006 passed, 88 skipped**, 0 failed (1005 plus the new case).
+- **Sphinx** `-W --keep-going -E`: exit 1 with exactly the two known toctree warnings
+  (`cli/task_submit.rst`, `manual.rst`). The new sentence renders in `templates.html`.

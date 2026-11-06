@@ -197,9 +197,10 @@ Exposed standard library modules include ``os``, ``os.path`` as ``path``,
 process that expands the template, so ``os.environ`` is that process's own
 environment. Under a client that ``hs cluster`` starts as a process of its own,
 through a launcher or over SSH, it includes ``HYPERSHELL_SERVER_AUTH``
-(see :doc:`/security`). It does not under the default local mode, whose client
-runs inside the ``hs cluster`` process: the key that run mints is never put in
-that process's environment. A client started by hand with ``-k`` has it there
+(see :doc:`/security`). Under the default local mode, whose client runs inside
+the ``hs cluster`` process, it includes the variable only if the environment
+that starts ``hs cluster`` already sets it: the key that run mints is never put
+in that process's environment. A client started by hand with ``-k`` has it there
 only if its own environment sets it.
 
 Incoming arguments are intelligently coerced into the expected type.
