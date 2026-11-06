@@ -3,7 +3,7 @@ slug: authkey-handling-hardening
 title: The queue authentication key is never exposed to other users on client nodes
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/authkey-handling-hardening
 base: develop
 current_phase: done
