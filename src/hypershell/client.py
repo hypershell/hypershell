@@ -1664,6 +1664,8 @@ class ClientApp(Application):
         auth_given = self.auth is not None
         if not auth_given:
             self.auth = config.server.auth
+        # The hints below name a missing key only when none came from -k, the environment or a configuration file.
+        no_key = not auth_given and AUTH_ENV not in os.environ and self.auth == DEFAULT_AUTH
         try:
             self.check_args()
             self.enable_tls()
@@ -1691,11 +1693,11 @@ class ClientApp(Application):
         except gaierror:
             raise HostAddressInfo(f'Could not resolve host \'{self.host}\'')
         except AuthenticationError as error:
-            if not auth_given and AUTH_ENV not in os.environ:
+            if no_key:
                 raise AuthenticationError(f'{error}\n{LAUNCH_ENV_HINT}') from error
             raise
         except ssl.SSLCertVerificationError as error:
-            if not auth_given and AUTH_ENV not in os.environ:
+            if no_key:
                 raise ssl.SSLCertVerificationError(error.errno, f'{error}\n{LAUNCH_ENV_TLS_HINT}') from error
             raise
 

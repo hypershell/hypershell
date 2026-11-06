@@ -1281,15 +1281,21 @@ def start_server(temp_site: Path) -> Popen:
     pytest.fail('Server did not start')
 
 
-@mark.parametrize('client_args, env, hint', [
-    pytest.param([], {}, True, id='no-key'),
-    pytest.param(['-k', DEFAULT_AUTH], {}, False, id='explicit-default-key'),
-    pytest.param(['-k', 'w' * 64], {}, False, id='explicit-wrong-key'),
-    pytest.param([], {AUTH_ENV: 'w' * 64}, False, id='environment-wrong-key'),
+@mark.parametrize('client_args, env, config_key, hint', [
+    pytest.param([], {}, None, True, id='no-key'),
+    pytest.param(['-k', DEFAULT_AUTH], {}, None, False, id='explicit-default-key'),
+    pytest.param(['-k', 'w' * 64], {}, None, False, id='explicit-wrong-key'),
+    pytest.param([], {AUTH_ENV: 'w' * 64}, None, False, id='environment-wrong-key'),
+    pytest.param([], {}, 'w' * 64, False, id='config-wrong-key'),
 ])
 def test_client_names_missing_key_only_when_none_given(temp_site: Path, client_args: List[str],
-                                                      env: Dict[str, str], hint: bool) -> None:
-    """A client that fails to authenticate names a missing key only when no key came from -k or the environment."""
+                                                      env: Dict[str, str], config_key: Optional[str],
+                                                      hint: bool) -> None:
+    """A client that fails to authenticate names a missing key only when no key came from any source."""
+    if config_key is not None:
+        config_file = Path(temp_site) / 'client.toml'
+        config_file.write_text(f'[server]\nauth = "{config_key}"\n')
+        env = {**env, 'HYPERSHELL_CONFIG_FILE': str(config_file)}
     server = start_server(temp_site)
     try:
         run = run_in_session(['hs', 'client', '-H', LOOPBACK, '--no-tls', '-T', '5', *client_args],
@@ -1383,25 +1389,35 @@ def test_template_shell_expansion_never_sees_key(stand_ins: StandIns, temp_site:
 
 # A launcher that drops the whole environment, as `srun --export=NONE` does where the client's site
 # and TLS settings came from that environment: the client starts with a home of its own, so it finds
-# neither its key nor the server's certificate. Its configuration file stays blank, as in every run.
-# With {keep_key}, it passes the key variable alone through, so the client has a key of its own.
+# neither its key nor the server's certificate. Its configuration file stays blank, as in every run,
+# unless {key_in} names where the client still gets the run's key: 'env' passes the key variable
+# alone through, and 'config' writes the key into a configuration file in that home instead.
 LAUNCHER_BARE_ENV_BODY: Final[str] = """\
 record('launcher')
 home = os.path.join(os.path.dirname(RECORDS), 'bare-home-' + uuid.uuid4().hex)
 os.mkdir(home, 0o700)
 env = {{'PATH': os.environ['PATH'], 'HOME': home, 'HYPERSHELL_CONFIG_FILE': '', 'HYPERSHELL_LOGGING_LEVEL': 'DEBUG'}}
-if {keep_key!r}:
+if {key_in!r} == 'env':
     env[{auth_env!r}] = os.environ[{auth_env!r}]
+if {key_in!r} == 'config':
+    config_file = os.path.join(home, 'client.toml')
+    with os.fdopen(os.open(config_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
+        stream.write('[server]\\nauth = "' + os.environ[{auth_env!r}] + '"\\n')
+    env['HYPERSHELL_CONFIG_FILE'] = config_file
 os.chdir(home)
 os.execve(sys.argv[1], sys.argv[1:], env)
 """
 
 
-@mark.parametrize('keep_key, hint', [pytest.param(False, True, id='no-key'), pytest.param(True, False, id='key-kept')])
+@mark.parametrize('key_in, hint', [
+    pytest.param(None, True, id='no-key'),
+    pytest.param('env', False, id='key-kept'),
+    pytest.param('config', False, id='key-in-config'),
+])
 def test_launched_client_without_environment_names_cause_under_tls(stand_ins: StandIns, temp_site: Path,
-                                                                   keep_key: bool, hint: bool) -> None:
-    """Under TLS, a launched client that got no environment, and so no key, names the launcher's environment."""
-    body = LAUNCHER_BARE_ENV_BODY.format(keep_key=keep_key, auth_env=AUTH_ENV)
+                                                                   key_in: Optional[str], hint: bool) -> None:
+    """Under TLS, a launched client that got no key from any source names the launcher's environment."""
+    body = LAUNCHER_BARE_ENV_BODY.format(key_in=key_in, auth_env=AUTH_ENV)
     launcher = write_program(stand_ins.bin / 'launcher-bare-env', body, stand_ins.records)
     run = run_cluster(stand_ins, [f'--launcher={launcher}'], temp_site, False, None,
                       until=lambda: bool(stand_ins.exits()))

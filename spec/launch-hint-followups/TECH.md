@@ -1,48 +1,57 @@
 ---
 slug: launch-hint-followups
-title: "Launch-path follow-ups: accurate no-key hints, template docs, an export-name test"
+title: 'Launch-path follow-ups: accurate no-key hints, template docs, an export-name
+  test'
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/launch-hint-followups
 base: develop
-current_phase: P1
-last_updated: "2026-11-05"
+current_phase: P2
+last_updated: '2026-11-05'
 phases:
-  - id: P1
-    name: "No-key hints only when no key reached the client"
-    status: pending
-    satisfies: [R1, R2, R3]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -n auto tests/test_cluster_launch.py -k 'names_missing_key or names_cause_under_tls'"
-  - id: P2
-    name: "Test the export-name check, and kill its mutant"
-    status: pending
-    satisfies: [R5]
-    depends_on: []
-    parallel: true
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -n auto tests/test_cluster_launch.py -k shell_cannot_assign"
-  - id: P3
-    name: "Accurate template docs and the approved security sentence; final gates"
-    status: pending
-    satisfies: [R4, R6]
-    depends_on: [P1, P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -n auto && uv run sphinx-build -W --keep-going -E docs docs/_build"
+- id: P1
+  name: No-key hints only when no key reached the client
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: uv run pytest -n auto tests/test_cluster_launch.py -k 'names_missing_key
+    or names_cause_under_tls'
+- id: P2
+  name: Test the export-name check, and kill its mutant
+  status: pending
+  satisfies:
+  - R5
+  depends_on: []
+  parallel: true
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -n auto tests/test_cluster_launch.py -k shell_cannot_assign
+- id: P3
+  name: Accurate template docs and the approved security sentence; final gates
+  status: pending
+  satisfies:
+  - R4
+  - R6
+  depends_on:
+  - P1
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -n auto && uv run sphinx-build -W --keep-going -E docs docs/_build
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Launch-path follow-ups: accurate no-key hints, template docs, an export-name test
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -72,16 +81,16 @@ spec/launch-hint-followups/TECH.md`); the per-phase checklists below are the wor
 **Goal:** a client whose key came from a configuration file never gets the no-key hint, and a
 client with no key from any source still does.
 
-- [ ] Red first: add the failing cases to `tests/test_cluster_launch.py`.
+- [x] Red first: add the failing cases to `tests/test_cluster_launch.py`.
   - `test_client_names_missing_key_only_when_none_given` gets a `config-wrong-key` case: the key
     comes from a configuration file named by `HYPERSHELL_CONFIG_FILE`, so expect no hint.
   - `test_launched_client_without_environment_names_cause_under_tls` gets a `key-in-config` case:
     the bare-environment launcher writes the run's key into a configuration file in the client's
     own home, so expect no hint.
   - Run them on the unchanged `client.py` and record the result below.
-- [ ] `ClientApp.run`: compute `no_key` once (no `-k`, no `HYPERSHELL_SERVER_AUTH`, resolved key
+- [x] `ClientApp.run`: compute `no_key` once (no `-k`, no `HYPERSHELL_SERVER_AUTH`, resolved key
   still `DEFAULT_AUTH`) and use it in both handlers.
-- [ ] Re-run: every case passes. That covers the existing no-key, `-k` and environment cases too
+- [x] Re-run: every case passes. That covers the existing no-key, `-k` and environment cases too
   (R3).
 - **Verify:** `uv run pytest -n auto tests/test_cluster_launch.py -k 'names_missing_key or names_cause_under_tls'`.
 - **Touches:** `src/hypershell/client.py`, `tests/test_cluster_launch.py`.
@@ -116,4 +125,21 @@ wording; the full suite and the docs build pass.
 
 ## Evidence
 
-Recorded as each phase runs.
+Recorded as each phase runs. Python 3.14.6, worktree venv (`uv sync --frozen`), every run under a
+perl process-group kill timer.
+
+### P1 — red first, then green
+
+- **Red** (new cases in `tests/test_cluster_launch.py`, `client.py` unchanged at `d2a460f`):
+  `pytest -n auto tests/test_cluster_launch.py -k 'names_missing_key or names_cause_under_tls'`
+  → **2 failed, 6 passed**. The two failures are exactly the new cases:
+  - `test_client_names_missing_key_only_when_none_given[config-wrong-key]`: `AuthenticationError:
+    digest sent was rejected - No key reached this client: HYPERSHELL_SERVER_AUTH is not set …`
+    (hint present, expected absent).
+  - `test_launched_client_without_environment_names_cause_under_tls[key-in-config]`:
+    `SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED] … - No key reached this client
+    either …` (hint present, expected absent).
+  - The existing cases passed: `no-key` (hint present), `explicit-default-key`,
+    `explicit-wrong-key`, `environment-wrong-key`, and under TLS `no-key` (hint present) and
+    `key-kept`.
+- **Green** (with `no_key` in `ClientApp.run`): the same command → **8 passed**.
