@@ -36,8 +36,9 @@ from hypershell.client import ClientInfo
 from hypershell.data.model import Entity, Task, Client, zone_id, DEFAULT_ZONE_ID
 from hypershell.relay import store
 from hypershell.relay.store import ensure_tables
+from hypershell.core.dispatch import Dispatcher
 from hypershell.relay.upstream import (UpstreamPuller, PullerState, RelayInsertError, upstream_identity,
-                                       INSERT_ATTEMPTS)
+                                       served_zones, INSERT_ATTEMPTS, ZONE_REQUEST_WAIT, DEFAULT_REQUEST_WAIT)
 
 
 # The upstream server's identity and an offset unlike the relay's, so a stamp's text is not the relay's.
@@ -419,3 +420,115 @@ def test_real_dispatcher_serves_the_relay_as_a_client(relay_db: Engine) -> None:
         assert machine.gate() is PullerState.GATE  # Three held: above the low-water mark (two).
     stamps = dict(rows(relay_db, 'SELECT id, schedule_time FROM relay_task'))
     assert stamps == {record['id']: record['schedule_time'] for record in records}
+
+
+
+# --- Several zones -----------------------------------------------------------------------------
+
+
+ZONES = ('cpu', 'gpu')
+
+
+def zoned_puller(engine: Engine, remote: Any, clients: Dict[Optional[str], int], zones=ZONES,
+                 confirmed: Optional[Any] = None) -> UpstreamPuller:
+    """A puller for every zone in `zones` on `remote`; `clients` counts the site clients serving each zone."""
+    queue = remote if confirmed is None else SimpleNamespace(dispatcher=remote.dispatcher, confirmed=confirmed)
+    return UpstreamPuller(queue=queue, engine=engine, identity=upstream_identity(zones[0]), zone=zones[0],
+                          bundlesize=1000, local_bundlesize=1, poll=POLL, zones=served_zones(zones),
+                          connected=lambda zone: clients.get(zone, 0))
+
+
+def pull_once(machine: UpstreamPuller) -> PullerState:
+    """Run the puller from its gate through one request, and its insert and confirmation if any came back."""
+    state = machine.gate()
+    if state is not PullerState.REQUEST:
+        return state
+    state = machine.request()
+    if state is PullerState.INSERT:
+        assert machine.insert() is PullerState.CONFIRM
+        state = machine.confirm()
+    return state
+
+
+@mark.unit
+def test_each_zone_requests_independently(relay_db: Engine) -> None:
+    """Each zone asks under its own identity, bounded by its own fleet; upstream holds one demand per identity.
+
+    The upstream side is a real dispatcher, as the upstream server runs it, untouched: it holds the
+    relay's demand for each zone as it would hold two clients', and cuts each zone's tasks for that
+    zone's identity only. Each confirmation names the identity that asked.
+    """
+    dispatcher = Dispatcher(bundlesize=1, queuesize=1)
+    for zone, count in (('cpu', 3), ('gpu', 5)):
+        records = dispatched(*[f'echo {zone}-{n}' for n in range(count)], zone=zone)
+        dispatcher.stage(zone_id(zone), [(record['id'], json.dumps(record)) for record in records])
+    confirmed = Queue()
+    machine = zoned_puller(relay_db, SimpleNamespace(dispatcher=dispatcher), {'cpu': 1, 'gpu': 2},
+                           confirmed=confirmed)
+    assert machine.wait_request == ZONE_REQUEST_WAIT < DEFAULT_REQUEST_WAIT
+    assert pull_once(machine) is PullerState.GATE
+    assert pull_once(machine) is PullerState.GATE
+    cpu, gpu = upstream_identity('cpu'), upstream_identity('gpu')
+    assert dispatcher.demand == {cpu: (zone_id('cpu'), 2), gpu: (zone_id('gpu'), 4)}  # Clients x local bundle x 2.
+
+    infos = [ClientInfo.unpack_or_none(confirmed.get_nowait()) for _ in range(2)]
+    assert [info.client_id for info in infos] == [cpu, gpu]
+    held = dict(rows(relay_db, 'SELECT id, identity FROM relay_task'))
+    zones = dict(rows(relay_db, 'SELECT id, zone FROM task'))
+    for info, zone in zip(infos, ZONES):
+        assert len(info.task_ids) == {'cpu': 2, 'gpu': 4}[zone]
+        assert all(held[id] == info.client_id and zones[id] == zone_id(zone) for id in info.task_ids)
+    assert dispatcher.staged(zone_id('cpu')) == 1 and dispatcher.staged(zone_id('gpu')) == 1
+
+
+@mark.unit
+def test_a_full_zone_is_passed_over_for_the_next(relay_db: Engine) -> None:
+    """A zone whose own backlog is above its low-water mark is not asked; the zone with room is."""
+    records = dispatched('echo held-1', 'echo held-2', zone='cpu')
+    store.insert_received(relay_db, records, identity=upstream_identity('cpu'))
+    fake = FakeDispatcher()
+    machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 1})
+    for _ in range(3):
+        assert machine.gate() is PullerState.REQUEST and machine.request() is PullerState.GATE
+    assert [(request['client'], request['zone']) for request in fake.requests] == [(upstream_identity('gpu'), 'gpu')] * 3
+    assert fake.requests[0]['size'] == 2 and fake.requests[0]['wait'] == ZONE_REQUEST_WAIT
+
+
+@mark.unit
+def test_a_zone_without_site_clients_is_never_asked(relay_db: Engine) -> None:
+    """A zone none of whose site clients is connected has no room: only the other zone asks."""
+    fake = FakeDispatcher()
+    machine = zoned_puller(relay_db, upstream(fake), {'cpu': 2})
+    for _ in range(3):
+        assert machine.gate() is PullerState.REQUEST and machine.request() is PullerState.GATE
+    assert {request['zone'] for request in fake.requests} == {'cpu'}
+    assert zoned_puller(relay_db, upstream(FakeDispatcher()), {}).gate() is PullerState.GATE
+
+
+@mark.unit
+def test_zones_take_turns(relay_db: Engine) -> None:
+    """With room in every zone, the zones are asked in turn."""
+    fake = FakeDispatcher()
+    machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 1, None: 1}, zones=('cpu', 'gpu', None))
+    for _ in range(6):
+        assert machine.gate() is PullerState.REQUEST and machine.request() is PullerState.GATE
+    assert [request['zone'] for request in fake.requests] == ['cpu', 'gpu', None] * 2
+
+
+@mark.unit
+def test_pulling_ends_once_every_zone_is_shut_down(relay_db: Engine) -> None:
+    """A shutdown reply ends requests for that zone only; pulling ends once every zone has had one."""
+    fake = FakeDispatcher(reply([], shutdown=True), reply([]), reply([], shutdown=True))
+    machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 1})
+    assert pull_once(machine) is PullerState.GATE   # cpu: shut down.
+    assert pull_once(machine) is PullerState.GATE   # gpu: nothing yet.
+    assert pull_once(machine) is PullerState.FINAL  # gpu: shut down; cpu is not asked again.
+    assert [request['zone'] for request in fake.requests] == ['cpu', 'gpu', 'gpu']
+
+
+@mark.unit
+def test_several_zones_need_their_own_client_counts(relay_db: Engine) -> None:
+    """A puller for several zones cannot fall back on the relay's total client count."""
+    with pytest.raises(ValueError):
+        UpstreamPuller(queue=upstream(FakeDispatcher()), engine=relay_db, identity=upstream_identity('cpu'),
+                       zones=served_zones(ZONES))

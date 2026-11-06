@@ -132,6 +132,12 @@ subsystems.
 - `SIGINT`/`SIGTERM` are **deliberately not captured** (Ctrl-C → `KeyboardInterrupt` via cmdkit).
 - `signal.RECEIVED` is a process-global **sticky** flag; USR1/USR2 are never reset. **Do not add
   stray `reset_signal()` calls.**
+- **Relay carve-out (sanctioned; `hs relay` only, process-lifetime handlers, one relay per process).**
+  SIGUSR1/SIGUSR2 drain the relay through its own handler and **never set `RECEIVED`**. SIGTERM is
+  caught: the relay ends its parts and site clients and removes the site config copy, then SIGTERM is
+  **re-delivered with the default action** (the process still dies by it). The handler resets SIGTERM
+  first, so **a second SIGTERM ends the process at once** (leaving the copy, as SIGKILL does). No other
+  command captures SIGTERM; nothing here goes through `check_signal()`.
 
 ## 9. Queue transport & security
 
@@ -154,6 +160,10 @@ subsystems.
   unlimited/auto** for many numeric knobs.
 - `data/core.py` creates engine + `Session` at import and can `sys.exit(3)` on bad config; SQLite
   uses `check_same_thread=False`.
+- **Relay process:** `core/config.py` replaces the whole `[database]` section with the relay's private
+  SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes;
+  never rebind after import. Relay-only tables live on their own `MetaData`, never `Entity`.
+  `DISTRIBUTED_ROLES` (commands with their own log, `relay` among them) is in `core/logging.py`.
 
 ## 11. Cluster orchestration
 
@@ -175,6 +185,10 @@ subsystems.
   (they self-exit on idle) and ignores `no_confirm`/`in_memory`/`forever`/`restart`.
 - `SSHCluster` shells out to the plain `ssh` binary (not paramiko; paramiko is only in
   `core/remote.py` for SFTP).
+- The relay's site fleets are launched only through `client_launch()`: the first zone's by
+  `AutoScalingCluster`, each further zone's by `relay/site.py::zone_launch` with the same values, and
+  every launch passes `fence_site` (no upstream key on a site argv or in a site environment). Nothing
+  in a relay dials its own relay-local server in-process.
 - `submit.py` queue-mode silently ignores `-t/--tag` (asymmetric vs DB mode).
 
 ## 12. Project conventions (same-commit rules)

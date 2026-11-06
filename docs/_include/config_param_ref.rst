@@ -560,9 +560,25 @@
         (default: `300`). Results not yet returned are always kept.
 
     ``.zone``
-        Zone the relay serves (default: none, the default zone).
+        Zone or zones the relay serves (default: none, the default zone).
 
-        See also ``--zone`` command-line option.
+        One zone name, a list of names, or one table per zone, ``[relay.zone.NAME]``, which may
+        give that zone's own ``launcher``, ``launcher_args`` and ``size`` (each in place of the
+        relay's, for that zone's *clients* only); an empty table serves the zone with the relay's.
+        Upstream the relay is one *client* per zone, each with its own identity; at the site it
+        keeps one fleet of *clients* per zone, all served by the relay-local *server*. The first
+        zone's identity lists the site's *clients* upstream.
+
+        .. code-block:: toml
+
+            [relay.zone.cpu]
+
+            [relay.zone.gpu]
+            size = 2
+            launcher = "srun"
+            launcher_args = "--gres=gpu:1"
+
+        See also ``--zone`` command-line option, which names the zones in place of this one.
 
     ``.site``
         Name of the relay's site (default: none, the relay's host name).

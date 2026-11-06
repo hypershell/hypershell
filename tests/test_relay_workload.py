@@ -23,12 +23,16 @@ server dying and coming back (its held results then refused as stale, and the ta
 when told to drain (what it has not yet staged too), returns the times its site clients report as the
 instants they were from another time zone, and hands its site clients the relay's configuration file
 without the relay settings in it, a copy it removes when SIGINT or SIGTERM ends it.
+
+A relay serving two zones takes the tasks of those zones only, each under its own identity, and leaves
+a third zone's alone; killed while it holds tasks in both, it is evicted under each identity, and every
+task of both zones goes back unscheduled.
 """
 
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Set, Tuple
 
 # Standard libs
 import os
@@ -42,6 +46,7 @@ import sqlite3
 import tomllib
 import subprocess
 from pathlib import Path
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from collections import Counter
 
@@ -900,6 +905,28 @@ def test_leaf_times_land_upstream_as_the_instants_they_were(group: Group) -> Non
 SIGNALLED_STATUS = {signal.SIGTERM: -signal.SIGTERM, signal.SIGINT: 4}  # 4 is the keyboard-interrupt status
 
 
+@contextmanager
+def interruptible() -> Iterator[None]:
+    """Processes started within get SIGINT at its default action, whatever this process inherited.
+
+    A background job of a non-interactive shell starts with SIGINT ignored, and an ignored signal stays
+    ignored across exec, so a relay started from it could not be interrupted. A signal with a handler
+    is reset to its default action across exec instead, so a handler is installed while the process
+    starts. Off the main thread no handler can be installed: with SIGINT ignored the test is skipped.
+    """
+    try:
+        previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    except ValueError:
+        if signal.getsignal(signal.SIGINT) is signal.SIG_IGN:
+            pytest.skip('SIGINT is ignored here and cannot be reset off the main thread')
+        previous = None
+    try:
+        yield
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGINT, previous)
+
+
 @mark.integration
 @mark.parametrize('signum', [signal.SIGTERM, signal.SIGINT], ids=['SIGTERM', 'SIGINT'])
 def test_relay_ended_by_a_signal_removes_the_site_config_copy(group: Group, signum: int) -> None:
@@ -918,7 +945,8 @@ def test_relay_ended_by_a_signal_removes_the_site_config_copy(group: Group, sign
     assert group.wait(submit, deadline) == 0, group.text('submit')
     server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
     wait_listening(server, port, group, 'server')
-    relay = start_relay(group, 'relay', port, key, 2, HYPERSHELL_CONFIG_FILE=str(config))
+    with interruptible():
+        relay = start_relay(group, 'relay', port, key, 2, HYPERSHELL_CONFIG_FILE=str(config))
     try:
         until(lambda: running_tasks(relay, barrier) >= 2, deadline, 'two site tasks running')
         clients = [proc.pid for proc in site_clients(relay)]
@@ -984,3 +1012,134 @@ def test_site_clients_keep_the_relay_config_file_without_relay_settings(group: G
     relay_log = group.text('relay')
     assert 'CERTIFICATE_VERIFY_FAILED' not in relay_log and 'exited with status' not in relay_log
     assert not copy.exists()
+
+
+
+# --- A relay serving two zones -----------------------------------------------------------------------
+
+
+SERVED = ('cpu', 'gpu')
+PER_ZONE = 4
+
+
+def submit_zones(group: Group, deadline: float, lines: Callable[[str], List[str]], zones: Tuple[str, ...]) -> None:
+    """Submit `lines(zone)` to each of `zones`."""
+    for zone in zones:
+        taskfile = create_taskfile(group.site, lines(zone), filename=f'{zone}.in')
+        submit = group.start(f'submit-{zone}', 'submit', '--zone', zone, str(taskfile))
+        assert group.wait(submit, deadline) == 0, group.text(f'submit-{zone}')
+
+
+def zone_identities(group: Group, name: str, deadline: float) -> Dict[str, str]:
+    """The upstream identity a relay logged for each zone it serves."""
+    until(lambda: len(IDENTITY.findall(group.text(name))) == len(SERVED), deadline, f'{name} identities')
+    return {zone: identity for identity, zone in IDENTITY.findall(group.text(name))}
+
+
+def zone_rows(upstream: Path, zone: str) -> List[Dict[str, Any]]:
+    """Upstream task rows of `zone`."""
+    return rows(upstream, f"SELECT t.* FROM task t JOIN zone z ON z.id = t.zone WHERE z.name = '{zone}'")
+
+
+@mark.integration
+def test_multizone_relay_takes_only_its_zones(group: Group) -> None:
+    """A relay serving two zones runs both zones' tasks, each pulled under its own identity; a third zone is left alone.
+
+    Each zone has its own fleet of one site client at the relay's site. Upstream, the relay is two
+    clients, both attributed to its site; its site clients are listed under the first identity.
+    """
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    deadline = time.monotonic() + DEADLINE
+    upstream = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
+    submit_zones(group, deadline, lambda zone: [f'echo {zone}-{n}' for n in range(PER_ZONE)], (*SERVED, 'other'))
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    wait_listening(server, port, group, 'server')
+    relay = start_relay(group, 'relay', port, key, 1, '--zone', SERVED[0], '--zone', SERVED[1],
+                        HYPERSHELL_RELAY_SITE='site-z')
+    try:
+        identities = zone_identities(group, 'relay', deadline)
+        assert set(identities) == set(SERVED) and len(set(identities.values())) == 2
+        until(lambda: all(len([t for t in zone_rows(upstream, zone) if t['exit_status'] == 0]) == PER_ZONE
+                          for zone in SERVED), deadline, 'both zones complete')
+        relay.send_signal(signal.SIGUSR1)
+        assert group.wait(relay, deadline) == 0, group.text('relay')
+    finally:
+        release(group, relay, group.site / 'barrier')
+
+    # The third zone was never pulled: no row of it was handed to anyone.
+    assert all(t['client_id'] is None and t['completion_time'] is None for t in zone_rows(upstream, 'other'))
+
+    # Each zone was requested under its own identity, and only for its own tasks.
+    server_log = group.text('server')
+    for zone, identity in identities.items():
+        assert re.search(rf'Dispatched \d+ tasks to client {identity} \(zone {zone}\)', server_log), zone
+        assert not re.search(rf'Dispatched \d+ tasks to client {identity} \(zone (?!{zone}\))', server_log), zone
+
+    # Results are the site clients'; upstream lists both identities at the site, the leaves under the first.
+    leaves = {row['id'] for row in rows(group.site / 'relay.db', 'SELECT id FROM client')}
+    assert len(leaves) >= len(SERVED)
+    done = [t for zone in SERVED for t in zone_rows(upstream, zone)]
+    assert {t['client_id'] for t in done} <= leaves
+    clients = {c['id']: c for c in rows(upstream, 'SELECT id, evicted, disconnected_at, site, relay FROM client')}
+    holder = identities[SERVED[0]]
+    for identity in identities.values():
+        assert (clients[identity]['site'], clients[identity]['relay']) == ('site-z', identity)
+    assert all(clients[id]['relay'] == holder and clients[id]['site'] == 'site-z' for id in leaves)
+    assert all(c['evicted'] == 0 and c['disconnected_at'] is not None for c in clients.values())
+    relay_log = group.text('relay')
+    assert 'Upstream heartbeat - final' in relay_log and 'not finishing upstream' not in relay_log
+
+
+def zone_settled(group: Group, upstream: Path, identity: str) -> bool:
+    """A zone identity holds confirmed tasks above its low-water mark, and everything dispatched to it is confirmed.
+
+    With its site's tasks blocked, it then asks for nothing more, so no reply can be cut for it unconfirmed.
+    """
+    held = held_upstream(upstream, identity)
+    dispatched = sum(int(n) for n in re.findall(rf'Dispatched (\d+) tasks to client {identity}', group.text('server')))
+    return len(held) >= BACKLOG_FACTOR and dispatched == len(held)
+
+
+@mark.integration
+def test_multizone_relay_failover_reverts_and_unstages_both_zones(group: Group) -> None:
+    """A two-zone relay killed while it holds tasks in both zones is evicted under each identity; both zones go back.
+
+    Every task the relay held is put back unscheduled, and what the upstream server had staged for
+    either zone is unstaged once its only client is gone: no row of either zone is left stamped.
+    """
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    deadline = time.monotonic() + DEADLINE
+    upstream = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
+    barrier = group.site / 'barrier'
+    submit_zones(group, deadline, lambda zone: waiting_tasks(group.site, barrier, 2 * PER_ZONE), SERVED)
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key,
+                         env={'HYPERSHELL_SERVER_EVICT': '10'})
+    wait_listening(server, port, group, 'server')
+    relay = start_relay(group, 'relay', port, key, 1, '--zone', SERVED[0], '--zone', SERVED[1],
+                        HYPERSHELL_RELAY_UPSTREAM_HEARTRATE='1')
+    try:
+        identities = zone_identities(group, 'relay', deadline)
+        until(lambda: running_tasks(relay, barrier) == len(SERVED)
+              and all(zone_settled(group, upstream, identity) for identity in identities.values()),
+              deadline, 'tasks held in both zones')
+        held = {zone: held_upstream(upstream, identity) for zone, identity in identities.items()}
+        site = [proc.pid for proc in site_processes(relay)]
+        os.killpg(relay.pid, signal.SIGKILL)
+        assert relay.wait(timeout=30) == -signal.SIGKILL
+        until(lambda: not any(alive(pid) for pid in site), deadline, 'site gone')
+        until(lambda: group.text('server').count('Reverting orphaned tasks') == len(SERVED), deadline,
+              'both identities evicted')
+        until(lambda: all(t['schedule_time'] is None for zone in SERVED for t in zone_rows(upstream, zone)),
+              deadline, 'both zones back unscheduled')
+    finally:
+        release(group, relay, barrier)
+
+    for zone, ids in held.items():
+        assert ids, zone
+        rows_ = {t['id']: t for t in zone_rows(upstream, zone)}
+        assert all(rows_[id]['client_id'] is None and rows_[id]['completion_time'] is None for id in ids)
+    clients = {c['id']: c for c in rows(upstream, 'SELECT id, evicted FROM client')}
+    assert all(clients[identity]['evicted'] == 1 for identity in identities.values())
+    server_log = group.text('server')
+    assert server_log.count('Evicting client') == len(SERVED)
+    assert all(identity in server_log for identity in identities.values())

@@ -43,11 +43,12 @@ from hypershell.core.types import serialize, deserialize
 from hypershell.core.uuid import uuid
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
-from hypershell.data.model import Entity, Client, Task
+from hypershell.data.model import Entity, Client, Task, zone_id
 from hypershell.data.upgrade import upgrade_schema
 from hypershell.relay import store
 from hypershell.relay.store import ensure_tables
-from hypershell.relay.upstream import UpstreamHeartbeat, HeartbeatState, upstream_identity, relay_site
+from hypershell.relay.upstream import (UpstreamHeartbeat, HeartbeatState, upstream_identity, relay_site,
+                                       request_text)
 from hypershell.server import HeartMonitor, HeartbeatState as MonitorState
 from tests import FIXTURE_283
 
@@ -438,3 +439,81 @@ def test_relay_site_defaults_to_the_host() -> None:
     assert relay_site(None) == HOSTNAME
     assert relay_site('') == HOSTNAME
     assert relay_site('cluster-a') == 'cluster-a'
+
+
+# --- A relay serving several zones -----------------------------------------------------------------
+
+
+ZONES = ('cpu', 'gpu')
+
+
+def zoned_heartbeat(engine: Engine, remote: Any) -> UpstreamHeartbeat:
+    """The heartbeat of a relay serving both `ZONES`, reading its roster from `engine`."""
+    identities = [upstream_identity(zone) for zone in ZONES]
+    return UpstreamHeartbeat(queue=remote, identity=identities[0], heartrate=60, site=SITE,
+                             roster=lambda: store.roster(engine, INSTANCE), identities=identities)
+
+
+@mark.unit
+def test_every_identity_beats_and_the_holder_carries_the_roster(relay_db) -> None:
+    """Each zone identity beats with the relay's site; only the first, the holder, carries the roster."""
+    leaves = sorted(register_local(relay_db) for _ in range(3))
+    machine = zoned_heartbeat(relay_db, SimpleNamespace(heartbeat=Queue()))
+    assert machine.submit() is HeartbeatState.WAIT
+    holder, other = sent(machine)
+    assert (holder.uuid, other.uuid) == tuple(upstream_identity(zone) for zone in ZONES)
+    assert holder.site == other.site == SITE
+    assert [entry.uuid for entry in holder.roster] == leaves and other.roster is None
+    machine.signal_finished()
+    assert machine.submit() is HeartbeatState.FINAL
+    assert [(beat.uuid, beat.state) for beat in sent(machine)] == \
+        [(upstream_identity(zone), ClientState.FINISHED) for zone in ZONES]
+
+
+def stamp_upstream(identity: str, zone: str) -> str:
+    """An upstream task of `zone` confirmed to `identity`, not complete; return its id."""
+    task = Task.new(args=f'echo {zone}', zone=zone_id(zone))
+    task.schedule_time = datetime.now().astimezone()
+    task.server_id, task.server_host, task.client_id, task.client_host = str(uuid()), 'upstream', identity, 'relay'
+    Task.add(task)
+    return task.id
+
+
+@mark.unit
+def test_failover_of_a_two_zone_relay_reverts_and_unstages_both_zones(queues, task_db, relay_db) -> None:
+    """A two-zone relay that stops beating is evicted under each identity: both zones' tasks go back, both unstage.
+
+    Upstream is the stock heart monitor and dispatcher. Each identity asked for its own zone, so each
+    zone's pool is staged for it alone; once both identities are evicted, every task they held is
+    reverted, and both zones, left with no client, are marked to unstage.
+    """
+    register_local(relay_db)
+    machine = monitor(queues)
+    dispatcher = queues.dispatcher
+    for zone in ZONES:
+        identity = upstream_identity(zone)
+        dispatcher.request(request_text(identity, zone, size=2, wait=0))
+        dispatcher.stage(zone_id(zone), [(str(uuid()), '{}')])
+    held = {zone: stamp_upstream(upstream_identity(zone), zone) for zone in ZONES}
+
+    beater = zoned_heartbeat(relay_db, SimpleNamespace(heartbeat=Queue()))
+    stale = datetime.now().astimezone() - timedelta(seconds=3 * EVICT)
+    beater.submit()
+    for beat in sent(beater):  # The relay's last beats, as old as the eviction period three times over.
+        deliver(machine, Heartbeat.new(uuid=beat.uuid, host=beat.host, state=beat.state, site=beat.site,
+                                       roster=beat.roster, time=stale))
+    rows = clients()
+    for zone in ZONES:
+        identity = upstream_identity(zone)
+        assert (rows[identity]['site'], rows[identity]['relay']) == (SITE, identity)
+
+    machine.last_check = datetime.now().astimezone()
+    assert machine.check_clients() is MonitorState.SWITCH
+    rows = clients()
+    assert all(rows[upstream_identity(zone)]['evicted'] is True for zone in ZONES)
+    assert connected(rows) == set()  # The roster went with its holder.
+    for zone, id in held.items():
+        task = Task.from_id(id, caching=False)
+        assert task.schedule_time is None and task.client_id is None, zone
+    assert dispatcher.demand == {}
+    assert len(dispatcher.take_unstaged()) == len(ZONES)

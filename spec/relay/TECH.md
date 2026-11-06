@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay
 base: develop
-current_phase: P9
+current_phase: P7
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -137,7 +137,7 @@ phases:
 - id: P9
   name: Multi-zone relays (one upstream identity per zone), per-zone fleets, relay
     docs and trust model
-  status: pending
+  status: in_progress
   satisfies:
   - R2
   - R8
@@ -147,7 +147,7 @@ phases:
   - P8
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: crest
   verify: uv run pytest -v && bash -n share/bash_completion.d/hs && zsh -n share/zsh/site-functions/_hs
 - id: P10
   name: 'R21 run B: judge the external multi-node evidence'
@@ -1543,41 +1543,108 @@ reconnection they are handed over; a relay restart loses nothing.
 **Goal:** one relay serves several zones, each as its own upstream identity and its own site fleet;
 failover reverts and unstages every zone it held; the docs carry the relay trust model and
 non-goals.
+**Status (2026-11-05):** built; unit gates green here; `in_progress` until the foreman's Linux run of the
+verify (this host cannot start servers, as in P8).
 
-- [ ] Security-cycle overlap rule for P9 (above): starts only after hardening has landed and been
-      merged.
-- [ ] `[relay] zone` becomes a list (`--zone` repeatable); `[relay.zone.<name>]` overrides
+- [x] Security-cycle overlap rule for P9 (above): starts only after hardening has landed and been
+      merged. (Met 2026-11-05; see the overlap section.)
+- [x] `[relay] zone` becomes a list (`--zone` repeatable); `[relay.zone.<name>]` overrides
       `launcher`, `launcher_args`, `size`.
-- [ ] Puller cycles zones with a short `wait`; per-zone gate; confirm under the requesting zone's
+- [x] Puller cycles zones with a short `wait`; per-zone gate; confirm under the requesting zone's
       identity; heartbeat every identity, roster on the holder.
-- [ ] ~~`cluster/remote.py`: minimal, behaviour-preserving extraction of `AutoScalingCluster`'s
+- [x] ~~`cluster/remote.py`: minimal, behaviour-preserving extraction of `AutoScalingCluster`'s
       client-invocation build into a module function~~ **Dropped (merge round, 2026-11-05):**
       hardening exposes `cluster/launch.py` `client_launch()`. Extra zone fleets build their
       `ClientLaunch` with it and run an `AutoScalerThread(launch, …)`; each zone's fleet goes through
       the credential fence (`check_invocation` on its launch). No `cluster/` edit.
-- [ ] Tests: `test_relay_connector.py::test_each_zone_requests_independently` (demand holds one
+- [x] Tests: `test_relay_connector.py::test_each_zone_requests_independently` (demand holds one
       entry per identity; Z2 dispatcher untouched); `test_relay_workload.py::
       test_multizone_relay_takes_only_its_zones` (a zone with no client stays unscheduled);
       failover of a two-zone relay reverts and unstages both zones.
-- [ ] Docs: `docs/security.rst` gains a relay section (two auth domains, TLS pinning across the WAN
+- [x] Docs: `docs/security.rst` gains a relay section (two auth domains, TLS pinning across the WAN
       hop, key exposure confined within each site; since #80 no key is on any site process's
       command line, so state the site key's handoff in the site client's environment as #80's
       section does, not process-table exposure); `docs/cli/relay.rst` states the non-goals (no
       throughput gain, no cross-site cancellation or output retrieval, no site-topology
       autoscaling, synchronised clocks needed for eviction); `docs/database.rst` (relay-local file,
       node-local disk advice); help snippets and completions for the multi-zone options.
-- [ ] `AGENTS.md`: relay in the repository map and footguns (one relay per process; import-time
+- [x] `AGENTS.md`: relay in the repository map and footguns (one relay per process; import-time
       database swap; relay-only tables; no in-process dial of the local server); `DISTRIBUTED_ROLES`
       location (D11). `invariants.md` §10/§11 notes in lockstep.
-- [ ] *C3-1 (ruled 2026-11-05):* the relay SIGTERM carve-out in `AGENTS.md` §Signals and
+- [x] *C3-1 (ruled 2026-11-05):* the relay SIGTERM carve-out in `AGENTS.md` §Signals and
       `invariants.md` §8 (catch, clean up, re-deliver; USR1/USR2 drain; a second SIGTERM ends at once).
-- [ ] *C3-3 (ruled 2026-11-05):* `relay_desc.rst` / `hs relay --help`: a second SIGTERM also leaves
+- [x] *C3-3 (ruled 2026-11-05):* `relay_desc.rst` / `hs relay --help`: a second SIGTERM also leaves
       the site config copy behind (not only SIGKILL).
-- [ ] Full suite passes.
+- [x] *Foreman, Linux concurrency gate at `1393af6`:* `test_relay_ended_by_a_signal_removes_the_site_config_copy
+      [SIGINT]` failed 6 of 6 as background jobs (SIGINT inherited as SIG_IGN; harness, not relay).
+      Fixed in the test: the relay is started inside `interruptible()`, which installs Python's SIGINT
+      handler in the test process while it spawns, so the child gets SIGINT at its default action
+      (an ignored signal survives exec; a handled one is reset); off the main thread, with SIGINT
+      ignored, it skips with that reason.
+- [x] *Foreman:* `spec/relay/drive/relay_throughput.py` hung when run outside `uv run` (site clients:
+      `env: 'hyper-shell': No such file or directory`, relaunched forever). It now puts `dirname(HS)`
+      first on `PATH` for every process (as `relay_drive.sh` does), fails with a message naming the
+      logs when no client is live within `--live-wait` (120 s), when the relay exits before the
+      upstream server, or past `--timeout`, and prints progress lines with `flush=True`.
+- [ ] Full suite passes (the foreman's Linux run; see *Gates*).
+- **Amendments and deviations (2026-11-05, build; the conservative reading each time):**
+  - **`[relay] zone` forms.** The plan's `[relay] zone` list and `[relay.zone.<name>]` tables cannot
+    both be one TOML key (`relay.zone` is either an array or a table). `relay.zone` therefore takes
+    one name, a list of names, or one table per zone (`[relay.zone.gpu]`, possibly empty), the table
+    form carrying that zone's `launcher`, `launcher_args`, `size` (`relay/__init__.py::zone_options`).
+    Any other per-zone key, a repeated zone (after `zone_name` normalisation), or no zone is refused
+    (`ArgumentError`). `--zone` (repeatable) names the zones in place of the configuration; each still
+    takes its table's settings. A zone's own setting wins over the relay-wide value for that zone,
+    whether the relay-wide value came from the command line or configuration.
+  - **Per-zone client count.** The relay-local `client` table has no zone column, and the model is not
+    changed for it, so a multi-zone gate counts a zone's site clients from the relay-local server's
+    dispatcher (`Dispatcher.clients(zone_id)`: clients that have asked for that zone and have not
+    finished or been evicted; read in process, no dial). A client counts from its first request, so a
+    zone's first pull can come one request later than with the `client` table. **A single-zone relay
+    is unchanged:** the `client`-table count and the total backlog, exactly as in P8.
+  - **Per-zone backlog** is `count_backlog(zone=zone_id(zone))` for a multi-zone relay.
+  - **Short wait.** With more than one zone, requests wait upstream at most `ZONE_REQUEST_WAIT` (1 s)
+    so an empty zone does not hold up the others; one zone keeps `DEFAULT_REQUEST_WAIT`. The gate takes
+    zones in turn from the one after the last asked; a full zone (or one with no client) is skipped.
+  - **Shutdown per zone** (PLAN §2.9 "in every zone"): the upstream dispatcher answers `shutdown` per
+    pool, so a zone that gets one is asked no more, and pulling ends once every zone has had one.
+  - **Fleets.** The first zone's fleet is the `AutoScalingCluster`'s; each further zone's is
+    `relay/site.py::zone_fleet` (a fixed-policy `AutoScalerThread`, named `hypershell-autoscaler-<zone>`)
+    over `zone_launch`, which calls `client_launch()` with the same values `AutoScalingCluster` uses
+    and the cluster's site key and port. A unit test pins that, for the same zone and launcher, the
+    argv and environment equal the cluster's own, and that another zone differs only in `--zone`.
+    No `cluster/` edit. Every fleet is fenced (`fence_site(..., launches=)`), supervised
+    (`check_site`), stopped (`stop_site`, `abort`) and reaped (`end_site_clients(..., fleets=)`).
+  - **Heartbeat.** One heartbeat machine beats every identity in turn on its one link role (no new
+    upstream connection per zone); the holder (first zone) carries the roster, every beat the site.
+    The `beat` link stage is passed once all identities have beaten. FINISHED goes out under each.
+  - **Drive untouched.** The R21 drive and judge keep the approved 3-node shared-zone matrix; the
+    single-zone path they exercise is unchanged.
+  - **Not added:** a `--site` option (P6 left it to P9 or a ruling; config `[relay] site` stays the
+    only way) and `--advertise` (P4 ruling 1; nothing here needed it).
+  - **`test_one_relay_end_to_end` under 6x load** (one copy 452 s, timed out once in 6): not changed.
+    Its 240 s `DEADLINE` is shared by the file; a scale knob would be new test configuration for a load
+    artefact. For the foreman.
+- **Red first (2026-11-05),** new tests against the `8a0f3b3` source (a scratch export on `PYTHONPATH`):
+  `test_relay_connector.py` and `test_relay_launch.py` fail at collection (`cannot import name
+  'served_zones'` / `'zone_options'`); in `test_relay_roster.py`
+  `test_every_identity_beats_and_the_holder_carries_the_roster` and
+  `test_failover_of_a_two_zone_relay_reverts_and_unstages_both_zones` fail (`unexpected keyword argument
+  'identities'`). The two new workload tests and the SIGINT fix start servers: not run here.
+- **Gates here (2026-11-05), no servers (POSIX semaphores still exhausted):**
+  - Relay unit tests (`-m unit`: connector, roster, launch, fsm, link, return, judge, db, main,
+    completions): 289 passed on 3.12 and on 3.14.
+  - `tests/test_main.py tests/test_completions.py` (venv on `PATH`): 65 passed. `bash -n`/`zsh -n` on
+    the completions: clean. `hs relay --help` shows the new text.
+  - Sphinx `-W --keep-going` (sandbox off): only the three known warnings.
+  - `relay_throughput.py` with an `HS` that does not exist: one line naming it, `FAIL`, exit 1.
+- **Touches:** `src/hypershell/relay/` (`__init__.py`, `upstream.py`, `site.py`), `src/hypershell/core/config.py`
+  (comment), `docs/` (`security.rst`, `cli/relay.rst`, `_include/database.rst`, `relay_desc.rst`,
+  `relay_help.rst`, `relay_usage.rst`, `config_param_ref.rst`), `share/zsh/site-functions/_hs`,
+  `AGENTS.md`, `.agents/factory/invariants.md`, `tests/test_relay_connector.py`, `tests/test_relay_roster.py`,
+  `tests/test_relay_launch.py`, `tests/test_relay_workload.py`, `spec/relay/drive/relay_throughput.py`.
+  No `cluster/`, zone code, `client.py`, `server.py` or `data/model.py` change.
 - **Verify:** see frontmatter.
-- **Touches:** `src/hypershell/relay/`, `src/hypershell/cluster/remote.py` (extraction only),
-  `src/hypershell/core/config.py`, `docs/`, `share/`, `AGENTS.md`, `.agents/factory/invariants.md`,
-  tests above.
 
 ## Phase P10 — R21 run B: judge the evidence
 **Satisfies:** R21 · **Depends on:** P7, P9

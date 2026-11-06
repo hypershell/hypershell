@@ -197,7 +197,7 @@ default = Namespace({
         'bundlewait': 5,          # Seconds the relay waits before returning results regardless of size
         'poll': 0.1,              # Max polling interval of the relay-local scheduler in seconds
         'retention': 300,         # Seconds a returned result is kept in the relay database
-        'zone': PARAM_UNSET,      # Zone served by the relay (default zone if unset)
+        'zone': PARAM_UNSET,      # Zone(s) served: a name, a list, or one [relay.zone.<name>] table each
         'site': PARAM_UNSET,      # Site name the relay gives upstream (default: the relay's host name)
         'size': 1,                # Number of site clients the relay keeps launched (at least 1)
         'launcher': '',           # Command prefix to launch each site client (empty means 'hs client ...')

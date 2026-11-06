@@ -9,9 +9,14 @@ launches the site clients with it, and launches another whenever one exits. It s
 its own (no source; its server runs forever on the relay database) and never retries: the upstream
 server alone retries tasks, so a failure at the site is a completed row like any other.
 
-Every site client is launched through the cluster's one `ClientLaunch` (see
-`hypershell.cluster.launch.client_launch`): the site key is handed over in the client's environment,
-never on its command line, and a client passes it to none of its tasks.
+Every site client is launched through a `ClientLaunch` (see `hypershell.cluster.launch.client_launch`):
+the site key is handed over in the client's environment, never on its command line, and a client
+passes it to none of its tasks.
+
+A relay serving several zones keeps one fleet per zone, all served by the one site server. The first
+zone's fleet is the cluster's own; each further zone's (`zone_fleet`) is a fixed-policy autoscaler
+whose clients are launched exactly as the cluster's are, with the same site key, but serving that
+zone (`zone_launch`), and with its own launcher and size if the zone names them.
 
 The upstream key stays with the relay. Site clients inherit the relay's environment when they are
 launched, and tasks inherit their client's, so before the first launch `fence_site` refuses a client
@@ -31,11 +36,12 @@ Example:
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, List, Optional, Tuple, Final, Mapping, MutableMapping
+from typing import Any, List, Optional, Sequence, Tuple, Final, Mapping, MutableMapping
 
 # Standard libs
 import os
 import time
+import shlex
 import tomllib
 import subprocess
 
@@ -44,13 +50,14 @@ import tomlkit
 
 # Internal libs
 from hypershell.core.config import config, load_task_env
-from hypershell.core.logging import Logger
+from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.tls import TLSConfig
-from hypershell.cluster.launch import ClientLaunch
-from hypershell.cluster.remote import AutoScalingCluster
+from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
+from hypershell.cluster.launch import ClientLaunch, client_launch
+from hypershell.cluster.remote import AutoScalingCluster, AutoScalerThread, DEFAULT_REMOTE_EXE
 
 # Public interface
-__all__ = ['site_cluster', 'site_launch', 'SITE_POLICY', 'DEFAULT_SITE_PERIOD', 'fence_site',
+__all__ = ['site_cluster', 'site_launch', 'zone_launch', 'zone_fleet', 'SITE_POLICY', 'DEFAULT_SITE_PERIOD', 'fence_site',
            'scrub_environment', 'check_invocation', 'check_exports', 'CredentialFenceError', 'FENCED_PREFIX',
            'site_config_copy', 'end_site_clients']
 
@@ -100,6 +107,39 @@ def site_cluster(address: Tuple[str, int],
 def site_launch(cluster: AutoScalingCluster) -> ClientLaunch:
     """The invocation every site client of `cluster` is launched with: its command line holds no key."""
     return cluster.launch
+
+
+def zone_launch(cluster: AutoScalingCluster,
+                zone: Optional[str],
+                launcher: Optional[str] = None,
+                launcher_args: Optional[List[str]] = None,
+                num_threads: int = 1,
+                bundlesize: int = 1,
+                bundlewait: int = 5,
+                template: str = '{}',
+                client_timeout: Optional[int] = None,
+                tls: Optional[TLSConfig] = None) -> ClientLaunch:
+    """The invocation of a site client of `cluster` serving `zone`, built as the cluster builds its own.
+
+    The site key and the address the clients dial are the cluster's; every other value must be the
+    one `site_cluster` was given (with `launcher` and `launcher_args` the zone's own, if it has any),
+    so a client of this zone differs from one of the cluster's only in the zone it serves.
+    """
+    queue = cluster.server.queue.config
+    args = [arg for group in (launcher_args or []) for arg in shlex.split(group)]
+    return client_launch(DEFAULT_REMOTE_EXE, (HOSTNAME, queue.port), queue.auth,
+                         launcher=shlex.split(launcher or ''), launcher_args=args,
+                         num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
+                         template=template, delay_start=DEFAULT_DELAY, task_signalwait=DEFAULT_SIGNALWAIT,
+                         client_timeout=client_timeout, tls_enabled=tls is not None, zone=zone)
+
+
+def zone_fleet(launch: ClientLaunch, zone: Optional[str], size: int = 1,
+               period: int = DEFAULT_SITE_PERIOD) -> AutoScalerThread:
+    """A fixed fleet of `size` site clients launched with `launch`, one launched again whenever one exits."""
+    fleet = AutoScalerThread(launch, policy=SITE_POLICY, period=period, init_size=size, min_size=size, max_size=size)
+    fleet.name = f'hypershell-autoscaler-{zone}'
+    return fleet
 
 
 FENCED_PREFIX: Final[str] = 'HYPERSHELL_RELAY_'
@@ -212,16 +252,19 @@ def check_exports(exports: Mapping[str, str], key: str) -> None:
 def fence_site(cluster: AutoScalingCluster, key: str,
                environ: Optional[MutableMapping[str, str]] = None,
                exports: Optional[Mapping[str, str]] = None,
-               site_config: Optional[str] = None) -> List[str]:
+               site_config: Optional[str] = None,
+               launches: Sequence[ClientLaunch] = ()) -> List[str]:
     """Keep the upstream key from the site before its first client is launched.
 
-    The client invocation and the exported task variables are checked (a leak there is refused, with
+    Every client invocation (the cluster's, and `launches`, those of the fleets of further zones) and
+    the exported task variables are checked (a leak there is refused, with
     `CredentialFenceError`); the environment the clients will inherit is scrubbed, and a configuration
     file it names is replaced by a copy written to `site_config` if need be. Read the key, and anything
     configured through the environment, before calling this: relay settings are gone after. Returns
     the names of the variables removed.
     """
-    check_invocation(site_launch(cluster), key)
+    for launch in (site_launch(cluster), *launches):
+        check_invocation(launch, key)
     check_exports(load_task_env() if exports is None else exports, key)
     removed = scrub_environment(key, environ, site_config=site_config)
     if removed:
@@ -230,13 +273,15 @@ def fence_site(cluster: AutoScalingCluster, key: str,
     return removed
 
 
-def end_site_clients(cluster: AutoScalingCluster, grace: float, patience: float = 0) -> int:
-    """End every site client the cluster launched that is still running; return how many were ended.
+def end_site_clients(cluster: AutoScalingCluster, grace: float, patience: float = 0,
+                     fleets: Sequence[AutoScalerThread] = ()) -> int:
+    """End every site client the cluster, or one of `fleets`, launched that is still running; return how many.
 
     Each is given `patience` seconds to exit by itself, then SIGTERM, then SIGKILL if it is still
-    running `grace` seconds later. Stop the autoscaler first, or it may launch more.
+    running `grace` seconds later. Stop the autoscalers first, or they may launch more.
     """
-    running = [proc for proc in list(cluster.autoscaler.machine.clients) if proc.poll() is None]
+    launched = [proc for autoscaler in (cluster.autoscaler, *fleets) for proc in list(autoscaler.machine.clients)]
+    running = [proc for proc in launched if proc.poll() is None]
     deadline = time.monotonic() + patience
     for proc in running:
         try:

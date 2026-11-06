@@ -36,11 +36,13 @@ from cmdkit.config import Configuration, Namespace
 
 # Internal libs
 from hypershell.core.config import config, DEFAULT_AUTH, ConfigurationError
-from hypershell.relay import RelayThread, site_bundlesize
+from hypershell.relay import RelayThread, RelayApp, site_bundlesize, zone_options
 from hypershell.cluster.launch import ClientLaunch, AUTH_ENV, OMPI_ENV_LIST
 from hypershell.relay.site import (site_cluster, site_launch, fence_site, scrub_environment, check_invocation,
-                                   check_exports, CredentialFenceError, site_config_copy)
-from hypershell.relay.upstream import upstream_key
+                                   check_exports, CredentialFenceError, site_config_copy, zone_launch, zone_fleet,
+                                   end_site_clients)
+from hypershell.relay.upstream import upstream_key, upstream_identity
+from cmdkit.cli import ArgumentError
 from tests.test_relay_db import relays, upstream, free_port, UPSTREAM_AUTH, DEADLINE, POLL  # noqa: fixtures
 
 
@@ -451,3 +453,134 @@ def test_relay_refuses_an_exported_task_variable_carrying_the_key(relays, tmp_pa
     assert UPSTREAM_AUTH not in relay.text()
     assert launches(tmp_path) == []
     assert 'Relay-local server ready' not in relay.text()
+
+
+
+# --- Several zones ------------------------------------------------------------------------------
+
+
+SITE_OPTIONS = dict(num_threads=4, bundlesize=8, bundlewait=2, template='run {}', client_timeout=30)
+
+
+def zone_word(argv: List[str]) -> List[str]:
+    """The zones a client command line serves (each `--zone` value)."""
+    return [argv[i + 1] for i, word in enumerate(argv) if word == '--zone']
+
+
+@mark.unit
+def test_zone_launch_is_the_cluster_launch_but_for_its_zone() -> None:
+    """A further zone's clients are launched exactly as the cluster's, with the same site key, serving their own zone."""
+    cluster = site_cluster(address=('127.0.0.1', free_port()), size=2, launcher='srun --exact',
+                           launcher_args=['--mpi=none'], zone='cpu', **SITE_OPTIONS)
+    same = zone_launch(cluster, 'cpu', launcher='srun --exact', launcher_args=['--mpi=none'], **SITE_OPTIONS)
+    assert same.argv == site_launch(cluster).argv and same.env == site_launch(cluster).env
+    other = zone_launch(cluster, 'gpu', launcher='srun --exact', launcher_args=['--mpi=none'], **SITE_OPTIONS)
+    assert zone_word(other.argv) == ['gpu'] and zone_word(site_launch(cluster).argv) == ['cpu']
+    assert [word for word in other.argv if word != 'gpu'] == [word for word in same.argv if word != 'cpu']
+    assert other.env == {AUTH_ENV: cluster.server.queue.config.auth}
+    assert '--no-tls' in other.argv  # No site TLS given, as for the cluster's own clients.
+
+
+@mark.unit
+def test_zone_fleet_keeps_a_fixed_size() -> None:
+    """A further zone's fleet is a fixed-policy autoscaler of its own size, named for its zone."""
+    cluster = site_cluster(address=('127.0.0.1', free_port()))
+    fleet = zone_fleet(zone_launch(cluster, 'gpu'), 'gpu', size=3, period=7)
+    machine = fleet.machine
+    assert machine.policy.name.lower() == 'fixed' and machine.period == 7
+    assert machine.init_size == machine.min_size == machine.max_size == 3
+    assert fleet.name == 'hypershell-autoscaler-gpu'
+
+
+@mark.unit
+def test_fence_checks_every_zone_launch() -> None:
+    """A further zone's launch carrying the key is refused, as the cluster's own would be."""
+    cluster = site_cluster(address=('127.0.0.1', free_port()))
+    leaking = zone_launch(cluster, 'gpu', launcher=f'srun --comment={KEY}')
+    with pytest.raises(CredentialFenceError):
+        fence_site(cluster, KEY, environ={}, exports={}, launches=[zone_launch(cluster, 'cpu'), leaking])
+    fence_site(cluster, KEY, environ={}, exports={}, launches=[zone_launch(cluster, 'cpu')])
+
+
+class Proc:
+    """A launched client that ends when told to."""
+
+    def __init__(self, running: bool = True) -> None:
+        self.status = None if running else 0
+        self.pid = id(self)
+
+    def poll(self):
+        return self.status
+
+    def wait(self, timeout=None):
+        return self.status
+
+    def terminate(self) -> None:
+        self.status = -15
+
+    def kill(self) -> None:
+        self.status = -9
+
+
+@mark.unit
+def test_site_clients_of_every_fleet_are_ended() -> None:
+    """Ending the site ends the clients of every zone's fleet, not only the cluster's."""
+    cluster = site_cluster(address=('127.0.0.1', free_port()))
+    fleet = zone_fleet(zone_launch(cluster, 'gpu'), 'gpu', size=2)
+    ours, theirs, done = [Proc(), Proc()], [Proc(), Proc()], Proc(running=False)
+    cluster.autoscaler.machine.clients = [*ours, done]
+    fleet.machine.clients = theirs
+    assert end_site_clients(cluster, grace=0.1, fleets=[fleet]) == 4
+    assert all(proc.status == -15 for proc in ours + theirs) and done.status == 0
+
+
+@mark.unit
+def test_relay_serving_several_zones_has_one_fleet_and_one_identity_per_zone() -> None:
+    """The first zone's fleet is the cluster's; each further zone gets its own, with any settings it gives itself."""
+    relay = RelayThread(address=('127.0.0.1', free_port()), size=2, launcher='srun', num_threads=4,
+                        zones=['cpu', 'gpu', None],
+                        zone_settings={'gpu': {'size': 3, 'launcher': 'mpirun', 'launcher_args': ['-np 1']}})
+    assert relay.zone == 'cpu' and relay.identity == upstream_identity('cpu')
+    assert relay.identities == [upstream_identity(zone) for zone in ('cpu', 'gpu', None)]
+    assert zone_word(site_launch(relay.cluster).argv) == ['cpu'] and relay.cluster.autoscaler.machine.min_size == 2
+    gpu, default = relay.fleets
+    assert zone_word(gpu.machine.launch.argv) == ['gpu'] and gpu.machine.launch.argv[:3] == ['mpirun', '-np', '1']
+    assert gpu.machine.min_size == 3
+    assert zone_word(default.machine.launch.argv) == [] and default.machine.launch.argv[0] == 'srun'
+    assert default.machine.min_size == 2
+    site_key = relay.site_key
+    assert all(fleet.machine.launch.env[AUTH_ENV] == site_key for fleet in relay.fleets)
+    single = RelayThread(address=('127.0.0.1', free_port()), zone='cpu')
+    assert single.zones == ['cpu'] and single.fleets == [] and single.identities == [upstream_identity('cpu')]
+
+
+@mark.unit
+@mark.parametrize('value, zones, settings', [
+    (None, [None], {}),
+    ('', [None], {}),
+    ('gpu', ['gpu'], {'gpu': {}}),
+    (['cpu', 'gpu'], ['cpu', 'gpu'], {'cpu': {}, 'gpu': {}}),
+    (['default', 'gpu'], [None, 'gpu'], {None: {}, 'gpu': {}}),
+    ({'cpu': {}, 'gpu': {'size': 2, 'launcher': 'srun'}}, ['cpu', 'gpu'],
+     {'cpu': {}, 'gpu': {'size': 2, 'launcher': 'srun'}}),
+])
+def test_zone_setting_forms(value, zones, settings) -> None:
+    """`[relay] zone` is one name, a list of names, or one table per zone with that zone's fleet settings."""
+    assert zone_options(value) == (zones, settings)
+
+
+@mark.unit
+@mark.parametrize('value', [['gpu', 'gpu'], ['gpu', ' gpu '], {'gpu': {'num_threads': 4}}, {'gpu': 'srun'}, []])
+def test_zone_setting_refuses_repeats_and_unknown_settings(value) -> None:
+    """A zone named twice, a setting a zone may not give, or no zone at all is refused."""
+    with pytest.raises(ValueError):
+        zone_options(value)
+
+
+@mark.unit
+def test_zone_option_repeats() -> None:
+    """`--zone` given more than once names every zone the relay serves, in order."""
+    assert RelayApp.from_cmdline(['--zone', 'cpu', '--zone', 'gpu']).zones == ['cpu', 'gpu']
+    assert RelayApp.from_cmdline(['--zone', 'gpu']).zone == 'gpu'
+    with pytest.raises(ArgumentError):
+        RelayApp.from_cmdline(['--zone', 'gpu', '--zone', 'gpu']).zones

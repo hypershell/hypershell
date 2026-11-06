@@ -19,8 +19,8 @@ file that holds relay settings or the key, the site is given a copy of it instea
 beside the relay database; the site's *clients* keep the file's other settings, ``[server.tls]``
 among them. (If the file cannot be read, the site gets none.) The copy is removed when the relay
 exits, however it ends: when it finishes, when it fails, and on SIGINT or SIGTERM. Only a relay
-killed outright (SIGKILL) leaves it behind, and the next relay on the same relay database to need
-a copy writes over it. The relay refuses to start if the *client* command line (launcher, launcher
+killed outright leaves it behind (by SIGKILL, or by a second SIGTERM while it ends, which ends the
+process at once), and the next relay on the same relay database to need a copy writes over it. The relay refuses to start if the *client* command line (launcher, launcher
 arguments or template) or a variable exported to tasks (``[export]``) would carry the key.
 
 At the site the relay runs its tasks on the *clients* it launches there, with a key it mints for
@@ -37,11 +37,21 @@ The relay's heartbeat names its site (``relay.site``, by default the relay's hos
 *clients*, attributed to the site and the relay, and counts them (not the relay) as connected. They
 never heartbeat upstream themselves: they disconnect there when they leave the site, and all at once
 when the relay finishes or is evicted.
+A relay may serve several zones (``--zone`` given more than once, or ``relay.zone`` as a list or as
+one ``[relay.zone.NAME]`` table per zone). Upstream it is then one *client* per zone, each under its
+own identity, all over the same connection: it takes the zones in turn, and asks for each only as
+much as that zone's own *clients* at the site have room for. At the site it keeps one fleet of
+*clients* per zone, launched alike but each serving its own zone, with that zone's own launcher,
+launcher arguments and size if its table gives them; the one relay-local *server* serves them all.
+The first zone's identity lists every *client* at the site upstream. Each identity sends its own
+heartbeat, so if the relay fails, the upstream *server* evicts each one and puts back what each
+held, in every zone.
 When the upstream *server* shuts down, the relay finishes the tasks it holds, returns every result,
 and ends its upstream registration. SIGUSR1 or SIGUSR2, sent to the relay process, do the same: the
 relay stops asking for work, its site finishes every task the relay holds (those not yet started
 too), and the results go back before the registration ends. SIGINT and SIGTERM end the relay at
-once, without draining: it ends the *clients* it launched and exits (on SIGTERM, by that signal). If
+once, without draining: it ends the *clients* it launched and exits (on SIGTERM, by that signal; a
+second SIGTERM ends the process at once). If
 the relay fails (a part of its own *server* stops, say, or the upstream *server* refuses it), it ends
 the *clients* it launched and exits with a non-zero status. Either way the upstream *server* puts
 back the tasks the relay held when it evicts the relay.

@@ -18,10 +18,12 @@ Options
     See also ``relay.upstream.tls.enabled``.
 
 ``--zone`` *NAME*
-    Zone this relay serves (default: the default zone).
+    Zone this relay serves (default: the default zone). Give it more than once to serve several.
 
-    The relay asks upstream only for tasks of this zone, and its *clients* at the site serve it.
-    See also ``relay.zone``.
+    The relay asks upstream only for tasks of the zones it serves, and keeps one fleet of
+    *clients* at the site for each zone (``-N`` *clients* each, unless the zone gives its own
+    ``size``). Zones named here take the place of ``relay.zone``; each still takes its own
+    settings from ``[relay.zone.NAME]``. See also ``relay.zone``.
 
 ``-N``, ``--size`` *NUM*
     Number of *clients* the relay keeps launched at its site (default: 1).

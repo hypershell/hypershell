@@ -129,6 +129,35 @@ See also the :ref:`command-line interface <cli_initdb>` for ``hs initdb``.
 
 -------------------
 
+Relay Database
+--------------
+
+|
+
+A relay (``hs relay``) keeps its own database, apart from the one configured here. It is always a
+private SQLite file, whatever ``[database]`` names (PostgreSQL included), and the configured database
+is never opened by a relay process. It holds the tasks the relay has received and not yet finished,
+their upstream assignments, and the results the relay holds until it has handed them back
+(and for ``relay.retention`` seconds after), so it stays about the same size however long the relay
+runs.
+
+The file is ``relay.database`` (``--database``), by default ``<lib>/relay/<host>.db``: named for the
+host, since a home directory is often shared between hosts. One relay uses a file at a time; a
+second relay on the same file refuses to start (a lock file beside it, ``<file>.lock``, guards it).
+
+Every insert of received tasks is committed with ``synchronous = FULL`` before the relay confirms
+them upstream, so the file sees a steady stream of small, durable writes. Put it on a **node-local
+disk** where the relay runs, not on a network filesystem: SQLite's locking is unreliable on many
+network filesystems, and their latency slows each commit. WAL journaling is not turned on, for the
+same reason; a node-local file may use it through ``[database] pragmas`` if wanted. A relay
+restarted on the same file picks up where its earlier run stopped: results it still held go back
+upstream, and tasks it was running run again at the site.
+
+A relay given a configuration file with relay settings in it writes a copy for its site beside the
+relay database (``<file>.site.toml``, readable by its owner only), removed when the relay ends.
+
+-------------------
+
 TimescaleDB
 -----------
 

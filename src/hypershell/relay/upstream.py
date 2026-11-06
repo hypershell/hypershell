@@ -24,7 +24,7 @@ Example:
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Callable, Dict, List, Optional, Tuple, Final
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Final
 
 # Standard libs
 import json
@@ -52,16 +52,17 @@ from hypershell.core.tls import from_namespace as tls_from_namespace
 from hypershell.core.dispatch import build_version
 from hypershell.core.reconnect import LinkDown, as_link
 from hypershell.client import ClientInfo
-from hypershell.data.model import DEFAULT_ZONE_NAME
+from hypershell.data.model import DEFAULT_ZONE_NAME, zone_id
 from hypershell.relay import store
 
 # Public interface
-__all__ = ['upstream_identity', 'upstream_config', 'upstream_key', 'relay_site', 'request_text', 'read_reply',
+__all__ = ['upstream_identity', 'served_zones', 'upstream_config', 'upstream_key', 'relay_site', 'request_text', 'read_reply',
            'RelayInsertError', 'drain_signalled',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
            'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
            'HeartbeatState', 'UpstreamHeartbeat', 'UpstreamHeartbeatThread',
-           'DEFAULT_UPSTREAM_BUNDLESIZE', 'DEFAULT_UPSTREAM_HEARTRATE', 'DEFAULT_REQUEST_WAIT', 'INSERT_ATTEMPTS',
+           'DEFAULT_UPSTREAM_BUNDLESIZE', 'DEFAULT_UPSTREAM_HEARTRATE', 'DEFAULT_REQUEST_WAIT', 'ZONE_REQUEST_WAIT',
+           'INSERT_ATTEMPTS',
            'DEFAULT_RETENTION', 'DEFAULT_RETURN_BUNDLEWAIT']
 
 # Initialize logger
@@ -76,6 +77,9 @@ DEFAULT_UPSTREAM_HEARTRATE: Final[int] = config.relay.upstream.heartrate
 
 DEFAULT_REQUEST_WAIT: Final[float] = DEFAULT_REMOTE_TIMEOUT
 """Seconds a work request may wait upstream for tasks (the upstream server bounds it)."""
+
+ZONE_REQUEST_WAIT: Final[float] = 1.0
+"""Seconds a work request may wait upstream when the relay serves several zones, so it turns to the next soon."""
 
 INSERT_ATTEMPTS: Final[int] = 3
 """Times the puller tries to insert a received bundle before it gives up (never confirming it)."""
@@ -123,6 +127,11 @@ PULL_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, STAGE_DRAIN)
 def upstream_identity(zone: Optional[str], instance: str = INSTANCE) -> str:
     """The upstream client id of a relay `instance` for the zone named `zone` (None is the default zone)."""
     return str(uuid5(UUID(instance), zone or DEFAULT_ZONE_NAME))
+
+
+def served_zones(zones: Sequence[Optional[str]], instance: str = INSTANCE) -> List[Tuple[str, Optional[str]]]:
+    """The (identity, zone) of each zone in `zones`, in order: the upstream clients a relay `instance` is."""
+    return [(upstream_identity(zone, instance), zone) for zone in zones]
 
 
 def upstream_config(host: Optional[str] = None, port: Optional[int] = None, no_tls: bool = False) -> QueueConfig:
@@ -211,13 +220,21 @@ class PullerState(State, Enum):
 
 class UpstreamPuller(StateMachine):
     """
-    Request work upstream for one zone, insert it durably, then confirm it.
+    Request work upstream for each zone the relay serves, insert it durably, then confirm it.
 
     The gate holds while the tasks in the relay database not yet complete exceed the low-water mark,
     half the bound: the relay-local server's connected clients times `local_bundlesize`, times
     `BACKLOG_FACTOR`. At or below it the puller asks for the whole gap, at most `bundlesize`, so it
     asks seldom and in large bundles, and the site has a second round of work ready while the first
     runs. Every wait is finite and re-enters.
+
+    A relay serving several zones (`zones`, each an upstream identity and its zone) is one upstream
+    client per zone over the same link: the gate takes the zones in turn, each with its own bound
+    and backlog (the site clients serving that zone, by `connected`, and the unfinished tasks of that
+    zone), and asks for the first that has room, under that zone's identity; the insert and the
+    confirmation that follow are that identity's too. Its requests wait upstream at most
+    `ZONE_REQUEST_WAIT`, so one zone with nothing staged never holds up the others. A zone the
+    upstream server answers with a shutdown is asked no more; pulling ends once every zone has been.
 
     Every upstream call goes through the link (see `hypershell.core.reconnect`). While the link is down
     the puller waits for it (WAIT_LINK); pulling resumes once the link is back, has carried a heartbeat
@@ -237,6 +254,10 @@ class UpstreamPuller(StateMachine):
     engine: Engine
     identity: str
     zone: Optional[str]
+    zones: List[Tuple[str, Optional[str]]]
+    connected: Optional[Callable[[Optional[str]], int]]
+    finished: set
+    turn: int
     bundlesize: int
     local_bundlesize: int
     poll: float
@@ -257,17 +278,28 @@ class UpstreamPuller(StateMachine):
     def __init__(self: UpstreamPuller, queue: Any, engine: Engine, identity: str, zone: Optional[str] = None,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, local_bundlesize: int = 1, poll: float = 1,
                  wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE,
-                 drain: Callable[[], bool] = drain_signalled) -> None:
-        """Initialize with the upstream link (or a connected client), the relay database and the zone identity."""
+                 drain: Callable[[], bool] = drain_signalled,
+                 zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
+                 connected: Optional[Callable[[Optional[str]], int]] = None) -> None:
+        """Initialize with the upstream link (or a connected client), the relay database and the zone identity.
+
+        `zones`, if given, are every (identity, zone) served, in place of `identity` and `zone`; with
+        more than one, `connected` must count the site clients serving a zone.
+        """
         self.queue = queue
         self.link = as_link(queue)
         self.engine = engine
-        self.identity = identity
-        self.zone = zone
+        self.zones = list(zones) if zones else [(identity, zone)]
+        if len(self.zones) > 1 and connected is None:
+            raise ValueError('A puller for several zones needs the site clients of each zone counted')
+        self.identity, self.zone = self.zones[0]
+        self.connected = connected
+        self.finished = set()
+        self.turn = 0
         self.bundlesize = max(1, int(bundlesize))
         self.local_bundlesize = max(1, int(local_bundlesize))
         self.poll = poll
-        self.wait_request = wait
+        self.wait_request = wait if len(self.zones) == 1 else min(wait, ZONE_REQUEST_WAIT)
         self.server_id = server_id
         self.drain = drain
         self.stopping = False
@@ -296,12 +328,28 @@ class UpstreamPuller(StateMachine):
         log.debug(f'Started (puller: {self.identity})')
         return PullerState.GATE
 
-    def bound(self: UpstreamPuller) -> int:
-        """Most unfinished tasks the relay holds: connected site clients times the local bundle size, twice over."""
-        return store.count_connected(self.engine, self.server_id) * self.local_bundlesize * BACKLOG_FACTOR
+    def bound(self: UpstreamPuller, zone: Optional[str] = None) -> int:
+        """Most unfinished tasks the relay holds for `zone`: its site clients times the local bundle size, twice over.
+
+        A relay serving one zone counts every site client connected to the relay-local server.
+        """
+        if self.connected is None:
+            connected = store.count_connected(self.engine, self.server_id)
+        else:
+            connected = self.connected(zone)
+        return connected * self.local_bundlesize * BACKLOG_FACTOR
+
+    def backlog(self: UpstreamPuller, zone: Optional[str] = None) -> int:
+        """Tasks in the relay database not yet complete (of `zone` only, when the relay serves several)."""
+        if len(self.zones) == 1:
+            return store.count_backlog(self.engine)
+        return store.count_backlog(self.engine, zone=zone_id(zone))
 
     def gate(self: UpstreamPuller) -> PullerState:
-        """Ask for work only at or below the low-water mark, and only on a ready link; end on a drain or halt."""
+        """Ask for work only at or below the low-water mark, and only on a ready link; end on a drain or halt.
+
+        Zones are taken in turn, from the one after the zone last asked for: the first with room is asked.
+        """
         if self.stopping:  # atomic
             return PullerState.FINAL
         if self.drain():
@@ -309,13 +357,22 @@ class UpstreamPuller(StateMachine):
             return PullerState.FINAL
         if not self.link.ready(PULL_STAGES):
             return PullerState.WAIT_LINK
-        bound = self.bound()
-        backlog = store.count_backlog(self.engine)
-        if bound == 0 or backlog > bound // 2:
-            self.wake.wait(min(self.poll, GATE_WAIT))
-            return PullerState.GATE
-        self.size = min(bound - backlog, self.bundlesize)
-        return PullerState.REQUEST
+        count = len(self.zones)
+        for step in range(count):
+            index = (self.turn + step) % count
+            identity, zone = self.zones[index]
+            if identity in self.finished:
+                continue
+            bound = self.bound(zone)
+            backlog = self.backlog(zone)
+            if bound == 0 or backlog > bound // 2:
+                continue
+            self.turn = (index + 1) % count
+            self.identity, self.zone = identity, zone
+            self.size = min(bound - backlog, self.bundlesize)
+            return PullerState.REQUEST
+        self.wake.wait(min(self.poll, GATE_WAIT))
+        return PullerState.GATE
 
     def request(self: UpstreamPuller) -> PullerState:
         """Request up to `size` tasks under the zone identity (the upstream server bounds the wait)."""
@@ -333,6 +390,11 @@ class UpstreamPuller(StateMachine):
             log.debug(f'Received {len(self.bundle)} tasks ({self.identity})')
             return PullerState.INSERT
         if reply.get('shutdown'):
+            self.finished.add(self.identity)
+            if len(self.finished) < len(self.zones):
+                log.debug(f'Upstream server is shutting down - no more requests for zone '
+                          f'{self.zone or DEFAULT_ZONE_NAME} ({self.identity})')
+                return PullerState.GATE
             log.info('Upstream server is shutting down - no more upstream requests')
             return PullerState.FINAL
         return PullerState.GATE
@@ -406,12 +468,15 @@ class UpstreamPullerThread(Thread):
     def __init__(self: UpstreamPullerThread, queue: Any, engine: Engine, identity: str, zone: Optional[str] = None,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, local_bundlesize: int = 1, poll: float = 1,
                  wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE,
-                 drain: Callable[[], bool] = drain_signalled) -> None:
+                 drain: Callable[[], bool] = drain_signalled,
+                 zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
+                 connected: Optional[Callable[[Optional[str]], int]] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-puller')
         self.machine = UpstreamPuller(queue=queue, engine=engine, identity=identity, zone=zone,
                                       bundlesize=bundlesize, local_bundlesize=local_bundlesize, poll=poll,
-                                      wait=wait, server_id=server_id, drain=drain)
+                                      wait=wait, server_id=server_id, drain=drain, zones=zones,
+                                      connected=connected)
 
     def run_with_exceptions(self: UpstreamPullerThread) -> None:
         """Run machine."""
@@ -626,12 +691,14 @@ class HeartbeatState(State, Enum):
 
 class UpstreamHeartbeat(StateMachine):
     """
-    Keep a zone identity registered upstream with a heartbeat every `heartrate` seconds.
+    Keep each zone identity registered upstream with a heartbeat every `heartrate` seconds.
 
-    Each beat carries the relay's `site`, and, from the identity that holds it, the roster read by
-    `roster` (the site clients connected now, a whole snapshot each time). A change in the roster is
+    Every identity beats in turn (`identities`, else `identity` alone). Each beat carries the relay's
+    `site`; the first identity's, the roster holder's, also carries the roster read by `roster` (the
+    site clients connected now, of every zone, a whole snapshot each time). A change in the roster is
     sent at the next wait step rather than when the next beat is due. A roster that cannot be read
-    is left out of that beat, so upstream keeps the last one it was sent.
+    is left out of that beat, so upstream keeps the last one it was sent. The final beat goes out
+    under every identity.
 
     While the upstream link is down the heartbeat waits for it (WAIT_LINK) and beats as soon as it is
     back: that first beat registers the identity again if the upstream server evicted it, and passes
@@ -641,6 +708,7 @@ class UpstreamHeartbeat(StateMachine):
     queue: Any
     link: Any
     identity: str
+    identities: List[str]
     heartrate: float
     previous: float
     client_state: ClientState
@@ -653,11 +721,13 @@ class UpstreamHeartbeat(StateMachine):
 
     def __init__(self: UpstreamHeartbeat, queue: Any, identity: str,
                  heartrate: float = DEFAULT_UPSTREAM_HEARTRATE, site: Optional[str] = None,
-                 roster: Optional[Callable[[], List[RosterEntry]]] = None) -> None:
-        """Initialize with the upstream link (or a connected client) and the zone identity."""
+                 roster: Optional[Callable[[], List[RosterEntry]]] = None,
+                 identities: Optional[Sequence[str]] = None) -> None:
+        """Initialize with the upstream link (or a connected client) and the zone identity (or every one, holder first)."""
         self.queue = queue
         self.link = as_link(queue)
-        self.identity = identity
+        self.identities = list(identities) if identities else [identity]
+        self.identity = self.identities[0]
         self.heartrate = heartrate
         self.site = site
         self.roster = roster
@@ -682,13 +752,17 @@ class UpstreamHeartbeat(StateMachine):
         return HeartbeatState.SUBMIT
 
     def submit(self: UpstreamHeartbeat) -> HeartbeatState:
-        """Send one heartbeat under the zone identity."""
+        """Send one heartbeat under each zone identity, the roster with the holder's."""
         state = self.client_state  # atomic
         roster = self.read_roster() if state is ClientState.RUNNING else None
-        beat = Heartbeat.new(uuid=self.identity, state=state, site=self.site, roster=roster).pack()
+        beats = [Heartbeat.new(uuid=identity, state=state, site=self.site,
+                               roster=roster if identity == self.identity else None).pack()
+                 for identity in self.identities]
         epoch = self.link.epoch
         try:
-            self.link.call('heartbeat', lambda client: client.heartbeat.put(beat, timeout=DEFAULT_REMOTE_TIMEOUT))
+            for beat in beats:
+                self.link.call('heartbeat',
+                               lambda client, beat=beat: client.heartbeat.put(beat, timeout=DEFAULT_REMOTE_TIMEOUT))
         except QueueFull:
             return HeartbeatState.SUBMIT
         except LinkDown:
@@ -699,9 +773,9 @@ class UpstreamHeartbeat(StateMachine):
         if roster is not None:
             self.sent_roster = roster
         if state is ClientState.RUNNING:
-            log.trace(f'Upstream heartbeat - running ({self.identity})')
+            log.trace(f'Upstream heartbeat - running ({", ".join(self.identities)})')
             return HeartbeatState.WAIT
-        log.debug(f'Upstream heartbeat - final ({self.identity})')
+        log.debug(f'Upstream heartbeat - final ({", ".join(self.identities)})')
         return HeartbeatState.FINAL
 
     def wait(self: UpstreamHeartbeat) -> HeartbeatState:
@@ -753,11 +827,12 @@ class UpstreamHeartbeatThread(Thread):
 
     def __init__(self: UpstreamHeartbeatThread, queue: Any, identity: str,
                  heartrate: float = DEFAULT_UPSTREAM_HEARTRATE, site: Optional[str] = None,
-                 roster: Optional[Callable[[], List[RosterEntry]]] = None) -> None:
+                 roster: Optional[Callable[[], List[RosterEntry]]] = None,
+                 identities: Optional[Sequence[str]] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-heartbeat')
         self.machine = UpstreamHeartbeat(queue=queue, identity=identity, heartrate=heartrate,
-                                         site=site, roster=roster)
+                                         site=site, roster=roster, identities=identities)
 
     def run_with_exceptions(self: UpstreamHeartbeatThread) -> None:
         """Run machine."""

@@ -5,8 +5,9 @@
 Run a relay: one site's link to an upstream server.
 
 A relay is one long-running process at a site. Upstream it is an ordinary client of the upstream
-server, once for the zone it serves (see `hypershell.relay.upstream`); at the site it runs a complete
-server, scheduling from its own database, for clients it launches there (see `hypershell.relay.site`).
+server, once for each zone it serves (see `hypershell.relay.upstream`); at the site it runs a complete
+server, scheduling from its own database, for clients it launches there, one fleet per zone (see
+`hypershell.relay.site`).
 Its database is always a private SQLite file, whatever database is configured (see
 `hypershell.core.config.relay_database_section`): the configuration swaps the database section when
 the process starts, before the database engine is built, so a process runs at most one relay.
@@ -21,7 +22,7 @@ Example:
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Tuple, IO, Optional, Dict, Final
+from typing import Any, List, Tuple, IO, Optional, Dict, Final, Mapping, Sequence
 from types import TracebackType
 
 # Standard libs
@@ -53,15 +54,16 @@ from hypershell.core.thread import Thread
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.data import ensuredb
 from hypershell.data.core import engine
-from hypershell.data.model import zone_name, DEFAULT_ZONE_NAME
+from hypershell.data.model import zone_name, zone_id, DEFAULT_ZONE_NAME
 from hypershell.relay import store
 from hypershell.relay.store import ensure_tables, store_utc
-from hypershell.relay.site import site_cluster, fence_site, end_site_clients, DEFAULT_SITE_PERIOD
+from hypershell.relay.site import (site_cluster, zone_launch, zone_fleet, fence_site, end_site_clients,
+                                   DEFAULT_SITE_PERIOD)
 from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
-                                       upstream_identity, upstream_config, upstream_key, relay_site,
+                                       served_zones, upstream_config, upstream_key, relay_site,
                                        drain_signalled, DEFAULT_UPSTREAM_BUNDLESIZE, DEFAULT_UPSTREAM_HEARTRATE,
                                        DEFAULT_RETENTION, LINK_STAGES)
-from hypershell.cluster.remote import AutoScalingCluster
+from hypershell.cluster.remote import AutoScalingCluster, AutoScalerThread
 from hypershell.server import ServerThread
 
 try:
@@ -74,7 +76,7 @@ __all__ = ['RelayThread', 'RelayApp', 'DEFAULT_RELAY_BIND', 'DEFAULT_RELAY_PORT'
            'DEFAULT_RELAY_SIZE', 'lock_database', 'RelayDatabaseLocked', 'DRAIN', 'install_drain_handlers',
            'STOP_TIMEOUT', 'CLIENT_GRACE', 'RelayPartEnded', 'RelayTerminated', 'install_terminate_handler',
            'site_bundlesize', 'DEFAULT_UPSTREAM_DEADLINE', 'DEFAULT_UPSTREAM_BACKOFF', 'DEFAULT_EVICT_HINT',
-           'DEFAULT_SITE_EVICT']
+           'DEFAULT_SITE_EVICT', 'ZONE_OPTIONS', 'zone_options']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -223,6 +225,45 @@ def lock_database(path: str) -> Optional[IO]:
     return stream
 
 
+ZONE_OPTIONS: Final[Tuple[str, ...]] = ('launcher', 'launcher_args', 'size')
+"""Settings a served zone may give for its own fleet (`[relay.zone.<name>]`), in place of the relay's."""
+
+
+def zone_options(value: Any) -> Tuple[List[Optional[str]], Dict[Optional[str], Dict[str, Any]]]:
+    """The zones `[relay] zone` names, in order, and each one's own fleet settings.
+
+    The setting is one zone name, a list of names, or a table with one table per zone (`[relay.zone.gpu]`)
+    holding that zone's `launcher`, `launcher_args` or `size`. The default zone is None. Raises
+    ValueError for an invalid or repeated name, or a setting a zone may not give.
+    """
+    if value in (None, '', PARAM_UNSET):
+        return [None], {}
+    if isinstance(value, Mapping):
+        names, tables = list(value), dict(value)
+    elif isinstance(value, (list, tuple)):
+        names, tables = list(value), {}
+    else:
+        names, tables = [value], {}
+    zones: List[Optional[str]] = []
+    options: Dict[Optional[str], Dict[str, Any]] = {}
+    for given in names:
+        name = zone_name(str(given))
+        zone = None if name == DEFAULT_ZONE_NAME else name
+        if zone in zones:
+            raise ValueError(f'zone {name} named more than once')
+        zones.append(zone)
+        table = tables.get(given) or {}
+        if not isinstance(table, Mapping):
+            raise ValueError(f'settings of zone {name} must be a table')
+        if unknown := sorted(set(table) - set(ZONE_OPTIONS)):
+            raise ValueError(f'zone {name} cannot set {", ".join(unknown)} '
+                             f'(a zone sets only {", ".join(ZONE_OPTIONS)})')
+        options[zone] = dict(table)
+    if not zones:
+        raise ValueError('no zone named')
+    return zones, options
+
+
 def site_bundlesize(bundlesize: int, num_threads: int) -> int:
     """The relay-local bundle size: `bundlesize`, but never below a site client's executor threads.
 
@@ -242,8 +283,13 @@ class RelayThread(Thread):
     minted for this run only, handed to each in its environment, never on its command line. The
     upstream server alone retries tasks, so a failure at the site is a completed row like any other.
 
-    Upstream the relay is one client for its zone, under an identity derived from this relay and the
-    zone name. It connects before anything else starts, so a server it cannot use (a version
+    Upstream the relay is one client for each zone it serves, under an identity derived from this
+    relay and the zone name. A relay serving several zones keeps one fleet of site clients per zone,
+    the first zone's in the cluster and the others alongside it, all on the one relay-local server;
+    each zone is pulled for under its own identity, bounded by its own fleet, and every identity
+    beats upstream (the first, the roster holder, listing the site clients of every zone), so the
+    upstream server evicts each on its own and puts back what each held if the relay fails. It
+    connects before anything else starts, so a server it cannot use (a version
     mismatch, a wrong key) ends it before the site is touched; a server it cannot reach yet is tried
     again with backoff until it answers. Before that, the upstream key is fenced
     off from the site: a client invocation that would carry it is refused, and the relay's environment,
@@ -297,6 +343,13 @@ class RelayThread(Thread):
 
         zone (str, optional):
             Name of the zone the relay serves (default zone if None).
+
+        zones (list, optional):
+            Names of every zone the relay serves, in place of `zone` (None is the default zone).
+
+        zone_settings (dict, optional):
+            A zone's own fleet settings by zone name (`launcher`, `launcher_args`, `size`), in place of
+            the relay's.
 
         site (str, optional):
             Name of the relay's site, as upstream lists it and its site clients (default: this host's name).
@@ -353,10 +406,13 @@ class RelayThread(Thread):
     """
 
     cluster: AutoScalingCluster
+    fleets: Sequence[AutoScalerThread] = ()  # The fleets of zones after the first (the cluster has the first's).
     server: ServerThread
     zone: Optional[str]
+    zones: List[Optional[str]]
     site: str
     identity: str
+    identities: List[str]
     upstream_config: Optional[QueueConfig]
     link: Optional[UpstreamLink] = None
     puller: Optional[UpstreamPullerThread] = None
@@ -388,20 +444,36 @@ class RelayThread(Thread):
                  deadline: float = DEFAULT_UPSTREAM_DEADLINE,
                  backoff: float = DEFAULT_UPSTREAM_BACKOFF,
                  evict_hint: float = DEFAULT_EVICT_HINT,
-                 evict: int = DEFAULT_SITE_EVICT) -> None:
+                 evict: int = DEFAULT_SITE_EVICT,
+                 zones: Optional[Sequence[Optional[str]]] = None,
+                 zone_settings: Optional[Mapping[Optional[str], Mapping[str, Any]]] = None) -> None:
         """Initialize the site and the upstream side."""
         bundlesize = site_bundlesize(bundlesize, num_threads)
+        self.zones = list(zones) if zones else [zone]
+        self.zone = self.zones[0]
+        settings = {name: {'size': size, 'launcher': launcher, 'launcher_args': launcher_args,
+                           **dict((zone_settings or {}).get(name) or {})}
+                    for name in self.zones}
+        first = settings[self.zone]
         self.cluster = site_cluster(address=address, bundlesize=bundlesize, bundlewait=bundlewait, poll=poll,
-                                    tls=tls, zone=zone, size=size, launcher=launcher, launcher_args=launcher_args,
-                                    num_threads=num_threads, template=template, client_timeout=client_timeout,
+                                    tls=tls, zone=self.zone, size=first['size'], launcher=first['launcher'],
+                                    launcher_args=first['launcher_args'], num_threads=num_threads,
+                                    template=template, client_timeout=client_timeout,
                                     period=period, evict_after=evict)
+        self.fleets = [zone_fleet(zone_launch(self.cluster, name, launcher=settings[name]['launcher'],
+                                              launcher_args=settings[name]['launcher_args'],
+                                              num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
+                                              template=template, client_timeout=client_timeout, tls=tls),
+                                  name, size=settings[name]['size'], period=period)
+                       for name in self.zones[1:]]
         self.server = self.cluster.server
         self.bundlesize = bundlesize
         self.bundlewait = bundlewait
         self.poll = poll
-        self.zone = zone
         self.site = relay_site(site)
-        self.identity = upstream_identity(zone)
+        self.served = served_zones(self.zones)
+        self.identities = [identity for identity, _ in self.served]
+        self.identity = self.identities[0]
         self.upstream_config = upstream
         self.upstream_bundlesize = upstream_bundlesize
         self.heartrate = heartrate
@@ -422,10 +494,12 @@ class RelayThread(Thread):
     def run_with_exceptions(self: RelayThread) -> None:
         """Connect upstream, start the site, pull and return work, and wait for the relay to finish."""
         log.debug('Started')
-        log.info(f'Upstream identity {self.identity} for zone {self.zone or DEFAULT_ZONE_NAME} at site {self.site}')
+        for identity, zone in self.served:
+            log.info(f'Upstream identity {identity} for zone {zone or DEFAULT_ZONE_NAME} at site {self.site}')
         upstream = self.upstream_config or upstream_config()
         try:
-            fence_site(self.cluster, key=upstream.auth, site_config=self.site_config)
+            fence_site(self.cluster, key=upstream.auth, site_config=self.site_config,
+                       launches=[fleet.machine.launch for fleet in self.fleets])
             # The link holds the upstream configuration (and so the key) read before the fence:
             # every reconnection builds its client from this object, never from configuration again.
             self.link = UpstreamLink(functools.partial(QueueClient, config=upstream),
@@ -437,16 +511,21 @@ class RelayThread(Thread):
                 return
             self.heartbeat = UpstreamHeartbeatThread(queue=self.link, identity=self.identity,
                                                      heartrate=self.heartrate, site=self.site,
-                                                     roster=functools.partial(store.roster, engine, INSTANCE))
+                                                     roster=functools.partial(store.roster, engine, INSTANCE),
+                                                     identities=self.identities)
             self.puller = UpstreamPullerThread(queue=self.link, engine=engine, identity=self.identity,
                                                zone=self.zone, bundlesize=self.upstream_bundlesize,
-                                               local_bundlesize=self.bundlesize, poll=self.poll, drain=draining)
+                                               local_bundlesize=self.bundlesize, poll=self.poll, drain=draining,
+                                               zones=self.served,
+                                               connected=self.zone_clients if len(self.zones) > 1 else None)
             self.returner = UpstreamReturnerThread(queue=self.link, engine=engine,
                                                    bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
                                                    poll=self.poll, retention=self.retention)
             self.cluster.start()
             self.wait_ready()
             log.info(f'Relay-local server ready on {self.server.queue.config.host}:{self.server.queue.config.port}')
+            for fleet in self.fleets:
+                fleet.start()
             self.heartbeat.start()
             self.returner.start()
             self.puller.start()
@@ -463,6 +542,10 @@ class RelayThread(Thread):
         finally:
             self.release()
         log.debug('Done')
+
+    def zone_clients(self: RelayThread, zone: Optional[str]) -> int:
+        """Site clients now serving `zone` (asking the relay-local server for its tasks, not yet gone)."""
+        return self.server.queue.dispatcher.clients(zone_id(zone))
 
     def wait_link(self: RelayThread) -> bool:
         """Wait for the first upstream connection; false if the relay was stopped first.
@@ -518,6 +601,8 @@ class RelayThread(Thread):
         as is a thread of the site ending out of turn (see `check_site`).
         """
         self.cluster.autoscaler.stop()
+        for fleet in self.fleets:
+            fleet.stop()
         scheduler = self.server.scheduler
         if scheduler is not None and scheduler.is_alive():
             scheduler.stop()
@@ -545,22 +630,23 @@ class RelayThread(Thread):
         server itself, each only once the one before it has ended. One that has ended while an earlier
         one still runs has died, and the server would wait on the earlier one forever: a dead receiver,
         say, leaves the site's results unwritten, so the relay would hold its tasks indefinitely. Until
-        the site is told to stop (`stopping`), the autoscaler that keeps the site clients launched must
-        be running too.
+        the site is told to stop (`stopping`), the autoscalers that keep the site clients launched (one
+        per zone) must be running too.
         """
         server = self.server
         chain = [thread for thread in (server.scheduler, server.heartmonitor, server.receiver, server.confirm, server)
                  if thread is not None]
-        autoscaler = self.cluster.autoscaler
-        for thread in (*chain, autoscaler):
+        autoscalers = (self.cluster.autoscaler, *self.fleets)
+        for thread in (*chain, *autoscalers):
             if thread.ident is not None and not thread.is_alive():
                 thread.join()  # Raises its failure, if any.
         for earlier, later in zip(chain, chain[1:]):
             # The later one is read first: once it has ended on a clean stop, the earlier one has too.
             if later.ident is not None and not later.is_alive() and earlier.is_alive():
                 raise RelayPartEnded(f'Relay-local {later.name} ended while {earlier.name} still runs')
-        if not stopping and autoscaler.ident is not None and not autoscaler.is_alive():
-            raise RelayPartEnded(f'Relay-local {autoscaler.name} ended while the relay runs')
+        for autoscaler in autoscalers:
+            if not stopping and autoscaler.ident is not None and not autoscaler.is_alive():
+                raise RelayPartEnded(f'Relay-local {autoscaler.name} ended while the relay runs')
 
     def check_upstream(self: RelayThread) -> None:
         """Raise the failure of the heartbeat or the returner, if either has ended with one."""
@@ -572,21 +658,22 @@ class RelayThread(Thread):
         """Stop pulling, then end the upstream registration.
 
         A request the puller has already sent is inserted and confirmed before it stops, and only
-        once it has stopped is it known what the relay holds. The final heartbeat goes upstream only
-        when every received task's result has been handed over. Otherwise the identity is left to the
-        upstream server's eviction, which puts the tasks it still holds back in the queue for other
-        clients.
+        once it has stopped is it known what the relay holds. The final heartbeat goes upstream, under
+        every identity, only when every received task's result has been handed over. Otherwise the
+        identities are left to the upstream server's eviction, which puts the tasks each still holds
+        back in the queue for other clients.
         """
+        identities = ', '.join(self.identities)
         self.puller.stop(wait=True, timeout=STOP_TIMEOUT)
         if self.puller.is_alive():
             log.warning(f'Upstream puller did not stop within {STOP_TIMEOUT} seconds - not finishing upstream '
-                        f'(the upstream server will evict {self.identity} and revert what it holds)')
+                        f'(the upstream server will evict {identities} and revert what it holds)')
             self.heartbeat.stop(wait=True, timeout=STOP_TIMEOUT)
             return
         held = store.count_held(engine)
         if held:
             log.warning(f'Holding {held} tasks with no result returned upstream - not finishing upstream '
-                        f'(the upstream server will evict {self.identity} and revert them)')
+                        f'(the upstream server will evict {identities} and revert them)')
             self.heartbeat.stop(wait=True, timeout=STOP_TIMEOUT)
         else:
             self.heartbeat.signal_finished()
@@ -594,7 +681,7 @@ class RelayThread(Thread):
 
     def reap_site_clients(self: RelayThread) -> None:
         """After a clean drain, end any site client still running after the grace period (one that never connected)."""
-        if ended := end_site_clients(self.cluster, grace=CLIENT_GRACE, patience=CLIENT_GRACE):
+        if ended := end_site_clients(self.cluster, grace=CLIENT_GRACE, patience=CLIENT_GRACE, fleets=self.fleets):
             log.warning(f'Ended {ended} site clients still running after the site finished')
 
     def abort(self: RelayThread) -> None:
@@ -610,7 +697,9 @@ class RelayThread(Thread):
         log.warning('Stopping')
         self.stop_quietly(self.puller)
         self.stop_quietly(self.cluster.autoscaler)
-        if ended := end_site_clients(self.cluster, grace=CLIENT_GRACE):
+        for fleet in self.fleets:
+            self.stop_quietly(fleet)
+        if ended := end_site_clients(self.cluster, grace=CLIENT_GRACE, fleets=self.fleets):
             log.warning(f'Ended {ended} site clients')
         if self.cluster.is_alive():
             stopper = threading.Thread(target=self.stop_quietly, args=(self.cluster, ),
@@ -638,7 +727,8 @@ class RelayThread(Thread):
         """Remove the site's copy of the configuration file, if one was written.
 
         Called as the relay ends, however it ends: a clean drain or a failure (by this thread), and
-        SIGINT or SIGTERM (by `RelayApp.run`). Only a relay killed outright leaves the copy behind.
+        SIGINT or SIGTERM (by `RelayApp.run`). Only a relay killed outright leaves the copy behind:
+        by SIGKILL, or by a second SIGTERM while it ends (which ends the process at once).
         """
         if self.site_config and os.path.exists(self.site_config):
             try:
@@ -668,7 +758,7 @@ DEFAULT_UPSTREAM_PORT: Final[int] = config.relay.upstream.port
 APP_NAME = 'hs relay'
 APP_USAGE = f"""\
 Usage:
-  hs relay [-h] [-H ADDR] [-p NUM] [--no-tls] [--zone NAME] [-N NUM] [--launcher CMD]
+  hs relay [-h] [-H ADDR] [-p NUM] [--no-tls] [--zone NAME ...] [-N NUM] [--launcher CMD]
            [--launcher-args ARGS] [--bind ADDR] [--port NUM] [--database PATH]
 
   Run relay for one site.\
@@ -695,13 +785,19 @@ APP_HELP = f"""\
   Site clients receive the relay's own site key in their environment, never on their
   command line, so the launcher must pass the environment through.
 
+  A relay may serve several zones (--zone given more than once, or a list in [relay] zone):
+  upstream it is one client per zone, and at the site it keeps one fleet of clients per zone,
+  each asking upstream only for what its own fleet has room for. A zone's own launcher,
+  launcher arguments or size can be set in [relay.zone.NAME].
+
   If the upstream server cannot be reached, the site keeps running and results are kept in
   the relay database; the relay connects again with backoff, then returns them before it
   asks for more work.
 
   SIGUSR1 or SIGUSR2 drain the relay: it asks for no more work, finishes what it holds and
-  returns the results. SIGINT or SIGTERM end it at once, with the site's clients. If the
-  relay fails, it ends the site's clients and exits non-zero.
+  returns the results. SIGINT or SIGTERM end it at once, with the site's clients; a second
+  SIGTERM ends the process at once, and, like SIGKILL, leaves the site's copy of the
+  configuration file behind. If the relay fails, it ends the site's clients and exits non-zero.
 
   The relay database is always a private SQLite file, whatever database is configured,
   and the configured database is never opened. One relay runs per process, and a second
@@ -711,7 +807,7 @@ Options:
   -H, --upstream-host ADDR  Hostname of upstream server (default: {DEFAULT_UPSTREAM_HOST}).
   -p, --upstream-port NUM   Port of upstream server (default: {DEFAULT_UPSTREAM_PORT}).
       --no-tls              Disable TLS to upstream server (not recommended).
-      --zone          NAME  Zone this relay serves (default: the default zone).
+      --zone          NAME  Zone this relay serves; repeat for more (default: the default zone).
   -N, --size          NUM   Clients kept launched at the site, at least 1 (default: {DEFAULT_RELAY_SIZE}).
       --launcher      CMD   Command prefix that launches each client (default: none).
       --launcher-args ARGS  Extra arguments for the launcher.
@@ -740,8 +836,8 @@ class RelayApp(Application):
     no_tls: bool = False
     interface.add_argument('--no-tls', action='store_true')
 
-    zone_option: Optional[str] = None
-    interface.add_argument('--zone', default=zone_option, dest='zone_option')
+    zone_option: Optional[List[str]] = None
+    interface.add_argument('--zone', action='append', default=zone_option, dest='zone_option')
 
     size: int = DEFAULT_RELAY_SIZE
     interface.add_argument('-N', '--size', type=int, default=size)
@@ -809,7 +905,8 @@ class RelayApp(Application):
                              poll=config.relay.poll,
                              tls=tls_from_namespace(config.server.tls),
                              upstream=upstream_config(self.upstream_host, self.upstream_port, self.no_tls),
-                             zone=self.zone,
+                             zones=self.zones,
+                             zone_settings=self.zone_settings,
                              site=config.relay.get('site', None),
                              upstream_bundlesize=config.relay.upstream.bundlesize,
                              heartrate=config.relay.upstream.heartrate,
@@ -849,18 +946,59 @@ class RelayApp(Application):
             shlex.split(self.launcher or '')
         except ValueError as error:
             raise ArgumentError(f'Invalid launcher ({error})') from error
+        self.zone_settings  # noqa: checked when first read
 
     @functools.cached_property
-    def zone(self: RelayApp) -> Optional[str]:
-        """Name of the zone this relay serves, from `--zone` or `[relay] zone` (None is the default zone)."""
-        value = self.zone_option if self.zone_option is not None else config.relay.get('zone', None)
-        if value in (None, '', PARAM_UNSET):
-            return None
+    def zone_plan(self: RelayApp) -> Tuple[List[Optional[str]], Dict[Optional[str], Dict[str, Any]]]:
+        """The zones this relay serves, from `--zone` or `[relay] zone`, and the settings each gives itself.
+
+        `--zone` names the zones in place of the configuration; a zone named there still takes its
+        settings from `[relay.zone.<name>]`. None is the default zone.
+        """
         try:
-            name = zone_name(value)
+            zones, settings = zone_options(config.relay.get('zone', None))
+            if self.zone_option:
+                zones, _ = zone_options(list(self.zone_option))
         except ValueError as error:
             raise ArgumentError(f'Invalid relay zone ({error})') from error
-        return None if name == DEFAULT_ZONE_NAME else name
+        return zones, {zone: settings.get(zone, {}) for zone in zones}
+
+    @property
+    def zones(self: RelayApp) -> List[Optional[str]]:
+        """Names of the zones this relay serves, in order (None is the default zone)."""
+        return self.zone_plan[0]
+
+    @property
+    def zone(self: RelayApp) -> Optional[str]:
+        """Name of the first zone this relay serves, the one whose identity holds the roster."""
+        return self.zones[0]
+
+    @functools.cached_property
+    def zone_settings(self: RelayApp) -> Dict[Optional[str], Dict[str, Any]]:
+        """The fleet settings each served zone gives itself, checked and in the relay's own form."""
+        checked: Dict[Optional[str], Dict[str, Any]] = {}
+        for zone, given in self.zone_plan[1].items():
+            name, table = zone or DEFAULT_ZONE_NAME, {}
+            if 'size' in given:
+                size = given['size']
+                if isinstance(size, bool) or not isinstance(size, int) or size < 1:
+                    raise ArgumentError(f'Site size of zone {name} must be a whole number, at least 1 '
+                                        f'(given {size!r})')
+                table['size'] = size
+            for key in ('launcher', 'launcher_args'):
+                if key in given:
+                    if not isinstance(given[key], str):
+                        raise ArgumentError(f'relay.zone.{name}.{key} must be text (given {given[key]!r})')
+                    try:
+                        shlex.split(given[key])
+                    except ValueError as error:
+                        raise ArgumentError(f'Invalid launcher of zone {name} ({error})') from error
+            if 'launcher' in given:
+                table['launcher'] = given['launcher']
+            if 'launcher_args' in given:
+                table['launcher_args'] = [given['launcher_args']] if given['launcher_args'] else None
+            checked[zone] = table
+        return checked
 
     def bind_database(self: RelayApp) -> None:
         """Re-execute the process if its database section is not the relay database this run names.

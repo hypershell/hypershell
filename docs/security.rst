@@ -491,6 +491,57 @@ and audit ``authorized_keys`` for unexpected entries.
 
 -------------------
 
+Relays
+------
+
+|
+
+A relay (``hs relay``, see :ref:`cli_relay`) joins a site to an upstream *server* across a wide-area
+network. It is a *client* upstream and a *server* at its site, so it stands between two
+authentication domains, and each keeps its own key.
+
+* **Upstream.** The relay authenticates to the upstream *server* with the upstream key, read from
+  ``[relay.upstream]`` (``auth``, or its ``auth_env`` and ``auth_eval`` forms), never from
+  ``[server]`` and never from the relay's command line: there is no upstream ``-k`` option. The
+  connection uses TLS, configured by ``[relay.upstream.tls]`` alone, so the site keeps the relay's
+  own ``[server.tls]``. Across a wide-area hop, verify the upstream *server*: give
+  ``relay.upstream.tls.cafile`` (a certificate authority, or the upstream *server*'s own
+  certificate) or pin its ``relay.upstream.tls.fingerprint``. ``--no-tls`` turns TLS off on this
+  hop only, with a warning; do not use it outside a trusted network.
+
+* **At the site.** The relay-local *server* mints a fresh key for each run, as an autoscaling
+  ``hs cluster`` does, and hands it to each site *client* in its environment
+  (``HYPERSHELL_SERVER_AUTH``), never on its command line, as described under
+  *How cluster launches hand the key to their clients* above. The launcher must pass the
+  environment through. A site *client* passes that key to none of its tasks.
+
+* **The upstream key stays in the relay process.** Site *clients* inherit the relay's environment,
+  and tasks their *client*'s, so before the first site *client* starts the relay removes from its own
+  environment every relay setting (``HYPERSHELL_RELAY_*``) and every variable whose name or value
+  holds the upstream key. When ``HYPERSHELL_CONFIG_FILE`` names a file with relay settings or the key
+  in it, the site is given a copy without them (readable by its owner only, beside the relay
+  database, and removed when the relay ends; a relay ended by SIGKILL, or by a second SIGTERM while
+  it ends, leaves it behind, and the next relay on that database writes over it). The relay refuses
+  to start if a site *client*'s command line (launcher, launcher arguments or template), or a
+  variable exported to tasks (``[export]``), would carry the upstream key. This holds for every zone
+  a relay serves: each zone's *clients* are launched the same way.
+
+* **What the fence cannot cover.** It governs what the relay hands on: command lines and
+  environments. A site *client* on a host that reads the same user or system configuration file as
+  the relay reads whatever ``[relay.upstream]`` holds there. Keep a literal upstream key out of a
+  shared configuration file: use ``auth_env`` or ``auth_eval``, or give the relay a configuration
+  file of its own through ``HYPERSHELL_CONFIG_FILE``.
+
+* **The roster.** A relay lists its site *clients* upstream by id and host only. Upstream they are
+  attributed to the relay's site and the relay; a roster never claims a *client* of another relay.
+
+A relay keeps its own SQLite database (see :ref:`database`); it holds the tasks the relay received
+and their results until they are handed back, so protect it as you would the task database.
+
+|
+
+-------------------
+
 Deployment Guides
 -----------------
 
