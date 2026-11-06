@@ -1754,3 +1754,10 @@ follow-ups.
    amendment in the commit body). STOP and escalate only on a **`GOAL.md` contradiction**.
 6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[feature]` commit; stop and
    report.
+
+## Publish notes
+
+- 2026-11-06: PR #82's first CI run cancelled all four `tests` jobs at the workflow's 20-minute limit,
+  with no failure before the cut. The suite with relay takes about 25 minutes serially. #83 raised the
+  `tests` job limit to 45 minutes on develop. This note is the spec-only commit that re-runs CI; the
+  reviewed code (`ff23d2d`) is unchanged.
