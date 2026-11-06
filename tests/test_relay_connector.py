@@ -526,6 +526,111 @@ def test_pulling_ends_once_every_zone_is_shut_down(relay_db: Engine) -> None:
     assert [request['zone'] for request in fake.requests] == ['cpu', 'gpu', 'gpu']
 
 
+class ShuttingDown(FakeDispatcher):
+    """An upstream server that is finishing: every request is answered with a shutdown."""
+
+    def request(self, text_: str) -> str:
+        self.requests.append(json.loads(text_))
+        return json.dumps(reply([], shutdown=True))
+
+
+def drive(machine: UpstreamPuller, steps: int = 20) -> PullerState:
+    """Run the puller from its gate, one action at a time, until it ends or `steps` actions have run."""
+    state = PullerState.GATE
+    for _ in range(steps):
+        if state is PullerState.FINAL:
+            break
+        state = machine.actions[state]()
+    return state
+
+
+def complete_all(engine: Engine) -> None:
+    """Mark every task in the relay database complete, as the site does once it has run them."""
+    with engine.begin() as conn:
+        now = datetime.now().astimezone().isoformat(sep=' ')
+        conn.execute(text('UPDATE task SET completion_time = :now'), {'now': now})
+
+
+@mark.unit
+@mark.parametrize('zones', [('cpu', 'gpu'), ('gpu', 'cpu')])
+def test_a_zone_without_site_clients_ends_once_the_upstream_server_shuts_down(relay_db: Engine, zones) -> None:
+    """A zone with no site client never asks, so never hears the shutdown itself: it ends once another zone has.
+
+    The upstream server finishes for every zone at once, so one zone's shutdown reply is the whole
+    relay's. A zone with no site client and nothing held ends with it, and pulling ends; otherwise the
+    relay would never send its final heartbeats and a non-forever upstream server would never exit.
+    """
+    fake = ShuttingDown()
+    machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 0}, zones=zones)
+    assert drive(machine) is PullerState.FINAL
+    assert [request['zone'] for request in fake.requests] == ['cpu']
+    assert machine.finished == {upstream_identity('cpu'), upstream_identity('gpu')}
+
+
+@mark.unit
+def test_a_relay_with_no_site_client_in_any_zone_never_asks(relay_db: Engine) -> None:
+    """With no site client in any zone the relay never asks, so it cannot hear a shutdown: it waits for a drain or stop.
+
+    Asking would take tasks the site cannot run (its bound is zero), so it never does; it ends at its
+    gate when drained or stopped.
+    """
+    fake = ShuttingDown()
+    single = puller(relay_db, fake)
+    assert drive(single) is PullerState.GATE and not single.finished
+    several = zoned_puller(relay_db, upstream(fake), {'cpu': 0, 'gpu': 0})
+    assert drive(several) is PullerState.GATE and not several.finished
+    assert fake.requests == []
+    single.halt()
+    assert drive(single) is PullerState.FINAL
+
+
+@mark.unit
+def test_a_zone_with_site_clients_still_asks_for_itself_after_a_shutdown(relay_db: Engine) -> None:
+    """A shutdown in one zone does not end a zone that has site clients: it asks, and ends on its own reply."""
+    fake = ShuttingDown()
+    machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 2})
+    assert drive(machine) is PullerState.FINAL
+    assert [request['zone'] for request in fake.requests] == ['cpu', 'gpu']
+
+
+@mark.unit
+def test_a_zone_without_site_clients_that_holds_tasks_ends_only_once_they_are_done(relay_db: Engine) -> None:
+    """A zone with no site client but tasks still held does not end at another zone's shutdown until they are done."""
+    store.insert_received(relay_db, dispatched('echo held-1', 'echo held-2', zone='gpu'),
+                          identity=upstream_identity('gpu'))
+    fake = ShuttingDown()
+    machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 0})
+    assert drive(machine) is PullerState.GATE
+    assert machine.finished == {upstream_identity('cpu')}
+    complete_all(relay_db)
+    assert drive(machine) is PullerState.FINAL
+    assert [request['zone'] for request in fake.requests] == ['cpu']
+
+
+@mark.unit
+def test_a_zone_without_site_clients_is_not_ended_before_any_shutdown(relay_db: Engine) -> None:
+    """Until some zone has had a shutdown reply, a zone with no site client is only passed over, never ended."""
+    fake = FakeDispatcher()
+    machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 0})
+    assert drive(machine) is PullerState.GATE
+    assert machine.finished == set() and {request['zone'] for request in fake.requests} == {'cpu'}
+
+
+@mark.unit
+def test_default_zone_backlog_is_its_own_in_a_relay_serving_several_zones(relay_db: Engine) -> None:
+    """Default-zone tasks are stored with no zone; a relay serving it beside another zone counts them, and only them."""
+    add_backlog(relay_db, 2)
+    store.insert_received(relay_db, dispatched('echo gpu-1', zone='gpu'), identity=upstream_identity('gpu'))
+    assert rows(relay_db, 'SELECT COUNT(*) FROM task WHERE zone IS NULL') == [(2, )]
+    assert store.count_backlog(relay_db, zone=DEFAULT_ZONE_ID) == 2
+    assert store.count_backlog(relay_db, zone=zone_id('gpu')) == 1
+    assert store.count_backlog(relay_db) == 3
+    fake = FakeDispatcher()
+    machine = zoned_puller(relay_db, upstream(fake), {None: 1, 'gpu': 1}, zones=(None, 'gpu'))
+    assert machine.gate() is PullerState.REQUEST  # The default zone is above its low-water mark (2 of 2).
+    assert machine.zone == 'gpu' and machine.size == 1
+
+
 @mark.unit
 def test_several_zones_need_their_own_client_counts(relay_db: Engine) -> None:
     """A puller for several zones cannot fall back on the relay's total client count."""

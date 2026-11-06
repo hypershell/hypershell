@@ -54,7 +54,7 @@
 # Workload and timing:
 #   HSD_TASKS (2000), HSD_FAILING (3), HSD_GROUPS (3), HSD_SLEEP (1.0 s per task), HSD_ZONE (shared)
 #   HSD_THREADS (8 executors per site client), HSD_CLIENTS_PER_NODE (2), HSD_RELAY_BUNDLESIZE (4 x
-#   threads: a site holds at most its clients x this many tasks), HSD_EVICT (30 s upstream),
+#   threads: a site holds at most its clients x this many x 2 tasks), HSD_EVICT (30 s upstream),
 #   HSD_HEARTRATE (5 s relay to upstream), HSD_KILL_AT (0.4 of rows completed), HSD_PAUSE (evict + 15 s),
 #   HSD_SETTLE (4 s), HSD_SAMPLE (1 s), HSD_TLS (1), HSD_SERVER_BUNDLESIZE (8), HSD_SERVER_POLL (2 s)
 #

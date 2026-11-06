@@ -47,8 +47,10 @@ The first zone's identity lists every *client* at the site upstream. Each identi
 heartbeat, so if the relay fails, the upstream *server* evicts each one and puts back what each
 held, in every zone.
 When the upstream *server* shuts down, the relay finishes the tasks it holds, returns every result,
-and ends its upstream registration. SIGUSR1 or SIGUSR2, sent to the relay process, do the same: the
-relay stops asking for work, its site finishes every task the relay holds (those not yet started
+and ends its upstream registration. It hears of the shutdown in reply to a request for work, in any of
+its zones; a zone with no *client* at the site and no task held then ends with the others. A relay
+with no *client* at the site in any zone never asks, so it waits until it is drained or stopped.
+SIGUSR1 or SIGUSR2, sent to the relay process, drain it the same way: the relay stops asking for work, its site finishes every task the relay holds (those not yet started
 too), and the results go back before the registration ends. SIGINT and SIGTERM end the relay at
 once, without draining: it ends the *clients* it launched and exits (on SIGTERM, by that signal; a
 second SIGTERM ends the process at once). If

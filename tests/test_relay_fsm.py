@@ -776,6 +776,29 @@ def test_site_check_needs_the_autoscaler_until_the_site_stops(watched) -> None:
 
 
 @mark.unit
+def test_site_check_needs_every_zone_fleet_until_the_site_stops(watched) -> None:
+    """A further zone's fleet ending is a death while the site runs, as the first zone's is, and its failure is raised."""
+    relay, parts = watched
+    fleets = [Part('part-autoscaler-gpu'), Part('part-autoscaler-io')]
+    for fleet in fleets:
+        fleet.start()
+    relay.fleets = fleets
+    try:
+        relay.check_site()
+        fleets[1].end()
+        with pytest.raises(RelayPartEnded, match='part-autoscaler-io ended'):
+            relay.check_site()
+        relay.check_site(stopping=True)
+        fleets[0].end(OSError('gpu fleet failed'))
+        with pytest.raises(OSError, match='gpu fleet failed'):
+            relay.check_site(stopping=True)
+    finally:
+        for fleet in fleets:
+            if fleet.is_alive():
+                fleet.end()
+
+
+@mark.unit
 @mark.parametrize('name', ['receiver', 'returner', 'heartbeat'])
 def test_relay_wait_raises_a_part_that_died(watched, name: str) -> None:
     """While the relay waits on its site, a site or upstream thread that ends without a failure is raised."""

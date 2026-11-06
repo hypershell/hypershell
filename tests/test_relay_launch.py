@@ -16,7 +16,7 @@ without them. The key itself may be given in any of its documented forms.
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 # Standard libs
 import os
@@ -24,6 +24,8 @@ import sys
 import json
 import time
 import stat
+import functools
+import threading
 import tomllib
 from pathlib import Path
 from datetime import timedelta
@@ -37,6 +39,7 @@ from cmdkit.config import Configuration, Namespace
 # Internal libs
 from hypershell.core.config import config, DEFAULT_AUTH, ConfigurationError
 from hypershell.relay import RelayThread, RelayApp, site_bundlesize, zone_options
+from hypershell.core.queue import QueueConfig
 from hypershell.cluster.launch import ClientLaunch, AUTH_ENV, OMPI_ENV_LIST
 from hypershell.relay.site import (site_cluster, site_launch, fence_site, scrub_environment, check_invocation,
                                    check_exports, CredentialFenceError, site_config_copy, zone_launch, zone_fleet,
@@ -584,3 +587,114 @@ def test_zone_option_repeats() -> None:
     assert RelayApp.from_cmdline(['--zone', 'gpu']).zone == 'gpu'
     with pytest.raises(ArgumentError):
         RelayApp.from_cmdline(['--zone', 'gpu', '--zone', 'gpu']).zones
+
+
+@mark.unit
+@mark.parametrize('size', [0, -1, True, 1.5, '2'])
+def test_zone_table_size_must_be_a_whole_number_of_at_least_one(size) -> None:
+    """A zone table's `size` is refused unless it is a whole number of at least one; a good one is kept."""
+    app = RelayApp.from_cmdline(['--zone', 'gpu'])
+    app.__dict__['zone_plan'] = (['gpu'], {'gpu': {'size': size}})  # As `[relay.zone.gpu]` would give it.
+    with pytest.raises(ArgumentError, match='Site size of zone gpu'):
+        app.zone_settings  # noqa: checked when first read
+    good = RelayApp.from_cmdline(['--zone', 'gpu'])
+    good.__dict__['zone_plan'] = (['gpu'], {'gpu': {'size': 3}})
+    assert good.zone_settings == {'gpu': {'size': 3}}
+
+
+# --- The relay's start-up order (no server is started: the site stops the run when it is started) ---
+
+
+class SiteStarted(Exception):
+    """Raised in place of starting the relay-local server, so the run ends there."""
+
+
+class HeldLink:
+    """An upstream link that does not come up until told (`up`); it is never called."""
+
+    def __init__(self, *args, up: bool = False, **kwargs) -> None:
+        self.up = threading.Event()
+        if up:
+            self.up.set()
+        self.started = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def wait_up(self, timeout: float = 1.0) -> bool:
+        return self.up.wait(timeout)
+
+    def call(self, role, fn, deadline=None):
+        raise AssertionError('No upstream call is made before the site starts')
+
+    def stop(self, timeout=None) -> None:
+        pass
+
+
+def startup_relay(monkeypatch, up: bool, **options) -> Tuple[RelayThread, List[HeldLink], threading.Event]:
+    """A relay whose upstream link is a `HeldLink` and whose site raises `SiteStarted` when started.
+
+    The fence runs as written but on empty stand-ins for the environment and the exported task
+    variables, so the test process's own environment is never scrubbed.
+    """
+    import hypershell.relay as relay_module
+    links: List[HeldLink] = []
+
+    def link(*args, **kwargs) -> HeldLink:
+        links.append(HeldLink(*args, up=up, **kwargs))
+        return links[-1]
+
+    monkeypatch.setattr(relay_module, 'UpstreamLink', link)
+    monkeypatch.setattr(relay_module, 'fence_site', functools.partial(fence_site, environ={}, exports={}))
+    relay = RelayThread(address=('127.0.0.1', free_port()), site_config='',
+                        upstream=QueueConfig(host='127.0.0.1', port=free_port(), auth=KEY), **options)
+    started = threading.Event()
+
+    def start_site() -> None:
+        started.set()
+        raise SiteStarted()
+
+    monkeypatch.setattr(relay.cluster, 'start', start_site)
+    for fleet in relay.fleets:
+        monkeypatch.setattr(fleet, 'start', start_site)
+    return relay, links, started
+
+
+@mark.unit
+def test_relay_starts_its_site_only_once_the_upstream_server_answers(monkeypatch) -> None:
+    """Until the first upstream connection, no site server is started and no site client launched; then they are."""
+    relay, links, started = startup_relay(monkeypatch, up=False, zones=['cpu', 'gpu'])
+    failure: List[BaseException] = []
+
+    def run() -> None:
+        try:
+            relay.run_with_exceptions()
+        except BaseException as error:  # noqa: recorded for the test
+            failure.append(error)
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        time.sleep(2.5)  # Two and a half of the relay's waits for the link.
+        assert len(links) == 1 and links[0].started
+        assert not started.is_set() and thread.is_alive()
+    finally:
+        for link in links:
+            link.up.set()
+    thread.join(timeout=30)
+    assert not thread.is_alive() and started.is_set()
+    assert len(failure) == 1 and isinstance(failure[0], SiteStarted)
+
+
+@mark.unit
+def test_relay_fences_the_launch_of_every_zone_before_connecting(monkeypatch) -> None:
+    """A further zone's launcher carrying the upstream key is refused before the relay connects or starts its site."""
+    relay, links, started = startup_relay(monkeypatch, up=True, zones=['cpu', 'gpu'],
+                                          zone_settings={'gpu': {'launcher': f'srun --comment={KEY}'}})
+    with pytest.raises(CredentialFenceError):
+        relay.run_with_exceptions()
+    assert links == [] and not started.is_set()
+    clean, links, started = startup_relay(monkeypatch, up=True, zones=['cpu', 'gpu'])
+    with pytest.raises(SiteStarted):
+        clean.run_with_exceptions()
+    assert len(links) == 1 and started.is_set()

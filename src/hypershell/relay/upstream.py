@@ -235,6 +235,9 @@ class UpstreamPuller(StateMachine):
     confirmation that follow are that identity's too. Its requests wait upstream at most
     `ZONE_REQUEST_WAIT`, so one zone with nothing staged never holds up the others. A zone the
     upstream server answers with a shutdown is asked no more; pulling ends once every zone has been.
+    The upstream server finishes for every zone at once, so once one zone has had a shutdown reply, a
+    zone with no site client and nothing held ends too: it never asks, so it would never hear one. A
+    relay with no site client in any zone never asks at all, and pulling ends only on a drain or halt.
 
     Every upstream call goes through the link (see `hypershell.core.reconnect`). While the link is down
     the puller waits for it (WAIT_LINK); pulling resumes once the link is back, has carried a heartbeat
@@ -355,6 +358,9 @@ class UpstreamPuller(StateMachine):
         if self.drain():
             log.warning('Drain requested - no more upstream requests')
             return PullerState.FINAL
+        if self.finished and self.finish_idle():
+            log.info('Upstream server is shutting down - no more upstream requests')
+            return PullerState.FINAL
         if not self.link.ready(PULL_STAGES):
             return PullerState.WAIT_LINK
         count = len(self.zones)
@@ -373,6 +379,19 @@ class UpstreamPuller(StateMachine):
             return PullerState.REQUEST
         self.wake.wait(min(self.poll, GATE_WAIT))
         return PullerState.GATE
+
+    def finish_idle(self: UpstreamPuller) -> bool:
+        """End every zone with no site client and nothing held, the upstream server being finished; true once all are.
+
+        Only called once some zone has had a shutdown reply. A zone with site clients, or with tasks
+        still held, asks for itself and ends on its own reply.
+        """
+        for identity, zone in self.zones:
+            if identity not in self.finished and self.bound(zone) == 0 and self.backlog(zone) == 0:
+                self.finished.add(identity)
+                log.info(f'Upstream server is shutting down - no site client for zone '
+                         f'{zone or DEFAULT_ZONE_NAME}, no more requests for it ({identity})')
+        return len(self.finished) == len(self.zones)
 
     def request(self: UpstreamPuller) -> PullerState:
         """Request up to `size` tasks under the zone identity (the upstream server bounds the wait)."""

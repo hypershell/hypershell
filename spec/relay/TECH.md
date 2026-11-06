@@ -137,7 +137,7 @@ phases:
 - id: P9
   name: Multi-zone relays (one upstream identity per zone), per-zone fleets, relay
     docs and trust model
-  status: in_progress
+  status: done
   satisfies:
   - R2
   - R8
@@ -1543,8 +1543,9 @@ reconnection they are handed over; a relay restart loses nothing.
 **Goal:** one relay serves several zones, each as its own upstream identity and its own site fleet;
 failover reverts and unstages every zone it held; the docs carry the relay trust model and
 non-goals.
-**Status (2026-11-05):** built; unit gates green here; `in_progress` until the foreman's Linux run of the
-verify (this host cannot start servers, as in P8).
+**Status:** done (2026-11-06). Built 2026-11-05 with unit gates green here; the foreman's Linux run of
+the verify at `d4a2ec8` passed (this host cannot start servers, as in P8). Review cycle 4 approved it;
+its remediation follows the phase.
 
 - [x] Security-cycle overlap rule for P9 (above): starts only after hardening has landed and been
       merged. (Met 2026-11-05; see the overlap section.)
@@ -1586,7 +1587,9 @@ verify (this host cannot start servers, as in P8).
       first on `PATH` for every process (as `relay_drive.sh` does), fails with a message naming the
       logs when no client is live within `--live-wait` (120 s), when the relay exits before the
       upstream server, or past `--timeout`, and prints progress lines with `flush=True`.
-- [ ] Full suite passes (the foreman's Linux run; see *Gates*).
+- [x] Full suite passes (the foreman's Linux run at `d4a2ec8`, 2026-11-06: serial on 3.12, 1331
+      passed, 87 skipped, 0 failed; the relay files on 3.14 and the multi-zone tests pass; review
+      cycle 4 records it). The cycle-4 remediation below adds unit tests only.
 - **Amendments and deviations (2026-11-05, build; the conservative reading each time):**
   - **`[relay] zone` forms.** The plan's `[relay] zone` list and `[relay.zone.<name>]` tables cannot
     both be one TOML key (`relay.zone` is either an array or a table). `relay.zone` therefore takes
@@ -1645,6 +1648,64 @@ verify (this host cannot start servers, as in P8).
   `tests/test_relay_launch.py`, `tests/test_relay_workload.py`, `spec/relay/drive/relay_throughput.py`.
   No `cluster/`, zone code, `client.py`, `server.py` or `data/model.py` change.
 - **Verify:** see frontmatter.
+
+## Review-4 remediation round (2026-11-06)
+
+Review cycle 4 approved P7–P9 with follow-ups. The foreman's rulings: fix C4-1 now; kill the C4-3
+survivors where a test is cheap (M41 first, then M23, M19, M18, M36); fix C4-5; C4-2 and C4-4 stay
+follow-ups.
+
+- [x] **C4-1: a zone with no site client never heard the upstream shutdown.** The gate passes over a
+      zone whose bound is 0, so such a zone never asked, never had a shutdown reply, and pulling never
+      ended: the relay sent no FINISHED beats and a non-forever upstream server never exited. Now,
+      once any zone has had a shutdown reply, the gate ends every zone with no site client and no task
+      held (`UpstreamPuller.finish_idle`); a zone with site clients, or with tasks still held, asks for
+      itself and ends on its own reply. Safe because the upstream dispatcher finishes for every zone
+      at once: a non-forever upstream server finishes only once no task is incomplete, and a drained
+      one puts back whatever is still staged when it exits.
+      - *Residual (stated in `relay_desc.rst`):* a relay with no site client in **any** zone never asks
+        (asking would take tasks its site cannot run, against R8's bound of 0), so it cannot hear a
+        shutdown; it ends on a drain or a stop, as before. No request form asks "are you finishing?"
+        without taking tasks, and adding one is an upstream protocol change.
+      - *Red first:* against the unfixed puller, the scripted upstream that answers every request with
+        `shutdown` left clients `{'cpu': 1, 'gpu': 0}` at GATE after 20 actions, in both zone orders,
+        and a `gpu` zone holding tasks never ended once they were done (3 failed). With the fix: pass.
+        The safety tests passed both before and after: a single zone (and two zones) with 0 clients
+        never asks; a zone with clients asks for itself after another's shutdown; a zone holding
+        tasks is not ended until they are done; no zone is ended before any shutdown.
+      - Mutants of the fix (the call dropped; ending idle zones before any shutdown; dropping the
+        no-client or the nothing-held condition) are each killed.
+- [x] **C4-3: tests for the survivors**, each shown killing its mutant on a copy of `src/` here (all
+      unit tests; none starts a server):
+      - M41 (`relay/__init__.py`, the wait for the first upstream connection):
+        `test_relay_starts_its_site_only_once_the_upstream_server_answers`. The link is a stand-in that
+        is not up until told, and starting the site raises: for 2.5 s nothing is started, then the site
+        starts once the link is up.
+      - M23 (further zones' launches not fenced): `test_relay_fences_the_launch_of_every_zone_before_connecting`
+        (a further zone's launcher holding the key ends `run_with_exceptions` with the fence error before
+        any link is made; the fence runs on stand-ins, so the test process's environment is untouched).
+      - M19 (further zones' autoscalers not supervised): `test_site_check_needs_every_zone_fleet_until_the_site_stops`.
+      - M18 (zone `size` validation): `test_zone_table_size_must_be_a_whole_number_of_at_least_one`.
+      - M36 (`store.count_backlog`, the default zone's `IS NULL` match):
+        `test_default_zone_backlog_is_its_own_in_a_relay_serving_several_zones`.
+- [x] **C4-5:** `relay_drive.sh`'s header states the doubled bound (clients × bundle × 2).
+- **Follow-ups (not fixed here, by ruling):**
+  - *C4-2:* a TLS on/off mismatch with the upstream server is retried as a transport error (the
+    `ssl.SSLError` of `WRONG_VERSION_NUMBER`, or the connect deadline), not failed fast. Candidate:
+    fail fast on that class at the first connection, or add a hint to the "Cannot reach" warning.
+  - *C4-4:* the judge's four vacuity cases: require `env_unreadable == 0`, the presence of
+    `key_in_server_log`, at least 2 groups, and schema 2 under `--require`. Run B's records show none
+    of the four.
+  - *C4-3, rest:* M26 (the epoch guard in `mark_down`) and M28 (a non-transport connect error failing
+    the link) in `core/reconnect.py` were not in the ruling's list.
+  - *Throughput tail (review-4 note):* 4 of 9 Linux throughput runs had a 6–9 s end-of-run tail (once
+    about 60 s); rerun `relay_throughput.py` at DEBUG with the scratch kept until an outlier occurs.
+- **Gates here (no servers):** relay unit tests with `test_main.py`, `test_completions.py` and
+  `test_cluster_launch.py` (`-m unit`): 304 passed on 3.12, 3.14 and 3.15. The full suite is the
+  foreman's Linux run.
+- **Touches:** `src/hypershell/relay/upstream.py`, `docs/_include/relay_desc.rst`,
+  `tests/test_relay_connector.py`, `tests/test_relay_launch.py`, `tests/test_relay_fsm.py`,
+  `spec/relay/drive/relay_drive.sh`, this file.
 
 ## Phase P10 — R21 run B: judge the evidence
 **Satisfies:** R21 · **Depends on:** P7, P9
