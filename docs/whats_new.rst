@@ -184,10 +184,10 @@ Fixes
   the last 32 file descriptors below its open-file limit, and logs a warning, so it can still open
   its database and log files (2.9.0a4, :pr:`76`).
 - **A clear hint for the cron extra.** Log rotation without ``croniter`` installed stops with a
-  one-line hint to install the ``cron`` extra (2.9.0a2, :commit:`f4448a3`).
+  one-line hint to install the ``cron`` extra (2.9.0a2, :pr:`56`).
 - **Logging across forks and on lockless filesystems.** A forked process no longer inherits the
   parent's log file descriptors, and on a filesystem without lock support logging falls back cleanly
-  instead of failing (2.9.0a2, :commit:`ede1487`; :ref:`per-process log files <logging_files>`).
+  instead of failing (2.9.0a2, :pr:`54`; :ref:`per-process log files <logging_files>`).
 
 -------------------
 

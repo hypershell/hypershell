@@ -56,6 +56,7 @@ markers sit inside `.. only:: html` and stay out of the man page. `_include/temp
 | docs/_include/config_param_ref.rst | under `[relay]` (html only) | versionadded | #82 | 2.9.0a6 |
 | docs/getting_started.rst | § Features, after the task-slot example | versionadded | #52 | 2.9.0a1 |
 | docs/getting_started.rst | § Features, after the JSON-plan example | versionadded | #48 | 2.9.0a1 |
+| docs/install.rst | `uuid7` extra: required by the TimescaleDB provider | versionchanged | #71 | 2.9.0a3 |
 | docs/install.rst | § Docker and Apptainer, after the published-image passage | versionadded | ee03014 | 2.9.0a1 |
 | docs/logging.rst | § Per-process log files, after the lock-sidecar passage | versionchanged | #54 | 2.9.0a2 |
 | docs/security.rst | § Components: in-process queue server | versionchanged | #76 | 2.9.0a4 |
@@ -64,7 +65,9 @@ markers sit inside `.. only:: html` and stay out of the man page. `_include/temp
 | docs/api/data.rst | after `autofunction:: upgradedb` | versionadded | #69 | 2.9.0a2 |
 | docs/api/client.rst | after `autofunction:: run_client`: `zone` | versionchanged | #78 | 2.9.0a4 |
 | docs/api/client.rst | after `autoclass:: ClientThread`: `zone` | versionchanged | #78 | 2.9.0a4 |
-| docs/api/server.rst | after `autoclass:: ServerThread`: `template`, `from_json` | versionchanged | #48 | 2.9.0a1 |
+| docs/api/server.rst | after `autoclass:: ServerThread`: `template`, `from_json`; `start` raises a queue failure | versionchanged | #48 #76 | 2.9.0a1, 2.9.0a4 |
+| docs/api/submit.rst | after `autofunction:: submit_from`: dict sources | versionchanged | #48 | 2.9.0a1 |
+| docs/api/submit.rst | § Classes: dict sources on `SubmitThread`, `LiveSubmitThread` | versionchanged | #48 | 2.9.0a1 |
 | docs/api/cluster.rst | § Classes: `from_json` and `zone` on every cluster class | versionchanged | #48 #78 | 2.9.0a1, 2.9.0a4 |
 | docs/api/cluster.rst | after `autoclass:: AutoScalingCluster`: `evict_after` | versionchanged | #82 | 2.9.0a6 |
 
@@ -112,8 +115,6 @@ markers sit inside `.. only:: html` and stay out of the man page. `_include/temp
 
 **Covered by a neighbouring marker:**
 
-- `install.rst`'s `uuid7` extra note for the TimescaleDB provider: one sentence pointing at the
-  TimescaleDB section, which is marked.
 - `api/data.rst`'s intro paragraph on running `ensuredb` first: the Functions marker covers it.
 - `cli/index.rst`'s relay toctree entry: navigation to the marked relay page.
 - `manual.rst` and the `*_alt.rst` includes: man-page sources, out of scope (GOAL non-goals).

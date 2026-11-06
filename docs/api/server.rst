@@ -56,7 +56,8 @@ Classes
     .. automethod:: stop
 
 .. versionchanged:: 2.9.0
-   :pr:`48`: the ``template`` and ``from_json`` parameters.
+   :pr:`48`: the ``template`` and ``from_json`` parameters. :pr:`76`: ``start`` raises a failure
+   to start the queue, such as an address already in use, in the caller.
 
 |
 

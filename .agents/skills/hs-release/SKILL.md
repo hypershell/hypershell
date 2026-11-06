@@ -154,12 +154,16 @@ appear for commands run against the `/tmp` worktree path; that is expected and h
 ### Step 3a — Docs: complete the markers and What's new (pre-release & full-release)
 Skip for a patch: patch releases come from `master`, whose docs the site no longer serves.
 1. Every `versionadded`/`versionchanged` marker under `docs/` whose body has **no link at all** (no
-   `:pr:` and no `:commit:`) gets one: the number from the squash commit that added the marker
-   (`git log --first-parent -S'<marker line>' -- <file>`; squash subjects end `(#NN)`). That commit
-   is the feature's own, since a marker lands with its change. A change that landed as a direct
+   `:pr:` and no `:commit:`) gets one: the number from the squash commit that added that marker.
+   Find it with `git blame -L <n>,<n> -- <file>` on the marker's directive line, not with `git log
+   -S` on it: every marker of a line has the same directive text, so `-S` returns every commit that
+   added one. Squash subjects end `(#NN)`. That commit is the feature's own, since a marker lands
+   with its change. A change that landed as a direct
    commit gets `:commit:` with its short SHA instead. Never touch a marker that already has a link.
-2. In `docs/whats_new.rst`, move each *Not yet released* entry under a heading for this version, add
-   its link, and leave *Not yet released* saying nothing is pending. At a **full release**, copy the
+2. In `docs/whats_new.rst`, move each *Not yet released* entry into its topic group (an upgrade
+   caution under *Upgrading*, a feature or change under its area in *New and changed*, a fix under
+   *Fixes*), give it this version and its link inline as the other entries do (`(X.Y.ZaN,
+   :pr:`NN`)`), and leave *Not yet released* saying nothing is pending. At a **full release**, copy the
    page to `docs/whats_new_X_Y.rst` as the record of that line (linked from the page, not the
    navigation), and reset `docs/whats_new.rst` for the next line. `docs/whats_new.rst` is always
    the live page: the site notice, `AGENTS.md` and `hs-build` all point at it. Markers stay. The

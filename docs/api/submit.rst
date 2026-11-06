@@ -23,6 +23,9 @@ Functions
 
 .. autofunction:: submit_from
 
+.. versionchanged:: 2.9.0
+   :pr:`48`: ``source`` may yield dictionaries as well as strings, as ``--from-json`` does.
+
 |
 
 .. autofunction:: submit_file
@@ -33,6 +36,9 @@ Classes
 -------
 
 |
+
+.. versionchanged:: 2.9.0
+   :pr:`48`: ``source`` on both classes may yield dictionaries as well as strings.
 
 .. autoclass:: SubmitThread
     :show-inheritance:
