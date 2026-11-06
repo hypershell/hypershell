@@ -639,15 +639,15 @@ class Task(Entity):
         if recent_task is not None:
             return TaskGroupInfo(recent_task.group, f'most recently scheduled task: {recent_task.id}')
 
-        if Task.count() == 0:
+        # NOTE: we cannot just naively go with first submitted task (even though that makes sense)
+        # because the groups might have been altered, and we get stuck in an infinite loop waiting on
+        # all tasks to be completed (lower task group never get scheduled) but there are no more groups.
+        # The earliest group is read before deciding the database is empty, so a row deleted after it
+        # was counted (`hs update --delete` while the server runs) is never dereferenced.
+        submitted_task = Session.query(Task).order_by(Task.group).first()
+        if submitted_task is None:
             return TaskGroupInfo(DEFAULT_TASK_GROUP, 'no tasks submitted')
-
-        else:
-            # NOTE: we cannot just naively go with first submitted task (even though that makes sense)
-            # because the groups might have been altered, and we get stuck in an infinite loop waiting on
-            # all tasks to be completed (lower task group never get scheduled) but there are no more groups.
-            submitted_task = Session.query(Task).order_by(Task.group).first()
-            return TaskGroupInfo(submitted_task.group, f'no tasks scheduled - defaulting to earliest group')
+        return TaskGroupInfo(submitted_task.group, f'no tasks scheduled - defaulting to earliest group')
 
     @classmethod
     def increment_group(cls: Type[Task], previous_group: int, attempts: int, eager: bool = False) -> TaskGroupInfo:
@@ -673,20 +673,21 @@ class Task(Entity):
         retryable = cls.count_retryable(attempts, previous_group, eager=eager)
         if retryable > 0:
             return TaskGroupInfo(previous_group, f'waiting on {retryable} failed tasks to be retried')
-        failed_query = (
-            Session.query(Task)
+        # The count and the example are one statement: a row deleted after it was counted (a relay's
+        # completed rows leave for its outbox) can never leave a count with no example.
+        failed, example = (
+            Session.query(func.count(cls.id), func.min(cls.id))
             .filter(Task.group == previous_group)
             .filter(cls.exit_status.isnot(None))
             .filter(cls.exit_status != 0)
             .filter(cls.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
             .filter(cls.attempt >= attempts)
             .filter(cls.retried.is_(False))
+            .one()
         )
-        failed = failed_query.count()
         if failed > 0:
-            example = failed_query.first()
             return TaskGroupInfo(previous_group,
-                                 f'at least {failed} tasks exceeding allowed retries, example: {example.id}',
+                                 f'at least {failed} tasks exceeding allowed retries, example: {example}',
                                  False)
         # The next group is chosen in one query, so rows committed while the checks above ran are
         # never skipped; it is lower than the previous group when tasks were submitted late.

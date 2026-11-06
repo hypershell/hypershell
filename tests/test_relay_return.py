@@ -606,3 +606,80 @@ def test_site_confirmation_after_the_result_left_for_the_outbox(site_session: En
     assert rows(site_session, 'SELECT id, client_id FROM task') == [(slow, LEAF[0])]
     assert rows(site_session, 'SELECT id, state FROM relay_result') == [(fast, RESULT_PENDING)]
     assert store.count_held(site_session) == 2
+
+
+# --- A failed site task collected while the scheduler looks at its group --------------------------
+
+
+@mark.unit
+def test_group_check_while_a_failed_task_leaves_for_the_outbox(site_session: Engine) -> None:
+    """The relay-local scheduler (no retries) checks its group as a site task's failure is collected.
+
+    The failure is counted as one that has used its retries, and the returner moves the row to the
+    outbox before the scheduler takes it as the example it names. The check must not fail on the
+    vanished example: the group is held on the failure it saw, and once the row has gone the group
+    no longer holds anything.
+    """
+    from sqlalchemy import event
+
+    record = upstream_record('exit 3')
+    store.insert_received(site_session, [record], identity=IDENTITY)
+    task, = Task.next(limit=1, group=0)  # The relay-local scheduler.
+    assert Task.apply_results([leaf_result(task, exit_status=3)]) == [ResultOutcome.APPLIED]  # The Receiver.
+
+    seen, collected = [], []
+
+    def counted(conn, cursor, statement, parameters, context, executemany) -> None:  # noqa: unused
+        """Note the scheduler's first query for failures that have used their retries."""
+        if 'attempt >=' in statement:
+            seen.append(statement)
+
+    def returner_between(conn, cursor, statement, parameters, context, executemany) -> None:  # noqa: unused
+        """The returner runs before the scheduler's next statement once that query has run."""
+        if seen and not collected:
+            collected.append(None)  # The returner's own statements pass through here too.
+            collected[0] = store.collect_results(site_session)
+
+    event.listen(site_session, 'after_cursor_execute', counted)
+    event.listen(site_session, 'before_cursor_execute', returner_between)
+    try:
+        held = Task.increment_group(0, attempts=1)  # The site server's scheduler (max_retries=0).
+        after = Task.increment_group(0, attempts=1)
+    finally:
+        event.remove(site_session, 'after_cursor_execute', counted)
+        event.remove(site_session, 'before_cursor_execute', returner_between)
+    assert collected == [1]
+    assert rows(site_session, 'SELECT id FROM task') == []
+    assert held.value == 0 and not held.viable and record['id'] in held.reason
+    assert after.viable and after.reason == 'no task groups remain'
+
+
+@mark.unit
+def test_starting_group_while_the_unscheduled_tasks_are_deleted(site_session: Engine) -> None:
+    """The scheduler picks its starting group as every task, none yet scheduled, is deleted.
+
+    In a relay the puller drops and inserts in one transaction, so the table is never left empty, but a
+    task delete (`hs update --delete`) can empty it between the count and the read of the earliest
+    group. The start must take the default group, not fail on the vanished row.
+    """
+    from sqlalchemy import event
+    from hypershell.data.model import DEFAULT_TASK_GROUP
+
+    store.insert_received(site_session, [upstream_record('echo unscheduled')], identity=IDENTITY)
+    deleted = []
+
+    def delete_before(conn, cursor, statement, parameters, context, executemany) -> None:  # noqa: unused
+        """A task delete commits just before the scheduler reads the earliest group."""
+        if not deleted and 'ORDER BY task."group"' in statement:
+            deleted.append(None)
+            with site_session.begin() as other:
+                other.exec_driver_sql('DELETE FROM task')
+
+    event.listen(site_session, 'before_cursor_execute', delete_before)
+    try:
+        info = Task.current_group()
+    finally:
+        event.remove(site_session, 'before_cursor_execute', delete_before)
+    assert deleted == [None]
+    assert rows(site_session, 'SELECT id FROM task') == []
+    assert info.value == DEFAULT_TASK_GROUP

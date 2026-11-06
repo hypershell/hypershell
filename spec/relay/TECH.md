@@ -1842,3 +1842,62 @@ follow-ups.
     relay integration tests 39 passed on 3.15 (both workload tests above among them); the other
     integration tests 450 passed, 86 skipped on 3.15 (`-n 6`). Not run here: 3.11 to 3.13, and
     PostgreSQL. The full suite on Linux is the foreman's run.
+- 2026-11-06: the foreman's Linux runs at `5c50ece` (Python 3.14, 1 of 40 parallel runs of the three
+  relay workload tests) found a second abort of the same kind, on a read. Relay A's relay-local
+  scheduler ended with `AttributeError: 'NoneType' object has no attribute 'id'` in
+  `Task.increment_group` and the relay aborted; with both relays gone, the failover test's upstream
+  server never exited. A site task exited 3. The site server (no retries) counted it as a failure
+  that had used its retries, then the returner collected and deleted the completed row, and the
+  separate `first()` that fetches the example task for the message found nothing. A primary server
+  can hit the same gap when `hs update --delete` removes the row. Fix: the count and the example are
+  now one aggregate statement (`count(id)`, `min(id)`), so a count above zero always comes with an
+  example. A row deleted after that statement only means the group is held one more poll, and the next
+  check falls through to the next-group logic. This is better than keeping two statements and treating
+  a vanished example as a fall-through, which would leave a second read to reason about. The same
+  count-then-read shape in `Task.current_group` (count the table, then read the earliest group) now
+  reads the earliest group first and treats no row as an empty table. The relay cannot reach that
+  one: the puller drops superseded rows and inserts the new ones in one transaction, so the table is
+  never left empty. A task delete on a primary server can reach it.
+  - *Red first* (`tests/test_relay_return.py`, both deterministic, no server; an engine event runs the
+    other writer between two of the scheduler's statements):
+    `::test_group_check_while_a_failed_task_leaves_for_the_outbox`: unfixed, `AttributeError:
+    'NoneType' object has no attribute 'id'` at the example, the CI error; fixed, the first check holds
+    the group naming the failure it saw, and the next says no task groups remain.
+    `::test_starting_group_while_the_unscheduled_tasks_are_deleted`: unfixed, `AttributeError:
+    'NoneType' object has no attribute 'group'`; fixed, the default group.
+  - *Sweep, read then use, in every path the relay-local server runs*, against a row that
+    `collect_results` (complete rows) or `drop_superseded` (rows not yet scheduled here) deletes:
+    - Scheduler start: `Task.count`, `count_remaining` and `count_interrupted` feed only decisions
+      and log lines. `revert_interrupted` is the select-then-write of the earlier audit, which this
+      relay cannot reach. `current_group` was fixed here (not reachable in the relay).
+      `starting_group` → `increment_group` was fixed here; `lowest_incomplete_group` is one scalar,
+      and its None is handled.
+    - Scheduler `load_bundle`: the non-forever stop check is counts only (a site server runs
+      forever). `increment_group`: `remaining` and `retryable` are counts that feed decisions, and a
+      vanished row only moves a decision by one poll. The exhausted-failure count and its example
+      were the crash, fixed here.
+    - Scheduler `next_tasks` → `Task.next`: an ORM select, then a flush (C7-2, still open).
+      `pack_bundle` reads the tasks `Task.next` returned after its commit has expired them, so each
+      is refreshed by id. A just-stamped row is neither complete nor unscheduled, so neither deleter
+      can remove it. Not reachable.
+    - Scheduler `report_held`: one grouped count, and the zone names are looked up with a fallback.
+      No dereference.
+    - Receiver (`apply_results`): Core statements; a gone row is STALE. Confirm: fixed in
+      `c2cc82d`.
+    - HeartMonitor: `Client` reads and writes (`from_id` catches `NotFound`; the relay never deletes
+      a `client` row). Eviction's `select_orphaned` → `revert_all` is C7-1, still open.
+    - Dispatcher and zones: in memory, plus `Zone.ensure` (an upsert); no `task` reads.
+  - *C7-1 and C7-2 are not covered by this fix.* C7-1 is about three lines: `revert_orphaned`
+    reverts through the same per-row write with `pending` and not strict, as `revert_staged` does,
+    so a row completed or gone since the select is skipped. That also stops it reverting a result
+    that lands in that gap. Probed here and not kept: with that change, the unit suite passes
+    unchanged, and the scratch interleaving from the earlier audit no longer raises. It changes a
+    primary server's eviction path, so it should be its own reviewed change, with a test and an
+    integration run. C7-2 is larger, about a day: `Task.next` would stamp each selected row with a
+    conditional per-row UPDATE (`schedule_time IS NULL`) and skip a row that matched nothing,
+    instead of an ORM flush. It also needs the retry path (`retried` marks and retry inserts)
+    handled the same way, and the returned tasks built from the rows that actually landed. That is
+    the scheduler's dispatch path for every server, and it overlaps the contended-write seed.
+  - Gates here (macOS, no PostgreSQL): `-m unit` 858 passed, 3 skipped on 3.14 and on 3.15; the relay
+    integration tests 39 passed on 3.15; the other integration tests 450 passed, 86 skipped on 3.15
+    (`-n 6`). The full suite on Linux is the foreman's run.
