@@ -1361,3 +1361,166 @@ The TECH note's audit names the same paths with the same outcomes.
   before `hs-publish`.
 - **Gate on this cycle:** PR #82's CI on `c2cc82d`, green on all four Python versions, in
   particular the 3.11 failover test and the 3.14 site-key test. This is the last review cycle.
+
+## Review cycle 8 (scope: CI remediation 2, group check against a gone row; count 1 of 1) — changes requested (2026-11-06)
+
+- **Reviewed commit:** `ffa3428`  ·  **Range:** `5c50ece..ffa3428` (one commit: the one-statement
+  exhausted-failure check in `Task.increment_group`, the reordered `Task.current_group`, two tests,
+  a `store.py` docstring and a TECH note)  ·  **Base:** `develop`  ·  **Date:** 2026-11-06
+- **Verdict:** changes requested. The fix is right for SQLite and closes the CI abort, but the new
+  statement takes `min()` of the task id, which is a native `UUID` on PostgreSQL, and PostgreSQL has
+  no `min(uuid)`. Every PostgreSQL or `timescale` primary server would then fail on its first group
+  check (C8-1). C8-1 is PLAUSIBLE by the protocol's letter: the last step, the error on a live
+  PostgreSQL server, was not executed here. Everything up to it was, and the evidence is mechanical,
+  so the reviewer rates it a blocker and asks the maintainer to triage it as one. The fix is one line.
+- **Cycle:** a new scope beyond cycle 7, count 1 of 1, authorised explicitly by the maintainer. There
+  is no further cycle: C8-1 goes to the maintainer. `review.cycle` reads 8 (META F7).
+- **Mode:** inline, one reviewer, no subagent, as the foreman directed. The diff was read with `spec/`
+  excluded, and the relay-local server's read-then-use paths were swept from the code before the
+  commit's TECH note was read; the note was then compared against that sweep.
+- **Host:** macOS, the worktree's `.venv` (Python 3.15). No PostgreSQL server: running a downloaded
+  PostgreSQL binary was refused by this session's permissions, so PostgreSQL was checked by rendering
+  the SQL with SQLAlchemy's PostgreSQL dialect and by reading a PostgreSQL 16.2 distribution's
+  bootstrap catalog (`share/postgresql/postgres.bki`), not by running it.
+
+### Verification run
+
+- **Red/green** (`tests/test_relay_return.py`): green at `ffa3428`, 22 passed. Red, on an export of
+  `ffa3428` with `data/model.py` from `5c50ece` (imported ahead of the editable install, checked by
+  `hypershell.data.model.__file__`): 2 failed, 20 passed.
+  `::test_group_check_while_a_failed_task_leaves_for_the_outbox` fails with the CI error,
+  `AttributeError: 'NoneType' object has no attribute 'id'` at `model.py:689`;
+  `::test_starting_group_while_the_unscheduled_tasks_are_deleted` with `... has no attribute 'group'`.
+- **Mutants** (same export, `model.py` edited, 22 tests each):
+  - M1, old `increment_group` with the new `current_group`: only the group-check test fails.
+  - M2, old `current_group` with the new `increment_group`: only the starting-group test fails.
+  - M3, the old two statements with a None-guarded example (`example.id if example else None`):
+    the group-check test fails. It pins the one-statement reading (the held reason names the id it
+    counted), not just the absence of a crash.
+  - M6, the aggregate without `attempt >= attempts`: the group-check test fails.
+  - M4 (without `retried IS FALSE`) and M5 (without `exit_status != CANCEL_STATUS`): the whole unit
+    suite still passes (858). The filters are verbatim from `5c50ece`, so this is a pre-existing
+    coverage gap, not a defect of this range (see Notes).
+- **The new statement is on the ordinary path.** A statement probe over the unit suite: 22 tests
+  execute `min(task.id)`, across `test_group_order.py`, `test_retry_gate.py` (among them
+  `test_exhausted_failure_halts_group` and `test_retried_success_advances_group`),
+  `test_zone_model.py` and the relay tests. A scratch probe (never committed) driving a primary
+  `Scheduler` on SQLite: it runs once on the first poll of a non-forever server on an empty
+  database, once on a forever server's first poll after its queue drains, and once on the move from
+  group 0 to group 1.
+- **Suites (here, 3.15):** `pytest -m "not integration" -n 6`: 858 passed, 3 skipped. Integration
+  tests not run; the 80-run Linux evidence is the foreman's.
+
+### Requirement → evidence matrix (reviewed scope)
+
+| R-ID | Implemented by (this range) | Verified how | Status |
+|------|-----------------------------|--------------|--------|
+| R20 (relay workload completes; existing suite passes) | The relay-local scheduler no longer aborts when a failed site task leaves for the outbox during its group check | Red/green, M1–M3, M6; unit suite | ✅ on SQLite (the relay-local database is always SQLite, R10) |
+| R20 (existing suite passes), and the upstream server on PostgreSQL | `Task.increment_group` and `Task.current_group` are shared with every primary server | PostgreSQL dialect rendering and catalog; the PostgreSQL CI job does not reach either method | ❌ C8-1 |
+
+Unmapped changes: none. The `store.py` docstring matches the code.
+
+### Findings
+
+**C8-1 — PLAUSIBLE (high confidence) · HIGH · blocker.** `src/hypershell/data/model.py:679`
+(`Task.increment_group`), called from `src/hypershell/server.py:268` (`load_bundle`) and `:336`
+(`starting_group`). The new statement is `SELECT count(task.id), min(task.id) ...`. On PostgreSQL
+and `timescale`, `task.id` is a native `UUID` (`UUID = Text().with_variant(POSTGRES_UUID(...))`,
+`model.py:145`; the rendered DDL is `id UUID NOT NULL`), and PostgreSQL defines no `min` for `uuid`:
+the PostgreSQL 16.2 catalog has 22 `min` aggregates, over bpchar, date, time, timestamp,
+timestamptz, interval, timetz, numeric, int8, int2, anyarray, int4, text, oid, tid, pg_lsn,
+anyenum, xid8, float4, float8, money and inet, and none over `uuid` (oid 2950). It has no `pg_cast`
+row from `uuid`, and the text I/O conversion is never implicit, so the call cannot resolve. It
+fails with `function min(uuid) does not exist`, which ends the Scheduler thread. PostgreSQL 13, the
+oldest CI server, is older still. PostgreSQL 17 and 18 are not checked here; to the reviewer's
+knowledge neither adds `min(uuid)`.
+- **Failure scenario:** any PostgreSQL or `timescale` server reaching a group check whose group has
+  nothing left and no retryable failures: a server started on an empty database (first poll), a
+  forever server once its queue drains, any multi-group run at its first group change, and a
+  restart onto a completed group (`starting_group`). In a relay deployment, that is the upstream
+  server. The relay-local server is unaffected (SQLite, R10).
+- **Why CI would stay green:** the PostgreSQL job runs five files (`test_upgrade_postgres.py`,
+  `test_writeback_postgres.py`, `test_timescale.py`, `test_contended_write.py`,
+  `test_zone_postgres.py`), and none of them calls `increment_group` or runs a scheduler.
+- **To confirm:** one statement on any PostgreSQL server: `CREATE TEMP TABLE t (id uuid); SELECT
+  min(id) FROM t;`.
+- **Fix (one line):** `func.min(cast(cls.id, Text))` (import `cast` from `sqlalchemy`). It renders
+  `min(CAST(task.id AS TEXT))` on both dialects, `min(text)` exists, and an explicit cast of `uuid`
+  to `text` is valid. Probed in scratch on SQLite, not kept: `test_relay_return.py`,
+  `test_zone_model.py` and `test_group_order.py` all pass (55), the new tests among them. Pair it
+  with a PostgreSQL test that reaches `Task.increment_group` with an exhausted failure (for example
+  in `tests/test_zone_postgres.py`, which the PostgreSQL job already runs), so the job covers the
+  group check.
+- **Rating:** blocks merge. One line, but it changes a core statement, so the fix needs the
+  maintainer's sign-off and a green PostgreSQL CI run.
+
+### Questions put to this cycle
+
+1. **Is the single statement correct?** On SQLite, yes. The six filters are verbatim from
+   `5c50ece`, including `exit_status != CANCEL_STATUS`, `attempt >= attempts` and
+   `retried IS FALSE`. The aggregate always returns one row, so `.one()` is safe. `count` is an
+   integer, and `min` is NULL only when the count is 0, when it is never used. On PostgreSQL, no
+   (C8-1); with the cast, the types match SQLite's (a text id). **Is the hold safe for primary
+   servers?** Yes. The count and the example come from one statement snapshot. A group passes only
+   when the count is 0, as before. A count above 0 returns non-viable, as before. Non-forever still
+   halts (`load_bundle` → FINAL), and `test_exhausted_failure_halts_group` runs the new statement and
+   passes. The "one more poll" applies only when a counted row is deleted afterwards, which a primary
+   server sees only under `hs update --delete`. No group advance is skipped: the `failed == 0` path is
+   unchanged.
+2. **Is `current_group` behaviour-preserving?** Yes. It runs the same `ORDER BY group` query, and
+   without a concurrent delete `first()` is None exactly when `count()` was 0. Group-order and
+   retry-gate tests pass. It is not reachable in a relay (the puller drops and inserts in one
+   transaction).
+3. **Do the tests fail without the fix and pass with it?** Yes, both, and each one pins its own hunk
+   (M1, M2). They are deterministic: the interleaving is forced by engine events, with no threads or
+   timing.
+4. **Sweep of read-then-use paths (independent, then compared with TECH):**
+
+| Relay-local path | Read then use against a row `collect_results` or `drop_superseded` removes | Rating |
+|---|---|---|
+| Scheduler start: `count`, `count_remaining`, `count_interrupted` | scalars that only feed decisions | safe |
+| Scheduler start: `revert_interrupted` | runs before any site client; neither deleter can take its rows | not reachable |
+| `current_group` / `starting_group` → `increment_group`, `lowest_incomplete_group` | fixed here; the rest are scalars, and a None is handled | safe |
+| `load_bundle` → `increment_group` (`remaining`, `retryable`) | counts; `count_retryable` is 0 without a query (attempts 1, not eager) | safe |
+| `next_tasks` → `Task.next` | ORM select, then a flush | C7-2 (open) |
+| `pack_bundle` (expired tasks refreshed by id after commit) | a just-stamped row is neither complete nor unscheduled, so neither deleter can take it | not reachable |
+| `report_held` | one grouped count | safe |
+| Receiver `apply_results` / Confirm `confirm_all` | gone row is STALE / skipped (non-strict) | safe |
+| HeartMonitor `Client` reads and writes | `NotFound` handled; no `client` row is deleted | safe |
+| HeartMonitor eviction `select_orphaned` → `revert_all` | raises | C7-1 (open) |
+| The deleters themselves | `drop_superseded`'s DELETE carries `schedule_time IS NULL`; `collect_results` takes complete rows only, and no relay-local writer touches a complete row | safe |
+
+  The TECH note's sweep names the same paths with the same outcomes. Nothing beyond C7-1 and C7-2
+  was found that can still abort a relay.
+5. **Anything else:** C8-1. The commit's own gates say "no PostgreSQL", and the PostgreSQL CI job
+   would not have caught it.
+
+### Notes (not findings)
+
+- **Exhausted-failure filters are not pinned by a test.** Dropping `retried IS FALSE` or
+  `exit_status != CANCEL_STATUS` from this statement leaves all 858 unit tests green.
+  `test_cancelled_task_does_not_hold_group` uses `attempts=3` with a first-attempt cancel, so the
+  `attempt >= attempts` filter excludes the row before `CANCEL_STATUS` matters. This predates the
+  range, and the filters are unchanged, so it is a coverage gap worth a test, not a defect here.
+- The 80-run Linux evidence (no relay failure; one `free_port()` race between concurrent copies of
+  the test) is the foreman's, and it is consistent with the unit-level red/green. The port race is
+  in the test harness, not the relay.
+
+### Cycle-7 closure
+
+| Finding | Status |
+|---|---|
+| C7-1, C7-2 | Open follow-ups, unchanged: this range does not touch them. The sweep above finds no third path. |
+| C5-1, C4-2, C4-4, C4-3's M26/M28 | Follow-ups, unchanged. |
+
+### Human-gate triggers
+
+- **C8-1 touches `data/model.py`**, the high-blast-radius core. It is a scheduler statement every
+  primary server runs. It is PLAUSIBLE, not CONFIRMED, so the CONFIRMED-finding gate does not fire
+  by rule, but the reviewer asks for the same sign-off: the maintainer triages it, approves the
+  one-line fix, and sees a green PostgreSQL CI run that reaches `increment_group`.
+- **The `CANCEL_STATUS`/`retried` filters** (a DB-lifecycle invariant, §2–§3) are preserved exactly.
+  No trigger from them.
+- **The cycle-1 trigger stands:** maintainer sign-off on the credential fence and the site-hop TLS
+  before `hs-publish`.
+- **This is the last review cycle.** C8-1 goes to the maintainer.

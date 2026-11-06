@@ -114,3 +114,21 @@ into seven real-process runs in under a minute.
   `review.scope` and `review.scope_cycle`), reset by a `set_phase.py --new-scope NAME` flag, and grade
   the bound against it; the rubric and Step 4 say so.
 - **Confidence:** med · **Effort:** small
+
+## F8 — The executed-evidence spine has no route for a PostgreSQL-only defect in a core statement
+`origin=hs-review:Step 2 severity=medium category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** cycle 8's range rewrote a scheduler statement in `data/model.py` that every
+  server runs. The defect (`min()` over a native PostgreSQL `UUID`) shows only on PostgreSQL. The
+  review host had no PostgreSQL server, and the PostgreSQL CI job runs a fixed list of five files,
+  none of which reaches the statement, so neither the build's gates nor CI could show it. The
+  reviewer found it by rendering the SQL with the PostgreSQL dialect and reading a PostgreSQL
+  catalog, and could only rate it PLAUSIBLE.
+- **Skill cause:** the rubric asks for executed evidence but names no step for SQL a diff adds or
+  changes in `data/model.py`. It has no dialect check, and it does not ask whether the PostgreSQL CI
+  job reaches the changed method. A PLAUSIBLE rating then reads as "do not block", which is the wrong
+  default for a defect that is certain from the catalog.
+- **Recommended fix:** in the rubric, for any new or changed SQL in `data/model.py`, render it with
+  `sqlalchemy.dialects.postgresql` and check the functions and types it uses. Name which test in the
+  PostgreSQL CI file list executes it, or flag that none does. Allow a catalog-certain dialect error
+  to be rated CONFIRMED when no server is available, with the one-statement repro recorded.
+- **Confidence:** med · **Effort:** small
