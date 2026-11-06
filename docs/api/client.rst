@@ -23,6 +23,10 @@ Functions
 
 .. autofunction:: run_client
 
+.. versionchanged:: 2.9.0
+   :pr:`78`: the ``zone`` parameter. ``bundlesize`` is now the bundle size the client requests
+   from the server, and by default it requests none and takes the server's.
+
 -------------------
 
 Classes
@@ -37,6 +41,10 @@ Classes
     .. automethod:: start
     .. automethod:: join
     .. automethod:: stop
+
+.. versionchanged:: 2.9.0
+   :pr:`78`: the ``zone`` parameter. ``bundlesize`` is now the bundle size the client requests
+   from the server, and by default it requests none and takes the server's.
 
 |
 

@@ -15,10 +15,15 @@ These are expanded `prior` to scheduling as the actual `args` for the task.
 
 -------------------
 
+.. _templates_named_fields:
+
 Named Fields
 ^^^^^^^^^^^^
 
 |
+
+.. versionadded:: 2.9.0
+   :pr:`48`
 
 When tasks are submitted from a JSON file with ``--from-json`` (see the ``submit``
 command), each task object's keys become available as named template fields. A
@@ -40,10 +45,15 @@ and every ``{key}`` must be present in each task object or the submission is rej
 
 -------------------
 
+.. _templates_slot:
+
 Execution Slot
 ^^^^^^^^^^^^^^
 
 |
+
+.. versionadded:: 2.9.0
+   :pr:`52`
 
 Each client runs ``N`` task executors (set with ``-N``/``--num-threads``); every executor owns
 a fixed **slot** for its lifetime, a zero-based index in ``0 .. N-1``. Two patterns expose it so a

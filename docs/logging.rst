@@ -253,6 +253,8 @@ For full control, define the ``[logging.file]`` section and set individual param
 
 |
 
+.. _logging_files:
+
 Per-process log files
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -305,6 +307,9 @@ fault. Relatedly, revisiting a host at a *lower* concurrency than a previous run
 earlier rank's rotated or compressed files (e.g. ``client-<host>-3.20260101.log.gz``) with no
 active writer; these dangling rotated leaves are legitimate and are left untouched — remove them
 yourself if you no longer need them.
+
+.. versionchanged:: 2.9.0
+   :pr:`54`: lock sidecars are removed on a clean exit and swept after a crash.
 
 |
 

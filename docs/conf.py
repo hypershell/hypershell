@@ -11,7 +11,14 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
 import datetime
+import os
+import sys
+
 import hypershell
+
+# Local helper modules (not Sphinx extensions) live in _ext/.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '_ext'))
+from site_notice import announcement  # noqa: E402
 
 # -- Project information -----------------------------------------------------
 
@@ -42,6 +49,14 @@ extensions = [
     'sphinxcontrib.details.directive',
     'sphinx_reredirects',
 ]
+
+# :pr:`82` links pull request #82. Version markers (versionadded/versionchanged) carry one, so a
+# reader can see the change that shipped the behaviour. :commit:`961fb22` links a commit, for the
+# few changes that reached develop without a pull request.
+extlinks = {
+    'pr': ('https://github.com/hypershell/hypershell/pull/%s', '#%s'),
+    'commit': ('https://github.com/hypershell/hypershell/commit/%s', '%s'),
+}
 
 # The Tutorial, blog, and roadmap pages moved to the hypershell.org site. sphinx-reredirects emits a
 # meta-refresh stub at each old path so previously-published ReadTheDocs URLs redirect there instead
@@ -79,7 +94,9 @@ master_doc = 'index'
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+# The _include/ fragments are read by `.. include::` only; built as pages of their own they would
+# duplicate every label they define.
+exclude_patterns = ['_build', '_include', '_ext', 'Thumbs.db', '.DS_Store']
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'dracula'
@@ -101,7 +118,6 @@ html_css_files = [
 ]
 html_favicon = '_static/logo-dark-mode.png'
 html_theme_options = {
-    # 'announcement': 'See Installation page for not on PyPI package name issue!',
     'sidebar_hide_name': True,
     'light_logo': 'logo-light-mode.png',
     'dark_logo': 'logo-dark-mode.png',
@@ -132,6 +148,12 @@ html_theme_options = {
         },
     ],
 }
+
+# The site builds from develop, so while the version is a pre-release or development version every
+# page says which line the docs track and how to install it; a final version shows no notice.
+site_notice = announcement(release, base=html_baseurl)
+if site_notice:
+    html_theme_options['announcement'] = site_notice
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

@@ -55,6 +55,10 @@ the package directly from the package index, the following optional `extras` are
   UUIDv7 task identifiers. Without this extra, task IDs use the standard-library UUIDv4.
   The TimescaleDB provider requires it on every host that submits tasks, not only the server
   (see the TimescaleDB section of :ref:`database <database>`).
+
+  .. versionchanged:: 2.9.0
+     :pr:`71`: the TimescaleDB provider requires this extra.
+
 * ``zstd``: enable `Zstandard <https://facebook.github.io/zstd/>`_ as a log-rotation
   compression option (``logging.compress = "zstd"``).
 * ``cron``: enable cron-style, time-based log-rotation schedules via
@@ -224,6 +228,8 @@ the ``hs`` command is renamed to ``hsh`` (though this is not ideal and may chang
 
 -------------------
 
+.. _install_containers:
+
 Docker and Apptainer
 --------------------
 
@@ -271,6 +277,9 @@ release workflow's identity, with no long-lived signing key) and can be verified
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity-regexp 'https://github.com/hypershell/hypershell/.*' \
             ghcr.io/hypershell/hypershell:latest
+
+.. versionadded:: 2.9.0
+   Published, signed container images (:commit:`ee03014`).
 
 
 -------------------

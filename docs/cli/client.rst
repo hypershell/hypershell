@@ -15,4 +15,11 @@ Description
 
 |
 
+.. versionadded:: 2.9.0
+   ``--zone`` (:pr:`78`).
+
+.. versionchanged:: 2.9.0
+   :pr:`78`: the client requests each bundle from the server, and ``-b``/``--bundlesize`` is the
+   size it asks for; left unset, the server's size applies.
+
 .. include:: ../_include/client_help.rst

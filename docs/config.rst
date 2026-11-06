@@ -94,6 +94,8 @@ Runtime Package Resolution
 
 ------
 
+.. _config_params:
+
 Parameter Reference
 -------------------
 
@@ -102,6 +104,8 @@ Parameter Reference
 .. include:: _include/config_param_ref.rst
 
 ------
+
+.. _config_task_env:
 
 Task Environment
 ----------------

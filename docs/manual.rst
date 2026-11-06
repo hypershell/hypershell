@@ -1,3 +1,5 @@
+:orphan:
+
 Manual Page
 ===========
 
@@ -19,8 +21,7 @@ hs server [-h] FILE ...
 hs client [-h] ...
     Run stand-alone client.
 
-hs relay [-h] [-H ADDR] [-p NUM] [--no-tls] [--zone NAME] [-N NUM] [--launcher CMD]
-         [--launcher-args ARGS] [--bind ADDR] [--port NUM] [--database PATH]
+hs relay [-h] [-H ADDR] [-p NUM] [--zone NAME] ...
     Run relay for one site.
 
 hs submit [-h] [ARGS... | -f FILE] ...

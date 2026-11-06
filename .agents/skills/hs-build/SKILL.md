@@ -76,7 +76,9 @@ Parse `$ARGUMENTS` case-insensitively; if ambiguous, STOP and ask.
   silently drift the contract.
 - **Honor `AGENTS.md`**: code conventions (incl. declarative comments — no spec `R#`/`P#` ids in
   source), `exit_status` ranges, the task-lifecycle predicates, the
-  same-commit rule (a CLI/feature change updates `docs/_include/*.rst` + `share/` completions), and
+  same-commit rule (a CLI/feature change updates `docs/_include/*.rst` + `share/` completions; a
+  user-visible change also updates its prose page with a `versionadded`/`versionchanged` marker and
+  a *Not yet released* entry in `docs/whats_new.rst`, and the docs build passes with `-W`), and
   the `cmdkit.app.exit_status` constants. Consult `invariants.md` for the footguns the phase touches.
 - **Circuit breaker (durable).** Every red verify gate is recorded on file via
   `set_phase.py --phase {id} --record-attempt` — the counter, not session memory, trips the breaker.

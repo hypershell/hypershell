@@ -7,8 +7,9 @@ this drifts, fix it). Two consumers:
 - **`hs-plan` (gate):** before research *and* after PLAN/TECH is drafted, walk the sections a change
   touches and confirm the design honors each. Record any bend in PLAN's deviation-justification
   table.
-- **`hs-review` (footgun list):** a violation of any invariant here is **auto-CRITICAL** and, when it
-  touches the high-blast-radius core, forces a human sign-off gate.
+- **`hs-review` (footgun list):** a violation of any invariant in §1–§11 is **auto-CRITICAL** and,
+  when it touches the high-blast-radius core, forces a human sign-off gate. A §12 project-convention
+  violation grades **HIGH** (`review-rubric.md`'s severity table).
 
 Only invoke the sections relevant to the change — do not manufacture findings against untouched
 subsystems.
@@ -196,6 +197,9 @@ subsystems.
 - **Version is single-sourced from `pyproject.toml`** — never hardcode elsewhere.
 - A CLI/feature change updates the affected `docs/_include/*.rst` help snippets **and** the `share/`
   completions **in the same commit**.
+- A user-visible change also updates its prose page in the same commit, marked `.. versionadded::`
+  / `.. versionchanged::` with the release line, plus a *Not yet released* entry in
+  `docs/whats_new.rst` (`AGENTS.md` § Docs). The docs build passes with `-W`.
 - The wheel ships `share/`; a CI metadata job asserts those paths — keep `share/` and the CI list in
   lockstep.
 - Supported Python is **3.11–3.14**; do not reintroduce 3.9/3.10 shims.

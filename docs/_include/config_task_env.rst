@@ -65,6 +65,9 @@ A few common environment variables are defined for every task.
 ``TASK_SLOT_COUNT``
     Number of concurrent executors on the client (``N``). Defaults to ``1``.
 
+.. versionadded:: 2.9.0
+   ``TASK_SLOT`` and ``TASK_SLOT_COUNT`` (:pr:`52`).
+
 |
 
 Any user-defined tags are included as environment variables as well with

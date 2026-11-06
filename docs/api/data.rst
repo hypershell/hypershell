@@ -21,6 +21,10 @@ Functions
 
 |
 
+.. versionchanged:: 2.9.0
+   :pr:`69`: :func:`initdb`, :func:`checkdb` and :func:`ensuredb` upgrade an existing database
+   from an earlier release in place.
+
 .. autofunction:: initdb
 
 |
@@ -34,6 +38,9 @@ Functions
 |
 
 .. autofunction:: upgradedb
+
+.. versionadded:: 2.9.0
+   :pr:`69`
 
 |
 

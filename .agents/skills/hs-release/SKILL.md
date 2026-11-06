@@ -151,6 +151,28 @@ appear for commands run against the `/tmp` worktree path; that is expected and h
 - **pre-release:** stay on `develop` (the bump commit and tag land here).
 - **full-release:** `git switch -c release/X.Y.0 develop`.
 
+### Step 3a — Docs: complete the markers and What's new (pre-release & full-release)
+Skip for a patch: patch releases come from `master`, whose docs the site no longer serves.
+1. Every `versionadded`/`versionchanged` marker under `docs/` whose body has **no link at all** (no
+   `:pr:` and no `:commit:`) gets one: the number from the squash commit that added that marker.
+   Find it with `git blame -L <n>,<n> -- <file>` on the marker's directive line, not with `git log
+   -S` on it: every marker of a line has the same directive text, so `-S` returns every commit that
+   added one. That commit is the feature's own, since a marker lands with its change. Get its pull
+   request from GitHub (`gh api repos/hypershell/hypershell/commits/<sha>/pulls`), not from the
+   subject: most squash subjects end `(#NN)`, but some merges into `develop` don't. Only a commit
+   with no pull request gets `:commit:` with its short SHA. Never touch a marker that already has a
+   link.
+2. In `docs/whats_new.rst`, move each *Not yet released* entry into its topic group (an upgrade
+   caution under *Upgrading*, a feature or change under its area in *New and changed*, a fix under
+   *Fixes*), give it this version and its link inline as the other entries do (`(X.Y.ZaN,
+   :pr:`NN`)`), and leave *Not yet released* saying nothing is pending. At a **full release**, copy the
+   page to `docs/whats_new_X_Y.rst` as the record of that line (linked from the page, not the
+   navigation), and reset `docs/whats_new.rst` for the next line. `docs/whats_new.rst` is always
+   the live page: the site notice, `AGENTS.md` and `hs-build` all point at it. Markers stay. The
+   notice keys off the version and needs no edit.
+3. Build with `-W` (`AGENTS.md` § Docs), then commit `[docs] Complete version markers and What's new
+   for X.Y.Z` on the branch Step 3 set up. Skip the commit when nothing changed.
+
 ### Step 4 — Shared core: bump + man pages + commit
 1. Edit the `version = "…"` line in `pyproject.toml` → X.Y.Z (the ONLY source).
 2. `uv lock` (updates the `hypershell` entry in `uv.lock`).

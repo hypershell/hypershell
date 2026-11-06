@@ -15,4 +15,7 @@ Description
 
 |
 
+.. versionadded:: 2.9.0
+   ``-X``/``--cancelled`` and ``--signal`` (:commit:`27db1b0`).
+
 .. include:: ../_include/task_update_help.rst

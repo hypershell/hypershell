@@ -57,12 +57,14 @@ Additional instructions provided with the invocation: $ARGUMENTS
   `git diff {base}...HEAD` hands the reviewer PLAN/TECH/research (and any prior cycle's REVIEW.md) as
   added hunks — the `':(exclude)spec/'` pathspec below is load-bearing, not cosmetic.
 - **External verification is the spine.** Every finding must cite an executed command
-  (`uv run pytest`, real CLI in a throwaway site via `.agents/factory/bin/temp_site.sh`, docs build
-  when touched). No assertion-only findings.
+  (`uv run pytest`, real CLI in a throwaway site via `.agents/factory/bin/temp_site.sh`, the docs
+  build with `-W` when docs or user-visible behaviour are touched). A user-visible change whose prose
+  page, `versionadded`/`versionchanged` marker or `docs/whats_new.rst` entry is missing is an
+  `AGENTS.md` §12 finding. No assertion-only findings.
 - **Refute before reporting.** Try to disprove each candidate; classify `CONFIRMED` (reproduced) vs
   `PLAUSIBLE` (needs human triage). Default to dropping when uncertain.
 - **Scope is narrow:** correctness bugs, GOAL R-ID gaps, AGENTS.md invariant violations
-  (auto-CRITICAL), and scope creep (changes mapping to no R-ID). **No style nits, no speculative
+  (auto-CRITICAL, except §12 conventions, which grade HIGH), and scope creep (changes mapping to no R-ID). **No style nits, no speculative
   hardening** — a gap-hunting reviewer manufactures gaps.
 - **Read-only session.** This skill makes no source edits; it writes `REVIEW.md` and updates the
   `TECH.md` `review` block via `set_phase.py`.

@@ -15,4 +15,7 @@ Description
 
 |
 
+.. versionadded:: 2.9.0
+   ``card`` format (:pr:`60`).
+
 .. include:: ../_include/task_wait_help.rst

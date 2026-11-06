@@ -186,6 +186,7 @@ If this software has helped facilitate your research please consider citing us.
     :hidden:
     :caption: Intro
 
+    whats_new
     getting_started
     install
     security

@@ -45,6 +45,11 @@ Console entry points (`pyproject.toml [project.scripts]`): **`hs`** → `hypersh
   Never hardcode a version elsewhere.
 - A feature/CLI change is expected to update, in the **same commit**, the affected
   `docs/_include/*.rst` help snippets and the shell completions under `share/`.
+- A **user-visible** change also updates, in the same commit, the prose page that describes it,
+  and marks the passage with `.. versionadded::` or `.. versionchanged::` naming the release line
+  it ships in (`2.9.0`, never an alpha), plus an entry under *Not yet released* in
+  `docs/whats_new.rst`. The marker's `:pr:` link is added at the next release, once the squash
+  commit carries the number; see § Docs.
 
 ## Commands
 
@@ -495,8 +500,20 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
 reStructuredText + Sphinx (Furo theme). Conventions: `.. _anchor:` + `:ref:`, `===`/`---`/`^^^`
 underlines (must be ≥ title length), `-------------------` section rules, `|br|`, `*HyperShell*`
 italics, first-person-plural voice. CLI help text is generated into `docs/_include/*.rst` — a
-CLI change updates those. Build with `uv run sphinx-build docs docs/_build` and confirm no new
-warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-existing).
+CLI change updates those. Build with `uv run --python 3.12 --group docs sphinx-build -W
+--keep-going -q -E -b html docs docs/_build/html`. The build must produce no warnings: CI's `docs`
+job runs the same command and fails on any warning, and the published site builds from `develop`.
+A page reached only by direct link, not by the navigation, carries `:orphan:`.
+
+The published site builds from `develop`, ahead of the stable release, so every page says what is
+new. Behaviour the stable line lacks carries `.. versionadded:: X.Y.0`; behaviour that differs
+carries `.. versionchanged:: X.Y.0` with one short clause. The body links the pull request
+(`:pr:`NN``), or the commit (`:commit:`abc1234``) for a change that landed without one. Place a marker at the narrowest accurate scope: under the title of a wholly new page,
+under a section heading, or directly after the option or `autofunction` it qualifies. Generated help
+snippets are never hand-marked: the marker goes beside the `.. include::`. A marker written during a
+cycle has no PR number yet; `hs-release` adds it. Markers are never removed. `docs/whats_new.rst`
+lists every change since the stable release, with the pre-release that first carried it, and the
+site notice in `docs/conf.py` keys off the package version, so it needs no editing.
 
 Current docs, notes, seeds and PRs name only the top-level commands: `hs list`, `hs info`,
 `hs wait`, `hs run`, `hs update`. The `hs task …` subcommands stay in the code for backwards

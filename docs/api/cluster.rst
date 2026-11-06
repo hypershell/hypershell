@@ -51,6 +51,10 @@ Classes
 
 |
 
+.. versionchanged:: 2.9.0
+   Each cluster class takes a ``from_json`` parameter (:pr:`48`) and a ``zone`` parameter
+   (:pr:`78`).
+
 .. autoclass:: hypershell.cluster.local.LocalCluster
     :show-inheritance:
 
@@ -78,6 +82,9 @@ Classes
     .. automethod:: start
     .. automethod:: join
     .. automethod:: stop
+
+.. versionchanged:: 2.9.0
+   :pr:`82`: the ``evict_after`` parameter.
 
 |
 
