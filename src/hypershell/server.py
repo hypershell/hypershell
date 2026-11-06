@@ -566,6 +566,7 @@ class HeartMonitor(StateMachine):
     startup_phase: bool = True  # should not halt until at least one client
     scheduler_done: bool = False  # set by parent thread when scheduling is over
     should_signal: bool = False  # set by parent thread to signal clients
+    signaled: bool = False  # clients have been told to disconnect; late arrivals are told too
     latest_heartbeat: Heartbeat = None
 
     state = HeartbeatState.START
@@ -635,6 +636,9 @@ class HeartMonitor(StateMachine):
                         Client.update(old_client.id, disconnected_at=None, evicted=False)
                     except Client.NotFound:
                         Client.add(new_client)
+                if self.signaled:
+                    # Registered after the others were told to disconnect: it needs its own disconnect
+                    self.request_disconnect(hb)
             self.beats[hb.uuid] = hb
             return HeartbeatState.SWITCH
         else:
@@ -643,6 +647,10 @@ class HeartMonitor(StateMachine):
                 self.beats.pop(hb.uuid)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone())
+            elif self.signaled:
+                # Finished without ever registering, so it may have taken a disconnect that was
+                # posted for a registered client: post one in its place
+                self.request_disconnect(hb)
             return HeartbeatState.SWITCH
 
     def switch_mode(self: HeartMonitor) -> HeartbeatState:
@@ -677,13 +685,25 @@ class HeartMonitor(StateMachine):
         return HeartbeatState.SWITCH
 
     def signal_clients(self: HeartMonitor) -> HeartbeatState:
-        """Send shutdown signal to all connected clients."""
+        """
+        Send shutdown signal to all connected clients.
+
+        Each disconnect is one sentinel on the shared task queue, taken by whichever client reads
+        next, so every client must have one posted for it. Clients are counted by heartbeat, and a
+        client can take tasks before its first heartbeat arrives. One that registers after this
+        signal, or finishes without having registered, gets a disconnect of its own then.
+        """
         log.debug(f'Signaling clients ({len(self.beats)} connected)')
         for hb in self.beats.values():
-            self.queue.scheduled.put(make_sentinel())
-            log.debug(f'Disconnect requested ({hb.host}: {hb.uuid})')
+            self.request_disconnect(hb)
+        self.signaled = True
         self.should_signal = False
         return HeartbeatState.SWITCH
+
+    def request_disconnect(self: HeartMonitor, hb: Heartbeat) -> None:
+        """Post one disconnect (sentinel) on the task queue on behalf of the client that sent `hb`."""
+        self.queue.scheduled.put(make_sentinel())
+        log.debug(f'Disconnect requested ({hb.host}: {hb.uuid})')
 
     @staticmethod
     def finalize() -> HeartbeatState:
