@@ -48,11 +48,10 @@ phases:
   verify: 'uv run pytest -n auto && uv run sphinx-build -W --keep-going -E -q docs
     docs/_build 2>&1 | grep WARNING  # expect exactly the two known toctree warnings'
 review:
-  last_reviewed_commit: b80c6b2
-  verdict: changes-requested
-  blocked_reason: 'review 1: F1 templates.rst local-mode lambda sentence (R4); F2
-    env-placeholder hint case untested (R3)'
-  cycle: 1
+  last_reviewed_commit: de626171d4d77b4a0fabcf8574fcb97427bfb723
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
 ---
 # TECH.md — Launch-path follow-ups: accurate no-key hints, template docs, an export-name test
 

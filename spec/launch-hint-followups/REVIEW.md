@@ -209,3 +209,106 @@ The passage reads correctly, and the move keeps the approved meaning.
 
 **Next:** `/hs-build` for F1 (R4 wording) and F2 (one test case). Then review cycle 2, scoped to
 those two items.
+
+## Review cycle 2 — approved (2026-11-05)
+
+> **Mode:** scoped to the remediation of F1 and F2, on the foreman's instruction. The pass read
+> `git diff c1b9616..de62617 -- . ':(exclude)spec/'` (`docs/_include/templates.rst`,
+> `tests/test_cluster_launch.py`), checked that diff for regressions, and ran the full suite and
+> Sphinx. It ran inline in the orchestrator, with no subagent (foreman's instruction).
+
+- **Reviewed commit:** de62617  ·  **Base:** develop (`origin/develop` at `d2a460f`)  ·  **Date:** 2026-11-05
+- **Verdict:** approved. F1 and F2 are closed, and there are no new findings.
+- **Cycle:** 2 of ≤3.
+- **Contract drift:** none. `git log origin/develop..HEAD -- spec/launch-hint-followups/GOAL.md`
+  still shows only `ea56e37`, the shaping commit.
+
+### Verification run
+
+All runs used scratch copies only (`git archive de62617`, plus `d2a460f` and one mutant for
+comparison). The venv came from `uv sync --frozen --python 3.14 --group docs` (Python 3.14.6). Every
+run was under a perl process-group kill timer.
+
+- **Full suite**, `pytest -n auto`, in a copy without the contract tag: **1001 passed, 91 skipped,
+  2 failed**. Neither failure is in a file or code path the branch touches. Both are time limits
+  under load, and both pass when run again:
+  - `test_group_order.py::test_cluster_clients_with_timeout_wait_for_file` hit its 180 s cap on a
+    6000-task local `hs cluster` run. Run alone, it failed once more at 180 s, then passed in 65 s.
+    It passed in 118 s on `d2a460f`. Local `hs cluster` runs `ClientThread`, and the branch's only
+    source change is the `no_key` predicate in `ClientApp.run`. So the two trees run the same code
+    here, and the time spread is the host's load.
+  - `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade` logged no wait slice inside its 2 s
+    hold. Run alone, it passed in 2.5 s.
+- **Sphinx** `-W --keep-going -E`: exit 1, with exactly the two known warnings ("document isn't
+  included in any toctree", for `cli/task_submit.rst` and `manual.rst`). The F1 passage renders as
+  written in `templates.html`.
+- **Docs gates.** The changed sentence names `hs cluster` only. It contains no internal names and
+  describes no weakness.
+
+### F1 — closed
+
+`docs/_include/templates.rst:200-204` now reads: "Under the default local mode, whose client runs
+inside the `hs cluster` process, it includes the variable only if the environment that starts
+`hs cluster` already sets it: the key that run mints is never put in that process's environment."
+
+A scratch probe ran `hs cluster` with stand-ins and the template
+`echo LAMBDA:{= os.environ.get("HYPERSHELL_SERVER_AUTH", "absent") =}:{}`. Four tasks ran each
+time. It compared the value each lambda saw with three values:
+
+- the starting shell's value, `u` × 64, which is not hex, so no minted key can equal it;
+- the key the stand-ins recorded in the launched client's environment;
+- `absent`.
+
+| Run | Starting shell | `{= =}` saw (all 4 tasks) |
+|---|---|---|
+| local `hs cluster` | variable unset | absent |
+| local `hs cluster` | exports the variable | the shell's value, not a minted key |
+| `--launcher` | variable unset | the run's own key |
+| `--launcher` | exports the variable | the run's own key (the launch sets it over the shell's) |
+| `--ssh` | variable unset | the run's own key |
+| `--ssh` | exports the variable | the run's own key |
+
+Each clause of the paragraph holds:
+
+- "includes it only if the environment that starts `hs cluster` already sets it": the two local rows.
+- "the key that run mints is never put in that process's environment": the local row with an
+  export shows the shell's exact value, and the row without one shows nothing.
+- The unchanged launcher/SSH sentence holds both with and without an export.
+
+### F2 — closed
+
+`tests/test_cluster_launch.py:1307` adds
+`pytest.param([], {AUTH_ENV: DEFAULT_AUTH}, None, False, id='environment-default-key')`.
+
+- **Head:** all six `test_client_names_missing_key_only_when_none_given` cases pass.
+- **Mutant H2:** the clause `and AUTH_ENV not in os.environ` was removed from `client.py:1668`, and
+  the module was run against that copy. Result: **1 failed, 112 passed, 4 skipped**. The one
+  failure is `…none_given[environment-default-key]`, whose stderr carries "No key reached this
+  client". In cycle 1, H2 survived with 112 passed. With H2 killed, none of the 12 cycle-1
+  mutants survives. The other 11 were killed in cycle 1, by tests this cycle leaves unchanged.
+
+### Regressions
+
+- The remediation diff has two hunks: one sentence of docs and one test parameter. No source
+  changed. `git diff b80c6b2..de62617 -- . ':(exclude)spec/'` has the same patch-id as the
+  remediation diff, so nothing else reached the branch.
+- Both hunks map to R-IDs, R4 and R3. Neither is scope creep.
+
+### Requirement → evidence matrix (changes since cycle 1)
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R3 | `…none_given[environment-default-key]`; H2 now killed | ✅ |
+| R4 | F1 probe above (local, launcher, SSH, each with and without the shell's export) | ✅ |
+
+R1, R2, R5 and R6 are unchanged from cycle 1. The source and those docs have not changed since
+`b80c6b2`.
+
+### Human-gate triggers
+
+- This cycle has no CONFIRMED finding.
+- The `client.py` predicate (high blast radius) is unchanged since cycle 1. F2's fix is a test only.
+- O1 (the `auth_env`/`auth_eval` variant collision, now seeded) and O2 (the `docs/security.rst`
+  `{= =}` "key included" bullet, held for the maintainer) stay outside this cycle.
+
+**Next:** `/hs-publish`.
