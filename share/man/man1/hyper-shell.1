@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Nov 05, 2026" "2.9.0a5" "hypershell"
+.TH "HYPER-SHELL" "1" "Nov 06, 2026" "2.9.0a6" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -48,6 +48,15 @@ Run stand\-alone server.
 .TP
 .B hs client [\-h] ...
 Run stand\-alone client.
+.TP
+.B hs relay [\-h] [\-H ADDR] [\-p NUM] [\-\-no\-tls] [\-\-zone NAME] [\-N NUM] [\-\-launcher CMD]
+.INDENT 7.0
+.INDENT 3.5
+[\-\-launcher\-args ARGS] [\-\-bind ADDR] [\-\-port NUM] [\-\-database PATH]
+.UNINDENT
+.UNINDENT
+.sp
+Run relay for one site.
 .TP
 .B hs submit [\-h] [ARGS... | \-f FILE] ...
 Submit one or more tasks.
@@ -972,6 +981,154 @@ a single host or shared filesystem. Provide a \fIPATH\fP to a certificate author
 verify peers across multiple hosts.
 .sp
 See the \fIsecurity\fP section for peer verification modes.
+.UNINDENT
+.SH RELAY USAGE
+.INDENT 0.0
+.TP
+.B \fBhs\fP \fBrelay\fP \fB[\-h]\fP \fB[\-H ADDR]\fP \fB[\-p NUM]\fP \fB[\-\-no\-tls]\fP \fB[\-\-zone NAME ...]\fP \fB[\-N NUM]\fP
+\fB[\-\-launcher CMD]\fP \fB[\-\-launcher\-args ARGS]\fP \fB[\-\-bind ADDR]\fP \fB[\-\-port NUM]\fP \fB[\-\-database PATH]\fP
+.UNINDENT
+.sp
+Run relay for one site.
+.sp
+A \fIrelay\fP connects a site to an upstream \fIserver\fP\&. Upstream it is an ordinary \fIclient\fP; at
+the site it runs its own \fIserver\fP, scheduling the tasks it receives to \fIclients\fP it launches
+there, and returns their results upstream.
+.sp
+Upstream, the relay requests work for its zone under an identity of its own, derived from the
+relay and the zone name and logged when it starts. It holds at most about two rounds of work for its
+site (twice its connected \fIclients\fP times its bundle size, \fBrelay.bundlesize\fP, which is never
+below a \fIclient\fP\(aqs executor threads), asks for more once half of that is left, and then for the
+whole difference at once. It confirms the tasks it receives only once they are stored in the relay
+database. The upstream key comes from
+\fBrelay.upstream.auth\fP (or its \fB_env\fP and \fB_eval\fP forms), never from the command line.
+The key never reaches the site: before its first \fIclient\fP is launched, the relay removes from its
+own environment, which the site\(aqs \fIclients\fP and their tasks inherit, every relay setting
+(\fBHYPERSHELL_RELAY_*\fP) and any variable holding the key. When \fBHYPERSHELL_CONFIG_FILE\fP names a
+file that holds relay settings or the key, the site is given a copy of it instead, without the
+\fB[relay]\fP section and without any value holding the key, readable by its owner only, and kept
+beside the relay database; the site\(aqs \fIclients\fP keep the file\(aqs other settings, \fB[server.tls]\fP
+among them. (If the file cannot be read, the site gets none.) The copy is removed when the relay
+exits, however it ends: when it finishes, when it fails, and on SIGINT or SIGTERM. Only a relay
+killed outright leaves it behind (by SIGKILL, or by a second SIGTERM while it ends, which ends the
+process at once), and the next relay on the same relay database to need a copy writes over it. The relay refuses to start if the \fIclient\fP command line (launcher, launcher
+arguments or template) or a variable exported to tasks (\fB[export]\fP) would carry the key.
+.sp
+At the site the relay runs its tasks on the \fIclients\fP it launches there, with a key it mints for
+each run. Each \fIclient\fP receives that key in its environment (\fBHYPERSHELL_SERVER_AUTH\fP), never on
+its command line, and passes it to none of its tasks, so the launcher must pass the environment
+through to the \fIclient\fP\&. A site \fIclient\fP that stops sending heartbeats is evicted by the relay
+after \fBserver.evict\fP seconds, and the tasks it held are run again at the site. The site never
+retries a task: one that fails goes back upstream as it
+ended, and the upstream \fIserver\fP decides whether to run it again. Each result goes back attributed to the \fIclient\fP
+at the site that ran it, matched to the assignment the upstream \fIserver\fP made. Results are kept in
+the relay database until they have been handed over, and for a while after (\fBrelay.retention\fP).
+The relay\(aqs heartbeat names its site (\fBrelay.site\fP, by default the relay\(aqs host name) and lists the
+\fIclients\fP connected at the site, by id and host only. The upstream \fIserver\fP records them as its own
+\fIclients\fP, attributed to the site and the relay, and counts them (not the relay) as connected. They
+never heartbeat upstream themselves: they disconnect there when they leave the site, and all at once
+when the relay finishes or is evicted.
+A relay may serve several zones (\fB\-\-zone\fP given more than once, or \fBrelay.zone\fP as a list or as
+one \fB[relay.zone.NAME]\fP table per zone). Upstream it is then one \fIclient\fP per zone, each under its
+own identity, all over the same connection: it takes the zones in turn, and asks for each only as
+much as that zone\(aqs own \fIclients\fP at the site have room for. At the site it keeps one fleet of
+\fIclients\fP per zone, launched alike but each serving its own zone, with that zone\(aqs own launcher,
+launcher arguments and size if its table gives them; the one relay\-local \fIserver\fP serves them all.
+The first zone\(aqs identity lists every \fIclient\fP at the site upstream. Each identity sends its own
+heartbeat, so if the relay fails, the upstream \fIserver\fP evicts each one and puts back what each
+held, in every zone.
+When the upstream \fIserver\fP shuts down, the relay finishes the tasks it holds, returns every result,
+and ends its upstream registration. It hears of the shutdown in reply to a request for work, in any of
+its zones; a zone with no \fIclient\fP at the site and no task held then ends with the others. A relay
+with no \fIclient\fP at the site in any zone never asks, so it waits until it is drained or stopped.
+SIGUSR1 or SIGUSR2, sent to the relay process, drain it the same way: the relay stops asking for work, its site finishes every task the relay holds (those not yet started
+too), and the results go back before the registration ends. SIGINT and SIGTERM end the relay at
+once, without draining: it ends the \fIclients\fP it launched and exits (on SIGTERM, by that signal; a
+second SIGTERM ends the process at once). If
+the relay fails (a part of its own \fIserver\fP stops, say, or the upstream \fIserver\fP refuses it), it ends
+the \fIclients\fP it launched and exits with a non\-zero status. Either way the upstream \fIserver\fP puts
+back the tasks the relay held when it evicts the relay.
+.sp
+A lost upstream connection is not a failure. While the upstream \fIserver\fP cannot be reached (a call
+gets no answer within \fBrelay.upstream.deadline\fP), the site keeps running the tasks the relay holds,
+their results are kept in the relay database, and the relay connects again with backoff (at most
+\fBrelay.upstream.backoff\fP seconds apart). It logs the outage when it begins, now and then while it
+lasts, and when it ends. Once connected again it sends a heartbeat first (the upstream \fIserver\fP
+registers it again if it had evicted it), then returns the results it holds, and only then asks for
+more work. An outage shorter than the upstream eviction period (\fBrelay.upstream.evict_hint\fP)
+costs nothing: the results land. After a longer one, or after the upstream \fIserver\fP restarted, the
+upstream \fIserver\fP has put those tasks back for other \fIclients\fP, so their results are refused as
+stale and the tasks run again. A relay that is started while its upstream \fIserver\fP cannot be reached
+waits for it before it starts its site, and a relay restarted on the same relay database returns the
+results its earlier run still held.
+.sp
+The relay database is always a private SQLite file, whatever database is configured, and the
+configured database is never opened. One relay runs per process, and a second relay refuses to
+start on the same relay database.
+.SS Options
+.INDENT 0.0
+.TP
+.B \fB\-H\fP, \fB\-\-upstream\-host\fP \fIADDR\fP
+Hostname or IP address of the upstream \fIserver\fP (default: localhost).
+.sp
+See also \fBrelay.upstream.host\fP\&.
+.TP
+.B \fB\-p\fP, \fB\-\-upstream\-port\fP \fINUM\fP
+Port number of the upstream \fIserver\fP (default: 50001).
+.sp
+See also \fBrelay.upstream.port\fP\&.
+.TP
+.B \fB\-\-no\-tls\fP
+Disable TLS on the connection to the upstream \fIserver\fP (not recommended).
+.sp
+This affects only the upstream connection; the relay\-local \fIserver\fP keeps \fB[server.tls]\fP\&.
+See also \fBrelay.upstream.tls.enabled\fP\&.
+.TP
+.B \fB\-\-zone\fP \fINAME\fP
+Zone this relay serves (default: the default zone). Give it more than once to serve several.
+.sp
+The relay asks upstream only for tasks of the zones it serves, and keeps one fleet of
+\fIclients\fP at the site for each zone (\fB\-N\fP \fIclients\fP each, unless the zone gives its own
+\fBsize\fP). Zones named here take the place of \fBrelay.zone\fP; each still takes its own
+settings from \fB[relay.zone.NAME]\fP\&. See also \fBrelay.zone\fP\&.
+.TP
+.B \fB\-N\fP, \fB\-\-size\fP \fINUM\fP
+Number of \fIclients\fP the relay keeps launched at its site (default: 1).
+.sp
+A \fIclient\fP that exits is launched again. The size must be at least 1: with no \fIclient\fP at the
+site the relay would never ask upstream for work. See also \fBrelay.size\fP\&.
+.TP
+.B \fB\-\-launcher\fP \fICMD\fP
+Command prefix used to launch each \fIclient\fP at the site (default: none).
+.sp
+With none, \fIclients\fP run directly on the relay\(aqs host. Otherwise each is launched as
+\fBCMD [ARGS...] hyper\-shell client ...\fP (e.g., \fBsrun\fP). The \fIclients\fP connect back to the
+relay by its host name. The launcher must pass the environment through: each \fIclient\fP
+receives the site key there (\fBHYPERSHELL_SERVER_AUTH\fP), never on its command line.
+See also \fBrelay.launcher\fP\&.
+.TP
+.B \fB\-\-launcher\-args\fP \fIARGS\fP
+Extra arguments for the launcher, placed after it (quoted as one argument).
+.sp
+See also \fBrelay.launcher_args\fP\&.
+.TP
+.B \fB\-\-bind\fP \fIADDR\fP
+Bind address of the relay\-local \fIserver\fP (default: 0.0.0.0).
+.sp
+The \fIclients\fP at the site connect to the relay here, so it must be reachable from the
+nodes they run on. See also \fBrelay.bind\fP\&.
+.TP
+.B \fB\-\-port\fP \fINUM\fP
+Port of the relay\-local \fIserver\fP (default: 50002).
+.sp
+The default differs from the \fIserver\fP default (50001), so a relay can run beside a
+\fIserver\fP on the same host. See also \fBrelay.port\fP\&.
+.TP
+.B \fB\-\-database\fP \fIPATH\fP
+Path to the relay database (default: <lib>/relay/<host>.db).
+.sp
+The default is named for the host, since a home directory is often shared between hosts.
+A node\-local disk is a good place for it. See also \fBrelay.database\fP\&.
 .UNINDENT
 .SH SUBMIT USAGE
 .INDENT 0.0
@@ -2676,6 +2833,183 @@ Maximum size of cluster (default: 1).
 .sp
 For a \fIdynamic\fP autoscaling policy, this sets an upper limit on the number of launched
 clients. When this number is reached, scaling stops regardless of task pressure.
+.UNINDENT
+.UNINDENT
+.TP
+.B \fB[relay]\fP
+Section for the \fIrelay\fP workflow, which connects a site to an upstream \fIserver\fP\&.
+.INDENT 7.0
+.TP
+.B \fB\&.database\fP
+Path to the relay database (default: <lib>/relay/<host>.db).
+.sp
+The relay database is always a private SQLite file, whatever \fB[database]\fP names; a relay
+never opens the configured database. The default is named for the host, since a home
+directory is often shared between hosts. A node\-local disk is a good place for it.
+.sp
+See also \fB\-\-database\fP command\-line option.
+.TP
+.B \fB\&.bind\fP
+Bind address of the relay\-local \fIserver\fP (default: \fI0.0.0.0\fP).
+.sp
+The \fIclients\fP at the site connect here. See also \fB\-\-bind\fP command\-line option.
+.TP
+.B \fB\&.port\fP
+Port of the relay\-local \fIserver\fP (default: \fI50002\fP).
+.sp
+See also \fB\-\-port\fP command\-line option.
+.TP
+.B \fB\&.bundlesize\fP
+Size of task bundle for the relay\-local \fIserver\fP and the \fIclients\fP at its site
+(default: \fI1\fP).
+.sp
+It is never smaller than \fBrelay.num_threads\fP: a \fIclient\fP asks for one bundle at a time,
+so a smaller bundle would leave its executors idle between requests.
+.TP
+.B \fB\&.bundlewait\fP
+Seconds the relay waits before returning finished tasks upstream regardless of
+\fIbundlesize\fP (default: \fI5\fP).
+.TP
+.B \fB\&.poll\fP
+Maximum polling interval of the relay\-local scheduler in seconds (default: \fI0.1\fP).
+.sp
+Received tasks wait at most this long before the relay\-local \fIserver\fP hands them out.
+.TP
+.B \fB\&.retention\fP
+Seconds a result is kept in the relay database after it has been returned upstream
+(default: \fI300\fP). Results not yet returned are always kept.
+.TP
+.B \fB\&.zone\fP
+Zone or zones the relay serves (default: none, the default zone).
+.sp
+One zone name, a list of names, or one table per zone, \fB[relay.zone.NAME]\fP, which may
+give that zone\(aqs own \fBlauncher\fP, \fBlauncher_args\fP and \fBsize\fP (each in place of the
+relay\(aqs, for that zone\(aqs \fIclients\fP only); an empty table serves the zone with the relay\(aqs.
+Upstream the relay is one \fIclient\fP per zone, each with its own identity; at the site it
+keeps one fleet of \fIclients\fP per zone, all served by the relay\-local \fIserver\fP\&. The first
+zone\(aqs identity lists the site\(aqs \fIclients\fP upstream.
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.EX
+[relay.zone.cpu]
+
+[relay.zone.gpu]
+size = 2
+launcher = \(dqsrun\(dq
+launcher_args = \(dq\-\-gres=gpu:1\(dq
+.EE
+.UNINDENT
+.UNINDENT
+.sp
+See also \fB\-\-zone\fP command\-line option, which names the zones in place of this one.
+.TP
+.B \fB\&.site\fP
+Name of the relay\(aqs site (default: none, the relay\(aqs host name).
+.sp
+The upstream \fIserver\fP records the relay, and the \fIclients\fP at its site, under this name.
+.TP
+.B \fB\&.size\fP
+Number of \fIclients\fP the relay keeps launched at its site (default: \fI1\fP, at least \fI1\fP).
+.sp
+See also \fB\-N\fP, \fB\-\-size\fP command\-line option.
+.TP
+.B \fB\&.launcher\fP
+Command prefix used to launch each \fIclient\fP at the site (default: none).
+.sp
+An empty value launches clients directly as \fBhs client ...\fP\&.
+See also \fB\-\-launcher\fP command\-line option.
+.TP
+.B \fB\&.launcher_args\fP
+Extra arguments for the launcher (default: none).
+.sp
+See also \fB\-\-launcher\-args\fP command\-line option.
+.TP
+.B \fB\&.num_threads\fP
+Executor threads for each \fIclient\fP at the site (default: \fI1\fP).
+.TP
+.B \fB\&.template\fP
+Command template for the \fIclients\fP at the site (default: \fI{}\fP).
+.TP
+.B \fB\&.timeout\fP
+Seconds a \fIclient\fP at the site waits for tasks before it exits (default: \fI0\fP, never).
+.TP
+.B \fB[upstream]\fP
+Connection to the upstream \fIserver\fP\&. These settings are never read from \fB[server]\fP,
+so the \fIclients\fP at the site keep using the relay\(aqs own \fB[server.tls]\fP\&.
+.INDENT 7.0
+.TP
+.B \fB\&.host\fP
+Hostname of the upstream \fIserver\fP (default: \fIlocalhost\fP).
+.sp
+See also \fB\-\-upstream\-host\fP command\-line option.
+.TP
+.B \fB\&.port\fP
+Port of the upstream \fIserver\fP (default: \fI50001\fP).
+.sp
+See also \fB\-\-upstream\-port\fP command\-line option.
+.TP
+.B \fB\&.auth\fP
+Cryptographic key for the upstream \fIserver\fP\&.
+.sp
+Use \fB\&.auth_env\fP or \fB\&.auth_eval\fP to keep it out of the file; whichever form is set
+in the highest\-precedence place is used (two forms in one place are refused). The
+upstream key stays in the relay: the \fIclients\fP at the site use a key the relay mints for
+each run.
+.TP
+.B \fB\&.bundlesize\fP
+Bundle size the relay advertises upstream (default: \fI1000\fP).
+.sp
+The relay holds at most twice its connected \fIclients\fP times \fBrelay.bundlesize\fP in
+unfinished tasks. It asks for more only once half of that is left, and then for the
+whole difference (never more than this size at once), so the site has a second round
+of work ready while the first runs.
+.TP
+.B \fB\&.heartrate\fP
+Seconds between heartbeats to the upstream \fIserver\fP (default: \fI10\fP).
+.TP
+.B \fB\&.deadline\fP
+Seconds a call to the upstream \fIserver\fP may take before the relay takes the connection
+as lost (default: \fI30\fP).
+.sp
+While the upstream \fIserver\fP cannot be reached, the site keeps running and finished
+tasks are kept in the relay database; the relay connects again, with backoff, and then
+returns them before it asks for more work.
+.TP
+.B \fB\&.backoff\fP
+Longest wait in seconds between attempts to reach the upstream \fIserver\fP again
+(default: \fI60\fP).
+.sp
+Each wait is drawn at random up to a bound that starts at one second and doubles with
+each failed attempt, up to this value.
+.TP
+.B \fB\&.evict_hint\fP
+Seconds of lost contact after which the relay takes the upstream \fIserver\fP to have
+evicted it (default: \fI600\fP, the \fIserver\fP\(aqs own default \fBserver.evict\fP).
+.sp
+Set it to the upstream \fBserver.evict\fP\&. Past it, the relay warns that the results it
+holds will likely be refused as stale (the upstream \fIserver\fP has put those tasks back
+for other \fIclients\fP), and it does not repeat a confirmation the outage cut off. The
+results are still returned when the connection comes back.
+.TP
+.B \fB[tls]\fP
+.INDENT 7.0
+.TP
+.B \fB\&.enabled\fP
+Use TLS on the upstream connection (default: \fItrue\fP).
+.sp
+See also \fB\-\-no\-tls\fP command\-line option.
+.TP
+.B \fB\&.cert\fP
+Upstream server certificate (default: \fI<auto>\fP).
+.TP
+.B \fB\&.cafile\fP
+Trust anchor for the upstream server (default: \fI<auto>\fP).
+.TP
+.B \fB\&.fingerprint\fP
+Pin the upstream server certificate fingerprint, e.g. \fBSHA256:AB:CD:...\fP
+(default: none).
+.UNINDENT
 .UNINDENT
 .UNINDENT
 .TP
