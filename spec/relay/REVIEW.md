@@ -1107,3 +1107,116 @@ Unmapped changes: none.
   before `hs-publish`.
 - **Follow-ups for the build:** C5-1 (the wording at least), C4-2, C4-4, C4-3's M26/M28, and the
   throughput tail investigation (cycle-4 notes).
+
+## Review cycle 6 (scope P7–P9, count 3 of 3) — approved (2026-11-06)
+
+- **Reviewed commit:** `ef92e40`  ·  **Range:** `ff23d2d..ef92e40`: `eabd3bd` (the cycle-5 record),
+  `a91e225` and `8ec3cf4` (TECH only), and `ef92e40` (the `running_tasks` fix, with its TECH note)  ·
+  **Base:** `develop`  ·  **Date:** 2026-11-06
+- **Verdict:** approved. No finding. The diagnosis held on every point that could be checked here,
+  and the fix is test-only: `src/` and `docs/` are unchanged since `ff23d2d`.
+- **Cycle:** the third and last cycle the run allows for the P7–P9 scope. `set_phase.py` keeps one
+  counter, so `review.cycle` reads 6 (META F7).
+- **Mode:** inline, one reviewer, no subagent, as the foreman directed. The diagnosis was checked
+  from `client.py`, the test module, the relay's site-client defaults and the Debian and Ubuntu
+  dash sources before the builder's TECH note was weighed.
+- **Host constraint:** POSIX semaphores are still exhausted here, so no integration test ran here.
+  PR #82's CI on `ef92e40` was still running at this record; the foreman holds that result.
+
+### Verification run
+
+- **The launch:** `client.py:829` runs every task as `Popen(command, shell=True)`, that is
+  `/bin/sh -c COMMAND`. The relay's site clients have one executor each (`relay.num_threads = 1`) and
+  a relay-local bundle size of 1 by default.
+- **The waiter's argv:** `waiting_tasks` and `gated_workload` build `'PYTHON' 'waiter.py' 'BARRIER'
+  LABEL`. The shell strips the quotes, so the waiter's argv holds `str(barrier)` as an element of
+  its own, exactly the string the helper compares. No other site process carries it as an element:
+  the launchers `exec` down to `hs client`, whose command line has no barrier.
+- **Debian and Ubuntu dash:** `0004-SHELL-Disable-sh-c-command-sh-c-exec-command-optimiza.diff` is
+  active in the `debian/patches/series` of Debian's dash 0.5.12-12 (sources.debian.org) and of
+  Ubuntu noble's package (git.launchpad.net, `ubuntu/noble`), which is `ubuntu-latest`. Here, macOS
+  `/bin/sh` (bash) and `/bin/dash` (unpatched) both exec a lone command.
+- **Stand-in** (scratch, never committed): a parent Python process runs `waiting_tasks` commands with
+  `Popen(shell=True)`, and the real helpers count its children. The new helper is imported from
+  `ef92e40`; the mutant is the helper at `ff23d2d` (the substring match, which is the only change to
+  the file):
+
+  | Shell | Tasks | Live shells | Old (substring) | New (exact) |
+  |---|---|---|---|---|
+  | `/bin/sh` (bash), lone command | 3 | 0 | 3 | 3 |
+  | `/bin/dash`, lone command | 3 | 0 | 3 | 3 |
+  | `/bin/dash`, `cmd; :` | 3 | 3 | 6 | 3 |
+  | `/bin/sh`, `cmd; :` | 3 | 3 | 6 | 3 |
+  | `/bin/dash`, `cmd; :` | 2 | 2 | **4** | 2 |
+  | `/bin/dash`, `cmd; :` | 1 | 1 | **2** | 1 |
+
+  With the shell kept alive, the mutant counts every task twice: 4 with two tasks (never 2, the
+  deterministic timeout), and 2 with one (the vacuous `>= 2`). The new match counts each task once
+  under every shell.
+- **Suites (here, 3.15):** `pytest -m "not integration"` over the whole tree: 845 passed, 3
+  skipped and 10 errors. The 10 are in `test_card_info.py` and `test_zone_display.py`, which need
+  `hs` on `PATH`. Those two files were re-run with the venv's `bin/` on it: 12 of 12 passed. That
+  makes 855 passed. `test_relay_workload.py` (all 15 tests
+  integration) and `test_relay_outage.py`, which imports the helper, collect cleanly.
+
+### Requirement → evidence matrix (reviewed scope)
+
+| R-ID | Implemented by (this range) | Verified how | Status |
+|------|-----------------------------|--------------|--------|
+| R20  | `running_tasks` counts a task once, whatever `/bin/sh` is (test only), so the suite can pass on `ubuntu-latest` | source of the launch and the argv; dash patch series; stand-in and mutant; callers read | ✅ (CI pending) |
+
+Unmapped changes: none. The TECH entries are records.
+
+### Findings
+
+None.
+
+### Notes (not findings)
+
+- **The callers, under the exact match:**
+  - `>= 2`, at `:716`, `:760`, `:804` and `:958`: each runs 2 site clients with one executor and 4
+    waiting tasks, so 2 is reachable and stays reached until the barrier. It is what these callers
+    already meant on bash and macOS, where they pass. On Ubuntu the substring match let one task
+    satisfy them; that vacuity is gone.
+  - `== 2`, at `:858` (drain: two clients) and `:1129` (multi-zone: one client in each of two
+    zones): 2 is the most the site can run, so the state is stable while the barrier is absent.
+    For the multi-zone test, 2 now means one task running in each zone.
+  - Truthy, at `:377`, `:446`, `:1004` and `test_relay_outage.py:180`: these now wait for the waiter
+    process itself rather than a shell about to exec it. That is stricter, and costs milliseconds.
+  - None can wait forever on a correct relay, and none can now pass with fewer tasks than it
+    names.
+- **The docstrings still hold.** Drain: both site clients busy (`== 2`), with an unstaged backlog
+  at the relay when SIGUSR1 is sent. Multi-zone failover: a task running in each zone, both zones
+  settled upstream, then the kill.
+- **`scan_site` and `scan_site_key` keep the substring match, rightly.** They are leak scans: a
+  shell kept alive holds the task's environment too, so counting it widens what is checked for the
+  key, and their thresholds (`tasks >= 1`) are lower bounds.
+- **TECH's local check reads "3 tasks, 5 processes by the old match".** The stand-in here gives 6
+  (three shells and three waiters). The conclusion is unchanged; the figure could be corrected to 6
+  when TECH is next touched.
+- **Taken as stated, not re-derived here:** the CI counts (1346 passed, 2 failed on each version),
+  the test cluster's `/bin/sh`, and TECH's staging arithmetic for the drain backlog. The backlog
+  condition (`unstaged > 0`) is unchanged by this range.
+
+### What held (executed)
+
+- The diagnosis: the shell stays alive only where `sh` is a patched dash, and the substring match
+  then counts the shell as a second task. Reproduced with dash kept alive, and the patch is
+  confirmed active on `ubuntu-latest`.
+- The fix: one count per task under bash, unpatched dash and a dash kept alive. The `ff23d2d` helper
+  reintroduces the double count.
+
+### Cycle-5 closure
+
+| Finding | Status |
+|---|---|
+| C5-1 | Follow-up, unchanged: this range touches no product code or wording. |
+| C4-2, C4-4, C4-3's M26/M28 | Follow-ups, unchanged. |
+
+### Human-gate triggers
+
+- No high-blast-radius file is touched: one test helper and `spec/`.
+- **The cycle-1 trigger stands:** maintainer sign-off on the credential fence and the site-hop TLS
+  before `hs-publish`.
+- **Gate on this cycle:** PR #82's CI on `ef92e40`, green on all four Python versions. This is the
+  last review cycle the run allows for P7–P9.
