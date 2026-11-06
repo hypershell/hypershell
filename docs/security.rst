@@ -30,6 +30,8 @@ Architecture
 
 |
 
+.. _security_components:
+
 Components
 ^^^^^^^^^^
 
@@ -497,6 +499,8 @@ prefer key-based authentication, disable password auth, keep ``known_hosts`` pop
 and audit ``authorized_keys`` for unexpected entries.
 
 -------------------
+
+.. _security_relays:
 
 Relays
 ------

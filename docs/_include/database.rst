@@ -97,6 +97,8 @@ Individual pragmas can also be set from the command line:
 
 -------------------
 
+.. _database_initialization:
+
 Initialization
 --------------
 
@@ -132,6 +134,8 @@ See also the :ref:`command-line interface <cli_initdb>` for ``hs initdb``.
 
 -------------------
 
+.. _database_relay:
+
 Relay Database
 --------------
 
@@ -163,6 +167,8 @@ A relay given a configuration file with relay settings in it writes a copy for i
 relay database (``<file>.site.toml``, readable by its owner only), removed when the relay ends.
 
 -------------------
+
+.. _database_timescale:
 
 TimescaleDB
 -----------

@@ -224,6 +224,8 @@ the ``hs`` command is renamed to ``hsh`` (though this is not ideal and may chang
 
 -------------------
 
+.. _install_containers:
+
 Docker and Apptainer
 --------------------
 

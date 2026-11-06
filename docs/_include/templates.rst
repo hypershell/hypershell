@@ -15,6 +15,8 @@ These are expanded `prior` to scheduling as the actual `args` for the task.
 
 -------------------
 
+.. _templates_named_fields:
+
 Named Fields
 ^^^^^^^^^^^^
 
@@ -42,6 +44,8 @@ precedence over a task key of the same name. Named fields are resolved at submit
 and every ``{key}`` must be present in each task object or the submission is rejected.
 
 -------------------
+
+.. _templates_slot:
 
 Execution Slot
 ^^^^^^^^^^^^^^

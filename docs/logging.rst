@@ -253,6 +253,8 @@ For full control, define the ``[logging.file]`` section and set individual param
 
 |
 
+.. _logging_files:
+
 Per-process log files
 ~~~~~~~~~~~~~~~~~~~~~~~
 

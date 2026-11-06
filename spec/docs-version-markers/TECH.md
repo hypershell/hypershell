@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: feature/docs-version-markers
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-06'
 phases:
 - id: P1
@@ -34,7 +34,7 @@ phases:
     html docs docs/_build/html && uv run python spec/docs-version-markers/check_markers.py
 - id: P3
   name: Version-keyed site notice and the What's new in 2.9 page
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -137,16 +137,24 @@ exists for P2's markers.
 **Goal:** every page shows the notice while the built version is a pre-release or dev version, and
 `whats_new.rst` maps every 2.9 change to its pre-release, PR and marked section.
 
-- [ ] `docs/conf.py`: compute the notice from `packaging.version.Version(release)`; set
+- [x] `docs/conf.py`: compute the notice from `packaging.version.Version(release)`; set
       `html_theme_options['announcement']` only when `is_prerelease or is_devrelease`; link to
       `/whats_new.html` root-relative. Add a light-mode announcement colour only if contrast needs it.
-- [ ] `docs/whats_new.rst`: *Upgrading from 2.8*, *New and changed* (grouped by area; each entry:
+- [x] `docs/whats_new.rst`: *Upgrading from 2.8*, *New and changed* (grouped by area; each entry:
       first pre-release, `:pr:`, `:ref:` to the marked section), *Not yet released* (empty, says so).
       Add `.. _anchor:` targets the refs need.
-- [ ] Add `whats_new` first in the *Intro* toctree in `docs/index.rst`.
-- [ ] Write `spec/docs-version-markers/check_site.py` (stdlib): the built index and one nested page
+- [x] Add `whats_new` first in the *Intro* toctree in `docs/index.rst`.
+- [x] Write `spec/docs-version-markers/check_site.py` (stdlib): the built index and one nested page
       contain the announcement with a link to `whats_new.html`; `whats_new.html` exists with the
       three section headings; the notice logic, given a final version, yields no announcement.
+- *Amended in build:* the notice logic is `announcement()` in `docs/_ext/site_notice.py`, which
+      `conf.py` imports and `check_site.py` loads directly. Section anchors inside
+      `_include/database.rst` and `_include/templates.rst` duplicated, because Sphinx also built
+      every `_include/` fragment as a page of its own; `_include` (and `_ext`) join
+      `exclude_patterns`, which also drops those stray fragment pages from the site. Furo's
+      announcement does not wrap, so `_static/custom.css` lets it wrap rather than scroll the
+      What's new link out of view. No light-mode colour was needed: Furo's default is dark grey
+      with light text.
 - **Verify:** the strict build exits 0, and the site check exits 0.
 - **Touches:** `docs/conf.py`, `docs/whats_new.rst`, `docs/index.rst`, anchors in marked pages,
   `spec/docs-version-markers/check_site.py`.
