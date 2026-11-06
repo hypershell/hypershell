@@ -94,14 +94,23 @@ def site_cluster(address: Tuple[str, int],
     Site clients are launched with `launcher` (empty runs them directly on this host) and dial this
     host by name, so the relay must be reachable from wherever they run. They serve `zone` (None is
     the default zone). The site server evicts a site client silent for `evict_after` seconds.
+
+    The site server's confirmations are not strict: a site client confirms a bundle before it runs
+    it, but the confirmation and the results reach the site server on separate threads, so a result
+    can be written first, and the returner then moves the completed row to the outbox. A
+    confirmation naming that row finds it gone; it is settled, as a complete row is, and the rest
+    of its bundle is still recorded.
     """
-    return AutoScalingCluster(source=None, num_threads=num_threads, template=template,
-                              bundlesize=bundlesize, bundlewait=bundlewait, bind=address,
-                              launcher=launcher or '', launcher_args=launcher_args or None,
-                              max_retries=0, poll=poll, client_timeout=client_timeout,
-                              policy=SITE_POLICY, period=period,
-                              init_size=size, min_size=size, max_size=size,
-                              tls=tls, zone=zone, evict_after=evict_after)
+    cluster = AutoScalingCluster(source=None, num_threads=num_threads, template=template,
+                                 bundlesize=bundlesize, bundlewait=bundlewait, bind=address,
+                                 launcher=launcher or '', launcher_args=launcher_args or None,
+                                 max_retries=0, poll=poll, client_timeout=client_timeout,
+                                 policy=SITE_POLICY, period=period,
+                                 init_size=size, min_size=size, max_size=size,
+                                 tls=tls, zone=zone, evict_after=evict_after)
+    if cluster.server.confirm is not None:
+        cluster.server.confirm.machine.strict = False
+    return cluster
 
 
 def site_launch(cluster: AutoScalingCluster) -> ClientLaunch:

@@ -426,7 +426,8 @@ deferred P1 verifies. P3 is not started here.
   id, not `id` under the same filter, so one SELECT separates *gone* / *complete* / *still
   pending*. *Complete* is settled (one DEBUG line, no re-run, no warning). *Pending* re-runs up to
   `CONTENDED_RERUNS` (#75). *Gone* is skipped under `pending` and raises `StaleDataError` under
-  `pending, strict`. `confirm_all` passes `pending=True, strict=True`. `revert_staged`'s call is
+  `pending, strict`. `confirm_all` passes `pending=True, strict=True` (amended 2026-11-06: the
+  relay-local server's confirmations pass `strict=False`; see the publish notes). `revert_staged`'s call is
   unchanged (`pending=True`), and so are its outcomes and statement counts, which Z2's tests
   pin. #70's `(id, schedule_time)` result writeback and #73's prebuilt statements are a separate
   path and are not touched. Confirmations still reach the database only through `Confirm` →
@@ -1780,3 +1781,64 @@ follow-ups.
   `>= 2` now mean two tasks, as written (on Ubuntu one task used to satisfy them). Checked locally
   with dash kept alive as the parent (`cmd; :`): 3 tasks, 5 processes by the old match, 3 by the new.
   No product change.
+- 2026-11-06: PR #82's CI, after the fix above, failed `test_failover_reverts_and_completes_elsewhere`
+  on Python 3.11 only: the upstream server exited 0, relay A exited 5, with `StaleDataError` ("UPDATE
+  statement on table 'task' expected to update 1 row(s); 0 were matched (task …)") logged CRITICAL at
+  its shutdown. Intermittent; only timing ties it to 3.11. Cause: a site client confirms a bundle
+  before it runs it, but the relay-local server takes confirmations and results on separate threads
+  (Confirm and Receiver), so a fast task's result can be written first. The returner then moves the
+  completed row to the outbox and deletes it from `task` (`store.collect_results`), and the late
+  confirmation names a row that is gone. `confirm_all` is strict, so it raised and rolled back the
+  whole bundle's confirmation, the Confirm thread ended, and `check_site` aborted the relay. An abort
+  sends no FINISHED beat, so the upstream server waits out its eviction (600 s by default) before it
+  reverts what the relay held. That probably also explains the 3.14 failure of
+  `test_site_key_reaches_site_clients_in_their_environment_only` in the same run (the upstream server
+  did not exit within the test's deadline; that test leaves eviction at its default); unconfirmed,
+  since the CI logs were not read here. No result is lost or recorded twice: the gone row's result is
+  already held in the outbox. Fix: `Confirm` and `Task.confirm_all` take `strict` (default `True`, so
+  a primary server is unchanged and P1's `test_confirm_of_missing_row_raises_and_writes_nothing`
+  still holds), and `site_cluster` makes the site server's Confirm non-strict: a gone row is settled
+  as a complete one is, and the rest of the bundle is still recorded. The flag is set on the built
+  site server, not threaded through `AutoScalingCluster` and `ServerThread`, to keep their public
+  signatures as they are. The `relay/store.py` docstring no longer claims the relay-local server
+  never meets a row the relay's writers have touched.
+  - *Red first:* `tests/test_relay_return.py::test_site_confirmation_after_the_result_left_for_the_outbox`
+    plays the three threads in the losing order with no server running (result applied, rows
+    collected, then the site server's own Confirm machine run). Unfixed: `Failed: Late site
+    confirmation ended the Confirm thread: UPDATE statement on table 'task' expected to update 1
+    row(s); 0 were matched (task …)`, the CI message. Fixed: pass. The slow task's client is
+    recorded and the fast task's result stays pending in the outbox.
+  - *Audit of the relay-local server's other writes against a row the relay has moved out.* The
+    relay deletes `task` rows in two places: `collect_results` (complete rows) and `drop_superseded`
+    (rows not yet scheduled here, when the upstream server restarted). Neither takes a lock that
+    the relay-local server's threads share.
+    - Receiver (`apply_results`): a result for a gone row is classified STALE, logged and dropped.
+      No error. Not a defect.
+    - Staged reverts (`Scheduler.revert_unstaged`, `ServerThread.revert_staged` at shutdown):
+      `revert_staged` is `pending` and not strict, so a gone row is skipped. Not a defect.
+    - Scheduler start (`revert_interrupted`): it runs before any site client of this site server
+      can connect (each site server has a fresh key), so no row it selects can complete and be
+      collected meanwhile; `drop_superseded` never deletes a scheduled row. Not reachable.
+    - HeartMonitor (`Client` add, update and reconnect): the relay never deletes a `client` row. Not
+      a defect.
+    - **Follow-up, eviction (`HeartMonitor.check_clients` → `Task.revert_orphaned` → `revert_all`,
+      unconditional and strict).** If an evicted site client's result is applied and collected
+      between `select_orphaned` and the first UPDATE of `revert_all`, the revert raises
+      `StaleDataError`, the heart monitor ends and the relay aborts as above. Shown with a scratch
+      interleaving (the result applied and collected on another thread inside `select_orphaned`).
+      The window is that one gap: once the first UPDATE runs, SQLite's write lock holds the other
+      writers off. A result applied in the gap but not yet collected is reverted instead, so the task
+      runs again (the same on a primary server). Not fixed here: the narrow fix (a `pending`,
+      non-strict orphan revert) changes the primary server's eviction path, which
+      `tests/test_contended_recovery.py` and `tests/test_writeback.py` pin.
+    - **Follow-up, scheduling (`Task.next`, an ORM flush).** If the puller's `drop_superseded`
+      deletes an unscheduled row between `Task.next`'s SELECT and its flush, the flush raises
+      SQLAlchemy's own `StaleDataError` (no task suffix), the scheduler ends and the relay aborts.
+      Shown with a scratch interleaving. It needs an upstream restart that lands in that gap. The
+      `Task.next` stamp is the ORM write AGENTS.md already lists as not yet following the
+      contended-write pattern (`issues/hypertable-contended-scheduler-and-cli-writes.md`); fixing it
+      belongs there.
+  - Gates here (macOS, no PostgreSQL): `-m unit` 856 passed, 3 skipped on 3.14 and on 3.15; the
+    relay integration tests 39 passed on 3.15 (both workload tests above among them); the other
+    integration tests 450 passed, 86 skipped on 3.15 (`-n 6`). Not run here: 3.11 to 3.13, and
+    PostgreSQL. The full suite on Linux is the foreman's run.

@@ -921,14 +921,18 @@ class Task(Entity):
         return landed
 
     @classmethod
-    def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str) -> List[str]:
+    def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str,
+                    strict: bool = True) -> List[str]:
         """Record the client that confirmed the tasks identified by `ids`; return the ids recorded.
 
         A task already complete keeps the client its result recorded: a confirmation that arrives
-        after the result (or after a cancel) writes nothing to it.
+        after the result (or after a cancel) writes nothing to it. A task whose row is gone raises
+        `StaleDataError` and records nothing of the bundle, unless `strict` is false, when it is
+        skipped like a complete one (a relay-local server, whose completed rows leave the task
+        table for the relay's outbox).
         """
         return cls.__write_rows(ids, {'client_id': client_id, 'client_host': client_host},
-                                'confirm', 'client not recorded', pending=True, strict=True)
+                                'confirm', 'client not recorded', pending=True, strict=strict)
 
     @classmethod
     def revert_all(cls: Type[Task], ids: List[str]) -> List[str]:

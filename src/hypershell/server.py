@@ -449,9 +449,10 @@ class Confirm(StateMachine):
     state = ConfirmState.START
     states = ConfirmState
 
-    def __init__(self: Confirm, queue: QueueServer, in_memory: bool = False) -> None:
-        """Initialize machine."""
+    def __init__(self: Confirm, queue: QueueServer, in_memory: bool = False, strict: bool = True) -> None:
+        """Initialize machine; with `strict` false, a confirmed task whose row is gone is skipped, not raised."""
         self.in_memory = in_memory
+        self.strict = strict
         self.queue = queue
         self.client_data = None
         self.client_info = None
@@ -495,7 +496,7 @@ class Confirm(StateMachine):
         """Update client info in database for confirmed task bundle."""
         if not self.in_memory:
             info = self.client_info
-            Task.confirm_all(info.task_ids, info.client_id, info.client_host)
+            Task.confirm_all(info.task_ids, info.client_id, info.client_host, strict=self.strict)
         return ConfirmState.UNLOAD
 
     @staticmethod

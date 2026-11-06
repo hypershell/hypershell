@@ -36,8 +36,10 @@ pruned, with their upstream stamps, after a retention period (`prune_returned`).
 
 The relay's own writers (the puller's insert and the returner's moves, marks and prunes) are
 serialised by one lock in this process, so a task received again can never be moved or marked
-against a stamp it no longer has. The relay-local server writes only rows that are not complete,
-which these writers never touch.
+against a stamp it no longer has. The relay-local server's threads do not take that lock, so a row
+one of them names may be gone by the time it writes. A site client's confirmation, in particular,
+can be processed after that task's result was written and collected, so the relay-local server's
+confirmations skip a row that is gone (see `hypershell.relay.site.site_cluster`).
 """
 
 

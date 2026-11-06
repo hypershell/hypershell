@@ -538,3 +538,71 @@ def test_store_utc_refuses_an_engine_already_in_use(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match='already bound'):
         store.store_utc(engine)
     engine.dispose()
+
+
+# --- A late site confirmation ---------------------------------------------------------------------
+
+
+@fixture
+def site_session(relay_db: Engine) -> Iterator[Engine]:
+    """Bind the global session to the relay database, as the relay-local server's threads see it."""
+    Session.remove()
+    Session.configure(bind=relay_db)
+    try:
+        yield relay_db
+    finally:
+        Session.remove()
+        Session.configure(bind=data_core.engine)
+
+
+UPSTREAM_SERVER = (str(uuid()), 'upstream-host')
+
+
+def upstream_record(args: str) -> Dict[str, Any]:
+    """A task record as one upstream server instance sends it, stamped by that server."""
+    record = json.loads(json.dumps(Task.new(args=args, group=0).to_json()))
+    record.update(schedule_time=datetime.now().astimezone().isoformat(),
+                  server_id=UPSTREAM_SERVER[0], server_host=UPSTREAM_SERVER[1])
+    return record
+
+
+def leaf_result(task: Task, exit_status: int) -> Task:
+    """The result a site client returns for a task the relay-local server dispatched to it."""
+    result = Task.from_json(task.to_json())
+    now = datetime.now().astimezone()
+    result.client_id, result.client_host = LEAF
+    result.command, result.start_time, result.completion_time = task.args, now, now
+    result.exit_status, result.waited, result.duration = exit_status, 0, 0
+    return result
+
+
+@mark.unit
+def test_site_confirmation_after_the_result_left_for_the_outbox(site_session: Engine) -> None:
+    """A site client confirms a bundle; the relay-local Confirm thread is behind its Receiver, so one task's result
+    is written first, and the returner moves the completed row to the outbox before the confirmation is processed.
+    The confirmation must settle that task (its result is already held for return) and record the rest of its
+    bundle, not end the relay-local server's Confirm thread with StaleDataError."""
+    from hypershell.relay.site import site_cluster
+    from tests.conftest import free_port
+    from sqlalchemy.orm.exc import StaleDataError
+
+    records = [upstream_record('exit 3'), upstream_record('sleep 1')]
+    store.insert_received(site_session, records, identity=IDENTITY)
+    dispatched = {task.args: task for task in Task.next(limit=2, group=0)}  # The relay-local scheduler.
+    fast, slow = dispatched['exit 3'].id, dispatched['sleep 1'].id
+    confirmation = ClientInfo(client_id=LEAF[0], client_host=LEAF[1], task_ids=[fast, slow])
+
+    result = leaf_result(dispatched['exit 3'], exit_status=3)
+    assert Task.apply_results([result]) == [ResultOutcome.APPLIED]  # The Receiver runs first,
+    assert store.collect_results(site_session) == 1                 # then the returner,
+    assert rows(site_session, 'SELECT id FROM task') == [(slow, )]
+
+    machine = site_cluster(address=('127.0.0.1', free_port())).server.confirm.machine
+    machine.client_info = confirmation
+    try:
+        machine.update_info()                                       # and the Confirm thread last.
+    except StaleDataError as error:
+        pytest.fail(f'Late site confirmation ended the Confirm thread: {error}')
+    assert rows(site_session, 'SELECT id, client_id FROM task') == [(slow, LEAF[0])]
+    assert rows(site_session, 'SELECT id, state FROM relay_result') == [(fast, RESULT_PENDING)]
+    assert store.count_held(site_session) == 2
