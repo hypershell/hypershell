@@ -64,7 +64,8 @@ markers sit inside `.. only:: html` and stay out of the man page. `_include/temp
 | docs/api/data.rst | after `autofunction:: upgradedb` | versionadded | #69 | 2.9.0a2 |
 | docs/api/client.rst | after `autofunction:: run_client`: `zone` | versionchanged | #78 | 2.9.0a4 |
 | docs/api/client.rst | after `autoclass:: ClientThread`: `zone` | versionchanged | #78 | 2.9.0a4 |
-| docs/api/cluster.rst | § Classes: `zone` on every cluster class | versionchanged | #78 | 2.9.0a4 |
+| docs/api/server.rst | after `autoclass:: ServerThread`: `template`, `from_json` | versionchanged | #48 | 2.9.0a1 |
+| docs/api/cluster.rst | § Classes: `from_json` and `zone` on every cluster class | versionchanged | #48 #78 | 2.9.0a1, 2.9.0a4 |
 | docs/api/cluster.rst | after `autoclass:: AutoScalingCluster`: `evict_after` | versionchanged | #82 | 2.9.0a6 |
 
 ## Release-note items that need no marker

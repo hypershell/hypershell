@@ -151,7 +151,7 @@ html_theme_options = {
 
 # The site builds from develop, so while the version is a pre-release or development version every
 # page says which line the docs track and how to install it; a final version shows no notice.
-site_notice = announcement(release)
+site_notice = announcement(release, base=html_baseurl)
 if site_notice:
     html_theme_options['announcement'] = site_notice
 

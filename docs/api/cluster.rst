@@ -52,7 +52,8 @@ Classes
 |
 
 .. versionchanged:: 2.9.0
-   :pr:`78`: each cluster class takes a ``zone`` parameter.
+   Each cluster class takes a ``from_json`` parameter (:pr:`48`) and a ``zone`` parameter
+   (:pr:`78`).
 
 .. autoclass:: hypershell.cluster.local.LocalCluster
     :show-inheritance:

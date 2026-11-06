@@ -55,6 +55,9 @@ Classes
     .. automethod:: join
     .. automethod:: stop
 
+.. versionchanged:: 2.9.0
+   :pr:`48`: the ``template`` and ``from_json`` parameters.
+
 |
 
 .. warning::

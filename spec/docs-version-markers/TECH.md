@@ -3,7 +3,7 @@ slug: docs-version-markers
 title: Mark what is new in the docs, now that the published site tracks develop
 kind: docs
 appetite: small
-status: blocked
+status: in_review
 branch: feature/docs-version-markers
 base: develop
 current_phase: done
@@ -64,8 +64,7 @@ phases:
 review:
   last_reviewed_commit: 93c1e5f
   verdict: changes-requested
-  blocked_reason: F1 API markers; F3 notice link; F4 rubric severity; F2 fixes on
-    What's new
+  blocked_reason: ''
   cycle: 1
 ---
 # TECH.md — Mark what is new in the docs, now that the published site tracks `develop`

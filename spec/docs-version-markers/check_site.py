@@ -68,7 +68,7 @@ def check_pages(build: Path) -> list[str]:
             problems.append(f'{page}: no announcement')
             continue
         body = match['body']
-        for needle in ('href="/whats_new.html"', 'pip install --pre hypershell', 'development line'):
+        for needle in ('href="https://hypershell.readthedocs.io/whats_new.html"', 'pip install --pre hypershell', 'development line'):
             if needle not in body:
                 problems.append(f'{page}: announcement lacks {needle!r}')
     return problems

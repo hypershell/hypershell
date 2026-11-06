@@ -12,8 +12,14 @@ from packaging.version import Version
 __all__ = ['announcement']
 
 
-def announcement(release: str) -> Optional[str]:
-    """The notice (HTML) for the docs of `release`, or None for a final release."""
+def announcement(release: str, base: str = '') -> Optional[str]:
+    """The notice (HTML) for the docs of `release`, or None for a final release.
+
+    The notice is the same HTML on every page, so its link can't be relative to the page. `base` is
+    the site's root URL; the link is absolute under it, so it also works from a build opened from
+    disk.
+    """
+    base = base.rstrip('/')
     version = Version(release)
     if not (version.is_prerelease or version.is_devrelease):
         return None
@@ -29,4 +35,4 @@ def announcement(release: str) -> Optional[str]:
             f'Items marked &ldquo;Added in version {marker}&rdquo; or &ldquo;Changed in version '
             f'{marker}&rdquo; are not in {stable}. '
             f'Install the pre-release with <code>pip install --pre hypershell</code>. '
-            f'See <a href="/whats_new.html">What&rsquo;s new in {line}</a>.')
+            f'See <a href="{base}/whats_new.html">What&rsquo;s new in {line}</a>.')

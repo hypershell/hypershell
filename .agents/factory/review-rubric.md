@@ -31,9 +31,10 @@ prevent, and a deferral's stated reason is exactly the kind of author intent tha
 
 1. **Correctness bugs** — the code produces wrong behavior / crashes / data corruption.
 2. **GOAL-requirement gaps** — an R-ID with no implementing change, or implemented incorrectly.
-3. **AGENTS.md invariant violations** — auto-CRITICAL (see below). This includes the docs
-   same-commit rule: a user-visible change with no prose update, no `versionadded`/`versionchanged`
-   marker, or no `docs/whats_new.rst` entry, and a docs build that warns under `-W`.
+3. **AGENTS.md invariant violations** — auto-CRITICAL (see below), except §12 project conventions,
+   which grade **HIGH**. §12 includes the docs same-commit rule: a user-visible change with no prose
+   update, no `versionadded`/`versionchanged` marker, or no `docs/whats_new.rst` entry, and a docs
+   build that warns under `-W`.
 4. **Scope creep** — changes that map to no R-ID (report, don't necessarily block).
 
 **Do NOT** report style nits, speculative hardening, or "you could also…" gold-plating. A

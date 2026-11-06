@@ -28,7 +28,7 @@ The documentation site is built from one branch and served at the root, with no 
 path (Read the Docs single-version mode). Until 2026-11-06 that branch was `master`, so everything
 written for 2.9 since 2.8.5 sat unpublished on `develop`. That is about 25 commits across 60
 files: the `hs relay` page, the database guide, the configuration reference for zones, bundles and
-TimescaleDB, the new submit, search and update options, the template environment rules, and the
+TimescaleDB, the new submit, search and update options, and the
 security changes. Someone who installed 2.9.0a6 with `pip install --pre` read 2.8 documentation.
 
 The site now builds from `develop` (clarification C1). That publishes the 2.9 material, but nothing

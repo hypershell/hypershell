@@ -162,6 +162,23 @@ Packaging
   Registry as a multi-architecture image, signed with cosign and carrying SLSA build provenance
   (2.9.0a1, :commit:`ee03014`; :ref:`container images <install_containers>`).
 
+Fixes
+^^^^^
+
+- **Stale results are refused.** The server applies a result only from the task's current
+  assignment, and writes only the result columns. A late or duplicate result, for example from an
+  evicted client, is refused and logged as a warning. Before, it could overwrite a task that had
+  since been reverted, rescheduled, retried or cancelled (2.9.0a3, :pr:`70`).
+- **Cheaper result writeback.** Writing a result takes about 19% less server CPU than in 2.8
+  (2.9.0a3, :pr:`73`).
+- **Lost writes on TimescaleDB recovered.** On TimescaleDB 2.29 and later, an update that waited on
+  another writer's lock can silently match no rows. Under the ``timescale`` provider the server
+  detects these writes and re-runs them, and holds a result that can't land yet (2.9.0a3,
+  :pr:`75`).
+- **Descriptors kept for the server.** The server refuses a queue connection that would use one of
+  the last 32 file descriptors below its open-file limit, and logs a warning, so it can still open
+  its database and log files (2.9.0a4, :pr:`76`).
+
 -------------------
 
 Not yet released
