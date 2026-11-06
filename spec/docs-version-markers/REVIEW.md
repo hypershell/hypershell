@@ -146,3 +146,47 @@ on `/`, `/cli/relay.html` and `/api/data.html` with a working link; "Added in ve
 
 All eight are taken. F12 is resolved by keeping `docs/whats_new.rst` as the live page for the
 development line and copying it to a per-line record at a full release. This is cycle 2 of ≤3.
+
+## Review cycle 3 — changes-requested (2026-11-06)
+
+- **Reviewed commit:** 7b06e71 · **Mode:** fresh blind pass over the full spec-excluded diff.
+- **Cycle-2 findings:** F5–F12 verified fixed. No false markers. Every pre-release attribution
+  checked across 21 commits; the mixed-version refusal and the exit-code remap reproduced in
+  throwaway sites.
+
+### Verification run
+
+- Strict HTML build and `-b man -W` exit 0; broken ref → exit 1, reverted; the three base warnings
+  reproduce on a `git archive origin/develop` build and are gone on the branch.
+- Introspection of every autodoc'd `__init__`, function, lifecycle method and autodata, 2.8.5 vs
+  develop (F1, F4); throwaway-site probes of `submit_from` with dict sources and `ServerThread.start`
+  on a bound port, on both versions.
+- `gh api …/commits/<sha>/pulls` for every `:commit:` link (F2); a scratch-clone simulation of the
+  `hs-release` lookup with two same-version markers in one file (F3).
+
+### Findings
+
+- **[HIGH/CONFIRMED] F13 — `api/submit.rst` has no marker for #48's dict sources.** `source` on
+  `submit_from`, `SubmitThread` and `LiveSubmitThread` takes `Iterable[str | dict]` on develop and
+  `Iterable[str]` on 2.8.5; a dict source with a template field fails on 2.8.5 and works on develop.
+  (R1)
+- **[MEDIUM/CONFIRMED] F14 — two What's new fixes link commits that came through PRs.** `f4448a3` is
+  #56's merge and `ede1487` is #54's. The GOAL clarification allows `:commit:` only with no PR. (R3)
+  The cycle-2 remediation introduced this.
+- **[MEDIUM/PLAUSIBLE] F15 — `hs-release` Step 3a.1's `-S'<marker line>'` lookup returns every
+  commit that added a same-version marker to the file,** so with two in one file before a release
+  the first result is wrong for the older one. Simulated in a scratch clone. (R5)
+- **[LOW/CONFIRMED] F16 — `ServerThread.start` now raises a queue start failure in the caller
+  (#76),** documented by the autodoc'd docstring and unmarked; 2.8.5 hangs on a bound port. (R1)
+- **[LOW/CONFIRMED] F17 — the `uuid7` requirement for the TimescaleDB provider in `install.rst`
+  (#71) is unmarked.** (R1)
+- **[LOW/PLAUSIBLE] F18 — `hs-release` Step 3a.2 says "under a heading for this version",** but the
+  page groups by topic and gives the pre-release inline. (R5)
+
+Unmapped: excluding `_include` from the build removes about 70 fragment pages (`/_include/*.html`)
+that are live today and linked from no built page. Noted for the PR body.
+
+### Human-gate triggers
+
+- None: docs and harness only. **Escalated anyway:** this is the third cycle without convergence
+  (`hs-review` bound), so the next step is Geoffrey's.

@@ -3,7 +3,7 @@ slug: docs-version-markers
 title: Mark what is new in the docs, now that the published site tracks develop
 kind: docs
 appetite: small
-status: in_review
+status: blocked
 branch: feature/docs-version-markers
 base: develop
 current_phase: done
@@ -62,10 +62,10 @@ phases:
     .agents/skills/hs-publish/SKILL.md .agents/skills/hs-release/SKILL.md | wc -l
     | grep -qx ' *8'
 review:
-  last_reviewed_commit: ff5cc61
+  last_reviewed_commit: 7b06e71
   verdict: changes-requested
-  blocked_reason: ''
-  cycle: 2
+  blocked_reason: 'cycle 3: F13-F18; third cycle, escalated to Geoffrey'
+  cycle: 3
 ---
 # TECH.md — Mark what is new in the docs, now that the published site tracks `develop`
 
