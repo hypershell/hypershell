@@ -151,6 +151,20 @@ appear for commands run against the `/tmp` worktree path; that is expected and h
 - **pre-release:** stay on `develop` (the bump commit and tag land here).
 - **full-release:** `git switch -c release/X.Y.0 develop`.
 
+### Step 3a — Docs: complete the markers and What's new (pre-release & full-release)
+Skip for a patch: patch releases come from `master`, whose docs the site no longer serves.
+1. Every `versionadded`/`versionchanged` marker under `docs/` with no `:pr:` in its body gets one: the
+   number from the squash commit that added the passage (`git log --first-parent -S'<marker line>'
+   -- <file>`; squash subjects end `(#NN)`). A change that landed as a direct commit gets
+   `:commit:` with its short SHA instead.
+2. In `docs/whats_new.rst`, move each *Not yet released* entry under a heading for this version, add
+   its `:pr:`, and leave *Not yet released* saying nothing is pending. At a **full release**, the
+   page becomes the record of that line: retitle it, and start a fresh page for the next line when
+   the first change for it lands. Markers stay. The site notice keys off the version and needs no
+   edit.
+3. Build with `-W` (`AGENTS.md` § Docs), then commit `[docs] Complete version markers and What's new
+   for X.Y.Z` on the branch Step 3 set up. Skip the commit when nothing changed.
+
 ### Step 4 — Shared core: bump + man pages + commit
 1. Edit the `version = "…"` line in `pyproject.toml` → X.Y.Z (the ONLY source).
 2. `uv lock` (updates the `hypershell` entry in `uv.lock`).

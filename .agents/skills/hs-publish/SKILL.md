@@ -81,7 +81,10 @@ Report the verdict, commits vs `develop`, and whether a PR already exists (`gh p
   - **Research** → links to `research/*.md` (if present).
   - **Phases completed** → rendered from the `TECH.md` FSM (id · name · satisfies).
   - **Verification** → the CLI flows / tests actually run (from `REVIEW.md`).
-  - **Docs & completions** → confirm the same-commit rule was honored (`docs/_include/*.rst`, `share/`).
+  - **Docs & completions** → confirm the same-commit rule was honored (`docs/_include/*.rst`, `share/`;
+    for a user-visible change, the prose page, its `versionadded`/`versionchanged` marker and the
+    `docs/whats_new.rst` entry). The marker's `:pr:` is not added here: a commit outside `spec/`
+    after review would stale the approval. `hs-release` adds it.
   - **🔧 Harness feedback** — surface the self-improvement loop *only when substantial* (see the
     surfacing rule below); omit the section entirely otherwise.
   - Issue: `Refs #NN` (see the auto-close note below).

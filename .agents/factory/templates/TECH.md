@@ -80,7 +80,9 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
   P<n>: …` (no `WIP:` prefix) — squashed into the single PR-title commit at `hs-publish`.
 - **No `Co-Authored-By` trailer** (repo convention; overrides the AGENTS.md default).
 - A CLI/feature change updates `docs/_include/*.rst` help snippets and `share/` completions **in the
-  same commit**.
+  same commit**. A user-visible change also updates its prose page, marked `.. versionadded::` /
+  `.. versionchanged::` with the release line, and adds a *Not yet released* entry to
+  `docs/whats_new.rst` (`AGENTS.md` § Docs).
 
 ---
 

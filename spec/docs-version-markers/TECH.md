@@ -3,10 +3,10 @@ slug: docs-version-markers
 title: Mark what is new in the docs, now that the published site tracks develop
 kind: docs
 appetite: small
-status: in_progress
+status: in_review
 branch: feature/docs-version-markers
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-06'
 phases:
 - id: P1
@@ -48,7 +48,7 @@ phases:
     docs/_build/html
 - id: P4
   name: 'Harness keeps the convention: AGENTS.md, invariants, skills, rubric, template'
-  status: pending
+  status: done
   satisfies:
   - R5
   depends_on:
@@ -164,18 +164,18 @@ exists for P2's markers.
 **Goal:** later cycles update prose and add markers in the same commit, review grades it, publish
 completes the PR number, and release maintains the what's-new page.
 
-- [ ] `AGENTS.md`: the conventions bullet and § Docs name the prose update and the marker
+- [x] `AGENTS.md`: the conventions bullet and § Docs name the prose update and the marker
       (`versionadded`/`versionchanged`, release line, `:pr:`).
-- [ ] `.agents/factory/invariants.md` §12: the widened same-commit bullet.
-- [ ] `.agents/skills/hs-build/SKILL.md`: the conventions bullet names prose and markers.
-- [ ] `.agents/skills/hs-review/SKILL.md` and `.agents/factory/review-rubric.md`: a missing prose
+- [x] `.agents/factory/invariants.md` §12: the widened same-commit bullet.
+- [x] `.agents/skills/hs-build/SKILL.md`: the conventions bullet names prose and markers.
+- [x] `.agents/skills/hs-review/SKILL.md` and `.agents/factory/review-rubric.md`: a missing prose
       update or marker on a user-visible change is a §12 finding; the reviewer's docs build uses `-W`.
-- [ ] `.agents/skills/hs-publish/SKILL.md`: the *Docs & completions* line confirms prose, markers and
-      `:pr:`; publish fills the PR number into markers written during build.
-- [ ] `.agents/skills/hs-release/SKILL.md`: each pre-release moves "Not yet released" entries in
+- [x] `.agents/skills/hs-publish/SKILL.md`: the *Docs & completions* line confirms prose, markers and
+      the what's-new entry. *(Amended: `hs-release` adds the `:pr:`, not publish; see PLAN § Harness.)*
+- [x] `.agents/skills/hs-release/SKILL.md`: each pre-release moves "Not yet released" entries in
       `docs/whats_new.rst` under it; a final release renames or retires the page for the next line;
       markers stay; the notice keys off the version.
-- [ ] `.agents/factory/templates/TECH.md`: the conventions bullet gets the widening.
+- [x] `.agents/factory/templates/TECH.md`: the conventions bullet gets the widening.
 - **Verify:** `next_phase.py` validates; each of the eight files names `versionadded`.
 - **Touches:** the eight files above.
 

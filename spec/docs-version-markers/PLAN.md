@@ -110,18 +110,20 @@ Last, widen the same-commit rule in the harness so later work keeps the conventi
 
 - `AGENTS.md`, in the conventions bullet beside the help-snippet rule and in § Docs: a user-visible
   change also updates the prose page that describes it in the same commit, and marks the passage
-  `versionadded`/`versionchanged` with the release line it ships in and its `:pr:`. The PR number
-  isn't known until the PR is open, so the marker is written with the line and completed with the
-  number at `hs-publish`, before merge. § Docs gains the strict build command.
+  `versionadded`/`versionchanged` with the release line it ships in, plus a *Not yet released*
+  entry in `docs/whats_new.rst`. The PR number isn't known during the cycle, so `hs-release` adds
+  the `:pr:` (or `:commit:`) at the next release. *(Amended at P4: the plan first had `hs-publish`
+  add it, but a commit outside `spec/` after review stales the approval, and publish has no edit
+  step.)* § Docs gains the strict build command.
 - `.agents/factory/invariants.md` §12: the same widening, one bullet.
 - `hs-build`: the conventions bullet naming the same-commit rule names prose and markers too.
 - `hs-review` and `.agents/factory/review-rubric.md`: a user-visible change with no prose update, or
   with no marker, is an R-ID-independent finding under "AGENTS.md invariant violations" (§12 is
   already in that scope). The reviewer's docs build runs with `-W`.
-- `hs-publish`: the PR body's *Docs & completions* line confirms prose, markers and their `:pr:`.
-  This step fills in the PR number in any marker written during build.
-- `hs-release`: at each pre-release, move the "Not yet released" entries on `docs/whats_new.rst`
-  under that pre-release. At a final release, rename or retire the page for the next line. The
+- `hs-publish`: the PR body's *Docs & completions* line confirms the prose, markers and
+  what's-new entry.
+- `hs-release`: at each pre-release, add the missing `:pr:` links to markers, and move the "Not
+  yet released" entries on `docs/whats_new.rst` under that pre-release. At a final release, rename or retire the page for the next line. The
   notice needs no step, since it keys off the version. Markers stay.
 - `.agents/factory/templates/TECH.md`: the conventions bullet gets the same widening.
 
