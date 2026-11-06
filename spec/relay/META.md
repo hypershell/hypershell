@@ -101,3 +101,16 @@ into seven real-process runs in under a minute.
   verify leaves it `in_progress` (hill `crest`), `current_phase` unchanged, with the hand-back recorded in
   the body; the judging phase's arrival of evidence closes it.
 - **Confidence:** med · **Effort:** small
+
+## F7 — The ≤3-cycle bound is graded against one durable counter, but a run may bound cycles per scope
+`origin=hs-review:Step 4 severity=low category=template status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** after cycle 3 approved P1–P6, the foreman opened a new review scope (P7–P9) with
+  a fresh count of 3. `set_phase.py` keeps one `review.cycle`, which moves to 4, so the record carries
+  "cycle 4 (scope: P7–P9, fresh count 1 of 3)" in prose only.
+- **Skill cause:** Step 4 and the rubric's *Bounded loop* grade the bound against `review.cycle` alone
+  and assume one review scope per branch. Interim scoped reviews (cycle 1 here was "interim, after
+  P5") make that counter count scopes as well as rounds.
+- **Recommended fix:** keep a per-scope count beside `cycle` in the TECH frontmatter (e.g.
+  `review.scope` and `review.scope_cycle`), reset by a `set_phase.py --new-scope NAME` flag, and grade
+  the bound against it; the rubric and Step 4 say so.
+- **Confidence:** med · **Effort:** small

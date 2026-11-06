@@ -7,7 +7,7 @@ status: in_progress
 branch: feature/relay
 base: develop
 current_phase: P7
-last_updated: '2026-11-05'
+last_updated: '2026-11-06'
 phases:
 - id: P1
   name: 'Late-confirm fence: a confirmation never rewrites a completed row''s attribution'
@@ -162,10 +162,10 @@ phases:
   hill: uphill
   verify: uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster
 review:
-  last_reviewed_commit: c872680
+  last_reviewed_commit: d4a2ec8
   verdict: approved
   blocked_reason: ''
-  cycle: 3
+  cycle: 4
 ---
 # TECH.md — HyperShell Relay: two-level scheduling across administrative sites
 

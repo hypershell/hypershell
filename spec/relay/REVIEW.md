@@ -601,3 +601,309 @@ Unmapped changes: none. The roster guard is the cycle-2 note's optional hardenin
 - **Follow-ups for the build:**
   - C3-2: fix the test in P8.
   - C3-1 text and C3-3: in P9.
+
+## Review cycle 4 (scope: P7–P9, fresh count 1 of 3) — approved, with follow-ups (2026-11-06)
+
+- **Reviewed commit:** `d4a2ec8`  ·  **Range:** `8dfd5f8..d4a2ec8`, spec-excluded except
+  `spec/relay/drive/`. It holds P7 (the R21 drive, judge and smoke), the merge of `develop` with the
+  authkey hardening (`72cb1bb`), site clients through `client_launch()` (`24176a6`), P8 (`1393af6`),
+  the P8 probe fix (`8a0f3b3`) and P9 (`d4a2ec8`).  ·  **Base:** `develop`  ·  **Date:** 2026-11-06
+- **Verdict:** approved. This approves P7–P9 as built; P10 (recording R21 run B) remains. No finding
+  blocks. Each follow-up below says why it does not block. **C4-1 is the one the foreman should rule on
+  explicitly:** it is CONFIRMED and MEDIUM, and if it is ruled blocking, the remedy is small and local.
+- **Cycle:** the first cycle of a new scope. Cycles 1–3 covered P1–P6 and their remediation, and the
+  run allows 3 cycles per scope. `set_phase.py` keeps one counter, so `review.cycle` reads 4 (see
+  META F7).
+- **Mode:** a fresh blind pass over the range, done inline by one reviewer with no subagent, as the
+  foreman directed. The findings were formed from `GOAL.md` (unchanged since shaping: only `62d4a17`
+  and `e6a322b` touch it), the diff, `invariants.md`, `AGENTS.md`, the rubric and the runnable tree.
+  `TECH.md` and the cycle-1–3 record were read only afterwards, to check the P8/P9 deviations and the
+  cycle-3 follow-ups. Every local run used a `git archive d4a2ec8` copy outside the worktree, with the
+  copy's `src/` on `PYTHONPATH`, each under a process-group kill timer. The worktree was untouched
+  until this record.
+- **Host constraint:** the review host's POSIX semaphores are exhausted (`multiprocessing.Lock()`
+  raises ENOSPC), so nothing that starts a server ran here. Server-dependent checks were written here
+  and run by the foreman on a Linux test cluster at `d4a2ec8`. They are marked *(Linux)*.
+
+### Verification run
+
+- **Suites:**
+  - *(Linux)* Full suite, serial, 3.12: 1331 passed, 87 skipped, 0 failed.
+  - *(Linux)* Full suite, 3.12, `-n auto` on 32 CPUs: 1327 passed, with 4 timeouts under load. Three
+    are known flakes. The fourth, `test_relay_ended_by_a_signal_removes_the_site_config_copy[SIGINT]`,
+    passed serially and in the 6× run.
+  - *(Linux)* Relay files plus `test_cluster_launch.py` on 3.14, `-n 8`: pass.
+  - *(Linux)* `-k 'multizone or site_config_copy'`: 4 passed.
+  - *(Linux)* 6× concurrency (outage and workload tests, 6 background copies from `sh`): 18 passed in
+    every copy.
+  - Here: every relay unit test, plus `test_main.py`, `test_completions.py` and
+    `test_cluster_launch.py` (`-m unit`): 289 passed on both 3.12 and 3.14.
+- **R21 run B** *(Linux, 3 nodes, 2000 × 1 s, TLS on)*: kill 41/41, pause 41/41, none 39/39.
+  `relay_judge.py --require kill,pause,none` passes; it was re-run here on the delivered JSON. The
+  records were audited field by field:
+  - `env_unreadable` is 0 everywhere and the schema is 2.
+  - Peak backlog is 128, which is the bound of 128 (2 clients × 32 × 2).
+  - Kill: 112 held tasks, all completed at A, 0 stale.
+  - Pause: 94 held, all completed elsewhere, 94 stale.
+  - `c.peers` was checked by address (slurm mode).
+- **Mutations** (pure logic, here): 38 one-at-a-time mutants against the relay unit tests. 28 killed;
+  10 survived. Of the 10, 3 are equivalent or near-equivalent (`drop_superseded`'s select filter;
+  either one of the two `drain`-stage passes), and 7 are test gaps (C4-3). *(Linux)* one
+  server-dependent mutant: dropping the wait for the first upstream connection survives the outage
+  and launch integration tests (9 passed).
+- **Fault probes** *(Linux, probe script written here)*, each against a real upstream:
+  - wrong key; relay TLS against a `--no-tls` upstream; relay `--no-tls` against a TLS upstream;
+    wrong `cafile`;
+  - an unreachable upstream at start, then the upstream started on that port;
+  - idle CPU with `[relay] poll` 0.1 and 1.
+  The two-zone dead-fleet probe was invalid: it bound the relay-local server to 127.0.0.1 with no
+  loopback launcher, so even the control's site clients could not connect. C4-1 rests on the FSM
+  reproduction below.
+- **Throughput** *(Linux, `relay_throughput.py`, 2000 × 0.2 s, 32 executors)*: 9 runs across three
+  settings (see the note).
+- **Probes here (unit level):**
+  - the puller FSM against a scripted upstream (C4-1);
+  - the default-zone bound in a two-zone relay (it holds);
+  - the judge on edited records (C4-4);
+  - `relay.zone` forms through the real configuration loader (table, list, `--zone` with a table,
+    env override).
+- **Docs:** Sphinx `-W --keep-going`, run outside the sandbox for `sphinx_sitemap`'s AF_UNIX socket:
+  the three known warnings only (`manual.rst` ×2, `cli/task_submit.rst`).
+
+### Requirement → evidence matrix (reviewed scope)
+
+| R-ID | Implemented by (this range) | Verified how | Status |
+|------|-----------------------------|--------------|--------|
+| R2   | one identity per zone (`served_zones`), per-zone gate, `ZONE_REQUEST_WAIT`, shutdown per zone | unit tests; mutants M17/M21/M22/M34/M35 killed; multizone tests *(Linux)* | ⚠ C4-1 |
+| R8   | low-water gate, bound = clients × site bundle × 2, site bundle ≥ threads | mutants M1–M4 killed; run B peak 128 = bound; default zone in a two-zone relay holds (probe) | ✅ (2× is TECH's recorded reading, accepted) |
+| R9   | `UpstreamLink` (deadline, transport vs fatal, jittered backoff ≤ cap), WAIT_LINK stages, confirm replay cut-off, `drop_superseded` | link unit tests; mutants M5–M7/M12/M15/M20/M29/M37–M40 killed; outage tests ×6 *(Linux)*; fault probes | ✅ (C4-2) |
+| R16  | fixed fleet per zone (`zone_fleet`), supervised, stopped and reaped | unit tests; M24/M31 killed; M19 survived (C4-3) | ✅ |
+| R17  | merge with #80: site key via `HYPERSHELL_SERVER_AUTH`, tasks stripped, `fence_site(launches=…)` | run B (e.*: 0 key hits, 0 fenced names, site key in every client env, none in argv/tasks); unit tests; M14 killed; M23 survived (C4-3) | ✅ |
+| R18  | `security.rst` relay section, `cli/relay.rst` non-goals, `database.rst`, config ref, help, zsh completion | read against behaviour; Sphinx; scans: only top-level task commands named, no internal names | ✅ |
+| R20  | `test_relay_link/outage/connector/fsm/launch/roster/workload/judge` additions | suites above; 6× run; mutations | ⚠ C4-3 |
+| R21  | drive, probe, judge, smoke; probe bound mirror | run B 3/3 PASS; judge tests; mirror test; C4-4, C4-5 | ✅ (evidence to be recorded in P10) |
+
+Unmapped changes: none. The merge brings `develop`'s #79/#80 and the 2.9.0a4 bump, which were reviewed
+on `develop`. This record checks only their interplay with relay.
+
+### Findings
+
+#### [MEDIUM/CONFIRMED, FSM level] C4-1 — A served zone with no site client is never asked, so it never gets `shutdown`: pulling never ends, and the relay and a non-forever upstream run on
+- **Blocks or follow-up:** follow-up. **Foreman to rule.**
+  - Why not blocking: it needs a zone fleet that never registers a client (a launcher that fails
+    every time). No task is lost or run twice. A drain (SIGUSR1) or SIGINT ends it. The autoscaler logs
+    a WARNING for each failed launch.
+  - The single-zone form (a relay whose only fleet never connects) has been there since the
+    gate of P3–P6, which cycles 1–3 approved. P9 extends it to one bad zone among good ones, where it
+    is easier to miss: the other zones finish normally.
+- **Where:**
+  - `src/hypershell/relay/upstream.py:368`: the gate skips a zone with `bound == 0`.
+  - `:392-399`: pulling ends only once every zone has had a `shutdown` reply.
+  - `src/hypershell/relay/__init__.py:586-590`: the relay waits for the puller to end.
+  - `docs/_include/relay_desc.rst:49` promises that "when the upstream server shuts down, the relay
+    finishes … and ends its upstream registration".
+- **Scenario:**
+  1. A relay serves `cpu` and `gpu`. The `gpu` fleet's launcher fails every time, say a GPU
+     request on nodes without GPUs.
+  2. Upstream finishes and `dispatcher.finish()` runs. `cpu` gets `shutdown`. `gpu` is never asked
+     (bound 0), so the puller loops at the gate.
+  3. The relay never sends its FINISHED beats. The upstream `HeartMonitor` keeps the relay
+     identities in `beats` and never reaches FINAL.
+- **Evidence:** the real `UpstreamPuller`, with a scripted upstream that answers every request with
+  `shutdown`:
+  - Two zones, clients `{'cpu': 1, 'gpu': 0}`: 20 gate cycles, never FINAL, and the only request is
+    `['cpu']`.
+  - One zone with 0 clients: the same.
+  - An end-to-end probe on Linux was attempted, but the probe was flawed (see *Verification run*).
+- **Fix (small):** once any zone has had `shutdown` (upstream finishing is server-wide), finish every
+  zone that has no site client and no backlog. Its FINISHED beat then also makes upstream `forget` any
+  demand it left. Or, at the least, warn when a served zone has had no site client for a whole
+  autoscale period.
+
+#### [LOW/CONFIRMED] C4-2 — A TLS on/off mismatch with the upstream is retried forever as a transport error, not failed fast
+- **Blocks or follow-up:** follow-up.
+  - Why not blocking: R2 requires fail-fast only for the protocol version, and that holds. The
+    relay never starts its site while it waits. Its log names the SSL error or the connect timeout.
+- **Where:**
+  - `src/hypershell/core/reconnect.py:92`: `TRANSPORT_ERRORS` holds every `OSError`, including
+    `ssl.SSLError`.
+  - `:416-427`: `attempt`.
+- **Evidence** *(Linux, fault probes, real upstream)*:
+
+  | case | outcome | site launches |
+  |---|---|---|
+  | wrong key | rc 5 after 2.1 s (`AuthenticationError`) | 0 |
+  | wrong `cafile` | rc 5 after 1.8 s (`SSLCertVerificationError`) | 0 |
+  | relay TLS → `--no-tls` upstream | still retrying at 40 s: `SSLError: [SSL: WRONG_VERSION_NUMBER]`, "trying again" | 0 |
+  | relay `--no-tls` → TLS upstream | still retrying at 50 s: each attempt takes the full 30 s deadline (`TimeoutError`) | 0 |
+
+  A plain `hs client` fails at once in both mismatch cases.
+- **Fix:** treat `WRONG_VERSION_NUMBER`-class `ssl.SSLError` on the *first* connection as fatal, or
+  add a hint ("check `--no-tls` / `relay.upstream.tls` on both ends") to the "Cannot reach" warning
+  after N attempts.
+
+#### [LOW/CONFIRMED] C4-3 — Seven behaviours of this range survive mutation (test gaps)
+- **Blocks or follow-up:** follow-up (test-only). Why not blocking: the code is right in each case,
+  by reading and, where noted, by a probe or the Linux runs. These are the regressions a later
+  change could slip through.
+- **Survivors:**
+  - **M41** *(Linux)*: `relay/__init__.py:510`. Dropping the wait for the first upstream connection
+    survives the outage and launch integration tests (9 passed). The behaviour holds *(Linux probe:
+    0 launches and no relay-local server before the upstream is up; 1 launch after)*.
+  - **M23**: `:502`. A further zone's launch is not fenced. `fence_site(launches=…)` itself is
+    tested, but the `RelayThread` wiring is not, so a zone launcher carrying the upstream key would
+    go unnoticed (R17).
+  - **M19**: `:639`. A further zone's autoscaler is not supervised.
+  - **M18**: `:984`. Zone `size` validation removed.
+  - **M36**: `store.py:258`. The default-zone `IS NULL` filter, which matters for a multi-zone relay
+    serving the default zone. A probe here shows it holds today.
+  - **M26/M28**: `reconnect.py:345` (the epoch guard in `mark_down`) and `:421` (a non-transport
+    connect error failing the link).
+- **Fix:** one test per survivor. The two `drain`-stage passes and the select filter in
+  `drop_superseded` are equivalent mutants and need none.
+
+#### [LOW/CONFIRMED] C4-4 — The judge has four ways to pass without proving what it names
+- **Blocks or follow-up:** follow-up. Why not blocking: none of the four occurs in run B's records,
+  audited field by field (`env_unreadable` 0, `key_in_server_log` present and 0, 3 groups, schema 2).
+- **Where and evidence** (`judge_run` on edited `good_run` records): each edit below still passes
+  every check.
+  - `env_unreadable` = 50 on both leaves. `e.*` (`spec/relay/drive/relay_judge.py:180-192`) never
+    reads it, so a site client whose environment could not be read is not checked for the key.
+  - `key_in_server_log` absent. `e.logs` reads `or 0`.
+  - A one-group workload. `a.group_order` (`:104`) is then vacuous.
+  - A schema-1 run. `:195` skips the site-key checks, and `--require` does not ask for schema 2.
+- **Fix:** require `env_unreadable == 0`, the field's presence, `groups ≥ 2`, and schema 2 under
+  `--require`.
+
+#### [LOW/CONFIRMED] C4-5 — The drive's header still states the pre-P8 bound
+- **Blocks or follow-up:** follow-up (comment).
+- **Where:** `spec/relay/drive/relay_drive.sh:57`: "a site holds at most its clients x this many
+  tasks". Since P8 it is twice that, and `relay_probe.py:95-107` mirrors the doubled bound.
+
+### Notes (not findings)
+
+- **Throughput rider** *(Linux, 9 runs)*. All 9 completed 2000/2000 and exited 0. Settings and
+  ratios (relay wall time over direct):
+  - default settings: 1.61, 1.22, 1.31;
+  - `HYPERSHELL_RELAY_BUNDLEWAIT=1`: 1.78, 1.33;
+  - `HYPERSHELL_SERVER_POLL=1`: 3.89, 1.40, 1.55, 1.40.
+
+  The steady case is 1.2–1.4×. Four of the nine runs carry an extra end-of-run tail of 6–9 s, and once
+  about 60 s, before the upstream server exits. Neither bundlewait nor the upstream scheduler's
+  backoff explains it: both hypotheses were tested and failed. The relay scratch directories were
+  node-local and are gone, so the cause is undetermined.
+  - It is not a GOAL criterion: throughput is a stated non-goal, and the 1.5× limit is the foreman's
+    rider. But it decides whether the rider's gate is reliable on Linux. A stall near the autoscale
+    period (60 s) or the reconnect backoff cap (60 s) deserves a look.
+  - **Next step for the build:** run `relay_throughput.py` with `HYPERSHELL_LOGGING_LEVEL=DEBUG` and
+    the scratch kept, until an outlier occurs. Then read the relay log from "Upstream server is
+    shutting down" to "Upstream heartbeat - final" and the upstream log around the relay's FINISHED
+    beats.
+- **Idle relay** *(Linux)*: 3.9% of a core at the default `[relay] poll` 0.1, 0.9% at 1, with the
+  upstream at 0%. There is no spin. The probe's site clients could not connect (see *Verification
+  run*), so the puller sat at its 0.1 s gate throughout: this is near the idle upper bound. The `poll`
+  docs name only the relay-local scheduler, but the setting also paces the returner and the puller's
+  gate.
+- **The cut-to-confirm window now also opens on a dropped connection.** A request lost with the
+  link (`upstream.py:384-386`) leaves any reply cut for it stamped upstream with no client until the
+  upstream restarts. `cli/relay.rst` states this ("or when its connection drops"), and the GOAL lists
+  it as a non-goal. It is noted because R9's ride-through makes such drops routine rather than fatal.
+- **`[relay.upstream] evict_hint` must not exceed upstream `server.evict`,** and the docs say so. The
+  upstream ages a relay by its last heartbeat, which can be up to `heartrate` older than the relay's
+  last successful call. So a replay just under the hint can still land after an eviction. If it
+  does, it re-claims rows another client is running, and they finish there. This was found by
+  reading, and no loss follows.
+- **Merge with #80 (focus 1).** It holds:
+  - The site key reaches clients only in `HYPERSHELL_SERVER_AUTH` (`ClientLaunch.env`, applied at
+    `start()` over the scrubbed `os.environ`). `fence_site` checks every launch's argv and env, and
+    the exports.
+  - Tasks and `{% %}` commands lose the key (`inherited_task_env`).
+  - The link's factory holds the `QueueConfig` read before the scrub.
+  - Run B: every site client held its site key in its environment, and no command line or task held
+    it.
+  - The docs say the launcher must pass the environment, in three places (`relay_help.rst`,
+    `relay_desc.rst`, `security.rst`).
+  - `zone_launch` matches `AutoScalingCluster`'s launch (unit test).
+  - A `HYPERSHELL_RELAY_ZONE` variable replaces a file's `[relay.zone.*]` tables entirely, so
+    `--zone gpu` then takes no table settings. That is layered-configuration behaviour.
+- **Single zone unchanged by P9:** `connected=None` (the `client`-table count), the full request
+  wait, and no further fleets.
+- **The underscore-key seed** (TECH P8: `HYPERSHELL_*` cannot set `num_threads`, `launcher_args`,
+  `evict_hint`) is still not filed as an issue. It is for the foreman.
+
+### What held (executed)
+
+- **Fail fast.** At start, a wrong key and an unverifiable certificate end the relay in about 2 s,
+  with 0 site launches *(Linux)*. A version error is covered by the connector and link unit tests and by
+  `test_relay_against_old_server_exits_with_one_version_error` (serial suite *(Linux)*). An upstream
+  that comes back with another key ends the relay (the "comes back unusable" test).
+- **An unreachable upstream at start** is retried, and the site starts only once it answers
+  *(Linux)*: 0 launches, "Cannot reach", no relay-local server; then "Connected", 1 launch.
+- **Bounded backoff** (`backoff_delay`, cap killed by M5), **jitter**, **epochs**, the **stage
+  order** after reconnection (beat → replay → drain → pull: M20/M39/M40 killed), and the **replay
+  cut-off** at `evict_hint` (M7 killed).
+- **R8:** the low-water gate (M1), the gap-sized request never above the bound (M2), factor 2 (M3),
+  and the thread floor (M4). Run B: peak 128 against a bound of 128 at both sites, in all three
+  variants.
+- **Restart detection** (`drop_superseded`; M11 killed): only not-yet-started tasks of the old
+  instance are dropped, and ids in the new bundle are kept.
+- **P9:**
+  - one identity per zone (M17);
+  - the roster on the holder only (M16);
+  - the per-zone bound and backlog (M34/M35);
+  - the short wait (M21) and shutdown per zone (M22);
+  - repeated and unknown zones refused (M8/M9/M42);
+  - every fleet reaped (M24) and launched for its own zone (M31).
+  `relay.zone` forms through the real loader: a table, `--zone` keeping its table's settings, and an
+  empty table.
+- **Docs and invariants:**
+  - The relay trust model in `security.rst`: two auth domains, upstream TLS by `cafile`/fingerprint,
+    the site key in the environment, the fence's limits, the roster.
+  - The non-goals in `cli/relay.rst`.
+  - The C3-1 carve-out in AGENTS §Signals and invariants §8, matching the code: only
+    `relay/__init__.py:175` registers SIGTERM.
+  - §10/§11 relay notes.
+  - Only top-level task commands (`hs list`, `hs info`, `hs wait`, `hs run`, `hs update`) are
+    named, and there are no internal names in the diff or drive.
+  - Completions: zsh `*--zone`; bash `-n` clean *(Linux)*.
+- **The drive and judge** (focus 6):
+  - (a) rows = tasks + retries, none incomplete, retries chained, group order, every id executed,
+    duplicates only within the failover snapshot.
+  - (b) leaf attribution by site and host, and the roster upstream.
+  - (c) upstream connections only from the relays (psutil per leaf, and peer addresses).
+  - (d) eviction, revert and completion at A, with stale results refused after a pause.
+  - (e) no key in any site client or task argv or environment, and the site key handed over in the
+    environment.
+  These prove R21 (a)–(e) for run B. The probe's bound mirror is right (`relay_bound` =
+  `connected × max(1, RELAY_BUNDLESIZE, THREADS) × 2`, pinned by its test).
+
+### Cycle-3 closure
+
+| Finding | Status |
+|---|---|
+| C3-1 | Closed. The SIGTERM/USR1/USR2 carve-out is in `AGENTS.md` §Signals and `invariants.md` §8. It matches the code: catch, clean up, re-deliver; a second SIGTERM ends the process at once; USR1/USR2 never set `RECEIVED`. No other command registers SIGTERM. |
+| C3-2 | Closed. `FAULTY_RECEIVER_RELAY` raises only on non-empty `results` (`tests/test_relay_workload.py:620-624`). The test passed in the serial and 6× runs *(Linux)*. |
+| C3-3 | Closed. `relay_desc.rst`, `hs relay --help` and `security.rst` say a second SIGTERM, like SIGKILL, leaves the site config copy. |
+
+### P8/P9 deviations (TECH), checked
+
+- **An unreachable upstream at start is not fatal** (P8). Accepted. It behaves as stated *(Linux
+  probe)*; its test gap is in C4-3 (M41).
+- **The R8 bound is twice the GOAL's order** (P8). Accepted. The bound is still enforced, documented
+  in the config ref, `relay_desc.rst` and `cli/relay.rst`, and held in run B.
+- **Upstream loss is not a relay failure** (P8). This is R9 itself. Real failures still end the
+  relay (the "comes back unusable" test).
+- **`relay.zone` forms, the per-zone client count from the relay-local dispatcher, the short wait,
+  shutdown per zone, fleets, heartbeats** (P9). Accepted, with one exception: "shutdown per zone"
+  combined with "a zone with no client is skipped" is C4-1.
+
+### Human-gate triggers
+
+- **C4-1:** the foreman rules it follow-up or blocking. No CONFIRMED finding touches a
+  high-blast-radius file. `core/reconnect.py` and `relay/` are outside the list, and the range edits
+  `client.py`, `cluster/remote.py` and `cluster/ssh.py` only through `develop`'s reviewed #80, plus
+  `AutoScalingCluster(evict_after=…)`, which all suites passed.
+- **The cycle-1 trigger stands:** maintainer sign-off on the credential fence and the site-hop TLS
+  before `hs-publish`.
+- **Follow-ups for the build:** C4-1 (fix or ruling), C4-2, C4-3, C4-4 and C4-5, plus the throughput
+  tail investigation (notes), before or with P10.
