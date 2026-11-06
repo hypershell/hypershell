@@ -1524,3 +1524,48 @@ knowledge neither adds `min(uuid)`.
 - **The cycle-1 trigger stands:** maintainer sign-off on the credential fence and the site-hop TLS
   before `hs-publish`.
 - **This is the last review cycle.** C8-1 goes to the maintainer.
+
+### Cycle 8 re-check (delta `cef7195..167793f`; maintainer-approved, not a new cycle) — C8-1 closed, approved (2026-11-06)
+
+- **Range:** `37c565f` (tests only) and `167793f` (the fix, plus a TECH line). Only the delta was
+  re-checked, with `spec/` excluded from the diff. `set_phase.py` raises `review.cycle` on every
+  verdict, so it reads 9, but this is the cycle-8 closure, not a ninth review (META F7).
+- **The fix:** `Task.increment_group` takes its example as `func.min(cast(cls.id, Text))`
+  (`src/hypershell/data/model.py:680`). It renders `min(CAST(task.id AS TEXT))` with both the
+  PostgreSQL and SQLite dialects. `min(text)` is in the PostgreSQL catalog, and an explicit
+  `uuid`-to-text cast is valid. On SQLite the cast is a no-op on a text column. The count and the
+  example are still one statement, and the six filters are unchanged. Nothing else in `src/`
+  changed.
+- **Compile-only test, red and green, executed here:**
+  `tests/test_relay_return.py::test_group_check_example_renders_for_postgresql`.
+  - Red on an export of `37c565f` (`hypershell.data.model.__file__` checked): it fails on
+    `assert 'min(task.id)' not in example`, and the rendered statement shows `min(task.id) AS min_1`.
+    That is the right reason.
+  - Green on `167793f`: `test_relay_return.py` and `test_zone_postgres.py` give 23 passed and
+    4 skipped (the PostgreSQL tests, without `HS_TEST_POSTGRES`).
+  - The statement is captured through `do_orm_execute` while `increment_group` really runs, so the
+    test pins the statement the method runs, not a copy of it.
+- **PostgreSQL test (read, collected; not runnable here):**
+  `tests/test_zone_postgres.py::test_group_checks_on_native_uuid_ids` is collected under the
+  module's `integration` mark and its `HS_TEST_POSTGRES` skip. The PostgreSQL CI job runs this file.
+  - It calls `Task.current_group` both with nothing scheduled (the earliest-group read) and after
+    `Task.next` (the most-recent read).
+  - It then calls `Task.increment_group(0, attempts=1)` with both tasks complete. `remaining` is 0,
+    and `count_retryable` returns 0 without a query (attempts 1, not eager), so the aggregate runs.
+    It must hold the group, non-viable, and name the failed id.
+  - After `retried=True` it must advance (`no task groups remain`).
+  - Before the fix, the expected failure is `function min(uuid) does not exist` at that aggregate.
+    The example compares equal to the Python-side id because PostgreSQL's uuid text output and
+    `hypershell.core.uuid.uuid()` are both lowercase and hyphenated.
+- **Suites (here, 3.15):** `pytest -m "not integration" -n 6`: 859 passed, 3 skipped (858 plus the
+  compile-only test). The 22 relay-return tests from cycle 8, the two cycle-8 red/green tests among
+  them, still pass.
+- **New findings in the delta:** none.
+- **PostgreSQL CI evidence (to be filled by the foreman):** `37c565f` red for the right reason
+  (`function min(uuid) does not exist` in `test_group_checks_on_native_uuid_ids`) and `167793f` green,
+  on pg13, pg18, timescale, timescale-oss and timescale-floor — _pending_.
+- **Closure:** C8-1 is closed by the code, and its red/green is executed for the compile-only test.
+  The live PostgreSQL red/green is the CI job's, and it gates this approval: if `167793f` is not
+  green on all five PostgreSQL entries, the approval lapses and C8-1 reopens. Human gate: the fix is
+  in `data/model.py`, so the maintainer signs off on it together with that CI run. The cycle-1
+  trigger stands.

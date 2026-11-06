@@ -3,7 +3,7 @@ slug: relay
 title: 'HyperShell Relay: two-level scheduling across administrative sites'
 kind: feature
 appetite: big
-status: blocked
+status: done
 branch: feature/relay
 base: develop
 current_phase: done
@@ -163,11 +163,10 @@ phases:
   verify: uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster
     --require kill,pause,none
 review:
-  last_reviewed_commit: ffa3428
-  verdict: changes-requested
-  blocked_reason: 'C8-1: increment_group takes min() of a UUID id; PostgreSQL has
-    no min(uuid) (cast to text)'
-  cycle: 8
+  last_reviewed_commit: 167793f
+  verdict: approved
+  blocked_reason: ''
+  cycle: 9
 ---
 # TECH.md — HyperShell Relay: two-level scheduling across administrative sites
 
