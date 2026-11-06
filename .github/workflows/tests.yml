@@ -18,7 +18,8 @@ concurrency:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The serial suite takes 12-16 minutes on develop; the relay's process tests add about ten more.
+    timeout-minutes: 45
     strategy:
       fail-fast: false          # run the whole matrix so every Python version's result is visible
       matrix:
