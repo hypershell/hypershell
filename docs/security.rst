@@ -223,7 +223,13 @@ key generators used in the deployment guides below satisfy this policy.
     is left). The client runs the shell commands of ``{% %}`` template patterns, once per
     task, with that same environment. So, whatever the launch mode, neither a task's
     environment nor a ``{% %}`` command's holds the key or the Open MPI entry the launch set,
-    unless the configuration gives it explicitly. There are two explicit ways:
+    unless the configuration gives it explicitly. This keeps the key out of an environment
+    that a task dumps or logs by accident. It does not hide the key from task code that looks
+    for it: a task runs as the same user as its client, and that user can generally read the
+    client's environment. This applies to clients from this release on; an older client under
+    a newer launcher still passes its environment to its tasks unchanged.
+
+    A task can be given the key in two explicit ways:
 
     * An ``[export]`` entry for ``HYPERSHELL_SERVER_AUTH`` (or a
       ``HYPERSHELL_EXPORT_HYPERSHELL_SERVER_AUTH`` variable) hands every task a key the
@@ -234,12 +240,7 @@ key generators used in the deployment guides below satisfy this policy.
       reads it does so on purpose.
 
     A task that runs a nested ``hs cluster`` needs neither: that run mints its own key for
-    its own server and clients. Keeping the key out of what tasks inherit keeps it out of
-    an environment a task dumps or logs by accident; it is not a barrier against task code
-    that looks for it, since tasks run as the same user as their client, which can generally
-    read the client's own process environment. This applies to clients from this release
-    on; an older client under a newer launcher still passes its environment to its tasks
-    unchanged.
+    its own server and clients.
 
     A directly configured ``server.auth`` is stored in plaintext in the config file and printed
     verbatim by ``hs config get``; prefer the ``_eval`` / ``_env`` suffixes (see below) to

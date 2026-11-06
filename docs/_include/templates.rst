@@ -175,9 +175,12 @@ The incoming command-line args can be substituted with an ``@``.
 ``{% mktemp -d %}``
     Create temporary directory and insert its path.
 
-When a client expands the template, the command runs with the same environment
-the client's tasks get, so it does not see ``HYPERSHELL_SERVER_AUTH``
-(see :doc:`/security`).
+When a client expands the template, the command runs with the client's own
+environment, without ``HYPERSHELL_SERVER_AUTH`` (see :doc:`/security`). That is
+the environment the client's tasks inherit, before the client adds the
+``[export]`` values and the ``TASK_*`` variables for each task. So the command
+sees an ``[export]`` value only if the client's own environment already holds
+it, as it does for a client that ``hs cluster`` starts through a launcher.
 
 -------------------
 
@@ -192,8 +195,13 @@ The input argument can be used within the expression with the variable ``x``.
 Exposed standard library modules include ``os``, ``os.path`` as ``path``,
 ``math`` and ``datetime`` as ``dt``. The expression is evaluated in the
 process that expands the template, so ``os.environ`` is that process's own
-environment: under a client, it includes ``HYPERSHELL_SERVER_AUTH``
-(see :doc:`/security`).
+environment. Under a client that ``hs cluster`` starts as a process of its own,
+through a launcher or over SSH, it includes ``HYPERSHELL_SERVER_AUTH``
+(see :doc:`/security`). Under the default local mode, whose client runs inside
+the ``hs cluster`` process, it includes the variable only if the environment
+that starts ``hs cluster`` already sets it: the key that run mints is never put
+in that process's environment. A client started by hand with ``-k`` has it there
+only if its own environment sets it.
 
 Incoming arguments are intelligently coerced into the expected type.
 E.g., ``2`` will be an integer, ``4.67`` a float, ``null`` and ``none``
