@@ -360,6 +360,21 @@ a fallback to the default key. Pre-existing since 2.8.0.
 *Horizon: near-term, small · Depends on: — · Refs: `docs/security.rst`*
 **Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: unshaped*
 
+## Environment variables cannot reach every configuration key
+
+The guide says every option can be set by a `HYPERSHELL_*` variable, but every underscore in the
+name is a level of nesting and every value is coerced (`src/hypershell/core/config.py:209-211`, by
+cmdkit). A key with an underscore of its own is out of reach: `server.tls.min_version`,
+`database.timescale.chunk_interval`, `connect_args`, and every `_env` / `_eval` variant, so
+`HYPERSHELL_SERVER_AUTH_ENV` makes `server.auth` a table. And a string key cannot be given `false`,
+`true`, `null`, an empty value or digits: an all-digit `HYPERSHELL_SERVER_AUTH` becomes an `int` and
+crashes `hs server`. `[export]` values reach tasks re-stringified (`007` becomes `7`). Every documented
+key should be settable, with the text given. Pre-existing since 2.7.0.
+
+*Horizon: near-term · Depends on: — · Refs: the `auth_env` collision above (shape together); relay
+(its zone tables add more keys)*
+**Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: unshaped*
+
 ## `hs cluster` waits forever when every launched client fails
 
 When every client a cluster launched exits early, from an authkey or TLS mismatch, an unreachable
@@ -546,8 +561,8 @@ Refs: —*
 Three shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
 drafted R-IDs. They carry `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
-drifted, then adopt largely as written. The last two entries are `unshaped` test-infrastructure
-seeds split out of shipped cycles.
+drifted, then adopt largely as written. The last three entries are `unshaped` test-infrastructure
+seeds: two split out of shipped cycles, one found out of cycle.
 
 ## Zone-aware autoscaling
 
@@ -615,6 +630,19 @@ A subprocess or per-test timeout would turn a hang into a fast, named failure.
 
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/`*
 **Seed:** [`issues/integration-test-hang-timeout.md`](issues/integration-test-hang-timeout.md) · *status: unshaped*
+
+## Test teardown by SIGKILL leaks a 2.8 server's named semaphores on macOS
+
+Tests and the queue bench end each `hs` session with `os.killpg(..., SIGKILL)`, which also kills
+multiprocessing's resource tracker before it can unlink the process's POSIX named semaphores. A 2.8
+server holds several, so on macOS each kill leaks them until reboot, and the pool runs out:
+`multiprocessing.Lock()` then fails with ENOSPC and no 2.8 server starts. A 2.9 server makes none,
+so on `develop` the leak is live only in the bench's `skew` runs against a 2.8 build. Teardown should
+send SIGTERM first and SIGKILL only what is left.
+
+*Horizon: near-term, small · Depends on: — · Refs: `tests/test_cluster_launch.py`,
+`tests/bench/bench_queue.py`; the 2.8 line (backport)*
+**Seed:** [`issues/test-teardown-sigkill-leaks-semaphores.md`](issues/test-teardown-sigkill-leaks-semaphores.md) · *status: unshaped*
 
 ---
 
