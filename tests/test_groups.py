@@ -6,10 +6,12 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Final
+from typing import Dict, Final, List, Tuple
 
 # Standard libs
+import json
 from pathlib import Path
+from datetime import datetime
 
 # External libs
 from pytest import mark
@@ -260,6 +262,18 @@ def test_group_mixed_inline_and_cli_specification(temp_site: Path) -> None:
     assert_output(r'Completed task group 2 - starting task group 5', stderr, 1)
 
 
+def task_intervals() -> Dict[int, List[Tuple[datetime, datetime]]]:
+    """Run interval (start, completion) of every task, by group, from `hs list --json`."""
+    rc, stdout, _ = main(['hs', 'list', 'group', 'start_time', 'completion_time', '--json'])
+    assert rc == exit_status.success
+    runs = {}
+    for record in json.loads(stdout):
+        assert record['start_time'] is not None and record['completion_time'] is not None
+        interval = datetime.fromisoformat(record['start_time']), datetime.fromisoformat(record['completion_time'])
+        runs.setdefault(record['group'], []).append(interval)
+    return runs
+
+
 @mark.integration
 def test_group_parallel_execution_within_group(temp_site: Path) -> None:
     """Tasks within the same group execute in parallel."""
@@ -276,19 +290,28 @@ def test_group_parallel_execution_within_group(temp_site: Path) -> None:
     ]
 
     taskfile = create_taskfile(temp_site, tasks)
-    
-    import time
-    start = time.time()
     rc, stdout, stderr = main(['hs', 'cluster', str(taskfile), '-N8'])
-    elapsed = time.time() - start
     assert rc == exit_status.success
     assert sorted(stdout.strip().splitlines()) == list(map(str, range(len(tasks))))
-    
-    # With 8 threads we should be able to get through everything in one shot (~1 second ignoring overhead)
-    # But because of the groups we can only execute one group at a time regardless of threads
-    # So that's 4 seconds plus 1-2 second backoff between groups
-    assert elapsed > 4 + 3*2, f'Expected > 10s for parallel execution, took {elapsed:.1f}s'
-    
+
+    # Run intervals are read from the database, which is authoritative. The wall clock of the
+    # whole run measures startup and the backoff between groups, not parallelism, so it is not
+    # asserted on.
+    runs = task_intervals()
+    assert sorted(runs) == [1, 2, 3, 4]
+    assert all(len(intervals) == 2 for intervals in runs.values())
+
+    # Within each group the two tasks run at the same time: their run intervals overlap.
+    for group, ((start_a, end_a), (start_b, end_b)) in runs.items():
+        assert max(start_a, start_b) < min(end_a, end_b), f'Group {group} ran serially: {runs[group]}'
+
+    # Groups run in order: every task of one group completes before any task of the next starts.
+    groups = sorted(runs)
+    for lower, higher in zip(groups, groups[1:]):
+        last_end = max(end for _, end in runs[lower])
+        first_start = min(start for start, _ in runs[higher])
+        assert last_end < first_start, f'Group {higher} started before group {lower} completed'
+
     # All tasks should complete
     assert_output(r'Completed task group 1 - starting task group 2', stderr, 1)
     assert_output(r'Completed task group 2 - starting task group 3', stderr, 1)
