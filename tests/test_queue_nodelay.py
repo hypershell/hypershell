@@ -105,6 +105,19 @@ def test_roundtrip(tls: Optional[TLSConfig]) -> None:
 
 
 @mark.unit
+def test_second_server_in_one_process(tls: Optional[TLSConfig]) -> None:
+    """A queue server started after another in the same process serves its own queues.
+
+    Starting a server must leave the server class's queue getters in place; replaced by
+    proxy-making methods, they reach the next server's process (under fork) in place of its queues.
+    """
+    getters = {name: QueueServer.__dict__[f'_get_{name}'] for name in NAMES}
+    roundtrip(tls)
+    assert {name: QueueServer.__dict__[f'_get_{name}'] for name in NAMES} == getters
+    roundtrip(tls)
+
+
+@mark.unit
 def test_roundtrip_under_default_timeout(tls: Optional[TLSConfig], default_timeout: float) -> None:
     """A process default socket timeout leaves the queue connections working.
 
