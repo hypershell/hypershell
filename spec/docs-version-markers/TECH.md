@@ -3,7 +3,7 @@ slug: docs-version-markers
 title: Mark what is new in the docs, now that the published site tracks develop
 kind: docs
 appetite: small
-status: in_review
+status: done
 branch: feature/docs-version-markers
 base: develop
 current_phase: done
