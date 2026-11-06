@@ -3,7 +3,7 @@ slug: relay
 title: 'HyperShell Relay: two-level scheduling across administrative sites'
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/relay
 base: develop
 current_phase: done
