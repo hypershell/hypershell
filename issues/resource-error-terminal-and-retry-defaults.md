@@ -49,8 +49,9 @@ dequeued it is not silently condemned by luck of the draw.
 ## Notes
 
 - **The heterogeneous-fleet half is answered by `zone`, not here.** Declaring a `large-mem` zone and
-  submitting those tasks to it is the sanctioned routing mechanism (`zone` R5/R8); building
-  fleet-capability introspection and cross-node requeue would duplicate it with a worse interface.
+  submitting those tasks to it is the sanctioned routing mechanism (`--zone` on submit and client,
+  shipped by `zone-dispatch`, #78); building fleet-capability introspection and cross-node requeue
+  would duplicate it with a worse interface.
   The shaped GOAL should say so explicitly rather than leaving M2's "requeue to a fitter node"
   reading as accepted scope.
 - Consistency check with `issues/task-start-spawn-guard.md`: whether a new spawn-error sentinel is

@@ -70,9 +70,9 @@ that 2.8 and 2.9 clients and servers do not interoperate.
 
 ## Notes
 
-- `zone-dispatch` is the intended fix. Its version handshake (its R5, and the 2026-11-02 ruling that
-  a new client against an older server exits non-zero with one clear error naming the mismatch) is
-  this clean failure. It SHALL be verified against 2.8.3 there, in both directions, rather than
-  built twice. This seed stays open until that verification is on record.
-- Related: `issues/zone.md`, `issues/date-like-args-coerced.md` (the same bundle codec).
+- `zone-dispatch` (landed, #78) is the intended fix. Its version handshake (its R5, and the
+  2026-11-02 ruling that a new client against an older server exits non-zero with one clear error
+  naming the mismatch) is this clean failure. It SHALL be verified against 2.8.3, in both
+  directions, rather than built twice. This seed stays open until that verification is on record.
+- Related: `spec/zone-dispatch/`, `issues/date-like-args-coerced.md` (the same bundle codec).
 - Found by: `writeback-scoped-conditional` review, cycle 1, 2026-11-02.

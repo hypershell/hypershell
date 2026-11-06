@@ -227,9 +227,10 @@ A user who never runs `hs relay` sees no change whatsoever.
 
 ## Related materials
 
-- Dependency: [`zone.md`](zone.md) — R1 (queue-primitive swap), R3/R4 (targeted
-  demand-driven dispatch: the relay *is* a zones client upstream), R13–R17 (zone-aware
-  autoscaling rails the topology computation extends). This cycle picks up zones' declared
+- Dependency: zone — the queue-primitive swap (`spec/zone-queue-primitive/`, landed, #76) and
+  targeted demand-driven dispatch (`spec/zone-dispatch/`, landed, #78: the relay *is* a zones
+  client upstream) have shipped; [`zone.md`](zone.md) R13–R17 (zone-aware autoscaling rails the
+  topology computation extends) have not. This cycle picks up zones' declared
   non-goal ("multi-server / one-cluster-per-zone topology") as its sanctioned shape.
 - Source (likely touchpoints, to be confirmed by `hs-plan`): new `src/hypershell/relay.py` (or
   `cluster/relay.py`) — connector, embedded local server composition, returner, reconciler;

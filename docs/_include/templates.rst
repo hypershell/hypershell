@@ -175,6 +175,10 @@ The incoming command-line args can be substituted with an ``@``.
 ``{% mktemp -d %}``
     Create temporary directory and insert its path.
 
+When a client expands the template, the command runs with the same environment
+the client's tasks get, so it does not see ``HYPERSHELL_SERVER_AUTH``
+(see :doc:`/security`).
+
 -------------------
 
 Lambda Expressions
@@ -186,7 +190,10 @@ Arbitrary Python expressions can be expanded with the ``{= =}`` notation.
 The input argument can be used within the expression with the variable ``x``.
 
 Exposed standard library modules include ``os``, ``os.path`` as ``path``,
-``math`` and ``datetime`` as ``dt``.
+``math`` and ``datetime`` as ``dt``. The expression is evaluated in the
+process that expands the template, so ``os.environ`` is that process's own
+environment: under a client, it includes ``HYPERSHELL_SERVER_AUTH``
+(see :doc:`/security`).
 
 Incoming arguments are intelligently coerced into the expected type.
 E.g., ``2`` will be an integer, ``4.67`` a float, ``null`` and ``none``

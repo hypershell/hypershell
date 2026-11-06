@@ -158,7 +158,8 @@ retry budget and then pins the group. Retry defaults also diverge between standa
 launch paths for no documented reason. The heterogeneous-fleet half of this finding — requeueing an
 over-large task to a fitter node — is answered by zones, not by fleet-capability introspection.
 
-*Horizon: mid-term · Depends on: — · Refs: zone (for the routing half)*
+*Horizon: mid-term · Depends on: — · Refs: zones, shipped by `zone-dispatch` (#78), for the routing
+half*
 **Seed:** [`issues/resource-error-terminal-and-retry-defaults.md`](issues/resource-error-terminal-and-retry-defaults.md)
 
 ## A restarted run stops before a pending retry
@@ -272,11 +273,11 @@ a stance rather than an omission, and cross-host timing aggregates assume synchr
 Two symptoms of one gap: the server has no channel on which to say anything to a client. An evicted
 client is never told to stop, so a merely-partitioned node keeps executing while its tasks run
 elsewhere; and `hs update --cancel` marks rows terminal without touching the process. Both need
-a server→client control path — and `zone`'s request-return dispatch surface is that seam, so this
-waits rather than building one twice.
+a server→client control path — and `zone-dispatch`'s request-return surface (#78) is meant to be
+that seam, so this waited rather than building one twice.
 
-*Horizon: mid-term · Depends on: zone (dispatch RPC) · Refs: the corruption half was closed
-separately by `writeback-scoped-conditional` (#70)*
+*Horizon: mid-term · Depends on: `zone-dispatch`'s request path (landed, #78) · Refs: the corruption
+half was closed separately by `writeback-scoped-conditional` (#70)*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
 
 ## A task whose confirmation has not landed is invisible to orphan recovery
@@ -328,11 +329,11 @@ The 2.9 line added task columns that a 2.8.3 peer cannot read, and nothing on th
 version. A 2.8.3 client exits on its first bundle from a 2.9 server with a `TypeError`; a 2.9 client
 against a 2.8.3 server runs its tasks, but the server records no result and the run hangs. Every 2.9
 pre-release is affected. The fix is a clean, prompt version error in both directions, and a line in
-the 2.9.0 release notes; `zone-dispatch`'s version handshake is meant to be that error and should be
-verified against 2.8.3 there.
+the 2.9.0 release notes; `zone-dispatch`'s version handshake (#78) is meant to be that error and
+should be verified against 2.8.3.
 
-*Horizon: near-term, before 2.9.0 · Depends on: `zone-dispatch`'s version handshake (R5 of its
-GOAL, not the zone seed's R5) · Refs: release notes*
+*Horizon: near-term, before 2.9.0 · Depends on: `zone-dispatch`'s version handshake (landed, #78;
+R5 of `spec/zone-dispatch/GOAL.md`) · Refs: release notes*
 **Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
 
 ## `hs server --initdb` never initializes the database
@@ -346,6 +347,45 @@ Pre-existing since 2023 (`70bcc63`).
 
 *Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
 **Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: unshaped*
+
+## `auth_env` and `auth_eval` in a config file break every command
+
+`docs/security.rst` recommends `auth_eval` / `auth_env` to keep the authkey out of the config file,
+but the built-in defaults already define `server.auth` (`src/hypershell/core/config.py:132`), and
+cmdkit refuses a key that has more than one variant. With either suffix in a config file, every
+`hs` command, `hs config get` included, dies at import with `'auth' has more than one variant`.
+A variant should take precedence over the default, and an unset variable should be an error, never
+a fallback to the default key. Pre-existing since 2.8.0.
+
+*Horizon: near-term, small · Depends on: — · Refs: `docs/security.rst`*
+**Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: unshaped*
+
+## `hs cluster` waits forever when every launched client fails
+
+When every client a cluster launched exits early, from an authkey or TLS mismatch, an unreachable
+address or a bad remote executable, `hs cluster` ignores their exit statuses and joins a server
+that has work left and no one to run it (`src/hypershell/cluster/remote.py:325-326`,
+`src/hypershell/cluster/ssh.py:321-323`). It never exits and names no failure; under autoscaling it
+relaunches into the same failure instead. It should exit non-zero with a clear error once every
+client has gone and work remains. Pre-existing since 2.8.0.
+
+*Horizon: near-term · Depends on: — · Refs: the advertised-host fix below (one way every client
+fails); failure-budget halt policy (the autoscaling bound)*
+**Seed:** [`issues/cluster-waits-when-every-client-fails.md`](issues/cluster-waits-when-every-client-fails.md) · *status: unshaped*
+
+## `--ssh` and autoscaling tell clients the host's own name, whatever `-H` binds
+
+Launcher and `--mpi` clusters tell their clients the bind address unless it is `0.0.0.0`
+(`src/hypershell/cluster/remote.py:309`), but `--ssh` (`src/hypershell/cluster/ssh.py:305`) and
+autoscaling (`src/hypershell/cluster/remote.py:850`) always pass the host's own name. A server bound
+to one interface on purpose then tells its clients a name that may not reach it, and there is no
+option to name the advertised address apart from the bind, which TLS certificate names also need.
+One rule for every mode, and an override such as `--advertise`, would also serve the relay's own
+downstream address.
+
+*Horizon: near-term, small · Depends on: — · Refs: relay (its downstream listener needs the same
+rule)*
+**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
 
 ## `rotatedb` lost-update window
 
@@ -363,8 +403,8 @@ after the stock proxy constructor returns. If a connection inside that construct
 server is alive, the half-made proxy keeps the stock finalizer, and a collection on the server's
 accept loop can then stall it. Seen only with an injected failure; the window predates the hand-off.
 
-*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
-`spec/zone-queue-primitive/` (review cycle 4, P4)*
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (`zone-queue-primitive`,
+landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4, P4)*
 **Seed:** [`issues/queue-proxy-finalizer-swap-window.md`](issues/queue-proxy-finalizer-swap-window.md)
 
 ## Handed-off decrefs can outlive their server and reach a same-port successor
@@ -373,8 +413,8 @@ A handed-off decref waits for the one sender thread, which under churn falls beh
 reach a successor server on the same port instead of its own and release a live client's queue.
 Seen statistically under same-port restart stress in one process; no CLI path restarts that way.
 
-*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
-`spec/zone-queue-primitive/` (review cycle 4, P5); the same-port restart entry below*
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (`zone-queue-primitive`,
+landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4, P5); the same-port restart entry below*
 **Seed:** [`issues/queue-decref-handoff-delay.md`](issues/queue-decref-handoff-delay.md)
 
 ## A same-key, same-port restart in one process receives the old server's decrefs
@@ -385,8 +425,8 @@ A client that dials the restarted server by another name than its bind host can 
 connection cached for the old server. It came with the in-process server's same-port restart; no
 CLI path uses the same key and port.
 
-*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
-`spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (`zone-queue-primitive`,
+landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
 **Seed:** [`issues/queue-stale-decref-same-port-restart.md`](issues/queue-stale-decref-same-port-restart.md)
 
 ## A forked child of a serving process keeps the queue server's port
@@ -395,8 +435,8 @@ A child forked from a process that serves queues in-process inherits the listeni
 the server shuts down the port cannot be bound again and new clients hang until the child exits. No
 CLI path forks a serving process; only library use sees it.
 
-*Horizon: mid-term, low priority · Depends on: the in-process queue server (zone R1) · Refs:
-`spec/zone-queue-primitive/` (review cycle 5, Observations)*
+*Horizon: mid-term, low priority · Depends on: the in-process queue server (`zone-queue-primitive`,
+landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 5, Observations)*
 **Seed:** [`issues/queue-forked-child-keeps-listener.md`](issues/queue-forked-child-keeps-listener.md)
 
 ## Server-owned queue proxies without reference counting
@@ -408,8 +448,8 @@ never send a decref, which would make the stall impossible by construction and c
 hand-off machinery retire. It needs a check of server-side refcount bookkeeping across reconnects
 first.
 
-*Horizon: mid-term · Depends on: the in-process queue server (zone R1) · Refs:
-`spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
+*Horizon: mid-term · Depends on: the in-process queue server (`zone-queue-primitive`, landed, #76) ·
+Refs: `spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
 **Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
 
 ## `hs client -b` reads the submit section's key, not the client section's
@@ -419,7 +459,7 @@ configuration reference documents `[client]`. Since zone-dispatch a client adver
 `-b` as the size it requests, so a `submit.bundlesize` set for `hs submit` is advertised by every
 client too.
 
-*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
+*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) · Refs:
 `spec/zone-dispatch/` (plan gate ruling N4)*
 **Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
 
@@ -433,7 +473,7 @@ results were refused as stale. In zone-dispatch, before its review-1 remediation
 hung; it is now refused at once with a clear error. A host that can reach the server but not its
 database cannot add work to it.
 
-*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2) · Refs:
+*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) · Refs:
 `spec/zone-dispatch/REVIEW.md` (cycle 1, F4; cycle 2, F6)*
 **Seed:** [`issues/queue-submit-database-server.md`](issues/queue-submit-database-server.md)
 
@@ -509,20 +549,20 @@ cycle has not. Promotion should re-confirm scope against current `develop` and c
 drifted, then adopt largely as written. The last two entries are `unshaped` test-infrastructure
 seeds split out of shipped cycles.
 
-## Zone-aware demand-driven dispatch on a lighter queue primitive
+## Zone-aware autoscaling
 
-Real campaigns are rarely one resource shape end to end — a screening pipeline has CPU steps, GPU
-steps, and high-memory steps — and today there is no way to say "run *these* tasks on *those*
-clients". Dispatch is anonymous and uniformly sized: every client pulls from one shared queue and a
-4-core client gets the same bundle as a 112-core one. Zones add a user-defined placement label on
-both submission and client, targeted delivery sized to the requesting client, and per-zone
-autoscaling — while the homogeneous founding case behaves exactly as it does today. Underneath, the
-managed queues move to the lighter threading primitive so per-client dispatch stops costing a pipe
-and a feeder thread each.
+Zones now route work from one server: a task submitted with `--zone` runs only on a client of that
+zone, sized to the client's own request. The elastic fleet does not follow yet. An autoscaling
+cluster takes a single `--zone`, and its pressure signal counts every zone's work in the current
+group. Zone-aware autoscaling reads pressure per zone, discovers the zones with eligible work,
+launches clients into each through the user's launcher (handing it the zone as `{zone}` and
+`HYPERSHELL_ZONE`), and lets idle clients retire — so a CPU/GPU/high-memory campaign provisions
+each resource type only while its phase is live, while the single-zone case behaves exactly as
+today.
 
-*Horizon: near-term · Depends on: — · Refs: ships in three cycles. R1 (the queue primitive) is
-carved into `zone-queue-primitive`; R2–R12 (dispatch and zones) into `zone-dispatch`; R13–R17
-(zone-aware autoscaling) follow from this seed*
+*Horizon: near-term · Depends on: — (its prerequisites shipped: the queue primitive,
+`zone-queue-primitive`, #76; dispatch and zones, `zone-dispatch`, #78) · Refs: the third of zone's
+three cycles; seed R13–R17*
 **Seed:** [`issues/zone.md`](issues/zone.md) · *status: shaped*
 
 ## Relay: two-level scheduling across administrative sites
@@ -534,7 +574,8 @@ down). `hs relay` is a per-site service that is just a client upstream and a com
 inside — roughly 100 relays × 100 nodes behind ~100 upstream sockets. Security improves at scale:
 upstream credentials stop at the relay.
 
-*Horizon: mid-term · Depends on: zone (strictly) · Refs: leans on the scoped writeback that
+*Horizon: mid-term · Depends on: zone — its queue primitive and dispatch landed (#76, #78);
+site-topology autoscaling still extends zone-aware autoscaling (Z3) · Refs: leans on the scoped writeback that
 `writeback-scoped-conditional` shipped (#70) and inherits the resilience feature's reconnect/redelivery machinery as its R9*
 **Seed:** [`issues/relay.md`](issues/relay.md) · *status: adopted:relay*
 
