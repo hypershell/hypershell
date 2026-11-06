@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/launch-hint-followups
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -25,13 +25,13 @@ phases:
     or names_cause_under_tls'
 - id: P2
   name: Test the export-name check, and kill its mutant
-  status: pending
+  status: done
   satisfies:
   - R5
   depends_on: []
   parallel: true
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: uv run pytest -n auto tests/test_cluster_launch.py -k shell_cannot_assign
 - id: P3
   name: Accurate template docs and the approved security sentence; final gates
@@ -99,11 +99,11 @@ client with no key from any source still does.
 **Satisfies:** R5 · **Depends on:** —
 **Goal:** removing the `SHELL_NAME` skip in `ssh_env_exports()` fails a test.
 
-- [ ] Add `test_ssh_env_skips_names_a_shell_cannot_assign`, parametrized over a dot, a dash and a
+- [x] Add `test_ssh_env_skips_names_a_shell_cannot_assign`, parametrized over a dot, a dash and a
   space in a `HYPERSHELL_*` name. It drives `hs cluster --ssh HOST --env` through the stand-in ssh
   and asserts four things: the name is on no command line, the warning is logged, the other exports
   arrive, and the run completes.
-- [ ] Run green; apply the mutant (the skip removed) and run again (it must fail); restore
+- [x] Run green; apply the mutant (the skip removed) and run again (it must fail); restore
   `launch.py` (`git diff` empty) and run green. Record all three below.
 - **Verify:** `uv run pytest -n auto tests/test_cluster_launch.py -k shell_cannot_assign`.
 - **Touches:** `tests/test_cluster_launch.py`.
@@ -143,3 +143,14 @@ perl process-group kill timer.
     `explicit-wrong-key`, `environment-wrong-key`, and under TLS `no-key` (hint present) and
     `key-kept`.
 - **Green** (with `no_key` in `ClientApp.run`): the same command → **8 passed**.
+
+### P2 — the export-name mutant
+
+- **Green:** `pytest -n auto tests/test_cluster_launch.py -k shell_cannot_assign` → **3 passed**
+  (`dot`, `dash`, `space`).
+- **Mutant:** in `ssh_env_exports()`, the three lines of the `SHELL_NAME` skip (the `if`, its
+  warning, and its `continue`) were removed. The same command → **3 failed**, each on the first
+  assertion: `AssertionError: 'HYPERSHELL_PROBE.NAME' on the command line of ssh` (and the same for
+  `-NAME` and ` NAME`). The mutant is killed.
+- **Restored:** `git checkout -- src/hypershell/cluster/launch.py`; `git diff` on `src/` empty; the
+  same command → **3 passed**.

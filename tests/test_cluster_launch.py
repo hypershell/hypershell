@@ -1219,6 +1219,24 @@ def record_level_exported(records: List[Dict[str, Any]]) -> bool:
     return all(record['level'] == 'DEVEL' for record in records if record['role'] == 'client')
 
 
+@mark.parametrize('name', [
+    pytest.param('HYPERSHELL_PROBE.NAME', id='dot'),
+    pytest.param('HYPERSHELL_PROBE-NAME', id='dash'),
+    pytest.param('HYPERSHELL_PROBE NAME', id='space'),
+])
+def test_ssh_env_skips_names_a_shell_cannot_assign(stand_ins: StandIns, temp_site: Path, name: str) -> None:
+    """With --ssh --env, a variable a shell cannot assign is on no command line, and the launch still runs."""
+    run = run_cluster(stand_ins, ['--ssh', SSH_HOSTS[0], '--env'], temp_site, True, None,
+                      until=ssh_failed(stand_ins), env={name: 'probe'})
+    records = stand_ins.read()
+    for record in records:
+        on_command_line = name in ' '.join(record['argv']) or name in record.get('remote', '')
+        assert not on_command_line, f'{name!r} on the command line of {record["name"]}'
+    assert f'Not exporting {name!r} to remote clients' in run.stderr, run.stderr[-4000:]
+    assert record_level_exported(records)
+    assert_run_complete(run, stand_ins, temp_site)
+
+
 def test_ssh_launch_exports_never_carry_key(monkeypatch: MonkeyPatch) -> None:
     """An SSH launch drops any export of the key variable, from --env or from a caller, and keeps the rest."""
     held = 'h' * 128
