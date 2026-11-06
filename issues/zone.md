@@ -61,7 +61,7 @@ zone-aware autoscaling with **uniform** sizing parameters applied per zone; per-
 ## Acceptance criteria (the contract)
 
 R1–R12 shipped in Z1 and Z2 and are retired; the numbering is kept so citations elsewhere
-(`issues/relay.md`, `spec/zone-dispatch/GOAL.md`) still resolve.
+(`spec/relay/GOAL.md`, `issues/relay-topology.md`, `spec/zone-dispatch/GOAL.md`) still resolve.
 
 - **R13** — WHILE autoscaling is active, the autoscaler SHALL compute task pressure **per zone**,
   scoped to the current task group (extending the existing group-scoped pressure signal with a zone

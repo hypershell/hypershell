@@ -29,7 +29,8 @@ spurious-crash source in real deployments.
 
 **2. One coordinator blip kills the whole fleet.** Client queue reads catch only `QueueEmpty`
 (`src/hypershell/client.py:216`); `EOFError` maps to a fatal disconnect handler
-(`client.py:1545-1548`), and there is no reconnect or backoff anywhere (grep `reconnect` is empty).
+(`client.py:1545-1548`), and no client has a reconnect or backoff path (the one that exists,
+`core/reconnect.py`, serves only the relay's upstream link, #82).
 A server restart or a transient network drop terminates *every* client simultaneously.
 
 **3. Completed-but-unrecorded results die with the process.** Results sit in the in-process
@@ -98,7 +99,7 @@ as a hazard. Operators see retries in the log as events, not as crashes.
   rows for a grace period, lets reconnecting clients reclaim their assignments or deliver their
   results under the original stamp, and reverts only what nobody claims. The shaping must decide
   this; it is the difference between at-least-once with re-runs and a true graceful bounce.
-- **2026-11-04: a starting point exists.** The relay cycle (`spec/relay/`, on its feature branch until it lands) builds
+- **2026-11-04: a starting point exists.** The relay cycle (`spec/relay/`, landed in #82) built
   `core/reconnect.py` `UpstreamLink`: upstream calls on a worker thread with a deadline, a split
   between transport errors (retry) and fatal errors, full-jitter backoff from 1 s to 60 s that
   stays responsive to halt, and a durable outbox redelivered on reconnect. It was planned so that
@@ -108,11 +109,13 @@ as a hazard. Operators see retries in the log as events, not as crashes.
 
 ## Notes
 
-- **`relay` inherits this directly.** `relay` R9 is verbatim this machinery — "WHILE the upstream
+- **`relay` built its own first.** Relay R9 is this machinery for one link — "WHILE the upstream
   server is unreachable, the relay SHALL continue operating its site … reconnect with backoff, and
   return buffered results on reconnection; a relay restart SHALL NOT lose completed-but-unreturned
-  results." Building it once in the client/queue core means the relay's upstream connector inherits
-  it instead of reimplementing it. Strong argument for sequencing this **before** `relay`.
+  results." The ordering this note once argued for (this feature **before** `relay`) is discharged:
+  relay landed first (#82) and built `core/reconnect.py` for its upstream link alone
+  (`spec/relay/GOAL.md` R9, Drift D7). This feature lifts that into the shared mechanism, and the
+  relay's link should then move onto it.
 - **`turso` shares R1's seam.** `turso` R4 consolidates `data/core.py` into an explicit
   per-provider abstraction (connect-argument policy, pragma injection, `in_memory` detection).
   Landing pragma defaults here first gives that consolidation a real second case to generalise

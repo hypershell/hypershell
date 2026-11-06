@@ -17,7 +17,7 @@ and `Receiver`), so their order is not guaranteed. A confirmation writes `client
 `client_host` onto its rows by id, unconditionally, even when the row is already complete.
 
 For an ordinary client this is harmless: the confirmation and the result name the same client. It
-stops being harmless for **relay** (`issues/relay.md`), which receives rows from upstream, confirms
+stops being harmless for **relay** (`spec/relay/`, #82), which receives rows from upstream, confirms
 them under its own identity, and returns each result attributed to the leaf client that actually ran
 it. `writeback-scoped-conditional` made that leaf attribution a result column the server accepts
 (its R4). If the relay's confirmation is applied *after* the result, it overwrites the leaf

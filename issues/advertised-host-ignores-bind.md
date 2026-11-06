@@ -51,8 +51,8 @@ One rule decides the address every launch mode advertises to its clients, and th
 override it. By default it is the bind address when that names a single interface, and the host's
 own name when the server binds every interface. An option (for example `--advertise ADDR`, with a
 config key beside `server.bind`) sets it outright, for a name that differs from the bind address
-or for a certificate's name. The same rule and option serve a future `hs relay`, which listens for
-its own clients and has to tell them where to connect.
+or for a certificate's name. The same rule and option serve `hs relay` (#82), which listens for
+its own clients and has to tell them where to connect; it left a `--advertise` option for later.
 
 ## Sketch of the acceptance criteria
 
@@ -79,7 +79,7 @@ its own clients and has to tell them where to connect.
   (`src/hypershell/client.py:1545`), not from `server.host`, though the config comments say `bind`
   is the server's and `host` the clients' (`src/hypershell/core/config.py:130-131`). Shaping should
   settle which key the advertised address and the client default share.
-- Related: [`relay.md`](relay.md) (a relay advertises its own downstream address), and
+- Related: `spec/relay/` (#82; a relay advertises its own downstream address), and
   [`ipv6-server-listener.md`](ipv6-server-listener.md) (an IPv6 bind address would be advertised by
   the same rule).
 - Found by: out-of-cycle review, 2026-11-05.
