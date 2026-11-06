@@ -1761,3 +1761,22 @@ follow-ups.
   with no failure before the cut. The suite with relay takes about 25 minutes serially. #83 raised the
   `tests` job limit to 45 minutes on develop. This note is the spec-only commit that re-runs CI; the
   reviewed code (`ff23d2d`) is unchanged.
+- 2026-11-06: PR #82's second CI run failed exactly two tests on all four Python versions, each at its
+  full deadline: `test_drain_signal_finishes_everything_the_relay_holds` ("an unstaged backlog at the
+  relay") and `test_multizone_relay_failover_reverts_and_unstages_both_zones` ("tasks held in both
+  zones"); 1346 passed. Both wait for `running_tasks(relay, barrier) == 2`. Cause: the helper counted
+  every site process with the barrier path anywhere in its arguments, and a site client runs each task
+  with `/bin/sh -c`. Debian and Ubuntu patch dash to not exec a lone `-c` command (debian/patches
+  0004, "Disable sh -c command -> sh -c exec command optimization"), so on `ubuntu-latest` the shell
+  stays alive as the waiter's parent and each task counted twice: 4 with both site tasks running,
+  never 2. Bash (the test cluster's `/bin/sh`) and macOS's shells exec the command, one process per
+  task, so both pass there. Not CPU count or staging depth: the relay-local pool for a named zone is
+  cut at the clients' size (1), refilled at most to `queuesize + 1` chunks (2 staged), each client
+  holds at most 3, and the relay holds up to its bound of 24, so the unstaged backlog is at least 16
+  and stable; the multi-zone holdings (2 per zone, above the low-water mark of 1) are stable too.
+  Fix, tests only: `running_tasks` counts a process only when the barrier path is one of its
+  arguments (the waiter itself), never a substring of one (the shell's whole command line), so each
+  task counts once whatever `/bin/sh` is. Both conditions now wait for stable states. Callers with
+  `>= 2` now mean two tasks, as written (on Ubuntu one task used to satisfy them). Checked locally
+  with dash kept alive as the parent (`cmd; :`): 3 tasks, 5 processes by the old match, 3 by the new.
+  No product change.

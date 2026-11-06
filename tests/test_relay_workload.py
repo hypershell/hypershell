@@ -252,11 +252,18 @@ def site_processes(relay: Any) -> List[psutil.Process]:
 
 
 def running_tasks(relay: Any, barrier: Path) -> int:
-    """Number of the relay's site tasks now waiting on the barrier."""
+    """Number of the relay's site tasks now waiting on the barrier, each counted once.
+
+    A task is the waiting Python process, whose arguments include the barrier path itself. A site
+    client runs each task with `/bin/sh -c`, and where that shell does not exec a lone command but
+    waits on it (Debian and Ubuntu patch dash so), the shell stays alive as the task's parent with the
+    whole command line as one argument: it holds the barrier path only within that argument and is
+    not counted, so the count is the same whichever shell `/bin/sh` is.
+    """
     count = 0
     for proc in site_processes(relay):
         try:
-            if any(str(barrier) in arg for arg in proc.cmdline()):
+            if str(barrier) in proc.cmdline():
                 count += 1
         except psutil.Error:
             pass
