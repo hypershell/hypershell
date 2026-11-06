@@ -460,10 +460,13 @@ class QueueServer(QueueInterface):
         self.completed = JoinableQueue(maxsize=self.config.size)
         self.heartbeat = JoinableQueue(maxsize=0)
         self.confirmed = JoinableQueue(maxsize=0)
-        self.register('_get_scheduled', callable=self._get_scheduled)
-        self.register('_get_completed', callable=self._get_completed)
-        self.register('_get_heartbeat', callable=self._get_heartbeat)
-        self.register('_get_confirmed', callable=self._get_confirmed)
+        # Without create_method=False, register() replaces these methods on the class with ones that
+        # ask a running server for a proxy, and the next server started in this process would serve
+        # those in place of its queues (under fork, which copies the changed class to the server).
+        self.register('_get_scheduled', callable=self._get_scheduled, create_method=False)
+        self.register('_get_completed', callable=self._get_completed, create_method=False)
+        self.register('_get_heartbeat', callable=self._get_heartbeat, create_method=False)
+        self.register('_get_confirmed', callable=self._get_confirmed, create_method=False)
         super().start()
         self.ready = True
 
