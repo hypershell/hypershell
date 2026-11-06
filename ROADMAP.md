@@ -324,6 +324,19 @@ false "not found", commits partially, or silently skips rows.
 *Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); resilience*
 **Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: unshaped*
 
+## A relay can abort when its own server meets a row the relay removed
+
+A relay deletes rows under its own server: completed rows leave for its outbox, and rows not yet
+scheduled are dropped when the upstream server restarts. Two of that server's writes still raise on
+such a row: the eviction revert, which reads a client's in-flight rows and then reverts them
+unconditionally, and the scheduler's dispatch stamp, an ORM flush. Either ends a thread and the
+relay exits 5; the upstream server puts its tasks back only after its eviction period. No result is
+lost. The eviction half is the same conditional revert that closes the lost-result window above.
+
+*Horizon: near-term, before 2.9.0 · Depends on: — · Refs: orphan revert (one fix for the eviction
+half); contended Scheduler writes (`Task.next` off the ORM flush); `spec/relay/` C7-1, C7-2*
+**Seed:** [`issues/relay-abort-races.md`](issues/relay-abort-races.md) · *status: unshaped*
+
 ## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
 
 The 2.9 line added task columns that a 2.8.3 peer cannot read, and nothing on the wire names a
@@ -402,6 +415,19 @@ downstream address.
 *Horizon: near-term, small · Depends on: — · Refs: relay (its downstream listener needs the same
 rule)*
 **Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
+
+## Relay rough edges: a TLS mismatch retried forever, idle zones ended early, a slow finish
+
+A relay whose TLS setting differs from its upstream server's retries forever, where a client fails
+at once. In a relay serving several zones, a zone with no site client at the moment upstream
+finishes can end before taking rows still staged for it. Some runs finish 6–9 s late, once about a
+minute, for a reason not yet found. Eviction ages a relay's heartbeat by the relay's own clock, so
+cross-site skew evicts a live relay. And the man page's relay synopsis warns at build and renders a
+stray blank line.
+
+*Horizon: near-term · Depends on: — · Refs: the advertised-host fix above (a relay's own
+downstream address); `spec/relay/` C4-2, C5-1*
+**Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: unshaped*
 
 ## `rotatedb` lost-update window
 
@@ -562,8 +588,8 @@ Refs: —*
 Shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
 drafted R-IDs. They carry `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
-drifted, then adopt largely as written. The last three entries are `unshaped` test-infrastructure
-seeds: two split out of shipped cycles, one found out of cycle.
+drifted, then adopt largely as written. The last four entries are `unshaped` test-infrastructure
+seeds: three split out of shipped cycles, one found out of cycle.
 
 ## Zone-aware autoscaling
 
@@ -644,6 +670,18 @@ send SIGTERM first and SIGKILL only what is left.
 *Horizon: near-term, small · Depends on: — · Refs: `tests/test_cluster_launch.py`,
 `tests/bench/bench_queue.py`; the 2.8 line (backport)*
 **Seed:** [`issues/test-teardown-sigkill-leaks-semaphores.md`](issues/test-teardown-sigkill-leaks-semaphores.md) · *status: unshaped*
+
+## Relay tests can pass a broken relay, and lose a port race to themselves
+
+The R21 judge passes on records that cannot show what four of its checks name; two reconnect
+behaviours survive mutation; and the relay workload tests draw a free port, release it, and hand it
+to a relay that binds it later, so a parallel copy can take it first. Smaller: the group check's
+cancel and `retried` filters are unpinned, and one start-up test resolves a path under the
+developer's own database location. Split out of `relay`'s review.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/relay/` C4-3, C4-4; the relay abort races
+and rough edges in Part I*
+**Seed:** [`issues/relay-test-strength.md`](issues/relay-test-strength.md) · *status: unshaped*
 
 ---
 

@@ -96,7 +96,8 @@ reports and applies exactly the rows its filter selects.
   [`orphan-revert-loses-result`](orphan-revert-loses-result.md) (the revert's condition is still
   "the row exists"; a conditional revert would change what "still qualifies" means for it),
   [`coordinator-resilience-retry-backoff`](coordinator-resilience-retry-backoff.md) (thread death
-  turned into retry).
+  turned into retry), [`relay-abort-races`](relay-abort-races.md) (C7-2: the same `Task.next` flush
+  raising on a row a relay deleted, not a contended one; a re-run alone does not cover a gone row).
 - For `coordinator-resilience-retry-backoff`: a pre-existing deadlock on every PostgreSQL provider.
   Confirm locks its bundle's rows in bundle order, and the Receiver locks its result bundle's rows
   in completion order and holds them all until one commit; interleaved, they can deadlock, and the
