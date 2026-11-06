@@ -95,6 +95,10 @@ adds its marker in the same commit, review grades it, and a broken page fails CI
   first carried each item is recorded once, on the R3 page. The site follows `develop`, so it can
   describe work merged but not yet in any pre-release, and the R2 notice says so. (resolved
   2026-11-06)
+- **Q:** What does a marker link when the change reached `develop` as a direct commit, with no pull
+  request? — **A:** The commit, through a `:commit:` link. Four 2.9 changes landed that way
+  (`961fb22`, `210a93e`, `27db1b0`, `ee03014`), and a commit link is as stable as a PR link.
+  (resolved 2026-11-06, during build)
 - **Q:** Is keeping the docs current for later work in scope? — **A:** Yes, approved: R5 adds the
   standing instructions. (resolved 2026-11-06)
 - **Q:** Has scope drifted since the seed was written? — **A:** No. The seed was written and adopted
