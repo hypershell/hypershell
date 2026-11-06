@@ -138,16 +138,19 @@ terminal records, indexed under `ROADMAP.md` § *Settled questions* rather than 
 account and git history holds the file. Retire only on evidence the cycle *landed* — an
 `adopted:{slug}` marker proves a cycle started, never that it finished. The security lane inverts
 this: nothing under `.security/` is ever deleted, because it is gitignored and a deletion there
-leaves no history to recover from, so a remediated finding keeps its file, its closure is recorded
-in `.security/STATUS.md`, and its `.security/ROADMAP.md` entry moves out of the ordered queue.
+leaves no history to recover from, so a remediated seed or finding keeps its file, moved aside into
+`.security/retired/`, the finding's own `status:` line records its closure, and its
+`.security/ROADMAP.md` entry moves out of the ordered queue. `.security/README.md` governs the lane's
+retirement in detail.
 
 **The security lane is not optional.** A deferral that describes an *unremediated* weakness — a
 live exploitable mechanism, an attack path, or enough evidence to reconstruct one — goes in
 `.security/`, which is gitignored along with `.local/`. Publishing a standing roadmap of live
 vulnerabilities hands an attacker a work plan. The *fixes* land as ordinary public commits and PRs
 when they ship; only the inventory of what is still open stays private. Inside that lane,
-`.security/README.md` + `findings/F*.md` hold the evidence, `.security/STATUS.md` is the
-current-status overlay, and `.security/ROADMAP.md` is the ordered remediation index — the same
+`.security/README.md` + `findings/F*.md` hold the evidence (each finding's `status:` line is the
+record of where it stands, and `.security/STATUS.md` summarises them), `.security/retired/` keeps
+what has been remediated, and `.security/ROADMAP.md` is the ordered remediation index — the same
 convention as the public lane, hidden. When in doubt which lane an item belongs to, use
 `.security/` and ask.
 

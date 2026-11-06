@@ -44,7 +44,10 @@ fits. At promotion, `kind: fix` branches as `fix/{slug}` and every other kind br
 `feature/{slug}`.
 
 `lane: public` lives in `issues/`. Security-sensitive deferrals use `lane: security` and live in
-`.security/issues/` — see the deferral table in [`AGENTS.md`](../AGENTS.md).
+`.security/issues/` — see the deferral table in [`AGENTS.md`](../AGENTS.md). The hidden lane keeps
+its retired seeds rather than deleting them: once a landed cycle ships one, `/hs-roadmap` moves it
+into `.security/retired/` and marks it as `.security/README.md` prescribes. Hidden-lane retirement
+follows that README, which governs the lane.
 
 Two optional keys are in use where they earn their place: `shaped-as:` on a `shaped` seed records
 the GOAL slug the shaping conversation used, and `findings:` on a `lane: security` seed lists the
