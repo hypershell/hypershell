@@ -1220,3 +1220,144 @@ None.
   before `hs-publish`.
 - **Gate on this cycle:** PR #82's CI on `ef92e40`, green on all four Python versions. This is the
   last review cycle the run allows for P7–P9.
+
+## Review cycle 7 (scope: CI remediation, late site confirmation; count 1 of 1) — approved, with follow-ups (2026-11-06)
+
+- **Reviewed commit:** `c2cc82d`  ·  **Range:** `37b7dec..c2cc82d` (one commit: the non-strict site
+  confirmation, its test and its TECH note)  ·  **Base:** `develop`  ·  **Date:** 2026-11-06
+- **Verdict:** approved, with follow-ups. No CONFIRMED finding in the range. Two PLAUSIBLE findings
+  sit outside it, in relay-local paths the range does not touch (C7-1, C7-2), and are rated as
+  follow-ups that need not block 2.9.0a6.
+- **Cycle:** one extra cycle beyond the 3-cycle bound for P7–P9, authorised explicitly by the
+  maintainer for this CI remediation, as a new scope with a count of 1 of 1. There is no further
+  cycle: anything left goes to the maintainer. `set_phase.py` keeps one counter, so `review.cycle`
+  reads 7 (META F7).
+- **Mode:** inline, one reviewer, no subagent, as the foreman directed. The relay-local server's
+  writes were audited from the code, and the race paths reproduced, before the TECH note's audit was
+  read; the note was then compared against that audit, not taken as evidence.
+- **Host:** macOS, Python 3.15 only. Python 3.11–3.13 and the Linux suite are the foreman's and CI's
+  runs.
+
+### Verification run
+
+- **CI evidence (PR #82 at `37b7dec`, read-only):** the 3.11 job's relay-A log shows the Confirm
+  machine log `Confirmed 1 tasks` for the bundle holding task `…790c`, then the Receiver's `Completed
+  task (…790c)` and the returner's `Holding 4 completed tasks for return`, then `Uncaught exception
+  from <class 'hypershell.server.Confirm'>` with `StaleDataError … 0 were matched (task …790c)`. The
+  task suffix is `__write_rows`' own message, so it is the confirmation's write, and the order is
+  the one the commit describes: confirmation unpacked, result written and collected, then the
+  confirmation's UPDATE. The 3.14 job's failure is a `TimeoutExpired` on the upstream server's
+  wait; the relay's log is not in the CI output.
+- **Red/green:** `tests/test_relay_return.py::test_site_confirmation_after_the_result_left_for_the_outbox`.
+  - Green, on `c2cc82d`: the module, 20 passed.
+  - Red, on an export of `c2cc82d` with the four `src/` files taken from `37b7dec` (imported ahead
+    of the editable install, checked by `hypershell.server.__file__`): 1 failed, 19 passed, with
+    `Failed: Late site confirmation ended the Confirm thread: UPDATE statement on table 'task'
+    expected to update 1 row(s); 0 were matched (task …)`.
+  - Mutant, `c2cc82d` with only `relay/site.py` from `37b7dec` (the `strict` plumbing present but
+    not wired to the site server): 1 failed, 19 passed. The test pins the wiring, not just the flag.
+- **Primary servers unchanged:** a probe built a plain `ServerThread`, a plain `AutoScalingCluster`
+  and a `site_cluster`: their Confirm machines read `strict` True, True and False.
+  `tests/test_contended_recovery.py` passes (20), with
+  `test_confirm_of_missing_row_raises_and_writes_nothing` among them.
+- **Suites (here, 3.15):** `pytest -m "not integration"` with the venv's `bin/` on `PATH`: 856
+  passed, 3 skipped (855 at cycle 6, plus the new test). The two workload tests that failed in CI,
+  run once together here: 2 passed. That is weak evidence for an intermittent race; the
+  unit-level red/green above carries the claim.
+
+### Requirement → evidence matrix (reviewed scope)
+
+| R-ID | Implemented by (this range) | Verified how | Status |
+|------|-----------------------------|--------------|--------|
+| R20  | The relay finishes cleanly when a site confirmation is processed after its task's result has left for the outbox (the abort CI hit) | CI log ordering; red/green and the wiring mutant; strictness probe on primary and site servers; unit suite | ✅ (CI pending) |
+
+Unmapped changes: none. The `store.py` and `model.py` docstrings are corrected to match the code;
+the TECH entries are records.
+
+### Findings
+
+**C7-1 — PLAUSIBLE · MEDIUM · follow-up.** `src/hypershell/server.py:874` →
+`src/hypershell/data/model.py:1090` (`revert_orphaned`) → `:938` (`revert_all`), raising at `:905`.
+When the relay-local server evicts a site client, `select_orphaned` reads the client's in-flight rows
+and `revert_all` then writes them unconditionally. If that client's result for one of them is applied
+and the returner collects the row (`relay/store.py:346`) in that gap, the revert raises
+`StaleDataError`, the heart monitor ends, and `check_site` aborts the relay: exit 5, no FINISHED
+beat. Reproduced at unit level (scratch, never committed): with the Receiver's write and
+`collect_results` run on another thread inside `select_orphaned`, `revert_orphaned` raised
+`UPDATE statement on table 'task' expected to update 1 row(s); 0 were matched (task …)`. Not
+reproduced end to end. It needs an evicted client, silent for the full eviction period, to have a
+result land in that gap. No result is lost: the relay's held tasks go back upstream on its eviction.
+- **Rating:** acceptable as a recorded follow-up for 2.9.0a6. Fix it before a stable release,
+  with a pending, non-strict orphan revert for the relay-local server only, which leaves the primary
+  eviction path and the tests that pin it as they are.
+
+**C7-2 — PLAUSIBLE · MEDIUM · follow-up.** `src/hypershell/data/model.py:756` (`Task.next`, an ORM
+flush at `:772`) against `src/hypershell/relay/store.py:250` (`drop_superseded`). `Task.next`
+selects unscheduled rows and stamps them in one flush. `drop_superseded` deletes unscheduled rows
+when the puller receives tasks from a restarted upstream server. If the delete commits between the
+SELECT and the flush, the flush raises SQLAlchemy's `StaleDataError`, the relay-local scheduler ends,
+and the relay aborts as above. Reproduced at unit level (scratch): with `insert_received` from a new
+upstream server id run on another thread inside `select_new`, `Task.next` raised `UPDATE statement
+on table 'task' expected to update 1 row(s); 0 were matched.` Not reproduced end to end. It needs an
+upstream restart whose first bundle reaches the relay in that gap. No integration test restarts the
+upstream server under a relay backlog, so it is not a CI-flake risk today. The upstream server has
+already put back everything the relay held, so an abort here loses only the site's in-flight work.
+- **Rating:** acceptable as a recorded follow-up for 2.9.0a6. It needs an operator to restart the
+  relay after an upstream restart, which is worth fixing before a stable release.
+
+### Audit of the relay-local server's other writes (independent, then compared with TECH)
+
+The relay removes `task` rows in two places, `collect_results` (complete rows) and `drop_superseded`
+(rows not yet scheduled locally). `insert_received`'s upsert replaces a row but never removes one.
+None of these takes a lock the relay-local server's threads share.
+
+| Writer | Gone row → | Rating |
+|---|---|---|
+| Confirm (`confirm_all`) | skipped, now non-strict | fixed in this range |
+| Receiver (`apply_results`) | `STALE`, logged, no raise (probe) | not a defect |
+| `Scheduler.revert_unstaged`, `ServerThread.revert_staged` (`revert_staged`) | skipped: pending, not strict (probe) | not a defect |
+| Scheduler start (`revert_interrupted`) | its rows are scheduled and incomplete; neither deleter can take one, and no site client is connected yet | not reachable |
+| HeartMonitor `Client` writes | the relay never deletes a `client` row | not a defect |
+| HeartMonitor eviction (`revert_orphaned`) | raises | C7-1 |
+| Scheduler `Task.next` | raises | C7-2 |
+
+The TECH note's audit names the same paths with the same outcomes.
+
+### Notes (not findings)
+
+- **The 3.14 timeout as the same abort: plausible, not shown.** The site-key test runs the same
+  gated workload as the failover test, one relay with two site clients and fast tasks after the
+  barrier, so the same Confirm/Receiver race is open. It leaves upstream eviction at its default
+  (600 s, against a 240 s deadline), so a relay that aborted without its FINISHED beat would hold the
+  upstream server past the deadline. That is exactly the symptom. The 3.11 failover test sets
+  eviction to 10 s, which is why its upstream server still exited 0 there. Any other relay abort
+  or hang would give the same 3.14 symptom, and the CI output carries no relay log, so a green 3.14
+  run on `c2cc82d` is the only confirmation available.
+- **The follow-ups have no home outside `spec/`.** TECH routes C7-2 to
+  `issues/hypertable-contended-scheduler-and-cli-writes.md`, but that seed is about write contention
+  on a TimescaleDB hypertable and does not name the relay's deleted-row case. A contended-write
+  re-run on its own would still raise on a gone row. C7-1 has no seed. Before merge, the
+  maintainer may want a seed or a `ROADMAP.md` line for both, or an amendment to that seed's
+  problem statement.
+- **Non-strict skips a gone row silently** (no debug line, unlike a complete row). This is not a
+  defect, but it is noted for diagnosis.
+
+### Cycle-6 closure
+
+| Finding | Status |
+|---|---|
+| C5-1, C4-2, C4-4, C4-3's M26/M28 | Follow-ups, unchanged: this range does not touch them. |
+
+### Human-gate triggers
+
+- **High-blast-radius files touched:** `server.py` and `data/model.py` (an additive `strict`
+  parameter whose default keeps the primary behavior, verified above). No CONFIRMED finding touches
+  them, so the CONFIRMED-finding gate does not fire. The maintainer should still see that the core
+  signatures changed.
+- **C7-1 and C7-2** are PLAUSIBLE, on core and DB-lifecycle paths (`revert_all`'s strictness and the
+  scheduler's stamp), and need the maintainer's triage. They are recommended as follow-ups, not
+  blockers, for 2.9.0a6.
+- **The cycle-1 trigger stands:** maintainer sign-off on the credential fence and the site-hop TLS
+  before `hs-publish`.
+- **Gate on this cycle:** PR #82's CI on `c2cc82d`, green on all four Python versions, in
+  particular the 3.11 failover test and the 3.14 site-key test. This is the last review cycle.
