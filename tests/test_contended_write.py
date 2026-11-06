@@ -229,21 +229,45 @@ def test_rerun_after_contended_update_matches(contended_db) -> None:
 
 
 def test_contended_confirm_records_client(contended_db) -> None:
-    """A confirmation that waited on a result write stamps the client and keeps the result."""
+    """A confirmation that waited on another write to its open row stamps the client."""
     task_id = submit()
     dispatch_one(task_id)
-    completed = datetime.now().astimezone()
-    holder_sql = f'UPDATE task SET completion_time = :completed, exit_status = 0, duration = 2 {BY_ID}'
+    holder_sql = f'UPDATE task SET client_id = CAST(:client_id AS uuid), client_host = :client_host {BY_ID}'
 
-    outcome = contend(contended_db, holder_sql, {'completed': completed, 'id': task_id},
+    outcome = contend(contended_db, holder_sql, {'client_id': str(uuid.uuid4()), 'client_host': 'holder', 'id': task_id},
                       lambda: confirm([task_id]))
 
     assert outcome.error is None, repr(outcome.error)
     assert outcome.value is ConfirmState.UNLOAD
     data = row(contended_db, task_id)
     assert (data['client_id'], data['client_host']) == CLIENT
+    assert data['completion_time'] is None
+
+
+def test_contended_late_confirm_on_complete_row_is_settled(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """A confirmation that waited on the result write leaves the result's client and is settled, not contended."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = submit()
+    dispatch_one(task_id)
+    completed = datetime.now().astimezone()
+    leaf = (str(uuid.uuid4()), 'leaf-a')
+    holder_sql = (f'UPDATE task SET completion_time = :completed, exit_status = 0, duration = 2, '
+                  f'client_id = CAST(:client_id AS uuid), client_host = :client_host {BY_ID}')
+
+    outcome = contend(contended_db, holder_sql,
+                      {'completed': completed, 'client_id': leaf[0], 'client_host': leaf[1], 'id': task_id},
+                      lambda: confirm([task_id]))
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value is ConfirmState.UNLOAD
+    data = row(contended_db, task_id)
+    assert (data['client_id'], data['client_host']) == leaf
     assert data['completion_time'] == completed
     assert data['exit_status'] == 0
+    assert warnings_with(caplog, 'Contended confirm') == []
+    settled = [record.getMessage() for record in caplog.records
+               if record.levelno == logging.DEBUG and 'already complete' in record.getMessage()]
+    assert len(settled) == 1 and task_id in settled[0], settled
 
 
 def test_contended_result_applies(contended_db, caplog: pytest.LogCaptureFixture) -> None:

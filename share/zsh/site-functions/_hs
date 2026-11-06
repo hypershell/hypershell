@@ -144,6 +144,7 @@ function _hs() {
         'cluster:Run managed cluster'
         'server:Run server in stand-alone mode'
         'client:Run individual client directly'
+        'relay:Run relay for one site'
         'submit:Submit tasks to the database'
         'initdb:Initialize database'
         'info:Get metadata/status/outputs of task'
@@ -170,6 +171,7 @@ function _hs() {
                 cluster) _hs_cluster ;;
                 server)  _hs_server ;;
                 client)  _hs_client ;;
+                relay)   _hs_relay ;;
                 submit)  _hs_submit ;;
                 initdb)  _hs_initdb ;;
                 config)  _hs_config ;;
@@ -520,6 +522,25 @@ function _hs_client() {
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
         '(-R --ratelimit)'{-R,--ratelimit}'[Maximum allowed tasks per second]:rate:' \
         '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait (default: 10)]:seconds:(1 5 10)'
+}
+
+# ---------------------------------------------------------------------------
+# relay
+# ---------------------------------------------------------------------------
+
+function _hs_relay() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show this message and exit]' \
+        '(-H --upstream-host)'{-H,--upstream-host}'[Hostname of upstream server (default: localhost)]:host:_hs_known_hosts' \
+        '(-p --upstream-port)'{-p,--upstream-port}'[Port of upstream server (default: 50001)]:port:_hs_ports' \
+        '--no-tls[Disable TLS to upstream server (not recommended)]' \
+        '*--zone[Zone this relay serves (repeat for more)]:zone:' \
+        '(-N --size)'{-N,--size}'[Number of clients kept launched at the site (default: 1)]:count:' \
+        '--launcher[Command prefix that launches each client]:launcher:_command_names -e' \
+        '--launcher-args[Extra arguments for the launcher]:arguments:' \
+        '--bind[Bind address of relay-local server (default: 0.0.0.0)]:address:(0.0.0.0 localhost 127.0.0.1)' \
+        '--port[Port of relay-local server (default: 50002)]:port:_hs_ports' \
+        '--database[Path to relay database]:database file:_files'
 }
 
 # ---------------------------------------------------------------------------

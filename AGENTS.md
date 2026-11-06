@@ -82,8 +82,10 @@ Top-level package `src/hypershell/`:
 | `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection. `InitDBApp` (`hs initdb`) and the `initdb`/`checkdb`/`ensuredb` helpers live in `data/__init__.py`; the schema-upgrade step in `data/upgrade.py`. |
 | `data/model.py` | `Entity` base + `Task`, `Client`, and `Source` ORM models (`Source` records submission provenance for re-submission gating; `DIRECT_SOURCE_ID`/`STDIN_SOURCE_ID` are reserved source ids). **Most query/state logic lives as `Task` classmethods here.** |
 | `cluster/` | `__init__.py` (`ClusterApp`/`hsx`), `local.py` (`LocalCluster`), `remote.py` (`RemoteCluster`, `AutoScalingCluster`), `ssh.py` (`SSHCluster`), `launch.py` (`client_launch()`, the one launched-client builder). |
+| `relay/` | `hs relay`: a site's link to an upstream server. `__init__.py` (`RelayApp`, `RelayThread`: composition, supervision, shutdown order, signal handlers), `upstream.py` (puller, returner and heartbeat FSMs; one upstream identity per served zone), `store.py` (relay-only tables `relay_task`/`relay_result` on their own `MetaData`; durable insert, outbox), `site.py` (site cluster and per-zone fleets, credential fence). The reconnecting upstream link is `core/reconnect.py` (`UpstreamLink`). |
 
-`core/` modules: `sys` (import-time `sys.path` sanitizer), `config`, `logging`, `signal`,
+`core/` modules: `sys` (import-time `sys.path` sanitizer), `config`, `logging` (also
+`DISTRIBUTED_ROLES`, the commands that write a log of their own), `signal`,
 `exceptions`, `fsm` (`StateMachine`), `thread` (`Thread` base), `queue` (transport +
 TLS-aware manager), `tls` (`TLSConfig`, cert generation), `heartbeat`, `template`, `tag`,
 `types` (JSON `serialize`/`deserialize`), `resource` (per-node resource accounting),
@@ -233,6 +235,10 @@ assignment: the row's `schedule_time` as dispatched, while `completion_time` is 
 (`Task.apply_results`). A stale or duplicate result is logged and dropped, so a late result from an
 evicted client cannot reopen a retried or cancelled row.
 
+A confirmation writes `client_id`/`client_host` only while `completion_time` is NULL
+(`Task.confirm_all`): one that arrives after the result, or after a cancel, leaves the row as it is,
+so the result's attribution stands.
+
 Pre-2.9 SQLite databases keep `UNIQUE` on both columns, because SQLite cannot drop them without a
 table rebuild. Normal operation never trips them; in the three cases above they raise
 `IntegrityError` instead.
@@ -295,6 +301,19 @@ path. Graceful cooperative drain is driven by USR1/USR2/HUP.
 `signal.RECEIVED` is a **process-global, sticky** module flag shared across all threads: it is
 only reset on the SIGHUP log-rotation path. USR1/USR2 are intentionally never reset — once
 seen they steer every polling FSM toward shutdown. **Do not add stray `reset_signal()` calls.**
+
+**The relay carve-out (sanctioned, `hs relay` only).** A relay process installs its own handlers
+(`relay/__init__.py`, from the main thread, for the life of the process; one relay per process):
+- **SIGUSR1/SIGUSR2 drain the relay through its own handler and never set `RECEIVED`.** The stock
+  flag would stop the relay-local scheduler at once and strand the site's backlog; the relay's
+  handler only ends pulling (`DRAIN`), and the site finishes what the relay holds.
+- **SIGTERM is caught** (`install_terminate_handler`): it raises `RelayTerminated` in the main
+  thread, the relay stops its parts, ends its site clients and removes the site's configuration
+  copy, then the signal is **re-delivered with its default action**, so the process still dies by
+  SIGTERM (`end_by_signal`). The handler resets SIGTERM to its default first, so **a second SIGTERM
+  ends the process at once** (and, like SIGKILL, leaves the site config copy behind).
+- No other command captures SIGTERM, and none of this goes through `check_signal()`. Don't run
+  another app in-process after the relay's handlers are installed (they are never restored).
 
 ## Queue transport & security
 
@@ -502,6 +521,17 @@ compatibility until v3, but are never referenced.
   auth token; `HOSTNAME` routability; autoscaler never terminates clients.
 - `submit.py` queue-mode silently ignores `-t/--tag` (leaves `group=None`) — asymmetric vs DB
   mode; tag/attribute resolution actually happens in `Task.new`.
+- **`relay/`** — **one relay per process**: `core/config.py` swaps the whole `[database]` section
+  for the relay's private SQLite file **at import** (`RELAY_PROCESS`), before `data/core.py` builds
+  the engine, so `RelayApp` re-executes the interpreter when started after import or with another
+  `--database`; never rebind the engine after import. `relay_task`/`relay_result` are **relay-only
+  tables** on their own `MetaData` (never `Entity`, or `upgrade_schema` would create them in every
+  primary). **Nothing in the relay dials its own relay-local server in-process** (the upstream TLS
+  trust is process-wide; the local listener keeps its own context), and tests run the upstream
+  server and each relay as separate processes. Site clients are launched only through
+  `client_launch()` (the first zone's via `AutoScalingCluster`, further zones' via
+  `relay/site.py::zone_launch`, built the same way), behind `fence_site`, which keeps the upstream key
+  off every site command line and environment. Its signal handling is the carve-out under *Signals*.
 
 ## Working on this codebase as an agent
 
@@ -541,8 +571,8 @@ compatibility until v3, but are never referenced.
   hand-roll state predicates in FSM code. Reuse `cmdkit.app.exit_status` constants for return
   codes — don't invent integer literals. New subcommand = a cmdkit `App`
   (`interface` + `run()` + `exceptions = {**get_shared_exception_mapping(__name__)}`) imported
-  and registered in `__init__.py`'s `commands` dict (+ `APP_HELP`, and `DISTRIBUTED_ROLES` if
-  it writes its own log).
+  and registered in `__init__.py`'s `commands` dict (+ `APP_HELP`, and `DISTRIBUTED_ROLES` in
+  `core/logging.py` if it writes its own log).
 - **Import-time side effects are real:** importing `hypershell` runs `core.sys`
   (`HYPERSHELL_PYTHONPATH`), builds the config singleton, and creates the DB engine — several
   of these can `sys.exit(3)`. Keep `import hypershell.core.sys` first in `__init__.py`.

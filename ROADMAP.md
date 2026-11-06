@@ -558,7 +558,7 @@ Refs: —*
 
 # Part II — The 2.9.0 feature cycle
 
-Three shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
+Shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
 drafted R-IDs. They carry `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
 drifted, then adopt largely as written. The last three entries are `unshaped` test-infrastructure
@@ -592,7 +592,20 @@ upstream credentials stop at the relay.
 *Horizon: mid-term · Depends on: zone — its queue primitive and dispatch landed (#76, #78);
 site-topology autoscaling still extends zone-aware autoscaling (Z3) · Refs: leans on the scoped writeback that
 `writeback-scoped-conditional` shipped (#70) and inherits the resilience feature's reconnect/redelivery machinery as its R9*
-**Seed:** [`issues/relay.md`](issues/relay.md) · *status: shaped*
+**Seed:** [`issues/relay.md`](issues/relay.md) · *status: adopted:relay*
+
+## Relay site-topology autoscaling: fill and spread across sites
+
+With relays in place, each site still sizes its own fleet; the true server, which holds the pressure
+signal, cannot say "fill the cheap site first, spill to the next" or "spread across what is live",
+and site failover moves the tasks but not the capacity. Here the server stops launching and
+publishes a versioned per-site topology under `fill` (the SU-cost mode) or `spread`, with per-site
+`min`/`max`/`init`; each relay reconciles only its own entry, and scale-down stays idle-exit. Carved
+out of relay at its promotion, because it extends zone autoscaling's per-zone pressure.
+
+*Horizon: mid-term · Depends on: zone autoscaling (Z3, `issues/zone.md` R13–R17) and relay
+(strictly) · Refs: relay R11–R15 and R16's topology half (`spec/relay/GOAL.md` C1)*
+**Seed:** [`issues/relay-topology.md`](issues/relay-topology.md) · *status: shaped*
 
 ## Turso provider, partition-attached listing, and S3 captured output
 

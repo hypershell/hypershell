@@ -517,6 +517,172 @@
             For a *dynamic* autoscaling policy, this sets an upper limit on the number of launched
             clients. When this number is reached, scaling stops regardless of task pressure.
 
+``[relay]``
+    Section for the `relay` workflow, which connects a site to an upstream *server*.
+
+    ``.database``
+        Path to the relay database (default: <lib>/relay/<host>.db).
+
+        The relay database is always a private SQLite file, whatever ``[database]`` names; a relay
+        never opens the configured database. The default is named for the host, since a home
+        directory is often shared between hosts. A node-local disk is a good place for it.
+
+        See also ``--database`` command-line option.
+
+    ``.bind``
+        Bind address of the relay-local *server* (default: `0.0.0.0`).
+
+        The *clients* at the site connect here. See also ``--bind`` command-line option.
+
+    ``.port``
+        Port of the relay-local *server* (default: `50002`).
+
+        See also ``--port`` command-line option.
+
+    ``.bundlesize``
+        Size of task bundle for the relay-local *server* and the *clients* at its site
+        (default: `1`).
+
+        It is never smaller than ``relay.num_threads``: a *client* asks for one bundle at a time,
+        so a smaller bundle would leave its executors idle between requests.
+
+    ``.bundlewait``
+        Seconds the relay waits before returning finished tasks upstream regardless of
+        `bundlesize` (default: `5`).
+
+    ``.poll``
+        Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).
+
+        Received tasks wait at most this long before the relay-local *server* hands them out.
+
+    ``.retention``
+        Seconds a result is kept in the relay database after it has been returned upstream
+        (default: `300`). Results not yet returned are always kept.
+
+    ``.zone``
+        Zone or zones the relay serves (default: none, the default zone).
+
+        One zone name, a list of names, or one table per zone, ``[relay.zone.NAME]``, which may
+        give that zone's own ``launcher``, ``launcher_args`` and ``size`` (each in place of the
+        relay's, for that zone's *clients* only); an empty table serves the zone with the relay's.
+        Upstream the relay is one *client* per zone, each with its own identity; at the site it
+        keeps one fleet of *clients* per zone, all served by the relay-local *server*. The first
+        zone's identity lists the site's *clients* upstream.
+
+        .. code-block:: toml
+
+            [relay.zone.cpu]
+
+            [relay.zone.gpu]
+            size = 2
+            launcher = "srun"
+            launcher_args = "--gres=gpu:1"
+
+        See also ``--zone`` command-line option, which names the zones in place of this one.
+
+    ``.site``
+        Name of the relay's site (default: none, the relay's host name).
+
+        The upstream *server* records the relay, and the *clients* at its site, under this name.
+
+    ``.size``
+        Number of *clients* the relay keeps launched at its site (default: `1`, at least `1`).
+
+        See also ``-N``, ``--size`` command-line option.
+
+    ``.launcher``
+        Command prefix used to launch each *client* at the site (default: none).
+
+        An empty value launches clients directly as ``hs client ...``.
+        See also ``--launcher`` command-line option.
+
+    ``.launcher_args``
+        Extra arguments for the launcher (default: none).
+
+        See also ``--launcher-args`` command-line option.
+
+    ``.num_threads``
+        Executor threads for each *client* at the site (default: `1`).
+
+    ``.template``
+        Command template for the *clients* at the site (default: `{}`).
+
+    ``.timeout``
+        Seconds a *client* at the site waits for tasks before it exits (default: `0`, never).
+
+    ``[upstream]``
+        Connection to the upstream *server*. These settings are never read from ``[server]``,
+        so the *clients* at the site keep using the relay's own ``[server.tls]``.
+
+        ``.host``
+            Hostname of the upstream *server* (default: `localhost`).
+
+            See also ``--upstream-host`` command-line option.
+
+        ``.port``
+            Port of the upstream *server* (default: `50001`).
+
+            See also ``--upstream-port`` command-line option.
+
+        ``.auth``
+            Cryptographic key for the upstream *server*.
+
+            Use ``.auth_env`` or ``.auth_eval`` to keep it out of the file; whichever form is set
+            in the highest-precedence place is used (two forms in one place are refused). The
+            upstream key stays in the relay: the *clients* at the site use a key the relay mints for
+            each run.
+
+        ``.bundlesize``
+            Bundle size the relay advertises upstream (default: `1000`).
+
+            The relay holds at most twice its connected *clients* times ``relay.bundlesize`` in
+            unfinished tasks. It asks for more only once half of that is left, and then for the
+            whole difference (never more than this size at once), so the site has a second round
+            of work ready while the first runs.
+
+        ``.heartrate``
+            Seconds between heartbeats to the upstream *server* (default: `10`).
+
+        ``.deadline``
+            Seconds a call to the upstream *server* may take before the relay takes the connection
+            as lost (default: `30`).
+
+            While the upstream *server* cannot be reached, the site keeps running and finished
+            tasks are kept in the relay database; the relay connects again, with backoff, and then
+            returns them before it asks for more work.
+
+        ``.backoff``
+            Longest wait in seconds between attempts to reach the upstream *server* again
+            (default: `60`).
+
+            Each wait is drawn at random up to a bound that starts at one second and doubles with
+            each failed attempt, up to this value.
+
+        ``.evict_hint``
+            Seconds of lost contact after which the relay takes the upstream *server* to have
+            evicted it (default: `600`, the *server*'s own default ``server.evict``).
+
+            Set it to the upstream ``server.evict``. Past it, the relay warns that the results it
+            holds will likely be refused as stale (the upstream *server* has put those tasks back
+            for other *clients*), and it does not repeat a confirmation the outage cut off. The
+            results are still returned when the connection comes back.
+
+        ``[tls]``
+            ``.enabled``
+                Use TLS on the upstream connection (default: `true`).
+
+                See also ``--no-tls`` command-line option.
+
+            ``.cert``
+                Upstream server certificate (default: `<auto>`).
+
+            ``.cafile``
+                Trust anchor for the upstream server (default: `<auto>`).
+
+            ``.fingerprint``
+                Pin the upstream server certificate fingerprint, e.g. ``SHA256:AB:CD:...``
+                (default: none).
+
 ``[console]``
     Rich text display and output parameters.
 

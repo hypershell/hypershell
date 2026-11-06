@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Zones on PostgreSQL: the get-or-create upsert, zone-filtered selection, and the in-place upgrade.
+Zones on PostgreSQL: the get-or-create upsert, zone-filtered selection, and the in-place upgrade;
+also the scheduler's task-group checks, which aggregate over the native UUID task id.
 
 These tests need a PostgreSQL server; each one creates and drops its own database:
 
@@ -31,7 +32,7 @@ from sqlalchemy.engine import Engine, make_url
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
 from hypershell.data.upgrade import upgrade_schema
-from hypershell.data.model import Task, Zone, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME
+from hypershell.data.model import Task, Zone, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME, DEFAULT_TASK_GROUP
 
 
 ADMIN_URL: Optional[str] = os.getenv('HS_TEST_POSTGRES')
@@ -131,3 +132,23 @@ def test_upgrade_adds_zone_in_place(pg_engine: Engine) -> None:
     assert {c['name']: str(c['type']) for c in insp.get_columns('task')}['zone'] == 'UUID'
     with pg_engine.connect() as conn:
         assert conn.execute(text('SELECT count(*) FROM task WHERE zone IS NULL')).scalar() == 2
+
+
+def test_group_checks_on_native_uuid_ids(pg_engine: Engine) -> None:
+    """The scheduler's group checks run on PostgreSQL: the start, an advance, and a hold on a spent failure.
+
+    PostgreSQL has no `min` over `uuid`, so the example a held group names is taken over the id as text.
+    """
+    failed_id, done_id = add_tasks(2)
+    assert Task.current_group().value == DEFAULT_TASK_GROUP  # Nothing scheduled: the earliest group.
+    assert {str(t.id) for t in Task.next(limit=10, attempts=1)} == {failed_id, done_id}
+    assert Task.current_group().value == DEFAULT_TASK_GROUP  # The most recently scheduled group.
+    now = datetime.now().astimezone()
+    Task.update(done_id, exit_status=0, completion_time=now)
+    Task.update(failed_id, exit_status=3, completion_time=now)
+    held = Task.increment_group(DEFAULT_TASK_GROUP, attempts=1)  # A site server's scheduler (no retries).
+    assert held.value == DEFAULT_TASK_GROUP and not held.viable
+    assert held.reason == f'at least 1 tasks exceeding allowed retries, example: {failed_id}'
+    Task.update(failed_id, retried=True)
+    after = Task.increment_group(DEFAULT_TASK_GROUP, attempts=1)
+    assert after.viable and after.reason == 'no task groups remain'

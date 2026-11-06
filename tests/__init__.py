@@ -23,7 +23,7 @@ import pytest
 # Public interface
 __all__ = ['NO_OUTPUT', 'main', 'main_lines', 'assert_output',
            'create_taskfile', 'create_taskfile_echo', 'create_json_taskfile',
-           'UUID_PATTERN', 'FIXTURE_283', 'ORIGINAL_TASK_COLUMNS', 'HALF_UPGRADE_DDL',
+           'UUID_PATTERN', 'FIXTURE_283', 'ORIGINAL_TASK_COLUMNS', 'ORIGINAL_CLIENT_COLUMNS', 'HALF_UPGRADE_DDL',
            'copy_fixture', 'make_half_upgraded', 'snapshot', 'task_columns', 'sqlite_schema']
 
 
@@ -103,6 +103,12 @@ ORIGINAL_TASK_COLUMNS: Final[Tuple[str, ...]] = (
 """The `task` columns of a hypershell 2.8.3 database, in table order."""
 
 
+ORIGINAL_CLIENT_COLUMNS: Final[Tuple[str, ...]] = (
+    'id', 'host', 'server_id', 'server_host', 'connected_at', 'disconnected_at', 'evicted',
+)
+"""The `client` columns of a hypershell 2.8.3 database, in table order."""
+
+
 HALF_UPGRADE_DDL: Final[Tuple[str, ...]] = (
     'CREATE TABLE source (\n\tid TEXT NOT NULL, \n\tpath TEXT NOT NULL, \n\tfingerprint TEXT, '
     '\n\ttask_count INTEGER, \n\tcreated DATETIME NOT NULL, \n\tPRIMARY KEY (id)\n)',
@@ -140,13 +146,14 @@ def _connect_ro(path: Path) -> sqlite3.Connection:
 
 
 def snapshot(path: Path) -> Dict[str, Dict[str, tuple]]:
-    """Raw rows as stored: the original `task` columns keyed by id, and every `client` row."""
+    """Raw rows as stored: the original `task` and `client` columns, keyed by id."""
     columns = ', '.join(f'"{name}"' for name in ORIGINAL_TASK_COLUMNS)
+    client_columns = ', '.join(f'"{name}"' for name in ORIGINAL_CLIENT_COLUMNS)
     conn = _connect_ro(path)
     try:
         return {
             'task': {row[0]: row for row in conn.execute(f'SELECT {columns} FROM task')},
-            'client': {row[0]: row for row in conn.execute('SELECT * FROM client')},
+            'client': {row[0]: row for row in conn.execute(f'SELECT {client_columns} FROM client')},
         }
     except sqlite3.Error as error:
         pytest.fail(f'Could not snapshot {path}: {error}')

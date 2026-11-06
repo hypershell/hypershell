@@ -657,7 +657,7 @@ file_handler: Optional[RotatingFileHandler] = None
 # 'main' role. The role is declared by the entry point (see `role_from_command`),
 # never sniffed from `sys.argv`, so bare invocations and library imports are safe.
 DEFAULT_ROLE: Final[str] = 'main'
-DISTRIBUTED_ROLES: Final[frozenset] = frozenset({'server', 'cluster', 'client', 'submit'})
+DISTRIBUTED_ROLES: Final[frozenset] = frozenset({'server', 'cluster', 'client', 'submit', 'relay'})
 
 
 def role_from_command(command: Optional[str]) -> str:

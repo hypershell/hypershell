@@ -1,5 +1,5 @@
 ---
-status: shaped
+status: adopted:relay
 kind: feature
 appetite: big
 lane: public

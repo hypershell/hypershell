@@ -375,6 +375,25 @@ def test_foreign_attribution_is_applied(task_db, logs) -> None:
     assert len(completions(logs, task_id)) == 1
 
 
+@mark.unit
+def test_late_confirm_keeps_leaf_attribution(task_db, logs) -> None:
+    """A confirmation that arrives after the result leaves the result's attribution as it was written."""
+    task_id = submit('echo late confirm')
+    copy = dispatch_one(task_id)
+    receive([finish(copy, 0, CLIENT_C)])
+    before = row(task_id)
+    if (before['client_id'], before['client_host']) != CLIENT_C:
+        pytest.fail(f'The result for task ({task_id}) was not applied')
+    logs.clear()
+
+    confirm(CLIENT_A, [task_id])
+
+    after = row(task_id)
+    assert (after['client_id'], after['client_host']) == CLIENT_C
+    assert after == before
+    assert messages(logs, logging.WARNING) == []
+
+
 # --- Behaviour that does not change -----------------------------------------------------------------
 
 @mark.unit

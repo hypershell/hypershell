@@ -19,6 +19,7 @@ Subcommands
     cluster <cluster>
     server <server>
     client <client>
+    relay <relay>
     submit <submit>
     initdb <initdb>
     info <task_info>

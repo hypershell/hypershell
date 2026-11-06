@@ -186,16 +186,18 @@ def test_first_command_server(legacy_db: Path) -> None:
 
 @mark.integration
 def test_rows_preserved(legacy_db: Path) -> None:
-    """The upgrade keeps every row as stored; new columns read NULL, NULL, and 0."""
+    """The upgrade keeps every row as stored; new columns read NULL, NULL, and 0 (task) and NULL (client)."""
     before = snapshot(legacy_db)
     assert main_lines(['hs', 'list', '--count'])[:2] == (exit_status.success, ['7'])
     assert snapshot(legacy_db) == before
     conn = sqlite3.connect(f'file:{legacy_db}?mode=ro', uri=True)
     try:
         values = conn.execute('SELECT source, fingerprint, part FROM task').fetchall()
+        client_values = conn.execute('SELECT site, relay FROM client').fetchall()
     finally:
         conn.close()
     assert values == [(None, None, 0)] * 7
+    assert client_values == [(None, None)] * len(before['client']) and client_values
 
 
 @mark.integration

@@ -19,7 +19,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, select, bindparam
+from sqlalchemy import Column, Index, func, text, update, select, bindparam, or_, cast
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
@@ -639,15 +639,15 @@ class Task(Entity):
         if recent_task is not None:
             return TaskGroupInfo(recent_task.group, f'most recently scheduled task: {recent_task.id}')
 
-        if Task.count() == 0:
+        # NOTE: we cannot just naively go with first submitted task (even though that makes sense)
+        # because the groups might have been altered, and we get stuck in an infinite loop waiting on
+        # all tasks to be completed (lower task group never get scheduled) but there are no more groups.
+        # The earliest group is read before deciding the database is empty, so a row deleted after it
+        # was counted (`hs update --delete` while the server runs) is never dereferenced.
+        submitted_task = Session.query(Task).order_by(Task.group).first()
+        if submitted_task is None:
             return TaskGroupInfo(DEFAULT_TASK_GROUP, 'no tasks submitted')
-
-        else:
-            # NOTE: we cannot just naively go with first submitted task (even though that makes sense)
-            # because the groups might have been altered, and we get stuck in an infinite loop waiting on
-            # all tasks to be completed (lower task group never get scheduled) but there are no more groups.
-            submitted_task = Session.query(Task).order_by(Task.group).first()
-            return TaskGroupInfo(submitted_task.group, f'no tasks scheduled - defaulting to earliest group')
+        return TaskGroupInfo(submitted_task.group, f'no tasks scheduled - defaulting to earliest group')
 
     @classmethod
     def increment_group(cls: Type[Task], previous_group: int, attempts: int, eager: bool = False) -> TaskGroupInfo:
@@ -673,20 +673,22 @@ class Task(Entity):
         retryable = cls.count_retryable(attempts, previous_group, eager=eager)
         if retryable > 0:
             return TaskGroupInfo(previous_group, f'waiting on {retryable} failed tasks to be retried')
-        failed_query = (
-            Session.query(Task)
+        # The count and the example are one statement: a row deleted after it was counted (a relay's
+        # completed rows leave for its outbox) can never leave a count with no example. The example is
+        # the least id as text: PostgreSQL's native uuid has no `min`.
+        failed, example = (
+            Session.query(func.count(cls.id), func.min(cast(cls.id, Text)))
             .filter(Task.group == previous_group)
             .filter(cls.exit_status.isnot(None))
             .filter(cls.exit_status != 0)
             .filter(cls.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
             .filter(cls.attempt >= attempts)
             .filter(cls.retried.is_(False))
+            .one()
         )
-        failed = failed_query.count()
         if failed > 0:
-            example = failed_query.first()
             return TaskGroupInfo(previous_group,
-                                 f'at least {failed} tasks exceeding allowed retries, example: {example.id}',
+                                 f'at least {failed} tasks exceeding allowed retries, example: {example}',
                                  False)
         # The next group is chosen in one query, so rows committed while the checks above ran are
         # never skipped; it is lower than the previous group when tasks were submitted late.
@@ -850,12 +852,13 @@ class Task(Entity):
     @classmethod
     @cache
     def __row_statements(cls: Type[Task], names: Tuple[str, ...], pending: bool = False) -> Tuple[Any, Any]:
-        """The UPDATE of one row by `id` for a set of columns, and the SELECT of that row's `id`.
+        """The UPDATE of one row by `id` for a set of columns, and the SELECT that looks the row up.
 
-        With `pending`, both match the row only while it has no `completion_time`, so the SELECT
-        asks whether the row still qualifies for the write, not merely whether it exists. Built
-        once per column set and condition, with binds typed from the table and prefixed names, as
-        for the result statements.
+        With `pending`, the UPDATE matches the row only while it has no `completion_time`, and the
+        SELECT reads that `completion_time`, so a write that matched nothing can tell a row that is
+        gone from one that is complete from one that is still pending (missed under contention);
+        otherwise the SELECT reads the row's `id`. Built once per column set and condition, with
+        binds typed from the table and prefixed names, as for the result statements.
         """
         table = cls.__table__
         by_id = table.c.id == bindparam('r_id', type_=table.c.id.type)
@@ -865,12 +868,12 @@ class Task(Entity):
             .where(*match)
             .values({name: bindparam(f'r_{name}', type_=table.c[name].type) for name in names})
         )
-        exists = select(table.c.id).where(*match)
+        exists = select(table.c.completion_time if pending else table.c.id).where(by_id)
         return write, exists
 
     @classmethod
-    def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any],
-                     path: str, consequence: str, pending: bool = False) -> List[str]:
+    def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any], path: str, consequence: str,
+                     pending: bool = False, strict: bool = False) -> List[str]:
         """Write the same `values` onto each task in `ids` by `id`, committing once; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
@@ -880,10 +883,11 @@ class Task(Entity):
         and the write is re-run, at most `CONTENDED_RERUNS` times. A row still not written after
         that is logged as a warning with the `consequence` and left as it is.
 
-        With `pending`, the write and the look-up both require that the row has no
-        `completion_time`. A row that is completed, cancelled or gone no longer qualifies: it is
-        skipped, never re-run and never an error, whether it was so before the write or became so
-        in the transaction the write waited on.
+        With `pending`, the write requires that the row has no `completion_time`. A row that is
+        completed or cancelled no longer qualifies: it is settled, never re-run and never an
+        error, whether it was so before the write or became so in the transaction the write waited
+        on. A row that is gone is skipped the same way, unless `strict` is given, when it raises
+        `StaleDataError` as for an unconditional write.
         """
         write, exists = cls.__row_statements(tuple(values), pending)
         params = {f'r_{name}': value for name, value in values.items()}
@@ -896,11 +900,15 @@ class Task(Entity):
                     if Session.execute(write, {**params, 'r_id': id}).rowcount == 1:
                         landed.append(id)
                         break
-                    if Session.execute(exists, {'r_id': id}).first() is None:
-                        if pending:
+                    found = Session.execute(exists, {'r_id': id}).first()
+                    if found is None:
+                        if pending and not strict:
                             break
                         raise StaleDataError(f'UPDATE statement on table \'{cls.__table__.name}\' expected to '
                                              f'update 1 row(s); 0 were matched (task {id})')
+                    if pending and found[0] is not None:
+                        log.debug(f'Ignored {path} for task ({id}) - task already complete')
+                        break
                     if attempt < attempts:
                         log.debug(f'Re-running contended {path} write for task ({id}) '
                                   f'(attempt {attempt + 1} of {attempts})')
@@ -915,10 +923,18 @@ class Task(Entity):
         return landed
 
     @classmethod
-    def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str) -> List[str]:
-        """Record the client that confirmed the tasks identified by `ids`; return the ids recorded."""
+    def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str,
+                    strict: bool = True) -> List[str]:
+        """Record the client that confirmed the tasks identified by `ids`; return the ids recorded.
+
+        A task already complete keeps the client its result recorded: a confirmation that arrives
+        after the result (or after a cancel) writes nothing to it. A task whose row is gone raises
+        `StaleDataError` and records nothing of the bundle, unless `strict` is false, when it is
+        skipped like a complete one (a relay-local server, whose completed rows leave the task
+        table for the relay's outbox).
+        """
         return cls.__write_rows(ids, {'client_id': client_id, 'client_host': client_host},
-                                'confirm', 'client not recorded')
+                                'confirm', 'client not recorded', pending=True, strict=strict)
 
     @classmethod
     def revert_all(cls: Type[Task], ids: List[str]) -> List[str]:
@@ -1221,6 +1237,11 @@ class Client(Entity):
     disconnected_at: Mapped[Optional[datetime]] = mapped_column(DATETIME, nullable=True)
     evicted: Mapped[bool] = mapped_column(BOOLEAN, nullable=False)
 
+    # A relay registers with its site and names itself as relay; the site clients it forwards
+    # (its roster) carry the same site and the relay's id. Both are NULL for an ordinary client.
+    site: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
+    relay: Mapped[Optional[str]] = mapped_column(UUID, nullable=True)
+
     columns = {
         'id': str,
         'host': str,
@@ -1229,6 +1250,8 @@ class Client(Entity):
         'connected_at': datetime,
         'disconnected_at': datetime,
         'evicted': bool,
+        'site': str,
+        'relay': str,
     }
 
     class NotFound(NotFound):
@@ -1250,8 +1273,10 @@ class Client(Entity):
 
     @classmethod
     def from_heartbeat(cls: Type[Client], hb: Heartbeat) -> Client:
-        """Initialize entity from client heartbeat message."""
-        return cls.new(id=hb.uuid, host=hb.host, connected_at=hb.time)
+        """Initialize entity from client heartbeat message (a beat with a site is a relay's own row)."""
+        if hb.site is None:
+            return cls.new(id=hb.uuid, host=hb.host, connected_at=hb.time)
+        return cls.new(id=hb.uuid, host=hb.host, connected_at=hb.time, site=hb.site, relay=hb.uuid)
 
     @classmethod
     def new(cls: Type[Client],
@@ -1268,11 +1293,46 @@ class Client(Entity):
 
     @classmethod
     def count_connected(cls: Type[Client]) -> int:
-        """Count active clients."""
+        """Count active clients that execute tasks (a relay's own row is not one; its site clients are)."""
         if server_id := Task.latest_server():
-            return cls.query().filter_by(server_id=server_id, disconnected_at=None).count()
+            return (cls.query().filter_by(server_id=server_id, disconnected_at=None)
+                    .filter(or_(cls.relay.is_(None), cls.relay != cls.id))
+                    .count())
         else:
             return 0
+
+    @classmethod
+    def reconnect(cls: Type[Client], id: str, **changes: Any) -> None:
+        """Mark an existing client connected again under this server, with any other `changes`."""
+        cls.update(id, disconnected_at=None, evicted=False, server_id=INSTANCE, server_host=HOSTNAME, **changes)
+
+    @classmethod
+    def disconnect_all(cls: Type[Client], ids: List[str], when: datetime) -> int:
+        """Mark the connected clients among `ids` disconnected at `when`; returns how many were."""
+        if not ids:
+            return 0
+        statement = (update(cls).where(cls.id.in_(ids)).where(cls.disconnected_at.is_(None))
+                     .values(disconnected_at=when).execution_options(synchronize_session=False))
+        return cls.__execute(statement)
+
+    @classmethod
+    def disconnect_roster(cls: Type[Client], relay: str, when: datetime) -> int:
+        """Mark every connected site client forwarded by `relay` disconnected at `when` (one statement)."""
+        statement = (update(cls).where(cls.relay == relay).where(cls.id != relay)
+                     .where(cls.disconnected_at.is_(None))
+                     .values(disconnected_at=when).execution_options(synchronize_session=False))
+        return cls.__execute(statement)
+
+    @classmethod
+    def __execute(cls: Type[Client], statement: Any) -> int:
+        """Run one write statement in its own transaction; returns the rows it matched."""
+        try:
+            count = Session.execute(statement).rowcount
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        return count
 
 
 # Indices for efficient queries
