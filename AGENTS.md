@@ -495,8 +495,10 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
 reStructuredText + Sphinx (Furo theme). Conventions: `.. _anchor:` + `:ref:`, `===`/`---`/`^^^`
 underlines (must be ≥ title length), `-------------------` section rules, `|br|`, `*HyperShell*`
 italics, first-person-plural voice. CLI help text is generated into `docs/_include/*.rst` — a
-CLI change updates those. Build with `uv run sphinx-build docs docs/_build` and confirm no new
-warnings (`task_submit.rst`/`manual.rst` "not in any toctree" warnings are pre-existing).
+CLI change updates those. Build with `uv run --python 3.12 --group docs sphinx-build -W
+--keep-going -q -E -b html docs docs/_build/html`. The build must produce no warnings: CI's `docs`
+job runs the same command and fails on any warning, and the published site builds from `develop`.
+A page reached only by direct link, not by the navigation, carries `:orphan:`.
 
 Current docs, notes, seeds and PRs name only the top-level commands: `hs list`, `hs info`,
 `hs wait`, `hs run`, `hs update`. The `hs task …` subcommands stay in the code for backwards

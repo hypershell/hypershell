@@ -1,3 +1,5 @@
+:orphan:
+
 .. _cli_task_submit:
 
 Submit

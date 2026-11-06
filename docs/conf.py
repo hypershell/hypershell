@@ -43,6 +43,12 @@ extensions = [
     'sphinx_reredirects',
 ]
 
+# :pr:`82` links pull request #82. Version markers (versionadded/versionchanged) carry one, so a
+# reader can see the change that shipped the behaviour.
+extlinks = {
+    'pr': ('https://github.com/hypershell/hypershell/pull/%s', '#%s'),
+}
+
 # The Tutorial, blog, and roadmap pages moved to the hypershell.org site. sphinx-reredirects emits a
 # meta-refresh stub at each old path so previously-published ReadTheDocs URLs redirect there instead
 # of 404ing. Keys must be explicit (non-wildcard): the source docs are deleted, and a wildcard would

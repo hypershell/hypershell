@@ -1,57 +1,72 @@
 ---
 slug: docs-version-markers
-title: "Mark what is new in the docs, now that the published site tracks develop"
+title: Mark what is new in the docs, now that the published site tracks develop
 kind: docs
 appetite: small
 status: in_progress
 branch: feature/docs-version-markers
 base: develop
-current_phase: P1
-last_updated: "2026-11-06"
+current_phase: P2
+last_updated: '2026-11-06'
 phases:
-  - id: P1
-    name: "Strict docs build gated in CI, warnings fixed, :pr: role"
-    status: pending
-    satisfies: [R4]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html && grep -q 'sphinx-build -W' .github/workflows/tests.yml"
-  - id: P2
-    name: "Audit and mark every 2.9 page and section, with inventory and check"
-    status: pending
-    satisfies: [R1]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html && uv run python spec/docs-version-markers/check_markers.py"
-  - id: P3
-    name: "Version-keyed site notice and the What's new in 2.9 page"
-    status: pending
-    satisfies: [R2, R3]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html && uv run python spec/docs-version-markers/check_site.py docs/_build/html"
-  - id: P4
-    name: "Harness keeps the convention: AGENTS.md, invariants, skills, rubric, template"
-    status: pending
-    satisfies: [R5]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run python .agents/factory/bin/next_phase.py spec/docs-version-markers/TECH.md && grep -l 'versionadded' AGENTS.md .agents/factory/invariants.md .agents/factory/review-rubric.md .agents/factory/templates/TECH.md .agents/skills/hs-build/SKILL.md .agents/skills/hs-review/SKILL.md .agents/skills/hs-publish/SKILL.md .agents/skills/hs-release/SKILL.md | wc -l | grep -qx ' *8'"
+- id: P1
+  name: 'Strict docs build gated in CI, warnings fixed, :pr: role'
+  status: done
+  satisfies:
+  - R4
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b
+    html docs docs/_build/html && grep -q 'sphinx-build -W' .github/workflows/tests.yml
+- id: P2
+  name: Audit and mark every 2.9 page and section, with inventory and check
+  status: pending
+  satisfies:
+  - R1
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b
+    html docs docs/_build/html && uv run python spec/docs-version-markers/check_markers.py
+- id: P3
+  name: Version-keyed site notice and the What's new in 2.9 page
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b
+    html docs docs/_build/html && uv run python spec/docs-version-markers/check_site.py
+    docs/_build/html
+- id: P4
+  name: 'Harness keeps the convention: AGENTS.md, invariants, skills, rubric, template'
+  status: pending
+  satisfies:
+  - R5
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run python .agents/factory/bin/next_phase.py spec/docs-version-markers/TECH.md
+    && grep -l 'versionadded' AGENTS.md .agents/factory/invariants.md .agents/factory/review-rubric.md
+    .agents/factory/templates/TECH.md .agents/skills/hs-build/SKILL.md .agents/skills/hs-review/SKILL.md
+    .agents/skills/hs-publish/SKILL.md .agents/skills/hs-release/SKILL.md | wc -l
+    | grep -qx ' *8'
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Mark what is new in the docs, now that the published site tracks `develop`
 
 The **context engine and finite-state machine** for this cycle. Read the frontmatter with
@@ -78,15 +93,15 @@ The **context engine and finite-state machine** for this cycle. Read the frontma
 **Goal:** the docs build with no warnings, CI fails a pull request whose docs warn, and a `:pr:` role
 exists for P2's markers.
 
-- [ ] Fix `manual.rst:24` (the wrapped `hs relay` usage line ends the block quote).
-- [ ] Resolve "not in any toctree" for `manual.rst` and `cli/task_submit.rst`: confirm where each is
+- [x] Fix `manual.rst:24` (the wrapped `hs relay` usage line ends the block quote).
+- [x] Resolve "not in any toctree" for `manual.rst` and `cli/task_submit.rst`: confirm where each is
       used (man pages; links from the nested-form pages), then add `:orphan:` or a toctree entry.
-- [ ] Add `extlinks = {'pr': ('https://github.com/hypershell/hypershell/pull/%s', '#%s')}` to
+- [x] Add `extlinks = {'pr': ('https://github.com/hypershell/hypershell/pull/%s', '#%s')}` to
       `docs/conf.py`.
-- [ ] Add a `docs` job to `.github/workflows/tests.yml`: checkout (`persist-credentials: false`,
+- [x] Add a `docs` job to `.github/workflows/tests.yml`: checkout (`persist-credentials: false`,
       pinned action SHAs as the other jobs use), setup-uv with the cache, then the strict build.
       Comment it in the file's house style.
-- [ ] `AGENTS.md` § Docs: replace the "pre-existing warnings" sentence with the strict command and
+- [x] `AGENTS.md` § Docs: replace the "pre-existing warnings" sentence with the strict command and
       "no warnings".
 - **Verify:** the strict build exits 0; the workflow carries the strict command.
 - **Touches:** `docs/manual.rst`, `docs/cli/task_submit.rst`, `docs/conf.py`,
