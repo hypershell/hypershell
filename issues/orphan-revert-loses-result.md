@@ -52,5 +52,8 @@ already landed is never undone.
 - The single-statement form is the same shape as the result fence: `UPDATE … WHERE id IN (…) AND
   completion_time IS NULL AND client_id = :evicted`.
 - Related: `issues/evicted-client-fencing-and-cancel-reach.md`,
-  `issues/coordinator-resilience-retry-backoff.md`.
+  `issues/coordinator-resilience-retry-backoff.md`,
+  [`relay-abort-races.md`](relay-abort-races.md) (C7-1: on a relay's own server the same gap raises
+  on a row the relay has already removed and aborts the relay; the same conditional revert closes
+  both, so shape them together).
 - Found by: `writeback-scoped-conditional` plan research, 2026-11-02.

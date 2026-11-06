@@ -118,9 +118,10 @@ Draft R-IDs; the bracket gives the `relay` seed's R-ID each one came from.
 
 ## Notes
 
-- Depends on: `issues/zone.md` R13–R17 (Z3, zone-aware autoscaling) and `spec/relay/` (the
-  delegation core) — both landed.
-- Related: `spec/relay/GOAL.md` (Clarifications C1, D3); `issues/relay.md` (the original seed).
+- Depends on: `issues/zone.md` R13–R17 (Z3, zone-aware autoscaling), not yet built, and
+  `spec/relay/` (the delegation core), landed in #82 (2.9.0a6).
+- Related: `spec/relay/GOAL.md` (Clarifications C1, D3). The original `relay` seed was retired when
+  #82 landed; `git log --diff-filter=D -- issues/relay.md` recovers it.
 - Source (likely touchpoints): `src/hypershell/cluster/remote.py` (`AutoScaler` →
   demand-to-topology computation, publication, no-launcher site mode); the relay module's
   reconciler; `src/hypershell/server.py` (`HeartMonitor` site liveness);

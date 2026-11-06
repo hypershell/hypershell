@@ -56,6 +56,6 @@ fence stay exactly as they are.
   fewer commits per task; batching results across bundles in the `Receiver`. The last one changes
   when results land, so it is a design decision, not a mechanical speed-up.
 - Related: `spec/writeback-prebuilt-update/` (the writeback half, and the measurement method),
-  `spec/writeback-scoped-conditional/` (#70), [`issues/relay.md`](relay.md) (relay multiplies
+  `spec/writeback-scoped-conditional/` (#70), `spec/relay/` (#82; relay multiplies
   fan-out, not row throughput, so this per-task cost still bounds a relayed campaign).
 - Found by: `writeback-prebuilt-update` shaping, from the foreman's 2026-11-04 profiling.

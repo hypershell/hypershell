@@ -45,9 +45,9 @@ Documented keys that no environment variable can reach today:
   `database.password_eval`.
 - An `[ssh.nodelist]` group whose name has an underscore.
 
-The relay cycle in flight adds more: `relay.launcher_args`, `relay.num_threads`,
+Relay (#82, 2.9.0a6) adds more: `relay.launcher_args`, `relay.num_threads`,
 `relay.upstream.evict_hint`, `relay.upstream.auth_env`, a zone's `launcher_args`, and any zone whose
-name has an underscore (`src/hypershell/core/config.py:192-224` on `feature/relay`, `37b7dec`). The
+name has an underscore (`src/hypershell/core/config.py:192-224` on `origin/develop`, `b4b37cd`). The
 coercion was first noticed there: `HYPERSHELL_RELAY_ZONE_GPU_LAUNCHER=false` reached the relay as the
 boolean `False`, and the relay refused it at start.
 
@@ -138,5 +138,6 @@ An `[export]` variable reaches a task with the name and value the user wrote.
   it does not collide, it nests (above), so R4 here and R1 there should be shaped together.
   [`templating-and-remote-env-contract.md`](templating-and-remote-env-contract.md) R3 quotes the
   `HYPERSHELL_*` values that `--ssh --env` forwards; on the remote host they go through this same
-  mapping. [`relay.md`](relay.md) and [`zone.md`](zone.md) add the per-zone tables named above.
+  mapping. Relay's `[relay.zone.*]` tables (#82) and [`zone.md`](zone.md) add the per-zone tables
+  named above.
 - Found by: out-of-cycle review, 2026-11-06; reproduced on 2.9.0a5.

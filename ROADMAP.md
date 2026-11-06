@@ -105,8 +105,9 @@ rather than documenting it as a hazard. The end goal is that any node (server, c
 be bounced without bringing the system down and recovers gracefully, behind one retry/backoff
 mechanism; not before SC26.
 
-*Horizon: after SC26 · Depends on: — · Refs: the relay cycle builds the first instance of this machinery
-(relay R9, its upstream link); lift it into the shared mechanism here; shares the `data/core.py` provider seam with turso*
+*Horizon: after SC26 · Depends on: — · Refs: relay built the first instance of this machinery (#82:
+`core/reconnect.py`, the relay's upstream link); lift it into the shared mechanism here; shares the
+`data/core.py` provider seam with turso*
 **Seed:** [`issues/coordinator-resilience-retry-backoff.md`](issues/coordinator-resilience-retry-backoff.md)
 
 ## A client cut off partway through connecting hangs until evicted
@@ -290,17 +291,6 @@ confirmation then names the already-evicted client. Either way the row waits unt
 *Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
-## A late confirmation can overwrite the executing client's attribution
-
-Confirmations and results are applied by separate threads in no fixed order. A confirmation applied
-after the result rewrites the completed row's attribution with the confirming client's id. Harmless
-for ordinary clients; wrong for relay, which confirms under its own id and returns results
-attributed to the leaf client that ran them. Conditioning the confirmation on an incomplete row
-needs no wire change.
-
-*Horizon: near-term, before relay · Depends on: — · Refs: relay (return path, leaf attribution)*
-**Seed:** [`issues/late-confirm-overwrites-attribution.md`](issues/late-confirm-overwrites-attribution.md)
-
 ## Orphan recovery can discard a result that lands while it runs
 
 Reverting an evicted client's tasks reads the in-flight rows, then reverts them by id in a separate,
@@ -323,6 +313,19 @@ false "not found", commits partially, or silently skips rows.
 *Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); resilience*
 **Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: unshaped*
 
+## A relay can abort when its own server meets a row the relay removed
+
+A relay deletes rows under its own server: completed rows leave for its outbox, and rows not yet
+scheduled are dropped when the upstream server restarts. Two of that server's writes still raise on
+such a row: the eviction revert, which reads a client's in-flight rows and then reverts them
+unconditionally, and the scheduler's dispatch stamp, an ORM flush. Either ends a thread and the
+relay exits 5; the upstream server puts its tasks back only after its eviction period. No result is
+lost. The eviction half is the same conditional revert that closes the lost-result window above.
+
+*Horizon: near-term, before 2.9.0 · Depends on: — · Refs: orphan revert (one fix for the eviction
+half); contended Scheduler writes (`Task.next` off the ORM flush); `spec/relay/` C7-1, C7-2*
+**Seed:** [`issues/relay-abort-races.md`](issues/relay-abort-races.md) · *status: unshaped*
+
 ## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
 
 The 2.9 line added task columns that a 2.8.3 peer cannot read, and nothing on the wire names a
@@ -339,7 +342,7 @@ R5 of `spec/zone-dispatch/GOAL.md`) · Refs: release notes*
 ## `hs server --initdb` never initializes the database
 
 `hs server` accepts `--initdb`, but `ServerApp.run` calls `ensuredb()` without it
-(`src/hypershell/server.py:1381`; the flag is defined at `:1343-1346` and never read), so on
+(`src/hypershell/server.py:1664`; the flag is defined at `:1626-1629` and never read), so on
 PostgreSQL and TimescaleDB the server only checks the schema and refuses a database that was never
 initialized; under the `timescale` provider the hypertable pass never runs from it. `hs submit` and
 `hs cluster` honour the same flag. The docs and the server's own help still promise it.
@@ -351,7 +354,7 @@ Pre-existing since 2023 (`70bcc63`).
 ## `auth_env` and `auth_eval` in a config file break every command
 
 `docs/security.rst` recommends `auth_eval` / `auth_env` to keep the authkey out of the config file,
-but the built-in defaults already define `server.auth` (`src/hypershell/core/config.py:132`), and
+but the built-in defaults already define `server.auth` (`src/hypershell/core/config.py:134`), and
 cmdkit refuses a key that has more than one variant. With either suffix in a config file, every
 `hs` command, `hs config get` included, dies at import with `'auth' has more than one variant`.
 A variant should take precedence over the default, and an unset variable should be an error, never
@@ -363,7 +366,7 @@ a fallback to the default key. Pre-existing since 2.8.0.
 ## Environment variables cannot reach every configuration key
 
 The guide says every option can be set by a `HYPERSHELL_*` variable, but every underscore in the
-name is a level of nesting and every value is coerced (`src/hypershell/core/config.py:209-211`, by
+name is a level of nesting and every value is coerced (`src/hypershell/core/config.py:247-249`, by
 cmdkit). A key with an underscore of its own is out of reach: `server.tls.min_version`,
 `database.timescale.chunk_interval`, `connect_args`, and every `_env` / `_eval` variant, so
 `HYPERSHELL_SERVER_AUTH_ENV` makes `server.auth` a table. And a string key cannot be given `false`,
@@ -379,8 +382,8 @@ key should be settable, with the text given. Pre-existing since 2.7.0.
 
 When every client a cluster launched exits early, from an authkey or TLS mismatch, an unreachable
 address or a bad remote executable, `hs cluster` ignores their exit statuses and joins a server
-that has work left and no one to run it (`src/hypershell/cluster/remote.py:325-326`,
-`src/hypershell/cluster/ssh.py:321-323`). It never exits and names no failure; under autoscaling it
+that has work left and no one to run it (`src/hypershell/cluster/remote.py:309-310`,
+`src/hypershell/cluster/ssh.py:310-312`). It never exits and names no failure; under autoscaling it
 relaunches into the same failure instead. It should exit non-zero with a clear error once every
 client has gone and work remains. Pre-existing since 2.8.0.
 
@@ -391,8 +394,8 @@ fails); failure-budget halt policy (the autoscaling bound)*
 ## `--ssh` and autoscaling tell clients the host's own name, whatever `-H` binds
 
 Launcher and `--mpi` clusters tell their clients the bind address unless it is `0.0.0.0`
-(`src/hypershell/cluster/remote.py:309`), but `--ssh` (`src/hypershell/cluster/ssh.py:305`) and
-autoscaling (`src/hypershell/cluster/remote.py:850`) always pass the host's own name. A server bound
+(`src/hypershell/cluster/remote.py:286`), but `--ssh` (`src/hypershell/cluster/ssh.py:283`) and
+autoscaling (`src/hypershell/cluster/remote.py:816`) always pass the host's own name. A server bound
 to one interface on purpose then tells its clients a name that may not reach it, and there is no
 option to name the advertised address apart from the bind, which TLS certificate names also need.
 One rule for every mode, and an override such as `--advertise`, would also serve the relay's own
@@ -401,6 +404,19 @@ downstream address.
 *Horizon: near-term, small · Depends on: — · Refs: relay (its downstream listener needs the same
 rule)*
 **Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
+
+## Relay rough edges: a TLS mismatch retried forever, idle zones ended early, a slow finish
+
+A relay whose TLS setting differs from its upstream server's retries forever, where a client fails
+at once. In a relay serving several zones, a zone with no site client at the moment upstream
+finishes can end before taking rows still staged for it. Some runs finish 6–9 s late, once about a
+minute, for a reason not yet found. Eviction ages a relay's heartbeat by the relay's own clock, so
+cross-site skew evicts a live relay. And the man page's relay synopsis warns at build and renders a
+stray blank line.
+
+*Horizon: near-term · Depends on: — · Refs: the advertised-host fix above (a relay's own
+downstream address); `spec/relay/` C4-2, C5-1*
+**Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: unshaped*
 
 ## `rotatedb` lost-update window
 
@@ -561,8 +577,8 @@ Refs: —*
 Shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
 drafted R-IDs. They carry `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
-drifted, then adopt largely as written. The last three entries are `unshaped` test-infrastructure
-seeds: two split out of shipped cycles, one found out of cycle.
+drifted, then adopt largely as written. The last four entries are `unshaped` test-infrastructure
+seeds: three split out of shipped cycles, one found out of cycle.
 
 ## Zone-aware autoscaling
 
@@ -580,20 +596,6 @@ today.
 three cycles; seed R13–R17*
 **Seed:** [`issues/zone.md`](issues/zone.md) · *status: shaped*
 
-## Relay: two-level scheduling across administrative sites
-
-The single shared hand-off tops out on connection fan-out (~1,000 sockets against leadership-class
-systems putting ~10,000 nodes on the floor) and on administrative boundaries (one elastic fleet
-cannot span centers, so there is no way to prefer cheaper capacity or survive one center going
-down). `hs relay` is a per-site service that is just a client upstream and a complete little cluster
-inside — roughly 100 relays × 100 nodes behind ~100 upstream sockets. Security improves at scale:
-upstream credentials stop at the relay.
-
-*Horizon: mid-term · Depends on: zone — its queue primitive and dispatch landed (#76, #78);
-site-topology autoscaling still extends zone-aware autoscaling (Z3) · Refs: leans on the scoped writeback that
-`writeback-scoped-conditional` shipped (#70) and inherits the resilience feature's reconnect/redelivery machinery as its R9*
-**Seed:** [`issues/relay.md`](issues/relay.md) · *status: adopted:relay*
-
 ## Relay site-topology autoscaling: fill and spread across sites
 
 With relays in place, each site still sizes its own fleet; the true server, which holds the pressure
@@ -603,8 +605,9 @@ publishes a versioned per-site topology under `fill` (the SU-cost mode) or `spre
 `min`/`max`/`init`; each relay reconciles only its own entry, and scale-down stays idle-exit. Carved
 out of relay at its promotion, because it extends zone autoscaling's per-zone pressure.
 
-*Horizon: mid-term · Depends on: zone autoscaling (Z3, `issues/zone.md` R13–R17) and relay
-(strictly) · Refs: relay R11–R15 and R16's topology half (`spec/relay/GOAL.md` C1)*
+*Horizon: mid-term · Depends on: zone autoscaling (Z3, `issues/zone.md` R13–R17); relay itself,
+the other prerequisite, landed (#82) · Refs: the original relay seed's R11–R15 and R16's topology
+half (`spec/relay/GOAL.md` C1)*
 **Seed:** [`issues/relay-topology.md`](issues/relay-topology.md) · *status: shaped*
 
 ## Turso provider, partition-attached listing, and S3 captured output
@@ -615,9 +618,9 @@ from our side of the code and removes that cap; the official dialect already shi
 adoption, validation, and the two capabilities it unlocks. Independently, the `[s3]` extra un-maroons
 captured output from the execution host.
 
-*Horizon: mid-term · Depends on: sequenced after zone and relay; R4's per-provider seam in
-`data/core.py` shares ground with the resilience feature's pragma defaults · Refs: R13–R15 soften
-relay's cross-site output non-goal*
+*Horizon: mid-term · Depends on: sequenced after zone (relay, the other half, landed in #82); R4's
+per-provider seam in `data/core.py` shares ground with the resilience feature's pragma defaults ·
+Refs: R13–R15 soften relay's cross-site output non-goal*
 **Seed:** [`issues/turso.md`](issues/turso.md) · *status: shaped*
 
 ## The whole test suite on a server database
@@ -656,6 +659,18 @@ send SIGTERM first and SIGKILL only what is left.
 *Horizon: near-term, small · Depends on: — · Refs: `tests/test_cluster_launch.py`,
 `tests/bench/bench_queue.py`; the 2.8 line (backport)*
 **Seed:** [`issues/test-teardown-sigkill-leaks-semaphores.md`](issues/test-teardown-sigkill-leaks-semaphores.md) · *status: unshaped*
+
+## Relay tests can pass a broken relay, and lose a port race to themselves
+
+The R21 judge passes on records that cannot show what four of its checks name; two reconnect
+behaviours survive mutation; and the relay workload tests draw a free port, release it, and hand it
+to a relay that binds it later, so a parallel copy can take it first. Smaller: the group check's
+cancel and `retried` filters are unpinned, and one start-up test resolves a path under the
+developer's own database location. Split out of `relay`'s review.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/relay/` C4-3, C4-4; the relay abort races
+and rough edges in Part I*
+**Seed:** [`issues/relay-test-strength.md`](issues/relay-test-strength.md) · *status: unshaped*
 
 ---
 

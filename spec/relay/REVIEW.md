@@ -1561,9 +1561,14 @@ knowledge neither adds `min(uuid)`.
   compile-only test). The 22 relay-return tests from cycle 8, the two cycle-8 red/green tests among
   them, still pass.
 - **New findings in the delta:** none.
-- **PostgreSQL CI evidence (to be filled by the foreman):** `37c565f` red for the right reason
+- **PostgreSQL CI evidence (filled by the foreman):** `37c565f` red for the right reason
   (`function min(uuid) does not exist` in `test_group_checks_on_native_uuid_ids`) and `167793f` green,
-  on pg13, pg18, timescale, timescale-oss and timescale-floor — _pending_.
+  on pg13, pg18, timescale, timescale-oss and timescale-floor — **recorded (2026-11-06).**
+  - `37c565f` (tests only): red on all five PostgreSQL CI servers (pg13, pg18, timescale,
+    timescale-oss, timescale-floor), each with `psycopg.errors.UndefinedFunction: function min(uuid)
+    does not exist` at `tests/test_zone_postgres.py::test_group_checks_on_native_uuid_ids`.
+  - `4153d0d` (the fix `167793f` plus this re-check): green on all 14 checks of PR #82, the five
+    PostgreSQL entries among them. The approval below stands.
 - **Closure:** C8-1 is closed by the code, and its red/green is executed for the compile-only test.
   The live PostgreSQL red/green is the CI job's, and it gates this approval: if `167793f` is not
   green on all five PostgreSQL entries, the approval lapses and C8-1 reopens. Human gate: the fix is
