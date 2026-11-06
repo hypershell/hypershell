@@ -102,7 +102,7 @@ into seven real-process runs in under a minute.
   the body; the judging phase's arrival of evidence closes it.
 - **Confidence:** med · **Effort:** small
 
-## F7 — The ≤3-cycle bound is graded against one durable counter, but a run may bound cycles per scope
+## F7 — The ≤3-cycle bound is graded against one durable counter, but a run may bound cycles per scope · seen again
 `origin=hs-review:Step 4 severity=low category=template status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** after cycle 3 approved P1–P6, the foreman opened a new review scope (P7–P9) with
   a fresh count of 3. `set_phase.py` keeps one `review.cycle`, which moves to 4, so the record carries

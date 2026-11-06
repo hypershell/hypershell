@@ -907,3 +907,203 @@ on `develop`. This record checks only their interplay with relay.
   before `hs-publish`.
 - **Follow-ups for the build:** C4-1 (fix or ruling), C4-2, C4-3, C4-4 and C4-5, plus the throughput
   tail investigation (notes), before or with P10.
+
+## Review cycle 5 (scope P7–P9, count 2 of 3) — approved, with follow-ups (2026-11-06)
+
+- **Reviewed commit:** `ff23d2d`  ·  **Range:** `672418d..ff23d2d`: `fec5ee4` (the cycle-4
+  remediation: C4-1, C4-3, C4-5, P9 marked done) and `ff23d2d` (P10: R21 run B's records in
+  `spec/relay/evidence/cluster/`, with the P7 and P10 records in TECH)  ·  **Base:** `develop`  ·
+  **Date:** 2026-11-06
+- **Verdict:** approved. No finding blocks. C4-1, C4-3 and C4-5 are closed. C4-2 and C4-4 stay
+  follow-ups by the cycle-4 ruling. One new follow-up (C5-1) qualifies the premise C4-1's fix rests
+  on.
+- **Cycle:** the second cycle of the P7–P9 scope. `set_phase.py` keeps one counter, so
+  `review.cycle` reads 5 (META F7, seen again).
+- **Mode:** scoped to the remediation and P10, done inline by one reviewer with no subagent, as the
+  foreman directed. The findings were formed first from `GOAL.md` (unchanged since shaping: only
+  `62d4a17` and `e6a322b` touch it), the range's diff, `invariants.md`, the rubric and the runnable
+  tree. Only then were REVIEW cycle 4 and `TECH.md` read, for the mutant definitions and the closure
+  checks. Every local run used a `git archive ff23d2d` copy outside the worktree, with the copy's
+  `src/` on `PYTHONPATH`, each under a process-group kill timer. The worktree was untouched until
+  this record.
+- **Host constraint:** POSIX semaphores are still exhausted here, so nothing that starts a server
+  ran here. Server-dependent checks were written here and run by the foreman on a Linux test
+  cluster at `ff23d2d`. They are marked *(Linux)*.
+
+### Verification run
+
+- **Suites:**
+  - Here: the relay unit tests with `test_main.py`, `test_completions.py` and
+    `test_cluster_launch.py` (`-m unit`): 304 passed on 3.12, 3.14 and 3.15. The same count as TECH's
+    gate.
+  - Here: the new tests (and all of `test_relay_connector.py`), 3 times in each of 6 concurrent
+    copies: 18 of 18 passed.
+  - *(Linux)* Full suite, 3.12, `-n auto` under load: 1343 passed and 3 failed. The 3 are timing
+    tests outside relay that this range does not touch: `test_waits_for_slow_peer_upgrade`,
+    `test_shared_port_number_leaks_nothing[tls]` and
+    `test_server_keeps_its_files_at_the_open_file_limit`. The serial suite, the relay files on 3.14,
+    multizone, the smoke and the 6× run were still running when this was recorded. The foreman
+    directed that the record not wait for them, and will forward them.
+- **Mutations** (unit level, here; each mutant on its own copy of `src/`):
+  - The five named survivors from cycle 4 are now killed, each by its new test, and each still
+    survives the cycle-4 test files (205 passed per mutant):
+    - M41: the wait for the first upstream connection dropped.
+    - M23: `launches=[]` given to `fence_site`.
+    - M19: further zones' fleets left out of `check_site`; also a variant that supervises only the
+      first zone's autoscaler.
+    - M18: the zone `size` check removed; also two partial variants, the `bool` clause dropped
+      (killed by `[True]`) and `< 1` turned into `< 0` (killed by `[0]`).
+    - M36: the default zone's `IS NULL` match turned into `zone == DEFAULT_ZONE_ID`.
+  - The C4-1 rule: the `finish_idle` call dropped; called before any shutdown; the no-client
+    condition dropped; the nothing-held condition dropped. All four are killed by
+    `test_relay_connector.py`.
+- **C4-1 end to end** *(Linux, a scratch probe, never committed)*: cycle 4's scenario, built on the
+  `test_relay_workload.py` helpers. A relay serves `cpu` and `gpu`. `gpu`'s launcher is a script that
+  fails every launch, so that zone never has a site client. A non-forever upstream (`--restart`)
+  runs 4 `cpu` tasks.
+  - At `ff23d2d`: 1 passed in 14 s. The upstream server and the relay both exited 0, 9.2 s after the
+    relay started. The relay logged "no site client for zone gpu" and its final heartbeats, neither
+    identity was evicted, and all 4 tasks completed.
+  - With the `finish_idle` call dropped: failed. The upstream server was still running at 148 s
+    (`TimeoutExpired`). Its log shows the `gpu` launches exiting with status 1, as intended.
+  - A first version of the probe was invalid: it set the launcher to `false` through
+    `HYPERSHELL_RELAY_ZONE_GPU_LAUNCHER`. The environment layer reads that value as a boolean, so the
+    relay refused it at start ("must be text", reproduced here), and both arms failed alike.
+- **Probes here (unit level, the real `Dispatcher`, no server):** the C4-1 rule against an upstream
+  that is finishing while rows are still staged for another zone, with and without a database
+  (C5-1).
+- **P10 evidence:** `relay_judge.py spec/relay/evidence/cluster --require kill,pause,none` from the
+  clean archive: kill PASS (41 checks), pause PASS (41), none PASS (39), `relay_judge: PASS (3 runs)`,
+  exit 0, under the project's 3.15 and a system 3.9 with `-I`. Every key and every string value of
+  the 15 records was listed (see *Evidence judgement*).
+- **Docs:** Sphinx `-W --keep-going` on 3.12, outside the sandbox for `sphinx_sitemap`'s AF_UNIX
+  socket: the three known warnings only (`manual.rst` ×2, `cli/task_submit.rst`).
+
+### Requirement → evidence matrix (reviewed scope)
+
+| R-ID | Implemented by (this range) | Verified how | Status |
+|------|-----------------------------|--------------|--------|
+| R2   | `finish_idle`: an idle zone ends once another has had `shutdown` | 5 new unit tests; 4 rule mutants killed; e2e *(Linux)*; probes | ✅ (C5-1) |
+| R16  | every zone's fleet supervised (test only) | M19 killed | ✅ |
+| R17  | every zone's launch fenced (test only) | M23 killed | ✅ |
+| R8   | per-zone backlog of the default zone (test only) | M36 killed | ✅ |
+| R9   | the site starts only once the upstream answers (test only) | M41 killed | ✅ |
+| R18  | `relay_desc.rst`: the shutdown is heard per zone; the all-zones-idle residual | read against the code and tests; Sphinx | ✅ |
+| R20  | the C4-3 tests | mutations above; 6× concurrency here | ✅ |
+| R21  | run B's 15 records, `SUMMARY.txt`, P10 | judge from a clean archive; records audited | ✅ |
+
+Unmapped changes: none.
+
+### Findings
+
+#### [LOW/CONFIRMED, unit level] C5-1 — An idle zone ended at another zone's `shutdown` gives up rows still staged for it upstream
+- **Blocks or follow-up:** follow-up.
+  - Why not blocking: it takes an upstream that finishes with rows still staged (drained by
+    SIGUSR1/2, a non-forever run stopped on a failed group, or a server without a database), and a
+    zone with no site client at that gate pass. With a database the rows go back unscheduled when
+    the upstream exits: nothing is lost or run twice. On a normal end (every task complete) nothing
+    is staged and the rule is exact. Before C4-1 each of these cases was a hang.
+- **Where:**
+  - The premise: `src/hypershell/relay/upstream.py:238` ("The upstream server finishes for every
+    zone at once"), the same sentence at `tests/test_relay_connector.py:559`, and
+    `spec/relay/TECH.md:1674`.
+  - The rule: `upstream.py:383-394` (`finish_idle`), called at `:361`.
+  - The server: `src/hypershell/core/dispatch.py:303-305`. `finish()` sets one flag for every pool,
+    but a zone's request is told to shut down only once that zone's own pool is empty, and invariant
+    §6 says so ("requests drain their zone's staged tasks, then get `shutdown`").
+    `src/hypershell/server.py:1157-1164`: the staged revert at exit takes stamped rows only, and only
+    with a database. Without a database, `finish()` runs as soon as the task file is submitted
+    (`:1086-1091`, `:1149-1153`).
+- **Scenario:** a relay serves `cpu` and `gpu`. The upstream is drained while rows are staged for
+  `gpu` (the `gpu` identity asked earlier, when it had a site client). `cpu` asks and is told to shut
+  down. At that gate pass `gpu` has no site client (its fleet is still launching, or its one client is
+  between exit and relaunch) and holds nothing, so `finish_idle` ends it. A `gpu` request a moment
+  later would have been served those rows.
+- **Evidence** (the real `UpstreamPuller` driven against the real `Dispatcher`, in process):
+  - With a database: two rows staged for `gpu`, then `finish()`, clients `{cpu: 1, gpu: 0}`. The
+    puller reaches FINAL with both identities finished, and 2 rows are still staged for `gpu`. A
+    `gpu` request then gets 2 tasks and `shutdown: false`.
+  - Without a database: a 4-task bundle on the inbound queue, and a default-zone request of size 1
+    (one cut, three staged). Then `finish()`, as `wait_heartbeat` does. Zones `(gpu, default)`,
+    clients `{gpu: 1, default: 0}`. The puller reaches FINAL and 3 default rows are left;
+    `take_staged()` returns `[]` (unstamped), so nothing puts them back. They do not run in that
+    server's run, and nothing is logged.
+- **Fix:**
+  - Required: state the premise exactly in the docstring, the test docstring and TECH. A shutdown
+    reply means the upstream is finishing in every zone, but each zone is first served what is still
+    staged for it.
+  - Optional: end an idle zone only once it has had no site client for a whole site period, so a
+    launching or relaunching fleet is not cut off.
+
+### Notes (not findings)
+
+- **An upstream restart between the shutdown reply and the finish.** A zone that has had `shutdown`
+  stays finished across a reconnection (P9's behaviour); C4-1 extends that to idle zones, and the
+  relay then winds down, returning what it holds. Consistent, not a regression.
+- **A client count flapping between 0 and 1** matters only in C5-1's case. On a normal end the
+  upstream has nothing left for the zone.
+- **The all-zones-idle residual** is stated accurately in `relay_desc.rst` and TECH: with no site
+  client in any zone the relay never asks, so it hears no shutdown. A request always takes at least
+  one task (`dispatch.py`: `size = max(1, …)`). The rst could add that a non-forever upstream server
+  waits for such a relay too, since its identities still beat.
+- **The new start-up tests pass `site_config=''`, which is falsy,** so `RelayThread` falls back to
+  `<configured database file>.site.toml`. In the test process that is the developer's default
+  database path, and `release()` removes that file if it exists. No real relay writes that name, so
+  nothing is lost in practice. A `temp_site` fixture would keep the test off the real path.
+- **A zone launcher set through the environment as a bare `false` or `true` is read as a boolean,**
+  and the relay refuses it at start with a clear error ("relay.zone.gpu.launcher must be text"). A
+  path stays text. This is how the environment layer types every setting; it is noted because it
+  misled the first end-to-end probe.
+- **M41's test sleeps 2.5 s.** It is not timing-dependent for correct code, because the link never
+  comes up until the test raises it. A mutant reaches the site in milliseconds, so it is killed
+  however loaded the host. The cost is the 2.5 s.
+
+### Evidence judgement (P10)
+
+- **Passes from a clean checkout.** Yes: see *Verification run*. The judge is stdlib only.
+- **No internal names.** The only string values in the 15 JSON files are the variants, the roles,
+  the site letters `A`/`B`, `slurm`, `2.9.0a4`, `3.12.13`, `d4a2ec8` and the three run ids. Grep of
+  the records and `SUMMARY.txt` for cluster, account, partition, path, host and user patterns: no
+  match. The range's other added lines are clean too.
+- **The Slurm job number in the run ids is acceptable** in a public repo. It is a site-local
+  sequence number. Without the cluster's name, which appears nowhere, it identifies no system or
+  person, and it grants nothing. Keeping the records exactly as the drive wrote them is worth more
+  than a nonce.
+- **`SUMMARY.txt` states what the records show.** Its build, Python, nodes, workload, settings,
+  checks, wall times, rows and peak backlog/bound match field by field. Kill: snapshot 112 (rows
+  confirmed to B, incomplete), B evicted and reverted once, 112 completed at A; B's 96 local rows
+  and 16 pending results also sum to 112. Pause: 94 held, all completed at A, 94 stale. None: 2003
+  executions of 2003 ids, no duplicate. Two wordings go slightly beyond a single field:
+  - "B's 94 late results": the probe counts the upstream log's stale refusals server-wide. B is the
+    only source, since A was never evicted and the none run has 0.
+  - "The transport … was never copied" is a statement of provenance, which the records cannot show.
+
+### What held (executed)
+
+- **C4-1 rule:** a zone with no site client ends only after some zone's shutdown (both zone
+  orders), never before. A zone with site clients still asks for itself. A zone holding tasks ends
+  only once they are done. The single-zone and all-zones-idle relays never ask, and end on a halt.
+- **Single zone unchanged:** a single-zone puller reaches FINAL from its own shutdown reply
+  (`request`), so `finish_idle` never runs for it.
+- **Docs:** the range names only top-level commands (none at all) and no internal names.
+- **TECH's P7/P10 record:** it matches the delivered records, and the P10 verify now requires all
+  three variants.
+
+### Cycle-4 closure
+
+| Finding | Status |
+|---|---|
+| C4-1 | Closed. Once any zone has had `shutdown`, the gate ends every zone with no site client and nothing held. Tests and four rule mutants (unit), plus the dead-fleet scenario end to end *(Linux)*: green with the fix (both processes exit 0 in 9.2 s), red without it (upstream still running at 148 s). C5-1 qualifies its premise; it does not reopen it. |
+| C4-2 | Follow-up by ruling (TLS on/off mismatch retried, not failed fast). Unchanged. |
+| C4-3 | Closed for the ruled list: M41, M23, M19, M18 and M36 are each killed by a new test and survive the cycle-4 tests. M26/M28 (`core/reconnect.py`) were outside the ruling and remain. |
+| C4-4 | Follow-up by ruling (the judge's four vacuity cases). Run B's records show none of the four: `env_unreadable` 0, `key_in_server_log` present and 0, 3 groups, schema 2. |
+| C4-5 | Closed. `relay_drive.sh:57` says "clients x this many x 2 tasks", which matches `relay_probe.py`'s mirror and run B's 128 = 2 × 32 × 2. |
+
+### Human-gate triggers
+
+- No CONFIRMED finding touches a high-blast-radius file. The range edits only `relay/upstream.py`,
+  tests, one docs include and `spec/`.
+- **The cycle-1 trigger stands:** maintainer sign-off on the credential fence and the site-hop TLS
+  before `hs-publish`.
+- **Follow-ups for the build:** C5-1 (the wording at least), C4-2, C4-4, C4-3's M26/M28, and the
+  throughput tail investigation (cycle-4 notes).

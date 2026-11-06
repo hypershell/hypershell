@@ -163,10 +163,10 @@ phases:
   verify: uv run python spec/relay/drive/relay_judge.py spec/relay/evidence/cluster
     --require kill,pause,none
 review:
-  last_reviewed_commit: d4a2ec8
+  last_reviewed_commit: ff23d2d
   verdict: approved
   blocked_reason: ''
-  cycle: 4
+  cycle: 5
 ---
 # TECH.md — HyperShell Relay: two-level scheduling across administrative sites
 
