@@ -623,18 +623,6 @@ per-provider seam in `data/core.py` shares ground with the resilience feature's 
 Refs: R13–R15 soften relay's cross-site output non-goal*
 **Seed:** [`issues/turso.md`](issues/turso.md) · *status: shaped*
 
-## Mark what is new in the docs, now that the published site tracks `develop`
-
-The documentation site now builds from `develop`, so the 2.9 material is published, but no page says
-which behaviour is new: `develop` carries no `versionadded` or `versionchanged` marker, and a reader
-on 2.8.5 cannot tell `--zone` or `hs relay` from options they already have. The cycle marks every
-2.9 page and section, adds a site-wide notice and a "What's new in 2.9" page with the upgrade
-cautions, builds the docs in CI with warnings as errors, and widens the same-commit rule so later
-user-visible changes update their prose page and carry a marker.
-
-*Horizon: near-term, small · Depends on: — · Refs: `docs-and-runtime-surfacing` (a separate gap)*
-**Seed:** [`issues/docs-version-markers.md`](issues/docs-version-markers.md) · *status: adopted:docs-version-markers*
-
 ## The whole test suite on a server database
 
 The suite runs on SQLite only. CI's PostgreSQL job runs three modules across five entries: the
