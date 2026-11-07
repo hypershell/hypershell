@@ -45,17 +45,22 @@ decomposes into three roles:
 * **Submit** ingests shell commands from ``stdin`` or files and writes them to the database
   (SQLite or PostgreSQL) with stable UUIDs.
 
-* **Server** pulls pending tasks from the database, bundles them, and exposes four
-  queues to clients via RPC over TCP. The server process itself accepts and handles these
-  connections (there is no separate manager process):
+* **Server** pulls pending tasks from the database, stages them for dispatch, and exposes four
+  queues and a dispatch service to clients via RPC over TCP. The server process itself accepts
+  and handles these connections (there is no separate manager process):
 
-  * ``scheduled`` — task bundles awaiting execution
+  * ``scheduled`` — tasks staged for dispatch
   * ``completed`` — results returned from clients
   * ``heartbeat`` — periodic liveness reports from clients
   * ``confirmed`` — explicit acknowledgement of received bundles
 
-* **Client** connects to the server, pulls bundles from the ``scheduled`` queue, spawns
-  shell subprocesses, and returns results on the ``completed`` queue.
+* **Client** connects to the server and, whenever it is ready for work, requests a bundle of
+  tasks, which the server answers from the tasks staged for the client's zone. It spawns shell
+  subprocesses and returns results on the ``completed`` queue.
+
+  .. versionchanged:: 2.9.0
+     :pr:`78`: a client requests each bundle from the server instead of pulling it from the
+     ``scheduled`` queue.
 
 The ``cluster`` command (``hsx``) composes the three roles in a single process group for
 local-only or SSH-distributed workflows.
