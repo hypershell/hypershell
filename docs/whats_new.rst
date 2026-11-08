@@ -196,6 +196,11 @@ Not yet released
 
 |
 
-Nothing is pending: everything merged on ``develop`` so far shipped in 2.9.0a6.
+Fixes
+^^^^^
+
+- **A database file of ``:memory:`` works again.** A cluster or server configured with ``file =
+  ':memory:'`` runs without a database, as with ``--no-db``. Before, it failed with "no such table:
+  client" once a client connected, or hung. This also ships in 2.8.6.
 
 |

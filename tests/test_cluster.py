@@ -9,7 +9,9 @@ from __future__ import annotations
 from typing import Final, Dict
 
 # Standard libs
+import os
 from pathlib import Path
+from subprocess import run
 
 # External libs
 from pytest import mark
@@ -148,6 +150,25 @@ def test_cluster_basic(temp_site: Path) -> None:
     assert_output(r'DEBUG \[hypershell.client\] Running task', stderr, 4)
     assert_output(r'\[hypershell.server\] Completed task', stderr, 4)
     assert_output(r'\[hypershell.client\] Completed task', stderr, 4)
+
+
+@mark.integration
+def test_cluster_memory_database(temp_site: Path) -> None:
+    """Run small collection of tasks with the database configured as ``:memory:``.
+
+    That configuration disables the database without ``--no-db``, so every server
+    thread must run in memory: none may query a database that was never initialized.
+    """
+    site = Path(str(temp_site))
+    taskfile = create_taskfile_echo(site, count=4)
+    env = {**os.environ, 'HYPERSHELL_DATABASE_FILE': ':memory:'}
+    proc = run(['hs', 'cluster', str(taskfile), '-N', '2'], cwd=site, env=env,
+               capture_output=True, text=True, timeout=60)
+    assert proc.returncode == exit_status.success, proc.stderr
+    assert sorted(proc.stdout.split()) == list(map(str, range(4)))
+    assert_output(r'\[hypershell.server\] Completed task', proc.stderr, 4)
+    assert not list(site.rglob('*.db'))
+    assert not (site / ':memory:').exists()
 
 
 @mark.integration
