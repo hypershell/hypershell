@@ -1079,7 +1079,7 @@ class ServerThread(Thread):
             self.confirm = ConfirmThread(queue=self.queue, in_memory=self.in_memory)
         self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures)
         self.heartmonitor = HeartMonitorThread(queue=self.queue, evict_after=evict_after,
-                                               in_memory=in_memory, no_confirm=no_confirm)
+                                               in_memory=self.in_memory, no_confirm=no_confirm)
         super().__init__(name='hypershell-server')
 
     def run_with_exceptions(self: ServerThread) -> None:
