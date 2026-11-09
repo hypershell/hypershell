@@ -137,8 +137,9 @@ Rehearse the ENTIRE release in isolation before any real ref moves:
 2. In that worktree, replay the mode's branch ops (Step 3: cherry-pick / branch), the shared core
    (Step 4: bump + man rebuild) and the **full gate** (Step 5: pytest + `uv build --no-sources` +
    `uvx twine check --strict` + sdist hygiene).
-3. For **patch/full-release** also test-merge the result into a throwaway copy of `develop` to prove
-   the Step 9 back-merge applies without surprise conflicts.
+3. For **full-release** also test-merge the result into a throwaway copy of `develop` to prove the
+   Step 9 back-merge applies cleanly. For **patch**, draft Step 9's file table now (every verdict
+   filled in), so a master change `develop` lacks surfaces before any real ref moves.
 4. `git worktree remove "$dir/rel"`. Any red → STOP and report; **nothing in the real tree moved.**
 
 Portability: this is plain `git worktree` + the same gate commands — no Claude-specific affordance. If
@@ -219,10 +220,32 @@ Then `gh release create X.Y.Z --verify-tag [--prerelease] --title "HyperShell X.
 tagged commit's tree carries it, `docker.yml` (→ ghcr).
 
 ### Step 9 — Back-merge (patch & full-release only; pre-release skips this entirely)
-`git switch develop && git merge --no-ff master -m "[release] Merge branch master (X.Y.Z) into
-develop"`. Expect conflicts **only** on version / `uv.lock` / man pages — resolve to **develop's
-superset content** (its CLI is the more advanced side), then re-run `uv lock` + rebuild the man pages
-to re-stamp develop's CLI content at X.Y.Z; commit the resolution; push `develop`.
+**full-release:** `git switch develop && git merge --no-ff master -m "[release] Merge branch master
+(X.Y.0) into develop"`. The release branch came off `develop`, so this applies cleanly and brings the
+X.Y.0 bump onto `develop`; a conflict → STOP and report. Push `develop`.
+
+**patch:** `master` is the older line. The back-merge records that its history is in `develop` and
+SHALL leave `develop`'s tree unchanged: none of the patch line's version stamp, man pages or own code
+reaches `develop`. A plain merge conflicts on the version stamp and on code both lines changed, and
+every resolution goes to `develop`'s side, so the merge is `-s ours`, but only after a person has seen
+what it discards:
+1. **Account for every file `master` brings.** List
+   `git diff --stat $(git merge-base origin/develop origin/master) origin/master` and give each file
+   one verdict in a table:
+   - *version stamp*: `pyproject.toml`, `uv.lock`, the three man pages;
+   - *on `develop`*: the `develop` commit or PR that already carries the change (for a cherry-picked
+     fix, its source SHA);
+   - *patch line only*: code or tests `develop` replaced or never had, with one line on why
+     `develop` doesn't need it.
+   A file that fits none is a `master` change `develop` lacks, and `-s ours` would drop it. STOP; port
+   it to `develop` through a normal PR first, then back-merge.
+2. **Pause, as at Step 7:** present the table, the merge command and `git push origin develop` via
+   `AskUserQuestion` (unavailable → plain text and STOP). Never run `-s ours` on a table nobody saw.
+3. On OK: `git merge -s ours --no-ff origin/master -m "[release] Merge branch master (X.Y.Z) into
+   develop"`, with the table's verdicts summarised in the body. Check `git diff --quiet HEAD
+   origin/develop` (tree unchanged) and that the parents are `develop`'s tip and `master`'s merge
+   commit. Do not re-run `uv lock` or rebuild the man pages: `develop` keeps its own version and CLI.
+4. Push `develop`.
 
 ### Step 10 — Verify after publish
 - **PyPI:** `curl -s https://pypi.org/pypi/hypershell/json` — `info.version` is the intended "latest"
