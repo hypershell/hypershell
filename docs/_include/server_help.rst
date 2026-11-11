@@ -86,8 +86,10 @@ Options
 
     When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
     This option sets the default memory requirement for all submitted tasks.
-    Specify memory size with units (e.g., '4GB', '512MB'). Individual tasks can override this
-    with inline comments (e.g., ``#HYPERSHELL: memory:8GB``).
+    Specify memory size in bytes or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed
+    by ``B`` or ``iB``, in any case (e.g., '4GB', '512M'). Each unit is a power of 1024, so
+    ``16G``, ``16GB`` and ``16GiB`` are the same size. Individual tasks can override this with
+    inline comments, which take the same forms (e.g., ``#HYPERSHELL: memory:8G``).
 
     See also ``--task-cores`` and ``--task-timeout``.
 
@@ -96,7 +98,12 @@ Options
 
     When an input *FILE* is provided, a `submit` thread is launched to read and submit tasks.
     This option sets the default timeout for all submitted tasks. Individual
-    tasks can override this with inline comments (e.g., ``#HYPERSHELL: timeout:3600``).
+    tasks can override this with inline comments, which take the same forms (e.g.,
+    ``#HYPERSHELL: timeout:3600`` or ``#HYPERSHELL: timeout:1:30:00``).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``90m``, ``1h30m``, ``1.5h``, ``1d12h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30:00``).
 
     See also ``--task-cores`` and ``--task-memory``.
 

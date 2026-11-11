@@ -69,7 +69,7 @@ from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
                                   DEFAULT_LOCAL_TIMEOUT, DEFAULT_REMOTE_TIMEOUT)
 from hypershell.core.thread import Thread
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
-from hypershell.core.types import JSONData, parse_bytes
+from hypershell.core.types import JSONData, parse_bytes, parse_time
 from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
@@ -1239,8 +1239,8 @@ Options:
       --tls-ca               Path to TLS CA certificate file (default: <auto>).
       --template     CMD     Submit-time template expansion (default: "{DEFAULT_TEMPLATE}").
   -c, --cores        NUM     Required cores per task (default: none).
-  -m, --memory       MEM     Required memory per task (default: none).
-  -W, --timeout      SEC     Task-level walltime limit (default: none).
+  -m, --memory       MEM     Required memory per task; K/M/G/T[B|iB] are powers of 1024 (default: none).
+  -W, --timeout      SEC     Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
   -g, --group        NUM     Task group for dependency management (default: {DEFAULT_TASK_GROUP}).
       --zone         NAME    Zone of the tasks; only clients of this zone run them (default: none).
   -b, --bundlesize   NUM     Number of lines to buffer (default: {DEFAULT_BUNDLESIZE}).
@@ -1283,7 +1283,7 @@ class SubmitApp(Application):
     interface.add_argument('-m', '--memory', type=parse_bytes, default=memory)
 
     timeout: Optional[int] = config.task.timeout or None
-    interface.add_argument('-W', '--timeout', type=int, default=timeout)
+    interface.add_argument('-W', '--timeout', type=parse_time, default=timeout)
 
     group: Optional[int] = None
     interface.add_argument('-g', '--group', type=int, default=group)
