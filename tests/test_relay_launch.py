@@ -46,6 +46,7 @@ from hypershell.relay.site import (site_cluster, site_launch, fence_site, scrub_
                                    end_site_clients)
 from hypershell.relay.upstream import upstream_key, upstream_identity
 from cmdkit.cli import ArgumentError
+from tests import main
 from tests.test_relay_db import relays, upstream, free_port, UPSTREAM_AUTH, DEADLINE, POLL  # noqa: fixtures
 
 
@@ -220,6 +221,67 @@ def test_upstream_key_refuses_two_forms_in_one_place(monkeypatch) -> None:
     assert 'auth, auth_env' in str(caught.value) and KEY not in str(caught.value)
     with pytest.raises(ConfigurationError):
         upstream_key(layered(user={'relay': {'upstream': {'auth_env': 'NOT_SET_ANYWHERE_RELAY'}}}))
+
+
+@mark.unit
+def test_upstream_key_unset_variable_names_it(monkeypatch) -> None:
+    """An `auth_env` naming an unset variable is refused, naming the key and the variable, never the default."""
+    monkeypatch.delenv('NOT_SET_ANYWHERE_RELAY', raising=False)
+    with pytest.raises(ConfigurationError) as caught:
+        upstream_key(layered(user={'relay': {'upstream': {'auth_env': 'NOT_SET_ANYWHERE_RELAY'}}}))
+    message = str(caught.value)
+    assert 'relay.upstream.auth_env' in message and 'NOT_SET_ANYWHERE_RELAY' in message
+    assert DEFAULT_AUTH not in message
+
+
+@mark.unit
+def test_upstream_key_failed_command_names_it() -> None:
+    """An `auth_eval` command that exits non-zero is refused, naming the key and the status, not its output."""
+    with pytest.raises(ConfigurationError) as caught:
+        upstream_key(layered(user={'relay': {'upstream': {'auth_eval': f'echo {KEY}; exit 4'}}}))
+    message = str(caught.value)
+    assert 'relay.upstream.auth_eval' in message and 'status 4' in message
+    assert KEY not in message
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+
+
+@mark.unit
+def test_upstream_key_refuses_two_forms_in_a_lower_layer(monkeypatch) -> None:
+    """Two forms of the key in a lower layer are refused even when a higher layer overrides them."""
+    monkeypatch.setenv('MY_RELAY_KEY', KEY)
+    with pytest.raises(ConfigurationError) as caught:
+        upstream_key(layered(user={'relay': {'upstream': {'auth': 'literal', 'auth_env': 'MY_RELAY_KEY'}}},
+                             env={'relay': {'upstream': {'auth': 'from-environment'}}}))
+    message = str(caught.value)
+    assert 'relay.upstream.auth (auth, auth_env)' in message
+    assert KEY not in message and 'from-environment' not in message
+
+
+@mark.integration
+@mark.parametrize('form', ['auth_env', 'auth_eval'])
+def test_config_get_relay_upstream_auth(temp_site: Path, monkeypatch, form: str) -> None:
+    """`hs config get relay.upstream.auth` prints the key an `auth_env` or `auth_eval` resolves to."""
+    value = 'MY_RELAY_KEY' if form == 'auth_env' else 'printf %s "$MY_RELAY_KEY"'
+    config_file = Path(str(temp_site)) / 'config.toml'
+    config_file.write_text(f"[relay.upstream]\n{form} = '{value}'\n", encoding='utf-8')
+    monkeypatch.setenv('HYPERSHELL_CONFIG_FILE', str(config_file))
+    monkeypatch.setenv('MY_RELAY_KEY', KEY)
+    assert main(['hs', 'config', 'get', 'relay.upstream.auth', '-r']) == (exit_status.success, KEY, '')
+
+
+@mark.integration
+def test_config_get_relay_upstream_auth_unset(temp_site: Path, monkeypatch) -> None:
+    """With the variable unset, `hs config get relay.upstream.auth` fails naming the key, with no traceback."""
+    config_file = Path(str(temp_site)) / 'config.toml'
+    config_file.write_text("[relay.upstream]\nauth_env = 'MY_RELAY_KEY'\n", encoding='utf-8')
+    monkeypatch.setenv('HYPERSHELL_CONFIG_FILE', str(config_file))
+    monkeypatch.delenv('MY_RELAY_KEY', raising=False)
+    rc, stdout, stderr = main(['hs', 'config', 'get', 'relay.upstream.auth', '-r'])
+    assert rc == exit_status.bad_config
+    assert stdout == ''
+    assert 'relay.upstream.auth_env' in stderr and 'MY_RELAY_KEY' in stderr and str(config_file) in stderr
+    assert 'Traceback' not in stderr and 'traceback' not in stderr.lower()
+    assert DEFAULT_AUTH not in stderr
 
 
 @mark.unit

@@ -4,10 +4,10 @@ title: auth_env and auth_eval in a config file work, and fail cleanly when they 
   resolve
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/server-auth-variant-collision
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-11'
 phases:
 - id: P1
@@ -52,7 +52,7 @@ phases:
 - id: P3
   name: 'Relay: upstream_key delegates to resolve_auth; hs config get relay.upstream.auth
     (2.9 only)'
-  status: pending
+  status: done
   satisfies:
   - R4
   depends_on:
@@ -206,16 +206,16 @@ picks onto `2.8.6`.
 **Goal:** `relay.upstream.auth` behaves as `server.auth` does for R1, R2, R5, through the same guard;
 every edit is in a path absent on `2.8.6` except the `whats_new` clause.
 
-- [ ] `relay/upstream.py`: `upstream_key(base=None)` → `return resolve_auth('relay', 'upstream',
+- [x] `relay/upstream.py`: `upstream_key(base=None)` → `return resolve_auth('relay', 'upstream',
       base=base)`; import `resolve_auth`; drop `AUTH_VARIANTS` and the layer walk; keep the docstring's
       precedence sentence accurate.
-- [ ] `tests/test_relay_launch.py`: keep `test_upstream_key_forms` and
+- [x] `tests/test_relay_launch.py`: keep `test_upstream_key_forms` and
       `test_upstream_key_refuses_two_forms_in_one_place` passing; add `@mark.unit` cases for an
       `auth_eval` failure (names `relay.upstream.auth_eval`), the unset message (names the variable),
       and a lower-layer duplicate; add `@mark.integration` `test_config_get_relay_upstream_auth`
       (subprocess, `[relay.upstream] auth_env`: resolved value printed; unset → `bad_config`, key
       named, no `Traceback`).
-- [ ] `docs/whats_new.rst`: extend the P2 entry with "`relay.upstream.auth` in `[relay.upstream]`
+- [x] `docs/whats_new.rst`: extend the P2 entry with "`relay.upstream.auth` in `[relay.upstream]`
       likewise".
 - **Verify:** the relay key tests, the shared test file, and the merge-tree gate against `2.8.6` with
   the two relay paths added to the dropped set.

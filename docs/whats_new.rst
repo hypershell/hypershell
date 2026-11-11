@@ -216,10 +216,10 @@ Fixes
   already stored that way are not corrected. This also ships in 2.8.7.
 - **The authkey can come from a variable or a command in a configuration file.** ``auth_env`` or
   ``auth_eval`` in ``[server]``, as the :ref:`security guide <security>` recommends, now takes
-  precedence over the built-in default, and ``hs config get server.auth`` prints the resolved value.
-  Before, every command stopped with a traceback. A variable that is not set, a command that exits
-  non-zero, or two forms of the key in one file is now a configuration error naming the key, and
-  the key is resolved only by the commands that use it. HyperShell now requires cmdkit 2.8.0. This
-  also ships in 2.8.7.
+  precedence over the built-in default, and ``hs config get server.auth`` prints the resolved value;
+  ``relay.upstream.auth`` in ``[relay.upstream]`` likewise. Before, every command stopped with a
+  traceback. A variable that is not set, a command that exits non-zero, or two forms of the key in
+  one file is now a configuration error naming the key, and the key is resolved only by the commands
+  that use it. HyperShell now requires cmdkit 2.8.0. This also ships in 2.8.7.
 
 |
