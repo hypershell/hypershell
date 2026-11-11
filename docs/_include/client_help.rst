@@ -125,8 +125,10 @@ Options
     Limit available memory for client (default: all memory).
 
     Sets an upper bound on the amount of memory that the client can use.
-    Specify memory size with units (e.g., '16GB', '4096MB'). This allows running
-    multiple clients on the same node by partitioning resources.
+    Specify memory size in bytes or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed
+    by ``B`` or ``iB``, in any case (e.g., '16G', '4096MB'). Each unit is a power of 1024, so
+    ``16G``, ``16GB`` and ``16GiB`` are the same size. This allows running multiple clients on
+    the same node by partitioning resources.
 
 ``--monitor``
     Enable resource monitoring for tasks.

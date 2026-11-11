@@ -11,13 +11,14 @@ from typing import Final, List, Dict, overload, Union, TypeAlias
 # Standard libs
 import re
 import json
+from argparse import ArgumentTypeError
 from datetime import datetime
 
 # Public interface
 __all__ = [
     'smart_coerce', 'NoneType', 'JSONData', 'ExtendedValue',
     'to_json_type', 'from_json_type', 'serialize', 'deserialize',
-    'parse_bytes', 'parse_time',
+    'parse_bytes', 'parse_time', 'UnitError',
 ]
 
 
@@ -82,7 +83,18 @@ def deserialize(data: bytes) -> JSONData:
     return json.loads(data.decode('utf-8'))
 
 
-MEMORY_PATTERN: re.Pattern = re.compile(r'(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>[KMGT]B)?')
+class UnitError(ValueError, ArgumentTypeError):
+    """A size or duration that is not in an accepted form.
+
+    It is a ValueError for callers that parse values directly, and an ArgumentTypeError so that
+    argparse shows its message (naming the value and the accepted forms) instead of a generic one.
+    """
+
+
+# The whole value must match: a number, then optionally K, M, G or T, alone or followed by
+# B or iB, or a bare B. Every unit is a power of 1024, in any case.
+MEMORY_PATTERN: Final[re.Pattern] = re.compile(r'(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>[KMGT](?:I?B)?|B)?',
+                                               re.IGNORECASE)
 MEMORY_SCALES: Final[Dict[str, int]] = {
     'B': 1,
     'KB': 1024,
@@ -90,14 +102,17 @@ MEMORY_SCALES: Final[Dict[str, int]] = {
     'GB': 1024 * 1024 * 1024,
     'TB': 1024 * 1024 * 1024 * 1024,
 }
+MEMORY_FORMS: Final[str] = ('a number of bytes, optionally with a unit K, M, G or T (powers of 1024), '
+                            'alone or followed by B or iB, in any case (e.g., 2048, 512M, 16G, 16GB, 1.5GiB)')
 
 
 def parse_bytes(value: str) -> int:
-    """Parse memory string to integer bytes (e.g., '512MB')."""
-    if match := MEMORY_PATTERN.match(value.upper()):
-        return int(float(match.group('num')) * MEMORY_SCALES[match.group('unit') or 'B'])
+    """Parse memory string to integer bytes (e.g., '512MB', '16G', '1.5GiB')."""
+    if match := MEMORY_PATTERN.fullmatch(str(value).strip()):
+        unit = (match.group('unit') or 'B').upper()
+        return int(float(match.group('num')) * MEMORY_SCALES[unit if unit == 'B' else f'{unit[0]}B'])
     else:
-        raise ValueError(f'Memory string {value!r} is not a valid memory unit')
+        raise UnitError(f'Memory size {value!r} is not valid: expected {MEMORY_FORMS}')
 
 
 TIME_PATTERN: Final[re.Pattern] = re.compile(r'(?P<num>\d+)\s*(?P<unit>[SMHDW])')

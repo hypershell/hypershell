@@ -1,39 +1,65 @@
 ---
 slug: size-and-duration-units
-title: "Sizes and durations written with common units are read as written"
+title: Sizes and durations written with common units are read as written
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/size-and-duration-units
 base: develop
-current_phase: P1
-last_updated: "2026-11-11"
+current_phase: P2
+last_updated: '2026-11-11'
 phases:
-  - id: P1
-    name: "Sizes: strict parse_bytes end to end (options, inline memory, rotation policy, docs)"
-    status: pending
-    satisfies: [R1, R5, R6, R7, R8, R9, R10]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_size_duration.py -k \"size or memory or rotate\" && .agents/factory/bin/temp_site.sh sh -c \"uv run hs submit -m 16G echo a && ! uv run hs submit -m 16X echo b\" && uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html"
-  - id: P2
-    name: "Durations: strict parse_time on six options and the inline timeout tag, docs, cherry-pick check"
-    status: pending
-    satisfies: [R2, R3, R4, R5, R6, R8, R10]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_size_duration.py tests/test_submit.py tests/test_cluster_launch.py && .agents/factory/bin/temp_site.sh sh -c \"echo 'echo a # HYPERSHELL: timeout:1:30:00 memory:16G' > t.in && uv run hs submit -f t.in -W 1h30m && uv run hs list id timeout memory && ! uv run hs submit -W 1hr echo b\" && uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html && ! git merge-tree --write-tree --name-only --no-messages --merge-base=\"$(git log -1 --format=%H --grep='Plan size-and-duration-units')\" 2.8.6 HEAD | tail -n +2 | grep -v -e '^$' -e '^docs/whats_new.rst$' -e '^spec/'"
+- id: P1
+  name: 'Sizes: strict parse_bytes end to end (options, inline memory, rotation policy,
+    docs)'
+  status: done
+  satisfies:
+  - R1
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  - R10
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_size_duration.py -k "size or memory or rotate"
+    && .agents/factory/bin/temp_site.sh sh -c "uv run hs submit -m 16G echo a && !
+    uv run hs submit -m 16X echo b" && uv run --python 3.12 --group docs sphinx-build
+    -W --keep-going -q -E -b html docs docs/_build/html
+- id: P2
+  name: 'Durations: strict parse_time on six options and the inline timeout tag, docs,
+    cherry-pick check'
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R8
+  - R10
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: 'uv run pytest -v tests/test_size_duration.py tests/test_submit.py tests/test_cluster_launch.py
+    && .agents/factory/bin/temp_site.sh sh -c "echo ''echo a # HYPERSHELL: timeout:1:30:00
+    memory:16G'' > t.in && uv run hs submit -f t.in -W 1h30m && uv run hs list id
+    timeout memory && ! uv run hs submit -W 1hr echo b" && uv run --python 3.12 --group
+    docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html && ! git
+    merge-tree --write-tree --name-only --no-messages --merge-base="$(git log -1 --format=%H
+    --grep=''Plan size-and-duration-units'')" 2.8.6 HEAD | tail -n +2 | grep -v -e
+    ''^$'' -e ''^docs/whats_new.rst$'' -e ''^spec/'''
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Sizes and durations written with common units are read as written
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -88,25 +114,25 @@ the per-phase checklists below are the work. `hs-build` executes the next action
 `1.5GiB` as powers of 1024, refuse `8,000MB`/`8GB of ram`/`16X`/`16GBB` naming the forms, keep every
 value accepted today, and treat `30 2 * * *` as a time policy.
 
-- [ ] `core/types.py`: add `UnitError(ValueError, argparse.ArgumentTypeError)` to `__all__`; rewrite
+- [x] `core/types.py`: add `UnitError(ValueError, argparse.ArgumentTypeError)` to `__all__`; rewrite
       `parse_bytes` as a stripped, case-insensitive full match of `\d+(\.\d+)?\s*` + optional
       `[KMGT](B|iB)?` or `B`; result `int(float(num) * scale)` (floor, today's arithmetic); refusal
       raises `UnitError` naming the value and the forms. Replace `MEMORY_PATTERN`; keep `MEMORY_SCALES`.
-- [ ] `data/model.py` `ensure_valid_tag`: in the `if isinstance(value, str):` block, after the
+- [x] `data/model.py` `ensure_valid_tag`: in the `if isinstance(value, str):` block, after the
       naked-tag `return`, a `memory` value is checked with `parse_bytes` and skips the charset regex.
-- [ ] `data/model.py` `Task.new`: the memory conversion re-raises a `UnitError` as a `RuntimeError`
+- [x] `data/model.py` `Task.new`: the memory conversion re-raises a `UnitError` as a `RuntimeError`
       naming the value and the forms (precedent: `split_argline`'s "Failed to parse inline tags").
-- [ ] `core/logging.py`: no edit — confirm `initialize_logging`'s `except ValueError` branch makes
+- [x] `core/logging.py`: no edit — confirm `initialize_logging`'s `except ValueError` branch makes
       `30 2 * * *` time-based.
-- [ ] Help: memory lines in `APP_HELP` of `submit.py`, `server.py`, `client.py`, `cluster/__init__.py`
+- [x] Help: memory lines in `APP_HELP` of `submit.py`, `server.py`, `client.py`, `cluster/__init__.py`
       and `docs/_include/{submit,server,client,cluster}_help.rst` (incl. the inline `memory:` example)
       state `K`, `M`, `G`, `T` with or without `B`/`iB` are powers of 1024. `config_param_ref.rst`
       (`task.memory`, `client.memory`, `logging.file.rotate`) and `docs/logging.rst` rotate prose.
       zsh `_hs` "Memory in bytes" descriptions.
-- [ ] `docs/whats_new.rst`: *Not yet released → Fixes* entry below the #92 one, carrying R9 ("a size
+- [x] `docs/whats_new.rst`: *Not yet released → Fixes* entry below the #92 one, carrying R9 ("a size
       written with a short or binary unit (`16G`, `16GiB`) was read before the fix as that many bytes;
       tasks already stored that way are not corrected") and ending "This also ships in 2.8.7."
-- [ ] `tests/test_size_duration.py` (new): `@mark.unit` parametrized `test_size_*` accept table (R1,
+- [x] `tests/test_size_duration.py` (new): `@mark.unit` parametrized `test_size_*` accept table (R1,
       R6: `16GB`, `512MB`, `2KB`, `16 GB`, `1.5GB`, `16gb`, `1024`, `16G`, `16g`, `16GiB`, `512M`,
       `1.5GiB`) and refusal table (R5) with the forms in the message; `test_memory_*` for each memory
       option's parsed value and refusal message, `ensure_valid_tag`, and `@mark.integration` inline

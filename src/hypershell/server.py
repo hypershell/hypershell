@@ -1561,7 +1561,7 @@ Options:
       --forever               Schedule forever.
       --restart               Start scheduling from last completed task.
   -c, --task-cores      NUM   Number of cores to assign each task (default: none).
-  -m, --task-memory     MEM   Memory in bytes to assign each task (default: none).
+  -m, --task-memory     MEM   Memory to assign each task; K/M/G/T[B|iB] are powers of 1024 (default: none).
   -W, --task-timeout    SEC   Task-level walltime limit in seconds (default: none).
   -b, --bundlesize      NUM   Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait      SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).

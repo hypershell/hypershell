@@ -202,5 +202,13 @@ Fixes
 - **A database file of ``:memory:`` works again.** A cluster or server configured with ``file =
   ':memory:'`` runs without a database, as with ``--no-db``. Before, it failed with "no such table:
   client" once a client connected, or hung. This also ships in 2.8.6.
+- **Memory sizes read as written.** ``16G``, ``16GiB``, ``512M`` and ``1.5GiB`` are powers of
+  1024, as ``16GB`` always was, for ``hs submit -m``, ``hs server -m``, ``hs client -M``,
+  ``hs cluster -m`` and ``-M``, the inline ``memory:`` tag, and a size-like log rotation policy. A
+  value that is not a size in full, such as ``16X`` or ``8,000MB``, is refused with the accepted
+  forms instead of being read by its leading number, and a cron rotation policy that begins with a
+  digit (``30 2 * * *``) is a schedule, not a size. Before this fix, a size written with a short or
+  binary unit (``16G``, ``16GiB``) was read as that many bytes; tasks already stored that way are
+  not corrected. This also ships in 2.8.7.
 
 |

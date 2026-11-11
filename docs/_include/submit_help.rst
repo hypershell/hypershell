@@ -101,9 +101,11 @@ Options
 ``-m``, ``--memory`` *MEM*
     Amount of memory required per task (default: none).
 
-    Sets the default memory requirement for all submitted tasks. Specify memory size with
-    units (e.g., '4GB', '512MB'). Individual tasks can override this with inline comments
-    (e.g., ``#HYPERSHELL: memory:8GB``).
+    Sets the default memory requirement for all submitted tasks. Specify memory size in bytes
+    or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed by ``B`` or ``iB``, in any
+    case (e.g., '4GB', '512M'). Each unit is a power of 1024, so ``16G``, ``16GB`` and ``16GiB``
+    are the same size. Individual tasks can override this with inline comments, which take the
+    same forms (e.g., ``#HYPERSHELL: memory:8G``).
 
 ``-W``, ``--timeout`` *SEC*
     Task-level walltime limit in seconds (default: none).

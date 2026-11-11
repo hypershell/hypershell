@@ -267,9 +267,12 @@ Options
 ``-m``, ``--memory`` *MEM*
     Amount of memory required per task (default: none).
 
-    Specify memory size with units (e.g., '4GB', '512MB'). Tasks will only be
-    executed when the required memory is available. Used with resource-aware
-    scheduling and backfill.
+    Specify memory size in bytes or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed
+    by ``B`` or ``iB``, in any case (e.g., '4GB', '512M'). Each unit is a power of 1024, so
+    ``16G``, ``16GB`` and ``16GiB`` are the same size. Individual tasks can override this with
+    inline comments, which take the same forms (e.g., ``#HYPERSHELL: memory:8G``). Tasks will
+    only be executed when the required memory is available. Used with resource-aware scheduling
+    and backfill.
 
 ``-C``, ``--client-cores`` *NUM*
     Limit available cores per client (default: all cores).
@@ -284,8 +287,10 @@ Options
     Limit available memory per client (default: all memory).
 
     Sets an upper bound on the amount of memory that each client can use.
-    Specify memory size with units (e.g., '16GB', '4096MB'). This allows running
-    multiple clients on the same node by partitioning resources.
+    Specify memory size in bytes or with a unit ``K``, ``M``, ``G`` or ``T``, alone or followed
+    by ``B`` or ``iB``, in any case (e.g., '16G', '4096MB'). Each unit is a power of 1024, so
+    ``16G``, ``16GB`` and ``16GiB`` are the same size. This allows running multiple clients on
+    the same node by partitioning resources.
 
 ``--monitor``
     Enable resource monitoring for tasks.

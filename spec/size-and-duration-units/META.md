@@ -45,7 +45,7 @@ is skipped by the parser):
 
 <!-- Real findings are appended below this line by the lifecycle skills. -->
 
-## F1 — The skill's `next_phase.py` validation command runs uv in project mode
+## F1 — The skill's `next_phase.py` validation command runs uv in project mode · seen again (hs-build Step 1)
 `origin=hs-plan:step-6 severity=low category=tooling status=open target=.agents/skills/hs-plan/SKILL.md`
 - **What happened:** Step 6 (and the TECH template's header) says to validate with `uv run python
   .agents/factory/bin/next_phase.py …`; the planner ran `uv run --no-project --with pyyaml python …`

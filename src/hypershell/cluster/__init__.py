@@ -100,9 +100,9 @@ Options:
       --capture                 Capture individual task <stdout> and <stderr>.
       --monitor                 Capture cores and memory used by tasks.
   -c, --cores          NUM      Required cores per task (default: none).
-  -m, --memory         MEM      Required memory per task (default: none).
+  -m, --memory         MEM      Required memory per task; K/M/G/T[B|iB] are powers of 1024 (default: none).
   -C, --client-cores   NUM      Limit available cores for client (default: all cores).
-  -M, --client-memory  MEM      Limit available memory for client (default: all memory).
+  -M, --client-memory  MEM      Memory limit per client; K/M/G/T[B|iB] are powers of 1024 (default: all memory).
   -o, --output         PATH     File path for task outputs (default: <stdout>).
   -e, --errors         PATH     File path for task errors (default: <stderr>).
   -f, --failures       PATH     File path to write failed task args (default: <none>).

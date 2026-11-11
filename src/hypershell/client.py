@@ -1565,7 +1565,7 @@ Options:
       --capture             Capture individual task <stdout> and <stderr>.
       --monitor             Capture cores and memory used by tasks.
   -C, --client-cores  NUM   Limit available cores for client (default: all cores).
-  -M, --client-memory MEM   Limit available memory for client (default: all memory).
+  -M, --client-memory MEM   Memory limit for client; K/M/G/T[B|iB] are powers of 1024 (default: all memory).
   -T, --timeout       SEC   Automatically shutdown if no tasks received (default: never).
   -W, --task-timeout  SEC   Task-level walltime limit (default: none).
   -R, --ratelimit     NUM   Maximum allowed tasks per second (default: none).

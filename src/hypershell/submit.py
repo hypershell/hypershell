@@ -1239,7 +1239,7 @@ Options:
       --tls-ca               Path to TLS CA certificate file (default: <auto>).
       --template     CMD     Submit-time template expansion (default: "{DEFAULT_TEMPLATE}").
   -c, --cores        NUM     Required cores per task (default: none).
-  -m, --memory       MEM     Required memory per task (default: none).
+  -m, --memory       MEM     Required memory per task; K/M/G/T[B|iB] are powers of 1024 (default: none).
   -W, --timeout      SEC     Task-level walltime limit (default: none).
   -g, --group        NUM     Task group for dependency management (default: {DEFAULT_TASK_GROUP}).
       --zone         NAME    Zone of the tasks; only clients of this zone run them (default: none).
