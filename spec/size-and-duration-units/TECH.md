@@ -3,7 +3,7 @@ slug: size-and-duration-units
 title: Sizes and durations written with common units are read as written
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/size-and-duration-units
 base: develop
 current_phase: done
