@@ -69,3 +69,15 @@ is skipped by the parser):
   merge-tree check, show the temporary-commit form (`git add -A` into a scratch index, `git write-tree`,
   `git commit-tree -p HEAD`) instead of `HEAD`.
 - **Confidence:** high · **Effort:** small
+
+## F3 — The review diff names the local `develop`, which can be far from the branch's real base
+`origin=hs-review:Step 2 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** the skill injects `git diff --stat develop...HEAD` and builds the blind diff from
+  `{base}` = `develop`. In this worktree the local `develop` (`222075b`, 2026-08-22) is not an ancestor
+  of `origin/develop`, so `git diff --stat develop...HEAD` reports 2911 files changed instead of the 17
+  this branch touches. The reviewer used `origin/develop`, as the caller instructed.
+- **Skill cause:** Step 1 resolves `base` to a bare branch name and never checks it against the remote
+  or the branch's merge base; a stale local ref silently floods the blind diff.
+- **Recommended fix:** resolve `{base}` to `origin/{base}` (after a fetch) when it exists, and stop with a
+  message when `git merge-base --is-ancestor {base} HEAD` fails.
+- **Confidence:** high · **Effort:** small

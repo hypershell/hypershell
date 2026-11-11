@@ -55,10 +55,10 @@ phases:
     --grep=''Plan size-and-duration-units'')" 2.8.6 HEAD | tail -n +2 | grep -v -e
     ''^$'' -e ''^docs/whats_new.rst$'' -e ''^spec/'''
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: d2bff2e
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — Sizes and durations written with common units are read as written
 
