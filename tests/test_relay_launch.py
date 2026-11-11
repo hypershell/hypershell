@@ -246,6 +246,17 @@ def test_upstream_key_failed_command_names_it() -> None:
 
 
 @mark.unit
+def test_upstream_key_command_output_not_utf8() -> None:
+    """An `auth_eval` command whose output is not UTF-8 is refused, naming the key, not a traceback."""
+    with pytest.raises(ConfigurationError) as caught:
+        upstream_key(layered(user={'relay': {'upstream': {'auth_eval': f"printf '{KEY}\\377'"}}}))
+    message = str(caught.value)
+    assert 'relay.upstream.auth_eval' in message and 'UnicodeDecodeError' in message
+    assert KEY not in message and '0xff' not in message
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+
+
+@mark.unit
 def test_upstream_key_refuses_two_forms_in_a_lower_layer(monkeypatch) -> None:
     """Two forms of the key in a lower layer are refused even when a higher layer overrides them."""
     monkeypatch.setenv('MY_RELAY_KEY', KEY)
@@ -282,6 +293,22 @@ def test_config_get_relay_upstream_auth_unset(temp_site: Path, monkeypatch) -> N
     assert 'relay.upstream.auth_env' in stderr and 'MY_RELAY_KEY' in stderr and str(config_file) in stderr
     assert 'Traceback' not in stderr and 'traceback' not in stderr.lower()
     assert DEFAULT_AUTH not in stderr
+
+
+@mark.integration
+@mark.parametrize('argv', [['hs', 'config', 'get', 'relay.upstream.auth', '-r'], ['hs', 'relay', '-H', 'localhost', '-p', '1']])
+def test_relay_upstream_auth_output_not_utf8(temp_site: Path, monkeypatch, argv: list) -> None:
+    """An `auth_eval` printing a byte that is not UTF-8 stops the command naming the key, with no traceback file."""
+    config_file = Path(str(temp_site)) / 'config.toml'
+    config_file.write_text(f"[relay.upstream]\nauth_eval = 'printf \"{KEY}\\377\"'\n", encoding='utf-8')
+    monkeypatch.setenv('HYPERSHELL_CONFIG_FILE', str(config_file))
+    rc, stdout, stderr = main(argv)
+    assert rc == exit_status.bad_config
+    assert stdout == ''
+    assert 'relay.upstream.auth_eval' in stderr and str(config_file) in stderr
+    assert 'Traceback' not in stderr and 'traceback' not in stderr.lower()
+    assert KEY not in stderr and DEFAULT_AUTH not in stderr
+    assert not list(Path(str(temp_site)).rglob('exception-*.log'))
 
 
 @mark.unit

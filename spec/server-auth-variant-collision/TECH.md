@@ -4,10 +4,10 @@ title: auth_env and auth_eval in a config file work, and fail cleanly when they 
   resolve
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/server-auth-variant-collision
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-11'
 phases:
 - id: P1
@@ -53,7 +53,7 @@ phases:
 - id: P3
   name: 'Relay: upstream_key delegates to resolve_auth; hs config get relay.upstream.auth
     (2.9 only)'
-  status: in_progress
+  status: done
   satisfies:
   - R4
   depends_on:
@@ -240,7 +240,7 @@ every edit is in a path absent on `2.8.6` except the `whats_new` clause.
       named, no `Traceback`).
 - [x] `docs/whats_new.rst`: extend the P2 entry with "`relay.upstream.auth` in `[relay.upstream]`
       likewise".
-- [ ] **F2 remediation (review cycle 1), relay part.** `tests/test_relay_launch.py`: an
+- [x] **F2 remediation (review cycle 1), relay part.** `tests/test_relay_launch.py`: an
       `[relay.upstream] auth_eval` whose output is not UTF-8 is a `ConfigurationError` naming
       `relay.upstream.auth_eval` (unit), and `hs relay` exits `bad_config` with no traceback file
       (integration). The fix itself is the shared P1 change.
