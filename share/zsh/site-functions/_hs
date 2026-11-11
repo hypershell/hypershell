@@ -527,8 +527,8 @@ function _hs_server() {
         '--forever[Schedule forever]' \
         '--restart[Start scheduling from last completed task]' \
         '(-c --task-cores)'{-c,--task-cores}'[Number of cores to assign each task]:cores:(1 2 4 8 16 32)' \
-        '(-m --task-memory)'{-m,--task-memory}'[Memory in bytes to assign each task]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
-        '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit in seconds]:seconds:(60 300 600 1800 3600)' \
+        '(-m --task-memory)'{-m,--task-memory}'[Memory to assign each task (K/M/G/T are powers of 1024)]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
+        '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit (seconds, 1h30m, or 1.5h)]:seconds:(60 300 600 1800 3600)' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
         '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries]:seconds:(1 2 5 10)' \
