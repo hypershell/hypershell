@@ -304,11 +304,11 @@ wheels = [
 
 [[package]]
 name = "cmdkit"
-version = "2.7.7"
+version = "2.8.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a9/8d/0483d6018a5293ef74889ee132b243d34c324be19378acb93341bbefb43b/cmdkit-2.7.7.tar.gz", hash = "sha256:afe20b60ee60658e299dba465248b74c1801bfe24f891ef745b3a6810251c280", size = 23225, upload-time = "2024-12-28T21:21:57.08Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/6c/b68b40b63f126fb01af17fce206a4f3b75687bc96a8a000031b6f5b357b2/cmdkit-2.8.0.tar.gz", hash = "sha256:0c279bc2ea64bdbb0cff05ddf6f0781986ad0c7c60bfd5a4b85093ed9bd6b547", size = 25581, upload-time = "2026-11-11T21:27:24.075Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/62/c82680c31dc2dcfa55918a28720d2e5695cbb4e778b621416d12883203cd/cmdkit-2.7.7-py3-none-any.whl", hash = "sha256:9dfb1ae63329d0ce1970886206ef14a9773d5ebcc15608c96df119bc82abf023", size = 26819, upload-time = "2024-12-28T21:21:54.931Z" },
+    { url = "https://files.pythonhosted.org/packages/32/19/8149d2e3a3b0f6afeb7a9430c7bbb0c286e2954506ea4c366374a909d238/cmdkit-2.8.0-py3-none-any.whl", hash = "sha256:4d8ce29c91a0454cd8963c995e1c2426d41ec30cd8950222f32f766e6a66fbac", size = 29629, upload-time = "2026-11-11T21:27:23.128Z" },
 ]
 
 [package.optional-dependencies]
@@ -679,7 +679,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cmdkit", extras = ["toml"], specifier = ">=2.7.7" },
+    { name = "cmdkit", extras = ["toml"], specifier = ">=2.8.0" },
     { name = "croniter", marker = "extra == 'cron'", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=3.4" },
     { name = "paramiko", specifier = ">=3.4.0" },
