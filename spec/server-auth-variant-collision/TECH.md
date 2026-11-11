@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/server-auth-variant-collision
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-11'
 phases:
 - id: P1
@@ -31,7 +31,7 @@ phases:
 - id: P2
   name: Commands resolve the key at run (server, submit -q, client), whats_new, 2.8.6
     pick gate
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R5
@@ -48,7 +48,8 @@ phases:
     -b html docs docs/_build/html && W=$(git stash create) && ! git merge-tree --write-tree
     --name-only --no-messages --merge-base="$(git log -1 --format=%H --grep='Plan
     server-auth-variant-collision')" 2.8.6 "${W:-HEAD}" | tail -n +2 | grep -v -e
-    '^$' -e '^docs/whats_new.rst$' -e '^spec/'
+    '^$' -e '^docs/whats_new.rst$' -e '^spec/' -e '^src/hypershell/relay/upstream.py$'
+    -e '^tests/test_relay_launch.py$'
 - id: P3
   name: 'Relay: upstream_key delegates to resolve_auth; hs config get relay.upstream.auth
     (2.9 only)'
@@ -202,12 +203,15 @@ picks onto `2.8.6`.
       commit body. (`2.8.6` is an annotated tag, so `commit-tree -p` needs it peeled; the pick of
       `15587cf` itself conflicts on 2.8.6 in `ROADMAP.md` and `docs/whats_new.rst`, which the
       synthetic tree carries with markers, and neither path is touched here.)
-- [ ] **F1 remediation (review cycle 1).** `stop_server` in `tests/test_auth_variants.py` waits
+- [x] **F1 remediation (review cycle 1).** `stop_server` in `tests/test_auth_variants.py` waits
       (bounded, `DEADLINE`) for the server to exit on its own before any signal; SIGINT, then kill,
       are only the fallback for a server that does not. On `2.8.6` the server is still in its normal
       shutdown when the client returns, and an immediate SIGINT made it exit 4 (or -2). Proven by
       the real pick (scratch clone, `2.8.6^{commit}` + `15587cf` + every non-relay commit, full
-      suite under Python 3.12 and cmdkit 2.8.0).
+      suite under Python 3.12 and cmdkit 2.8.0): 722 passed, 1 skipped.
+- **Gate amendment (review cycle 1):** the merge-tree step also drops the two relay paths, as P3's
+  does. Run after P3 landed, it reads `HEAD`, which carries P3's relay edits; P2 touches neither
+  path, so the gate is no weaker for P2's own files.
 - **Verify:** the new test file plus `tests/test_server.py`, `tests/test_submit.py`,
   `tests/test_client.py`; a `temp_site` drive (`hs server --forever` with a failing `auth_eval`
   exits 3, names `server.auth_eval`, no traceback); the Sphinx `-W` build; the merge-tree gate against

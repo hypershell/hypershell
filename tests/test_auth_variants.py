@@ -270,8 +270,15 @@ def start_server(site: Path, *args: str) -> Popen:
 
 
 def stop_server(server: Popen) -> int:
-    """Interrupt `server` if still running and return its exit status."""
-    if server.poll() is None:
+    """Wait for `server` to exit on its own and return its exit status.
+
+    The server may still be shutting down when its client returns, so it gets `DEADLINE` seconds
+    to finish before any signal. Only a server that does not exit by then is interrupted (and
+    killed if that fails too), and its status then fails the caller's assertion.
+    """
+    try:
+        return server.wait(timeout=DEADLINE)
+    except TimeoutExpired:
         server.send_signal(SIGINT)
     try:
         return server.wait(timeout=DEADLINE)
