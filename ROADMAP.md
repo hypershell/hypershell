@@ -363,6 +363,16 @@ unit only. A cron rotation policy that begins with a digit is read as a size. Pr
 *Horizon: now, small; ships in 2.8.7 and 2.9.0a7 · Depends on: — · Refs: an out-of-cycle build against the library*
 **Seed:** [`issues/size-and-duration-units.md`](issues/size-and-duration-units.md) · *status: adopted:size-and-duration-units*
 
+## The remaining duration options still take bare seconds only
+
+`--bundlewait`, `--signalwait`, `--delay-start`, the autoscaling `--period` and the `--interval` on
+`hs wait` and `hs run` still take a bare number of seconds, so `--period 5m` is an argument error
+while `-W 5m` works. `--delay-start` gives a negative value its own meaning (a random wait), which
+the strict parser refuses.
+
+*Horizon: near-term, small · Depends on: `size-and-duration-units` · Refs: its GOAL's Non-goals*
+**Seed:** [`issues/duration-units-remaining-options.md`](issues/duration-units-remaining-options.md) · *status: unshaped*
+
 ## `auth_env` and `auth_eval` in a config file break every command
 
 `docs/security.rst` recommends `auth_eval` / `auth_env` to keep the authkey out of the config file,
