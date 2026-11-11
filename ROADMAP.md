@@ -247,6 +247,21 @@ review.
 cycles 2 and 3); same committer death as `issues/database-locked-during-ingest-hangs.md`*
 **Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
 
+## A memory size with a short unit is silently read as bytes
+
+The memory parser matches the start of a value and ignores the rest, so a unit it does not know is
+dropped and the number is kept as bytes: `8G` is 8 bytes, `512M` is 512, `8GiB` is 8. There is no
+error. Every memory option on `hs submit`, `hs cluster`, `hs server` and `hs client` and the inline
+`memory:` tag go through it, so a task or a client declared the way Slurm users write sizes gets a
+declaration that means nothing. The same function decides whether a log rotation policy is a size
+or a time, and reads a cron expression that begins with a digit as a size. The fix is to match the
+whole value and either read the short forms properly or refuse them. Pre-existing, and found while
+building a separate tool against the library.
+
+*Horizon: now · Depends on: — · Refs: `spec/croniter-missing-guidance/` (the rotation-policy
+note left out of scope there)*
+**Seed:** [`issues/memory-size-prefix-parse.md`](issues/memory-size-prefix-parse.md) · *status: unshaped*
+
 ## Concurrent first submits can collide on the reserved source row
 
 `Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
