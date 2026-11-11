@@ -361,7 +361,7 @@ unit only. A cron rotation policy that begins with a digit is read as a size. Pr
 `develop` and on the 2.8 line.
 
 *Horizon: now, small; ships in 2.8.7 and 2.9.0a7 · Depends on: — · Refs: an out-of-cycle build against the library*
-**Seed:** [`issues/size-and-duration-units.md`](issues/size-and-duration-units.md) · *status: unshaped*
+**Seed:** [`issues/size-and-duration-units.md`](issues/size-and-duration-units.md) · *status: adopted:size-and-duration-units*
 
 ## `auth_env` and `auth_eval` in a config file break every command
 

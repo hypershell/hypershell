@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:size-and-duration-units
 kind: fix
 appetite: small
 lane: public
