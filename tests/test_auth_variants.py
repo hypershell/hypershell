@@ -10,7 +10,10 @@ from typing import Final, Dict
 
 # Standard libs
 import os
+import time
 from pathlib import Path
+from signal import SIGINT
+from subprocess import run, Popen, STDOUT, TimeoutExpired
 
 # External libs
 from pytest import mark, raises
@@ -18,7 +21,7 @@ from cmdkit.app import exit_status
 from cmdkit.config import Configuration, Namespace, ConfigurationError
 
 # Internal libs
-from tests import main
+from tests import main, create_taskfile
 from hypershell.core.config import resolve_auth, check_auth_forms, DEFAULT_AUTH
 
 
@@ -30,6 +33,9 @@ OTHER_KEY: Final[str] = 'Hc6dF1gJ5kM0nP2qS4uV'
 
 VAR: Final[str] = 'AUTHVAR_TEST_KEY'
 """The variable an `auth_env` names."""
+
+DEADLINE: Final[int] = 60
+"""Seconds a server or client subprocess may take."""
 
 
 def layered(**layers: dict) -> Configuration:
@@ -196,6 +202,15 @@ def test_config_get_auth_env_unset(temp_site: Path, monkeypatch) -> None:
 
 
 @mark.integration
+def test_config_get_auth_eval_failed(temp_site: Path) -> None:
+    """With the command failing, `hs config get server.auth` fails naming the key and the status."""
+    filepath = write_config(temp_site, f'[server]\nauth_eval = "echo {KEY}; exit 4"\n')
+    rc, stdout, stderr = main(['hs', 'config', 'get', 'server.auth', '-r'])
+    assert_clean_failure(rc, stdout, stderr, 'server.auth_eval', 'status 4', str(filepath))
+    assert stdout == ''
+
+
+@mark.integration
 def test_config_get_literal_auth(temp_site: Path) -> None:
     """A literal `auth` in a file is printed as before."""
     write_config(temp_site, f'[server]\nauth = "{KEY}"\n')
@@ -228,3 +243,132 @@ def test_two_forms_in_one_file(temp_site: Path, monkeypatch, argv: list) -> None
     rc, stdout, stderr = main(argv)
     assert_clean_failure(rc, stdout, stderr, 'server.auth', 'auth, auth_env', str(filepath))
     assert len(stderr.splitlines()) == 1
+
+
+def start_server(site: Path, *args: str) -> Popen:
+    """Start `hs server` writing to `server.log` in `site`, and wait until it listens."""
+    log_path = site / 'server.log'
+    with open(log_path, mode='w') as stream:
+        server = Popen(['hs', 'server', *args], cwd=site, env=os.environ, stdout=stream, stderr=STDOUT)
+    deadline = time.monotonic() + DEADLINE
+    while 'Server listening' not in log_path.read_text() and server.poll() is None:
+        assert time.monotonic() < deadline, log_path.read_text()
+        time.sleep(0.1)
+    assert server.poll() is None, log_path.read_text()
+    return server
+
+
+def stop_server(server: Popen) -> int:
+    """Interrupt `server` if still running and return its exit status."""
+    if server.poll() is None:
+        server.send_signal(SIGINT)
+    try:
+        return server.wait(timeout=DEADLINE)
+    except TimeoutExpired:
+        server.kill()
+        return server.wait()
+
+
+RESOLVED_FORMS: Final[Dict[str, str]] = {
+    'auth': f'[server]\nauth = "{KEY}"\n',
+    'auth_env': f'[server]\nauth_env = "{VAR}"\n',
+    'auth_eval': f'[server]\nauth_eval = "echo {KEY}"\n',
+    'environment': f'[server]\nauth_env = "UNSET_{VAR}"\n',
+}
+"""Configuration files whose key resolves to `KEY` (`environment` sets `HYPERSHELL_SERVER_AUTH` over it)."""
+
+
+@mark.integration
+@mark.parametrize('form', list(RESOLVED_FORMS))
+def test_command_server_and_client(temp_site: Path, monkeypatch, form: str) -> None:
+    """`hs server` and `hs client` both take the configured key, in any form, and run every task."""
+    site = Path(str(temp_site))
+    write_config(site, RESOLVED_FORMS[form])
+    monkeypatch.setenv(VAR, KEY)
+    monkeypatch.delenv(f'UNSET_{VAR}', raising=False)
+    if form == 'environment':
+        monkeypatch.setenv('HYPERSHELL_SERVER_AUTH', KEY)
+    server = start_server(site, str(create_taskfile(site, ['echo one', 'echo two', 'echo three'])))
+    try:
+        client = run(['hs', 'client', '-N', '1'], cwd=site, env=os.environ, capture_output=True, text=True, timeout=DEADLINE)
+    finally:
+        status = stop_server(server)
+    log = (site / 'server.log').read_text()
+    assert client.returncode == exit_status.success, client.stderr
+    assert status == exit_status.success, log
+    assert client.stdout.split() == ['one', 'two', 'three']
+    assert KEY not in client.stderr and KEY not in log
+    assert main(['hs', 'list', '--succeeded', '--count']) == (exit_status.success, '3', '')
+
+
+@mark.integration
+def test_command_submit_queue(temp_site: Path, monkeypatch) -> None:
+    """`hs submit -q` takes the key from `auth_env` and reaches a server that does too.
+
+    An in-memory server with no source of its own stops its clients once its queue drains, so the
+    queue is deep enough to take every submitted bundle before the client starts.
+    """
+    site = Path(str(temp_site))
+    write_config(site, RESOLVED_FORMS['auth_env'])
+    monkeypatch.setenv(VAR, KEY)
+    monkeypatch.setenv('HYPERSHELL_SERVER_QUEUESIZE', '100')
+    server = start_server(site, '--no-db')
+    try:
+        submit = run(['hs', 'submit', '-q', '-w', '1'], cwd=site, env=os.environ, input='echo one\necho two\n',
+                     capture_output=True, text=True, timeout=DEADLINE)
+        client = run(['hs', 'client', '-N', '1', '-T', '20'], cwd=site, env=os.environ, capture_output=True,
+                     text=True, timeout=DEADLINE)
+    finally:
+        status = stop_server(server)
+    assert submit.returncode == exit_status.success, submit.stderr
+    assert client.returncode == exit_status.success, client.stderr
+    assert status == exit_status.success, (site / 'server.log').read_text()
+    assert sorted(client.stdout.split()) == ['one', 'two']
+    assert KEY not in submit.stderr and KEY not in client.stderr
+
+
+@mark.integration
+def test_command_builtin_default_key(temp_site: Path) -> None:
+    """With no key configured, `hs server` still refuses the built-in default, as before."""
+    rc, stdout, stderr = main(['hs', 'server', '--forever'])
+    assert rc == exit_status.bad_argument
+    assert 'Refusing to run server without authentication key' in stderr
+
+
+UNRESOLVED_FORMS: Final[Dict[str, str]] = {
+    'server.auth_env': f'[server]\nauth_env = "{VAR}"\n',
+    'server.auth_eval': f'[server]\nauth_eval = "echo {KEY}; exit 4"\n',
+}
+"""Configuration files whose key cannot resolve (with `VAR` unset), by the key form each names."""
+
+
+@mark.integration
+@mark.parametrize('name', list(UNRESOLVED_FORMS))
+@mark.parametrize('argv', [['hs', 'server', '--forever'], ['hs', 'client', '-N', '1'], ['hs', 'submit', '-q', 'echo', 'one']])
+def test_command_unresolved_key(temp_site: Path, monkeypatch, name: str, argv: list) -> None:
+    """A key that cannot resolve stops each command that uses it, naming the key, with nothing in its place."""
+    filepath = write_config(temp_site, UNRESOLVED_FORMS[name])
+    monkeypatch.delenv(VAR, raising=False)
+    proc = run(argv, cwd=str(temp_site), env=os.environ, capture_output=True, text=True, timeout=DEADLINE)
+    assert_clean_failure(proc.returncode, proc.stdout, proc.stderr, name, str(filepath))
+    assert DEFAULT_AUTH not in proc.stderr
+
+
+@mark.integration
+def test_command_unresolved_key_unused(temp_site: Path, monkeypatch) -> None:
+    """A command that does not use the key runs although the key cannot resolve."""
+    write_config(temp_site, UNRESOLVED_FORMS['server.auth_env'])
+    monkeypatch.delenv(VAR, raising=False)
+    assert main(['hs', 'list', '--count']) == (exit_status.success, '0', '')
+
+
+@mark.integration
+def test_command_environment_over_unset_variable(temp_site: Path, monkeypatch) -> None:
+    """`HYPERSHELL_SERVER_AUTH` decides over a file's `auth_env`, so a short key fails as a key, not as configuration."""
+    write_config(temp_site, UNRESOLVED_FORMS['server.auth_env'])
+    monkeypatch.delenv(VAR, raising=False)
+    monkeypatch.setenv('HYPERSHELL_SERVER_AUTH', 'tooshort')
+    rc, stdout, stderr = main(['hs', 'server', '--forever'])
+    assert rc == exit_status.bad_argument
+    assert 'Authentication key must be at least' in stderr
+    assert 'ConfigurationError' not in stderr

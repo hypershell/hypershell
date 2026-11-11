@@ -62,7 +62,7 @@ from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.logging import Logger
-from hypershell.core.config import config, default
+from hypershell.core.config import config, default, resolve_auth
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
@@ -1301,7 +1301,7 @@ class SubmitApp(Application):
     queue_mode: bool = False
     queue_server: str = config.server.host
     queue_port: int = config.server.port
-    queue_auth: str = config.server.auth
+    queue_auth: Optional[str] = None  # Without -k, the key is resolve_auth('server') (see run)
     interface.add_argument('-q', '--queue', action='store_true', dest='queue_mode')
     interface.add_argument('-H', '--host', default=queue_server, dest='queue_server')
     interface.add_argument('-p', '--port', type=int, default=queue_port, dest='queue_port')
@@ -1353,6 +1353,8 @@ class SubmitApp(Application):
         self.queue = None
         if self.queue_mode:
             self.enable_tls()
+            if self.queue_auth is None:
+                self.queue_auth = resolve_auth('server')
             self.queue = QueueConfig(host=self.queue_server, port=self.queue_port, auth=self.queue_auth, tls=self.tls)
             if self.queue_auth == DEFAULT_AUTH:
                 log.warning('Using default authentication key - do not use this in production!')

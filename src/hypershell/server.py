@@ -64,7 +64,7 @@ from sqlalchemy import func
 
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH
+from hypershell.core.config import config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH, resolve_auth
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes, parse_time
 from hypershell.core.logging import Logger
@@ -1619,7 +1619,7 @@ class ServerApp(Application):
     port: int = config.server.port
     interface.add_argument('-p', '--port', type=int, default=port)
 
-    auth: str = config.server.auth
+    auth: Optional[str] = None  # Without -k, the key is resolve_auth('server') (see run)
     interface.add_argument('-k', '--auth', default=auth)
 
     in_memory: bool = False
@@ -1659,6 +1659,8 @@ class ServerApp(Application):
         """Run server."""
         if self.special_options():
             return
+        if self.auth is None:
+            self.auth = resolve_auth('server')
         self.check_args()
         self.enable_tls()
         ensuredb()

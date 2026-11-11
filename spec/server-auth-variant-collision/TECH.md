@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/server-auth-variant-collision
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-11'
 phases:
 - id: P1
@@ -31,7 +31,7 @@ phases:
 - id: P2
   name: Commands resolve the key at run (server, submit -q, client), whats_new, 2.8.6
     pick gate
-  status: pending
+  status: done
   satisfies:
   - R1
   - R5
@@ -164,29 +164,31 @@ prints the resolved value, or fails naming the key.
 resolved key, and fail with `bad_config` and the key named when it cannot resolve; the change still
 picks onto `2.8.6`.
 
-- [ ] `server.py`: `auth: Optional[str] = None` (comment: without `-k`, `resolve_auth('server')`, see
+- [x] `server.py`: `auth: Optional[str] = None` (comment: without `-k`, `resolve_auth('server')`, see
       run); in `ServerApp.run` after `special_options()` and before `check_args()`, resolve when
       `None`. Leave `check_args` unchanged.
-- [ ] `submit.py`: `queue_auth: Optional[str] = None`; in `run` inside `if self.queue_mode:` before
+- [x] `submit.py`: `queue_auth: Optional[str] = None`; in `run` inside `if self.queue_mode:` before
       `QueueConfig(...)`, resolve when `None`.
-- [ ] `client.py`: `self.auth = config.server.auth` → `self.auth = resolve_auth('server')`.
-- [ ] Add `resolve_auth` to the `core.config` import line of each of the three modules.
-- [ ] `tests/test_auth_variants.py`: `@mark.integration` `test_command_*` — `hs server` (task file)
+- [x] `client.py`: `self.auth = config.server.auth` → `self.auth = resolve_auth('server')`.
+- [x] Add `resolve_auth` to the `core.config` import line of each of the three modules.
+- [x] `tests/test_auth_variants.py`: `@mark.integration` `test_command_*` — `hs server` (task file)
       and `hs client` as subprocesses with `[server] auth_env` set, tasks complete (R1); `hs server
       --forever`, `hs client`, `hs submit -q` with the variable unset, and with `auth_eval = "exit
       4"` → exit `bad_config`, stderr names the key, no `Traceback` (R5); variable unset but
       `HYPERSHELL_SERVER_AUTH=tooshort` → `hs server` fails on key length, not on configuration
       (R3). `test_config_get_*`: the `auth_eval` failure case for `hs config get` (exit
       `bad_config`, names `server.auth_eval`, no `Traceback`).
-- [ ] `docs/whats_new.rst`: *Not yet released → Fixes* entry below the units entry: a configuration
+- [x] `docs/whats_new.rst`: *Not yet released → Fixes* entry below the units entry: a configuration
       file can give `server.auth` as `auth_env` or `auth_eval`, as the security guide says; before,
       every command stopped with a traceback; an unset variable, a failing command, or two forms of
       the key in one file is now a configuration error naming the key. Ends "This also ships in
       2.8.7."
-- [ ] Build-time pick check (no ref moved): `T=$(git merge-tree --write-tree --merge-base=15587cf^
-      2.8.6 15587cf | head -n 1)`; `S=$(git commit-tree "$T" -p 2.8.6 -m sim)`; run the verify's
-      merge-tree step with `$S` in place of `2.8.6`; same exclusions. Note the result in the commit
-      body.
+- [x] Build-time pick check (no ref moved): `T=$(git merge-tree --write-tree --merge-base=15587cf^
+      2.8.6 15587cf | head -n 1)`; `S=$(git commit-tree "$T" -p '2.8.6^{commit}' -m sim)`; run the
+      verify's merge-tree step with `$S` in place of `2.8.6`; same exclusions. Note the result in the
+      commit body. (`2.8.6` is an annotated tag, so `commit-tree -p` needs it peeled; the pick of
+      `15587cf` itself conflicts on 2.8.6 in `ROADMAP.md` and `docs/whats_new.rst`, which the
+      synthetic tree carries with markers, and neither path is touched here.)
 - **Verify:** the new test file plus `tests/test_server.py`, `tests/test_submit.py`,
   `tests/test_client.py`; a `temp_site` drive (`hs server --forever` with a failing `auth_eval`
   exits 3, names `server.auth_eval`, no traceback); the Sphinx `-W` build; the merge-tree gate against
