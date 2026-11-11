@@ -105,12 +105,20 @@ Options
     The timeout counts from when the client starts, after any ``--delay-start``, so the delay
     does not count toward it.
 
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``90m``, ``1h30m``, ``1.5h``, ``1d12h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30:00``).
+
 
 ``-W``, ``--task-timeout`` *SEC*
     Task-level walltime limit (default: none).
 
     Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
     If the process still persists the executor itself will shutdown.
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``90m``, ``1h30m``, ``1.5h``, ``1d12h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30:00``).
 
 ``-C``, ``--client-cores`` *NUM*
     Limit available cores for client (default: all cores).

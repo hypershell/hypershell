@@ -3,10 +3,10 @@ slug: size-and-duration-units
 title: Sizes and durations written with common units are read as written
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/size-and-duration-units
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-11'
 phases:
 - id: P1
@@ -32,7 +32,7 @@ phases:
 - id: P2
   name: 'Durations: strict parse_time on six options and the inline timeout tag, docs,
     cherry-pick check'
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -151,22 +151,22 @@ value accepted today, and treat `30 2 * * *` as a time policy.
 `1:30:00`, `90:00`, `1-12` as seconds, keep a bare integer as seconds, refuse `5MB`/`1hr`/`2hours`/`1w`
 naming the forms, and the change still cherry-picks onto `2.8.6`.
 
-- [ ] `core/types.py`: rewrite `parse_time` — stripped, case-insensitive full match of a bare number
+- [x] `core/types.py`: rewrite `parse_time` — stripped, case-insensitive full match of a bare number
       (seconds), or `[N d][N h][N m][N s]` (≥1, each once, in order, fractional N), or Slurm `MM:SS`,
       `HH:MM:SS`, `D-HH`, `D-HH:MM`, `D-HH:MM:SS` (integer fields); result `math.ceil` to `int`;
       refusal raises `UnitError` naming the value and the forms. Drop `W` and `TIME_PATTERN`.
-- [ ] `type=int` → `type=parse_time` on `submit.py -W`, `server.py -W`, `client.py -T`/`-W`,
+- [x] `type=int` → `type=parse_time` on `submit.py -W`, `server.py -W`, `client.py -T`/`-W`,
       `cluster/__init__.py -W`/`-T`; add `parse_time` to each existing `core.types` import line.
-- [ ] `data/model.py` `ensure_valid_tag`: a `timeout` value is checked with `parse_time` and skips the
+- [x] `data/model.py` `ensure_valid_tag`: a `timeout` value is checked with `parse_time` and skips the
       charset regex (next to the P1 memory check).
-- [ ] `data/model.py` `Task.new`: insert lines **above** the untouched timeout pop that read the string
+- [x] `data/model.py` `Task.new`: insert lines **above** the untouched timeout pop that read the string
       timeout from `tag` (else `other`), convert it with `parse_time` into `tag['timeout']`, and
       re-raise a `UnitError` as a `RuntimeError` naming the value and the forms. Ints/floats pass.
-- [ ] Help: timeout lines in the four `APP_HELP` blocks and `_include/*_help.rst` (incl. the inline
+- [x] Help: timeout lines in the four `APP_HELP` blocks and `_include/*_help.rst` (incl. the inline
       `timeout:` example) state the duration forms; `config_param_ref.rst` `task.timeout`,
       `client.timeout`; zsh `_hs` "… in seconds" descriptions. Extend the P1 `whats_new` entry with
       the duration forms.
-- [ ] `tests/test_size_duration.py`: `@mark.unit` parametrized `test_duration_*` accept table (R2, R3,
+- [x] `tests/test_size_duration.py`: `@mark.unit` parametrized `test_duration_*` accept table (R2, R3,
       R6: `45s`, `90m`, `1h30m`, `1d12h`, `1.5h`, `90`, `90:00`, `1:30:00`, `1-12`, `1-12:00`,
       `1-12:00:00`, `1H30M`, `0.5s` → 1) and refusal table (R5: `5MB`, `1hr`, `2hours`, `1w`, `30m1h`)
       with the forms in the message; `test_timeout_*` for each of the six options' parsed value and
@@ -179,6 +179,11 @@ naming the forms, and the change still cherry-picks onto `2.8.6`.
   `-W 1h30m` submits and lists; `-W 1hr` fails), the Sphinx `-W` build, and the cherry-pick dry run:
   `git merge-tree --merge-base=<plan commit> 2.8.6 HEAD` must report no conflict outside
   `docs/whats_new.rst` and `spec/`.
+- **Verify note (amended at build):** the `git merge-tree … 2.8.6 HEAD` step reads `HEAD`, which
+  before this phase's commit does not hold the phase's work. It was run before the commit against a
+  temporary commit of the working tree (`git commit-tree`, no ref moved), then again verbatim after
+  the commit. Both reported conflicts only in `docs/whats_new.rst` and `spec/`. The new test file
+  also passed (228) on that simulated 2.8.6 merge.
 - **Touches:** `src/hypershell/core/types.py`, `src/hypershell/{submit,server,client}.py`,
   `src/hypershell/cluster/__init__.py`, `src/hypershell/data/model.py`, `docs/_include/*_help.rst`,
   `docs/_include/config_param_ref.rst`, `docs/whats_new.rst`, `share/zsh/site-functions/_hs`,

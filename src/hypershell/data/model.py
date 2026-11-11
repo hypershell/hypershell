@@ -32,7 +32,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 # Internal libs
 from hypershell.core.logging import Logger, HOSTNAME, INSTANCE
 from hypershell.core.heartbeat import Heartbeat
-from hypershell.core.types import JSONData, to_json_type, from_json_type, serialize, deserialize, parse_bytes, UnitError
+from hypershell.core.types import (JSONData, to_json_type, from_json_type, serialize, deserialize,
+                                   parse_bytes, parse_time, UnitError)
 from hypershell.core.uuid import uuid
 from hypershell.core.tag import Tag
 from hypershell.data.core import schema, Session
@@ -530,6 +531,12 @@ class Task(Entity):
             other['memory'] = parse_bytes(memory) if isinstance(memory, str) else memory
         except UnitError as error:
             raise RuntimeError(f'Failed to parse task memory ({error})') from error
+        # A timeout string ('1h30m', '1:30:00') is read as integer seconds, from the tag or the option.
+        timeout = tag.get('timeout', other.get('timeout', None))
+        try:
+            tag['timeout'] = parse_time(timeout) if isinstance(timeout, str) else timeout
+        except UnitError as error:
+            raise RuntimeError(f'Failed to parse task timeout ({error})') from error
         other['timeout'] = tag.pop('timeout', other.get('timeout', None))
         if fingerprint is None:
             if raw_args is None:
@@ -616,9 +623,13 @@ class Task(Entity):
             if isinstance(value, str):
                 if not value.strip():
                     return  # Empty value is a naked tag (no value).
-                # A memory size is checked by its own grammar instead of the tag character set.
+                # A memory size or a timeout is checked by its own grammar instead of the tag
+                # character set, so a Slurm time (1:30:00) is taken.
                 if key == 'memory':
                     parse_bytes(value)
+                    continue
+                if key == 'timeout':
+                    parse_time(value)
                     continue
                 if len(value) > 120:
                     raise ValueError(f'Tag value size ({len(value)}) exceeds 120 characters ({key}:{value})')

@@ -56,3 +56,16 @@ is skipped by the parser):
 - **Recommended fix:** use `uv run --no-project --with pyyaml python .agents/factory/bin/<script>.py` in
   `hs-plan` Step 6, `templates/TECH.md`, and the other skills that call the factory scripts.
 - **Confidence:** med · **Effort:** small
+
+## F2 — A verify step that reads `HEAD` cannot see the uncommitted phase it gates
+`origin=hs-build:P2 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** P2's verify ends with `git merge-tree … 2.8.6 HEAD`. `hs-build` runs verify before
+  the phase commit, so `HEAD` was P1 and the cherry-pick check would have passed without looking at
+  P2's edits. The builder ran it against a temporary `git commit-tree` of the working tree instead,
+  then again after the commit.
+- **Skill cause:** `hs-plan` gives no rule that a verify command must test the working tree, and
+  `hs-build` Step 4 says to run the verify as written before Step 7 commits.
+- **Recommended fix:** in `hs-plan`, require verify commands to read the working tree; for a
+  merge-tree check, show the temporary-commit form (`git add -A` into a scratch index, `git write-tree`,
+  `git commit-tree -p HEAD`) instead of `HEAD`.
+- **Confidence:** high · **Effort:** small

@@ -367,6 +367,8 @@
         Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 
         This feature allows for gracefully scaling down a cluster when task throughput subsides.
+        A string takes the same forms as ``-T``/``--timeout``: units ``d``, ``h``, ``m`` and
+        ``s`` (e.g., ``"1h30m"``, ``"1.5h"``) or a Slurm time (e.g., ``"1:30:00"``, ``"1-12"``).
 
     ``.cores``
         Client-level limit on CPU cores available for running tasks (default: all available).
@@ -449,10 +451,13 @@
         See also ``-m``/``--memory`` command-line option.
 
     ``.timeout``
-        Task-level walltime limit (default: none).
+        Task-level walltime limit in seconds (default: none).
 
         Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
         If the process still persists the executor itself will shutdown.
+        A string takes the same forms as ``-W``: units ``d``, ``h``, ``m`` and ``s`` (e.g.,
+        ``"1h30m"``, ``"1.5h"``) or a Slurm time (e.g., ``"1:30:00"``, ``"1-12"``); individual
+        tasks may override this inline in the same forms (e.g., ``# HYPERSHELL: timeout:1h30m``).
 
     ``.signalwait``
         Wait period in seconds between signal escalation on task cancellation (default: 10).

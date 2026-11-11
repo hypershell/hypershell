@@ -22,7 +22,7 @@ from cmdkit.cli import Interface, ArgumentError
 # Internal libs
 from hypershell.core.config import config, blame, find_available_ports
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
-from hypershell.core.types import parse_bytes
+from hypershell.core.types import parse_bytes, parse_time
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -106,8 +106,8 @@ Options:
   -o, --output         PATH     File path for task outputs (default: <stdout>).
   -e, --errors         PATH     File path for task errors (default: <stderr>).
   -f, --failures       PATH     File path to write failed task args (default: <none>).
-  -T, --timeout        SEC      Automatically shutdown clients if no tasks received (default: never).
-  -W, --task-timeout   SEC      Task-level walltime limit (default: none).
+  -T, --timeout        SEC      Shutdown clients if no tasks received; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: never).
+  -W, --task-timeout   SEC      Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
   -R, --ratelimit      NUM      Maximum allowed tasks per second per client (default: none).
   -S, --signalwait     SEC      Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
   -Q, --poll           NUM      Polling interval between database queries if no tasks (default: {DEFAULT_SERVER_POLL}).
@@ -239,8 +239,8 @@ class ClusterApp(Application):
 
     task_timeout: Optional[int] = config.task.timeout or None
     client_timeout: Optional[int] = config.client.timeout or None
-    interface.add_argument('-W', '--task-timeout', type=int, default=task_timeout, dest='task_timeout')
-    interface.add_argument('-T', '--timeout', type=int, default=client_timeout, dest='client_timeout')
+    interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout, dest='task_timeout')
+    interface.add_argument('-T', '--timeout', type=parse_time, default=client_timeout, dest='client_timeout')
 
     task_signalwait: int = config.task.signalwait
     interface.add_argument('-S', '--signalwait', type=int, default=task_signalwait, dest='task_signalwait')

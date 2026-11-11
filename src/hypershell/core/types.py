@@ -11,6 +11,8 @@ from typing import Final, List, Dict, overload, Union, TypeAlias
 # Standard libs
 import re
 import json
+import math
+from fractions import Fraction
 from argparse import ArgumentTypeError
 from datetime import datetime
 
@@ -115,19 +117,31 @@ def parse_bytes(value: str) -> int:
         raise UnitError(f'Memory size {value!r} is not valid: expected {MEMORY_FORMS}')
 
 
-TIME_PATTERN: Final[re.Pattern] = re.compile(r'(?P<num>\d+)\s*(?P<unit>[SMHDW])')
+# A duration is a bare number of seconds, unit components in the order d, h, m, s (each at most
+# once, whole or fractional, in any case), or one of Slurm's --time forms with a colon or a dash.
+TIME_NUMBER: Final[str] = r'\d+(?:\.\d+)?'
+TIME_SECONDS_PATTERN: Final[re.Pattern] = re.compile(rf'(?P<s>{TIME_NUMBER})')
+TIME_UNITS_PATTERN: Final[re.Pattern] = re.compile(
+    rf'(?:(?P<d>{TIME_NUMBER})d)?(?:(?P<h>{TIME_NUMBER})h)?(?:(?P<m>{TIME_NUMBER})m)?(?:(?P<s>{TIME_NUMBER})s)?',
+    re.IGNORECASE)
+TIME_CLOCK_PATTERN: Final[re.Pattern] = re.compile(r'(?:(?P<h>\d+):)?(?P<m>\d+):(?P<s>\d+)')
+TIME_DAYS_PATTERN: Final[re.Pattern] = re.compile(r'(?P<d>\d+)-(?P<h>\d+)(?::(?P<m>\d+)(?::(?P<s>\d+))?)?')
 TIME_SCALES: Final[Dict[str, int]] = {
-    'S': 1,
-    'M': 60,
-    'H': 60 * 60,
-    'D': 60 * 60 * 24,
-    'W': 60 * 60 * 24 * 7,
+    's': 1,
+    'm': 60,
+    'h': 60 * 60,
+    'd': 60 * 60 * 24,
 }
+TIME_FORMS: Final[str] = ('a number of seconds, units d, h, m and s in that order, whole or fractional '
+                          '(e.g., 90, 45s, 90m, 1h30m, 1.5h, 1d12h), or a Slurm time MM:SS, HH:MM:SS, D-HH, '
+                          'D-HH:MM or D-HH:MM:SS (e.g., 90:00, 1:30:00, 1-12)')
 
 
 def parse_time(value: str) -> int:
-    """Parse time string to integer seconds (e.g., '10H' -> 36000)."""
-    if match := TIME_PATTERN.match(value.upper()):
-        return int(float(match.group('num')) * TIME_SCALES[match.group('unit')])
-    else:
-        raise ValueError(f'Time string {value!r} is not a valid time unit')
+    """Parse duration string to integer seconds, rounded up (e.g., '1h30m', '1.5h', '1:30:00' -> 5400)."""
+    text = str(value).strip()
+    for pattern in (TIME_SECONDS_PATTERN, TIME_UNITS_PATTERN, TIME_CLOCK_PATTERN, TIME_DAYS_PATTERN):
+        if text and (match := pattern.fullmatch(text)):
+            return math.ceil(sum(Fraction(num) * TIME_SCALES[unit]
+                                 for unit, num in match.groupdict().items() if num is not None))
+    raise UnitError(f'Duration {value!r} is not valid: expected {TIME_FORMS}')
