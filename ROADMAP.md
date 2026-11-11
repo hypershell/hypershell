@@ -383,7 +383,7 @@ A variant should take precedence over the default, and an unset variable should 
 a fallback to the default key. Pre-existing since 2.8.0.
 
 *Horizon: near-term, small · Depends on: — · Refs: `docs/security.rst`*
-**Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: unshaped*
+**Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: adopted:server-auth-variant-collision*
 
 ## Environment variables cannot reach every configuration key
 
