@@ -4,10 +4,10 @@ title: auth_env and auth_eval in a config file work, and fail cleanly when they 
   resolve
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/server-auth-variant-collision
 base: develop
-current_phase: done
+current_phase: P2
 last_updated: '2026-11-11'
 phases:
 - id: P1
@@ -31,7 +31,7 @@ phases:
 - id: P2
   name: Commands resolve the key at run (server, submit -q, client), whats_new, 2.8.6
     pick gate
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R5
@@ -52,7 +52,7 @@ phases:
 - id: P3
   name: 'Relay: upstream_key delegates to resolve_auth; hs config get relay.upstream.auth
     (2.9 only)'
-  status: done
+  status: in_progress
   satisfies:
   - R4
   depends_on:
@@ -154,6 +154,18 @@ prints the resolved value, or fails naming the key.
       `server.auth_env`, no `Traceback`. `@mark.integration` `test_two_forms_*`: `hs config get
       logging.level` and `hs list` with `auth` + `auth_env` in one file → exit `bad_config`, stderr
       names `server.auth` and the file, no `Traceback`, no "traceback written".
+- [x] **F2 remediation (review cycle 1).** `resolve_auth` turns any failure reading the deciding
+      form (not only `CalledProcessError`: also an `auth_eval` whose output is not UTF-8, or one
+      that cannot start) into `ConfigurationError` naming the key and only the error's type, never
+      its text (a `UnicodeDecodeError` quotes the offending byte). `Exception` only, so
+      `KeyboardInterrupt`/`SystemExit` pass. Shared by `server.auth` and `[relay.upstream]`, so it
+      ships in the pick. Tests: `test_resolve_command_output_not_utf8`,
+      `test_command_key_output_not_utf8` (`hs config get`, `hs server`, `hs client`, `hs submit -q`:
+      exit `bad_config`, no traceback file).
+- **Left as is:** `core/queue.py` `QueueConfig.load()` still reads `config.server.auth` directly
+  (an unset `auth_env` gives `auth=None`). Only `QueueInterface.new()` calls it, and no command
+  does; the cherry-pick discipline keeps `core/queue.py` untouched. A later 2.9 change can route it
+  through `resolve_auth`.
 - **Verify:** `uv lock --check`, the new test file, and a `temp_site` drive (`hs config get
   server.auth -r` prints the `auth_env` value when set, fails when unset).
 - **Touches:** `pyproject.toml`, `uv.lock`, `src/hypershell/core/config.py`,
@@ -190,6 +202,12 @@ picks onto `2.8.6`.
       commit body. (`2.8.6` is an annotated tag, so `commit-tree -p` needs it peeled; the pick of
       `15587cf` itself conflicts on 2.8.6 in `ROADMAP.md` and `docs/whats_new.rst`, which the
       synthetic tree carries with markers, and neither path is touched here.)
+- [ ] **F1 remediation (review cycle 1).** `stop_server` in `tests/test_auth_variants.py` waits
+      (bounded, `DEADLINE`) for the server to exit on its own before any signal; SIGINT, then kill,
+      are only the fallback for a server that does not. On `2.8.6` the server is still in its normal
+      shutdown when the client returns, and an immediate SIGINT made it exit 4 (or -2). Proven by
+      the real pick (scratch clone, `2.8.6^{commit}` + `15587cf` + every non-relay commit, full
+      suite under Python 3.12 and cmdkit 2.8.0).
 - **Verify:** the new test file plus `tests/test_server.py`, `tests/test_submit.py`,
   `tests/test_client.py`; a `temp_site` drive (`hs server --forever` with a failing `auth_eval`
   exits 3, names `server.auth_eval`, no traceback); the Sphinx `-W` build; the merge-tree gate against
@@ -218,6 +236,10 @@ every edit is in a path absent on `2.8.6` except the `whats_new` clause.
       named, no `Traceback`).
 - [x] `docs/whats_new.rst`: extend the P2 entry with "`relay.upstream.auth` in `[relay.upstream]`
       likewise".
+- [ ] **F2 remediation (review cycle 1), relay part.** `tests/test_relay_launch.py`: an
+      `[relay.upstream] auth_eval` whose output is not UTF-8 is a `ConfigurationError` naming
+      `relay.upstream.auth_eval` (unit), and `hs relay` exits `bad_config` with no traceback file
+      (integration). The fix itself is the shared P1 change.
 - **Verify:** the relay key tests, the shared test file, and the merge-tree gate against `2.8.6` with
   the two relay paths added to the dropped set.
 - **Touches:** `src/hypershell/relay/upstream.py`, `tests/test_relay_launch.py`, `docs/whats_new.rst`.

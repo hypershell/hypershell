@@ -113,6 +113,17 @@ def test_resolve_failed_command() -> None:
 
 
 @mark.unit
+def test_resolve_command_output_not_utf8() -> None:
+    """An `auth_eval` command whose output is not UTF-8 is an error naming the key, not a traceback."""
+    with raises(ConfigurationError) as caught:
+        resolve_auth('server', base=layered(user=server(auth_eval=f"printf '{KEY}\\377'")))
+    message = str(caught.value)
+    assert 'server.auth_eval' in message and 'UnicodeDecodeError' in message
+    assert KEY not in message and '0xff' not in message
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+
+
+@mark.unit
 @mark.parametrize('given', [('auth', 'auth_env'), ('auth', 'auth_eval'), ('auth_env', 'auth_eval')])
 def test_resolve_two_forms_in_deciding_layer(monkeypatch, given: tuple) -> None:
     """Two forms of the key in the layer that decides it are refused, naming the key and both forms."""
@@ -352,6 +363,22 @@ def test_command_unresolved_key(temp_site: Path, monkeypatch, name: str, argv: l
     proc = run(argv, cwd=str(temp_site), env=os.environ, capture_output=True, text=True, timeout=DEADLINE)
     assert_clean_failure(proc.returncode, proc.stdout, proc.stderr, name, str(filepath))
     assert DEFAULT_AUTH not in proc.stderr
+
+
+NOT_UTF8_FORM: Final[str] = f"[server]\nauth_eval = 'printf \"{KEY}\\377\"'\n"
+"""A configuration file whose `auth_eval` command succeeds but prints a byte that is not UTF-8."""
+
+
+@mark.integration
+@mark.parametrize('argv', [['hs', 'config', 'get', 'server.auth', '-r'], ['hs', 'server', '--forever'],
+                           ['hs', 'client', '-N', '1'], ['hs', 'submit', '-q', 'echo', 'one']])
+def test_command_key_output_not_utf8(temp_site: Path, argv: list) -> None:
+    """Output that is not UTF-8 stops each command that uses the key, naming the key, with no traceback file."""
+    filepath = write_config(temp_site, NOT_UTF8_FORM)
+    proc = run(argv, cwd=str(temp_site), env=os.environ, capture_output=True, text=True, timeout=DEADLINE)
+    assert_clean_failure(proc.returncode, proc.stdout, proc.stderr, 'server.auth_eval', str(filepath))
+    assert DEFAULT_AUTH not in proc.stderr
+    assert not list(Path(str(temp_site)).rglob('exception-*.log'))
 
 
 @mark.integration

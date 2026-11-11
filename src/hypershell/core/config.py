@@ -373,6 +373,9 @@ def resolve_auth(*section: str, base: Configuration = None) -> str:
         value = getattr(table, 'auth')
     except subprocess.CalledProcessError as error:
         raise ConfigurationError(f'{key}_eval command exited with status {error.returncode} ({label})') from None
+    except Exception as error:
+        # Only the error's type is named: its text can carry part of the command's output.
+        raise ConfigurationError(f'{key}{form[4:]} could not be resolved: {type(error).__name__} ({label})') from None
     if value is None and form == 'auth_env':
         raise ConfigurationError(f'{key}_env names {table[form]}, which is not set ({label})')
     if value is None:
