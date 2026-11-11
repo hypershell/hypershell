@@ -672,6 +672,39 @@ developer's own database location. Split out of `relay`'s review.
 and rough edges in Part I*
 **Seed:** [`issues/relay-test-strength.md`](issues/relay-test-strength.md) · *status: unshaped*
 
+# Part III — Turso follow-ons
+
+What the Turso provider's vacuum work left open. Turso's multi-process mode is experimental, and the
+vacuum went through six review cycles. Each cycle exposed a deeper limit in the engine, and 2.9.0a7
+ships `hs initdb --vacuum` under Turso with one known risk flagged in the docs. The first entry
+gathers the evidence and the second acts on it.
+
+## Reproduce Turso's crash after a killed vacuum without HyperShell
+
+With multi-process Turso, when a vacuum is killed while it folds its compacted image into the
+database, the processes that open the database right after it can panic or read an unreadable row.
+This happens well below the shared WAL index's capacity. So far it has only been reproduced through
+HyperShell's own kill tests, and HyperShell resets Turso's shared-memory file around the vacuum. A
+script that uses only `pyturso`, run on macOS and Linux and checked by someone independent, settles
+what the claim is. That makes it the headline of the issue we file with the Turso team. The issue
+lists the other Turso findings in a table, with an offer to file each one separately.
+
+*Horizon: now · Depends on: — (the upstream draft it rewrites lands with `turso`) · Refs: feeds the
+entry below*
+**Seed:** [`issues/turso-upstream-repro.md`](issues/turso-upstream-repro.md) · *status: shaped*
+
+## A killed Turso vacuum must not crash the processes that open the database after it
+
+Today an administrator using multi-process Turso has to pause scheduling for a vacuum, and run it
+again if it was interrupted. The fix makes a vacuum that is killed at any point leave every process
+that opens the database afterwards correct, with scheduling live. Depending on what the
+reproduction shows, the route is a Turso release that fixes it, HyperShell serialising the first
+opens after an interrupted vacuum, or Turso supporting in-place `VACUUM` in its multi-process mode.
+
+*Horizon: when there is evidence or an upstream fix · Depends on: turso-upstream-repro, or a Turso
+release · Refs: `spec/turso/` P3, review cycles 4–6*
+**Seed:** [`issues/turso-vacuum-concurrent-recovery.md`](issues/turso-vacuum-concurrent-recovery.md) · *status: unshaped*
+
 ---
 
 # Settled questions
