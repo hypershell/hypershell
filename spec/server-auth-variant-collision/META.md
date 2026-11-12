@@ -38,3 +38,18 @@
 - **Skill cause:** the skill never says to fetch or to compare against the remote-tracking base, and `TECH.md`'s `base: develop` is read verbatim.
 - **Recommended fix:** resolve `{base}` to `origin/{base}` after a `git fetch` (or check `git merge-base --is-ancestor {base} origin/{base}` and warn) in the injected diffstat, Step 1 and Step 2's diff command.
 - **Confidence:** high · **Effort:** small
+
+## F3 — the patch-line pick gate proves the pick applies, not that its suite passes
+`origin=hs-build:P2 severity=medium category=steering status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** P2's `git merge-tree` gate against `2.8.6` was green, yet five new tests failed
+  on the real pick (a shutdown timing difference on `2.8.6`); only review cycle 1 found it, by
+  running the suite in a scratch clone. Once P3 landed, P2's own gate also went red at `HEAD`,
+  since it predates the relay paths; the remediation had to widen it.
+- **Skill cause:** the gate F1 recommends checks conflicts only; nothing asks a build to run the
+  suite on the picked tree, and nothing says an earlier phase's tree-wide gate must still hold
+  after a later phase lands.
+- **Recommended fix:** for a patch-line fix, give the last pickable phase a behavioural gate (a
+  scratch clone, the base commit then every non-2.9 commit cherry-picked onto `<tag>^{commit}`, the
+  agreed drop list, the full suite on the line's Python and pins), and write each phase's
+  merge-tree exclusions as the union over all phases.
+- **Confidence:** med · **Effort:** medium
