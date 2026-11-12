@@ -385,6 +385,19 @@ a fallback to the default key. Pre-existing since 2.8.0.
 *Horizon: near-term, small · Depends on: — · Refs: `docs/security.rst`*
 **Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: adopted:server-auth-variant-collision*
 
+## The queue key can still be given on a command line
+
+Since 2.9.0a5 and 2.8.5, `hs cluster` hands its key to the clients it launches in their
+environment, never on a command line, where a process listing shows it to every user on the host.
+The `-k`/`--auth` option of `hs client`, `hs server` and `hs submit -q` still puts it there, on the
+long-lived processes a person starts by hand, and the help, man pages, completions and tutorials
+all show it. Nothing needs the option: each command already reads `HYPERSHELL_SERVER_AUTH` or
+`server.auth`. On 2.8 the option should warn; on 2.9 it should be refused. Pre-existing in
+`develop` and on the 2.8 line.
+
+*Horizon: near-term, small · Depends on: — · Refs: the key hand-off hardening (#80, #81)*
+**Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: unshaped*
+
 ## Environment variables cannot reach every configuration key
 
 The guide says every option can be set by a `HYPERSHELL_*` variable, but every underscore in the
