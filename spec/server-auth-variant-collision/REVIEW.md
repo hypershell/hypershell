@@ -125,3 +125,70 @@ Unmapped changes (possible scope creep): none. `ROADMAP.md` / `issues/` status f
 ## Optional completeness sub-pass
 
 - Not run (not requested).
+
+## Review cycle 2 — approved (2026-11-11)
+
+- **Reviewed commit:** 5540156  ·  **Base:** `origin/develop` (15587cf; local `develop` is stale)  ·  **Cycle:** 2 of ≤3
+- **Mode:** scoped to the remediation of cycle 1's F1 and F2 (`79b6569`, `302b973`, `2d759ec`), plus a
+  regression check of cycle 1's clean areas and the full 2.8.7 pick. Run by hand by a reviewer agent
+  that did the correctness pass itself (no nested subagent). It read `GOAL.md`, the spec-excluded diff
+  `f2f474e..HEAD`, the rubric, cycle 1's section of this file, and only the `TECH.md` frontmatter;
+  not `PLAN.md`, `research/` or the body of `TECH.md`, and `META.md` only after the pass, to file the
+  meta-note. Contract drift: none (`GOAL.md` still has only `cec1d83`).
+
+### Verification run
+
+- `uv lock --check` clean; `uv run pytest -q -n 4` at HEAD (Python 3.14, cmdkit 2.8.0) →
+  **1635 passed, 90 skipped**.
+- **F1, remediated.** `stop_server` (`tests/test_auth_variants.py:272`) now waits up to `DEADLINE`
+  for the server's own exit and signals only on timeout. A scratch probe on the pick: a normal run
+  (server still running when `hs client` returned) → status 0 at once, no interrupt in the log; a
+  `--forever` server (a real hang) with `DEADLINE` patched to 3 → SIGINT after 3 s, status 4, so the
+  caller's `status == success` assertion fails. A hang is reported, not hidden. On the pick the five
+  cycle 1 failures pass at about 4 s each (`--durations`).
+- **F2, remediated.** `resolve_auth` (`src/hypershell/core/config.py:376`) maps any `Exception` from
+  the deciding form to a `ConfigurationError` naming the key and only the error's type.
+  Probes against `resolve_auth('server')` and `('relay', 'upstream')`, with a marker in each key:
+  non-UTF-8 output → `UnicodeDecodeError`; a command killed by SIGKILL or SIGTERM → `exited with
+  status -9` or `-15`; a NUL in the command → `ValueError`; `os.getenv` patched to raise `ValueError`
+  or `OSError` with the marker as its text, `check_output` raising `OSError` or `MemoryError` → each
+  a `ConfigurationError` with no marker, byte or error text, `__cause__` None and context suppressed.
+  `KeyboardInterrupt` and `SystemExit` raised from `os.getenv` or `check_output` pass through.
+  CLI in a throwaway site at `DEBUG` (`auth_eval` printing marker + `\377`): `hs config get
+  server.auth`, `hs server` (`--forever` and with a file), `hs client`, `hs submit -q`, `hs config get
+  relay.upstream.auth`, `hs relay` → exit 3, one CRITICAL line naming the key and file, empty stdout,
+  no traceback file, and no marker, `\377` byte or decode text in stdout, stderr or any file in the
+  site. Signal-killed `auth_eval` → the same, `status -9`. `hs list`, `hs cluster --no-db` (key
+  unused) → exit 0.
+- **Regression of cycle 1's clean areas** (end-to-end `hs server` + `hs client`, 3 tasks, isolated
+  user and local layers, marker keys): plain `auth` with TLS and DB; `HYPERSHELL_SERVER_AUTH` over a
+  file `auth_env` with `--no-db`; user `auth` under local `auth_env` with `--no-tls`; user
+  `auth_eval` under local `auth` with TLS → `hs config get` prints the expected key, server and
+  client exit 0, all tasks run, no key in any log. A client with the wrong key →
+  `AuthenticationError` (rc 5). Built-in default → `hs config get` prints `<not-secure>`, `hs server`
+  refuses it (rc 2), as before.
+- **2.8.7 pick** (scratch clone, `2.8.6^{commit}` = 0eaea7b): cherry-pick `15587cf`, `a5aaf42`,
+  `844e897`, `79b6569`, `302b973`. Every conflict was delete/modify on a path absent from 2.8.6 and
+  dropped: `ROADMAP.md`, `docs/whats_new.rst`, `spec/…/TECH.md`; no other conflict. The picked
+  `src/`, `tests/`, `pyproject.toml` and `uv.lock` hunks are byte-identical to the originals.
+  `uv lock --check` clean, cmdkit 2.8.0; `uv run --python 3.12 pytest -q -n 4` (3.12.13) →
+  **722 passed, 1 skipped, 0 failed**.
+
+### Requirement → evidence (changes since cycle 1)
+
+| Item | Status |
+|------|--------|
+| R4 (relay `auth_eval` output not UTF-8 → clean error) | ✅ F2 closed |
+| R5 (every resolution failure a configuration error naming the key, no traceback, no substitute) | ✅ |
+| R1–R3, R6, R7 | ✅ unchanged; re-driven end to end |
+| Pick-safe onto `2.8.6` | ✅ F1 closed, pick suite green |
+
+Unmapped changes: none. The new tests map to F1/F2 (R4, R5).
+
+### Findings
+
+None. Cycle 1's F1 and F2 are verified fixed; no new CONFIRMED or PLAUSIBLE finding.
+
+### Human-gate triggers
+
+Not triggered: no CONFIRMED finding.

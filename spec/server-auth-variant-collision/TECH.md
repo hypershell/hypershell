@@ -69,11 +69,10 @@ phases:
     | grep -v -e '^$' -e '^docs/whats_new.rst$' -e '^spec/' -e '^src/hypershell/relay/upstream.py$'
     -e '^tests/test_relay_launch.py$'
 review:
-  last_reviewed_commit: 9938ea9
-  verdict: changes-requested
-  blocked_reason: 'F1: new command tests fail on the 2.8.6 pick (stop_server SIGINT
-    race); F2: relay auth_eval decode error now a traceback'
-  cycle: 1
+  last_reviewed_commit: '5540156'
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
 ---
 # TECH.md — `auth_env` and `auth_eval` in a config file work, and fail cleanly
 

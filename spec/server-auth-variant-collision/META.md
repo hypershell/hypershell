@@ -32,7 +32,7 @@
   `spec/size-and-duration-units/META.md` F2.
 - **Confidence:** med · **Effort:** small
 
-## F2 — `hs-review` grades against local `develop`, which can be stale
+## F2 — `hs-review` grades against local `develop`, which can be stale · seen again (review cycle 2)
 `origin=hs-review:step1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** the injected diffstat and the Step 1 base both name `develop`; in this worktree local `develop` (222075b) lagged `origin/develop` (15587cf), so a literal run would have graded unrelated upstream commits as part of this branch's diff. The reviewer had to be told by hand to use `origin/develop`.
 - **Skill cause:** the skill never says to fetch or to compare against the remote-tracking base, and `TECH.md`'s `base: develop` is read verbatim.
