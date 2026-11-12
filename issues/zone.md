@@ -1,5 +1,5 @@
 ---
-status: shaped
+status: adopted:zone-autoscale
 kind: feature
 appetite: big
 lane: public

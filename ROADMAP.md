@@ -629,7 +629,7 @@ today.
 *Horizon: near-term · Depends on: — (its prerequisites shipped: the queue primitive,
 `zone-queue-primitive`, #76; dispatch and zones, `zone-dispatch`, #78) · Refs: the third of zone's
 three cycles; seed R13–R17*
-**Seed:** [`issues/zone.md`](issues/zone.md) · *status: shaped*
+**Seed:** [`issues/zone.md`](issues/zone.md) · *status: adopted:zone-autoscale*
 
 ## Relay site-topology autoscaling: fill and spread across sites
 
