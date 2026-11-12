@@ -58,10 +58,10 @@ phases:
     -q ''refresh the index admonition for X.Y.Z'' .agents/skills/hs-release/SKILL.md
     && echo VERIFY_OK'
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 093eaa7b456a1ea57f1eb7a45b3b1cdf8c38af5a
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — Replace the docs banner and What's new page with an index admonition
 
