@@ -4,7 +4,7 @@ title: auth_env and auth_eval in a config file work, and fail cleanly when they 
   resolve
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/server-auth-variant-collision
 base: develop
 current_phase: done
