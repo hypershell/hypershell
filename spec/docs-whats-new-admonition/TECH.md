@@ -1,55 +1,68 @@
 ---
 slug: docs-whats-new-admonition
-title: "Replace the docs banner and What's new page with an index admonition"
+title: Replace the docs banner and What's new page with an index admonition
 kind: docs
 appetite: small
 status: in_progress
 branch: feature/docs-whats-new-admonition
 base: develop
-current_phase: P1
-last_updated: "2026-11-11"
+current_phase: P2
+last_updated: '2026-11-11'
 phases:
-  - id: P1
-    name: "Docs: drop the page and the notice, add the redirect and the admonition"
-    status: pending
-    satisfies: [R1, R2, R3, R4]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      test ! -e docs/whats_new.rst && test ! -e docs/_ext &&
-      test -z "$(grep -n -E 'whats_new|site_notice' docs/index.rst)" &&
-      test "$(cat docs/conf.py docs/_static/custom.css | grep -E 'whats_new|site_notice|announcement|_ext' | tr -d ' ')" = "'whats_new':'https://www.hypershell.org/blog/hypershell-2-9-0'," &&
-      python3 -c "s=open('docs/index.rst').read(); a=s.find('.. admonition:: What'); u=s.find('\nUsage\n-----'); w=s[a:u]; assert 0 <= a < u, 'admonition not above Usage'; assert 3 <= w.count('\n    * ') <= 5, 'highlight count'; assert w.count('https://www.hypershell.org/blog/hypershell-2-9-0') == 1 and w.count('https://www.hypershell.org/blog/hypershell-2-8-x') == 1, 'links'; assert 'hs task' not in w and ' -k ' not in w, 'commands'" &&
-      uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html &&
-      grep -q 'url=https://www.hypershell.org/blog/hypershell-2-9-0' docs/_build/html/whats_new.html &&
-      test -z "$(grep -rl 'class="announcement' docs/_build/html)" &&
-      test "$(curl -sS -o /dev/null -w '%{http_code}' https://www.hypershell.org/blog/hypershell-2-9-0)" = 200 &&
-      test "$(curl -sS -o /dev/null -w '%{http_code}' https://www.hypershell.org/blog/hypershell-2-8-x)" = 200 &&
-      echo VERIFY_OK
-  - id: P2
-    name: "Factory lockstep: one rule, the note in the squash body, hs-release refreshes the admonition"
-    status: pending
-    satisfies: [R5, R6, R7, R8]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      test "$(git ls-files -z -- ':!spec/' | xargs -0 grep -s -I -h -E 'whats_new|site_notice' | tr -d ' ')" = "'whats_new':'https://www.hypershell.org/blog/hypershell-2-9-0'," &&
-      test -z "$(git ls-files -z -- ':!spec/' | xargs -0 grep -s -I -l -i -E 'not yet released|site notice')" &&
-      test "$(grep -l 'squash commit body' AGENTS.md .agents/factory/invariants.md .agents/factory/review-rubric.md .agents/factory/templates/TECH.md .agents/skills/hs-build/SKILL.md .agents/skills/hs-review/SKILL.md .agents/skills/hs-publish/SKILL.md | wc -l | tr -d ' ')" = 7 &&
-      grep -q '^### Step 3a — Docs: complete the markers and refresh the index admonition' .agents/skills/hs-release/SKILL.md &&
-      grep -q 'refresh the index admonition for X.Y.Z' .agents/skills/hs-release/SKILL.md &&
-      echo VERIFY_OK
+- id: P1
+  name: 'Docs: drop the page and the notice, add the admonition'
+  status: done
+  satisfies:
+  - R1
+  - R3
+  - R4
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  attempts: 1
+  verify: 'test ! -e docs/whats_new.rst && test ! -e docs/_ext && test -z "$(grep
+    -n -E ''whats_new|site_notice'' docs/index.rst)" && test -z "$(cat docs/conf.py
+    docs/_static/custom.css | grep -E "whats_new|site_notice|announcement|''_ext''|_ext/")"
+    && python3 -c "s=open(''docs/index.rst'').read(); a=s.find(''.. admonition:: What'');
+    u=s.find(''\nUsage\n-----''); w=s[a:u]; assert 0 <= a < u, ''admonition not above
+    Usage''; assert 3 <= w.count(''\n    * '') <= 5, ''highlight count''; assert w.count(''https://www.hypershell.org/blog/hypershell-2-9-0'')
+    == 1 and w.count(''https://www.hypershell.org/blog/hypershell-2-8-x'') == 1, ''links'';
+    assert ''hs task'' not in w and '' -k '' not in w, ''commands''" && uv run --python
+    3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html
+    && test -z "$(grep -rl ''class="announcement'' docs/_build/html)" && test "$(curl
+    -sS -o /dev/null -w ''%{http_code}'' https://www.hypershell.org/blog/hypershell-2-9-0)"
+    = 200 && test "$(curl -sS -o /dev/null -w ''%{http_code}'' https://www.hypershell.org/blog/hypershell-2-8-x)"
+    = 200 && echo VERIFY_OK'
+- id: P2
+  name: 'Factory lockstep: one rule, the note in the squash body, hs-release refreshes
+    the admonition'
+  status: pending
+  satisfies:
+  - R5
+  - R6
+  - R7
+  - R8
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: 'test -z "$(git ls-files -z -- '':!spec/'' | xargs -0 grep -s -I -l -E ''whats_new|site_notice'')"
+    && test -z "$(git ls-files -z -- '':!spec/'' | xargs -0 grep -s -I -l -i -E ''not
+    yet released|site notice'')" && test "$(grep -l ''squash commit body'' AGENTS.md
+    .agents/factory/invariants.md .agents/factory/review-rubric.md .agents/factory/templates/TECH.md
+    .agents/skills/hs-build/SKILL.md .agents/skills/hs-review/SKILL.md .agents/skills/hs-publish/SKILL.md
+    | wc -l | tr -d '' '')" = 7 && grep -q ''^### Step 3a — Docs: complete the markers
+    and refresh the index admonition'' .agents/skills/hs-release/SKILL.md && grep
+    -q ''refresh the index admonition for X.Y.Z'' .agents/skills/hs-release/SKILL.md
+    && echo VERIFY_OK'
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Replace the docs banner and What's new page with an index admonition
 
 The **context engine and finite-state machine** for building this feature. The YAML
@@ -97,26 +110,29 @@ one atomic code+state commit.
 
 ---
 
-## Phase P1 — Docs: drop the page and the notice, add the redirect and the admonition
-**Satisfies:** R1, R2, R3, R4 · **Depends on:** —
-**Goal:** the built site has no What's new page, no banner on any page, a redirect stub at
-`whats_new.html`, and a "What's new" admonition above *Usage* on the home page.
+## Phase P1 — Docs: drop the page and the notice, add the admonition
+**Satisfies:** R1, R3, R4 · **Depends on:** —
+**Goal:** the built site has no What's new page, no banner on any page, and a "What's new"
+admonition above *Usage* on the home page.
 
-- [ ] `git rm docs/whats_new.rst`; remove `whats_new` from the *Intro* toctree in `docs/index.rst`.
-- [ ] `docs/conf.py`: add `'whats_new': 'https://www.hypershell.org/blog/hypershell-2-9-0',` to
-      `redirects` and name the What's new page in the comment above the map (say "What's new", never
-      the file name).
-- [ ] `git rm docs/_ext/site_notice.py`. In `docs/conf.py` remove the `_ext` `sys.path` line and its
+> **Amended 2026-11-11 (maintainer ruling via the foreman, GOAL Clarifications):** R2 is withdrawn
+> ("Ignore the old 'whats_new' page, it was only live for a day"). No redirect stub and no
+> `redirects` key; the verify no longer checks a built `whats_new.html`, and the `conf.py`/`custom.css`
+> grep now expects no match at all.
+
+- [x] `git rm docs/whats_new.rst`; remove `whats_new` from the *Intro* toctree in `docs/index.rst`.
+- ~~`docs/conf.py`: add a `redirects` key for the What's new page.~~ Dropped with R2.
+- [x] `git rm docs/_ext/site_notice.py`. In `docs/conf.py` remove the `_ext` `sys.path` line and its
       comment, the `from site_notice import announcement` import, the now-unused `import os` /
       `import sys`, `'_ext'` from `exclude_patterns`, `'color-announcement-background'`, and the
       `site_notice = announcement(…)` block with its comment.
-- [ ] `docs/_static/custom.css`: remove the `.announcement` and `.announcement-content` rules and
+- [x] `docs/_static/custom.css`: remove the `.announcement` and `.announcement-content` rules and
       their comment.
-- [ ] `docs/index.rst`: add the `.. admonition:: What's new` block from PLAN §2 after the *Design
+- [x] `docs/index.rst`: add the `.. admonition:: What's new` block from PLAN §2 after the *Design
       elements* list, before the `-------------------` rule that opens *Usage*. Bullets indented four
       spaces (`    * `), three to five of them; both links as anonymous references (`__`).
 - **Verify:** the folded `verify:` above (file checks, admonition position and links, `-W` build,
-  redirect stub, no `class="announcement`, both URLs 200). Prints `VERIFY_OK`.
+  no `class="announcement`, both URLs 200). Prints `VERIFY_OK`.
 - **Touches:** `docs/whats_new.rst` (deleted), `docs/_ext/site_notice.py` (deleted), `docs/conf.py`,
   `docs/_static/custom.css`, `docs/index.rst`.
 
@@ -124,7 +140,7 @@ one atomic code+state commit.
 **Satisfies:** R5, R6, R7, R8 · **Depends on:** P1
 **Goal:** every factory file states the one rule, `hs-publish` drafts the user-facing note for the
 squash commit body, `hs-release` Step 3a refreshes the admonition, and no tracked file outside
-`spec/` names the page or the notice except the redirect key.
+`spec/` names the page or the notice at all (R2's redirect-key exception went with R2).
 
 Keep the literal phrase `squash commit body` unbroken on one line in each of the seven R5/R6 files,
 and the new Step 3a heading and commit subject each on one line: the verify greps them.
@@ -149,7 +165,7 @@ and the new Step 3a heading and commit subject each on one line: the verify grep
       raise it at Step 7), item 3 subject `[docs] Complete version markers and refresh the index
       admonition for X.Y.Z`; drop the move-and-reset, `whats_new_X_Y.rst` and notice text. Step 7 and
       the release-notes Safety bullet read commit subjects and bodies.
-- **Verify:** the folded `verify:` above (R8 grep returns only the redirect key; no "not yet
+- **Verify:** the folded `verify:` above (R8 grep returns nothing; no "not yet
   released"/"site notice" outside `spec/`; seven files carry `squash commit body`; the Step 3a
   heading and subject are present). Prints `VERIFY_OK`.
 - **Touches:** `AGENTS.md`, `.agents/factory/{invariants.md,review-rubric.md,templates/TECH.md}`,

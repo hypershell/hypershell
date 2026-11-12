@@ -5,6 +5,9 @@
 > the phased executable roadmap is [`TECH.md`](TECH.md). No `research/`: `appetite: small`,
 > `kind: docs`, no high-blast-radius file touched, and the GOAL hands no open question to planning
 > (the admonition's wording and the PR-body section's shape are design choices made here).
+>
+> **Amended 2026-11-11:** R2 is withdrawn by maintainer ruling (GOAL Clarifications). The
+> `whats_new` redirect key and its comment below are not built, and R8's grep expects no match.
 
 ## 1. Summary
 

@@ -52,9 +52,10 @@ Proposed highlights for the admonition (the plan owns the final wording; the R-I
 
 - **R1** — The docs SHALL no longer contain `docs/whats_new.rst`, and no toctree SHALL list it. The
   docs build passes with `-W` (`AGENTS.md` § Docs).
-- **R2** — WHEN the built site is asked for `whats_new.html`, the docs SHALL serve a redirect to
+- **R2** — *Withdrawn 2026-11-11 (maintainer ruling; see Clarifications).* ~~WHEN the built site
+  is asked for `whats_new.html`, the docs SHALL serve a redirect to
   `https://www.hypershell.org/blog/hypershell-2-9-0`, through the `redirects` map `docs/conf.py`
-  already feeds to `sphinx-reredirects`.
+  already feeds to `sphinx-reredirects`.~~
 - **R3** — The built docs SHALL carry no site notice on any page, whatever the version, pre-release
   or final. `docs/_ext/site_notice.py` and everything that served only it are removed: its import
   and `sys.path` wiring and the `announcement` assignment in `docs/conf.py`, the
@@ -79,7 +80,8 @@ Proposed highlights for the admonition (the plan owns the final wording; the R-I
   The `whats_new` move-and-reset steps, the `whats_new_X_Y.rst` copy and the notice note go, and
   the step's commit subject names the admonition instead of What's new.
 - **R8** — Outside `spec/`, no tracked file SHALL refer to `docs/whats_new.rst`, `whats_new` or
-  `site_notice`, except the R2 redirect key in `docs/conf.py`.
+  `site_notice`~~, except the R2 redirect key in `docs/conf.py`~~ (exception withdrawn with R2,
+  2026-11-11).
 
 ## Non-goals (no-gos)
 
@@ -130,6 +132,12 @@ Proposed highlights for the admonition (the plan owns the final wording; the R-I
   leave the factory pointing at a deleted file. (resolved 2026-11-11, shaping)
 - **Q:** Does any test cover the notice? — **A:** No test under `tests/` imports `site_notice` or
   checks the banner. (resolved 2026-11-11, shaping)
+- **Q:** Does `whats_new.html` still need a redirect? — **A:** No. Verbatim: "Ignore the old
+  'whats_new' page, it was only live for a day." R2 is withdrawn: no redirect stub and no
+  `redirects` key for it, and the Outcome's redirect sentence falls away with it. R8's exception
+  for the R2 key goes too, so no tracked file outside `spec/` refers to `whats_new` or
+  `site_notice` at all. Supersedes the redirect clarification above. (resolved 2026-11-11,
+  maintainer via the foreman)
 
 ## Related materials
 
