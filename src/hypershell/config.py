@@ -30,7 +30,7 @@ from hypershell.core.platform import path
 from hypershell.core.types import smart_coerce
 from hypershell.core.logging import Logger
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS,
+from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth,
                                     default as default_config, config as full_config)
 
 # Public interface
@@ -186,6 +186,11 @@ class ConfigGetApp(Application):
             raise ConfigurationError(f'Section name cannot start with "."')
 
         section, *subsections, variable = self.varpath.split('.')
+        if self.site_name is None and variable == 'auth' and (section, *subsections) in AUTH_SECTIONS:
+            # An authkey is resolved from whichever form the deciding layer gives, or refused.
+            self.print_output(resolve_auth(section, *subsections))
+            return
+
         if section not in config:
             raise ConfigurationError(f'"{section}" is not a section in {config_path}')
 

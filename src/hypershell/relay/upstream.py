@@ -41,7 +41,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 # Internal libs
-from hypershell.core.config import config, PARAM_UNSET, DEFAULT_AUTH, ConfigurationError
+from hypershell.core.config import config, PARAM_UNSET, resolve_auth
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
@@ -144,36 +144,16 @@ def upstream_config(host: Optional[str] = None, port: Optional[int] = None, no_t
     return QueueConfig(host=host or section.host, port=int(port or section.port), auth=upstream_key(), tls=tls)
 
 
-AUTH_VARIANTS: Final[Tuple[str, ...]] = ('auth', 'auth_env', 'auth_eval')
-"""The forms the upstream key may take in `[relay.upstream]`: literal, from a variable, from a command."""
-
-
 def upstream_key(base: Any = None) -> str:
     """The upstream key: `[relay.upstream] auth`, `auth_env` or `auth_eval` from the highest layer setting one.
 
     Each configuration layer (built-in defaults, then system, user and local files, then the
     environment) is looked at from the top, and the first that sets any form of the key decides it,
     so a file's `auth_env` takes precedence over the built-in `auth` rather than colliding with it.
-    Two forms in one layer are refused. With none set anywhere, the built-in default key is used.
+    Two forms in any one layer, an unset variable, or a failed command is a configuration error
+    naming the key. With none set anywhere, the built-in default key is used.
     """
-    base = config if base is None else base
-    for name, layer in reversed(list(base.namespaces.items())):
-        section = layer.get('relay', {}).get('upstream', {})
-        given = [variant for variant in AUTH_VARIANTS if variant in section]
-        if not given:
-            continue
-        if len(given) > 1:
-            raise ConfigurationError(f'More than one form of relay.upstream.auth ({", ".join(given)}) '
-                                     f'in one configuration layer ({name})')
-        try:
-            value = getattr(section, 'auth')
-        except Exception as error:
-            raise ConfigurationError(f'Could not resolve relay.upstream.{given[0]} '
-                                     f'({error.__class__.__name__})') from None
-        if value is None:
-            raise ConfigurationError(f'relay.upstream.{given[0]} resolves to nothing ({name})')
-        return str(value)
-    return DEFAULT_AUTH
+    return resolve_auth('relay', 'upstream', base=base)
 
 
 def relay_site(site: Optional[str] = None) -> str:

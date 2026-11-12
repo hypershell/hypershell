@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:server-auth-variant-collision
 kind: fix
 appetite: small
 lane: public

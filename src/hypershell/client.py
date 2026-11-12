@@ -61,7 +61,7 @@ from cmdkit.config import Namespace, Configuration
 from hypershell.data.model import Task, serialize_tasks, deserialize_tasks, zone_name
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
-from hypershell.core.config import default, config, load_task_env, SSH_GROUPS
+from hypershell.core.config import default, config, load_task_env, SSH_GROUPS, resolve_auth
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
@@ -1663,7 +1663,7 @@ class ClientApp(Application):
         """Run client."""
         auth_given = self.auth is not None
         if not auth_given:
-            self.auth = config.server.auth
+            self.auth = resolve_auth('server')
         # The hints below name a missing key only when none came from -k, the environment or a configuration file.
         no_key = not auth_given and AUTH_ENV not in os.environ and self.auth == DEFAULT_AUTH
         try:
