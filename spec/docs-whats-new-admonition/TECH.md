@@ -3,7 +3,7 @@ slug: docs-whats-new-admonition
 title: Replace the docs banner and What's new page with an index admonition
 kind: docs
 appetite: small
-status: in_review
+status: done
 branch: feature/docs-whats-new-admonition
 base: develop
 current_phase: done
