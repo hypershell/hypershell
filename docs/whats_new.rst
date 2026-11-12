@@ -5,14 +5,14 @@ What's New in 2.9
 
 |
 
-This page lists every user-visible change in the 2.9 line since 2.8.5, the current stable release.
-Each entry gives the pre-release that first carried it, the pull request that shipped it (or the
+This page lists every user-visible change in the 2.9 line since 2.8.5. The current stable release
+is 2.8.7. Each entry gives the pre-release that first carried it, the pull request that shipped it (or the
 commit, for the few changes made without one), and the section that describes it. That section
 carries an "Added in version 2.9.0" or "Changed in version 2.9.0" marker.
 
 The 2.9 releases so far are pre-releases, so ``pip install hypershell`` still installs 2.8.x.
 Install the latest pre-release with ``pip install --pre hypershell``, or pin one, such as
-``hypershell==2.9.0a6``.
+``hypershell==2.9.0a7``.
 
 -------------------
 
@@ -188,20 +188,9 @@ Fixes
 - **Logging across forks and on lockless filesystems.** A forked process no longer inherits the
   parent's log file descriptors, and on a filesystem without lock support logging falls back cleanly
   instead of failing (2.9.0a2, :pr:`54`; :ref:`per-process log files <logging_files>`).
-
--------------------
-
-Not yet released
-----------------
-
-|
-
-Fixes
-^^^^^
-
 - **A database file of ``:memory:`` works again.** A cluster or server configured with ``file =
   ':memory:'`` runs without a database, as with ``--no-db``. Before, it failed with "no such table:
-  client" once a client connected, or hung. This also ships in 2.8.6.
+  client" once a client connected, or hung (2.9.0a7, :pr:`92`). This also shipped in 2.8.6.
 - **Memory sizes and timeouts read as written.** ``16G``, ``16GiB``, ``512M`` and ``1.5GiB`` are
   powers of 1024, as ``16GB`` always was, for ``hs submit -m``, ``hs server -m``, ``hs client -M``,
   ``hs cluster -m`` and ``-M``, the inline ``memory:`` tag, and a size-like log rotation policy.
@@ -213,13 +202,23 @@ Fixes
   refused with the accepted forms instead of being read by its leading part, and a cron rotation
   policy that begins with a digit (``30 2 * * *``) is a schedule, not a size. Before this fix, a
   size written with a short or binary unit (``16G``, ``16GiB``) was read as that many bytes; tasks
-  already stored that way are not corrected. This also ships in 2.8.7.
+  already stored that way are not corrected (2.9.0a7, :pr:`96`). This also shipped in 2.8.7.
 - **The authkey can come from a variable or a command in a configuration file.** ``auth_env`` or
   ``auth_eval`` in ``[server]``, as the :ref:`security guide <security>` recommends, now takes
   precedence over the built-in default, and ``hs config get server.auth`` prints the resolved value;
   ``relay.upstream.auth`` in ``[relay.upstream]`` likewise. Before, every command stopped with a
   traceback. A variable that is not set, a command that exits non-zero, or two forms of the key in
   one file is now a configuration error naming the key, and the key is resolved only by the commands
-  that use it. HyperShell now requires cmdkit 2.8.0. This also ships in 2.8.7.
+  that use it. HyperShell now requires cmdkit 2.8.0 (2.9.0a7, :pr:`97`). This also shipped in
+  2.8.7.
+
+-------------------
+
+Not yet released
+----------------
+
+|
+
+Nothing is pending.
 
 |
