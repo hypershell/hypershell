@@ -95,8 +95,9 @@ self-contradictory or ambiguous, STOP and ask.
   move in lockstep ([`invariants.md`](../../factory/invariants.md) §12). Never hardcode a version
   elsewhere.
 - **Signed tags only.** `git tag -s` (GPG key 61AE0783), verified with `git tag -v` **before** any push.
-- **Release notes are drafted, then confirmed.** Auto-draft from `git log <lasttag>..HEAD` grouped by
-  `[category]`; present for human edit at Step 7; never publish unreviewed notes.
+- **Release notes are drafted, then confirmed.** Auto-draft from `git log <lasttag>..HEAD` subjects
+  and bodies, grouped by `[category]` (each squash body carries its PR's user-facing note); present
+  for human edit at Step 7; never publish unreviewed notes.
 - **Never `rm`.** `dist/`, `sdist/`, `docs/_build/` are gitignored (leave them); `git worktree remove`
   cleans the rehearsal. Do not delete files.
 - **Operational, not meta.** hs-release never writes `META.md` findings and never recurses; harness
@@ -152,7 +153,7 @@ appear for commands run against the `/tmp` worktree path; that is expected and h
 - **pre-release:** stay on `develop` (the bump commit and tag land here).
 - **full-release:** `git switch -c release/X.Y.0 develop`.
 
-### Step 3a — Docs: complete the markers and What's new (pre-release & full-release)
+### Step 3a — Docs: complete the markers and refresh the index admonition (pre-release & full-release)
 Skip for a patch: patch releases come from `master`, whose docs the site no longer serves.
 1. Every `versionadded`/`versionchanged` marker under `docs/` whose body has **no link at all** (no
    `:pr:` and no `:commit:`) gets one: the number from the squash commit that added that marker.
@@ -163,16 +164,17 @@ Skip for a patch: patch releases come from `master`, whose docs the site no long
    subject: most squash subjects end `(#NN)`, but some merges into `develop` don't. Only a commit
    with no pull request gets `:commit:` with its short SHA. Never touch a marker that already has a
    link.
-2. In `docs/whats_new.rst`, move each *Not yet released* entry into its topic group (an upgrade
-   caution under *Upgrading*, a feature or change under its area in *New and changed*, a fix under
-   *Fixes*), give it this version and its link inline as the other entries do (`(X.Y.ZaN,
-   :pr:`NN`)`), and leave *Not yet released* saying nothing is pending. At a **full release**, copy the
-   page to `docs/whats_new_X_Y.rst` as the record of that line (linked from the page, not the
-   navigation), and reset `docs/whats_new.rst` for the next line. `docs/whats_new.rst` is always
-   the live page: the site notice, `AGENTS.md` and `hs-build` all point at it. Markers stay. The
-   notice keys off the version and needs no edit.
-3. Build with `-W` (`AGENTS.md` § Docs), then commit `[docs] Complete version markers and What's new
-   for X.Y.Z` on the branch Step 3 set up. Skip the commit when nothing changed.
+2. Refresh the "What's new" admonition on `docs/index.rst`, above *Usage*. Keep three to five
+   highlights in short, plain words, drawn from the user-facing notes in the squash commit bodies
+   since the last tag (`git log <lasttag>..HEAD`) and from the current release-notes posts. Name only
+   top-level commands, and never pass a key with `-k`. Its two links point at the current line's
+   release-notes post and the previous series' post on `https://www.hypershell.org/blog/`, as
+   anonymous references (`` `text <url>`__ ``). `curl` each link; one that does not answer 200 yet
+   (the post is written after Step 7's notes) keeps its old target and is raised at the Step 7
+   pause. Markers stay.
+3. Build with `-W` (`AGENTS.md` § Docs), then commit
+   `[docs] Complete version markers and refresh the index admonition for X.Y.Z` on the branch Step 3
+   set up. Skip the commit when nothing changed.
 
 ### Step 4 — Shared core: bump + man pages + commit
 1. Edit the `version = "…"` line in `pyproject.toml` → X.Y.Z (the ONLY source).
@@ -203,9 +205,10 @@ Then `git tag -s X.Y.Z -m "HyperShell X.Y.Z"` (GPG 61AE0783) and `git tag -v X.Y
 signature **before anything is pushed**. Signing/verify failure → STOP.
 
 ### Step 7 — PAUSE: confirm before anything irreversible
-Everything so far is reversible in-tree. Draft the release notes from `git log <lasttag>..HEAD` grouped
-by `[category]` (dedupe entries that appear under multiple SHAs from back-merges; link `#NN` issues if
-present). Then present via `AskUserQuestion`: the mode, version, the branch/tag layout, `--prerelease`
+Everything so far is reversible in-tree. Draft the release notes from `git log <lasttag>..HEAD`
+subjects and bodies, grouped by `[category]`: a squash commit's body is its PR's user-facing note,
+so use it as the entry's text (dedupe entries that appear under multiple SHAs from back-merges; link
+`#NN` issues if present). List any Step 3a admonition link that did not yet answer 200. Then present via `AskUserQuestion`: the mode, version, the branch/tag layout, `--prerelease`
 yes/no, whether `:latest` / PyPI-latest will move, the drafted notes (human-editable), and the exact
 push/publish commands. **Nothing is pushed until an explicit OK.** `AskUserQuestion` unavailable → ask
 in plain text and STOP.

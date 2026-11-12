@@ -49,6 +49,25 @@ Design elements include but are not limited to:
 * **User-defined tags:** annotate tasks with `key`:`value` tags. |br|
   Manage catalogs of large collections of tasks with ease.
 
+.. admonition:: What's new
+    :class: tip
+
+    *HyperShell* 2.9 is in pre-release. Highlights so far:
+
+    * **Zones and relays:** place tasks and clients by name, and run one campaign across several
+      sites.
+    * **TimescaleDB and in-place upgrades:** a TimescaleDB provider with compression, and the first
+      2.9 process upgrades a 2.8 database in place.
+    * **Task files:** submit tasks from JSON, submit the same file again safely, and pin each task
+      to its own core or GPU.
+    * **Installing 2.9:** it is a pre-release, so use ``pip install --pre hypershell``. Upgrade the
+      server and every client together, and back up the database first.
+    * **2.8.1 to 2.8.7:** fixes for cancelled tasks, retries, and stranded task groups, and the run
+      key kept off command lines. If you run 2.8, upgrade to 2.8.7.
+
+    Read the release notes for `2.9.0 <https://www.hypershell.org/blog/hypershell-2-9-0>`__ and
+    `2.8.1 to 2.8.7 <https://www.hypershell.org/blog/hypershell-2-8-x>`__.
+
 -------------------
 
 Usage
@@ -186,7 +205,6 @@ If this software has helped facilitate your research please consider citing us.
     :hidden:
     :caption: Intro
 
-    whats_new
     getting_started
     install
     security

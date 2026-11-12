@@ -81,10 +81,15 @@ Report the verdict, commits vs `develop`, and whether a PR already exists (`gh p
   - **Research** → links to `research/*.md` (if present).
   - **Phases completed** → rendered from the `TECH.md` FSM (id · name · satisfies).
   - **Verification** → the CLI flows / tests actually run (from `REVIEW.md`).
+  - **User-facing note** → for a user-visible change only; omit the section when nothing is
+    user-visible. One to three sentences in release-notes voice: what changed for the user, naming
+    only top-level commands and never passing a key with `-k`. Write it to be the squash commit body,
+    as plain text a reader can copy into GitHub's merge box: `hs-release` drafts the release notes
+    from `git log` subjects and bodies.
   - **Docs & completions** → confirm the same-commit rule was honored (`docs/_include/*.rst`, `share/`;
-    for a user-visible change, the prose page, its `versionadded`/`versionchanged` marker and the
-    `docs/whats_new.rst` entry). The marker's `:pr:` is not added here: a commit outside `spec/`
-    after review would stale the approval. `hs-release` adds it.
+    for a user-visible change, the prose page and its `versionadded`/`versionchanged` marker). The
+    marker's `:pr:` is not added here: a commit outside `spec/` after review would stale the
+    approval. `hs-release` adds it.
   - **🔧 Harness feedback** — surface the self-improvement loop *only when substantial* (see the
     surfacing rule below); omit the section entirely otherwise.
   - Issue: `Refs #NN` (see the auto-close note below).
@@ -123,15 +128,16 @@ Report the PR URL. If `merge` was requested and confirmed, squash with an **expl
 none of the intermediate branch commit subjects leak into the `develop` commit — a bare
 `gh pr merge --squash` concatenates every branch commit message into the squash body:
 ```
-gh pr merge {N} --squash --subject "{title}" --body "{one-line summary, or empty}" --delete-branch
+gh pr merge {N} --squash --subject "{title}" --body "{user-facing note, or empty}" --delete-branch
 ```
-The `{title}` is the PR title (`[{category}] …`), which becomes the sole squash-commit subject on `develop`.
+The `{title}` is the PR title (`[{category}] …`), which becomes the sole squash-commit subject on
+`develop`; the user-facing note becomes its squash commit body.
 
 ### Step 4b — local (`local`)
 ```
 git switch develop && git pull --ff-only
 git merge --squash {branch}
-git commit -m "{title}"     # no co-author trailer
+git commit -m "{title}" [-m "{user-facing note}"]     # the note only when there is one; no co-author trailer
 git branch -D {branch}
 ```
 Do **not** push `develop` unless the human explicitly asks.

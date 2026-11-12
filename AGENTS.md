@@ -47,9 +47,9 @@ Console entry points (`pyproject.toml [project.scripts]`): **`hs`** → `hypersh
   `docs/_include/*.rst` help snippets and the shell completions under `share/`.
 - A **user-visible** change also updates, in the same commit, the prose page that describes it,
   and marks the passage with `.. versionadded::` or `.. versionchanged::` naming the release line
-  it ships in (`2.9.0`, never an alpha), plus an entry under *Not yet released* in
-  `docs/whats_new.rst`. The marker's `:pr:` link is added at the next release, once the squash
-  commit carries the number; see § Docs.
+  it ships in (`2.9.0`, never an alpha). Its user-facing note goes in the PR's
+  squash commit body, which `hs-publish` drafts, not in a docs file. The marker's `:pr:` link is
+  added at the next release, once the squash commit carries the number; see § Docs.
 
 ## Commands
 
@@ -511,9 +511,11 @@ carries `.. versionchanged:: X.Y.0` with one short clause. The body links the pu
 (`:pr:`NN``), or the commit (`:commit:`abc1234``) for a change that landed without one. Place a marker at the narrowest accurate scope: under the title of a wholly new page,
 under a section heading, or directly after the option or `autofunction` it qualifies. Generated help
 snippets are never hand-marked: the marker goes beside the `.. include::`. A marker written during a
-cycle has no PR number yet; `hs-release` adds it. Markers are never removed. `docs/whats_new.rst`
-lists every change since the stable release, with the pre-release that first carried it, and the
-site notice in `docs/conf.py` keys off the package version, so it needs no editing.
+cycle has no PR number yet; `hs-release` adds it. Markers are never removed. A change's
+user-facing note travels in its PR's squash commit body, not in a docs file. At each pre-release
+or full release, `hs-release` drafts the GitHub release notes from `git log`, and refreshes the
+"What's new" admonition on `docs/index.rst`: its highlights and its links to the current
+release-notes posts on hypershell.org.
 
 Current docs, notes, seeds and PRs name only the top-level commands: `hs list`, `hs info`,
 `hs wait`, `hs run`, `hs update`. The `hs task …` subcommands stay in the code for backwards

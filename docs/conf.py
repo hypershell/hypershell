@@ -11,14 +11,8 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
 import datetime
-import os
-import sys
 
 import hypershell
-
-# Local helper modules (not Sphinx extensions) live in _ext/.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '_ext'))
-from site_notice import announcement  # noqa: E402
 
 # -- Project information -----------------------------------------------------
 
@@ -96,7 +90,7 @@ master_doc = 'index'
 # This pattern also affects html_static_path and html_extra_path.
 # The _include/ fragments are read by `.. include::` only; built as pages of their own they would
 # duplicate every label they define.
-exclude_patterns = ['_build', '_include', '_ext', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ['_build', '_include', 'Thumbs.db', '.DS_Store']
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'dracula'
@@ -131,7 +125,6 @@ html_theme_options = {
         'color-background-primary': '#161B23',
         'color-sidebar-background': '#11151b',
         'color-sidebar-search-background': '#11151b',
-        'color-announcement-background': '#ee0d7e;',
     },
     'footer_icons': [
         {
@@ -148,12 +141,6 @@ html_theme_options = {
         },
     ],
 }
-
-# The site builds from develop, so while the version is a pre-release or development version every
-# page says which line the docs track and how to install it; a final version shows no notice.
-site_notice = announcement(release, base=html_baseurl)
-if site_notice:
-    html_theme_options['announcement'] = site_notice
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,

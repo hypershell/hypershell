@@ -81,8 +81,8 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 - **No `Co-Authored-By` trailer** (repo convention; overrides the AGENTS.md default).
 - A CLI/feature change updates `docs/_include/*.rst` help snippets and `share/` completions **in the
   same commit**. A user-visible change also updates its prose page, marked `.. versionadded::` /
-  `.. versionchanged::` with the release line, and adds a *Not yet released* entry to
-  `docs/whats_new.rst` (`AGENTS.md` § Docs).
+  `.. versionchanged::` with the release line; its user-facing note goes in the PR's
+  squash commit body, which `hs-publish` drafts (`AGENTS.md` § Docs).
 
 ---
 

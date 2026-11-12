@@ -14,12 +14,3 @@
     -webkit-mask-image: var(--icon-admonition-default);
     mask-image:var(--icon-admonition-default)
 }
-
-/* The site notice is a few sentences long: let it wrap instead of scrolling out of view. */
-.announcement {
-    height: auto;
-    min-height: var(--header-height);
-}
-.announcement-content {
-    white-space: normal;
-}
