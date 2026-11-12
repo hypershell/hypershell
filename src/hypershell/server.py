@@ -62,9 +62,9 @@ from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH
+from hypershell.core.config import config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH, resolve_auth
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
-from hypershell.core.types import parse_bytes
+from hypershell.core.types import parse_bytes, parse_time
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread
@@ -1356,8 +1356,8 @@ Options:
       --forever               Schedule forever.
       --restart               Start scheduling from last completed task.
   -c, --task-cores      NUM   Number of cores to assign each task (default: none).
-  -m, --task-memory     MEM   Memory in bytes to assign each task (default: none).
-  -W, --task-timeout    SEC   Task-level walltime limit in seconds (default: none).
+  -m, --task-memory     MEM   Memory to assign each task; K/M/G/T[B|iB] are powers of 1024 (default: none).
+  -W, --task-timeout    SEC   Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
   -b, --bundlesize      NUM   Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait      SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
   -Q, --poll            NUM   Polling interval between database queries if no tasks available.
@@ -1392,7 +1392,7 @@ class ServerApp(Application):
     task_timeout: Optional[int] = config.task.timeout or None
     interface.add_argument('-c', '--task-cores', type=int, default=task_cores)
     interface.add_argument('-m', '--task-memory', type=parse_bytes, default=task_memory)
-    interface.add_argument('-W', '--task-timeout', type=int, default=task_timeout)
+    interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout)
 
     eager_mode: bool = config.server.eager
     max_retries: int = config.server.attempts - 1
@@ -1414,7 +1414,7 @@ class ServerApp(Application):
     port: int = config.server.port
     interface.add_argument('-p', '--port', type=int, default=port)
 
-    auth: str = config.server.auth
+    auth: Optional[str] = None  # Without -k, the key is resolve_auth('server') (see run)
     interface.add_argument('-k', '--auth', default=auth)
 
     in_memory: bool = False
@@ -1454,6 +1454,8 @@ class ServerApp(Application):
         """Run server."""
         if self.special_options():
             return
+        if self.auth is None:
+            self.auth = resolve_auth('server')
         self.check_args()
         self.enable_tls()
         ensuredb()

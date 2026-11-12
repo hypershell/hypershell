@@ -18,6 +18,7 @@ import logging
 import socket
 import functools
 import platform
+import subprocess
 from datetime import datetime
 
 # External libs
@@ -26,12 +27,13 @@ from cmdkit.app import exit_status
 
 # Internal libs
 from hypershell.core.platform import path, home, default_path
-from hypershell.core.exceptions import write_traceback
+from hypershell.core.exceptions import write_traceback, display_critical
 from hypershell.core.sys import PATH_SEP
 
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
+    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
     'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
     'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
@@ -270,6 +272,78 @@ def get_logging_style(base: Configuration) -> str:
         raise ConfigurationError(f'Unrecognized `logging.style` \'{style}\' ({label})')
 
 
+AUTH_FORMS: Final[tuple[str, ...]] = ('auth', 'auth_env', 'auth_eval')
+"""The forms an authkey may take: literal, from an environment variable, or from a command."""
+
+AUTH_SECTIONS: Final[tuple[tuple[str, ...], ...]] = (('server', ), ('relay', 'upstream'))
+"""The sections whose `auth` key is an authkey (a section no layer has is simply absent)."""
+
+
+def _layer_label(name: str) -> str:
+    """Name a configuration layer for a message: its file path, `env`, or `<name>`."""
+    if name in ('system', 'user', 'local'):
+        return path.get(name).config
+    return name if name == 'env' else f'<{name}>'
+
+
+def _layer_section(layer: dict, section: tuple[str, ...]) -> dict:
+    """The table at `section` within one configuration `layer`, or empty if the layer has none."""
+    for name in section:
+        layer = layer.get(name, {}) if isinstance(layer, dict) else {}
+    return layer if isinstance(layer, dict) else {}
+
+
+def check_auth_forms(base: Configuration, sections: tuple[tuple[str, ...], ...] = AUTH_SECTIONS) -> None:
+    """Refuse a configuration layer that gives an authkey in more than one form.
+
+    Every layer is checked, not only the one that decides the key, since the merged view hides
+    a lower layer's duplicate. This reads no environment variable and runs no command.
+    """
+    for section in sections:
+        key = '.'.join((*section, 'auth'))
+        for name, layer in base.namespaces.items():
+            table = _layer_section(layer, section)
+            given = [form for form in AUTH_FORMS if form in table]
+            if len(given) > 1:
+                raise ConfigurationError(f'More than one form of {key} ({", ".join(given)}) '
+                                         f'in one configuration layer ({_layer_label(name)})')
+
+
+def resolve_auth(*section: str, base: Configuration = None) -> str:
+    """The authkey of `section` (e.g., 'server'), from whichever form the deciding layer gives.
+
+    The highest configuration layer that sets `auth`, `auth_env` or `auth_eval` decides.
+    An unset variable, a failed command, or two forms in one layer raise `ConfigurationError`
+    naming the key; no message carries the key itself, and nothing stands in for it.
+    """
+    base = config if base is None else base
+    key = '.'.join((*section, 'auth'))
+    check_auth_forms(base, (section, ))
+    table = base
+    try:
+        for name in section:
+            table = table[name]
+    except (KeyError, TypeError):
+        raise ConfigurationError(f'"{key}" not found in configuration') from None
+    given = [form for form in AUTH_FORMS if isinstance(table, dict) and form in table]
+    if not given:
+        raise ConfigurationError(f'"{key}" not found in configuration')
+    form, = given
+    label = blame(base, *section, form)
+    try:
+        value = getattr(table, 'auth')
+    except subprocess.CalledProcessError as error:
+        raise ConfigurationError(f'{key}_eval command exited with status {error.returncode} ({label})') from None
+    except Exception as error:
+        # Only the error's type is named: its text can carry part of the command's output.
+        raise ConfigurationError(f'{key}{form[4:]} could not be resolved: {type(error).__name__} ({label})') from None
+    if value is None and form == 'auth_env':
+        raise ConfigurationError(f'{key}_env names {table[form]}, which is not set ({label})')
+    if value is None:
+        raise ConfigurationError(f'"{key}" not found in configuration')
+    return str(value)
+
+
 DEFAULT_DATABASE_NAME: Final[str] = 'Main.db' if platform.system() in ['Windows', 'Darwin'] else 'main.db'
 """Either Main.db (Windows/macOS) or main.db on Linux/POSIX."""
 
@@ -319,6 +393,10 @@ try:
         config = reload_local(local_config)
     else:
         config = load()
+    check_auth_forms(config)
+except ConfigurationError as error:
+    display_critical(error, module=__name__)
+    sys.exit(exit_status.bad_config)
 except Exception as error:
     write_traceback(error, module=__name__)
     sys.exit(exit_status.bad_config)

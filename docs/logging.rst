@@ -335,14 +335,15 @@ The ``rotate`` policy accepts three kinds of value:
     No rotation (the default); the file grows indefinitely.
 
 *size-like*
-    A byte threshold such as ``512MB`` or ``2GB``: the active file is rotated once it
-    reaches that size. Accepted units are ``KB``, ``MB``, ``GB``, and ``TB`` — each a power
-    of 1024 — and a bare number is interpreted as bytes. Rotated files are numbered
-    (``name.1``, ``name.2``, …).
+    A byte threshold such as ``512MB`` or ``2G``: the active file is rotated once it
+    reaches that size. Accepted units are ``K``, ``M``, ``G``, and ``T``, alone or followed by
+    ``B`` or ``iB`` — each a power of 1024 — and a bare number is interpreted as bytes. The
+    whole value must be a size; anything else is read as a cron expression. Rotated files are
+    numbered (``name.1``, ``name.2``, …).
 
 *time-like*
     A cron expression (requires the ``croniter`` package) such as ``@hourly``, ``@daily``,
-    ``@midnight``, or ``0 1 * * 0``: the file is rotated on that schedule. ``@daily`` and
+    ``@midnight``, ``0 1 * * 0``, or ``30 2 * * *``: the file is rotated on that schedule. ``@daily`` and
     ``@midnight`` name rotated files by date (``name.YYYYMMDD``); any other expression also
     includes the time (``name.YYYYMMDD-HHMMSS``).
 

@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Nov 08, 2026" "2.8.6" "hypershell"
+.TH "HYPER-SHELL" "1" "Nov 11, 2026" "2.8.7" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -330,12 +330,22 @@ for you and if \fB\-\-failures\fP is enabled these task args will be sent to a l
 Timeout in seconds for clients. Automatically shutdown if no tasks received (default: never).
 .sp
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30:00\fP).
 .TP
 .B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit (default: none).
 .sp
 Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
 If the process still persists the executor itself will shutdown.
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30:00\fP).
+Individual tasks can override this with inline comments, which take the same forms (e.g.,
+\fB#HYPERSHELL: timeout:1:30:00\fP).
 .TP
 .B \fB\-c\fP, \fB\-\-cores\fP \fINUM\fP
 Number of CPU cores required per task (default: none).
@@ -346,9 +356,12 @@ is available. Used with resource\-aware scheduling and backfill.
 .B \fB\-m\fP, \fB\-\-memory\fP \fIMEM\fP
 Amount of memory required per task (default: none).
 .sp
-Specify memory size with units (e.g., \(aq4GB\(aq, \(aq512MB\(aq). Tasks will only be
-executed when the required memory is available. Used with resource\-aware
-scheduling and backfill.
+Specify memory size in bytes or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed
+by \fBB\fP or \fBiB\fP, in any case (e.g., \(aq4GB\(aq, \(aq512M\(aq). Each unit is a power of 1024, so
+\fB16G\fP, \fB16GB\fP and \fB16GiB\fP are the same size. Individual tasks can override this with
+inline comments, which take the same forms (e.g., \fB#HYPERSHELL: memory:8G\fP). Tasks will
+only be executed when the required memory is available. Used with resource\-aware scheduling
+and backfill.
 .TP
 .B \fB\-C\fP, \fB\-\-client\-cores\fP \fINUM\fP
 Limit available cores per client (default: all cores).
@@ -363,8 +376,10 @@ See also \fB\-\-num\-threads=0\fP\&.
 Limit available memory per client (default: all memory).
 .sp
 Sets an upper bound on the amount of memory that each client can use.
-Specify memory size with units (e.g., \(aq16GB\(aq, \(aq4096MB\(aq). This allows running
-multiple clients on the same node by partitioning resources.
+Specify memory size in bytes or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed
+by \fBB\fP or \fBiB\fP, in any case (e.g., \(aq16G\(aq, \(aq4096MB\(aq). Each unit is a power of 1024, so
+\fB16G\fP, \fB16GB\fP and \fB16GiB\fP are the same size. This allows running multiple clients on
+the same node by partitioning resources.
 .TP
 .B \fB\-\-monitor\fP
 Enable resource monitoring for tasks.
@@ -608,8 +623,10 @@ Amount of memory required per task (default: none).
 .sp
 When an input \fIFILE\fP is provided, a \fIsubmit\fP thread is launched to read and submit tasks.
 This option sets the default memory requirement for all submitted tasks.
-Specify memory size with units (e.g., \(aq4GB\(aq, \(aq512MB\(aq). Individual tasks can override this
-with inline comments (e.g., \fB#HYPERSHELL: memory:8GB\fP).
+Specify memory size in bytes or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed
+by \fBB\fP or \fBiB\fP, in any case (e.g., \(aq4GB\(aq, \(aq512M\(aq). Each unit is a power of 1024, so
+\fB16G\fP, \fB16GB\fP and \fB16GiB\fP are the same size. Individual tasks can override this with
+inline comments, which take the same forms (e.g., \fB#HYPERSHELL: memory:8G\fP).
 .sp
 See also \fB\-\-task\-cores\fP and \fB\-\-task\-timeout\fP\&.
 .TP
@@ -618,7 +635,12 @@ Task\-level walltime limit in seconds (default: none).
 .sp
 When an input \fIFILE\fP is provided, a \fIsubmit\fP thread is launched to read and submit tasks.
 This option sets the default timeout for all submitted tasks. Individual
-tasks can override this with inline comments (e.g., \fB#HYPERSHELL: timeout:3600\fP).
+tasks can override this with inline comments, which take the same forms (e.g.,
+\fB#HYPERSHELL: timeout:3600\fP or \fB#HYPERSHELL: timeout:1:30:00\fP).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30:00\fP).
 .sp
 See also \fB\-\-task\-cores\fP and \fB\-\-task\-memory\fP\&.
 .TP
@@ -824,12 +846,20 @@ Timeout in seconds for client. Automatically shutdown if no tasks received (defa
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
 The timeout counts from when the client starts, after any \fB\-\-delay\-start\fP, so the delay
 does not count toward it.
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30:00\fP).
 .TP
 .B \fB\-W\fP, \fB\-\-task\-timeout\fP \fISEC\fP
 Task\-level walltime limit (default: none).
 .sp
 Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
 If the process still persists the executor itself will shutdown.
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30:00\fP).
 .TP
 .B \fB\-C\fP, \fB\-\-client\-cores\fP \fINUM\fP
 Limit available cores for client (default: all cores).
@@ -844,8 +874,10 @@ See also \fB\-\-num\-threads=0\fP\&.
 Limit available memory for client (default: all memory).
 .sp
 Sets an upper bound on the amount of memory that the client can use.
-Specify memory size with units (e.g., \(aq16GB\(aq, \(aq4096MB\(aq). This allows running
-multiple clients on the same node by partitioning resources.
+Specify memory size in bytes or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed
+by \fBB\fP or \fBiB\fP, in any case (e.g., \(aq16G\(aq, \(aq4096MB\(aq). Each unit is a power of 1024, so
+\fB16G\fP, \fB16GB\fP and \fB16GiB\fP are the same size. This allows running multiple clients on
+the same node by partitioning resources.
 .TP
 .B \fB\-\-monitor\fP
 Enable resource monitoring for tasks.
@@ -1001,15 +1033,22 @@ this with inline comments (e.g., \fB#HYPERSHELL: cores:8\fP).
 .B \fB\-m\fP, \fB\-\-memory\fP \fIMEM\fP
 Amount of memory required per task (default: none).
 .sp
-Sets the default memory requirement for all submitted tasks. Specify memory size with
-units (e.g., \(aq4GB\(aq, \(aq512MB\(aq). Individual tasks can override this with inline comments
-(e.g., \fB#HYPERSHELL: memory:8GB\fP).
+Sets the default memory requirement for all submitted tasks. Specify memory size in bytes
+or with a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone or followed by \fBB\fP or \fBiB\fP, in any
+case (e.g., \(aq4GB\(aq, \(aq512M\(aq). Each unit is a power of 1024, so \fB16G\fP, \fB16GB\fP and \fB16GiB\fP
+are the same size. Individual tasks can override this with inline comments, which take the
+same forms (e.g., \fB#HYPERSHELL: memory:8G\fP).
 .TP
 .B \fB\-W\fP, \fB\-\-timeout\fP \fISEC\fP
 Task\-level walltime limit in seconds (default: none).
 .sp
 Sets the default timeout for all submitted tasks. Individual tasks can override this
-with inline comments (e.g., \fB#HYPERSHELL: timeout:3600\fP).
+with inline comments, which take the same forms (e.g., \fB#HYPERSHELL: timeout:3600\fP or
+\fB#HYPERSHELL: timeout:1:30:00\fP).
+.sp
+Specify a number of seconds, units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP in that order, whole or
+fractional (e.g., \fB90m\fP, \fB1h30m\fP, \fB1.5h\fP, \fB1d12h\fP), or a Slurm time \fBMM:SS\fP,
+\fBHH:MM:SS\fP, \fBD\-HH\fP, \fBD\-HH:MM\fP or \fBD\-HH:MM:SS\fP (e.g., \fB1:30:00\fP).
 .TP
 .B \fB\-g\fP, \fB\-\-group\fP \fINUM\fP
 Task group for dependency management (default: 0).
@@ -1976,9 +2015,10 @@ Format preset for the file (default: \fBsystem\fP). Accepts the same options as
 .TP
 .B \fB\&.rotate\fP
 Rotation policy (default: \fBnever\fP). Either a size threshold such as \fB512MB\fP
-(units \fBKB\fP/\fBMB\fP/\fBGB\fP/\fBTB\fP, powers of 1024; a bare number is bytes) or a
-cron expression such as \fB@daily\fP, \fB@midnight\fP, or \fB0 1 * * 0\fP (requires the
-\fBcroniter\fP package). Sending \fBSIGHUP\fP rotates on demand.
+or \fB2G\fP (units \fBK\fP/\fBM\fP/\fBG\fP/\fBT\fP, alone or followed by \fBB\fP or \fBiB\fP,
+powers of 1024; a bare number is bytes) or a cron expression such as \fB@daily\fP,
+\fB@midnight\fP, or \fB0 1 * * 0\fP (requires the \fBcroniter\fP package). A cron
+expression may begin with a digit. Sending \fBSIGHUP\fP rotates on demand.
 .TP
 .B \fB\&.compress\fP
 Compression for rotated files (default: none). One of \fBgzip\fP, \fBbzip\fP,
@@ -2242,6 +2282,8 @@ Even on the largest scales the default interval should be fine.
 Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
 .sp
 This feature allows for gracefully scaling down a cluster when task throughput subsides.
+A string takes the same forms as \fB\-T\fP/\fB\-\-timeout\fP: units \fBd\fP, \fBh\fP, \fBm\fP and
+\fBs\fP (e.g., \fB\(dq1h30m\(dq\fP, \fB\(dq1.5h\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30:00\(dq\fP, \fB\(dq1\-12\(dq\fP).
 .TP
 .B \fB\&.cores\fP
 Client\-level limit on CPU cores available for running tasks (default: all available).
@@ -2255,7 +2297,8 @@ See also \fB\-C\fP/\fB\-\-client\-cores\fP command\-line option.
 Client\-level limit on memory (in bytes) available for running tasks (default: all available).
 .sp
 A value of \fB0\fP means unconstrained. Set a lower value to partition a node\(aqs memory
-between multiple clients.
+between multiple clients. A string may carry a unit \fBK\fP, \fBM\fP, \fBG\fP or \fBT\fP, alone
+or followed by \fBB\fP or \fBiB\fP, each a power of 1024 (e.g., \fB\(dq16G\(dq\fP).
 .sp
 See also \fB\-M\fP/\fB\-\-client\-memory\fP command\-line option.
 .TP
@@ -2308,16 +2351,21 @@ See also \fB\-c\fP/\fB\-\-cores\fP command\-line option.
 .B \fB\&.memory\fP
 Default memory (in bytes) required per task (default: unconstrained).
 .sp
-A value of \fB0\fP means unconstrained. Used with resource\-aware scheduling and backfill;
-individual tasks may override this inline (e.g., \fB# HYPERSHELL: memory:8GB\fP).
+A value of \fB0\fP means unconstrained. A string may carry a unit \fBK\fP, \fBM\fP, \fBG\fP or
+\fBT\fP, alone or followed by \fBB\fP or \fBiB\fP, each a power of 1024 (e.g., \fB\(dq16G\(dq\fP). Used
+with resource\-aware scheduling and backfill; individual tasks may override this inline in
+the same forms (e.g., \fB# HYPERSHELL: memory:8G\fP).
 .sp
 See also \fB\-m\fP/\fB\-\-memory\fP command\-line option.
 .TP
 .B \fB\&.timeout\fP
-Task\-level walltime limit (default: none).
+Task\-level walltime limit in seconds (default: none).
 .sp
 Executors will send a progression of SIGINT, SIGTERM, and SIGKILL.
 If the process still persists the executor itself will shutdown.
+A string takes the same forms as \fB\-W\fP: units \fBd\fP, \fBh\fP, \fBm\fP and \fBs\fP (e.g.,
+\fB\(dq1h30m\(dq\fP, \fB\(dq1.5h\(dq\fP) or a Slurm time (e.g., \fB\(dq1:30:00\(dq\fP, \fB\(dq1\-12\(dq\fP); individual
+tasks may override this inline in the same forms (e.g., \fB# HYPERSHELL: timeout:1h30m\fP).
 .TP
 .B \fB\&.signalwait\fP
 Wait period in seconds between signal escalation on task cancellation (default: 10).
