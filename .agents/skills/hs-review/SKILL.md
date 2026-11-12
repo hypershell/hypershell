@@ -59,8 +59,9 @@ Additional instructions provided with the invocation: $ARGUMENTS
 - **External verification is the spine.** Every finding must cite an executed command
   (`uv run pytest`, real CLI in a throwaway site via `.agents/factory/bin/temp_site.sh`, the docs
   build with `-W` when docs or user-visible behaviour are touched). A user-visible change whose prose
-  page, `versionadded`/`versionchanged` marker or `docs/whats_new.rst` entry is missing is an
-  `AGENTS.md` §12 finding. No assertion-only findings.
+  page or `versionadded`/`versionchanged` marker is missing is an `AGENTS.md` §12 finding. Its
+  user-facing note belongs in the PR's squash commit body and is drafted at publish, after review,
+  so it is not graded here. No assertion-only findings.
 - **Refute before reporting.** Try to disprove each candidate; classify `CONFIRMED` (reproduced) vs
   `PLAUSIBLE` (needs human triage). Default to dropping when uncertain.
 - **Scope is narrow:** correctness bugs, GOAL R-ID gaps, AGENTS.md invariant violations

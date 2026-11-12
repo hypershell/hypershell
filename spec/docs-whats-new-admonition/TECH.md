@@ -3,10 +3,10 @@ slug: docs-whats-new-admonition
 title: Replace the docs banner and What's new page with an index admonition
 kind: docs
 appetite: small
-status: in_progress
+status: in_review
 branch: feature/docs-whats-new-admonition
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-11'
 phases:
 - id: P1
@@ -37,7 +37,7 @@ phases:
 - id: P2
   name: 'Factory lockstep: one rule, the note in the squash body, hs-release refreshes
     the admonition'
-  status: pending
+  status: done
   satisfies:
   - R5
   - R6
@@ -47,7 +47,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: 'test -z "$(git ls-files -z -- '':!spec/'' | xargs -0 grep -s -I -l -E ''whats_new|site_notice'')"
     && test -z "$(git ls-files -z -- '':!spec/'' | xargs -0 grep -s -I -l -i -E ''not
     yet released|site notice'')" && test "$(grep -l ''squash commit body'' AGENTS.md
@@ -145,22 +145,22 @@ squash commit body, `hs-release` Step 3a refreshes the admonition, and no tracke
 Keep the literal phrase `squash commit body` unbroken on one line in each of the seven R5/R6 files,
 and the new Step 3a heading and commit subject each on one line: the verify greps them.
 
-- [ ] `AGENTS.md` conventions bullet: swap the *Not yet released* clause for the note-in-squash-commit-body
+- [x] `AGENTS.md` conventions bullet: swap the *Not yet released* clause for the note-in-squash-commit-body
       clause; keep the `:pr:`-at-release sentence. (`CLAUDE.md` is a symlink — no separate edit.)
-- [ ] `AGENTS.md` § Docs: replace the `docs/whats_new.rst` and site-notice sentences with the note
+- [x] `AGENTS.md` § Docs: replace the `docs/whats_new.rst` and site-notice sentences with the note
       rule and `hs-release`'s two release-time jobs (draft GitHub notes from `git log`; refresh the
       `docs/index.rst` admonition at each pre-release or full release).
-- [ ] `.agents/factory/invariants.md` §12, `.agents/factory/templates/TECH.md` Conventions,
+- [x] `.agents/factory/invariants.md` §12, `.agents/factory/templates/TECH.md` Conventions,
       `.agents/skills/hs-build/SKILL.md` same-commit parenthetical: the same swap.
-- [ ] `.agents/factory/review-rubric.md` §3 and `.agents/skills/hs-review/SKILL.md`: the §12
+- [x] `.agents/factory/review-rubric.md` §3 and `.agents/skills/hs-review/SKILL.md`: the §12
       finding is a missing prose update or marker, or a `-W` warning; state the note rule as
       context (drafted at publish, not graded at review).
-- [ ] `.agents/skills/hs-publish/SKILL.md`: add the **User-facing note** body section (user-visible
+- [x] `.agents/skills/hs-publish/SKILL.md`: add the **User-facing note** body section (user-visible
       changes only; one to three sentences; top-level commands only, no `-k`; written to be the
       squash commit body); drop `docs/whats_new.rst` from *Docs & completions* (keep the `:pr:`
       sentence); Step 4a `--body "{user-facing note, or empty}"`; Step 4b adds `-m "{user-facing
       note}"` when there is one.
-- [ ] `.agents/skills/hs-release/SKILL.md`: Step 3a per PLAN §2 — new heading, item 1 unchanged,
+- [x] `.agents/skills/hs-release/SKILL.md`: Step 3a per PLAN §2 — new heading, item 1 unchanged,
       item 2 refreshes the admonition (highlights, two links, curl each, keep a not-yet-live link and
       raise it at Step 7), item 3 subject `[docs] Complete version markers and refresh the index
       admonition for X.Y.Z`; drop the move-and-reset, `whats_new_X_Y.rst` and notice text. Step 7 and

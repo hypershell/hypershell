@@ -198,8 +198,9 @@ subsystems.
 - A CLI/feature change updates the affected `docs/_include/*.rst` help snippets **and** the `share/`
   completions **in the same commit**.
 - A user-visible change also updates its prose page in the same commit, marked `.. versionadded::`
-  / `.. versionchanged::` with the release line, plus a *Not yet released* entry in
-  `docs/whats_new.rst` (`AGENTS.md` § Docs). The docs build passes with `-W`.
+  / `.. versionchanged::` with the release line. Its user-facing note goes in the PR's
+  squash commit body, which `hs-publish` drafts (`AGENTS.md` § Docs). The docs build passes with
+  `-W`.
 - The wheel ships `share/`; a CI metadata job asserts those paths — keep `share/` and the CI list in
   lockstep.
 - Supported Python is **3.11–3.14**; do not reintroduce 3.9/3.10 shims.
