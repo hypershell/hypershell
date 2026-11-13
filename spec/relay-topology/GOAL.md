@@ -39,9 +39,10 @@ Under autoscaling with sites, the true server stops launching processes and inst
 **desired topology**: per-site, per-zone client counts computed from the same group- and
 zone-scoped pressure signal Z3 builds. The server may run off-cluster with no launcher at all. When
 a zone needs another client, the server's autoscaler picks the next site for that zone by its
-distribution policy — **`fill`** (saturate sites in the declared preference order, the SU-cost
-mode) or **`spread`** (distribute across live sites) — and only among sites whose relay serves that
-zone.
+distribution policy — **`spread`** (distribute across live sites, the default) or **`fill`**
+(saturate sites in preference order, the SU-cost mode) — and only among sites whose relay serves
+that zone. Any relay that connects with the key takes part; the topology needs no site
+configuration on the server, and an ordered site list matters only to `fill`.
 
 Each relay is a delegate. It advertises upstream the zones it serves and, for each, its own
 `min`/`max`/`init` bounds, configured beside that zone's launcher. It watches the published
@@ -55,20 +56,24 @@ A relay against a server that publishes no topology behaves exactly as the relay
 ## Acceptance criteria (the contract)
 
 The R-IDs are the seed's (`issues/relay-topology.md`); the bracket gives the original `relay`
-seed's R-ID each came from. R1 and R4 are amended by the maintainer ruling of 2026-11-12
-(Clarifications); every other SHALL is the seed's.
+seed's R-ID each came from. R1, R4, R5 and R6 are amended by the maintainer rulings of
+2026-11-12 (Clarifications); every other SHALL is the seed's.
 
 - **R1** [relay R11; *amended 2026-11-12*] — The server's autoscale configuration SHALL accept a
-  site-distribution policy — **`fill`** (saturate sites in declared order, each up to its `max`,
-  before spilling to the next — the SU/cost preference mode) or **`spread`** (distribute demand
-  across live sites, respecting each one's `min`/`max`) — and an ordered list of site names that
-  is the `fill` preference order. Each zone a relay serves SHALL accept its own `min`/`max`/`init`
+  site-distribution policy — **`spread`** (distribute demand across live sites as peers,
+  respecting each one's `min`/`max`; the default) or **`fill`** (saturate sites in preference
+  order, each up to its `max`, before spilling to the next — the SU/cost preference mode) — and an
+  **optional** ordered list of site names that only `fill` reads. Under `fill`, listed live sites
+  SHALL come first in declared order and unlisted live sites SHALL follow in the order they first
+  registered. The topology SHALL need no server-side site configuration: every relay that connects
+  with the key SHALL take part. Each zone a relay serves SHALL accept its own `min`/`max`/`init`
   client counts in the relay's configuration, in that zone's entry beside its launcher and other
   per-zone settings (`[relay.zone.<name>]`, and the relay's own settings for a relay that names
-  no zone table). The server SHALL plan with the bounds the relays advertise (R4): a site's entry
-  for a zone SHALL stay within that site's advertised `min`/`max` for the zone.
-  [NEEDS CLARIFICATION: Q1 — whether a live site absent from the declared list takes part in the
-  topology, and if so where it falls in `fill` order.]
+  no zone table); `min` SHALL default to 0. The server SHALL plan with the bounds the relays
+  advertise (R4): a site's entry for a zone SHALL stay within that site's advertised `min`/`max`
+  for the zone, and a zone's explicit `min` (and its `init` at start) SHALL be held even while the
+  zone's work is gated behind the current group; growth above that floor SHALL follow Z3's
+  group-scoped demand.
 - **R2** [relay R12] — WHILE autoscaling with sites, the true server SHALL NOT launch client
   processes via a local launcher; it SHALL derive total demand from the existing pressure signal
   (group- and zone-scoped, per Z3) and publish a **versioned desired topology** — per-site and,
@@ -85,9 +90,11 @@ seed's R-ID each came from. R1 and R4 are amended by the maintainer ruling of 20
   recorded the relay's previous one, overwriting the old values, and SHALL account fleets and
   liveness per site and per zone, plan each zone's distribution over the live sites that serve it
   with their recorded bounds, and attribute clients and tasks to sites in presentation. A zone
-  SHALL be assigned only to sites whose relay serves it.
-  [NEEDS CLARIFICATION: Q2 — what the server does while two live relays advertise the same site
-  name.] *(The relay cycle already sends the site on every relay identity's beat and forwards the
+  SHALL be assigned only to sites whose relay serves it. The site identity SHALL default to the
+  relay host's hostname. WHILE two live relays advertise the same site, the most recently
+  registered one SHALL hold the site's topology entries, the older one SHALL be assigned zero (its
+  clients retiring through idle exit, never terminated, per R5), and the server SHALL log a warning
+  naming both. *(The relay cycle already sends the site on every relay identity's beat and forwards the
   roster attributed to it; this extends it to served zones, bounds, and per-site, per-zone
   accounting and liveness.)*
 - **R5** [relay R15; *ruling recorded 2026-11-12*] — Scale-down SHALL remain idle-exit driven: a
@@ -98,11 +105,12 @@ seed's R-ID each came from. R1 and R4 are amended by the maintainer ruling of 20
   in it, THEN the topology SHALL assign that site-zone no new launches and the excess SHALL retire
   through the existing idle-exit timeout; a raised bound SHALL only let a later topology assign
   more.
-- **R6** [relay R16, topology half] — Topology SHALL be optional: against an upstream that
-  publishes none, or for a site not declared in policy, the relay SHALL fall back to its
-  locally-configured fleet size (the behaviour the relay cycle ships). *(The "site not declared"
-  clause is the subject of Q1.)*
-- **R7** — The server's site list and distribution policy, and the relay's per-zone bounds, SHALL be
+- **R6** [relay R16, topology half; *amended 2026-11-12*] — Topology SHALL be optional: against an
+  upstream that publishes none (one not autoscaling with sites, or an older server), the relay
+  SHALL fall back to its locally-configured fleet size (the behaviour the relay cycle ships).
+  *(The seed's "or for a site not declared in policy" clause is dropped: every connected relay
+  takes part, Q1 ruling.)*
+- **R7** — The server's distribution policy and optional site list, and the relay's per-zone bounds, SHALL be
   documented in `docs/_include/*.rst`, the configuration reference and `share/` completions in the
   same commit as the change.
 
@@ -128,7 +136,8 @@ seed's R-ID each came from. R1 and R4 are amended by the maintainer ruling of 20
 - **Q:** Site model — ordered list vs weights, and does the true server keep an implicit local
   launcher? — **A:** **Ordered sites, no implicit local site** (resolved 2026-08-02, relay
   shaping). `fill` order *is* the declared order (SU preference). *The ordered list stays on the
-  server; the per-site bounds it once carried moved to the relay (2026-11-12, below).*
+  server but is optional and read only by `fill`; the per-site bounds it once carried moved to the
+  relay (2026-11-12, below).*
 - **Q:** Relay buffer depth? — **A:** **Bounded, demand-driven** (resolved 2026-08-02, relay
   shaping); hoarding breaks fill/spread fidelity. Delivered by the relay cycle's R8.
 - **2026-11-04 — Carved from `relay`** (maintainer ruling at relay's promotion): *"Still out,
@@ -157,7 +166,7 @@ seed's R-ID each came from. R1 and R4 are amended by the maintainer ruling of 20
   topology. But it seems more elegant to define those at the relay site."*
 - **2026-11-12 — Fill order stays on the server** (foreman reading). The 2026-08-02 resolution
   holds: `fill` order is the declared site order in the server's autoscale configuration (the
-  campaign's cost preference). How live sites absent from that list are treated is Q1.
+  campaign's cost preference). Live sites absent from that list: Q1 ruling below.
 - **2026-11-12 — Advertise on connect; changes work themselves out** (maintainer ruling; settles
   how bounds are negotiated and what a change mid-run does; carried into R4 and R5). A relay sends
   its configuration (site identity, served zones, per-zone `min`/`max`/`init`) when it connects to
@@ -172,8 +181,33 @@ seed's R-ID each came from. R1 and R4 are amended by the maintainer ruling of 20
   to organically work itself out - if we lower the max clients on a zone we just let them stop on
   their own due to timeout."*
 
-**Readings this GOAL assumes** (shaping, 2026-11-12; each follows from the rulings and the code;
-confirm at the plan gate):
+**Ruled at the GOAL gate** (2026-11-12):
+
+- **2026-11-12 — Q1: relays join by default, and the default policy is `spread`** (maintainer
+  ruling; amends R1 and R6). Any relay that connects with the key takes part in the topology; the
+  topology needs no server-side site configuration. The server's ordered site list is optional and
+  matters only under `fill`: listed sites come first, in declared order, and unlisted live sites
+  follow in first-registration order. Under `spread`, every live site is a peer. The seed's R6
+  undeclared-site clause is dropped; R6 keeps only its first half (an upstream that publishes no
+  topology — not autoscaling with sites, or an older server). In the maintainer's words: *"we
+  would actually have a default policy of "spread" and allow relays to join (they have the key!)
+  and treat it as the default case without required config."*
+- **2026-11-12 — Site naming** (foreman reading; confirm at the plan gate; carried into R4).
+  `[relay] site` is optional and defaults to the relay host's hostname. A hostname is stable across
+  restarts, so a bounced relay reclaims its own site under the Q2 ruling, and it reads well in
+  logs. Two relays on one host must set `site` explicitly. The maintainer asked whether a hostname
+  or a UUID suits better; a UUID would make every restart a new site until the old one is evicted.
+  *(This is already how `relay_site` behaves, `relay/upstream.py:159-161`, `core/config.py:203`.)*
+- **2026-11-12 — Q2: the most recent registration holds a shared site** (maintainer ruling; amends
+  R4). When two live relays advertise the same site, the most recently registered one holds the
+  site's topology entries. The older one is assigned zero, and its clients retire through idle
+  exit, never terminated. A warning names both.
+- **2026-11-12 — Zone floor** (maintainer ruling; amends R1). A relay zone's explicit `min` (and
+  `init` at start) is a floor held even while the zone's work is gated behind the current group:
+  keeping clients warm is the operator's choice. The default `min` is 0, so gated zones get nothing
+  unless an operator asks. Growth above the floor follows Z3's demand.
+
+**Foreman readings for the plan gate** (shaping, 2026-11-12; they stand as recorded):
 
 - **Server knobs under sites.** With sites, the server's `[autoscale]` fixed/dynamic `policy`,
   `factor` and `period` keep their Z3 meaning for computing each zone's demand. Its own
@@ -185,31 +219,6 @@ confirm at the plan gate):
   (`relay/site.py:104-111`, `:147-153`, which already take `init`/`min`/`max`, today all equal to
   `size`). `size` stays as shorthand for `init` = `min` = `max`, so a relay configured only with
   `size` behaves exactly as today.
-- **Floors and gated zones.** A site's `min` and `init` for a zone are the operator's floor at that
-  site, held whether or not the zone has current-group work, as the relay's fixed fleets and Z3's
-  own zone do today. Growth above the floor follows Z3's group-scoped demand, so a zone gated behind
-  the current group (Z3 R2) gets nothing above its floors.
-
-**Open — block `hs-plan` until answered:**
-
-- **Q1 — Live sites the server's list does not name.** The seed's R6 says a site "not declared in
-  policy" falls back to its local fleet, so it never enters the topology. The 2026-11-12
-  restatement ("any number of relays", sites self-describing their zones and bounds) reads as
-  though every live relay takes part, which would need an order for unlisted sites under `fill`.
-  **Proposed:** keep R6 as written — an unlisted site runs its local fleet and is not in the
-  topology; the server logs that it is ignoring it. This keeps the seed's SHALL and makes `fill`
-  order total. *Alternative, if every live relay should take part:* under `fill`, unlisted sites
-  follow every listed one, in the order they first registered; under `spread` they are peers of
-  the listed ones; R6's "site not declared" clause is dropped.
-- **Q2 — Two live relays advertising the same site name.** The site name is free text, defaulting
-  to the relay's host name (`relay/upstream.py:159-161`), and a restarted relay comes back under new
-  upstream identities (`relay/upstream.py:127-133`, from a per-process `INSTANCE`,
-  `core/logging.py:63`) while the old ones wait for eviction. **Proposed:** the topology is keyed by
-  site name, and while two live relays name one site, the most recently registered relay holds the
-  site's entries and the older one is assigned zero, with a warning naming both; once the older is
-  evicted the warning clears. This covers the restart case without a refusal window. *Alternative:*
-  refuse the second registration with an error (cleaner, but a quick restart then waits out
-  `evict_after`).
 
 **Drift since the seed was written** (re-confirmed against `develop` `22684fd`, with relay #82 and
 Z3 #99 landed; scope holds):
