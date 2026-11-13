@@ -42,7 +42,12 @@ one ``[relay.zone.NAME]`` table per zone). Upstream it is then one *client* per 
 own identity, all over the same connection: it takes the zones in turn, and asks for each only as
 much as that zone's own *clients* at the site have room for. At the site it keeps one fleet of
 *clients* per zone, launched alike but each serving its own zone, with that zone's own launcher,
-launcher arguments and size if its table gives them; the one relay-local *server* serves them all.
+launcher arguments, size and client bounds if its table gives them; the one relay-local *server*
+serves them all. Every launch names its zone to the launcher: ``{zone}`` in the launcher or its
+arguments is replaced by the zone's name (``default`` for the default zone), and the launched process
+has it in ``HYPERSHELL_ZONE``. Each zone advertises its client bounds upstream; against an upstream
+*server* autoscaling with relay sites, each fleet follows the topology it publishes (see
+:ref:`Topology <cli_relay_topology>`).
 The first zone's identity lists every *client* at the site upstream. Each identity sends its own
 heartbeat, so if the relay fails, the upstream *server* evicts each one and puts back what each
 held, in every zone.

@@ -87,7 +87,7 @@ Top-level package `src/hypershell/`:
 | `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection. `InitDBApp` (`hs initdb`) and the `initdb`/`checkdb`/`ensuredb` helpers live in `data/__init__.py`; the schema-upgrade step in `data/upgrade.py`. |
 | `data/model.py` | `Entity` base + `Task`, `Client`, and `Source` ORM models (`Source` records submission provenance for re-submission gating; `DIRECT_SOURCE_ID`/`STDIN_SOURCE_ID` are reserved source ids). **Most query/state logic lives as `Task` classmethods here.** |
 | `cluster/` | `__init__.py` (`ClusterApp`/`hsx`), `local.py` (`LocalCluster`), `remote.py` (`RemoteCluster`, `AutoScalingCluster`), `ssh.py` (`SSHCluster`), `launch.py` (`client_launch()`, the one launched-client builder; `LaunchActuator`), `demand.py` (per-zone autoscaling demand: `read_zone_loads`, `fleet_demand`). |
-| `relay/` | `hs relay`: a site's link to an upstream server. `__init__.py` (`RelayApp`, `RelayThread`: composition, supervision, shutdown order, signal handlers), `upstream.py` (puller, returner and heartbeat FSMs; one upstream identity per served zone), `store.py` (relay-only tables `relay_task`/`relay_result` on their own `MetaData`; durable insert, outbox), `site.py` (site cluster and per-zone fleets, credential fence). The reconnecting upstream link is `core/reconnect.py` (`UpstreamLink`). |
+| `relay/` | `hs relay`: a site's link to an upstream server. `__init__.py` (`RelayApp`, `RelayThread`: composition, supervision, shutdown order, signal handlers), `upstream.py` (puller, returner and heartbeat FSMs; one upstream identity per served zone), `store.py` (relay-only tables `relay_task`/`relay_result` on their own `MetaData`; durable insert, outbox), `site.py` (site cluster and per-zone fleets, their topology-following `SiteScaler`, credential fence). The reconnecting upstream link is `core/reconnect.py` (`UpstreamLink`). |
 
 `core/` modules: `sys` (import-time `sys.path` sanitizer), `config`, `logging` (also
 `DISTRIBUTED_ROLES`, the commands that write a log of their own), `signal`,
@@ -419,10 +419,32 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   `client_launch(..., expose_zone=True)` per zone: `{zone}` is replaced in launcher words only
   (never the client's `-t`), `HYPERSHELL_ZONE` is added to the launch env (never to the Open MPI
   forward list), `expose_zone` refuses SSH, and the own default zone keeps today's argv (no
-  `--zone`). The relay's site cluster passes `discover_zones=False` and exposes nothing.
+  `--zone`). The relay's site cluster passes `discover_zones=False`; relay launches expose their
+  zone all the same (every zone's is `relay/site.py::zone_launch`, built with `expose_zone=True`), in
+  every mode.
 - The autoscaler reads every zone from the group the scheduler loads from
   (`Scheduler.active_group`, else `Task.starting_group`, the scheduler's own start rule), not
   `Task.current_group()`, which is only the most recently scheduled group.
+- A server autoscaling with relay sites (`hs server --autoscaling`, `cluster/topology.py`
+  `AutoScalingServer`) launches nothing; it publishes. Relay identities advertise their zone,
+  bounds and launched count on every heartbeat into an in-memory `SiteRegistry`; the
+  `TopologyPublisher` reads zones through `demand.scheduler_group` (the same group rule, pinned by
+  a test), plans with the pure `plan_sites`, and publishes a versioned topology on the dispatcher
+  (`Dispatcher.topology`, the third remotely exposed method): a new version only when its entries
+  change, and at every check the count of checks made (`checks`, under the same version otherwise).
+  Duplicates are held relay-wide: per site, the relay whose instance key (its first identity, on
+  every beat) registered last holds every zone it serves, planned on its own clients alone (an older
+  relay's last-advertised clients do not count against the site, so a restarted relay is planned at
+  once), and every older relay there gets zero.
+- The relay's fleets reconcile a published topology and never terminate: each is a
+  `relay/site.py::SiteScaler` with one rule. It launches `target - max(basis, live)` (`live`: its
+  zone's clients still running, never a count of launches) each time it learns a new basis, the count
+  the server's plan rests on: a new version's `seen`, or, while `live < target` under an unchanged
+  version, `live` itself once the server has finished two checks (`checks`) past a topology read that
+  followed a beat reporting it. It never launches beyond the target in hand nor on its own period
+  alone, so a slow server is never read as clients that left uncounted, and a counted client that
+  left before the relay read the plan made with it is replaced. With no topology (none published, or
+  an older server) it is the fixed fleet it always was.
 
 ## Configuration
 
@@ -559,8 +581,8 @@ compatibility until v3, but are never referenced.
   primary). **Nothing in the relay dials its own relay-local server in-process** (the upstream TLS
   trust is process-wide; the local listener keeps its own context), and tests run the upstream
   server and each relay as separate processes. Site clients are launched only through
-  `client_launch()` (the first zone's via `AutoScalingCluster`, further zones' via
-  `relay/site.py::zone_launch`, built the same way), behind `fence_site`, which keeps the upstream key
+  `client_launch()` (every zone's via `relay/site.py::zone_launch`, the first zone's set as the
+  `AutoScalingCluster`'s launch), behind `fence_site`, which keeps the upstream key
   off every site command line and environment. Its signal handling is the carve-out under *Signals*.
 
 ## Working on this codebase as an agent

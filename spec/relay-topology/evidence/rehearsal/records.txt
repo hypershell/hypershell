@@ -1,0 +1,720 @@
+# The two rehearsal records (topology_collect.py), as the judge read them for judge.txt.
+# rehearsal-spread-kill.json
+{
+ "bounds": {
+  "A": {
+   "cpu": {
+    "max": 5,
+    "min": 0
+   },
+   "highmem": {
+    "max": 2,
+    "min": 0
+   }
+  },
+  "B": {
+   "cpu": {
+    "max": 5,
+    "min": 0
+   },
+   "gpu": {
+    "max": 2,
+    "min": 0
+   }
+  }
+ },
+ "distribution": "spread",
+ "dropped": [
+  {
+   "site": "B",
+   "t": 32.95
+  },
+  {
+   "site": "A",
+   "t": 58.26
+  }
+ ],
+ "duplicate_warnings": 0,
+ "events": {
+  "completed": 48.65,
+  "drain": 56.73,
+  "end": 59.79,
+  "kill": 20.41,
+  "observed": 56.72,
+  "quiet": 48.7,
+  "registered": 3.12,
+  "submitted": 5.16
+ },
+ "groups": [
+  {
+   "completed": 12,
+   "failed": 0,
+   "first_schedule": 6.49,
+   "group": 0,
+   "last_completion": 9.66,
+   "succeeded": 12,
+   "tasks": 12,
+   "zones": {
+    "gpu": 6,
+    "highmem": 6
+   }
+  },
+  {
+   "completed": 160,
+   "failed": 0,
+   "first_schedule": 12.71,
+   "group": 1,
+   "last_completion": 45.76,
+   "succeeded": 160,
+   "tasks": 160,
+   "zones": {
+    "cpu": 160
+   }
+  }
+ ],
+ "hypershell": "2.9.0a7",
+ "label": "rehearsal",
+ "last_completion": 45.76,
+ "launches": [
+  {
+   "client": "gpu",
+   "env": "gpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 12.59,
+   "t_kill": null,
+   "t_launch": 6.11,
+   "t_start": 6.16,
+   "word": "gpu"
+  },
+  {
+   "client": "highmem",
+   "env": "highmem",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 12.6,
+   "t_kill": null,
+   "t_launch": 6.14,
+   "t_start": 6.18,
+   "word": "highmem"
+  },
+  {
+   "client": "gpu",
+   "env": "gpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 14.65,
+   "t_kill": null,
+   "t_launch": 10.16,
+   "t_start": 10.2,
+   "word": "gpu"
+  },
+  {
+   "client": "highmem",
+   "env": "highmem",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 14.66,
+   "t_kill": null,
+   "t_launch": 10.18,
+   "t_start": 10.21,
+   "word": "highmem"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "signal": null,
+   "site": "B",
+   "status": 5,
+   "t_end": 20.48,
+   "t_kill": null,
+   "t_launch": 12.15,
+   "t_start": 12.2,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 47.84,
+   "t_kill": null,
+   "t_launch": 16.2,
+   "t_start": 16.23,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "B",
+   "status": 5,
+   "t_end": 20.48,
+   "t_kill": null,
+   "t_launch": 18.19,
+   "t_start": 18.22,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 47.85,
+   "t_kill": null,
+   "t_launch": 20.25,
+   "t_start": 20.29,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 47.85,
+   "t_kill": null,
+   "t_launch": 34.34,
+   "t_start": 34.37,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 47.88,
+   "t_kill": null,
+   "t_launch": 36.37,
+   "t_start": 36.41,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 47.87,
+   "t_kill": null,
+   "t_launch": 38.38,
+   "t_start": 38.41,
+   "word": "cpu"
+  }
+ ],
+ "local": true,
+ "nodes": 4,
+ "python": "3.12.13",
+ "relays": {
+  "A": {
+   "drained_at": 56.89,
+   "errors": 0,
+   "evicted": [],
+   "idle_exits": 7,
+   "killed_at": null,
+   "left": [
+    {
+     "t": 57.85,
+     "zone": "cpu"
+    },
+    {
+     "t": 57.86,
+     "zone": "highmem"
+    }
+   ],
+   "nonzero_exits": 0,
+   "rc": 0,
+   "registered": [
+    {
+     "t": 3.1,
+     "zone": "cpu"
+    },
+    {
+     "t": 3.1,
+     "zone": "highmem"
+    }
+   ],
+   "reverted": [],
+   "started": true,
+   "stopped": false,
+   "terminating": 0
+  },
+  "B": {
+   "drained_at": null,
+   "errors": 8,
+   "evicted": [
+    {
+     "t": 32.4,
+     "zone": "cpu"
+    },
+    {
+     "t": 32.4,
+     "zone": "gpu"
+    }
+   ],
+   "idle_exits": 2,
+   "killed_at": 20.41,
+   "left": [
+    {
+     "t": 32.4,
+     "zone": "cpu"
+    },
+    {
+     "t": 32.4,
+     "zone": "gpu"
+    }
+   ],
+   "nonzero_exits": 0,
+   "rc": -9,
+   "registered": [
+    {
+     "t": 2.06,
+     "zone": "cpu"
+    },
+    {
+     "t": 2.06,
+     "zone": "gpu"
+    }
+   ],
+   "reverted": [
+    {
+     "t": 32.4,
+     "zone": "cpu"
+    },
+    {
+     "t": 32.4,
+     "zone": "gpu"
+    }
+   ],
+   "started": true,
+   "stopped": false,
+   "terminating": 0
+  }
+ },
+ "run_id": "rehearsal-spread-kill",
+ "scenario": "spread-kill",
+ "schema": 1,
+ "scrub": {
+  "hosts": 0,
+  "key": 0,
+  "paths": 0,
+  "users": 0,
+  "words": 0
+ },
+ "server": {
+  "exported": true,
+  "rc": 4
+ },
+ "settings": {
+  "bundlewait": 1,
+  "evict": 12,
+  "factor": 1.0,
+  "heartrate": 1,
+  "kill_at_clients": 2,
+  "period": 1,
+  "quiet": 8,
+  "relay_period": 1,
+  "threads": 2,
+  "timeout": 4
+ },
+ "sites": [],
+ "tasks": {
+  "completed": 172,
+  "failed": 0,
+  "max_attempt": 1,
+  "rows": 172,
+  "succeeded": 172,
+  "total": 172
+ },
+ "topology_versions": 21,
+ "wall_s": 59.79,
+ "workload": [
+  {
+   "group": 0,
+   "sleep": 1.0,
+   "tasks": 6,
+   "zone": "highmem"
+  },
+  {
+   "group": 0,
+   "sleep": 1.0,
+   "tasks": 6,
+   "zone": "gpu"
+  },
+  {
+   "group": 1,
+   "sleep": 1.0,
+   "tasks": 160,
+   "zone": "cpu"
+  }
+ ]
+}
+# rehearsal-fill.json
+{
+ "bounds": {
+  "A": {
+   "cpu": {
+    "max": 3,
+    "min": 0
+   },
+   "highmem": {
+    "max": 2,
+    "min": 0
+   }
+  },
+  "B": {
+   "cpu": {
+    "max": 3,
+    "min": 0
+   },
+   "gpu": {
+    "max": 2,
+    "min": 0
+   }
+  }
+ },
+ "distribution": "fill",
+ "dropped": [
+  {
+   "site": "B",
+   "t": 42.94
+  },
+  {
+   "site": "A",
+   "t": 42.94
+  }
+ ],
+ "duplicate_warnings": 0,
+ "events": {
+  "completed": 32.19,
+  "drain": 41.36,
+  "end": 45.43,
+  "observed": 41.34,
+  "quiet": 33.32,
+  "registered": 5.18,
+  "submitted": 7.22
+ },
+ "groups": [
+  {
+   "completed": 90,
+   "failed": 0,
+   "first_schedule": 8.59,
+   "group": 0,
+   "last_completion": 24.24,
+   "succeeded": 90,
+   "tasks": 90,
+   "zones": {
+    "cpu": 90
+   }
+  },
+  {
+   "completed": 6,
+   "failed": 0,
+   "first_schedule": 27.76,
+   "group": 1,
+   "last_completion": 29.85,
+   "succeeded": 6,
+   "tasks": 6,
+   "zones": {
+    "gpu": 3,
+    "highmem": 3
+   }
+  }
+ ],
+ "hypershell": "2.9.0a7",
+ "label": "rehearsal",
+ "last_completion": 29.85,
+ "launches": [
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 26.75,
+   "t_kill": null,
+   "t_launch": 8.18,
+   "t_start": 8.21,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 25.7,
+   "t_kill": null,
+   "t_launch": 12.21,
+   "t_start": 12.25,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 25.74,
+   "t_kill": null,
+   "t_launch": 14.25,
+   "t_start": 14.3,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 26.76,
+   "t_kill": null,
+   "t_launch": 16.22,
+   "t_start": 16.25,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 26.75,
+   "t_kill": null,
+   "t_launch": 18.23,
+   "t_start": 18.26,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 26.76,
+   "t_kill": null,
+   "t_launch": 20.25,
+   "t_start": 20.29,
+   "word": "cpu"
+  },
+  {
+   "client": "gpu",
+   "env": "gpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 32.82,
+   "t_kill": null,
+   "t_launch": 27.32,
+   "t_start": 27.36,
+   "word": "gpu"
+  },
+  {
+   "client": "highmem",
+   "env": "highmem",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 32.83,
+   "t_kill": null,
+   "t_launch": 27.33,
+   "t_start": 27.37,
+   "word": "highmem"
+  }
+ ],
+ "local": true,
+ "nodes": 4,
+ "python": "3.12.13",
+ "relays": {
+  "A": {
+   "drained_at": 41.77,
+   "errors": 0,
+   "evicted": [],
+   "idle_exits": 4,
+   "killed_at": null,
+   "left": [
+    {
+     "t": 42.77,
+     "zone": "cpu"
+    },
+    {
+     "t": 42.77,
+     "zone": "highmem"
+    }
+   ],
+   "nonzero_exits": 0,
+   "rc": 0,
+   "registered": [
+    {
+     "t": 4.15,
+     "zone": "cpu"
+    },
+    {
+     "t": 4.15,
+     "zone": "highmem"
+    }
+   ],
+   "reverted": [],
+   "started": true,
+   "stopped": false,
+   "terminating": 0
+  },
+  "B": {
+   "drained_at": 41.75,
+   "errors": 0,
+   "evicted": [],
+   "idle_exits": 4,
+   "killed_at": null,
+   "left": [
+    {
+     "t": 42.77,
+     "zone": "cpu"
+    },
+    {
+     "t": 42.78,
+     "zone": "gpu"
+    }
+   ],
+   "nonzero_exits": 0,
+   "rc": 0,
+   "registered": [
+    {
+     "t": 2.1,
+     "zone": "cpu"
+    },
+    {
+     "t": 2.11,
+     "zone": "gpu"
+    }
+   ],
+   "reverted": [],
+   "started": true,
+   "stopped": false,
+   "terminating": 0
+  }
+ },
+ "run_id": "rehearsal-fill",
+ "scenario": "fill",
+ "schema": 1,
+ "scrub": {
+  "hosts": 0,
+  "key": 0,
+  "paths": 0,
+  "users": 0,
+  "words": 0
+ },
+ "server": {
+  "exported": true,
+  "rc": 4
+ },
+ "settings": {
+  "bundlewait": 1,
+  "evict": 12,
+  "factor": 1.0,
+  "heartrate": 1,
+  "kill_at_clients": 2,
+  "period": 1,
+  "quiet": 8,
+  "relay_period": 1,
+  "threads": 2,
+  "timeout": 4
+ },
+ "sites": [
+  "A",
+  "B"
+ ],
+ "tasks": {
+  "completed": 96,
+  "failed": 0,
+  "max_attempt": 1,
+  "rows": 96,
+  "succeeded": 96,
+  "total": 96
+ },
+ "topology_versions": 16,
+ "wall_s": 45.43,
+ "workload": [
+  {
+   "group": 0,
+   "sleep": 1.0,
+   "tasks": 90,
+   "zone": "cpu"
+  },
+  {
+   "group": 1,
+   "sleep": 1.0,
+   "tasks": 3,
+   "zone": "highmem"
+  },
+  {
+   "group": 1,
+   "sleep": 1.0,
+   "tasks": 3,
+   "zone": "gpu"
+  }
+ ]
+}

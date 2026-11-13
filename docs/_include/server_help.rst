@@ -151,6 +151,37 @@ Options
 
     Conflicts with ``--no-db`` and mutually exclusive to ``--forever``.
 
+``-A``, ``--autoscaling`` [*MODE*]
+    Publish client targets for relay sites (default: disabled).
+
+    The server schedules forever (as with ``--forever``) and launches nothing itself. Each relay
+    connected with the server's key advertises the zones it serves and, for each, its ``min``,
+    ``max`` and ``init`` clients. Each ``--period`` the server computes each zone's demand from
+    its tasks in the active *task group*, splits it over the live sites that serve the zone by
+    ``autoscale.distribution`` (*spread* or *fill*), and publishes the result, which each relay
+    fetches and launches with its own launcher.
+
+    The *policy* can be specified directly here as either *fixed* or *dynamic* (e.g.,
+    ``--autoscaling=dynamic``); the default is the configured ``autoscale.policy``. Under *fixed*,
+    a zone with work gets one client when none runs, and otherwise keeps the floor its relays
+    advertise. Under *dynamic*, a zone grows by one client per check while its task pressure is
+    high, up to the sum of its sites' ``max``. Clients leave only by their idle timeout.
+
+    Conflicts with `FILE`, ``--restart``, ``--no-db`` and ``--no-confirm``.
+
+    See also ``--factor`` and ``--period``.
+
+``-F``, ``--factor`` *VALUE*
+    Scaling factor (default: 1).
+
+    The dimensionless multiple of the average task duration that ``--autoscaling=dynamic`` compares
+    each zone's estimated time to completion against (its *task pressure*), as for the `cluster`.
+
+``-P``, ``--period`` *SEC*
+    Scaling period in seconds (default: 60).
+
+    The server waits this long between checks and publishes a new topology only when it changes.
+
 ``--print``
     Print failed task args to <stdout>.
 

@@ -27,6 +27,15 @@ a private copy without them, so its clients keep the file's other settings (`[se
 
 The relay owns the clients it launches: `end_site_clients` ends any still running when it stops.
 
+Every fleet's autoscaler is a `SiteScaler`. Against an upstream server that publishes a site topology
+(a server autoscaling with relay sites), it follows its zone's entry there: it launches what the
+server asks for beyond the count the server is known to have planned on (at a new version, the count
+the server saw; once the server has planned again on the clients running, that count), and nothing
+more. It replaces a client that exits only when the server still asks for it, and never ends one, so
+a lowered target, or a target of zero, takes effect as the zone's clients exit when idle. Without a
+topology it is the fixed fleet above.
+Every launch names its zone to the launcher (`{zone}` and `HYPERSHELL_ZONE`), in both modes.
+
 Example:
     >>> from hypershell.relay.site import site_cluster, fence_site
     >>> cluster = site_cluster(address=('0.0.0.0', 50002), size=4, launcher='srun')
@@ -43,6 +52,7 @@ import os
 import time
 import shlex
 import tomllib
+import threading
 import subprocess
 
 # External libs
@@ -53,14 +63,16 @@ from hypershell.core.config import config, load_task_env
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.tls import TLSConfig
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
+from hypershell.core.topology import Entry, TopologyReply
 from hypershell.cluster.launch import ClientLaunch, client_launch
-from hypershell.cluster.remote import AutoScalingCluster, AutoScalerThread, DEFAULT_REMOTE_EXE
+from hypershell.cluster.remote import (AutoScalingCluster, AutoScaler, AutoScalerThread, AutoScalerState,
+                                       AutoScalerPhase, DEFAULT_REMOTE_EXE)
 from hypershell.cluster.demand import ZoneRef
 
 # Public interface
 __all__ = ['site_cluster', 'site_launch', 'zone_launch', 'zone_fleet', 'SITE_POLICY', 'DEFAULT_SITE_PERIOD', 'fence_site',
            'scrub_environment', 'check_invocation', 'check_exports', 'CredentialFenceError', 'FENCED_PREFIX',
-           'site_config_copy', 'end_site_clients']
+           'site_config_copy', 'end_site_clients', 'TopologyView', 'SiteScaler', 'site_scaler', 'launched_now']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -89,12 +101,21 @@ def site_cluster(address: Tuple[str, int],
                  template: str = '{}',
                  client_timeout: Optional[int] = None,
                  period: int = DEFAULT_SITE_PERIOD,
-                 evict_after: int = DEFAULT_SITE_EVICT) -> AutoScalingCluster:
-    """The relay's site cluster: a forever server on the relay database and `size` site clients.
+                 evict_after: int = DEFAULT_SITE_EVICT,
+                 init_size: Optional[int] = None,
+                 min_size: Optional[int] = None,
+                 max_size: Optional[int] = None,
+                 view: Optional[TopologyView] = None) -> AutoScalingCluster:
+    """The relay's site cluster: a forever server on the relay database and its first zone's site clients.
+
+    Without a topology the fleet is fixed: `init_size` clients at start and never fewer than
+    `min_size` (each `size` when not given). With a topology in `view`, the fleet follows its zone's
+    entry (see `SiteScaler`).
 
     Site clients are launched with `launcher` (empty runs them directly on this host) and dial this
     host by name, so the relay must be reachable from wherever they run. They serve `zone` (None is
-    the default zone). The site server evicts a site client silent for `evict_after` seconds.
+    the default zone), which is named to the launcher as `{zone}` and `HYPERSHELL_ZONE` (see
+    `zone_launch`). The site server evicts a site client silent for `evict_after` seconds.
 
     The site server's confirmations are not strict: a site client confirms a bundle before it runs
     it, but the confirmation and the results reach the site server on separate threads, so a result
@@ -107,10 +128,17 @@ def site_cluster(address: Tuple[str, int],
                                  launcher=launcher or '', launcher_args=launcher_args or None,
                                  max_retries=0, poll=poll, client_timeout=client_timeout,
                                  policy=SITE_POLICY, period=period,
-                                 init_size=size, min_size=size, max_size=size,
+                                 init_size=size if init_size is None else init_size,
+                                 min_size=size if min_size is None else min_size,
+                                 max_size=size if max_size is None else max_size,
                                  tls=tls, zone=zone, evict_after=evict_after, discover_zones=False)
     if cluster.server.confirm is not None:
         cluster.server.confirm.machine.strict = False
+    # The first zone's clients are launched as every further zone's are, naming their zone.
+    cluster.launch = zone_launch(cluster, zone, launcher=launcher, launcher_args=launcher_args,
+                                 num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
+                                 template=template, client_timeout=client_timeout, tls=tls)
+    cluster.autoscaler.machine = site_scaler(cluster.autoscaler.machine, cluster.launch, view)
     return cluster
 
 
@@ -141,16 +169,201 @@ def zone_launch(cluster: AutoScalingCluster,
                          launcher=shlex.split(launcher or ''), launcher_args=args,
                          num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                          template=template, delay_start=DEFAULT_DELAY, task_signalwait=DEFAULT_SIGNALWAIT,
-                         client_timeout=client_timeout, tls_enabled=tls is not None, zone=zone)
+                         client_timeout=client_timeout, tls_enabled=tls is not None, zone=zone,
+                         expose_zone=True)
 
 
 def zone_fleet(launch: ClientLaunch, zone: Optional[str], size: int = 1,
-               period: int = DEFAULT_SITE_PERIOD) -> AutoScalerThread:
-    """A fixed fleet of `size` site clients launched with `launch`, one launched again whenever one exits."""
-    fleet = AutoScalerThread(launch, policy=SITE_POLICY, period=period, init_size=size, min_size=size, max_size=size,
+               period: int = DEFAULT_SITE_PERIOD,
+               init_size: Optional[int] = None,
+               min_size: Optional[int] = None,
+               max_size: Optional[int] = None,
+               view: Optional[TopologyView] = None) -> AutoScalerThread:
+    """The fleet of `zone`'s site clients, launched with `launch`.
+
+    Without a topology it is fixed: `init_size` clients at start and one launched again whenever one
+    exits while fewer than `min_size` run (each `size` when not given). With a topology in `view`, it
+    follows its zone's entry (see `SiteScaler`).
+    """
+    fleet = AutoScalerThread(launch, policy=SITE_POLICY, period=period,
+                             init_size=size if init_size is None else init_size,
+                             min_size=size if min_size is None else min_size,
+                             max_size=size if max_size is None else max_size,
                              own_zone=ZoneRef.from_name(zone))
+    fleet.machine = site_scaler(fleet.machine, launch, view)
     fleet.name = f'hypershell-autoscaler-{zone}'
     return fleet
+
+
+class TopologyView:
+    """
+    The site topology as this relay last read it from the upstream server, shared by its fleets.
+
+    None until the relay reads one, and again whenever the upstream server publishes none (an
+    earlier release, or a server not autoscaling with relay sites). A failed read leaves it as it
+    was, so an outage never moves the relay's fleets between modes.
+
+    Each read is stamped with `beat_at`, the time (monotonic) the heartbeat sent just before it was
+    built, so a fleet can tell a read that follows a beat reporting its clients from one that does not.
+    """
+
+    def __init__(self: TopologyView, reply: Optional[TopologyReply] = None) -> None:
+        """Initialize with nothing read."""
+        self._lock = threading.Lock()
+        self._reply = reply
+        self._beat_at = time.monotonic()
+
+    @property
+    def reply(self: TopologyView) -> Optional[TopologyReply]:
+        """The topology last read (None: none published)."""
+        with self._lock:
+            return self._reply
+
+    @property
+    def beat_at(self: TopologyView) -> float:
+        """When the heartbeat before the last read was built (monotonic seconds)."""
+        with self._lock:
+            return self._beat_at
+
+    def set(self: TopologyView, reply: Optional[TopologyReply], beat_at: Optional[float] = None) -> None:
+        """Replace the topology with the one just read (None: none published), after a beat built at `beat_at` (now)."""
+        with self._lock:
+            self._reply = reply
+            self._beat_at = time.monotonic() if beat_at is None else beat_at
+
+    def read(self: TopologyView) -> Tuple[Optional[TopologyReply], float]:
+        """The topology last read and when the heartbeat before it was built, together."""
+        with self._lock:
+            return self._reply, self._beat_at
+
+    def assignment(self: TopologyView, zone: str) -> Optional[Tuple[str, Entry]]:
+        """The version and the entry of `zone` (a zone it does not name is assigned none); None with no topology."""
+        reply = self.reply
+        return None if reply is None else (reply.version, reply.assignment(zone))
+
+
+class SiteScaler(AutoScaler):
+    """
+    The autoscaler of one zone's fleet at a relay's site.
+
+    Without a topology (no `view`, or nothing published upstream) it is the fixed fleet its parent
+    runs. With one, the zone's entry decides, by one rule. The fleet launches `target - max(basis,
+    live)` clients (none when that is not positive) each time it learns a new basis, and at no
+    other time. `live` is the zone's clients launched here and still running. The basis is the
+    count of them the server's current plan is known to rest on:
+
+    - a version not yet applied gives its `seen`, the count the server planned from;
+    - otherwise, while `live` stays below `target`, the server's own evidence gives `live` itself:
+      the server has finished `RECHECKS` checks since a topology read that followed a beat
+      reporting `live`, so its plan rests on that count, and it still asks for `target`.
+
+    So a fleet never launches beyond the target in hand, and never on its own period alone: a
+    client that exits is replaced only when the server, having planned on the exit, still asks for
+    it, whether its plan came back as a new version or unchanged (a client that left before any
+    beat counted it, or one the server counted that left before the relay read the plan made with
+    it, changes nothing the server publishes). A target at or below what runs launches nothing, and
+    no client is ever ended, so a lowered target, or a target of zero, takes effect as the zone's
+    clients exit when idle. A new version is applied as soon as it is read, not only at the next
+    period.
+
+    One check is not enough evidence: it may have read the relay's beats before that one arrived.
+    The count of checks comes with every read (`checks`), and each read is stamped with when the
+    beat before it was built, so a read that follows no beat reporting `live` never counts.
+    """
+
+    RECHECKS: Final[int] = 2
+
+    view: Optional[TopologyView]
+    applied: Optional[str]
+    held: Optional[int]
+    since: float
+    mark: Optional[int]
+
+    def __init__(self: SiteScaler, launch: ClientLaunch, *, view: Optional[TopologyView] = None, **options: Any) -> None:
+        """Initialize as the fleet's autoscaler, following `view` when it holds a topology."""
+        super().__init__(launch, **options)
+        self.view = view
+        self.applied = None
+        self.held = None
+        self.since = 0.0
+        self.mark = None
+
+    def assignment(self: SiteScaler) -> Optional[Tuple[str, Entry]]:
+        """The version and the entry of this fleet's zone, or None without a topology."""
+        return None if self.view is None else self.view.assignment(self.own_zone.name)
+
+    def evidence(self: SiteScaler) -> Tuple[int, float]:
+        """The server's count of finished checks in the last read, and when the beat before that read was built."""
+        reply, beat_at = (None, 0.0) if self.view is None else self.view.read()
+        return (0 if reply is None else reply.checks), beat_at
+
+    def init(self: SiteScaler) -> AutoScalerState:
+        """Launch the initial clients: the topology's, or without one the fixed fleet's."""
+        assignment = self.assignment()
+        if assignment is None:
+            return super().init()
+        self.phase = AutoScalerPhase.STEADY
+        return self.reconcile(*assignment)
+
+    def wait(self: SiteScaler) -> AutoScalerState:
+        """Wait for the period, or check at once when a version not yet applied has been read."""
+        if self.phase is AutoScalerPhase.STEADY:
+            assignment = self.assignment()
+            if assignment is not None and assignment[0] != self.applied:
+                return AutoScalerState.CHECK
+        return super().wait()
+
+    def check_zones(self: SiteScaler) -> AutoScalerState:
+        """Follow the topology's entry, or without one keep the fixed fleet."""
+        assignment = self.assignment()
+        if assignment is None:
+            return super().check_zones()
+        return self.reconcile(*assignment)
+
+    def reconcile(self: SiteScaler, version: str, entry: Entry) -> AutoScalerState:
+        """Launch `target - max(basis, live)` clients if a new basis is known (see the class), else nothing."""
+        live = self.launched().get(self.own_zone.id, 0)
+        planned = self.planned_on(live)
+        if version != self.applied:
+            self.applied = version
+            count = max(0, entry.target - max(entry.seen, live))
+            log.info(f'Topology {version} (zone: {self.own_zone.name}, target: {entry.target}, seen: {entry.seen}, '
+                     f'launched: {live}) - launching {count}')
+        elif planned and live < entry.target:
+            count = entry.target - live
+            log.info(f'Topology {version} (zone: {self.own_zone.name}, target: {entry.target}, launched: {live}): '
+                     f'the server planned again on {live} running - applying again, launching {count}')
+        else:
+            return AutoScalerState.WAIT
+        if count == 0:
+            return AutoScalerState.WAIT
+        self.held, self.mark = None, None
+        self.pending = {self.own_zone: live + count}
+        return AutoScalerState.SCALE
+
+    def planned_on(self: SiteScaler, live: int) -> bool:
+        """Whether the server has finished `RECHECKS` checks since a read that followed a beat reporting `live`."""
+        checks, beat_at = self.evidence()
+        if live != self.held:
+            self.held, self.since, self.mark = live, time.monotonic(), None
+            return False
+        if self.mark is None or checks < self.mark:  # Not yet marked, or a new server counting afresh.
+            self.mark = checks if beat_at > self.since else None
+            return False
+        return checks >= self.mark + self.RECHECKS
+
+
+def site_scaler(machine: AutoScaler, launch: ClientLaunch, view: Optional[TopologyView]) -> SiteScaler:
+    """A `SiteScaler` in place of a fleet's autoscaler `machine`, with its settings, launching with `launch`."""
+    return SiteScaler(launch, view=view, policy=machine.policy.name.lower(), factor=machine.factor,
+                      period=machine.period, init_size=machine.init_size, min_size=machine.min_size,
+                      max_size=machine.max_size, own_zone=machine.own_zone, attempts=machine.attempts,
+                      eager=machine.eager, registered=machine.registered, scheduler_group=machine.scheduler_group)
+
+
+def launched_now(machine: AutoScaler) -> int:
+    """The clients `machine` launched that are still running (read from any thread)."""
+    return sum(1 for proc in list(machine.clients) if proc.poll() is None)
 
 
 FENCED_PREFIX: Final[str] = 'HYPERSHELL_RELAY_'

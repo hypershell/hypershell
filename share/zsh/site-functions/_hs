@@ -272,6 +272,8 @@ function _hs_config_set() {
                 server.bind)       _values 'bind address' localhost 127.0.0.1 0.0.0.0 ;;
                 server.auth)       _hs_authkey ;;
                 autoscale.policy)  _values 'autoscale policy' fixed dynamic ;;
+                autoscale.distribution) _values 'autoscale distribution' spread fill ;;
+                relay.min|relay.max|relay.init) _values 'site clients per zone' 0 1 2 4 8 16 ;;
                 console.theme)     _hs_themes ;;
                 *)
                     local current_value
@@ -559,6 +561,9 @@ function _hs_server() {
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
         '--forever[Schedule forever]' \
         '--restart[Start scheduling from last completed task]' \
+        '(-A --autoscaling)'{-A,--autoscaling}'[Publish client targets for relay sites (implies --forever)]::mode:(fixed dynamic)' \
+        '(-F --factor)'{-F,--factor}'[Scaling factor (default: 1)]:factor:(1 2 3 4 5)' \
+        '(-P --period)'{-P,--period}'[Scaling period in seconds (default: 60)]:seconds:(30 60 300 600)' \
         '(-c --task-cores)'{-c,--task-cores}'[Number of cores to assign each task]:cores:(1 2 4 8 16 32)' \
         '(-m --task-memory)'{-m,--task-memory}'[Memory to assign each task (K/M/G/T are powers of 1024)]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit (seconds, 1h30m, or 1.5h)]:seconds:(60 300 600 1800 3600)' \

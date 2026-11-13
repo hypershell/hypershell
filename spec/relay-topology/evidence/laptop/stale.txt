@@ -1,0 +1,39 @@
+# topology_drive stale: launches (epoch, launcher label, pid, {zone} word, HYPERSHELL_ZONE, client --zone)
+launch t=1794586344 site=A pid=28159 word=cpu env=cpu client=cpu
+launch t=1794586344 site=A pid=28160 word=cpu env=cpu client=cpu
+# server: registrations, versions, duplicates, departures, evictions
+2026-11-13 11:12:03.498 <host>     INFO [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.cluster] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:1 published (0 relay identities)
+2026-11-13 11:12:03.559 <host>     INFO [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.server] Relay site registered (site: A, zone: cpu, min: 0, init: 2, max: 2, clients: 0) (<host>: c9655e5a-0edd-5146-bef5-5ab5a8bede11)
+2026-11-13 11:12:23.637 <host>     INFO [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.cluster] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:2 published (1 relay identities)
+2026-11-13 11:12:23.637 <host>     INFO [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.cluster] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:2 (site: A, zone: cpu, target: 2, launched: 0)
+2026-11-13 11:12:43.803 <host>     INFO [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.cluster] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:3 published (1 relay identities)
+2026-11-13 11:12:43.803 <host>     INFO [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.cluster] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:3 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:13:00.207 <host>     INFO [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.server] Relay site left (site: A, zone: cpu) (<host>: c9655e5a-0edd-5146-bef5-5ab5a8bede11)
+2026-11-13 11:13:03.932 <host>  WARNING [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.cluster] Site A left the topology (no live relay) - its share is planned over the remaining sites
+2026-11-13 11:13:03.933 <host>     INFO [01a1d5ae-28ee-73c1-a006-9c5e71c1cdde] [hypershell.cluster] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:4 published (0 relay identities)
+# relay-A: topology reads and applications, idle exits
+    INFO [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+    INFO [hypershell.relay.site] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:0 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:1 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:2 (zone: cpu, target: 2, seen: 0, launched: 0) - launching 2
+    INFO [hypershell.cluster] Autoscale client disconnected (28159)
+    INFO [hypershell.cluster] Autoscale client disconnected (28160)
+    INFO [hypershell.relay.site] Topology 01a1d5ae-28ee-73c1-a006-9c5e71c1cdde:3 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+# topology_drive stale: checks
+A's clients left at 1794586349, after 1 server checks
+the server checked again at 1794586367
+PASS no launch after every client left
+PASS every live relay still runs after its clients left
+PASS no relay identity left or was evicted while running
+PASS every live relay drained and exited 0
+PASS every task completed (0)
+PASS no task failed
+PASS some client was launched
+PASS every launch names one zone in {zone}, HYPERSHELL_ZONE and --zone
+PASS no relay terminated a site client
+peak A cpu 2 (max 2)
+PASS no site-zone ran more clients than its max
+A launched 2 (init 2); versions applied again: 0
+PASS A launched exactly its init (2) across the server's silence
+PASS A applied no version again
+# topology_drive stale: PASS

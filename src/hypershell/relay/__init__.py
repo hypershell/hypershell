@@ -58,7 +58,9 @@ from hypershell.data.model import zone_name, zone_id, DEFAULT_ZONE_NAME
 from hypershell.relay import store
 from hypershell.relay.store import ensure_tables, store_utc
 from hypershell.relay.site import (site_cluster, zone_launch, zone_fleet, fence_site, end_site_clients,
-                                   DEFAULT_SITE_PERIOD)
+                                   launched_now, TopologyView, DEFAULT_SITE_PERIOD)
+from hypershell.core.topology import Bounds
+from hypershell.cluster.demand import ZoneRef
 from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
                                        served_zones, upstream_config, upstream_key, relay_site,
                                        drain_signalled, DEFAULT_UPSTREAM_BUNDLESIZE, DEFAULT_UPSTREAM_HEARTRATE,
@@ -76,7 +78,7 @@ __all__ = ['RelayThread', 'RelayApp', 'DEFAULT_RELAY_BIND', 'DEFAULT_RELAY_PORT'
            'DEFAULT_RELAY_SIZE', 'lock_database', 'RelayDatabaseLocked', 'DRAIN', 'install_drain_handlers',
            'STOP_TIMEOUT', 'CLIENT_GRACE', 'RelayPartEnded', 'RelayTerminated', 'install_terminate_handler',
            'site_bundlesize', 'DEFAULT_UPSTREAM_DEADLINE', 'DEFAULT_UPSTREAM_BACKOFF', 'DEFAULT_EVICT_HINT',
-           'DEFAULT_SITE_EVICT', 'ZONE_OPTIONS', 'zone_options']
+           'DEFAULT_SITE_EVICT', 'ZONE_OPTIONS', 'zone_options', 'BOUND_OPTIONS', 'zone_bounds']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -225,15 +227,49 @@ def lock_database(path: str) -> Optional[IO]:
     return stream
 
 
-ZONE_OPTIONS: Final[Tuple[str, ...]] = ('launcher', 'launcher_args', 'size')
+ZONE_OPTIONS: Final[Tuple[str, ...]] = ('launcher', 'launcher_args', 'size', 'min', 'max', 'init')
 """Settings a served zone may give for its own fleet (`[relay.zone.<name>]`), in place of the relay's."""
+
+BOUND_OPTIONS: Final[Tuple[str, ...]] = ('min', 'max', 'init')
+"""Client bounds a served zone may give (`[relay.zone.<name>]`), or the relay for every zone (`[relay]`)."""
+
+
+def _given(value: Any) -> bool:
+    """True for a setting that was given (not None and not unset)."""
+    return value is not None and value is not PARAM_UNSET and value != PARAM_UNSET
+
+
+def zone_bounds(settings: Mapping[str, Any], relay_wide: Mapping[str, Any]) -> Tuple[Bounds, Bounds]:
+    """The client bounds of one served zone: those it advertises upstream, and those of its fallback fleet.
+
+    Each of `size`, `min`, `max` and `init` is the zone's own (`settings`) if it gives one, else the
+    relay's (`relay_wide`). The advertised bounds, which a server autoscaling with relay sites plans
+    with: `min` (default 0), `init` (default `min`) and `max` (default `size`). The fallback fleet's,
+    used when no topology is published: `min` (default `size`, at least 1, so the zone always has a
+    client to ask for work), `init` (default `size`) and `max` (default `size`), with `min` and `init`
+    held within `max`. With only `size` given the fallback is a fixed fleet of `size`, as without bounds.
+    ValueError when a value is not a whole number or the advertised bounds are not
+    0 <= min <= init <= max with max >= 1.
+    """
+    merged = {name: settings[name] if _given(settings.get(name)) else relay_wide.get(name)
+              for name in ('size', *BOUND_OPTIONS)}
+    for name, value in merged.items():
+        if _given(value) and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise ValueError(f'{name} must be a whole number, at least 0 (given {value!r})')
+    size = merged['size'] if _given(merged['size']) else 1
+    lo, hi, init = (merged[name] if _given(merged[name]) else None for name in BOUND_OPTIONS)
+    upper = size if hi is None else hi
+    advertised = Bounds(min=lo or 0, max=upper, init=(lo or 0) if init is None else init)
+    floor = min(upper, max(1, size if lo is None else lo))
+    start = min(upper, max(floor, size if init is None else init))
+    return advertised, Bounds(min=floor, max=upper, init=start)
 
 
 def zone_options(value: Any) -> Tuple[List[Optional[str]], Dict[Optional[str], Dict[str, Any]]]:
     """The zones `[relay] zone` names, in order, and each one's own fleet settings.
 
     The setting is one zone name, a list of names, or a table with one table per zone (`[relay.zone.gpu]`)
-    holding that zone's `launcher`, `launcher_args` or `size`. The default zone is None. Raises
+    holding that zone's `launcher`, `launcher_args`, `size`, `min`, `max` or `init`. The default zone is None. Raises
     ValueError for an invalid or repeated name, or a setting a zone may not give.
     """
     if value in (None, '', PARAM_UNSET):
@@ -305,6 +341,14 @@ class RelayThread(Thread):
     returns every result still held, and ends its upstream registration with a final heartbeat if
     nothing it received is left without a result.
 
+    Each zone's fleet has client bounds (see `zone_bounds`): every zone identity's beat advertises
+    them upstream, with the clients launched in the zone and the relay's instance key (its first
+    identity, new each time a relay starts). Against an upstream server autoscaling with relay sites,
+    which publishes a topology, each fleet follows its zone's entry there, read after every beat and
+    once before the site starts: it launches what the server asks for and never ends a client, so a
+    zone the server lowers or zeroes shrinks only as its clients exit when idle. Against one that
+    publishes none, each fleet is fixed at its fallback size, as a relay always was.
+
     The upstream connection is a link that rides through outages (see `hypershell.core.reconnect`):
     every call has a deadline, and a lost connection is made again with backoff while the site keeps
     running and completed results stay in the outbox. Once the link is back the relay beats first
@@ -348,8 +392,8 @@ class RelayThread(Thread):
             Names of every zone the relay serves, in place of `zone` (None is the default zone).
 
         zone_settings (dict, optional):
-            A zone's own fleet settings by zone name (`launcher`, `launcher_args`, `size`), in place of
-            the relay's.
+            A zone's own fleet settings by zone name (`launcher`, `launcher_args`, `size`, `min`,
+            `max`, `init`), in place of the relay's.
 
         site (str, optional):
             Name of the relay's site, as upstream lists it and its site clients (default: this host's name).
@@ -362,6 +406,9 @@ class RelayThread(Thread):
 
         size (int, optional):
             Number of site clients kept launched. See :const:`DEFAULT_RELAY_SIZE`.
+
+        min_size, max_size, init_size (int, optional):
+            Client bounds of every zone that gives none of its own (see `zone_bounds`).
 
         launcher (str, optional):
             Command prefix that launches each site client (empty runs them directly on this host).
@@ -419,6 +466,8 @@ class RelayThread(Thread):
     returner: Optional[UpstreamReturnerThread] = None
     heartbeat: Optional[UpstreamHeartbeatThread] = None
     site_config: Optional[str]
+    view: TopologyView
+    advertised: Dict[Optional[str], Bounds]
     aborted: bool = False
 
     def __init__(self: RelayThread,
@@ -446,7 +495,10 @@ class RelayThread(Thread):
                  evict_hint: float = DEFAULT_EVICT_HINT,
                  evict: int = DEFAULT_SITE_EVICT,
                  zones: Optional[Sequence[Optional[str]]] = None,
-                 zone_settings: Optional[Mapping[Optional[str], Mapping[str, Any]]] = None) -> None:
+                 zone_settings: Optional[Mapping[Optional[str], Mapping[str, Any]]] = None,
+                 min_size: Optional[int] = None,
+                 max_size: Optional[int] = None,
+                 init_size: Optional[int] = None) -> None:
         """Initialize the site and the upstream side."""
         bundlesize = site_bundlesize(bundlesize, num_threads)
         self.zones = list(zones) if zones else [zone]
@@ -454,17 +506,24 @@ class RelayThread(Thread):
         settings = {name: {'size': size, 'launcher': launcher, 'launcher_args': launcher_args,
                            **dict((zone_settings or {}).get(name) or {})}
                     for name in self.zones}
-        first = settings[self.zone]
+        relay_wide = {'size': size, 'min': min_size, 'max': max_size, 'init': init_size}
+        bounds = {name: zone_bounds(settings[name], relay_wide) for name in self.zones}
+        self.advertised = {name: advertised for name, (advertised, _) in bounds.items()}
+        self.view = TopologyView()
+        first, (_, fallback) = settings[self.zone], bounds[self.zone]
         self.cluster = site_cluster(address=address, bundlesize=bundlesize, bundlewait=bundlewait, poll=poll,
                                     tls=tls, zone=self.zone, size=first['size'], launcher=first['launcher'],
                                     launcher_args=first['launcher_args'], num_threads=num_threads,
                                     template=template, client_timeout=client_timeout,
-                                    period=period, evict_after=evict)
+                                    period=period, evict_after=evict, init_size=fallback.init,
+                                    min_size=fallback.min, max_size=fallback.max, view=self.view)
         self.fleets = [zone_fleet(zone_launch(self.cluster, name, launcher=settings[name]['launcher'],
                                               launcher_args=settings[name]['launcher_args'],
                                               num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                                               template=template, client_timeout=client_timeout, tls=tls),
-                                  name, size=settings[name]['size'], period=period)
+                                  name, size=settings[name]['size'], period=period,
+                                  init_size=bounds[name][1].init, min_size=bounds[name][1].min,
+                                  max_size=bounds[name][1].max, view=self.view)
                        for name in self.zones[1:]]
         self.server = self.cluster.server
         self.bundlesize = bundlesize
@@ -512,7 +571,13 @@ class RelayThread(Thread):
             self.heartbeat = UpstreamHeartbeatThread(queue=self.link, identity=self.identity,
                                                      heartrate=self.heartrate, site=self.site,
                                                      roster=functools.partial(store.roster, engine, INSTANCE),
-                                                     identities=self.identities)
+                                                     identities=self.identities,
+                                                     zones={identity: ZoneRef.from_name(zone).name
+                                                            for identity, zone in self.served},
+                                                     bounds={ZoneRef.from_name(zone).name: bounds
+                                                             for zone, bounds in self.advertised.items()},
+                                                     launched=self.zone_launched, instance=self.identity,
+                                                     view=self.view)
             self.puller = UpstreamPullerThread(queue=self.link, engine=engine, identity=self.identity,
                                                zone=self.zone, bundlesize=self.upstream_bundlesize,
                                                local_bundlesize=self.bundlesize, poll=self.poll, drain=draining,
@@ -521,6 +586,8 @@ class RelayThread(Thread):
             self.returner = UpstreamReturnerThread(queue=self.link, engine=engine,
                                                    bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
                                                    poll=self.poll, retention=self.retention)
+            # Read the topology first, so a relay a topology sizes never launches its local fleet first.
+            self.heartbeat.machine.fetch()
             self.cluster.start()
             self.wait_ready()
             log.info(f'Relay-local server ready on {self.server.queue.config.host}:{self.server.queue.config.port}')
@@ -546,6 +613,14 @@ class RelayThread(Thread):
     def zone_clients(self: RelayThread, zone: Optional[str]) -> int:
         """Site clients now serving `zone` (asking the relay-local server for its tasks, not yet gone)."""
         return self.server.queue.dispatcher.clients(zone_id(zone))
+
+    def zone_launched(self: RelayThread, name: str) -> int:
+        """Site clients launched for the zone called `name` and still running, as advertised upstream."""
+        fleets = [self.cluster.autoscaler, *self.fleets]
+        for zone, fleet in zip(self.zones, fleets):
+            if ZoneRef.from_name(zone).name == name:
+                return launched_now(fleet.machine)
+        return 0
 
     def wait_link(self: RelayThread) -> bool:
         """Wait for the first upstream connection; false if the relay was stopped first.
@@ -788,7 +863,18 @@ APP_HELP = f"""\
   A relay may serve several zones (--zone given more than once, or a list in [relay] zone):
   upstream it is one client per zone, and at the site it keeps one fleet of clients per zone,
   each asking upstream only for what its own fleet has room for. A zone's own launcher,
-  launcher arguments or size can be set in [relay.zone.NAME].
+  launcher arguments, size or client bounds can be set in [relay.zone.NAME]. Every launch
+  names its zone to the launcher: {{zone}} in the launcher or its arguments, and the
+  HYPERSHELL_ZONE variable.
+
+  Each zone advertises its client bounds upstream ([relay] or [relay.zone.NAME] min, max
+  and init; min defaults to 0, init to min, max to the size). An upstream server
+  autoscaling with relay sites (hs server --autoscaling) plans each zone's clients over
+  the relays that serve it within those bounds, and the relay launches what it is asked
+  for. It never ends a client to shrink: clients exit when idle ([relay] timeout), and
+  the relay stays connected with none, ready to grow. Against any other upstream server
+  each zone keeps its own fleet, as before: init clients at start, and one launched again
+  while fewer than min run (here min is at least 1, and each defaults to the size).
 
   If the upstream server cannot be reached, the site keeps running and results are kept in
   the relay database; the relay connects again with backoff, then returns them before it
@@ -911,6 +997,9 @@ class RelayApp(Application):
                              upstream_bundlesize=config.relay.upstream.bundlesize,
                              heartrate=config.relay.upstream.heartrate,
                              size=self.size,
+                             min_size=self.relay_bounds['min'],
+                             max_size=self.relay_bounds['max'],
+                             init_size=self.relay_bounds['init'],
                              launcher=self.launcher,
                              launcher_args=[self.launcher_args] if self.launcher_args else None,
                              num_threads=config.relay.num_threads,
@@ -947,6 +1036,32 @@ class RelayApp(Application):
         except ValueError as error:
             raise ArgumentError(f'Invalid launcher ({error})') from error
         self.zone_settings  # noqa: checked when first read
+        self.check_bounds()
+
+    @functools.cached_property
+    def relay_bounds(self: RelayApp) -> Dict[str, Optional[int]]:
+        """The client bounds `[relay]` gives every zone (`min`, `max`, `init`; None where not given)."""
+        given: Dict[str, Optional[int]] = {}
+        for key in BOUND_OPTIONS:
+            value = config.relay.get(key, None)
+            if value in (None, PARAM_UNSET) or value == PARAM_UNSET:
+                given[key] = None
+            elif isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ArgumentError(f'relay.{key} must be a whole number, at least 0 (given {value!r})')
+            else:
+                given[key] = value
+        return given
+
+    def check_bounds(self: RelayApp) -> None:
+        """Fail client bounds of a served zone that are not 0 <= min <= init <= max with max >= 1."""
+        relay_wide = {'size': self.size, **self.relay_bounds}
+        for zone in self.zones:
+            settings = {'size': self.size, **self.zone_settings.get(zone, {})}
+            try:
+                zone_bounds(settings, relay_wide)
+            except ValueError as error:
+                raise ArgumentError(f'Invalid client bounds of zone {zone or DEFAULT_ZONE_NAME} ({error}; '
+                                    f'max defaults to the size)') from error
 
     @functools.cached_property
     def zone_plan(self: RelayApp) -> Tuple[List[Optional[str]], Dict[Optional[str], Dict[str, Any]]]:
@@ -985,6 +1100,13 @@ class RelayApp(Application):
                     raise ArgumentError(f'Site size of zone {name} must be a whole number, at least 1 '
                                         f'(given {size!r})')
                 table['size'] = size
+            for key in BOUND_OPTIONS:
+                if key in given:
+                    value = given[key]
+                    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                        raise ArgumentError(f'relay.zone.{name}.{key} must be a whole number, at least 0 '
+                                            f'(given {value!r})')
+                    table[key] = value
             for key in ('launcher', 'launcher_args'):
                 if key in given:
                     if not isinstance(given[key], str):

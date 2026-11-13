@@ -1,0 +1,321 @@
+# topology_drive floor: launches (epoch, launcher label, pid, {zone} word, HYPERSHELL_ZONE, client --zone)
+launch t=1794585907 site=B pid=24217 word=cpu env=cpu client=cpu
+launch t=1794585907 site=B pid=24218 word=gpu env=gpu client=gpu
+launch t=1794585911 site=A pid=24249 word=cpu env=cpu client=cpu
+launch t=1794585913 site=B pid=24270 word=gpu env=gpu client=gpu
+launch t=1794585914 site=B pid=24278 word=cpu env=cpu client=cpu
+launch t=1794585916 site=B pid=24297 word=cpu env=cpu client=cpu
+launch t=1794585918 site=B pid=24320 word=gpu env=gpu client=gpu
+launch t=1794585918 site=A pid=24322 word=cpu env=cpu client=cpu
+launch t=1794585923 site=B pid=24365 word=cpu env=cpu client=cpu
+launch t=1794585924 site=B pid=24374 word=gpu env=gpu client=gpu
+launch t=1794585924 site=B pid=24375 word=cpu env=cpu client=cpu
+launch t=1794585924 site=A pid=24378 word=cpu env=cpu client=cpu
+launch t=1794585927 site=A pid=24397 word=highmem env=highmem client=highmem
+launch t=1794585929 site=B pid=24418 word=gpu env=gpu client=gpu
+launch t=1794585930 site=A pid=24424 word=highmem env=highmem client=highmem
+launch t=1794585933 site=B pid=24457 word=gpu env=gpu client=gpu
+launch t=1794585939 site=B pid=24492 word=gpu env=gpu client=gpu
+launch t=1794585945 site=B pid=24520 word=gpu env=gpu client=gpu
+# server: registrations, versions, duplicates, departures, evictions
+2026-11-13 11:05:05.576 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:1 published (0 relay identities)
+2026-11-13 11:05:05.645 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.server] Relay site registered (site: B, zone: cpu, min: 0, init: 0, max: 2, clients: 0) (<host>: 4d17d860-6c78-5eae-a04f-ffececd62d4e)
+2026-11-13 11:05:05.646 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.server] Relay site registered (site: B, zone: gpu, min: 1, init: 1, max: 2, clients: 0) (<host>: 58b00168-b0b5-5aa2-85df-5a295c72c87c)
+2026-11-13 11:05:06.580 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:2 published (2 relay identities)
+2026-11-13 11:05:06.580 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:2 (site: B, zone: cpu, target: 1, launched: 0)
+2026-11-13 11:05:06.580 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:2 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:06.714 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.server] Relay site registered (site: A, zone: cpu, min: 0, init: 0, max: 2, clients: 0) (<host>: 885512b1-d81c-50b9-a146-2ab3de556c63)
+2026-11-13 11:05:06.716 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.server] Relay site registered (site: A, zone: highmem, min: 0, init: 0, max: 2, clients: 0) (<host>: 7488ead0-6e61-5cba-b546-384b98bc3dd9)
+2026-11-13 11:05:07.594 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:3 published (4 relay identities)
+2026-11-13 11:05:07.594 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:3 (site: B, zone: cpu, target: 1, launched: 0)
+2026-11-13 11:05:07.594 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:3 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:07.594 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:3 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:07.594 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:3 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:08.615 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 published (4 relay identities)
+2026-11-13 11:05:08.615 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 (site: B, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:08.615 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:08.615 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:08.615 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:10.645 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 published (4 relay identities)
+2026-11-13 11:05:10.645 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 (site: B, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:10.645 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:10.645 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 (site: A, zone: cpu, target: 1, launched: 0)
+2026-11-13 11:05:10.645 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:12.674 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 published (4 relay identities)
+2026-11-13 11:05:12.674 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:12.675 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:12.675 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:12.675 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:13.688 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 published (4 relay identities)
+2026-11-13 11:05:13.688 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 (site: B, zone: cpu, target: 1, launched: 0)
+2026-11-13 11:05:13.688 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:13.688 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:13.688 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:14.698 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 published (4 relay identities)
+2026-11-13 11:05:14.698 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 (site: B, zone: cpu, target: 1, launched: 0)
+2026-11-13 11:05:14.698 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:14.698 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:14.698 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:15.717 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 published (4 relay identities)
+2026-11-13 11:05:15.717 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 (site: B, zone: cpu, target: 2, launched: 1)
+2026-11-13 11:05:15.717 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:15.717 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:15.717 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:17.759 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 published (4 relay identities)
+2026-11-13 11:05:17.759 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 (site: B, zone: cpu, target: 2, launched: 2)
+2026-11-13 11:05:17.759 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:17.759 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 (site: A, zone: cpu, target: 2, launched: 1)
+2026-11-13 11:05:17.759 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:19.787 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 published (4 relay identities)
+2026-11-13 11:05:19.787 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 (site: B, zone: cpu, target: 2, launched: 2)
+2026-11-13 11:05:19.787 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:19.787 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 (site: A, zone: cpu, target: 2, launched: 2)
+2026-11-13 11:05:19.787 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:21.815 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 published (4 relay identities)
+2026-11-13 11:05:21.815 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 (site: B, zone: cpu, target: 2, launched: 1)
+2026-11-13 11:05:21.815 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:21.815 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 (site: A, zone: cpu, target: 2, launched: 2)
+2026-11-13 11:05:21.815 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:22.817 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 published (4 relay identities)
+2026-11-13 11:05:22.817 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 (site: B, zone: cpu, target: 2, launched: 1)
+2026-11-13 11:05:22.817 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:22.817 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 (site: A, zone: cpu, target: 2, launched: 2)
+2026-11-13 11:05:22.817 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:23.829 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:14 published (4 relay identities)
+2026-11-13 11:05:23.829 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:14 (site: B, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:23.830 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:14 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:23.830 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:14 (site: A, zone: cpu, target: 1, launched: 0)
+2026-11-13 11:05:23.830 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:14 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:24.840 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 published (4 relay identities)
+2026-11-13 11:05:24.840 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 (site: B, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:24.840 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:24.840 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:24.840 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:25.850 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 published (4 relay identities)
+2026-11-13 11:05:25.850 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 (site: B, zone: cpu, target: 2, launched: 2)
+2026-11-13 11:05:25.850 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:25.850 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:25.851 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:26.860 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 published (4 relay identities)
+2026-11-13 11:05:26.861 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 (site: B, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:26.861 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:26.861 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:26.861 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 (site: A, zone: highmem, target: 1, launched: 0)
+2026-11-13 11:05:27.882 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 published (4 relay identities)
+2026-11-13 11:05:27.882 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:27.883 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:27.883 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 11:05:27.883 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 (site: A, zone: highmem, target: 1, launched: 0)
+2026-11-13 11:05:28.892 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 published (4 relay identities)
+2026-11-13 11:05:28.892 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:28.892 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:28.893 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:28.893 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 (site: A, zone: highmem, target: 1, launched: 1)
+2026-11-13 11:05:29.898 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 published (4 relay identities)
+2026-11-13 11:05:29.898 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:29.898 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:29.898 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:29.898 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 (site: A, zone: highmem, target: 2, launched: 1)
+2026-11-13 11:05:31.927 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 published (4 relay identities)
+2026-11-13 11:05:31.928 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:31.928 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 (site: B, zone: gpu, target: 2, launched: 1)
+2026-11-13 11:05:31.928 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:31.928 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 (site: A, zone: highmem, target: 2, launched: 2)
+2026-11-13 11:05:33.957 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 published (4 relay identities)
+2026-11-13 11:05:33.957 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:33.957 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 (site: B, zone: gpu, target: 2, launched: 2)
+2026-11-13 11:05:33.957 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:33.957 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 (site: A, zone: highmem, target: 2, launched: 2)
+2026-11-13 11:05:34.960 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 published (4 relay identities)
+2026-11-13 11:05:34.960 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:34.960 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 (site: B, zone: gpu, target: 2, launched: 2)
+2026-11-13 11:05:34.960 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:34.960 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:35.964 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 published (4 relay identities)
+2026-11-13 11:05:35.964 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:35.964 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:35.964 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:35.964 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:37.988 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 published (4 relay identities)
+2026-11-13 11:05:37.988 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:37.988 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:37.988 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:37.988 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:40.006 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 published (4 relay identities)
+2026-11-13 11:05:40.006 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:40.006 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:40.006 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:40.006 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:44.051 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 published (4 relay identities)
+2026-11-13 11:05:44.052 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:44.052 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:44.052 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:44.052 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:46.070 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 published (4 relay identities)
+2026-11-13 11:05:46.070 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:46.070 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 (site: B, zone: gpu, target: 1, launched: 1)
+2026-11-13 11:05:46.070 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:46.070 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:49.107 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:29 published (4 relay identities)
+2026-11-13 11:05:49.107 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:29 (site: B, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:49.107 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:29 (site: B, zone: gpu, target: 1, launched: 0)
+2026-11-13 11:05:49.107 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:29 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 11:05:49.107 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:29 (site: A, zone: highmem, target: 0, launched: 0)
+2026-11-13 11:05:49.278 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.server] Relay site left (site: A, zone: cpu) (<host>: 885512b1-d81c-50b9-a146-2ab3de556c63)
+2026-11-13 11:05:49.285 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.server] Relay site left (site: A, zone: highmem) (<host>: 7488ead0-6e61-5cba-b546-384b98bc3dd9)
+2026-11-13 11:05:49.339 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.server] Relay site left (site: B, zone: cpu) (<host>: 4d17d860-6c78-5eae-a04f-ffececd62d4e)
+2026-11-13 11:05:49.340 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.server] Relay site left (site: B, zone: gpu) (<host>: 58b00168-b0b5-5aa2-85df-5a295c72c87c)
+2026-11-13 11:05:50.120 <host>  WARNING [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Site B left the topology (no live relay) - its share is planned over the remaining sites
+2026-11-13 11:05:50.120 <host>  WARNING [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Site A left the topology (no live relay) - its share is planned over the remaining sites
+2026-11-13 11:05:50.120 <host>     INFO [01a1d5a7-c870-7552-a61c-51790538de90] [hypershell.cluster] Topology 01a1d5a7-c870-7552-a61c-51790538de90:30 published (0 relay identities)
+# relay-A: topology reads and applications, idle exits
+    INFO [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:2 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:2 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 (zone: cpu, target: 2, seen: 1, launched: 1) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 (zone: cpu, target: 2, seen: 2, launched: 2) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24249)
+    INFO [hypershell.cluster] Autoscale client disconnected (24322)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 (zone: cpu, target: 2, seen: 2, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 (zone: cpu, target: 2, seen: 2, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:14 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:14 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 (zone: cpu, target: 0, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 (zone: highmem, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.cluster] Autoscale client disconnected (24378)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 (zone: cpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 (zone: highmem, target: 1, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 (zone: cpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 (zone: highmem, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 (zone: highmem, target: 2, seen: 1, launched: 1) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 (zone: highmem, target: 2, seen: 2, launched: 2) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24397)
+    INFO [hypershell.cluster] Autoscale client disconnected (24424)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 (zone: highmem, target: 2, seen: 2, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 (zone: highmem, target: 0, seen: 0, launched: 0) - launching 0
+# relay-B: topology reads and applications, idle exits
+    INFO [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:0 (zone: gpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:0 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:1 (zone: gpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:1 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:2 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:2 (zone: gpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:3 (zone: cpu, target: 1, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:3 (zone: gpu, target: 1, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 (zone: gpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:4 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24217)
+    INFO [hypershell.cluster] Autoscale client disconnected (24218)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 (zone: cpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:5 (zone: gpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:6 (zone: gpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:7 (zone: gpu, target: 1, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 (zone: cpu, target: 1, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:8 (zone: gpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24270)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 (zone: cpu, target: 2, seen: 1, launched: 1) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:9 (zone: gpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 (zone: gpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:10 (zone: cpu, target: 2, seen: 2, launched: 2) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 (zone: gpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24297)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:11 (zone: cpu, target: 2, seen: 2, launched: 1) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24320)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 (zone: gpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24278)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:12 (zone: cpu, target: 2, seen: 1, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 (zone: gpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:13 (zone: cpu, target: 2, seen: 1, launched: 1) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 (zone: gpu, target: 1, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:15 (zone: cpu, target: 1, seen: 1, launched: 2) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24365)
+    INFO [hypershell.cluster] Autoscale client disconnected (24374)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 (zone: gpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24375)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:16 (zone: cpu, target: 2, seen: 2, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 (zone: gpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:17 (zone: cpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:18 (zone: gpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:19 (zone: gpu, target: 1, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:20 (zone: gpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:21 (zone: gpu, target: 2, seen: 1, launched: 1) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24418)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:22 (zone: gpu, target: 2, seen: 2, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:23 (zone: gpu, target: 2, seen: 2, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24457)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:24 (zone: gpu, target: 1, seen: 1, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:25 (zone: gpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:26 (zone: gpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24492)
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:27 (zone: gpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d5a7-c870-7552-a61c-51790538de90:28 (zone: gpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (24520)
+# topology_drive floor: checks
+PASS no launch after every client left
+PASS B's gpu floor (min 1) held after the work: its idle client launched again
+PASS every live relay still runs after its clients left
+PASS no relay identity left or was evicted while running
+PASS every live relay drained and exited 0
+PASS every task completed (28)
+PASS no task failed
+PASS some client was launched
+PASS every launch names one zone in {zone}, HYPERSHELL_ZONE and --zone
+PASS no relay terminated a site client
+peak A cpu 2 (max 2)
+peak A highmem 2 (max 2)
+peak B cpu 2 (max 2)
+peak B gpu 2 (max 2)
+PASS no site-zone ran more clients than its max
+group 0 last completion 1794585921; first gpu launch 1794585907
+PASS a gpu client (min 1) was launched while group 0 ran
+PASS no highmem client (min 0) was launched before group 0 ended
+PASS highmem was launched once group 1 began
+# topology_drive floor: PASS

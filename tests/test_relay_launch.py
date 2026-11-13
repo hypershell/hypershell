@@ -40,7 +40,7 @@ from cmdkit.config import Configuration, Namespace
 from hypershell.core.config import config, DEFAULT_AUTH, ConfigurationError
 from hypershell.relay import RelayThread, RelayApp, site_bundlesize, zone_options
 from hypershell.core.queue import QueueConfig
-from hypershell.cluster.launch import ClientLaunch, AUTH_ENV, OMPI_ENV_LIST
+from hypershell.cluster.launch import ClientLaunch, AUTH_ENV, OMPI_ENV_LIST, ZONE_ENV
 from hypershell.relay.site import (site_cluster, site_launch, fence_site, scrub_environment, check_invocation,
                                    check_exports, CredentialFenceError, site_config_copy, zone_launch, zone_fleet,
                                    end_site_clients)
@@ -331,7 +331,7 @@ def test_client_invocation_excludes_the_key(monkeypatch) -> None:
     site_key = cluster.server.queue.config.auth
     assert site_key != KEY and len(site_key) == 128
     assert not any(site_key in arg for arg in argv)
-    assert launch.env == {AUTH_ENV: site_key} and launch.stdin is None and not launch.inherit_env
+    assert launch.env == {AUTH_ENV: site_key, ZONE_ENV: 'gpu'} and launch.stdin is None and not launch.inherit_env
     assert site_key not in launch.describe()
 
     environ = dict(os.environ)
@@ -569,7 +569,7 @@ def test_zone_launch_is_the_cluster_launch_but_for_its_zone() -> None:
     other = zone_launch(cluster, 'gpu', launcher='srun --exact', launcher_args=['--mpi=none'], **SITE_OPTIONS)
     assert zone_word(other.argv) == ['gpu'] and zone_word(site_launch(cluster).argv) == ['cpu']
     assert [word for word in other.argv if word != 'gpu'] == [word for word in same.argv if word != 'cpu']
-    assert other.env == {AUTH_ENV: cluster.server.queue.config.auth}
+    assert other.env == {AUTH_ENV: cluster.server.queue.config.auth, ZONE_ENV: 'gpu'}
     assert '--no-tls' in other.argv  # No site TLS given, as for the cluster's own clients.
 
 

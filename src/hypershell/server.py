@@ -74,6 +74,7 @@ from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEO
 from hypershell.core.dispatch import Dispatcher
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
 from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
+from hypershell.core.topology import SiteRegistry
 from hypershell.data.model import (Task, Client, Zone, ResultOutcome, CONTENDED_RERUNS, serialize_tasks,
                                    deserialize_tasks, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
@@ -691,6 +692,11 @@ class HeartMonitor(StateMachine):
     site clients are registered (attributed to the site and the relay) and disconnected as they
     come and go from the roster, but never enter `beats`: only their relay is evicted for missed
     heartbeats, and its eviction or final heartbeat disconnects its whole roster.
+
+    With a site registry (a server autoscaling with relay sites), each beat of a relay identity
+    that advertises its zone is recorded there, overwriting that identity's previous record, and
+    the record is dropped when the identity is evicted or finishes. A relay identity that
+    advertises no zone (a relay of an earlier release) takes no part in the topology.
     """
 
     in_memory: bool
@@ -698,6 +704,8 @@ class HeartMonitor(StateMachine):
     queue: QueueServer
     beats: Dict[str, Heartbeat]
     rosters: Dict[str, Dict[str, RosterEntry]]
+    sites: Optional[SiteRegistry]
+    ignored_sites: set
     last_check: datetime
     wait_check: timedelta
     evict_after: timedelta
@@ -711,12 +719,14 @@ class HeartMonitor(StateMachine):
     states = HeartbeatState
 
     def __init__(self: HeartMonitor, queue: QueueServer, evict_after: int = DEFAULT_EVICT,
-                 in_memory: bool = False, no_confirm: bool = False) -> None:
+                 in_memory: bool = False, no_confirm: bool = False, sites: Optional[SiteRegistry] = None) -> None:
         """Initialize with queue server."""
         self.queue = queue
         self.last_check = datetime.now().astimezone()
         self.beats = {}
         self.rosters = {}
+        self.sites = sites
+        self.ignored_sites = set()
         self.in_memory = in_memory
         self.no_confirm = no_confirm
         if evict_after >= 10:
@@ -780,6 +790,8 @@ class HeartMonitor(StateMachine):
             self.beats[hb.uuid] = hb
             if hb.roster is not None:
                 self.update_roster(hb)
+            if self.sites is not None and hb.site is not None:
+                self.record_site(hb)
             return HeartbeatState.SWITCH
         else:
             log.trace(f'Client disconnected ({hb.host}: {hb.uuid})')
@@ -789,8 +801,33 @@ class HeartMonitor(StateMachine):
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone())
             if hb.site is not None or hb.uuid in self.rosters:
                 self.end_roster(hb.uuid)
+            self.drop_site(hb.uuid)
             self.queue.dispatcher.forget(hb.uuid)
             return HeartbeatState.SWITCH
+
+    def record_site(self: HeartMonitor, hb: Heartbeat) -> None:
+        """Record a relay identity's advertisement, overwriting its previous one."""
+        if hb.zone is None or hb.bounds is None or hb.clients is None:
+            if hb.uuid not in self.ignored_sites:
+                self.ignored_sites.add(hb.uuid)
+                log.info(f'Relay ({hb.host}: {hb.uuid}, site {hb.site}) advertises no zone or bounds: '
+                         f'it takes no part in the site topology')
+            return
+        known = hb.uuid in self.sites
+        record = self.sites.record(hb.uuid, site=hb.site, zone=hb.zone, bounds=hb.bounds,
+                                   clients=hb.clients, host=hb.host, instance=hb.instance)
+        if not known:
+            log.info(f'Relay site registered (site: {record.site}, zone: {record.zone}, '
+                     f'min: {record.bounds.min}, init: {record.bounds.init}, max: {record.bounds.max}, '
+                     f'clients: {record.clients}) ({hb.host}: {hb.uuid})')
+
+    def drop_site(self: HeartMonitor, uuid: str) -> None:
+        """Forget a relay identity's advertisement as it is evicted or finishes."""
+        if self.sites is not None:
+            self.ignored_sites.discard(uuid)
+            record = self.sites.drop(uuid)
+            if record is not None:
+                log.info(f'Relay site left (site: {record.site}, zone: {record.zone}) ({record.host}: {uuid})')
 
     @staticmethod
     def relay_fields(hb: Heartbeat) -> Dict[str, str]:
@@ -878,6 +915,7 @@ class HeartMonitor(StateMachine):
                     Task.revert_orphaned(uuid)
                 if hb.site is not None or uuid in self.rosters:
                     self.end_roster(uuid)
+                self.drop_site(uuid)
                 self.queue.dispatcher.forget(uuid)
         return HeartbeatState.SWITCH
 
@@ -901,11 +939,11 @@ class HeartMonitorThread(Thread):
     """Run heart monitor within dedicated thread."""
 
     def __init__(self: HeartMonitorThread, queue: QueueServer, evict_after: int = DEFAULT_EVICT,
-                 in_memory: bool = False, no_confirm: bool = False) -> None:
+                 in_memory: bool = False, no_confirm: bool = False, sites: Optional[SiteRegistry] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-heartmonitor')
         self.machine = HeartMonitor(queue=queue, evict_after=evict_after,
-                                    in_memory=in_memory, no_confirm=no_confirm)
+                                    in_memory=in_memory, no_confirm=no_confirm, sites=sites)
 
     def run_with_exceptions(self: HeartMonitorThread) -> None:
         """Run machine."""
@@ -1009,6 +1047,10 @@ class ServerThread(Thread):
             Clients must connect with compatible configuration.
             See :ref:`security <security>` documentation for details.
 
+        sites (SiteRegistry, optional):
+            Record the advertisements of relay identities here (a server autoscaling with
+            relay sites). Without it, nothing is recorded.
+
     Example:
         >>> from hypershell.server import ServerThread
         >>> server = ServerThread.new(restart_mode=True, auth='my-secret-key')
@@ -1028,6 +1070,7 @@ class ServerThread(Thread):
     heartmonitor: HeartMonitorThread
     in_memory: bool
     no_confirm: bool
+    sites: Optional[SiteRegistry]
 
     def __init__(self: ServerThread,
                  source: Iterable[str] = None,
@@ -1049,10 +1092,12 @@ class ServerThread(Thread):
                  evict_after: int = DEFAULT_EVICT,
                  template: str = DEFAULT_TEMPLATE,
                  from_json: bool = False,
-                 tls: Optional[TLSConfig] = None) -> None:
+                 tls: Optional[TLSConfig] = None,
+                 sites: Optional[SiteRegistry] = None) -> None:
         """Initialize queue manager and child threads."""
         self.in_memory = in_memory
         self.no_confirm = no_confirm
+        self.sites = sites
         if not self.in_memory and not DATABASE_ENABLED:
             log.warning('No database configured - automatically disabled')
             self.in_memory = True
@@ -1083,7 +1128,7 @@ class ServerThread(Thread):
             self.confirm = ConfirmThread(queue=self.queue, in_memory=self.in_memory)
         self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures)
         self.heartmonitor = HeartMonitorThread(queue=self.queue, evict_after=evict_after,
-                                               in_memory=self.in_memory, no_confirm=no_confirm)
+                                               in_memory=self.in_memory, no_confirm=no_confirm, sites=sites)
         super().__init__(name='hypershell-server')
 
     def run_with_exceptions(self: ServerThread) -> None:
@@ -1532,6 +1577,7 @@ Usage:
             [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] [-Q NUM]
             [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
             [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
+            [--autoscaling [MODE] [-F VALUE] [-P SEC]]
 
   Launch server, schedule directly or asynchronously from database.\
 """
@@ -1551,6 +1597,11 @@ APP_HELP = f"""\
   Tasks are bundled and clients pull them in these bundles. However, by default the bundle
   size is one, meaning that at small scales there is greater responsiveness.
 
+  With --autoscaling the server schedules forever and launches nothing. Relays connected with
+  its key advertise the zones they serve and each zone's min/max/init clients; the server plans
+  each zone's clients over the live relay sites (autoscale.distribution: spread or fill) and
+  publishes them for each relay to launch with its own launcher.
+
 Arguments:
   FILE                        Path to input task file (default: <stdin>).
 
@@ -1564,6 +1615,9 @@ Options:
       --tls-ca                Path to TLS CA certificate file (default: <auto>).
       --forever               Schedule forever.
       --restart               Start scheduling from last completed task.
+  -A, --autoscaling   [MODE]  Publish client targets for relay sites (fixed or dynamic; implies --forever).
+  -F, --factor        VALUE   Scaling factor (default: {default.autoscale.factor}).
+  -P, --period        SEC     Scaling period in seconds (default: {default.autoscale.period}).
   -c, --task-cores      NUM   Number of cores to assign each task (default: none).
   -m, --task-memory     MEM   Memory to assign each task; K/M/G/T[B|iB] are powers of 1024 (default: none).
   -W, --task-timeout    SEC   Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
@@ -1613,6 +1667,14 @@ class ServerApp(Application):
 
     restart_mode: bool = False
     interface.add_argument('--restart', action='store_true', dest='restart_mode')
+
+    autoscaling_policy: Optional[str] = None
+    autoscaling_factor: float = config.autoscale.factor
+    autoscaling_period: int = config.autoscale.period
+    interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
+                           const=config.autoscale.policy, dest='autoscaling_policy')
+    interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
+    interface.add_argument('-P', '--period', type=int, default=autoscaling_period, dest='autoscaling_period')
 
     poll: int = config.server.poll
     interface.add_argument('-Q', '--poll', type=int, default=poll)
@@ -1668,7 +1730,22 @@ class ServerApp(Application):
         self.check_args()
         self.enable_tls()
         ensuredb()
-        if self.forever_mode:
+        if self.autoscaling_policy is not None:
+            # Imported here: the cluster package imports this module.
+            from hypershell.cluster.topology import serve_with_sites
+            serve_with_sites(bundlesize=self.bundlesize,
+                             address=(self.host, self.port),
+                             auth=self.auth,
+                             poll=self.poll,
+                             max_retries=self.max_retries,
+                             eager=self.eager_mode,
+                             redirect_failures=self.failure_stream,
+                             evict_after=config.server.evict,
+                             tls=self.tls,
+                             policy=self.autoscaling_policy,
+                             factor=self.autoscaling_factor,
+                             period=self.autoscaling_period)
+        elif self.forever_mode:
             serve_forever(bundlesize=self.bundlesize,
                           address=(self.host, self.port),
                           auth=self.auth,
@@ -1701,6 +1778,8 @@ class ServerApp(Application):
 
     def check_args(self: ServerApp) -> None:
         """Fail particular argument combinations."""
+        if self.autoscaling_policy is not None:
+            self.check_autoscaling()
         if self.filepath and self.forever_mode:
             raise ArgumentError('Cannot specify both FILE and --forever')
         if self.filepath and self.restart_mode:
@@ -1717,6 +1796,21 @@ class ServerApp(Application):
             raise ArgumentError(f'Authentication key must contain only "{AUTH_ALLOWED_CHARS.pattern}"')
         if not self.tls_enabled:
             log.warning('TLS is disabled - this is not recommended for production!')
+
+    def check_autoscaling(self: ServerApp) -> None:
+        """Fail combinations with --autoscaling, which runs forever and relies on the database and confirmation."""
+        if self.autoscaling_policy not in ('fixed', 'dynamic'):
+            raise ArgumentError(f'Autoscaling mode must be \'fixed\' or \'dynamic\' '
+                                f'(given \'{self.autoscaling_policy}\')')
+        if self.filepath:
+            raise ArgumentError('Cannot specify both FILE and --autoscaling')
+        if self.restart_mode:
+            raise ArgumentError('Using --autoscaling with --restart is invalid')
+        if self.in_memory:
+            raise ArgumentError('Cannot use --autoscaling with --no-db')
+        if self.no_confirm:
+            raise ArgumentError('Cannot use --autoscaling with --no-confirm')
+        self.forever_mode = True
 
     def special_options(self: ServerApp) -> bool:
         """Special terminating options print information lazily (not import time)."""
@@ -1738,8 +1832,8 @@ class ServerApp(Application):
 
     @cached_property
     def input_stream(self: ServerApp) -> Optional[IO]:
-        """Input IO stream for task args."""
-        if self.forever_mode or self.restart_mode or not self.filepath:
+        """Input IO stream for task args (none with --autoscaling, which never reads one)."""
+        if self.forever_mode or self.restart_mode or self.autoscaling_policy is not None or not self.filepath:
             return None
         else:
             return sys.stdin if self.filepath == '-' else open(self.filepath, mode='r')

@@ -1,0 +1,388 @@
+{
+ "bounds": {
+  "A": {
+   "cpu": {
+    "max": 4,
+    "min": 0
+   },
+   "highmem": {
+    "max": 2,
+    "min": 0
+   }
+  },
+  "B": {
+   "cpu": {
+    "max": 4,
+    "min": 0
+   },
+   "gpu": {
+    "max": 2,
+    "min": 0
+   }
+  }
+ },
+ "distribution": "fill",
+ "dropped": [
+  {
+   "site": "B",
+   "t": 261.41
+  },
+  {
+   "site": "A",
+   "t": 261.41
+  }
+ ],
+ "duplicate_warnings": 0,
+ "events": {
+  "completed": 225.08,
+  "drain": 256.52,
+  "end": 263.56,
+  "observed": 256.52,
+  "quiet": 236.51,
+  "registered": 70.51,
+  "submitted": 75.39
+ },
+ "groups": [
+  {
+   "completed": 300,
+   "failed": 0,
+   "first_schedule": 95.22,
+   "group": 0,
+   "last_completion": 168.41,
+   "succeeded": 300,
+   "tasks": 300,
+   "zones": {
+    "cpu": 300
+   }
+  },
+  {
+   "completed": 16,
+   "failed": 0,
+   "first_schedule": 192.87,
+   "group": 1,
+   "last_completion": 224.47,
+   "succeeded": 16,
+   "tasks": 16,
+   "zones": {
+    "gpu": 8,
+    "highmem": 8
+   }
+  }
+ ],
+ "hypershell": null,
+ "label": "b98e994",
+ "last_completion": 224.47,
+ "launches": [
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 174.31,
+   "t_kill": null,
+   "t_launch": 78.87,
+   "t_start": 80.15,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 175.13,
+   "t_kill": null,
+   "t_launch": 101.81,
+   "t_start": 102.86,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 173.6,
+   "t_kill": null,
+   "t_launch": 107.71,
+   "t_start": 107.86,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 173.34,
+   "t_kill": null,
+   "t_launch": 111.72,
+   "t_start": 113.05,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 173.38,
+   "t_kill": null,
+   "t_launch": 118.05,
+   "t_start": 118.23,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 173.78,
+   "t_kill": null,
+   "t_launch": 123.6,
+   "t_start": 125.77,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 172.73,
+   "t_kill": null,
+   "t_launch": 127.6,
+   "t_start": 127.72,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 174.78,
+   "t_kill": null,
+   "t_launch": 133.6,
+   "t_start": 133.7,
+   "word": "cpu"
+  },
+  {
+   "client": "gpu",
+   "env": "gpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 232.69,
+   "t_kill": null,
+   "t_launch": 178.23,
+   "t_start": 178.35,
+   "word": "gpu"
+  },
+  {
+   "client": "highmem",
+   "env": "highmem",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 208.1,
+   "t_kill": null,
+   "t_launch": 178.38,
+   "t_start": 178.49,
+   "word": "highmem"
+  },
+  {
+   "client": "highmem",
+   "env": "highmem",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "A",
+   "status": 0,
+   "t_end": 218.86,
+   "t_kill": null,
+   "t_launch": 198.55,
+   "t_start": 198.66,
+   "word": "highmem"
+  },
+  {
+   "client": "gpu",
+   "env": "gpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "signal": null,
+   "site": "B",
+   "status": 0,
+   "t_end": 236.02,
+   "t_kill": null,
+   "t_launch": 223.89,
+   "t_start": 224.1,
+   "word": "gpu"
+  }
+ ],
+ "local": false,
+ "nodes": 4,
+ "python": "3.12.16",
+ "relays": {
+  "A": {
+   "drained_at": 256.86,
+   "errors": 0,
+   "evicted": [],
+   "idle_exits": 6,
+   "killed_at": null,
+   "left": [
+    {
+     "t": 259.6,
+     "zone": "cpu"
+    },
+    {
+     "t": 259.6,
+     "zone": "highmem"
+    }
+   ],
+   "nonzero_exits": 0,
+   "rc": 0,
+   "registered": [
+    {
+     "t": 69.52,
+     "zone": "cpu"
+    },
+    {
+     "t": 69.52,
+     "zone": "highmem"
+    }
+   ],
+   "reverted": [],
+   "started": true,
+   "stopped": false,
+   "terminating": 0
+  },
+  "B": {
+   "drained_at": 256.79,
+   "errors": 0,
+   "evicted": [],
+   "idle_exits": 6,
+   "killed_at": null,
+   "left": [
+    {
+     "t": 259.59,
+     "zone": "cpu"
+    },
+    {
+     "t": 259.6,
+     "zone": "gpu"
+    }
+   ],
+   "nonzero_exits": 0,
+   "rc": 0,
+   "registered": [
+    {
+     "t": 56.54,
+     "zone": "cpu"
+    },
+    {
+     "t": 56.54,
+     "zone": "gpu"
+    }
+   ],
+   "reverted": [],
+   "started": true,
+   "stopped": false,
+   "terminating": 0
+  }
+ },
+ "run_id": "topology-b98e994-45755911-fill",
+ "scenario": "fill",
+ "schema": 1,
+ "scrub": {
+  "hosts": 0,
+  "key": 0,
+  "paths": 0,
+  "users": 0,
+  "words": 0
+ },
+ "server": {
+  "exported": true,
+  "rc": 4
+ },
+ "settings": {
+  "bundlewait": 2,
+  "evict": 20,
+  "factor": 1.0,
+  "heartrate": 2,
+  "kill_at_clients": 2,
+  "period": 5,
+  "quiet": 20,
+  "relay_period": 2,
+  "threads": 2,
+  "timeout": 10
+ },
+ "sites": [
+  "A",
+  "B"
+ ],
+ "tasks": {
+  "completed": 316,
+  "failed": 0,
+  "max_attempt": 1,
+  "rows": 316,
+  "succeeded": 316,
+  "total": 316
+ },
+ "topology_versions": 23,
+ "wall_s": 263.56,
+ "workload": [
+  {
+   "group": 0,
+   "sleep": 2.0,
+   "tasks": 300,
+   "zone": "cpu"
+  },
+  {
+   "group": 1,
+   "sleep": 2.0,
+   "tasks": 8,
+   "zone": "highmem"
+  },
+  {
+   "group": 1,
+   "sleep": 2.0,
+   "tasks": 8,
+   "zone": "gpu"
+  }
+ ]
+}
