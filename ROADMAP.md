@@ -643,22 +643,6 @@ cycle has not. Promotion should re-confirm scope against current `develop` and c
 drifted, then adopt largely as written. The last four entries are `unshaped` test-infrastructure
 seeds: three split out of shipped cycles, one found out of cycle.
 
-## Zone-aware autoscaling
-
-Zones now route work from one server: a task submitted with `--zone` runs only on a client of that
-zone, sized to the client's own request. The elastic fleet does not follow yet. An autoscaling
-cluster takes a single `--zone`, and its pressure signal counts every zone's work in the current
-group. Zone-aware autoscaling reads pressure per zone, discovers the zones with eligible work,
-launches clients into each through the user's launcher (handing it the zone as `{zone}` and
-`HYPERSHELL_ZONE`), and lets idle clients retire — so a CPU/GPU/high-memory campaign provisions
-each resource type only while its phase is live, while the single-zone case behaves exactly as
-today.
-
-*Horizon: near-term · Depends on: — (its prerequisites shipped: the queue primitive,
-`zone-queue-primitive`, #76; dispatch and zones, `zone-dispatch`, #78) · Refs: the third of zone's
-three cycles; seed R13–R17*
-**Seed:** [`issues/zone.md`](issues/zone.md) · *status: adopted:zone-autoscale*
-
 ## Relay site-topology autoscaling: fill and spread across sites
 
 With relays in place, each site still sizes its own fleet; the true server, which holds the pressure
@@ -668,8 +652,8 @@ publishes a versioned per-site topology under `fill` (the SU-cost mode) or `spre
 `min`/`max`/`init`; each relay reconciles only its own entry, and scale-down stays idle-exit. Carved
 out of relay at its promotion, because it extends zone autoscaling's per-zone pressure.
 
-*Horizon: mid-term · Depends on: zone autoscaling (Z3, `issues/zone.md` R13–R17); relay itself,
-the other prerequisite, landed (#82) · Refs: the original relay seed's R11–R15 and R16's topology
+*Horizon: mid-term · Depends on: — (both prerequisites landed: zone autoscaling, `zone-autoscale`,
+#99, and relay itself, #82) · Refs: the original relay seed's R11–R15 and R16's topology
 half (`spec/relay/GOAL.md` C1)*
 **Seed:** [`issues/relay-topology.md`](issues/relay-topology.md) · *status: adopted:relay-topology*
 
@@ -681,9 +665,10 @@ from our side of the code and removes that cap; the official dialect already shi
 adoption, validation, and the two capabilities it unlocks. Independently, the `[s3]` extra un-maroons
 captured output from the execution host.
 
-*Horizon: mid-term · Depends on: sequenced after zone (relay, the other half, landed in #82); R4's
-per-provider seam in `data/core.py` shares ground with the resilience feature's pragma defaults ·
-Refs: R13–R15 soften relay's cross-site output non-goal*
+*Horizon: mid-term · Depends on: the sequencing after zone, cleared (zone shipped as
+`zone-autoscale`, #99; relay, the other half, in #82); R4's per-provider seam in `data/core.py`
+shares ground with the resilience feature's pragma defaults · Refs: R13–R15 soften relay's
+cross-site output non-goal*
 **Seed:** [`issues/turso.md`](issues/turso.md) · *status: shaped*
 
 ## The whole test suite on a server database

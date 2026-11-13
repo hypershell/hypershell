@@ -303,8 +303,8 @@ not a migration. PostgreSQL remains the recommendation for large multi-user depl
 
 ## Related materials
 
-- Dependency: none hard — sequenced after [`zone.md`](zone.md) and relay (`spec/relay/`,
-  landed in #82) as the closing phase of 2.9.0. Synergy: R13–R15 (S3 output)
+- Dependency: none hard — sequenced after zone (`spec/zone-autoscale/`, #99) and relay
+  (`spec/relay/`, landed in #82) as the closing phase of 2.9.0. Synergy: R13–R15 (S3 output)
   soften relay's "cross-site captured-output retrieval" non-goal — an `s3://` outpath is
   site-independent by construction.
 - Source (likely touchpoints, to be confirmed by `hs-plan`): `src/hypershell/data/core.py`

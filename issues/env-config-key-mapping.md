@@ -138,6 +138,7 @@ An `[export]` variable reaches a task with the name and value the user wrote.
   it does not collide, it nests (above), so R4 here and R1 there should be shaped together.
   [`templating-and-remote-env-contract.md`](templating-and-remote-env-contract.md) R3 quotes the
   `HYPERSHELL_*` values that `--ssh --env` forwards; on the remote host they go through this same
-  mapping. Relay's `[relay.zone.*]` tables (#82) and [`zone.md`](zone.md) add the per-zone tables
-  named above.
+  mapping. Relay's `[relay.zone.*]` tables (#82) add the per-zone tables
+  named above; zone-aware autoscaling (`spec/zone-autoscale/`, #99) kept the sizing knobs uniform
+  and added none.
 - Found by: out-of-cycle review, 2026-11-06; reproduced on 2.9.0a5.
