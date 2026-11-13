@@ -87,7 +87,7 @@ is skipped by the parser):
 - **Recommended fix:** draw the line at the first build commit. Surface only `GOAL.md` commits after it, and note any earlier clarification commits in `REVIEW.md`'s pre-flight without stopping.
 - **Confidence:** high · **Effort:** small
 
-## F6 — The skill's base is the local `develop`, which was stale again · seen again (other cycles)
+## F6 — The skill's base is the local `develop`, which was stale again · seen again (other cycles) · seen again (review cycle 2)
 `origin=hs-review:step-1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** the injected diffstat and Step 1's `base` resolve to the local `develop` (`5f22298`), which differs from `origin/develop` (`1ea9145`, the branch's merge base). The foreman's brief named `origin/develop`, so the drift check, the graded diff and the reviewer brief all used it.
 - **Skill cause:** "Current state" runs `git diff --stat develop...HEAD`, and Step 1 defaults `base` to the branch name `develop`, with no fetch and no comparison against `origin`. The same finding is open in several earlier cycles' META files.
@@ -100,3 +100,24 @@ is skipped by the parser):
 - **Skill cause:** Safety Principles say "Amend `TECH.md` freely; GOAL is locked", and Step 1.3 (remediation) covers only `REVIEW.md` → `TECH.md`. A remediation after a human-gate ruling has no instruction to record the ruling, so a builder following the skill alone either leaves it in chat or edits a "locked" file without guidance.
 - **Recommended fix:** in Step 1.3, add: when `REVIEW.md` records a human gate, append each ruling to `GOAL.md` Clarifications as a dated line naming the finding (append only; no R-ID text changes), in the remediation commit.
 - **Confidence:** med · **Effort:** small
+
+## F8 — The reviewer's conduct rule covers tracked files, not the processes its CLI drives start
+`origin=hs-review:step-2 severity=medium category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** the blind reviewer left two autoscaling `hsx` servers running after hand-back. Its deadline helper signalled a wrapper subshell rather than `hsx`, and `temp_site.sh` then removed the site out from under them. Each kept relaunching a client every period, which crashed at once. The harness refused the reviewer's own later `kill`, so a human has to stop them.
+- **Skill cause:** Step 2 and the rubric's conduct rule require only a clean `git status`. `temp_site.sh` removes the site on exit but leaves running any background process the command started. The skill prescribes bounded CLI drives of long-running servers but gives no way to bound or reap them.
+- **Recommended fix:** have `temp_site.sh` run the command in its own process group and signal the group (INT, then TERM) in its exit trap. Add to the conduct rule: no process you started may outlive your hand-back.
+- **Confidence:** high · **Effort:** small
+
+## F9 — CLI drives of launcher clusters need a host rewrite in the sandbox, and nothing says so
+`origin=hs-review:step-2 severity=low category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** the autoscaler hands each client `-H <host name>`, and the sandbox cannot resolve it. Every client exited with `Could not resolve host`. The orchestrator found this only after a 40 s drive came back as 11 failed launches; the reviewer found it independently. Both wrote a shim that points `-H` at loopback.
+- **Skill cause:** the executed-evidence spine prescribes `--launcher` drives in `temp_site.sh` sites, and the factory docs are silent on this sandbox limit. Each review rediscovers it at the cost of a retry.
+- **Recommended fix:** ship a recording launcher shim under `.agents/factory/bin/`. It logs argv and `HYPERSHELL_ZONE`, drops its own marker word, and rewrites `-H` to loopback. Point to it from the rubric's verification guidance.
+- **Confidence:** med · **Effort:** small
+
+## F10 — The clean route leaves the previous cycle's `blocked_reason` under an `approved` verdict
+`origin=hs-review:step-4 severity=low category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** after cycle 1's changes-requested, Step 4's clean-route call (`--verdict approved --reviewed-commit … --touch`) left `review.blocked_reason` holding cycle 1's text. The orchestrator cleared it with a second call, `--blocked-reason ''`, by inference.
+- **Skill cause:** the clean route names no `--blocked-reason`, and `set_phase.py` changes only the fields it is given. Any approval that follows a blocked cycle therefore carries a stale reason into `hs-publish`.
+- **Recommended fix:** add `--blocked-reason ''` to the clean-route command in Step 4, or have `set_phase.py` clear `blocked_reason` on `--verdict approved`.
+- **Confidence:** high · **Effort:** small

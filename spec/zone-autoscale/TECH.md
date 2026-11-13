@@ -81,11 +81,10 @@ phases:
     restart && uv run pytest && uv run --python 3.12 --group docs sphinx-build -W
     --keep-going -q -E -b html docs docs/_build/html
 review:
-  last_reviewed_commit: 86fe37225a9337724f08c9692ba2c82c6e9ba327
-  verdict: changes-requested
-  blocked_reason: 'Review cycle 1: F1/F2 autoscaler reads a stale task group (restart
-    with a late lower group; own named zone at a group change)'
-  cycle: 1
+  last_reviewed_commit: a9c1c76d15492caa0398bc1c0404fede1f798d8f
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
 ---
 # TECH.md — Zone-aware autoscaling (zone, cycle 3)
 
