@@ -193,6 +193,12 @@ subsystems.
   most recently scheduled group differs after a restart with a late lower group and at a group
   change. Other zones, and an own zone with no client launched or registered, are read in the
   group the scheduler runs next (`Task.increment_group`, read only).
+- A server autoscaling with relay sites (`hs server --autoscaling`, `cluster/topology.py`) launches
+  nothing; it publishes. Its publisher reads the zones as above (`demand.scheduler_group`, pinned
+  equal to `AutoScaler.current_group` by a test), plans per site and zone within the bounds each
+  relay identity advertises on its heartbeat, and publishes a versioned topology on the dispatcher
+  (`Dispatcher.topology`) only when its entries change. It terminates nothing; it is refused with
+  `--no-db` and `--no-confirm`, since site failover rests on orphan recovery.
 - `SSHCluster` shells out to the plain `ssh` binary (not paramiko; paramiko is only in
   `core/remote.py` for SFTP).
 - The relay's site fleets are launched only through `client_launch()`: the first zone's by

@@ -498,6 +498,12 @@
 
         See also ``.factor``, ``.period``, ``.size.init``, ``.size.min``, and ``.size.max``.
 
+        A server autoscaling with relay sites (``hs server --autoscaling``) applies the policy to
+        each zone's demand alone: under `fixed`, a zone with work gets one client when none runs,
+        and its size otherwise comes from the relays' ``min`` and ``init``; under `dynamic`, a zone
+        grows by one client per check while its pressure is high, up to the sum of its live sites'
+        ``max``.
+
     ``.factor``
         Scaling factor (default: 1).
 
@@ -539,6 +545,38 @@
             .. versionchanged:: 2.9.0
                ``{zone}`` and ``HYPERSHELL_ZONE``.
 
+        A server autoscaling with relay sites launches nothing and ignores this setting: each
+        relay launches its own site clients with its own launcher.
+
+    ``.distribution``
+        How a zone's clients are split over the relay sites that serve it (default: `spread`).
+
+        Only a server autoscaling with relay sites (``hs server --autoscaling``) reads it. With
+        `spread`, each new client of a zone goes to the live site serving it that runs the
+        fewest, as peers. With `fill`, each new client goes to the first site in preference
+        order that has room below its ``max``, so a site is saturated before the next one gets
+        any: use it to prefer the cheaper site. Every site stays within the ``min``/``max`` its
+        relay advertises for the zone.
+
+        Its environment form is ``HYPERSHELL_AUTOSCALE_DISTRIBUTION``.
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+
+    ``.sites``
+        Preferred site order for the `fill` distribution (default: none).
+
+        A list of site names, or one comma-separated string (the environment form,
+        ``HYPERSHELL_AUTOSCALE_SITES=east,west``). Under `fill`, the listed live sites come first in
+        the listed order, and live sites not listed follow in the order they first registered.
+        Any relay connected with the server's key takes part whether or not it is listed, and
+        `spread` ignores the list.
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+
     ``[size]``
         ``.init``
             Initial size of cluster (default: 1).
@@ -559,6 +597,9 @@
 
             For a *dynamic* autoscaling policy, this sets an upper limit on the number of launched
             clients. When this number is reached, scaling stops regardless of task pressure.
+
+        A server autoscaling with relay sites ignores ``[size]``: each relay advertises the
+        ``min``, ``max`` and ``init`` of each zone it serves, and the server plans within those.
 
 ``[relay]``
     Section for the `relay` workflow, which connects a site to an upstream *server*.

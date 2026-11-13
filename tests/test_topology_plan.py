@@ -228,7 +228,10 @@ def test_parse_distribution_and_sites() -> None:
     assert parse_sites('') == []
     assert parse_sites('east, west,,east') == ['east', 'west']
     assert parse_sites(['B', 'A']) == ['B', 'A']
-    for bad in (1, ['A', 2], {'A': 1}):
+    assert parse_sites('<none>') == []
+    assert parse_sites(7) == ['7']
+    assert parse_sites(['east', 2]) == ['east', '2']
+    for bad in (True, ['A', None], {'A': 1}):
         with pytest.raises(ValueError, match='Sites must be'):
             parse_sites(bad)
 

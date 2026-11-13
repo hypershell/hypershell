@@ -28,7 +28,7 @@ from dataclasses import dataclass
 # Public interface
 __all__ = ['Bounds', 'Entry', 'Topology', 'TopologyReply', 'SiteRecord', 'SiteRegistry',
            'TOPOLOGY_PROTOCOL', 'MAX_TOPOLOGY_REQUEST', 'request_text', 'read_request',
-           'reply_text', 'read_topology']
+           'reply_text', 'error_text', 'read_topology']
 
 
 # The version of the topology request and reply, independent of the work-request protocol.
@@ -227,14 +227,25 @@ def reply_text(topology: Optional[Topology], identities: Iterable[str]) -> str:
     return json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': topology.version, 'zones': zones})
 
 
+def error_text(message: str) -> str:
+    """The reply to a topology request the server cannot read."""
+    return json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'error': 'request', 'message': message})
+
+
 def read_topology(text: str) -> Optional[TopologyReply]:
-    """The topology in a reply, or None when the server publishes none (ValueError when it cannot be read)."""
+    """
+    The topology in a reply, or None when the server publishes none.
+
+    ValueError when the reply cannot be read or is the server's refusal of the request.
+    """
     try:
         data = json.loads(text)
     except (TypeError, json.JSONDecodeError) as error:
         raise ValueError(f'Topology reply is not JSON ({error})') from error
     if not isinstance(data, dict) or data.get('protocol') != TOPOLOGY_PROTOCOL:
         raise ValueError(f'Topology reply is not protocol {TOPOLOGY_PROTOCOL}')
+    if 'error' in data:
+        raise ValueError(f'Topology request refused ({data.get("message")})')
     version = data.get('version')
     if version is None:
         return None

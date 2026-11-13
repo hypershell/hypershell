@@ -8,24 +8,45 @@ A server autoscaling with sites launches nothing. It reads each zone's load as t
 does, and splits each zone's clients over the live relay sites that serve the zone, within the
 bounds each site advertises. The planning functions here are pure: they take the loads and the
 relays' latest advertisements as inputs and return targets, so every rule is testable on its own.
+
+The :class:`TopologyPublisher` runs those functions at each check and publishes a new version of
+the topology on the server's dispatcher whenever the plan changes; relays fetch their own entries
+from there. :class:`AutoScalingServer` runs it beside a server in forever mode.
 """
 
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Callable, Dict, IO, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 # Standard libs
+import time
 from enum import Enum
+from datetime import datetime, timedelta
+from functools import cached_property
 from dataclasses import dataclass, replace
 
 # Internal libs
-from hypershell.core.topology import Bounds, Entry, SiteRecord
-from hypershell.cluster.demand import ZoneRef, ZoneLoad, ScalingKnobs, zone_demand
+from hypershell.core.config import config, blame, ConfigurationError, PARAM_UNSET
+from hypershell.core.fsm import State, StateMachine
+from hypershell.core.thread import Thread
+from hypershell.core.tls import TLSConfig
+from hypershell.core.logging import Logger, INSTANCE
+from hypershell.core.dispatch import Dispatcher
+from hypershell.core.topology import Bounds, Entry, Topology, SiteRecord, SiteRegistry
+from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ZoneLoad, ScalingKnobs, zone_demand,
+                                       scheduler_group, read_zone_loads)
+from hypershell.server import (ServerThread, DEFAULT_BIND, DEFAULT_PORT, DEFAULT_AUTH, DEFAULT_BUNDLESIZE,
+                               DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_EVICT)
 
 # Public interface
 __all__ = ['Distribution', 'parse_distribution', 'parse_sites',
-           'SiteZone', 'SiteView', 'Duplicate', 'site_views', 'plan_sites', 'entries']
+           'SiteZone', 'SiteView', 'Duplicate', 'site_views', 'plan_sites', 'entries',
+           'TopologyPublisherState', 'TopologyPublisher', 'TopologyPublisherThread', 'AutoScalingServer',
+           'serve_with_sites']
+
+# Initialize logger
+log = Logger.with_name('hypershell.cluster')
 
 
 class Distribution(Enum):
@@ -46,18 +67,25 @@ def parse_distribution(value: Any) -> Distribution:
     raise ValueError(f'Unknown site distribution {value!r} (expected \'spread\' or \'fill\')')
 
 
+def _site_name(value: Any) -> bool:
+    """True for a value that names a site: text, or a number the environment read from text."""
+    return isinstance(value, (str, int, float)) and not isinstance(value, bool)
+
+
 def parse_sites(value: Any) -> List[str]:
     """
     Site names, in order, from a list or one comma-separated string; nothing when unset.
 
     Blank names are skipped and a repeated name keeps its first place.
     """
-    if value is None:
+    if value is None or value == PARAM_UNSET:
         return []
     if isinstance(value, str):
         names = value.split(',')
-    elif isinstance(value, (list, tuple)) and all(isinstance(name, str) for name in value):
-        names = value
+    elif _site_name(value):
+        names = [str(value)]
+    elif isinstance(value, (list, tuple)) and all(_site_name(name) for name in value):
+        names = [str(name) for name in value]
     else:
         raise ValueError(f'Sites must be a list of names or a comma-separated string (given {value!r})')
     return list(dict.fromkeys(name.strip() for name in names if name.strip()))
@@ -189,3 +217,311 @@ def entries(targets: Mapping[str, Mapping[str, int]], records: Iterable[SiteReco
         result[holder.identity] = Entry(holder.zone, max(0, target), holder.clients)
         result.update({record.identity: Entry(record.zone, 0, record.clients) for record in older})
     return result
+
+
+class TopologyPublisherState(State, Enum):
+    """Finite states for TopologyPublisher."""
+    START = 0
+    WAIT = 1
+    CHECK = 2
+    PUBLISH = 3
+    FINAL = 4
+    HALT = 5
+
+
+class TopologyPublisher(StateMachine):
+    """
+    Plan the relay sites' client targets each period and publish them when they change.
+
+    Each check reads every zone's load in the group the scheduler loads from (as the scheduler
+    reports it through `scheduler_group`, else its start rule), takes a snapshot of the relay
+    advertisements in `registry`, and plans per site and zone. A plan whose entries differ from the
+    last published ones is published on `dispatcher` under the next version. The publisher never
+    launches or terminates a client and never ends by itself.
+    """
+
+    dispatcher: Dispatcher
+    registry: SiteRegistry
+    policy: AutoScalerPolicy
+    factor: float
+    distribution: Distribution
+    order: List[str]
+    attempts: int
+    eager: bool
+    scheduler_group: Optional[Callable[[], Optional[int]]]
+
+    count: int
+    published: Optional[Dict[str, Entry]]
+    pending: Optional[Dict[str, Entry]]
+    targets: Dict[str, Dict[str, int]]
+    views: List[SiteView]
+    warned: Set[Tuple[str, str]]
+    last_check: datetime
+    wait_check: timedelta
+
+    state: TopologyPublisherState = TopologyPublisherState.START
+    states = TopologyPublisherState
+
+    def __init__(self: TopologyPublisher,
+                 dispatcher: Dispatcher,
+                 registry: SiteRegistry,
+                 policy: str = 'fixed',
+                 factor: float = 1.0,
+                 period: int = 60,
+                 distribution: Distribution = Distribution.SPREAD,
+                 order: Sequence[str] = (),
+                 attempts: int = 1,
+                 eager: bool = False,
+                 scheduler_group: Optional[Callable[[], Optional[int]]] = None) -> None:
+        """Initialize with the server's dispatcher, its site registry and the scaling parameters."""
+        self.dispatcher = dispatcher
+        self.registry = registry
+        self.policy = AutoScalerPolicy.from_name(policy)
+        self.factor = factor
+        self.distribution = parse_distribution(distribution)
+        self.order = parse_sites(list(order))
+        self.attempts = attempts
+        self.eager = eager
+        self.scheduler_group = scheduler_group
+        self.count = 0
+        self.published = None
+        self.pending = None
+        self.targets = {}
+        self.views = []
+        self.warned = set()
+        self.last_check = datetime.now()
+        self.wait_check = timedelta(seconds=period)
+
+    @property
+    def knobs(self: TopologyPublisher) -> ScalingKnobs:
+        """The demand knobs; sizes come from the sites' advertised bounds, never from the server."""
+        return ScalingKnobs(self.policy, self.factor, init_size=0, min_size=0, max_size=0)
+
+    @cached_property
+    def actions(self: TopologyPublisher) -> Dict[TopologyPublisherState, Callable[[], TopologyPublisherState]]:
+        return {
+            TopologyPublisherState.START: self.start,
+            TopologyPublisherState.WAIT: self.wait,
+            TopologyPublisherState.CHECK: self.check,
+            TopologyPublisherState.PUBLISH: self.publish,
+            TopologyPublisherState.FINAL: self.finalize,
+        }
+
+    def start(self: TopologyPublisher) -> TopologyPublisherState:
+        """Check at once."""
+        order = f', sites: {", ".join(self.order)}' if self.order else ''
+        log.info(f'Autoscale start (policy: {self.policy.name.lower()}, '
+                 f'distribution: {self.distribution.name.lower()}{order})')
+        return TopologyPublisherState.CHECK
+
+    def wait(self: TopologyPublisher) -> TopologyPublisherState:
+        """Wait for the period, a second at a time."""
+        waited = datetime.now() - self.last_check
+        if waited > self.wait_check:
+            return TopologyPublisherState.CHECK
+        log.trace(f'Autoscale wait ({timedelta(seconds=round(waited.total_seconds()))})')
+        time.sleep(1)
+        return TopologyPublisherState.WAIT
+
+    def current_group(self: TopologyPublisher) -> int:
+        """The task group the scheduler loads from."""
+        reported = None if self.scheduler_group is None else self.scheduler_group()
+        return scheduler_group(reported, attempts=self.attempts, eager=self.eager)
+
+    def check(self: TopologyPublisher) -> TopologyPublisherState:
+        """Plan every zone over the live sites; publish if the plan changed."""
+        self.last_check = datetime.now()
+        group = self.current_group()
+        loads = read_zone_loads(group, self.knobs, own=None, discover=True,
+                                attempts=self.attempts, eager=self.eager)
+        records = self.registry.snapshot()
+        views, duplicates = site_views(records)
+        self.warn_duplicates(duplicates)
+        self.warn_dropped(views)
+        targets = plan_sites(loads, self.knobs, views, distribution=self.distribution, order=self.order)
+        self.log_check(loads, views, group)
+        self.views, self.targets = views, targets
+        planned = entries(targets, records)
+        if planned != self.published:
+            self.pending = planned
+            return TopologyPublisherState.PUBLISH
+        return TopologyPublisherState.WAIT
+
+    def publish(self: TopologyPublisher) -> TopologyPublisherState:
+        """Publish the pending entries under the next version."""
+        self.count += 1
+        version = f'{INSTANCE}:{self.count}'
+        self.dispatcher.publish(Topology(version, dict(self.pending)))
+        self.published, self.pending = self.pending, None
+        log.info(f'Topology {version} published ({len(self.published)} relay identities)')
+        for view in self.views:
+            for zone, sz in view.zones.items():
+                log.info(f'Topology {version} (site: {view.name}, zone: {sz.zone.name}, '
+                         f'target: {self.targets.get(view.name, {}).get(zone, 0)}, launched: {sz.running})')
+        return TopologyPublisherState.WAIT
+
+    def warn_duplicates(self: TopologyPublisher, duplicates: List[Duplicate]) -> None:
+        """Warn once for each pair of identities advertising one site's zone."""
+        for dup in duplicates:
+            pair = (dup.older.identity, dup.holder.identity)
+            if pair not in self.warned:
+                self.warned.add(pair)
+                log.warning(f'Site {dup.site} advertised by two relays '
+                            f'(older: {dup.older.identity} on {dup.older.host}, '
+                            f'newer: {dup.holder.identity} on {dup.holder.host}) - the newer holds its entries '
+                            f'(zone: {dup.holder.zone})')
+
+    def warn_dropped(self: TopologyPublisher, views: List[SiteView]) -> None:
+        """Warn for each site of the last plan that has no live relay left."""
+        live = {view.name for view in views}
+        for view in self.views:
+            if view.name not in live:
+                log.warning(f'Site {view.name} left the topology (no live relay) - '
+                            f'its share is planned over the remaining sites')
+
+    def log_check(self: TopologyPublisher, loads: Mapping[str, ZoneLoad], views: List[SiteView], group: int) -> None:
+        """Log each zone's reading: its sites, its launched clients and its work."""
+        dynamic = self.policy is AutoScalerPolicy.DYNAMIC
+        served = {zone: [view for view in views if zone in view.zones] for view in views for zone in view.zones}
+        for zone, load in loads.items():
+            if zone not in served:
+                log.debug(f'Autoscale check (zone: {load.zone.name}, no live site serves it, '
+                          f'tasks: {load.work} in group {group if load.group is None else load.group})')
+        for zone, sites in served.items():
+            ref = sites[0].zones[zone].zone
+            load = loads.get(zone) or ZoneLoad(ref, remaining=0, retryable=0, pressure=None)
+            pressure = '' if not dynamic else (
+                ', pressure: unknown' if load.pressure is None else f', pressure: {load.pressure:.2f}')
+            running = sum(view.zones[zone].running for view in sites)
+            log.debug(f'Autoscale check (zone: {ref.name}, sites: {len(sites)}, clients: {running}, '
+                      f'tasks: {load.work} in group {group if load.group is None else load.group}{pressure})')
+
+    @staticmethod
+    def finalize() -> TopologyPublisherState:
+        """Finalize."""
+        log.debug('Done (topology publisher)')
+        return TopologyPublisherState.HALT
+
+
+class TopologyPublisherThread(Thread):
+    """Run TopologyPublisher within dedicated thread."""
+
+    def __init__(self: TopologyPublisherThread, dispatcher: Dispatcher, registry: SiteRegistry, **options) -> None:
+        """Initialize machine."""
+        super().__init__(name='hypershell-topology')
+        self.machine = TopologyPublisher(dispatcher, registry, **options)
+
+    def run_with_exceptions(self: TopologyPublisherThread) -> None:
+        """Run machine."""
+        self.machine.run()
+
+    def stop(self: TopologyPublisherThread, wait: bool = False, timeout: int = None) -> None:
+        """Stop machine."""
+        log.warning('Stopping (topology publisher)')
+        self.machine.halt()
+        super().stop(wait=wait, timeout=timeout)
+
+
+def configured_distribution() -> Distribution:
+    """The `[autoscale] distribution` setting, refused naming its source when unknown."""
+    try:
+        return parse_distribution(config.autoscale.distribution)
+    except ValueError as error:
+        raise ConfigurationError(f'{error} ({blame(config, "autoscale", "distribution")})') from error
+
+
+def configured_sites() -> List[str]:
+    """The `[autoscale] sites` setting, refused naming its source when not a list of names."""
+    try:
+        return parse_sites(config.autoscale.sites)
+    except ValueError as error:
+        raise ConfigurationError(f'{error} ({blame(config, "autoscale", "sites")})') from error
+
+
+class AutoScalingServer(Thread):
+    """
+    Run a server in forever mode that publishes a site topology for its relays, and launches nothing.
+
+    Relays connected with the server's key advertise their zones and bounds on their heartbeats; the
+    server records them, and its topology publisher plans per-site, per-zone client targets from
+    the zones' loads, which each relay fetches and reconciles with its own launchers.
+
+    Args:
+        policy (str, optional):
+            Scaling policy for each zone's demand, ``fixed`` or ``dynamic``.
+
+        factor (float, optional):
+            Scaling factor for the dynamic policy's task pressure.
+
+        period (int, optional):
+            Seconds between checks.
+
+        distribution (str or Distribution, optional):
+            How a zone's clients are split over its sites (default: ``[autoscale] distribution``).
+
+        sites (list or str, optional):
+            Preferred site order for ``fill`` (default: ``[autoscale] sites``).
+
+    The remaining arguments are those of :class:`~hypershell.server.ServerThread`.
+    """
+
+    server: ServerThread
+    publisher: TopologyPublisherThread
+    registry: SiteRegistry
+
+    def __init__(self: AutoScalingServer,
+                 address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
+                 auth: str = DEFAULT_AUTH,
+                 bundlesize: int = DEFAULT_BUNDLESIZE,
+                 poll: int = DEFAULT_SERVER_POLL,
+                 max_retries: int = DEFAULT_ATTEMPTS - 1,
+                 eager: bool = False,
+                 redirect_failures: IO = None,
+                 evict_after: int = DEFAULT_EVICT,
+                 tls: Optional[TLSConfig] = None,
+                 policy: str = 'fixed',
+                 factor: float = 1.0,
+                 period: int = 60,
+                 distribution: Optional[Any] = None,
+                 sites: Optional[Any] = None) -> None:
+        """Initialize server and topology publisher."""
+        distribution = configured_distribution() if distribution is None else parse_distribution(distribution)
+        order = configured_sites() if sites is None else parse_sites(sites)
+        self.registry = SiteRegistry()
+        self.server = ServerThread(address=address, auth=auth, bundlesize=bundlesize, poll=poll,
+                                   max_retries=max_retries, eager=eager, forever_mode=True,
+                                   redirect_failures=redirect_failures, evict_after=evict_after, tls=tls,
+                                   sites=self.registry)
+        # Every zone is read from the group the scheduler loads from, as the scheduler reports it.
+        scheduler = self.server.scheduler
+        reported = None if scheduler is None else (lambda: scheduler.machine.active_group)
+        self.publisher = TopologyPublisherThread(self.server.queue.dispatcher, self.registry,
+                                                 policy=policy, factor=factor, period=period,
+                                                 distribution=distribution, order=order,
+                                                 attempts=max_retries + 1, eager=eager,
+                                                 scheduler_group=reported)
+        super().__init__(name='hypershell-cluster')
+
+    def run_with_exceptions(self: AutoScalingServer) -> None:
+        """Start the server, then the publisher once scheduling starts; wait."""
+        self.server.start()
+        self.server.wait_scheduling()
+        self.publisher.start()
+        self.publisher.join()
+        self.server.join()
+
+    def stop(self: AutoScalingServer, wait: bool = False, timeout: int = None) -> None:
+        """Stop the publisher, then the server."""
+        self.publisher.stop(wait=wait and self.publisher.ident is not None, timeout=timeout)
+        self.server.stop(wait=wait, timeout=timeout)
+        super().stop(wait=wait, timeout=timeout)
+
+
+def serve_with_sites(**options) -> None:
+    """Run a server autoscaling with relay sites until stopped (see :class:`AutoScalingServer`)."""
+    thread = AutoScalingServer.new(**options)
+    try:
+        thread.join()
+    except Exception:
+        thread.stop()
+        raise

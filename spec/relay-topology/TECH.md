@@ -6,8 +6,8 @@ appetite: big
 status: in_progress
 branch: feature/relay-topology
 base: develop
-current_phase: P2
-last_updated: '2026-11-12'
+current_phase: P3
+last_updated: '2026-11-13'
 phases:
 - id: P1
   name: 'Topology core: bounds, advertisement wire, registry, and the pure planner'
@@ -26,7 +26,7 @@ phases:
 - id: P2
   name: 'Server: hs server --autoscaling publishes a versioned topology from relay
     advertisements'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -154,8 +154,11 @@ commit.
   `[feature] Build relay-topology P<n>: …`; they are squashed at `hs-publish`.
 - **No `Co-Authored-By` trailer.** This is the repo convention and overrides the AGENTS.md default.
   Commits are signed.
-- A CLI or config change updates its `docs/_include/*.rst` snippets, `docs/_include/config_param_ref.rst`,
-  the `share/` bash and zsh completions and the man page **in the same commit**. Mark it
+- A CLI or config change updates its `docs/_include/*.rst` snippets, `docs/_include/config_param_ref.rst`
+  and the `share/` bash and zsh completions **in the same commit**. The man pages under
+  `share/man/man1/` are generated from `docs/manual.rst` (which includes those snippets) and are
+  rebuilt by `hs-release` at each release, as every earlier cycle left them; a build checks the
+  `-b man` output builds, and never hand-edits the generated file (amended in P2). Mark it
   `.. versionadded:: 2.9.0` (or `versionchanged`). The user-facing note goes in the PR's squash body,
   which `hs-publish` drafts.
 - **Founding-case rule (every phase).** The guarding tests named in PLAN §2.7 stay green with their
@@ -188,7 +191,9 @@ commit.
 | `cluster/demand.py` | `scheduler_group(reported, *, attempts, eager) -> int` | additive; equals `AutoScaler.current_group` (pinned by a test) |
 | `cluster/topology.py` | `Distribution`, `parse_distribution(value)`, `parse_sites(value)` | `spread`/`fill`; list or comma string |
 | `cluster/topology.py` | `SiteZone`, `SiteView`, `Duplicate`, `site_views(records) -> (views, duplicates)`, `plan_sites(loads, knobs, sites, *, distribution, order)`, `entries(targets, records)` | pure (PLAN §2.4); a holder is chosen per site **and zone** (the newest identity advertising that zone at that site), so a `Duplicate` names one zone's holder and older record |
-| `cluster/topology.py` | `TopologyPublisher`, `TopologyPublisherThread`, `AutoScalingServer` | FSM START→WAIT→CHECK→PUBLISH→WAIT, FINAL/HALT; publishes only on change; never launches |
+| `cluster/topology.py` | `TopologyPublisher`, `TopologyPublisherThread`, `AutoScalingServer`, `serve_with_sites(**options)` | FSM START→CHECK (first check at once)→PUBLISH→WAIT→CHECK, FINAL/HALT; publishes only on change; never launches; `AutoScalingServer(address, auth, bundlesize, poll, max_retries, eager, redirect_failures, evict_after, tls, policy, factor, period, distribution=None, sites=None)` reads `[autoscale] distribution`/`sites` when not given (`ConfigurationError` naming the source); `ServerApp.run` calls `serve_with_sites` lazily |
+| `core/topology.py` | `error_text(message)` | the reply to an unreadable topology request (`{"protocol","error":"request","message"}`); `read_topology` raises `ValueError` on it |
+| `server.py` | `HeartMonitor(…, sites)`, `record_site(hb)`, `drop_site(uuid)`; `ServerThread(…, sites)` | a site beat lacking zone, bounds or clients is logged once at INFO and not recorded |
 | `relay/__init__.py` | `zone_bounds(settings, relay_wide) -> (advertised: Bounds, fallback: Bounds)` | PLAN §2.2 table |
 | `relay/site.py` | `TopologyView`, `SiteScaler(AutoScaler)` | `view.assignment(zone) -> Optional[(version, Entry)]`; `SiteScaler` launches `max(0, target − max(seen, launched))` once per version, else the parent's fixed fleet |
 
@@ -248,13 +253,13 @@ plans per site and zone from Z3's loads. It publishes a version only when the pl
 serves it through `Dispatcher.topology`, and it launches nothing. Every other server and `hs cluster`
 mode is unchanged.
 
-- [ ] `core/dispatch.py`:
+- [x] `core/dispatch.py`:
   - `published: Optional[Topology] = None`;
   - `publish(topology)` under the lock;
   - `topology(text)` replies per PLAN §2.4, with `version: null` when nothing is published.
 
   `core/queue.py`: add `'topology'` to `DISPATCH_EXPOSED`. Work-request handling is untouched.
-- [ ] `server.py`:
+- [x] `server.py`:
   - `HeartMonitor(…, sites: Optional[SiteRegistry] = None)`. In `update_client`, a beat with `site` and
     `zone` is recorded every time. The record is dropped on the FINISHED path and in `check_clients`
     on eviction, beside `end_roster`/`forget`.
@@ -263,16 +268,16 @@ mode is unchanged.
     `-F/--factor` and `-P/--period`. `--autoscaling` implies forever. It is refused with FILE,
     `--restart`, `--no-db` and `--no-confirm` (`ArgumentError`). It keeps every key check. `run()`
     imports `cluster.topology.AutoScalingServer` lazily.
-- [ ] `cluster/topology.py` (the publisher reads its group through P1's `scheduler_group`):
+- [x] `cluster/topology.py` (the publisher reads its group through P1's `scheduler_group`):
       `TopologyPublisher`/`TopologyPublisherThread` and `AutoScalingServer` (PLAN §2.1, §2.4):
   - publish only on change, with the version bumped then;
   - INFO lines per site and zone at each version;
   - the duplicate WARNING once per pair;
   - DEBUG `Autoscale check (zone: …)` per zone per check;
   - stop the publisher before the server.
-- [ ] `core/config.py`: `[autoscale] distribution = 'spread'`, `sites = PARAM_UNSET`. Validate the
+- [x] `core/config.py`: `[autoscale] distribution = 'spread'`, `sites = PARAM_UNSET`. Validate the
       distribution at `AutoScalingServer` construction (`ConfigurationError` naming the source).
-- [ ] `tests/test_topology_server.py`:
+- [x] `tests/test_topology_server.py`:
   - `@mark.integration`, on a real `QueueServer` and `HeartMonitor`: advertised beats populate the
     registry; a new identity registers newer; eviction and FINISHED drop the record; an old relay's
     beat (no `zone`) and an ordinary client's are ignored; `dispatcher.topology` returns null before
@@ -281,18 +286,18 @@ mode is unchanged.
     check with two fake sites publishes per the planner. A second check with the same inputs publishes
     nothing new. The `gpu` floor holds while group 0 runs.
   - `@mark.unit`: `parse_distribution`/`parse_sites` (list, comma string, unknown value).
-- [ ] `tests/test_server.py`: the new refusals and the mode's help text (usage and help still equal
+- [x] `tests/test_server.py`: the new refusals and the mode's help text (usage and help still equal
       `ServerApp.interface`). `tests/test_dispatch_version.py`: amend the pinned surface (deviation 1),
       and add `old server → hasattr(dispatcher, 'topology')` false through a proxy built from the old
       tuple.
-- [ ] Docs and assets, same commit:
+- [x] Docs and assets, same commit:
   - `docs/_include/server_usage.rst`, `server_help.rst` and `server_desc.rst`, plus `APP_USAGE`/`APP_HELP`;
   - `docs/cli/server.rst`: a section on autoscaling with relay sites, `.. versionadded:: 2.9.0`. It
     covers what the server plans with, that the server's own `size.*`/`launcher` do not apply, `fixed`
     vs `dynamic` meaning, `spread`/`fill`, `sites`, and the environment forms;
   - `config_param_ref.rst`: `[autoscale] .distribution`, `.sites`, and notes on `.size.*`/`.launcher`;
-  - `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs` and `share/man/man1/hs.1`: the
-    `hs server` options and `autoscale.distribution` values;
+  - `share/bash_completion.d/hs` and `share/zsh/site-functions/_hs`: the `hs server` options and
+    `autoscale.distribution` values (the man page is regenerated at release; `-b man` builds clean);
   - AGENTS.md cluster section and invariants.md §11: "a server autoscaling with sites launches
     nothing; it publishes", in lockstep.
 - **Verify:** see frontmatter (server, dispatch, roster, autoscaler and completion suites; the
@@ -348,7 +353,7 @@ nothing, it runs today's fleets.
     their defaults, `size` as shorthand, `{zone}`/`HYPERSHELL_ZONE` on relay launchers, the fallback,
     and that scale-down is idle exit only;
   - `config_param_ref.rst`: `[relay] .min/.max/.init` and `[relay.zone.<name>]`;
-  - completions and man page for the new `relay.*` keys;
+  - completions for the new `relay.*` keys (the man page is regenerated at release);
   - AGENTS.md and invariants.md §11: "relay launches expose their zone; the relay's fleets reconcile a
     published topology and never terminate".
 - **Verify:** see frontmatter (the whole relay suite, which is the R6 guard, and the relay cycle's

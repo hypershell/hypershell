@@ -13,6 +13,10 @@ no task goes to two clients. A request that finds nothing waits a bounded time a
 
 Only the scheduler thread touches the database. Everything here is plain Python data: the request
 and its reply are JSON text, and staged rows are carried as their ids and encoded records.
+
+A server autoscaling with relay sites also publishes its site topology here, and a relay fetches its
+own entries with one call, ``topology``, also as JSON text. A server that publishes none answers
+with a null version.
 """
 
 
@@ -31,6 +35,7 @@ from queue import Queue, Empty as QueueEmpty
 
 # Internal libs
 from hypershell.core.logging import Logger
+from hypershell.core.topology import Topology, read_request, reply_text, error_text
 from hypershell.data.model import zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME
 
 # Public interface
@@ -210,6 +215,7 @@ class Dispatcher:
         self.pools: Dict[str, Pool] = {DEFAULT_ZONE_ID: Pool(DEFAULT_ZONE_NAME)}
         self.demand: Dict[str, Tuple[str, int]] = {}
         self.unstaging: set = set()
+        self.published: Optional[Topology] = None
 
     def configure(self: Dispatcher, bundlesize: Optional[int] = None, queuesize: Optional[int] = None,
                   bundlemax: Optional[int] = None, in_memory: Optional[bool] = None) -> Dispatcher:
@@ -429,6 +435,22 @@ class Dispatcher:
         with self.lock:
             pool = self.pools.get(zone)
             return pool.name if pool is not None else None
+
+    def publish(self: Dispatcher, topology: Optional[Topology]) -> None:
+        """Publish the site topology relays fetch (None publishes none)."""
+        with self.lock:
+            self.published = topology
+
+    def topology(self: Dispatcher, text: str) -> str:
+        """Reply to a relay's topology request with the published entries of its identities."""
+        try:
+            _, identities = read_request(text)
+        except ValueError as error:
+            log.warning(f'Refused topology request: {error}')
+            return error_text(str(error))
+        with self.lock:
+            published = self.published
+        return reply_text(published, identities)
 
     def forget(self: Dispatcher, client_id: str) -> None:
         """Drop a finished or evicted client's demand; a zone it was the last client of is marked for unstaging."""

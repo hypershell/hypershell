@@ -423,6 +423,12 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
 - The autoscaler reads every zone from the group the scheduler loads from
   (`Scheduler.active_group`, else `Task.starting_group`, the scheduler's own start rule), not
   `Task.current_group()`, which is only the most recently scheduled group.
+- A server autoscaling with relay sites (`hs server --autoscaling`, `cluster/topology.py`
+  `AutoScalingServer`) launches nothing; it publishes. Relay identities advertise their zone,
+  bounds and launched count on every heartbeat into an in-memory `SiteRegistry`; the
+  `TopologyPublisher` reads zones through `demand.scheduler_group` (the same group rule, pinned by
+  a test), plans with the pure `plan_sites`, and publishes a versioned topology on the dispatcher
+  (`Dispatcher.topology`, the third remotely exposed method) only when its entries change.
 
 ## Configuration
 

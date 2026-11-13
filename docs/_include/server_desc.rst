@@ -12,3 +12,8 @@ for tasks and re-submit them if their previous number of attempts is less.
 Tasks are bundled for each client at the size it asks for, or at the server's ``-b``/``--bundlesize``
 when it asks for none. By default the bundle size is one, meaning that at small scales there is
 greater concurrency.
+
+With ``--autoscaling``, the server schedules forever and launches nothing. Relays connected with its
+key advertise the zones they serve and each zone's ``min``, ``max`` and ``init`` clients, and the server
+publishes how many clients each relay should run in each zone, for the relay to launch with its own
+launcher (see :ref:`autoscaling with relay sites <cli_server_sites>`).

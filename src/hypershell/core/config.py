@@ -178,6 +178,8 @@ default = Namespace({
         'factor': 1,
         'period': 60,       # Seconds to wait between checks
         'launcher': '',     # Empty means just 'hs client ...'
+        'distribution': 'spread',  # Relay sites only: either 'spread' or 'fill'
+        'sites': PARAM_UNSET,      # Relay sites only: preferred site order for 'fill' (list or comma string)
         'size': {
             'init': 1,
             'min': 0,

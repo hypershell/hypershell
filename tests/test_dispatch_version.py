@@ -84,12 +84,12 @@ def ask(dispatcher, wait: float = 0.0) -> dict:
 
 @mark.unit
 def test_dispatcher_remote_surface_is_pinned() -> None:
-    """A remote client may call exactly `request` and `takes_submissions` on the dispatcher, nothing else.
+    """A remote client may call exactly `request`, `takes_submissions` and `topology` on the dispatcher, nothing else.
 
     The surface is pickle-framed RPC: adding a method to it or dropping one must change this test, both
     the declared tuple and the surface a connected client is handed.
     """
-    surface = ('request', 'takes_submissions')
+    surface = ('request', 'takes_submissions', 'topology')
     assert DISPATCH_EXPOSED == surface
     with QueueServer(config()) as server:
         client = QueueClient(config(server.address[1]))
@@ -98,6 +98,18 @@ def test_dispatcher_remote_surface_is_pinned() -> None:
         assert ask(client.dispatcher)['tasks'] == []
         assert isinstance(client.dispatcher.takes_submissions(), bool)
         assert not hasattr(client.dispatcher, 'stage')
+
+
+@mark.unit
+def test_old_server_dispatcher_has_no_topology(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Against a server exposing the earlier surface, the client's proxy has no `topology` to call."""
+    monkeypatch.setattr(queue_module, 'DISPATCH_EXPOSED', ('request', 'takes_submissions'))
+    with QueueServer(config()) as server:
+        client = QueueClient(config(server.address[1]))
+        client.connect()
+        assert type(client.dispatcher)._exposed_ == ('request', 'takes_submissions')
+        assert not hasattr(client.dispatcher, 'topology')
+        assert ask(client.dispatcher)['tasks'] == []
 
 
 @mark.unit

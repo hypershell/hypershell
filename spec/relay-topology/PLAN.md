@@ -375,7 +375,7 @@ Guarding tests, kept green with their assertions unchanged, except the declared 
 | R4 | `zone`/`bounds`/`clients` on every zone identity's beat; `SiteRegistry.record` overwrite per identity; per-site, per-zone running and liveness; zones assigned only to sites that serve them; site defaults to the host name; newest registration holds, older gets 0, warning names both (§2.3, §2.6) |
 | R5 | `base_s ≤ max_s`, never below running except under `max`; `SiteScaler` applies each version's delta once, never terminates, never replaces exits on its own; relays stay connected at zero (§2.4, §2.5) |
 | R6 | `version: null` / missing method → `TopologyView` None → stock fixed fleets with fallback bounds; relay test suite and `relay_smoke.sh` (§2.5, §2.7) |
-| R7 | `docs/_include/server_{usage,help,desc}.rst`, `docs/cli/server.rst`, `relay_{help,desc}.rst`, `docs/cli/relay.rst`, `config_param_ref.rst` (`[autoscale] distribution`/`sites`, `[relay] min`/`max`/`init` and the zone tables), `share/` bash/zsh completions and man page, each in the phase that adds the option (P2 server, P3 relay) |
+| R7 | `docs/_include/server_{usage,help,desc}.rst`, `docs/cli/server.rst`, `relay_{help,desc}.rst`, `docs/cli/relay.rst`, `config_param_ref.rst` (`[autoscale] distribution`/`sites`, `[relay] min`/`max`/`init` and the zone tables), `share/` bash/zsh completions, each in the phase that adds the option (P2 server, P3 relay); the generated man page is rebuilt at release |
 
 ## 3. Invariant gate (AGENTS.md constitution check)
 
