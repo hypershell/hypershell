@@ -3,7 +3,7 @@ slug: zone-autoscale
 title: Zone-aware autoscaling (zone, cycle 3)
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/zone-autoscale
 base: develop
 current_phase: done
