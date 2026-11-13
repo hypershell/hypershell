@@ -5,10 +5,10 @@
 Autoscaling demand: how many clients each zone should have.
 
 Demand is computed per zone from readings of the database scoped to the current task group,
-under one set of sizing knobs applied to every zone alike. :func:`read_zone_loads` is the only
-function here that reads the database; :func:`zone_demand` and :func:`fleet_demand` are pure and
-take the number of clients already launched in each zone as an input, so the caller decides how
-that number is known. Nothing here launches or terminates a client: that is the actuator's job.
+under one set of sizing knobs applied to every zone alike. :func:`read_zone_loads` and
+:func:`scheduler_group`, which names that group, are the only functions here that read the
+database; :func:`zone_demand` and :func:`fleet_demand` are pure and take the number of clients
+already launched in each zone as an input, so the caller decides how that number is known. Nothing here launches or terminates a client: that is the actuator's job.
 """
 
 
@@ -26,7 +26,7 @@ from hypershell.data.model import Task, Zone, zone_id, DEFAULT_ZONE_ID, DEFAULT_
 
 # Public interface
 __all__ = ['AutoScalerPolicy', 'ZoneRef', 'ScalingKnobs', 'ZoneLoad',
-           'read_zone_loads', 'zone_demand', 'fleet_demand']
+           'scheduler_group', 'read_zone_loads', 'zone_demand', 'fleet_demand']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
@@ -90,6 +90,22 @@ class ZoneLoad:
     def work(self: ZoneLoad) -> int:
         """Tasks the zone still has to run: incomplete tasks plus failures awaiting a retry."""
         return self.remaining + self.retryable
+
+
+def scheduler_group(reported: Optional[int], *, attempts: int, eager: bool) -> int:
+    """
+    The task group the scheduler loads from: `reported` when the scheduler reports one, else the
+    group it would start from under the server's `attempts` and `eager` retry rule.
+
+    The start rule is :meth:`~hypershell.data.model.Task.starting_group` from the most recently
+    scheduled group, or that group itself when nothing is left to start from. This is the rule
+    :meth:`~hypershell.cluster.remote.AutoScaler.current_group` applies, and a test pins the two equal.
+    """
+    if reported is not None:
+        return reported
+    recent = Task.current_group().value
+    group = Task.starting_group(recent, attempts=attempts, eager=eager)
+    return recent if group is None else group
 
 
 def read_zone_loads(group: int, knobs: ScalingKnobs, *, own: Optional[ZoneRef], discover: bool,

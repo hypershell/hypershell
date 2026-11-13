@@ -1,66 +1,114 @@
 ---
 slug: relay-topology
-title: "Relay site-topology autoscaling: fill and spread across sites"
+title: 'Relay site-topology autoscaling: fill and spread across sites'
 kind: feature
 appetite: big
 status: in_progress
 branch: feature/relay-topology
 base: develop
-current_phase: P1
-last_updated: "2026-11-12"
+current_phase: P2
+last_updated: '2026-11-12'
 phases:
-  - id: P1
-    name: "Topology core: bounds, advertisement wire, registry, and the pure planner"
-    status: pending
-    satisfies: [R1, R3, R4, R5]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_topology_plan.py tests/test_relay_roster.py tests/test_zone_autoscale.py tests/test_autoscale.py"
-  - id: P2
-    name: "Server: hs server --autoscaling publishes a versioned topology from relay advertisements"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R7]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_topology_server.py tests/test_topology_plan.py tests/test_server.py tests/test_server_fsm.py tests/test_dispatch.py tests/test_dispatch_version.py tests/test_relay_roster.py tests/test_autoscale.py tests/test_zone_autoscale.py tests/test_completions.py tests/test_main.py && .agents/factory/bin/temp_site.sh sh \"$PWD/spec/zone-autoscale/drive/zone_drive.sh\" founding"
-  - id: P3
-    name: "Relay: per-zone bounds, advertisement and fetch, SiteScaler reconcile, zone exposure, fallback"
-    status: pending
-    satisfies: [R1, R2, R4, R5, R6, R7]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_topology.py tests/test_topology_plan.py tests/test_topology_server.py tests/test_relay_connector.py tests/test_relay_db.py tests/test_relay_fsm.py tests/test_relay_launch.py tests/test_relay_link.py tests/test_relay_outage.py tests/test_relay_return.py tests/test_relay_roster.py tests/test_relay_workload.py tests/test_completions.py tests/test_main.py && sh spec/relay/drive/relay_smoke.sh"
-  - id: P4
-    name: "Laptop drive (two relays, three zones), evidence, full regression and docs gate"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R7]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "for mode in spread fill floor idle kill lower; do .agents/factory/bin/temp_site.sh sh \"$PWD/spec/relay-topology/drive/topology_drive.sh\" $mode || exit 1; done && for mode in founding fixed dynamic restart; do .agents/factory/bin/temp_site.sh sh \"$PWD/spec/zone-autoscale/drive/zone_drive.sh\" $mode || exit 1; done && uv run pytest && uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html"
-  - id: P5
-    name: "Multi-node test-cluster run (split gate): run A builds the batch script and judge, run B judges the foreman's logs"
-    status: pending
-    satisfies: [R2, R3, R4, R5]
-    depends_on: [P4]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_topology_judge.py && uv run python spec/relay-topology/drive/topology_judge.py spec/relay-topology/evidence/cluster --require spread-kill,fill"
+- id: P1
+  name: 'Topology core: bounds, advertisement wire, registry, and the pure planner'
+  status: done
+  satisfies:
+  - R1
+  - R3
+  - R4
+  - R5
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_topology_plan.py tests/test_relay_roster.py
+    tests/test_zone_autoscale.py tests/test_autoscale.py
+- id: P2
+  name: 'Server: hs server --autoscaling publishes a versioned topology from relay
+    advertisements'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R7
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_topology_server.py tests/test_topology_plan.py
+    tests/test_server.py tests/test_server_fsm.py tests/test_dispatch.py tests/test_dispatch_version.py
+    tests/test_relay_roster.py tests/test_autoscale.py tests/test_zone_autoscale.py
+    tests/test_completions.py tests/test_main.py && .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding
+- id: P3
+  name: 'Relay: per-zone bounds, advertisement and fetch, SiteScaler reconcile, zone
+    exposure, fallback'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R4
+  - R5
+  - R6
+  - R7
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_topology.py tests/test_topology_plan.py
+    tests/test_topology_server.py tests/test_relay_connector.py tests/test_relay_db.py
+    tests/test_relay_fsm.py tests/test_relay_launch.py tests/test_relay_link.py tests/test_relay_outage.py
+    tests/test_relay_return.py tests/test_relay_roster.py tests/test_relay_workload.py
+    tests/test_completions.py tests/test_main.py && sh spec/relay/drive/relay_smoke.sh
+- id: P4
+  name: Laptop drive (two relays, three zones), evidence, full regression and docs
+    gate
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: for mode in spread fill floor idle kill lower; do .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/relay-topology/drive/topology_drive.sh" $mode || exit 1; done &&
+    for mode in founding fixed dynamic restart; do .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" $mode || exit 1; done && uv
+    run pytest && uv run --python 3.12 --group docs sphinx-build -W --keep-going -q
+    -E -b html docs docs/_build/html
+- id: P5
+  name: 'Multi-node test-cluster run (split gate): run A builds the batch script and
+    judge, run B judges the foreman''s logs'
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  - R4
+  - R5
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_topology_judge.py && uv run python spec/relay-topology/drive/topology_judge.py
+    spec/relay-topology/evidence/cluster --require spread-kill,fill
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Relay site-topology autoscaling: fill and spread across sites
 
 This file is the **context engine and finite-state machine** for building this feature. The YAML
@@ -134,12 +182,12 @@ commit.
 | `core/topology.py` | `Bounds(min, max, init)` | frozen; `to_dict`/`from_dict` (`{"min","max","init"}`), ints, `0 ≤ min ≤ init ≤ max`, `max ≥ 1` |
 | `core/topology.py` | `Entry(zone, target, seen)`, `Topology(version, entries)` | `version` = `"<server instance>:<n>"`; `entries` by relay identity |
 | `core/topology.py` | `SiteRegistry` | lock-guarded; `record(identity, *, site, zone, bounds, clients, host)` overwrites per identity, stamps `registered` (monotonic) on first sight, `rank` per site name on first sight (kept), `init_held` until `clients ≥ init`; `drop(identity)`; `snapshot() -> List[SiteRecord]` |
-| `core/topology.py` | `request_text(site, identities)`, `reply_text(topology, identities)`, `read_topology(text)` | JSON; `{"protocol","version":null}` when unpublished; a zone with no entry → `target 0` |
-| `core/heartbeat.py` | `Heartbeat.zone/bounds/clients` | optional, packed only when set, read with `.get` |
+| `core/topology.py` | `request_text(site, identities)`, `read_request(text) -> (site, identities)`, `reply_text(topology, identities)`, `read_topology(text) -> Optional[TopologyReply]` | JSON, `TOPOLOGY_PROTOCOL = 1` (its own number, apart from the work-request protocol); `{"protocol","version":null}` when unpublished; the reply names only identities that have an entry, by zone name; `TopologyReply(version, zones).assignment(zone)` gives `Entry(zone, 0, 0)` for a zone with no entry (target 0); `read_request`/`read_topology` raise `ValueError` on anything malformed |
+| `core/heartbeat.py` | `Heartbeat.zone/bounds/clients` | optional, packed only when set, read with `.get`; a malformed value (zone not text, invalid bounds, a count that is not a whole number ≥ 0) decodes as None, so the identity is a non-participant rather than a crash in the heart monitor |
 | `core/dispatch.py` | `Dispatcher.topology(text) -> str`, `Dispatcher.publish(topology)` | under the dispatcher lock; `DISPATCH_EXPOSED = ('request', 'takes_submissions', 'topology')` |
 | `cluster/demand.py` | `scheduler_group(reported, *, attempts, eager) -> int` | additive; equals `AutoScaler.current_group` (pinned by a test) |
 | `cluster/topology.py` | `Distribution`, `parse_distribution(value)`, `parse_sites(value)` | `spread`/`fill`; list or comma string |
-| `cluster/topology.py` | `SiteZone`, `SiteView`, `Duplicate`, `site_views(records)`, `plan_sites(loads, knobs, sites, *, distribution, order)`, `entries(targets, records)` | pure (PLAN §2.4) |
+| `cluster/topology.py` | `SiteZone`, `SiteView`, `Duplicate`, `site_views(records) -> (views, duplicates)`, `plan_sites(loads, knobs, sites, *, distribution, order)`, `entries(targets, records)` | pure (PLAN §2.4); a holder is chosen per site **and zone** (the newest identity advertising that zone at that site), so a `Duplicate` names one zone's holder and older record |
 | `cluster/topology.py` | `TopologyPublisher`, `TopologyPublisherThread`, `AutoScalingServer` | FSM START→WAIT→CHECK→PUBLISH→WAIT, FINAL/HALT; publishes only on change; never launches |
 | `relay/__init__.py` | `zone_bounds(settings, relay_wide) -> (advertised: Bounds, fallback: Bounds)` | PLAN §2.2 table |
 | `relay/site.py` | `TopologyView`, `SiteScaler(AutoScaler)` | `view.assignment(zone) -> Optional[(version, Entry)]`; `SiteScaler` launches `max(0, target − max(seen, launched))` once per version, else the parent's fixed fleet |
@@ -151,19 +199,19 @@ commit.
 **Goal:** the data shapes, the wire fields and the planner exist and are table-tested on their own.
 Nothing is wired, and no behaviour changes.
 
-- [ ] `core/topology.py`: `Bounds`, `Entry`, `Topology`, `SiteRecord`, `SiteRegistry`, and the topology
+- [x] `core/topology.py`: `Bounds`, `Entry`, `Topology`, `SiteRecord`, `SiteRegistry`, and the topology
       request/reply text helpers (Interfaces table). No import from `cluster/` and no DB.
-- [ ] `core/heartbeat.py`: optional `zone`, `bounds` (a `Bounds`, packed as its dict) and `clients`.
+- [x] `core/heartbeat.py`: optional `zone`, `bounds` (a `Bounds`, packed as its dict) and `clients`.
       Pack each only when set; `unpack_or_none` reads them with `.get`. Docstring: an older server
       ignores them, and a beat without them is valid.
-- [ ] `cluster/topology.py`: `Distribution`, `parse_distribution`, `parse_sites`, `SiteZone`,
+- [x] `cluster/topology.py`: `Distribution`, `parse_distribution`, `parse_sites`, `SiteZone`,
       `SiteView`, `Duplicate`, `site_views`, `plan_sites` and `entries`, exactly as PLAN §2.4.
       `plan_sites` calls `zone_demand` per zone with
       `dataclasses.replace(knobs, init_size=0, min_size=0, max_size=Σmax)`; `demand.py`'s three seam
       functions are unchanged.
-- [ ] `cluster/demand.py`: the additive `scheduler_group(reported, *, attempts, eager)` (PLAN §2.4, D2):
+- [x] `cluster/demand.py`: the additive `scheduler_group(reported, *, attempts, eager)` (PLAN §2.4, D2):
       the reported group, else `Task.starting_group(Task.current_group())`. Deviation 4.
-- [ ] `tests/test_topology_plan.py` (`@mark.unit`). Table tests over `plan_sites` (parametrized rows:
+- [x] `tests/test_topology_plan.py` (`@mark.unit`). Table tests over `plan_sites` (parametrized rows:
       loads, knobs, sites, distribution, order → targets), plus `site_views` and `entries`:
   - spread across peers, with ties broken by order;
   - fill: listed sites in order, then unlisted ones by rank;
@@ -178,13 +226,14 @@ Nothing is wired, and no behaviour changes.
   - with no sites the result is `{}`;
   - a duplicate site: the newest holds, the older gets `Entry(zone, 0, …)`, the holder's target less
     the older's running, and one `Duplicate` naming both.
-- [ ] Wire tests in the same file:
+- [x] Wire tests in the same file:
   - `Heartbeat` round-trips with `zone`/`bounds`/`clients`;
   - a plain beat still packs exactly its four keys;
   - a beat without the new keys decodes with them None;
   - the topology reply for null, entries, and an identity with no entry;
   - `SiteRegistry`: overwrite in place, `registered` and `rank` order, `drop`, and `init_held` clearing.
-- [ ] Equivalence test in the same file (`@mark.unit`, deviation 4, kept in P1's verify):
+- [x] Equivalence test in the same file (`@mark.integration`, on a real SQLite file, since the start
+      rule reads the database; deviation 4, kept in P1's verify):
       `scheduler_group` equals `AutoScaler.current_group` over the `TestSchedulerGroup` cases (a
       reported group; None → the start rule).
 - **Verify:** see frontmatter (new tests plus the beat, Z3 and autoscaler suites unchanged).

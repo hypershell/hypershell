@@ -4,9 +4,10 @@
 """Heartbeat data passed between client and server.
 
 A relay's heartbeat may also carry its `site` and its `roster`, the site clients connected to it.
-Both are packed only when set and read as optional, so a heartbeat without them (from an earlier
-release, or from an ordinary client) is still valid, and a server that does not know them ignores
-them.
+Each of a relay's zone identities may also advertise its `zone`, that zone's client `bounds` and
+`clients`, the site clients launched in it. All of these are packed only when set and read as
+optional, so a heartbeat without them (from an earlier release, or from an ordinary client) is
+still valid, and a server that does not know them ignores them.
 """
 
 
@@ -23,6 +24,7 @@ from dataclasses import dataclass
 # Internal libs
 from hypershell.core.logging import HOSTNAME, INSTANCE
 from hypershell.core.types import serialize, deserialize
+from hypershell.core.topology import Bounds
 
 # Public interface
 __all__ = ['ClientState', 'Heartbeat', 'RosterEntry']
@@ -67,7 +69,7 @@ class RosterEntry:
 
 @dataclass
 class Heartbeat:
-    """Momentary notice of a client's active status (with a relay's site and roster, if any)."""
+    """Momentary notice of a client's active status (with a relay's site, roster and advertisement, if any)."""
 
     uuid: str
     host: str
@@ -75,6 +77,9 @@ class Heartbeat:
     state: ClientState
     site: Optional[str] = None
     roster: Optional[List[RosterEntry]] = None
+    zone: Optional[str] = None
+    bounds: Optional[Bounds] = None
+    clients: Optional[int] = None
 
     @classmethod
     def new(cls: Type[Heartbeat],
@@ -83,17 +88,23 @@ class Heartbeat:
             time: Optional[datetime] = None,
             state: Optional[ClientState] = None,
             site: Optional[str] = None,
-            roster: Optional[List[RosterEntry]] = None) -> Heartbeat:
+            roster: Optional[List[RosterEntry]] = None,
+            zone: Optional[str] = None,
+            bounds: Optional[Bounds] = None,
+            clients: Optional[int] = None) -> Heartbeat:
         """Create new instance."""
         return cls(uuid=(uuid or INSTANCE),
                    host=(host or HOSTNAME),
                    time=(time or datetime.now().astimezone()),
                    state=ClientState.default(state),
                    site=site,
-                   roster=roster)
+                   roster=roster,
+                   zone=zone,
+                   bounds=bounds,
+                   clients=clients)
 
     def pack(self: Heartbeat) -> bytes:
-        """Serialize data (site and roster only when set)."""
+        """Serialize data (each optional field only when set)."""
         data = {'uuid': self.uuid,
                 'host': self.host,
                 'time': str(self.time),
@@ -102,6 +113,12 @@ class Heartbeat:
             data['site'] = self.site
         if self.roster is not None:
             data['roster'] = [entry.to_dict() for entry in self.roster]
+        if self.zone is not None:
+            data['zone'] = self.zone
+        if self.bounds is not None:
+            data['bounds'] = self.bounds.to_dict()
+        if self.clients is not None:
+            data['clients'] = self.clients
         return serialize(data)
 
     @classmethod
@@ -117,4 +134,28 @@ class Heartbeat:
                        time=datetime.fromisoformat(unpacked_data['time']),
                        state=ClientState.from_value(unpacked_data['state']),
                        site=unpacked_data.get('site'),
-                       roster=None if roster is None else [RosterEntry.from_dict(entry) for entry in roster])
+                       roster=None if roster is None else [RosterEntry.from_dict(entry) for entry in roster],
+                       zone=_text_or_none(unpacked_data.get('zone')),
+                       bounds=_bounds_or_none(unpacked_data.get('bounds')),
+                       clients=_count_or_none(unpacked_data.get('clients')))
+
+
+# An advertisement field that is not valid is read as absent, so a malformed advertisement makes
+# its relay identity a non-participant instead of failing the server's heartbeat thread.
+
+def _text_or_none(value: Any) -> Optional[str]:
+    """The value when it is text, else None."""
+    return value if isinstance(value, str) else None
+
+
+def _bounds_or_none(value: Any) -> Optional[Bounds]:
+    """The bounds when they are valid, else None."""
+    try:
+        return None if value is None else Bounds.from_dict(value)
+    except ValueError:
+        return None
+
+
+def _count_or_none(value: Any) -> Optional[int]:
+    """The value when it is a whole number not below zero, else None."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
