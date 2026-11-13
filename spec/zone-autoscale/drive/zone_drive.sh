@@ -11,15 +11,19 @@
 # Modes:
 #   founding  default zone only, fixed policy, no --zone: the run without zones
 #   fixed     default and cpu tasks in group 0, gpu tasks in group 1, fixed policy
-#   dynamic   the same three zones under the dynamic policy, with tasks that take a while
+#   dynamic   the same three zones under the dynamic policy with a max-size of 3: default and gpu
+#             have twelve tasks of a second each, cpu has three quick ones
 #
 # Checks, all modes: every task completes and none fails; every launched client exits by itself
 # (idle exit) while the cluster still runs. Founding: every launch is in the default zone with no
 # --zone, and names the default zone in {zone} and HYPERSHELL_ZONE. Fixed and dynamic: each zone
 # is launched into, every launch names one zone, no gpu launch is made while group 0 has work,
-# and each task sees its own zone in HYPERSHELL_ZONE.
+# and each task sees its own zone in HYPERSHELL_ZONE. Dynamic: some zone grew past one client
+# on its own pressure while another stayed at one, and no zone passed the max-size.
 #
-# Settings: ZD_DEADLINE, seconds each wait is bounded by (default 120).
+# Settings: ZD_DEADLINE, seconds each wait is bounded by (default 120). ZD_EVIDENCE, a directory:
+# when set, the run's launch log, task log and autoscaler log lines are written to MODE.txt there,
+# with this machine's host name and paths replaced. Unset, nothing is written outside the site.
 set -eu
 
 mode=${1:-founding}
@@ -29,15 +33,18 @@ log=$PWD/launches.log out=$PWD/tasks.log
 : > "$log"
 : > "$out"
 
+# Each zone as NAME:GROUP:TASKS:SECONDS (seconds each task takes).
 case $mode in
-    founding) zones='default:0' policy=fixed count=3 work=0 ;;
-    fixed) zones='default:0 cpu:0 gpu:1' policy=fixed count=3 work=0 ;;
-    dynamic) zones='default:0 cpu:0 gpu:1' policy=dynamic count=12 work=1 ;;
+    founding) zones='default:0:3:0' policy=fixed max=1 ;;
+    fixed) zones='default:0:3:0 cpu:0:3:0 gpu:1:3:0' policy=fixed max=1 ;;
+    dynamic) zones='default:0:12:1 cpu:0:3:0 gpu:1:12:1' policy=dynamic max=3 ;;
     *) echo "usage: zone_drive.sh founding|fixed|dynamic" >&2; exit 2 ;;
 esac
 
-for pair in $zones; do
-    zone=${pair%%:*} group=${pair#*:}
+for spec in $zones; do
+    IFS=: read -r zone group count work <<EOF
+$spec
+EOF
     n=1
     while [ "$n" -le "$count" ]; do
         printf '%s\n' "sh -c 'sleep $work; echo $zone \${HYPERSHELL_ZONE:--} $n >> $out'"
@@ -53,7 +60,7 @@ done 2>/dev/null
 port=$(uv run --quiet python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 HYPERSHELL_LOGGING_LEVEL=DEBUG uv run --quiet hs cluster --restart --autoscaling="$policy" \
     --launcher="sh $here/zone_shim.sh $log {zone}" \
-    -H 127.0.0.1 -p "$port" -T 2 -P 1 -I 1 -X 0 > cluster.out 2>&1 &
+    -H 127.0.0.1 -p "$port" -T 2 -P 1 -I 1 -X 0 -Y "$max" > cluster.out 2>&1 &
 pid=$!
 
 status=0
@@ -94,12 +101,13 @@ sleep 3
 kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
 
+grep -E 'Autoscale (check|adding|start|launcher|min-size|max-size)' cluster.out > autoscaler.log || true
 echo '--- launches'
 cat "$log"
 echo '--- tasks'
 sort "$out"
 echo '--- cluster (autoscaler)'
-grep -E 'Autoscale (check|adding|start|launcher)' cluster.out | sed 's/^/  /' | tail -n 40 || true
+sed 's/^/  /' autoscaler.log | tail -n 40
 
 [ -s "$log" ] || fail 'no client was launched'
 [ "$(wc -l < "$log")" = "$launched_before_stop" ] || fail 'a client was launched after the work was done'
@@ -107,14 +115,15 @@ grep -E 'Autoscale (check|adding|start|launcher)' cluster.out | sed 's/^/  /' | 
 [ "$(uv run --quiet hs list --remaining --count)" = 0 ] || fail 'some tasks never completed'
 
 # Every task ran once, in the expected zones.
-expected=$(for pair in $zones; do echo "${pair%%:*}"; done | sort | tr '\n' ' ')
-awk -v count="$count" -v zones="$expected" '
+expected=$(for spec in $zones; do echo "$spec"; done | cut -d: -f1,3 | sort | tr '\n' ' ')
+awk -v zones="$expected" '
     { n[$1]++ }
     END {
         split(zones, want, " ")
-        for (i in want) if (n[want[i]] != count) exit 1
-        for (z in n) { found = 0; for (i in want) if (want[i] == z) found = 1; if (!found) exit 1 }
-    }' "$out" || fail "tasks per zone differ from $count each in: $expected"
+        for (i in want) { split(want[i], kv, ":"); count[kv[1]] = kv[2] }
+        for (z in count) if (n[z] != count[z]) exit 1
+        for (z in n) if (!(z in count)) exit 1
+    }' "$out" || fail "tasks per zone differ from: $expected"
 
 case $mode in
     founding)
@@ -143,7 +152,27 @@ if [ "$mode" = dynamic ]; then
                           for (z in n) { if (n[z] > 1) grew = 1; if (n[z] == 1) one = 1 }
                           exit !(grew && one) }' "$log" \
         || fail 'no zone grew past one client on its own pressure while another stayed at one'
+    awk -v max="$max" '{ n[$3]++ } END { for (z in n) if (n[z] > max) exit 1 }' "$log" \
+        || fail "a zone was launched into more than $max times"
 fi
 
-echo "zone_drive ($mode): $([ "$status" = 0 ] && echo PASS || echo FAIL)"
+result=$([ "$status" = 0 ] && echo PASS || echo FAIL)
+if [ -n "${ZD_EVIDENCE:-}" ]; then
+    mkdir -p "$ZD_EVIDENCE"
+    root=$(cd "$here/../../.." && pwd)
+    host=$(hostname)
+    short=$(hostname -s)
+    {
+        echo "# zone_drive $mode: launches (pid, {zone} word, HYPERSHELL_ZONE, client --zone, group-0 tasks left)"
+        cat "$log"
+        echo "# zone_drive $mode: tasks (zone, HYPERSHELL_ZONE seen by the task, index)"
+        sort "$out"
+        echo "# zone_drive $mode: autoscaler log lines"
+        cat autoscaler.log
+        echo "# zone_drive $mode: $result"
+    } | sed -e "s|$root|<repo>|g" -e "s|$PWD|<site>|g" -e "s|$host|<host>|g" -e "s|$short|<host>|g" \
+        > "$ZD_EVIDENCE/$mode.txt"
+fi
+
+echo "zone_drive ($mode): $result"
 exit "$status"

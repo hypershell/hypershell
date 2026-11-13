@@ -3,10 +3,10 @@ slug: zone-autoscale
 title: Zone-aware autoscaling (zone, cycle 3)
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/zone-autoscale
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -60,7 +60,7 @@ phases:
 - id: P4
   name: Per-zone pressure under the dynamic policy, laptop evidence, full regression
     and docs gate
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -330,19 +330,38 @@ launched while group 0 has work, and every client retires by idle exit.
 **Goal:** the dynamic policy scales each zone on its own pressure in a live run. The three drive
 modes' logs are kept as evidence, the full suite is green, and the docs build passes with `-W`.
 
-- [ ] Drive `dynamic` mode, with a task duration long enough (a `sleep`) for pressure to be known.
+- [x] Drive `dynamic` mode, with a task duration long enough (a `sleep`) for pressure to be known.
   It asserts every PLAN §6 three-zone check, plus that at least one zone grew past one client on its
   own pressure while another stayed at one.
-- [ ] When `ZD_EVIDENCE=<dir>` is set, `zone_drive.sh` copies each mode's launch log, task log and
+- [x] When `ZD_EVIDENCE=<dir>` is set, `zone_drive.sh` copies each mode's launch log, task log and
   per-zone cluster log lines to `<dir>/{founding,fixed,dynamic}.log`; unset (every `verify:`), it
   writes nothing in the repo. Run the three modes once with
   `ZD_EVIDENCE="$PWD/spec/zone-autoscale/evidence/laptop"` and commit the logs. Write a short
   `spec/zone-autoscale/evidence/laptop/README.md`: what was run, on what kind of host, the commit,
   and the pass lines.
-- [ ] Fix anything the full suite or the `-W` docs build finds. Any change to source re-runs P1–P3's
+- [x] Fix anything the full suite or the `-W` docs build finds. Any change to source re-runs P1–P3's
   verifies before this phase is marked done.
 - **Verify:** see frontmatter (three drive modes, full `uv run pytest`, the docs build); the evidence
   logs are part of the phase's commit.
+- **Build notes (P4).**
+  - Drive: zones are now `NAME:GROUP:TASKS:SECONDS`, and the cluster gets `-Y MAX` (1 for
+    founding and fixed, the default; 3 for dynamic). Dynamic gives default and `gpu` twelve
+    one-second tasks and `cpu` three quick ones, so two zones grow on their own pressure while
+    one stays at one; it also checks that no zone passes the max-size. With the default max-size
+    of 1 no zone could grow, which the first dynamic run showed. `ZD_EVIDENCE` writes `MODE.txt`
+    with the host name, repository path and site path replaced (`.txt`, since `*.log` is
+    ignored repo-wide; the checklist's `{founding,fixed,dynamic}.log` names became `.txt`).
+  - No source change in this phase, so P1–P3's verifies were not re-run beyond the three drive
+    modes and the full suite.
+  - Full suite: 1718 passed, 88 skipped (PostgreSQL-only without `HS_TEST_POSTGRES`:
+    `test_contended_write` 8, `test_timescale` 4, `test_upgrade_postgres` 29,
+    `test_writeback_postgres` 24, `test_zone_postgres` 5; `test_timescale` 16 without
+    `HS_TEST_TIMESCALE`; one fish-completion case without fish; one fixture regeneration).
+  - Docs gate, sandbox form: the `sphinx_sitemap` extension cannot bind a local socket in the
+    build sandbox, so the gate ran as `uv run --python 3.12 --group docs sphinx-build -W
+    --keep-going -q -E -b html -D extensions=sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.extlinks,sphinx.ext.viewcode,sphinxext.opengraph,sphinx_inline_tabs,sphinx_copybutton,sphinxcontrib.details.directive,sphinx_reredirects
+    docs docs/_build/html` (every extension but `sphinx_sitemap`): exit 0, no warnings. The
+    unmodified frontmatter command is to be run outside the sandbox before review.
 - **Touches:** `spec/zone-autoscale/drive/`, `spec/zone-autoscale/evidence/laptop/`, and, only for
   fixes, any file P1–P3 touched.
 

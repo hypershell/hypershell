@@ -1,0 +1,36 @@
+# zone_drive fixed: launches (pid, {zone} word, HYPERSHELL_ZONE, client --zone, group-0 tasks left)
+launch pid=83978 word=default env=default client=- g0=6
+launch pid=83993 word=cpu env=cpu client=cpu g0=3
+launch pid=84046 word=gpu env=gpu client=gpu g0=0
+# zone_drive fixed: tasks (zone, HYPERSHELL_ZONE seen by the task, index)
+cpu cpu 1
+cpu cpu 2
+cpu cpu 3
+default default 1
+default default 2
+default default 3
+gpu gpu 1
+gpu gpu 2
+gpu gpu 3
+# zone_drive fixed: autoscaler log lines
+    INFO [hypershell.cluster] Autoscale start (policy: fixed, init-size: 1)
+   DEBUG [hypershell.cluster] Autoscale launcher (zone default): sh <repo>/spec/zone-autoscale/drive/zone_shim.sh <site>/launches.log default <repo>/.venv/bin/hs client -H <host> -p 54655 -N 1 -b 1 -w 5 -t '{}' -d 0 -S 10 -T 2
+    INFO [hypershell.cluster] Autoscale adding client (83978, zone: default)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 1/1, tasks: 0 in group 0)
+   DEBUG [hypershell.cluster] Autoscale check (zone: cpu, clients: 0/0, tasks: 3 in group 0)
+   DEBUG [hypershell.cluster] Autoscale adding client (zone: cpu, 3 tasks remaining in group 0)
+   DEBUG [hypershell.cluster] Autoscale launcher (zone cpu): sh <repo>/spec/zone-autoscale/drive/zone_shim.sh <site>/launches.log cpu <repo>/.venv/bin/hs client -H <host> -p 54655 -N 1 -b 1 -w 5 -t '{}' -d 0 -S 10 -T 2 --zone cpu
+    INFO [hypershell.cluster] Autoscale adding client (83993, zone: cpu)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 1/1, tasks: 0 in group 0)
+   DEBUG [hypershell.cluster] Autoscale check (zone: gpu, clients: 0/0, tasks: 3 in group 1)
+   DEBUG [hypershell.cluster] Autoscale adding client (zone: gpu, 3 tasks remaining in group 1)
+   DEBUG [hypershell.cluster] Autoscale launcher (zone gpu): sh <repo>/spec/zone-autoscale/drive/zone_shim.sh <site>/launches.log gpu <repo>/.venv/bin/hs client -H <host> -p 54655 -N 1 -b 1 -w 5 -t '{}' -d 0 -S 10 -T 2 --zone gpu
+    INFO [hypershell.cluster] Autoscale adding client (84046, zone: gpu)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 1/1, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 0/0, tasks: 0 in group 1)
+   DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 0/0, tasks: 0 in group 1)
+# zone_drive fixed: PASS
