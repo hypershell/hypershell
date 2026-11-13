@@ -593,7 +593,7 @@ function _hs_cluster() {
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
-        '--zone[Zone of the submitted tasks and of every client]:zone:' \
+        '--zone[Zone of the submitted tasks and of every client (own zone with --autoscaling)]:zone:' \
         '(-r --max-retries)'{-r,--max-retries}'[Auto-retry failed tasks (default: 0)]:retries:(1 2 3 4 5 6)' \
         '--eager[Schedule failed tasks before new tasks]' \
         '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries (default: 30)]:seconds:(1 2 5 10 30)' \
@@ -606,7 +606,7 @@ function _hs_cluster() {
         '(--repeat)--update[Submit only new tasks from a known file (use with --restart)]' \
         '(--mpi --launcher)--ssh[Launch directly with SSH host(s)]::host:_hs_known_hosts' \
         '(--ssh --launcher)--mpi[Same as --launcher=mpirun]' \
-        '(--ssh --mpi)--launcher[Use specific launch interface]:launcher:_command_names -e' \
+        '(--ssh --mpi)--launcher[Use specific launch interface ({zone} names each autoscaled zone)]:launcher:_command_names -e' \
         '--ssh-args[Command-line arguments for SSH]:ssh args:' \
         '--ssh-group[SSH nodelist group in config]:ssh group:_hs_ssh_groups' \
         '(-E --env)'{-E,--env}'[Send environment variables]' \
@@ -625,7 +625,7 @@ function _hs_cluster() {
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
         '(-R --ratelimit)'{-R,--ratelimit}'[Maximum allowed tasks per second per client]:rate:' \
         '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait (default: 10)]:seconds:(1 5 10)' \
-        '(-A --autoscaling)'{-A,--autoscaling}'[Enable autoscaling (used with --launcher)]::mode:(fixed dynamic)' \
+        '(-A --autoscaling)'{-A,--autoscaling}'[Enable autoscaling per zone (used with --launcher)]::mode:(fixed dynamic)' \
         '(-F --factor)'{-F,--factor}'[Scaling factor (default: 1)]:factor:(1 2 3 4 5)' \
         '(-P --period)'{-P,--period}'[Scaling period in seconds (default: 60)]:seconds:(30 60 300 600)' \
         '(-I --init-size)'{-I,--init-size}'[Initial size of cluster (default: 1)]:size:(0 1 2 5)' \

@@ -21,7 +21,7 @@ from typing import Callable, Iterator, List, Optional
 import os
 import uuid
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # External libs
 from pytest import mark, fixture
@@ -32,7 +32,7 @@ from sqlalchemy.engine import Engine, make_url
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
 from hypershell.data.upgrade import upgrade_schema
-from hypershell.data.model import Task, Zone, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME, DEFAULT_TASK_GROUP
+from hypershell.data.model import Task, Zone, Client, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME, DEFAULT_TASK_GROUP
 
 
 ADMIN_URL: Optional[str] = os.getenv('HS_TEST_POSTGRES')
@@ -152,3 +152,28 @@ def test_group_checks_on_native_uuid_ids(pg_engine: Engine) -> None:
     Task.update(failed_id, retried=True)
     after = Task.increment_group(DEFAULT_TASK_GROUP, attempts=1)
     assert after.viable and after.reason == 'no task groups remain'
+
+
+def test_zone_scoped_autoscale_signal(pg_engine: Engine) -> None:
+    """The autoscaler's per-zone counts and signal run on PostgreSQL, grouping over the native UUID zone."""
+    gpu, cpu = zone_id('gpu'), zone_id('cpu')
+    tasks = ([Task.new(args=f'echo {n}', group=0) for n in range(3)] +
+             [Task.new(args=f'echo gpu {n}', group=0, zone=gpu) for n in range(2)] +
+             [Task.new(args=f'echo cpu {n}', group=1, zone=cpu) for n in range(2)])
+    Task.add_all(tasks)
+    assert Task.count_remaining_by_zone(0) == {DEFAULT_ZONE_ID: 3, gpu: 2}
+    assert Task.count_remaining_by_zone(1) == {cpu: 2}
+    assert Task.count_remaining(group=0, zone=gpu) == 2
+    assert Task.count_remaining(group=0, zone=DEFAULT_ZONE_ID) == 3
+    client = Client.new()
+    Client.add_all([client])
+    scheduled = Task.next(limit=10, group=0, zone=gpu, attempts=2)
+    now = datetime.now().astimezone()
+    Task.update(str(scheduled[0].id), client_id=client.id, start_time=now - timedelta(seconds=4), completion_time=now,
+                duration=4, exit_status=1)
+    assert Task.count_retryable_by_zone(2, 0) == {gpu: 1}
+    assert Task.count_retryable_by_zone(1, 0) == {}
+    assert Task.avg_duration(zone=gpu) == 4.0
+    assert Task.avg_duration(zone=DEFAULT_ZONE_ID) is None
+    assert Task.effective_rate(zone=gpu) == Task.effective_rate()
+    assert Task.task_pressure(1, group=0, zone=gpu) == Task.time_to_completion(group=0, zone=gpu) / 4.0

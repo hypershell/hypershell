@@ -72,7 +72,7 @@ Arguments:
 Modes:
   --ssh                HOST...  Launch directly with SSH host(s).
   --mpi                         Same as --launcher=mpirun.
-  --launcher           ARGS...  Use specific launch interface.
+  --launcher           ARGS...  Use specific launch interface ({{zone}} and HYPERSHELL_ZONE name each autoscaled zone).
 
 Options:
   -N, --num-threads    NUM      Number of executor threads per client, 0=auto (default: {DEFAULT_NUM_THREADS}).
@@ -82,7 +82,7 @@ Options:
   -p, --port           PORT     Port number (default: {DEFAULT_PORT}).
   -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait     SEC      Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
-      --zone           NAME     Zone of the submitted tasks and of every client (default: none).
+      --zone           NAME     Zone of the submitted tasks and every client; own zone if autoscaling (default: none).
   -r, --max-retries    NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
       --eager                   Schedule failed tasks before new tasks.
       --no-db                   Disable database (submit directly to clients).
@@ -111,7 +111,7 @@ Options:
   -R, --ratelimit      NUM      Maximum allowed tasks per second per client (default: none).
   -S, --signalwait     SEC      Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
   -Q, --poll           NUM      Polling interval between database queries if no tasks (default: {DEFAULT_SERVER_POLL}).
-  -A, --autoscaling   [MODE]    Enable autoscaling (default: disabled). Used with --launcher.
+  -A, --autoscaling   [MODE]    Enable autoscaling per zone (default: disabled). Used with --launcher.
   -F, --factor         VALUE    Scaling factor (default: 1).
   -P, --period         SEC      Scaling period in seconds (default: {DEFAULT_AUTOSCALE_PERIOD}).
   -I, --init-size      SIZE     Initial size of cluster (default: {DEFAULT_AUTOSCALE_INIT_SIZE}).

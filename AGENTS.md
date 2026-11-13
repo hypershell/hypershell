@@ -86,7 +86,7 @@ Top-level package `src/hypershell/`:
 | `core/` | Shared infrastructure (see below). |
 | `data/core.py` | SQLAlchemy engine/`Session`, DB-URL construction, provider selection. `InitDBApp` (`hs initdb`) and the `initdb`/`checkdb`/`ensuredb` helpers live in `data/__init__.py`; the schema-upgrade step in `data/upgrade.py`. |
 | `data/model.py` | `Entity` base + `Task`, `Client`, and `Source` ORM models (`Source` records submission provenance for re-submission gating; `DIRECT_SOURCE_ID`/`STDIN_SOURCE_ID` are reserved source ids). **Most query/state logic lives as `Task` classmethods here.** |
-| `cluster/` | `__init__.py` (`ClusterApp`/`hsx`), `local.py` (`LocalCluster`), `remote.py` (`RemoteCluster`, `AutoScalingCluster`), `ssh.py` (`SSHCluster`), `launch.py` (`client_launch()`, the one launched-client builder). |
+| `cluster/` | `__init__.py` (`ClusterApp`/`hsx`), `local.py` (`LocalCluster`), `remote.py` (`RemoteCluster`, `AutoScalingCluster`), `ssh.py` (`SSHCluster`), `launch.py` (`client_launch()`, the one launched-client builder; `LaunchActuator`), `demand.py` (per-zone autoscaling demand: `read_zone_loads`, `fleet_demand`). |
 | `relay/` | `hs relay`: a site's link to an upstream server. `__init__.py` (`RelayApp`, `RelayThread`: composition, supervision, shutdown order, signal handlers), `upstream.py` (puller, returner and heartbeat FSMs; one upstream identity per served zone), `store.py` (relay-only tables `relay_task`/`relay_result` on their own `MetaData`; durable insert, outbox), `site.py` (site cluster and per-zone fleets, credential fence). The reconnecting upstream link is `core/reconnect.py` (`UpstreamLink`). |
 
 `core/` modules: `sys` (import-time `sys.path` sanitizer), `config`, `logging` (also
@@ -415,6 +415,14 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   expansion. The advertised
   `HOSTNAME` must be routable from clients. The `AutoScaler` never terminates clients (they
   self-exit on idle) and silently ignores `no_confirm`/`in_memory`/`forever`/`restart`.
+- The autoscaler launches zone by zone through `cluster/launch.py` `LaunchActuator`, one
+  `client_launch(..., expose_zone=True)` per zone: `{zone}` is replaced in launcher words only
+  (never the client's `-t`), `HYPERSHELL_ZONE` is added to the launch env (never to the Open MPI
+  forward list), `expose_zone` refuses SSH, and the own default zone keeps today's argv (no
+  `--zone`). The relay's site cluster passes `discover_zones=False` and exposes nothing.
+- The autoscaler reads every zone from the group the scheduler loads from
+  (`Scheduler.active_group`, else `Task.starting_group`, the scheduler's own start rule), not
+  `Task.current_group()`, which is only the most recently scheduled group.
 
 ## Configuration
 

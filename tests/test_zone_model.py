@@ -20,7 +20,7 @@ import signal
 import sqlite3
 import subprocess
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID as PyUUID
 
 # External libs
@@ -33,8 +33,8 @@ from sqlalchemy.engine import Engine
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
 from hypershell.data.upgrade import upgrade_schema
-from hypershell.data.model import (Entity, Task, Zone, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME,
-                                   DEFAULT_TASK_GROUP)
+from hypershell.data.model import (Entity, Task, Zone, Client, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME,
+                                   DEFAULT_TASK_GROUP, CANCEL_STATUS)
 from tests import FIXTURE_283
 
 
@@ -277,3 +277,106 @@ def test_group_gating_stays_global(task_db: Engine) -> None:
     assert sorted(t.id for t in Task.next(limit=10, group=1, zone=DEFAULT_ZONE_ID)) == sorted(later)
     assert Task.current_group().value == 1
     assert len(default_ids) == 2
+
+
+def run(task_id: str, client_id: str, seconds: int, exit_status: int = 0) -> None:
+    """Mark a scheduled task as run by `client_id` for `seconds`, ending now."""
+    end = datetime.now().astimezone()
+    start = end - timedelta(seconds=seconds)
+    Task.update(task_id, client_id=client_id, start_time=start, completion_time=end,
+                duration=seconds, exit_status=exit_status)
+
+
+def add_clients(count: int) -> List[str]:
+    """Register `count` connected clients of this server, return their ids."""
+    clients = [Client.new() for _ in range(count)]
+    Client.add_all(clients)
+    return [client.id for client in clients]
+
+
+@mark.unit
+def test_count_remaining_by_zone(task_db: Engine) -> None:
+    """Incomplete tasks of a group are counted per zone; the default zone is keyed by its reserved id."""
+    gpu, cpu = zone_id('gpu'), zone_id('cpu')
+    assert Task.count_remaining_by_zone(0) == {}
+    default_ids = add_tasks(3, group=0)
+    add_tasks(2, gpu, group=0)
+    add_tasks(4, cpu, group=1)
+    assert Task.count_remaining_by_zone(0) == {DEFAULT_ZONE_ID: 3, gpu: 2}
+    assert Task.count_remaining_by_zone(1) == {cpu: 4}
+    Task.next(limit=1, group=0, zone=DEFAULT_ZONE_ID)
+    assert Task.count_remaining_by_zone(0) == {DEFAULT_ZONE_ID: 3, gpu: 2}
+    for task_id in default_ids:
+        finish(task_id, 0)
+    assert Task.count_remaining_by_zone(0) == {gpu: 2}
+    assert Task.count_remaining(group=0, zone=gpu) == 2
+    assert Task.count_remaining(group=0, zone=DEFAULT_ZONE_ID) == 0
+    assert Task.count_remaining(zone=cpu) == 4
+    assert Task.count_remaining(group=0) == 2
+    assert Task.count_remaining() == 6
+
+
+@mark.unit
+@mark.parametrize('attempts, eager, counted', [(1, False, False), (2, False, True), (2, True, True)])
+def test_count_retryable_by_zone(task_db: Engine, attempts: int, eager: bool, counted: bool) -> None:
+    """Failures awaiting a retry are counted per zone under the retry rule; cancelled tasks never are."""
+    gpu, cpu = zone_id('gpu'), zone_id('cpu')
+    failed_default, = add_tasks(1, group=0)
+    failed_gpu = add_tasks(2, gpu, group=0)
+    cancelled_cpu, = add_tasks(1, cpu, group=0)
+    later_cpu, = add_tasks(1, cpu, group=1)
+    for task_id in (failed_default, *failed_gpu, later_cpu):
+        finish(task_id, 1)
+    finish(cancelled_cpu, CANCEL_STATUS)
+    expected = {DEFAULT_ZONE_ID: 1, gpu: 2} if counted else {}
+    assert Task.count_retryable_by_zone(attempts, 0, eager=eager) == expected
+    assert Task.count_retryable_by_zone(attempts, 1, eager=eager) == ({cpu: 1} if counted else {})
+    assert sum(expected.values()) == Task.count_retryable(attempts, 0, eager=eager)
+    if counted:
+        Task.next(limit=10, group=0, zone=gpu, attempts=attempts, eager=eager)
+        assert Task.count_retryable_by_zone(attempts, 0, eager=eager) == {DEFAULT_ZONE_ID: 1}
+
+
+@mark.unit
+def test_zone_less_signal_equals_unscoped(task_db: Engine) -> None:
+    """With every task in the default zone, the default zone's signal equals the unscoped one."""
+    clients = add_clients(2)
+    ids = add_tasks(6, group=0) + add_tasks(4, group=1)
+    Task.next(limit=4, group=0)
+    for task_id, client_id, seconds in zip(ids, clients * 2, (2, 4, 6, 8)):
+        run(task_id, client_id, seconds)
+    assert Task.effective_rate_by_client(zone=DEFAULT_ZONE_ID) == Task.effective_rate_by_client()
+    assert Task.effective_rate(zone=DEFAULT_ZONE_ID) == Task.effective_rate()
+    assert Task.avg_duration(zone=DEFAULT_ZONE_ID) == Task.avg_duration() == 5.0
+    for group in (None, 0, 1):
+        assert Task.count_remaining(group=group, zone=DEFAULT_ZONE_ID) == Task.count_remaining(group=group)
+        assert (Task.time_to_completion(group=group, zone=DEFAULT_ZONE_ID) ==
+                Task.time_to_completion(group=group))
+        assert Task.task_pressure(2, group=group, zone=DEFAULT_ZONE_ID) == Task.task_pressure(2, group=group)
+    assert Task.task_pressure(2, group=0) is not None
+
+
+@mark.unit
+def test_zone_scoped_signal(task_db: Engine) -> None:
+    """Rate, duration and pressure of a zone come from its own tasks and the clients that ran them."""
+    gpu = zone_id('gpu')
+    fast, slow = add_clients(2)
+    default_ids, gpu_ids = add_tasks(4, group=0), add_tasks(4, gpu, group=0)
+    Task.next(limit=10, group=0)
+    for task_id in default_ids[:2]:
+        run(task_id, fast, 1)
+    for task_id in gpu_ids[:2]:
+        run(task_id, slow, 10)
+    assert set(Task.effective_rate_by_client(zone=gpu)) == {slow}
+    assert set(Task.effective_rate_by_client(zone=DEFAULT_ZONE_ID)) == {fast}
+    assert set(Task.effective_rate_by_client()) == {fast, slow}
+    assert Task.avg_duration(zone=gpu) == 10.0
+    assert Task.avg_duration(zone=DEFAULT_ZONE_ID) == 1.0
+    assert Task.effective_rate(zone=gpu) < Task.effective_rate(zone=DEFAULT_ZONE_ID)
+    gpu_pressure = Task.task_pressure(1, group=0, zone=gpu)
+    assert gpu_pressure == Task.time_to_completion(group=0, zone=gpu) / 10.0
+    assert Task.time_to_completion(group=0, zone=gpu) == 2 / Task.effective_rate(zone=gpu)
+    assert Task.effective_rate(zone=zone_id('cpu')) is None
+    assert Task.avg_duration(zone=zone_id('cpu')) is None
+    assert Task.task_pressure(1, group=0, zone=zone_id('cpu')) is None
+    assert Task.task_pressure(1, group=1, zone=gpu) is None

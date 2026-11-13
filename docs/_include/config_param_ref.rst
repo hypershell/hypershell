@@ -530,6 +530,15 @@
         an MPI or SLURM command (e.g., ``srun``) to bring up each client through your resource
         manager. Counterpart to the cluster ``--launcher`` option used with ``--autoscaling``.
 
+        Each launch names the zone of its client: ``{zone}`` in the launcher is replaced by the
+        zone's name (``default`` for the default zone), and the launched process has the name
+        in its ``HYPERSHELL_ZONE`` environment variable.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               ``{zone}`` and ``HYPERSHELL_ZONE``.
+
     ``[size]``
         ``.init``
             Initial size of cluster (default: 1).

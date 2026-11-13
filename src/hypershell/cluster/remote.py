@@ -15,7 +15,7 @@ import shlex
 import secrets
 from enum import Enum
 from datetime import datetime, timedelta
-from functools import cached_property
+from functools import cached_property, partial
 from subprocess import Popen
 
 # Internal libs
@@ -30,14 +30,16 @@ from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL,
                                DEFAULT_EVICT)
-from hypershell.cluster.launch import ClientLaunch, client_launch, redact_secrets
+from hypershell.cluster.launch import ClientLaunch, LaunchActuator, client_launch, redact_secrets
+from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ZoneLoad, ScalingKnobs,
+                                       read_zone_loads, fleet_demand)
 
 # Public interface
 __all__ = ['run_cluster', 'RemoteCluster', 'AutoScalingCluster',
            'DEFAULT_REMOTE_EXE', 'DEFAULT_LAUNCHER',
            'DEFAULT_AUTOSCALE_POLICY', 'DEFAULT_AUTOSCALE_PERIOD', 'DEFAULT_AUTOSCALE_FACTOR',
            'DEFAULT_AUTOSCALE_INIT_SIZE', 'DEFAULT_AUTOSCALE_MIN_SIZE', 'DEFAULT_AUTOSCALE_MAX_SIZE',
-           'DEFAULT_AUTOSCALE_LAUNCHER',
+           'DEFAULT_AUTOSCALE_LAUNCHER', 'AutoScalerPolicy',
            'redact_secrets']
 
 # Initialize logger
@@ -353,20 +355,6 @@ class AutoScalerState(State, Enum):
     HALT = 9
 
 
-class AutoScalerPolicy(Enum):
-    """Allowed scaling policies."""
-    FIXED = 1
-    DYNAMIC = 2
-
-    @classmethod
-    def from_name(cls: Type[AutoScalerPolicy], name: str) -> AutoScalerPolicy:
-        """Return decided enum type from name."""
-        try:
-            return cls[name.upper()]
-        except KeyError:
-            raise RuntimeError(f'Unknown {cls.__name__} \'{name}\'')
-
-
 class AutoScalerPhase(Enum):
     """Launch phase."""
     INIT = 1
@@ -375,7 +363,19 @@ class AutoScalerPhase(Enum):
 
 
 class AutoScaler(StateMachine):
-    """Monitor task pressure and scale accordingly."""
+    """
+    Monitor task pressure and scale accordingly.
+
+    Clients are launched through a :class:`~hypershell.cluster.launch.LaunchActuator`: `launch`
+    starts the clients of the `own_zone` (the default zone if not given), and `launch_for`, when
+    given, builds the launch of any other zone. With `launch_for`, each check also discovers every
+    zone with work in the current task group and sizes it under the same knobs; without it, only
+    the own zone is scaled. `attempts` and `eager` are the server's retry rule, under which failed
+    tasks count as work. `registered`, when given, counts the clients a zone has registered; it is
+    called with a zone id. `scheduler_group`, when given, reports the task group the scheduler loads
+    from now (None while it is not known); otherwise, and while it reports None, the group is the
+    one the scheduler would start from (:meth:`~hypershell.data.model.Task.starting_group`).
+    """
 
     policy: AutoScalerPolicy
     factor: float
@@ -383,9 +383,14 @@ class AutoScaler(StateMachine):
     init_size: int
     min_size: int
     max_size: int
-    launch: ClientLaunch
+    own_zone: ZoneRef
+    attempts: int
+    eager: bool
+    registered: Optional[Callable[[str], int]]
+    scheduler_group: Optional[Callable[[], Optional[int]]]
 
-    clients: List[Popen]
+    actuator: LaunchActuator
+    pending: Dict[ZoneRef, int]
     last_check: datetime
     wait_check: timedelta
 
@@ -401,6 +406,12 @@ class AutoScaler(StateMachine):
                  init_size: int = DEFAULT_AUTOSCALE_INIT_SIZE,
                  min_size: int = DEFAULT_AUTOSCALE_MIN_SIZE,
                  max_size: int = DEFAULT_AUTOSCALE_MAX_SIZE,
+                 own_zone: Optional[ZoneRef] = None,
+                 launch_for: Optional[Callable[[ZoneRef], ClientLaunch]] = None,
+                 attempts: int = 1,
+                 eager: bool = False,
+                 registered: Optional[Callable[[str], int]] = None,
+                 scheduler_group: Optional[Callable[[], Optional[int]]] = None,
                  ) -> None:
         """Initialize with scaling parameters."""
         self.policy = AutoScalerPolicy.from_name(policy)
@@ -409,10 +420,44 @@ class AutoScaler(StateMachine):
         self.init_size = init_size
         self.min_size = min_size
         self.max_size = max_size
-        self.launch = launch
+        self.own_zone = own_zone if own_zone is not None else ZoneRef.from_name(None)
+        self.attempts = attempts
+        self.eager = eager
+        self.registered = registered
+        self.scheduler_group = scheduler_group
+        self.actuator = LaunchActuator(launch, own=self.own_zone, launch_for=launch_for)
         self.last_check = datetime.now()
         self.wait_check = timedelta(seconds=period)
-        self.clients = []
+        self.pending = {}
+
+    @property
+    def launch(self: AutoScaler) -> ClientLaunch:
+        """The launch of the own zone's clients."""
+        return self.actuator.launch
+
+    @property
+    def clients(self: AutoScaler) -> List[Popen]:
+        """Launched clients not yet exited, every zone together."""
+        return self.actuator.clients
+
+    @clients.setter
+    def clients(self: AutoScaler, value: List[Popen]) -> None:
+        """Replace the launched clients."""
+        self.actuator.clients = value
+
+    @property
+    def knobs(self: AutoScaler) -> ScalingKnobs:
+        """The sizing knobs, applied to each zone alike."""
+        return ScalingKnobs(self.policy, self.factor, self.init_size, self.min_size, self.max_size)
+
+    def launched(self: AutoScaler) -> Dict[str, int]:
+        """Launched clients per zone id."""
+        return self.actuator.launched()
+
+    @property
+    def discover(self: AutoScaler) -> bool:
+        """Whether zones other than the own zone are discovered and scaled."""
+        return self.actuator.launch_for is not None
 
     @cached_property
     def actions(self: AutoScaler) -> Dict[AutoScalerState, Callable[[], AutoScalerState]]:
@@ -431,12 +476,14 @@ class AutoScaler(StateMachine):
     def start(self: AutoScaler) -> AutoScalerState:
         """Jump to INIT state."""
         log.info(f'Autoscale start (policy: {self.policy.name.lower()}, init-size: {self.init_size})')
-        log.debug('Autoscale launcher: ' + self.launch.describe())
+        self.actuator.describe()
         return AutoScalerState.INIT
 
     def init(self: AutoScaler) -> AutoScalerState:
         """Launch initial clients."""
-        if len(self.clients) < self.init_size:
+        launched = self.launched()
+        desired = fleet_demand({}, launched, self.knobs, own=self.own_zone, initial=True)
+        if any(count > launched.get(zone.id, 0) for zone, count in desired.items()):
             return AutoScalerState.SCALE
         else:
             self.phase = AutoScalerPhase.STEADY
@@ -466,66 +513,78 @@ class AutoScaler(StateMachine):
 
     def check_fixed(self: AutoScaler) -> AutoScalerState:
         """Scaling procedure for a fixed policy cluster."""
-        launched_size = len(self.clients)
-        registered_size = Client.count_connected()
-        task_count = Task.count_remaining()
-        group_info = Task.current_group()
-        group_task_count = Task.count_remaining(group=group_info.value)
-        log.debug(f'Autoscale check (clients: {registered_size}/{launched_size}, '
-                  f'tasks: {group_task_count} in group {group_info.value}, {task_count} total)')
-        if launched_size < self.min_size:
-            log.debug(f'Autoscale min-size reached ({launched_size} < {self.min_size})')
-            return AutoScalerState.SCALE
-        if launched_size == 0 and group_task_count == 0:
-            return AutoScalerState.WAIT
-        if launched_size == 0 and group_task_count > 0:
-            log.debug(f'Autoscale adding client ({group_task_count} tasks remaining in group {group_info.value})')
-            return AutoScalerState.SCALE
-        else:
-            return AutoScalerState.WAIT
+        return self.check_zones()
 
     def check_dynamic(self: AutoScaler) -> AutoScalerState:
         """Scaling procedure for a dynamic policy cluster."""
-        launched_size = len(self.clients)
-        registered_size = Client.count_connected()
-        task_count = Task.count_remaining()
-        group_info = Task.current_group()
-        group_task_count = Task.count_remaining(group=group_info.value)
-        pressure = Task.task_pressure(self.factor, group=group_info.value)
-        pressure_val = 'unknown' if pressure is None else f'{pressure:.2f}'
-        log.debug(f'Autoscale check (pressure: {pressure_val}, '
-                  f'clients: {registered_size}/{launched_size}, '
-                  f'tasks: {group_task_count} in group {group_info.value}, {task_count} total)')
-        if launched_size < self.min_size:
-            log.debug(f'Autoscale min-size reached ({launched_size} < {self.min_size})')
-            return AutoScalerState.SCALE
-        if pressure is not None:
-            if pressure > 1:
-                log.debug(f'Autoscale pressure high ({pressure:.2f})')
-                if launched_size >= self.max_size:
-                    log.debug(f'Autoscale max-size reached ({launched_size} >= {self.max_size})')
-                    return AutoScalerState.WAIT
-                else:
-                    return AutoScalerState.SCALE
-            else:
-                log.debug(f'Autoscale pressure low ({pressure:.2f})')
-                return AutoScalerState.WAIT
-        else:
-            if launched_size == 0 and group_task_count == 0:
-                log.debug(f'Autoscale pause (no clients and no active tasks)')
-                return AutoScalerState.WAIT
-            if launched_size == 0 and group_task_count > 0:
-                log.debug(f'Autoscale adding client ({group_task_count} tasks remaining in group {group_info.value})')
-                return AutoScalerState.SCALE
-            else:
-                log.debug('Autoscale pause (waiting on clients to complete initial tasks)')
-                return AutoScalerState.WAIT
+        return self.check_zones()
+
+    def current_group(self: AutoScaler) -> int:
+        """The task group the scheduler loads from: as it reports it, else the group it would start from."""
+        group = None if self.scheduler_group is None else self.scheduler_group()
+        if group is None:
+            recent = Task.current_group().value
+            group = Task.starting_group(recent, attempts=self.attempts, eager=self.eager)
+            group = recent if group is None else group
+        return group
+
+    def check_zones(self: AutoScaler) -> AutoScalerState:
+        """Decide the clients each zone needs under the policy, and scale if any zone needs one."""
+        group = self.current_group()
+        launched = self.launched()
+        connected = None if self.registered is not None else Client.count_connected()
+        registered: Dict[str, int] = {}
+
+        def registered_in(zone_id: str) -> int:
+            if zone_id not in registered:
+                registered[zone_id] = connected if self.registered is None else self.registered(zone_id)
+            return registered[zone_id]
+
+        own = self.own_zone
+        own_idle = launched.get(own.id, 0) == 0 and registered_in(own.id) == 0
+        loads = read_zone_loads(group, self.knobs, own=own, discover=self.discover,
+                                attempts=self.attempts, eager=self.eager, own_idle=own_idle)
+        desired = fleet_demand(loads, launched, self.knobs, own=own, initial=False)
+        self.pending = {}
+        for zone, count in desired.items():
+            have = launched.get(zone.id, 0)
+            count = min(count, have + 1)  # NOTE: at most one launch per zone per check
+            load = loads.get(zone.id) or ZoneLoad(zone, remaining=0, retryable=0, pressure=None)
+            self.log_check(zone, load, group if load.group is None else load.group, have, registered_in(zone.id), count)
+            if count > have:
+                self.pending[zone] = count
+        return AutoScalerState.SCALE if self.pending else AutoScalerState.WAIT
+
+    def log_check(self: AutoScaler, zone: ZoneRef, load: ZoneLoad, group: int,
+                  launched: int, registered: int, desired: int) -> None:
+        """Log one zone's reading and the decision taken for it."""
+        dynamic = self.policy is AutoScalerPolicy.DYNAMIC
+        pressure = '' if not dynamic else (
+            'pressure: unknown, ' if load.pressure is None else f'pressure: {load.pressure:.2f}, ')
+        log.debug(f'Autoscale check (zone: {zone.name}, {pressure}clients: {registered}/{launched}, '
+                  f'tasks: {load.work} in group {group})')
+        if desired > launched and zone == self.own_zone and launched < self.min_size:
+            log.debug(f'Autoscale min-size reached (zone: {zone.name}, {launched} < {self.min_size})')
+            return
+        if dynamic and load.pressure is not None:
+            level = 'high' if load.pressure > 1 else 'low'
+            log.debug(f'Autoscale pressure {level} (zone: {zone.name}, {load.pressure:.2f})')
+        if desired > launched:
+            log.debug(f'Autoscale adding client (zone: {zone.name}, {load.work} tasks remaining in group {group})')
+        elif load.pressure is not None and load.pressure > 1:
+            log.debug(f'Autoscale max-size reached (zone: {zone.name}, {launched} >= {self.max_size})')
+        elif dynamic and load.pressure is None:
+            reason = ('no clients and no active tasks' if launched == 0 else
+                      'waiting on clients to complete initial tasks')
+            log.debug(f'Autoscale pause (zone: {zone.name}, {reason})')
 
     def scale(self: AutoScaler) -> AutoScalerState:
-        """Launch new client."""
-        proc = self.launch.start(stdout=sys.stdout, stderr=sys.stderr, bufsize=0, universal_newlines=True)
-        log.info(f'Autoscale adding client ({proc.pid})')
-        self.clients.append(proc)
+        """Launch the clients each zone needs, or one client of the own zone when none is pending."""
+        if self.pending:
+            self.actuator.apply(self.pending)
+            self.pending = {}
+        else:
+            self.actuator.launch_one()
         if self.phase is AutoScalerPhase.INIT:
             return AutoScalerState.INIT
         else:
@@ -533,17 +592,7 @@ class AutoScaler(StateMachine):
 
     def clean(self: AutoScaler) -> None:
         """Remove clients that have exited."""
-        marked = []
-        for i, client in enumerate(self.clients):
-            log.trace(f'Autoscale clean ({i+1}: {client.pid})')
-            status = client.poll()
-            if status is not None:
-                marked.append(i)
-                if status != 0:
-                    log.warning(f'Autoscale client ({i+1}) exited with status {status}')
-                else:
-                    log.info(f'Autoscale client disconnected ({client.pid})')
-        self.clients = [client for i, client in enumerate(self.clients) if i not in marked]
+        self.actuator.clean()
 
     @staticmethod
     def finalize() -> AutoScalerState:
@@ -563,11 +612,19 @@ class AutoScalerThread(Thread):
                  init_size: int = DEFAULT_AUTOSCALE_INIT_SIZE,
                  min_size: int = DEFAULT_AUTOSCALE_MIN_SIZE,
                  max_size: int = DEFAULT_AUTOSCALE_MAX_SIZE,
+                 own_zone: Optional[ZoneRef] = None,
+                 launch_for: Optional[Callable[[ZoneRef], ClientLaunch]] = None,
+                 attempts: int = 1,
+                 eager: bool = False,
+                 registered: Optional[Callable[[str], int]] = None,
+                 scheduler_group: Optional[Callable[[], Optional[int]]] = None,
                  ) -> None:
         """Initialize task executor."""
         super().__init__(name=f'hypershell-autoscaler')
         self.machine = AutoScaler(launch, policy=policy, factor=factor, period=period,
-                                  init_size=init_size, min_size=min_size, max_size=max_size)
+                                  init_size=init_size, min_size=min_size, max_size=max_size,
+                                  own_zone=own_zone, launch_for=launch_for, attempts=attempts, eager=eager,
+                                  registered=registered, scheduler_group=scheduler_group)
 
     def run_with_exceptions(self: AutoScalerThread) -> None:
         """Run machine."""
@@ -627,9 +684,12 @@ class AutoScalingCluster(Thread):
         launcher (str, optional):
             Launcher program used to bring up clients on other hosts.
             See :const:`~hypershell.cluster.remote.DEFAULT_AUTOSCALE_LAUNCHER`.
+            With `discover_zones`, every launch names its zone to the launcher: `{zone}` in the
+            launcher or its arguments is replaced by the zone's name (`default` for the default
+            zone), and the launched process has it in `HYPERSHELL_ZONE`.
 
         launcher_args (List[str], optional):
-            Additional command-line arguments for launcher program.
+            Additional command-line arguments for launcher program (`{zone}` is replaced as in `launcher`).
 
         remote_exe (str, optional):
             Program name or path for remote executable.
@@ -728,6 +788,10 @@ class AutoScalingCluster(Thread):
             Period in seconds the server waits on a client's heartbeat before evicting it.
             See :const:`~hypershell.server.DEFAULT_EVICT`.
 
+        discover_zones (bool, optional):
+            Scale clients zone by zone, each launch naming its zone to the launcher (default: True).
+            When disabled, every client is launched exactly as given, in the cluster's own zone.
+
     Example:
         >>> from hypershell.cluster import AutoScalingCluster
         >>> cluster = AutoScalingCluster.new(
@@ -785,6 +849,7 @@ class AutoScalingCluster(Thread):
                  tls: Optional[TLSConfig] = None,
                  zone: Optional[str] = None,
                  evict_after: int = DEFAULT_EVICT,
+                 discover_zones: bool = True,
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
@@ -812,17 +877,30 @@ class AutoScalingCluster(Thread):
             launcher_args = []
         else:
             launcher_args = [arg for arg_group in launcher_args for arg in shlex.split(arg_group)]
-        # One launch serves every scale-up, under either policy.
-        self.launch = client_launch(remote_exe, (HOSTNAME, bind[1]), auth,
-                                    launcher=shlex.split(launcher), launcher_args=launcher_args,
-                                    num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
-                                    template=client_template, delay_start=delay_start,
-                                    task_signalwait=task_signalwait, capture=capture, monitor=monitor,
-                                    client_cores=client_cores, client_memory=client_memory,
-                                    client_timeout=client_timeout, task_timeout=task_timeout,
-                                    ratelimit=ratelimit, tls_enabled=tls is not None, zone=zone)
+        # Every launch of a zone is built from the same values; only the zone differs.
+        build = partial(client_launch, remote_exe, (HOSTNAME, bind[1]), auth,
+                        launcher=shlex.split(launcher), launcher_args=launcher_args,
+                        num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
+                        template=client_template, delay_start=delay_start,
+                        task_signalwait=task_signalwait, capture=capture, monitor=monitor,
+                        client_cores=client_cores, client_memory=client_memory,
+                        client_timeout=client_timeout, task_timeout=task_timeout,
+                        ratelimit=ratelimit, tls_enabled=tls is not None)
+        own = ZoneRef.from_name(zone)
+        # The own zone keeps the cluster's --zone as given (none for the default zone); any other is named.
+        launch_for = None if not discover_zones else (
+            lambda ref: build(zone=zone if ref.id == own.id else ref.name, expose_zone=True))
+        self.launch = build(zone=zone) if launch_for is None else launch_for(own)
+        # Failed tasks count as a zone's work under the server's own retry rule.
+        # Registered clients per zone come from the dispatcher, looked up at each check.
+        registered = None if not discover_zones else (lambda zone_id: self.server.queue.dispatcher.clients(zone_id))
+        # Every zone is read from the group the scheduler loads from, as the scheduler reports it.
+        scheduler = self.server.scheduler
+        scheduler_group = None if scheduler is None else (lambda: scheduler.machine.active_group)
         self.autoscaler = AutoScalerThread(self.launch, policy=policy, factor=factor, period=period,
-                                           init_size=init_size, min_size=min_size, max_size=max_size)
+                                           init_size=init_size, min_size=min_size, max_size=max_size,
+                                           own_zone=own, launch_for=launch_for, attempts=max_retries + 1,
+                                           eager=eager, registered=registered, scheduler_group=scheduler_group)
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: AutoScalingCluster) -> None:

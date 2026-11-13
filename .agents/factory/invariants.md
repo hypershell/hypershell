@@ -184,6 +184,15 @@ subsystems.
   expansion.
 - Advertised `HOSTNAME` must be routable from clients. The autoscaler never terminates clients
   (they self-exit on idle) and ignores `no_confirm`/`in_memory`/`forever`/`restart`.
+- Autoscaled launches are per zone (`LaunchActuator`, `client_launch(..., expose_zone=True)`):
+  `{zone}` in launcher words only (never `-t`), `HYPERSHELL_ZONE` in the launch env and never in
+  the Open MPI forward list, no exposure over SSH, and no `--zone` for the own default zone. The
+  relay's site cluster uses `discover_zones=False`.
+- The autoscaler reads every zone from the scheduler's group (`Scheduler.active_group`; before
+  it is known, the start rule `Task.starting_group`), never from `Task.current_group()` alone: the
+  most recently scheduled group differs after a restart with a late lower group and at a group
+  change. Other zones, and an own zone with no client launched or registered, are read in the
+  group the scheduler runs next (`Task.increment_group`, read only).
 - `SSHCluster` shells out to the plain `ssh` binary (not paramiko; paramiko is only in
   `core/remote.py` for SFTP).
 - The relay's site fleets are launched only through `client_launch()`: the first zone's by

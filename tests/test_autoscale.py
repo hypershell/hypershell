@@ -20,7 +20,7 @@ from cmdkit.app import exit_status
 from tests import main, create_taskfile
 from hypershell.cluster.remote import AutoScaler, AutoScalerState
 from hypershell.cluster.launch import client_launch
-from hypershell.data.model import Task, Client, TaskGroupInfo
+from hypershell.data.model import Task, Client, TaskGroupInfo, DEFAULT_ZONE_ID
 
 
 def make_scaler(policy: str, clients: int = 0, **opts) -> AutoScaler:
@@ -38,16 +38,27 @@ def patch_queries(monkeypatch: MonkeyPatch,
                   total: int = 0,
                   pressure: Optional[float] = None,
                   connected: int = 0) -> Dict[str, Tuple]:
-    """Patch database-backed queries used by scaling checks, capturing `task_pressure` calls."""
+    """
+    Patch database-backed queries used by scaling checks, capturing `task_pressure` calls.
+    Every task is in the default zone, so a zone-scoped query answers as the unscoped one;
+    the zone a query asked for is recorded apart from the asserted call. The scheduler starts
+    from and stays in the patched group.
+    """
     calls = {}
     counts = {None: total, group: in_group}
 
-    def task_pressure(factor: float, group: int = None) -> Optional[float]:
+    def task_pressure(factor: float, group: int = None, zone: str = None) -> Optional[float]:
         calls['task_pressure'] = (factor, group)
+        calls['task_pressure_zone'] = zone
         return pressure
 
     monkeypatch.setattr(Task, 'current_group', lambda: TaskGroupInfo(group, 'testing'))
-    monkeypatch.setattr(Task, 'count_remaining', lambda group=None: counts.get(group, 0))
+    monkeypatch.setattr(Task, 'starting_group', lambda group, attempts, eager=False: group)
+    monkeypatch.setattr(Task, 'increment_group', lambda group, attempts, eager=False: TaskGroupInfo(group, 'testing'))
+    monkeypatch.setattr(Task, 'count_remaining', lambda group=None, zone=None: counts.get(group, 0))
+    monkeypatch.setattr(Task, 'count_remaining_by_zone',
+                        lambda group: {DEFAULT_ZONE_ID: counts[group]} if counts.get(group) else {})
+    monkeypatch.setattr(Task, 'count_retryable_by_zone', lambda attempts, group, eager=False: {})
     monkeypatch.setattr(Task, 'task_pressure', task_pressure)
     monkeypatch.setattr(Client, 'count_connected', lambda: connected)
     return calls
