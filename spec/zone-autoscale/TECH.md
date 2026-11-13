@@ -3,7 +3,7 @@ slug: zone-autoscale
 title: Zone-aware autoscaling (zone, cycle 3)
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/zone-autoscale
 base: develop
 current_phase: done
@@ -78,10 +78,11 @@ phases:
     founding && uv run pytest && uv run --python 3.12 --group docs sphinx-build -W
     --keep-going -q -E -b html docs docs/_build/html
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 86fe37225a9337724f08c9692ba2c82c6e9ba327
+  verdict: changes-requested
+  blocked_reason: 'Review cycle 1: F1/F2 autoscaler reads a stale task group (restart
+    with a late lower group; own named zone at a group change)'
+  cycle: 1
 ---
 # TECH.md — Zone-aware autoscaling (zone, cycle 3)
 

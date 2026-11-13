@@ -72,3 +72,24 @@ is skipped by the parser):
 - **Skill cause:** Steps 4–6 do not say whether a plan may carry a scoped `[NEEDS CLARIFICATION]` to the gate, or whether `hs-build` must refuse to start while one is open.
 - **Recommended fix:** add to Step 4 or 9: a design question confined to named phase items may be committed as a `[NEEDS CLARIFICATION]` in PLAN §5 with the proposed reading, listed in the Step 9 report. `hs-build` stops before any phase whose checklist names it until it is resolved.
 - **Confidence:** med · **Effort:** small
+
+## F4 — Step 2 hands the blind reviewer "the full text of invariants.md" without saying which version, when the branch edits it
+`origin=hs-review:step-2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** this branch adds an §11 bullet to `.agents/factory/invariants.md` (and a matching `AGENTS.md` paragraph) naming the design's own seams. The skill says to inline "the full text of `invariants.md`" and is silent on which copy. The branch copy would hand the reviewer author-written design names as if they were ground truth. The orchestrator inlined the base copy (`git show origin/develop:…`) and told the reviewer to grade the branch's edits as part of the diff, by inference.
+- **Skill cause:** Step 2 and the rubric's "What the reviewer sees" assume `invariants.md` and `AGENTS.md` are fixed inputs. When a cycle edits them in lockstep (as §12 asks), the branch copy is both a graded claim and a leak of author intent past the `spec/` exclusion.
+- **Recommended fix:** in Step 2, inline `invariants.md` from `{base}` (`git show {base}:.agents/factory/invariants.md`). Tell the reviewer that any branch edit to `invariants.md` or `AGENTS.md` is part of the diff, to be checked against the code like a docs change.
+- **Confidence:** high · **Effort:** small
+
+## F5 — Step 1's contract-drift check counts the plan gate's dated clarifications as mid-build drift
+`origin=hs-review:step-1 severity=low category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** `git log {base}..HEAD -- spec/{slug}/GOAL.md` listed the shaping commit plus two `hs-plan` commits. Those commits append the gate's dated clarifications, which `hs-plan` sanctions. The skill reads "anything beyond the original shaping commit" as the contract moving mid-build, to be confirmed with the human before grading. All three commits predate the first build commit, and the orchestrator, a subagent with no way to ask, recorded that rather than stopping.
+- **Skill cause:** the drift test draws its line at the shaping commit, where the build starts at the first `hs-build` commit. Every cycle whose plan gate records a clarification therefore trips a false alarm that blocks on a human.
+- **Recommended fix:** draw the line at the first build commit. Surface only `GOAL.md` commits after it, and note any earlier clarification commits in `REVIEW.md`'s pre-flight without stopping.
+- **Confidence:** high · **Effort:** small
+
+## F6 — The skill's base is the local `develop`, which was stale again · seen again (other cycles)
+`origin=hs-review:step-1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** the injected diffstat and Step 1's `base` resolve to the local `develop` (`5f22298`), which differs from `origin/develop` (`1ea9145`, the branch's merge base). The foreman's brief named `origin/develop`, so the drift check, the graded diff and the reviewer brief all used it.
+- **Skill cause:** "Current state" runs `git diff --stat develop...HEAD`, and Step 1 defaults `base` to the branch name `develop`, with no fetch and no comparison against `origin`. The same finding is open in several earlier cycles' META files.
+- **Recommended fix:** resolve `{base}` to `origin/{base}` after a fetch (or to `git merge-base HEAD origin/{base}`), and use that SHA in the diffstat, the drift check and the reviewer's diff command.
+- **Confidence:** high · **Effort:** small
