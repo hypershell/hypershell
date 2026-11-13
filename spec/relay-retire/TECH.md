@@ -87,11 +87,10 @@ phases:
   verify: uv run pytest -v tests/test_retire_judge.py && uv run python spec/relay-retire/drive/retire_judge.py
     spec/relay-retire/evidence/cluster --require retire
 review:
-  last_reviewed_commit: f98614f40768d0591fe529cf10cada7a946589af
-  verdict: changes-requested
-  blocked_reason: 'review cycle 1: RV1 retire strands a loading chunk (R4/R6/R7);
-    RV2 restart order retires the newer relay (R1/R9/R7)'
-  cycle: 1
+  last_reviewed_commit: 824e19f1f96f1b8343cd9b4bec0ab2232d5c5865
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
 ---
 # TECH.md — Retire a superseded relay, and wake the main thread for signals
 

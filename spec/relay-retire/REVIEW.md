@@ -172,3 +172,175 @@ script, as `tests/test_relay_judge.py` and `tests/test_topology_judge.py` do on 
   and `core/fsm.py` halting between states; a remediation that edits either brings it under the
   gate.
 - No PLAUSIBLE findings.
+
+## Review cycle 2 — approved (2026-11-13)
+
+- **Reviewed commit:** 824e19f1f96f1b8343cd9b4bec0ab2232d5c5865  ·  **Base:** `origin/develop` `fb89670`  ·  **Date:** 2026-11-13
+- **Verdict:** approved
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`
+- **Mode:** a fresh blind pass over the full spec-excluded diff, plus a check of RV1 and RV2 against
+  the cycle-1 head (`f98614f`). No `debate`, no `completeness` sub-pass. As in cycle 1, `hs-review`
+  was spawned as a fresh subagent with only the foreman's task statement and ran the correctness pass
+  in that context (the skill's no-subagent fallback). It read `GOAL.md` (with the cycle-1 rulings),
+  this file's cycle-1 section (to grade RV1 and RV2), the spec-excluded diff, `AGENTS.md`, the base
+  copy of `invariants.md` and the rubric, `TECH.md`'s frontmatter for `base`/`kind`/`status`, and the
+  usage header of `spec/relay-retire/drive/retire_drive.sh` to run it. It did not read `PLAN.md`, the
+  body of `TECH.md`, `research/` or `evidence/` prose; `META.md` was opened only after the verdict
+  was set. Probes were scratch files outside the repository; every process they started was stopped
+  by its test's process-group teardown or by its recorded PID.
+
+### Pre-flight
+
+- **Base.** `TECH.md` records `base: develop`; graded against `origin/develop` (`fb89670`, the merge
+  base), not a local `develop` ref.
+- **Build state.** `TECH.md` reads `status: in_review`, P1–P4 `done`, `review.cycle: 1`.
+- **Contract drift.** Since cycle 1, `GOAL.md` gained `a1fcb8c`, the foreman's "Ruled at review
+  cycle 1" clarification (fix RV1 and RV2; the RV2 residual case accepted). Graded as binding.
+- **Invariants.** The branch edits `.agents/factory/invariants.md` (§11) and `AGENTS.md`. The code
+  was graded against the base copy (`git show origin/develop:.agents/factory/invariants.md`); the
+  edits were graded as part of the diff (below).
+
+### Verification run
+
+- **Targeted suite (SQLite):** `uv run pytest -q tests/test_signal_wake.py tests/test_relay_retire.py
+  tests/test_retire_judge.py tests/test_topology_plan.py tests/test_topology_server.py
+  tests/test_dispatch.py tests/test_dispatch_version.py tests/test_contended_write.py
+  tests/test_relay_fsm.py tests/test_relay_topology.py` → **342 passed, 12 skipped** (the skips are
+  the PostgreSQL-only contended writes).
+- **Full suite (SQLite):** `uv run pytest -q tests` → **2055 passed, 95 skipped**, 2 warnings (the
+  existing `fork()` deprecation warnings in `tests/test_logging.py`), 19 min, CPython 3.14, run
+  while the probes below ran beside it.
+- **PostgreSQL / TimescaleDB (local server):** `HS_TEST_POSTGRES=… HS_TEST_TIMESCALE=community uv run
+  pytest tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py
+  tests/test_contended_write.py tests/test_zone_postgres.py` → **135 passed, 1 skipped, 29 failed**;
+  all 29 are the expected missing templates (20 `hs283`, 9 `hs290a1`, "not listed in
+  `HS_TEST_POSTGRES_TEMPLATES`"). With `HS_TEST_TIMESCALE=` (plain PostgreSQL),
+  `tests/test_contended_write.py` → **12 passed**, the four hand-back revert tests among them.
+- **Docs:** `UV_PROJECT_ENVIRONMENT=<tmp>/docs-venv uv run --python 3.12 --group docs sphinx-build -W
+  --keep-going -q -E -b html docs <tmp>` (sandbox off for `sphinx_sitemap`'s socket) → **exit 0, no
+  warnings**; the worktree's `.venv` stayed on CPython 3.14.
+- **Laptop drive (throwaway sites):** `.agents/factory/bin/temp_site.sh sh
+  "$PWD/spec/relay-retire/drive/retire_drive.sh" MODE` for `retire`, `retire-red`, `pair-relay`,
+  `pair-server` and `idle` → **all five PASS, exit 0**. `retire`: A's three unstarted tasks
+  available upstream at +1.230 s of its first "Superseded" line (bound 3 s, heartrate 1 s), the
+  requeue logged at +1.020 s; `retire-red` (every role on `fb89670`) strands as the seed describes;
+  `pair-relay` (relay A on `fb89670`) and `pair-server` (server on `fb89670`) behave as before, with
+  no topology read error and no hand-back; `idle`: no relay retires, both stay connected at zero
+  clients until drained.
+- **Cluster record (builder's, re-judged only):** `uv run python spec/relay-retire/drive/retire_judge.py
+  spec/relay-retire/evidence/cluster --require retire` → **PASS** (`R7.bound`: +1.193 s of the mark
+  against 6 s). The record is of `29c9bc7`, before this remediation; it was not regenerated (no
+  cluster tools). R7 at this head rests on the laptop end-to-end tests and the `retire` drive.
+- **Wire (R8, the new heartbeat field):** a branch `Heartbeat` with `retiring=True`, packed, read by
+  the base's `Heartbeat.unpack_or_none` (`PYTHONPATH` on an export of `origin/develop` `src`) →
+  parses, `retiring` ignored; a beat that is not retiring packs no `retiring` key, so it is the
+  base's text.
+- **Red-before-green of the remediation.** The builder's new tests cannot run against the cycle-1
+  source (their modules import `retiring_instances` and build `SiteRecord(retiring=…)`), so two
+  scratch probes, independent of them, were run against an export of `f98614f` `src` on `PYTHONPATH`
+  and against this head:
+  - `test_probe_rv1.py` (RV1): a real `SchedulerThread` on a real queue server's dispatcher, over a
+    relay database holding eight received tasks. A site-client request (`Dispatcher.request`) takes
+    2 of the 3 the scheduler staged, leaving 1 in the pool; the scheduler's next load of 3 is held
+    (a hook on `Task.next`) until `machine.halt()` lands, so it halts between that load and its
+    staging; then `RelayThread.retire()`. **Cycle-1 source:** 3 handed back, 5 held (the loaded
+    chunk stranded). **This head:** 6 handed back (the pooled one, the loaded three, the two never
+    loaded), neither of the 2 the site client took, 2 held, nothing staged.
+  - `test_probe_rv2.py` (RV2): an upstream server autoscaling with relay sites and relays A and B at
+    one site as processes; A reads that it is superseded, A is paused, the server is restarted on
+    the same port and database, and A resumes only once B has registered with the new server.
+    **Cycle-1 source:** the new server logs B retired (held by A), B logs "Superseded", both relays
+    exit and 4 tasks remain with no relay at the site. **This head, four runs:** each time the new
+    server logs A retired (held by B) and B never reads a mark; A exits 0. In three runs B stays
+    connected and every task completes. In one run B's upstream puller raised a `RemoteError`
+    (`KeyError` on a proxy id) as the server restarted, and B ended with exit status 5: a
+    pre-existing defect outside this diff (observation O1 below), not the holder rule.
+
+### RV1 and RV2
+
+- **RV1 — fixed.** `retire()` no longer reverts the staged rows itself; `hand_back()` first calls
+  `withdraw()`, which does nothing while the relay-local scheduler runs and, once it has stopped,
+  takes back the staged rows (`ServerThread.revert_staged`) and the chunk it loaded and never staged
+  (`scheduler.machine.loaded`, reverted with the conditional `Task.revert_staged`), once. Halting is
+  checked only between states (`core/fsm.py` `next`), and `pack_bundle` empties `loaded` in the
+  same state that stages it, so after a stop `loaded` holds exactly the rows in no pool and with no
+  site client; a row a site client's request cut keeps its local `schedule_time` and is never
+  listed by `store.unstarted`. A scheduler slower than `STOP_TIMEOUT` leaves the hand-back due, tried
+  at each check in `wait_site` and `stop_site` and once more before `finish_upstream`, so no
+  hand-back runs while the scheduler can still stage. Evidence: `test_probe_rv1.py` above; the
+  builder's `test_retire_hands_back_the_chunk_the_scheduler_loaded_but_never_staged` and
+  `test_retire_hands_back_nothing_until_the_scheduler_has_stopped` pass. The fix stays in relay code
+  (`relay/__init__.py`), as the cycle-1 ruling requires; the scheduler and `core/fsm.py` are unchanged.
+- **RV2 — fixed, per the ruling.** The relay's beats carry `retiring` under every identity from the
+  first beat after it reads the mark (`UpstreamHeartbeat.submit`); the server records it, sticky
+  for the life of the record (`SiteRegistry.record`, through the one-line `HeartMonitor.record_site`
+  change in `server.py`); `_arrange` never picks a retiring instance as holder, so it never makes
+  another instance a duplicate's `older`; and `retired_identities` names every retiring instance, so
+  the server marks it again at once. A relay of an earlier release never says `retiring` and is
+  ordered as before; a base server ignores the field (wire check above). Eviction and
+  re-registration: a re-registered retiring relay is a new record that says `retiring` on its first
+  beat, so it never holds. The residual case (a restart before either relay read the mark) keeps
+  registration order and one holder, as accepted. Evidence: `test_probe_rv2.py` above; the
+  builder's `test_a_retiring_relay_registering_again_after_an_upstream_restart_keeps_the_newer_relay`
+  passes.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `cluster/topology.py` (`_arrange` excludes retiring instances from holding, `retiring_instances`, `retired_identities`, `note_retired`/`note_retiring`), `core/topology.py` (`SiteRecord.retiring`, `Topology.retired`, `reply_text`), `server.py` `record_site` | `test_topology_plan.py`, `test_topology_server.py`; restart probe and end-to-end restart test; `warn_duplicates` unchanged | ✅ (RV2 fixed) |
+| R2 | `relay/upstream.py` (puller `gate`/`request` check `retired`; `fetch` logs once) | `test_relay_fsm.py`, `test_relay_topology.py`; end-to-end tests assert one "Superseded" line | ✅ |
+| R3 | `relay/site.py` (`SiteScaler` launches nothing once retired), `relay/__init__.py` (`retire` stops fleets, ends no client) | End-to-end tests; `retire` drive | ✅ |
+| R4 | `relay/__init__.py` (`retire`, `withdraw`, `hand_back`), `relay/store.py`, `core/dispatch.py`, `server.py` `revert_handed_back`, `data/model.py` `revert_handed_back` | RV1 probe; hand-back and contended tests on SQLite, PostgreSQL, TimescaleDB; `retire` drive | ✅ (RV1 fixed) |
+| R5 | `store.unstarted` lists only rows with no local `schedule_time`; `withdraw` touches only pooled and loaded rows | RV1 probe (the two taken rows are never handed back); end-to-end tests run each task once | ✅ |
+| R6 | `finish_upstream` after `retire` | RV1 builder test (final heartbeat once the taken task's result is returned); end-to-end tests: final heartbeat, exit 0 | ✅ |
+| R7 | All of the above | End-to-end tests and the `retire` drive at this head; cluster record (pre-remediation) re-judged PASS | ✅ |
+| R8 | `reply_text` adds `retired` only for a retired identity; a beat packs `retiring` only when set; `TOPOLOGY_PROTOCOL` stays 1 | Wire checks (cycle 1's topology reply, this cycle's heartbeat); `pair-relay` and `pair-server` drives | ✅ |
+| R9 | Every new path is gated on `retired`/`retiring`/`handback_due` | Full suite; `idle` drive | ✅ |
+| R10 | `docs/cli/relay.rst`, `docs/cli/server.rst`, `docs/_include/relay_desc.rst`, relay `APP_HELP`, `versionchanged` | Read; docs build `-W` clean | ✅ |
+| R11–R15 | `core/thread.py` `join_waking` and its call sites (unchanged since cycle 1) | `tests/test_signal_wake.py` in the targeted and full suites; cycle 1's red-on-base run stands | ✅ |
+
+**The branch's invariant edits.** The `invariants.md` §11 addition ("a relay whose beats say
+`retiring` never holds a site or causes another to be retired, whenever it registered") and the
+matching `AGENTS.md` sentence describe `_arrange` and `retired_identities` as built, and the two files
+stay in lockstep. `AGENTS.md`'s "pinned four-method surface" matches `DISPATCH_EXPOSED` and
+`tests/test_dispatch_version.py`.
+
+Also checked and clean:
+- **Requeue SQL, hand-back bounds, signal wake.** Untouched by the remediation (`data/model.py`,
+  `core/dispatch.py`, `core/topology.py`'s hand-back reader, `core/thread.py`); their tests pass on
+  all three providers.
+- **Tags.** All 63 new tests are tagged `unit` or `integration` (the four new contended tests by the
+  module's `pytestmark`); no existing assertion was removed.
+
+Unmapped changes (possible scope creep): none.
+
+### Findings
+
+None.
+
+### Observations (outside this diff, not graded)
+
+- **O1 — An upstream link role's first call after the upstream server restarts at the same address
+  can raise `RemoteError` instead of `LinkDown`.** `multiprocessing` proxies share one connection per
+  thread and address, so a role's new worker thread, making its first call on a client from before
+  the restart, dials the new server with a proxy id the old one minted (`KeyError` in
+  `serve_client`); `UpstreamLink.call` (`core/reconnect.py`) raises it as a non-transport error.
+  `probe_link_restart.py` (an `UpstreamLink` on a `QueueServer`; the `heartbeat` role uses
+  `client.dispatcher`; the server is stopped and started again on its port; then the first call of
+  another role) reproduces it every time on `origin/develop` (role `puller`, `dispatcher.request`)
+  and on this head (role `handback`). In the puller it ends the relay (exit status 5, the one RV2
+  probe run above). In the new `handback` role it is caught: the hand-back is refused and the tasks
+  are left to eviction, though a restarted server has already requeued them at start
+  (`revert_interrupted`). A single relay survived four restarts in each of three runs (base once,
+  this head twice), and two relays the base's restart scenario three times, so the window is
+  narrow. Predates this cycle and is outside its GOAL; worth a seed.
+
+### Human-gate triggers
+
+- No CONFIRMED finding, so the rubric's mandatory gate is not triggered. For the record: the
+  remediation's only `server.py` change is `HeartMonitor.record_site` passing the beat's `retiring`
+  to the registry (no scheduler, lifecycle or SQL change), and the diff as a whole touches other
+  high-blast-radius files (`data/model.py`, `client.py`, `core/queue.py`, `core/thread.py`,
+  `cluster/remote.py`, `cluster/ssh.py`), each graded clean in cycle 1 and unchanged since.
+- No PLAUSIBLE findings.
