@@ -453,34 +453,6 @@ stray blank line.
 downstream address); `spec/relay/` C4-2, C5-1*
 **Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: unshaped*
 
-## A superseded relay strands the tasks it holds once its last client leaves
-
-When a relay restarts while its old process still runs, both advertise one site; the upstream
-server lets the newest hold it and assigns the old one zero. The old relay still pulls for a client
-that is past its idle timeout but finishing, and when that client leaves the tasks sit there: it
-launches nothing, and the upstream server never reverts them, since a relay with no clients stays
-connected. A gated group then waits until the old process exits and is evicted. The server should
-mark the superseded instance retired in its topology reply, and the old relay should stop pulling,
-let its clients finish, hand its unstarted tasks back and exit. Shipped in #100 as a documented
-known limitation.
-
-*Horizon: near-term · Depends on: — · Refs: `spec/relay-topology/` RV5 and the 2026-11-13 ruling;
-the `docs/cli/relay.rst` note it removes*
-**Seed:** [`issues/relay-superseded-instance-retire.md`](issues/relay-superseded-instance-retire.md) · *status: adopted:relay-retire*
-
-## A drain signal can be lost while the main thread waits on its worker
-
-`hs relay`, `hs client` and `hs server` block their main thread in an untimed `thread.join()`, and
-Python runs signal handlers only there. On Linux, when another thread takes SIGUSR1, SIGUSR2 or
-SIGHUP, the handler does not run, so a relay never drains: a CI run hung on exactly this, and a
-thread sending the signal to itself reproduces it every time, on `develop` too. A timed join in a
-loop wakes the main thread within a second. Pre-existing since the relay landed (#82), and in the
-client and server before it.
-
-*Horizon: near-term, small · Depends on: — · Refs: `tests/test_relay_db.py` (the CI hang); the
-signal-teardown seed in Part I*
-**Seed:** [`issues/main-thread-signal-wake.md`](issues/main-thread-signal-wake.md) · *status: adopted:relay-retire*
-
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
