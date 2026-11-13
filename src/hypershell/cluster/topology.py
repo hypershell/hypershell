@@ -12,8 +12,9 @@ relays' latest advertisements as inputs and return targets, so every rule is tes
 The :class:`TopologyPublisher` runs those functions at each check and publishes a new version of
 the topology on the server's dispatcher whenever the plan changes; relays fetch their own entries
 from there. It also names, at every check, the identities of each relay a newer relay at its site
-has superseded, so that relay retires. :class:`AutoScalingServer` runs it beside a server in forever
-mode.
+has superseded, so that relay retires, and of each relay that says it is retiring: such a relay
+never holds a site and never causes another to be retired. :class:`AutoScalingServer` runs it beside
+a server in forever mode.
 """
 
 
@@ -43,7 +44,8 @@ from hypershell.server import (ServerThread, DEFAULT_BIND, DEFAULT_PORT, DEFAULT
 
 # Public interface
 __all__ = ['Distribution', 'parse_distribution', 'parse_sites',
-           'SiteZone', 'SiteView', 'Duplicate', 'site_views', 'plan_sites', 'entries', 'retired_identities',
+           'SiteZone', 'SiteView', 'Duplicate', 'site_views', 'plan_sites', 'entries', 'retiring_instances',
+           'retired_identities',
            'TopologyPublisherState', 'TopologyPublisher', 'TopologyPublisherThread', 'AutoScalingServer',
            'serve_with_sites']
 
@@ -136,11 +138,13 @@ def _arrange(records: Iterable[SiteRecord]) -> Tuple[Dict[Tuple[str, str], Held]
     """
     Live records by site and zone id, each with its holder, and every duplicate.
 
-    At each site, the relay instance whose first identity registered most recently holds every zone
-    it serves, and every identity of an older instance there is assigned none, so a zone that only an
-    older instance serves is left to the other sites. A record that advertises no instance key is held
-    per zone: of those and the holding instance's identity in a zone, the most recently registered one
-    holds the zone.
+    At each site, of the relay instances not retiring, the one whose first identity registered most
+    recently holds every zone it serves, and every identity of an older instance there is assigned
+    none, so a zone that only an older instance serves is left to the other sites. An instance that
+    has said it is retiring (under any of its identities) holds nothing and is assigned none, whenever
+    it registered, and it is never the holder of a duplicate. A record that advertises no instance key
+    is held per zone: of those and the holding instance's identity in a zone, the most recently
+    registered one holds the zone.
     """
     by_site: Dict[str, List[SiteRecord]] = {}
     for record in sorted(records, key=lambda record: record.registered):
@@ -149,12 +153,17 @@ def _arrange(records: Iterable[SiteRecord]) -> Tuple[Dict[Tuple[str, str], Held]
     duplicates: List[Duplicate] = []
     for site, group in by_site.items():
         first: Dict[str, SiteRecord] = {}
+        retiring: Set[str] = set()
         for record in group:
             if record.instance is not None:
                 first.setdefault(record.instance, record)
-        newest = max(first, key=lambda instance: first[instance].registered) if first else None
-        duplicates.extend(Duplicate(site, holder=first[newest], older=record, relay=True)
-                          for instance, record in first.items() if instance != newest)
+                if record.retiring:
+                    retiring.add(record.instance)
+        holding = [instance for instance in first if instance not in retiring]
+        newest = max(holding, key=lambda instance: first[instance].registered) if holding else None
+        if newest is not None:
+            duplicates.extend(Duplicate(site, holder=first[newest], older=record, relay=True)
+                              for instance, record in first.items() if instance != newest)
         zones: Dict[str, List[SiteRecord]] = {}
         for record in group:
             zones.setdefault(ZoneRef.from_name(record.zone).id, []).append(record)
@@ -190,16 +199,23 @@ def site_views(records: Iterable[SiteRecord]) -> Tuple[List[SiteView], List[Dupl
     return views, duplicates
 
 
+def retiring_instances(records: Iterable[SiteRecord]) -> Set[Tuple[str, str]]:
+    """Every relay instance, as (site, instance), that has said it is retiring under any of its identities."""
+    return {(record.site, record.instance) for record in records if record.instance is not None and record.retiring}
+
+
 def retired_identities(records: Iterable[SiteRecord]) -> FrozenSet[str]:
     """
-    The identities of every relay instance superseded at its site by a newer one.
+    The identities of every relay instance superseded at its site by a newer one, or retiring.
 
     Every identity of the older instance is retired, including a zone the newer instance does not
-    serve. A record that advertises no instance key is never retired.
+    serve, and so is every identity of an instance that has said it is retiring, whether or not
+    another relay at its site holds the site now. A record that advertises no instance key is never
+    retired.
     """
     records = list(records)
     _, duplicates = _arrange(records)
-    older = {(dup.site, dup.older.instance) for dup in duplicates if dup.relay}
+    older = {(dup.site, dup.older.instance) for dup in duplicates if dup.relay} | retiring_instances(records)
     return frozenset(record.identity for record in records
                      if record.instance is not None and (record.site, record.instance) in older)
 
@@ -410,6 +426,7 @@ class TopologyPublisher(StateMachine):
         views, duplicates = site_views(records)
         self.warn_duplicates(duplicates)
         self.note_retired(duplicates)
+        self.note_retiring(records)
         self.retired = retired_identities(records)
         self.warn_dropped(views)
         targets = plan_sites(loads, self.knobs, views, distribution=self.distribution, order=self.order)
@@ -457,6 +474,15 @@ class TopologyPublisher(StateMachine):
                 self.noted.add((dup.site, dup.older.instance))
                 log.info(f'Relay {dup.older.instance} on {dup.older.host} retired at site {dup.site} '
                          f'(held by {dup.holder.instance} on {dup.holder.host})')
+
+    def note_retiring(self: TopologyPublisher, records: List[SiteRecord]) -> None:
+        """Log once for each relay instance that says it is retiring and no newer relay at its site holds."""
+        for record in records:
+            if (record.instance is not None and record.retiring
+                    and (record.site, record.instance) not in self.noted):
+                self.noted.add((record.site, record.instance))
+                log.info(f'Relay {record.instance} on {record.host} retired at site {record.site} '
+                         f'(it says it is retiring)')
 
     def warn_dropped(self: TopologyPublisher, views: List[SiteView]) -> None:
         """Warn for each site of the last plan that has no live relay left."""

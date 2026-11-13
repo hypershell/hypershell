@@ -46,6 +46,7 @@ from multiprocessing import AuthenticationError
 from cmdkit.app import Application, exit_status
 from cmdkit.cli import Interface, ArgumentError
 from cmdkit.config import Namespace
+from sqlalchemy import inspect
 
 # Internal libs
 from hypershell.core.config import (config, RELAY_PROCESS, RELAY_MARKER, DEFAULT_RELAY_PORT, DEFAULT_AUTH,
@@ -59,7 +60,7 @@ from hypershell.core.thread import Thread, join_waking
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.data import ensuredb
 from hypershell.data.core import engine
-from hypershell.data.model import zone_name, zone_id, DEFAULT_ZONE_NAME
+from hypershell.data.model import Task, zone_name, zone_id, DEFAULT_ZONE_NAME
 from hypershell.relay import store
 from hypershell.relay.store import ensure_tables, store_utc
 from hypershell.relay.site import (site_cluster, zone_launch, zone_fleet, fence_site, end_site_clients,
@@ -481,6 +482,7 @@ class RelayThread(Thread):
     advertised: Dict[Optional[str], Bounds]
     aborted: bool = False
     retiring: bool = False
+    withdrawn: bool = False
     handback_due: bool = False
 
     def __init__(self: RelayThread,
@@ -683,6 +685,8 @@ class RelayThread(Thread):
             self.check_site(stopping=self.retiring)
             if self.superseded() and not self.retiring:
                 self.retire()
+            elif self.handback_due:
+                self.hand_back()
             if not self.puller.is_alive():
                 self.puller.join()  # Raises the puller's failure, if any.
                 if self.scheduling_over or store.count_backlog(engine) == 0:
@@ -724,12 +728,13 @@ class RelayThread(Thread):
 
         Called once, the first time the relay finds itself superseded at its site. In order: every
         zone's fleet stops launching; the puller stops (a request already sent is inserted and
-        confirmed first); the relay-local scheduler stops, so nothing more is staged; the tasks staged
-        but not yet taken by a site client are taken back, as the site server does at shutdown; and
-        every task now held with no site client's assignment is handed back upstream (see
-        `hand_back`). A task a site client has received is its to run: it runs once there, and its
-        result goes back as any other. The site clients are ended by nothing here: once scheduling is
-        over the relay finishes as it does at the end of any run.
+        confirmed first); the relay-local scheduler stops, so nothing more is staged; and, once it has
+        stopped, every task held that no site client has received is taken back here (see `withdraw`)
+        and handed back upstream (see `hand_back`). A scheduler that has not stopped within
+        `STOP_TIMEOUT` leaves the hand-back due, tried again at each check once it has. A task a site
+        client has received is its to run: it runs once there, and its result goes back as any other.
+        The site clients are ended by nothing here: once scheduling is over the relay finishes as it
+        does at the end of any run.
         """
         self.retiring = True
         log.debug('Retiring - stopping site client launches, the upstream puller and the relay-local scheduler')
@@ -743,21 +748,48 @@ class RelayThread(Thread):
         if scheduler is not None and scheduler.is_alive():
             scheduler.stop(wait=True, timeout=STOP_TIMEOUT)
             if scheduler.is_alive():
-                log.warning(f'Relay-local scheduler did not stop within {STOP_TIMEOUT} seconds')
-        self.server.revert_staged()
+                log.warning(f'Relay-local scheduler did not stop within {STOP_TIMEOUT} seconds - '
+                            f'handing back once it has')
         self.handback_due = True
         self.hand_back()
+
+    def withdraw(self: RelayThread) -> bool:
+        """Take back every task the relay-local scheduler holds for its site clients; false while it still runs.
+
+        Once the scheduler has stopped, nothing more is staged and nothing it holds can reach a site
+        client: the tasks staged and not yet taken are taken back, as the site server does at
+        shutdown, and so is the chunk it had loaded and not yet staged when it stopped (marked
+        scheduled here, but in no pool). Each is then unscheduled here, as a task no site client has
+        received. Done once; a scheduler still running is left alone, and nothing is taken back yet.
+        """
+        if self.withdrawn:
+            return True
+        scheduler = self.server.scheduler
+        if scheduler is not None and scheduler.is_alive():
+            return False
+        self.server.revert_staged()
+        if scheduler is not None and (ids := [inspect(task).identity[0]
+                                              for _, tasks in scheduler.machine.loaded for task in tasks]):
+            reverted = Task.revert_staged(ids)
+            log.debug(f'Reverted {reverted} tasks loaded for site clients but not staged when scheduling stopped')
+        self.withdrawn = True
+        return True
 
     def hand_back(self: RelayThread) -> None:
         """Hand back upstream every task held that no site client has received, and delete it here once acknowledged.
 
-        Each zone identity hands back its own tasks, by id with the schedule time it was sent under,
-        at most `MAX_HANDBACK_TASKS` at once; once the upstream server acknowledges them they are
-        deleted from the relay database, so the relay holds them no more. A hand-back the link loses
-        stays due, and is tried again (see `stop_site`, and once more before the registration ends).
-        An upstream server that refuses it (one without the call, say) leaves the tasks held: they are
-        then left to its eviction of the relay, as before.
+        Nothing is handed back until the relay-local scheduler has stopped and what it held for the
+        site is taken back (see `withdraw`): until then the hand-back stays due. Each zone identity
+        hands back its own tasks, by id with the schedule time it was sent under, at most
+        `MAX_HANDBACK_TASKS` at once; once the upstream server acknowledges them they are deleted from
+        the relay database, so the relay holds them no more. A hand-back the link loses stays due, and
+        is tried again (at each check while the site finishes, and once more before the registration
+        ends). An upstream server that refuses it (one without the call, say) leaves the tasks held:
+        they are then left to its eviction of the relay, as before.
         """
+        if not self.withdraw():
+            log.debug('Relay-local scheduler still running - hand-back waits for it to stop')
+            return
         try:
             held = store.unstarted(engine)
         except Exception as error:

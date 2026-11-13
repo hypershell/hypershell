@@ -8,12 +8,16 @@ time, an upstream stamp) and, once a hand-back is acknowledged, deletes exactly 
 with their stamps. A relay hands them back over its own upstream connection, by zone identity and in
 chunks; the upstream scheduler requeues them for another client. An upstream server without the call,
 or one that refuses it, leaves them held (the server's eviction of the relay puts them back, as
-before); a hand-back lost with the link stays due and goes through once the link is back.
+before); a hand-back lost with the link stays due and goes through once the link is back. A chunk the
+relay-local scheduler had loaded but not yet staged when retirement stopped it is handed back too, and
+nothing is handed back until the scheduler has stopped.
 
 End to end, an upstream server autoscaling with relay sites and two relays at one site, each a
 process: the older relay, holding a task its site client stopped asking for, reads that the newer one
 superseded it, hands that task back, lets its client finish, sends its final heartbeat and exits 0 by
-itself; every task runs once and the server evicts nothing.
+itself; every task runs once and the server evicts nothing. And once the upstream server restarts
+while the older relay is retiring, the older relay registering again after the newer one is still the
+one retired: the newer relay keeps the site, and the older one finishes and exits 0.
 """
 
 
@@ -28,9 +32,10 @@ import time
 import json
 import signal
 import sqlite3
+import threading
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
+from types import SimpleNamespace, MethodType
 from datetime import datetime
 
 # External libs
@@ -49,7 +54,7 @@ from hypershell.core.uuid import uuid
 from hypershell.data.model import Task
 from hypershell.relay import RelayThread, store
 from hypershell.relay.store import RelayTask
-from hypershell.server import Scheduler, SchedulerState
+from hypershell.server import Scheduler, SchedulerState, SchedulerThread, ServerThread
 from tests.conftest import free_port
 from tests.test_zone_model import task_db, add_tasks  # noqa: fixture
 from tests.test_relay_connector import relay_db, dispatched  # noqa: fixture
@@ -84,6 +89,7 @@ def bare_relay(link: Any) -> RelayThread:
     relay = RelayThread.__new__(RelayThread)
     relay.link = link
     relay.handback_due = True
+    relay.withdrawn = True  # No site: nothing staged or loaded for site clients to take back.
     return relay
 
 
@@ -249,6 +255,127 @@ def test_hand_back_lost_with_the_link_stays_due_and_goes_through_later(relay_db:
     assert [sorted(task_id for task_id, _ in tasks) for _, tasks in received] == [sorted(ids)]
 
 
+# --- Retirement while the relay-local scheduler loads ---------------------------------------------------
+
+
+class Stopped:
+    """A part of the relay that was never started (or has already stopped)."""
+
+    ident = None
+
+    def stop(self, wait: bool = False, timeout: Optional[float] = None) -> None:  # noqa: unused
+        pass
+
+    def is_alive(self) -> bool:
+        return False
+
+
+@pytest.fixture
+def loading(task_db: Engine, monkeypatch: MonkeyPatch):
+    """A relay holding five received tasks, whose relay-local scheduler (a real thread on its own queue
+    server) is loading three of them when the relay retires: its load commits their local schedule time
+    and then waits for the scheduler to be told to stop, and, once told, for `release`, so the stop lands
+    between the load and the staging. Of the other two, one is taken by a site client meanwhile."""
+    monkeypatch.setattr(relay_module, 'engine', task_db)
+    store.ensure_tables(task_db)
+    ids = store.insert_received(task_db, dispatched('echo a', 'echo b', 'echo c', 'echo d', 'echo e'),
+                                identity=RELAY)
+    with QueueServer(loopback()) as server:
+        server.dispatcher.configure(bundlesize=3)
+        scheduler = SchedulerThread(queue=server, bundlesize=3, forever_mode=True, poll=1)
+        loaded, halted, release = threading.Event(), threading.Event(), threading.Event()
+        halt = scheduler.machine.halt
+        scheduler.machine.halt = lambda: (halt(), halted.set())
+        next_tasks = Task.next.__func__
+
+        def hooked(cls: Any, *args: Any, **kwargs: Any) -> List[Task]:
+            tasks = next_tasks(cls, *args, **kwargs)
+            if tasks and not loaded.is_set():
+                loaded.set()
+                halted.wait(DEADLINE)
+                release.wait(DEADLINE)
+            return tasks
+
+        monkeypatch.setattr(Task, 'next', classmethod(hooked))
+        sent = []
+        relay = RelayThread.__new__(RelayThread)
+        relay.cluster = SimpleNamespace(autoscaler=Stopped())
+        relay.fleets = []
+        relay.puller = Stopped()
+        relay.server = SimpleNamespace(scheduler=scheduler, revert_staged=MethodType(
+            ServerThread.revert_staged, SimpleNamespace(queue=server, in_memory=False)))
+        relay.link = as_link(SimpleNamespace(dispatcher=SimpleNamespace(
+            handback=lambda text: sent.append(read_handback(text)) or handback_reply(len(read_handback(text)[1])))))
+        scheduler.start()
+        try:
+            assert loaded.wait(DEADLINE), 'the relay-local scheduler loaded nothing'
+            waiting = [task_id for task_id, _, _ in store.unstarted(task_db)]
+            assert len(waiting) == 2
+            deliver(task_db, waiting[:1])
+            yield SimpleNamespace(ids=ids, taken=waiting[0], unstarted=sorted(set(ids) - {waiting[0]}), relay=relay,
+                                  scheduler=scheduler, server=server, release=release, sent=sent, engine=task_db)
+        finally:
+            release.set()
+            scheduler.stop(wait=True, timeout=DEADLINE)
+
+
+def handed_back(sent: List[Any]) -> List[str]:
+    """The ids handed back upstream, in order."""
+    return [task_id for _, tasks in sent for task_id, _ in tasks]
+
+
+@mark.integration
+def test_retire_hands_back_the_chunk_the_scheduler_loaded_but_never_staged(loading, caplog) -> None:
+    """The scheduler is stopped between loading three tasks and staging them: they are marked scheduled at
+    the relay but in no pool, and no site client has received them. Retirement hands back all three, with
+    the one never loaded, and not the one a site client took; once that one's result has gone back, the
+    relay holds nothing and sends its final heartbeat."""
+    loading.release.set()  # The stop lands with the chunk loaded; the scheduler then halts before staging.
+    loading.relay.retire()
+    assert not loading.scheduler.is_alive()
+    assert sorted(handed_back(loading.sent)) == loading.unstarted
+    assert not loading.relay.handback_due
+    assert loading.server.dispatcher.staged() == 0
+    assert store.unstarted(loading.engine) == [] and store.count_held(loading.engine) == 1
+    taken = row(loading.taken)
+    assert taken.schedule_time is not None and taken.client_id is not None
+    complete(loading.engine, [loading.taken])
+    store.collect_results(loading.engine)
+    store.mark_returned(loading.engine, store.pending_results(loading.engine, 10))
+    finished = []
+    loading.relay.identities = [RELAY]
+    loading.relay.heartbeat = SimpleNamespace(signal_finished=lambda: finished.append(True),
+                                              stop=lambda wait=False, timeout=None: None,
+                                              join=lambda timeout=None: None)
+    with caplog.at_level('WARNING'):
+        loading.relay.finish_upstream()
+    assert finished == [True]
+    assert not messages(caplog, 'Holding')
+
+
+@mark.integration
+def test_retire_hands_back_nothing_until_the_scheduler_has_stopped(loading, monkeypatch, caplog) -> None:
+    """A scheduler that has not stopped within the relay's wait leaves the hand-back due, with nothing
+    handed back and nothing taken back; once it has stopped, the next try hands back the three tasks it
+    had loaded and the one it never loaded, and not the one a site client took."""
+    monkeypatch.setattr(relay_module, 'STOP_TIMEOUT', 0.2)
+    with caplog.at_level('WARNING'):
+        loading.relay.retire()
+    assert loading.scheduler.is_alive()
+    assert loading.relay.handback_due and loading.sent == []
+    assert messages(caplog, 'Relay-local scheduler did not stop') == [
+        'Relay-local scheduler did not stop within 0.2 seconds - handing back once it has']
+    loading.relay.hand_back()
+    assert loading.relay.handback_due and loading.sent == []
+    loading.release.set()
+    loading.scheduler.join(timeout=DEADLINE)
+    assert not loading.scheduler.is_alive()
+    loading.relay.hand_back()
+    assert not loading.relay.handback_due
+    assert sorted(handed_back(loading.sent)) == loading.unstarted
+    assert store.unstarted(loading.engine) == [] and store.count_held(loading.engine) == 1
+
+
 # --- End to end ----------------------------------------------------------------------------------------
 
 KEY = 'relay-retire-upstream-key-0123456789'
@@ -264,16 +391,28 @@ def relay_config(site: Path, name: str, size: int) -> Path:
     return path
 
 
-def start_relay(group: Group, name: str, port: int) -> subprocess.Popen:
+def start_relay(group: Group, name: str, port: int, size: int = 1, **env: str) -> subprocess.Popen:
     """Start relay `name` at site A against the upstream server on `port`, beating every second."""
     return group.start(name, 'relay', '-H', '127.0.0.1', '-p', str(port), '--no-tls',
                        '--bind', '127.0.0.1', '--port', str(free_port()),
-                       env={'HYPERSHELL_CONFIG_FILE': str(relay_config(group.site, name, 1)),
+                       env={'HYPERSHELL_CONFIG_FILE': str(relay_config(group.site, name, size)),
                             'HYPERSHELL_RELAY_DATABASE': str(group.site / f'{name}.db'),
                             'HYPERSHELL_RELAY_UPSTREAM_AUTH': KEY,
                             'HYPERSHELL_RELAY_UPSTREAM_HEARTRATE': '1',
                             'HYPERSHELL_SERVER_TLS_ENABLED': 'false',
-                            'HYPERSHELL_AUTOSCALE_PERIOD': '1'})
+                            'HYPERSHELL_AUTOSCALE_PERIOD': '1', **env})
+
+
+def start_server(group: Group, name: str, port: int) -> subprocess.Popen:
+    """Start an upstream server autoscaling with relay sites on `port`, checking every second."""
+    return group.start(name, 'server', '--autoscaling=fixed', '-P', '1', '--no-tls',
+                       '-H', '127.0.0.1', '-p', str(port),
+                       env={'HYPERSHELL_SERVER_AUTH': KEY, 'HYPERSHELL_SERVER_EVICT': '120'})
+
+
+def remaining() -> str:
+    """The count of tasks not yet complete upstream."""
+    return subprocess.run(['hs', 'list', '--remaining', '--count'], capture_output=True, text=True).stdout.strip()
 
 
 def until(condition: Any, what: str, deadline: float = DEADLINE) -> Any:
@@ -354,3 +493,53 @@ def test_a_superseded_relay_hands_back_finishes_and_exits(group: Group) -> None:
     assert len(ran) == 5 and len(set(ran)) == 5
     listed = json.loads(subprocess.run(['hs', 'list', '--json'], capture_output=True, text=True, check=True).stdout)
     assert len(listed) == 5 and all(task['exit_status'] == 0 for task in listed)
+
+
+SUPERSEDED = 'Superseded at site A by a newer relay'
+RETIRED_NOTE = re.compile(r'Relay (\S+) on \S+ retired at site A \(([^)]*)\)')
+
+
+@mark.integration
+def test_a_retiring_relay_registering_again_after_an_upstream_restart_keeps_the_newer_relay(group: Group) -> None:
+    """Relay A is retiring, its site client still running a task, while relay B holds site A. The upstream
+    server restarts, and A registers with it again only after B has, so A is now the later registration.
+    A says it is retiring, so the new server retires A again and B keeps the site: B is never told it is
+    superseded, A finishes and exits 0, and B, still connected, runs what is left."""
+    runs = group.site / 'runs.log'
+    tasks = ''.join(f'echo "$TASK_ID" >> {runs}; sleep 20\n' for _ in range(4))
+    subprocess.run(['hs', 'submit', '-'], input=tasks.encode(), env={**os.environ, 'HYPERSHELL_SERVER_AUTH': KEY},
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    port = free_port()
+    server = start_server(group, 'server', port)
+    relay_a = start_relay(group, 'relay-A', port, HYPERSHELL_RELAY_UPSTREAM_BACKOFF='2')
+    id_a = until(lambda: IDENTITY.search(group.text('relay-A')), "relay A's identity").group(1)
+    until(lambda: runs.exists() and runs.read_text().strip(), "A's site client running a task")
+    relay_b = start_relay(group, 'relay-B', port, size=2, HYPERSHELL_RELAY_UPSTREAM_BACKOFF='2')
+    id_b = until(lambda: IDENTITY.search(group.text('relay-B')), "relay B's identity").group(1)
+    until(lambda: SUPERSEDED in group.text('relay-A'), 'A to read that it is superseded')
+
+    # The upstream server restarts while A is retiring; A (paused) registers again only after B.
+    os.killpg(relay_a.pid, signal.SIGSTOP)
+    os.killpg(server.pid, signal.SIGTERM)
+    server.wait(timeout=30)
+    server2 = start_server(group, 'server2', port)
+    until(lambda: re.search(rf'Relay site registered .*: {id_b}\)', group.text('server2')), 'B to register again')
+    os.killpg(relay_a.pid, signal.SIGCONT)
+    until(lambda: re.search(rf'Relay site registered .*: {id_a}\)', group.text('server2')), 'A to register again')
+    note = until(lambda: RETIRED_NOTE.search(group.text('server2')), 'the restarted server to retire a relay')
+    assert note.group(1) == id_a and note.group(2).startswith(f'held by {id_b} ')
+
+    assert group.wait(relay_a, time.monotonic() + DEADLINE) == 0
+    assert relay_b.poll() is None
+    until(lambda: remaining() == '0', 'every task to complete')
+    assert relay_b.poll() is None and SUPERSEDED not in group.text('relay-B')
+    relay_b.send_signal(signal.SIGUSR1)
+    assert group.wait(relay_b, time.monotonic() + DEADLINE) == 0
+    server2.send_signal(signal.SIGTERM)
+    server2.wait(timeout=30)
+
+    a_log, server_log = group.text('relay-A'), group.text('server2')
+    assert a_log.count(SUPERSEDED) == 1
+    assert f'Upstream heartbeat - final ({id_a})' in a_log
+    assert [match.group(1) for match in RETIRED_NOTE.finditer(server_log)] == [id_a]
+    assert 'Evicting client' not in server_log

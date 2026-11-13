@@ -435,7 +435,8 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   Duplicates are held relay-wide: per site, the relay whose instance key (its first identity, on
   every beat) registered last holds every zone it serves, planned on its own clients alone (an older
   relay's last-advertised clients do not count against the site, so a restarted relay is planned at
-  once), and every older relay there gets zero.
+  once), and every older relay there gets zero and is marked retired. A relay that has read the mark
+  says `retiring` on every beat; it never holds a site or retires another, whenever it registered.
 - The relay's fleets reconcile a published topology and never terminate: each is a
   `relay/site.py::SiteScaler` with one rule. It launches `target - max(basis, live)` (`live`: its
   zone's clients still running, never a count of launches) each time it learns a new basis, the count

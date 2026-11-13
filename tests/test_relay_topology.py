@@ -42,7 +42,7 @@ from cmdkit.cli import ArgumentError
 # Internal libs
 from tests.conftest import free_port
 from tests.test_zone_model import task_db, add_tasks  # noqa: fixture
-from hypershell.core.heartbeat import Heartbeat
+from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.reconnect import LinkDown
 from hypershell.core.topology import Bounds, Entry, TopologyReply, reply_text, Topology
 from hypershell.core.types import deserialize
@@ -818,6 +818,28 @@ def test_fetch_retires_once_and_for_good(caplog) -> None:
     warnings = [record.getMessage() for record in caplog.records if record.levelname == 'WARNING']
     assert warnings == ['Superseded at site A by a newer relay - retiring: no more upstream requests, '
                         'site clients finish what they hold']
+
+
+@mark.unit
+def test_a_retired_relay_says_so_on_every_beat_under_every_identity() -> None:
+    """Before the mark no beat carries `retiring`; from the first beat after the relay reads the mark, every
+    identity's beat says it is retiring, including the final one, even once replies drop the mark."""
+    dispatcher = Dispatcher(published((CPU_ID, Entry('cpu', 2, 0))))
+    view = TopologyView()
+    machine, link = relay_heartbeat(dispatcher, view=view)
+    machine.submit()
+    assert all('retiring' not in beat for beat in sent(link))
+    dispatcher.reply = marked((CPU_ID, Entry('cpu', 0, 1)), version='s:2')
+    machine.submit()  # This beat is sent before the reply is read.
+    assert all('retiring' not in beat for beat in sent(link)) and view.retired
+    dispatcher.reply = published((CPU_ID, Entry('cpu', 2, 0)), version='s:3')
+    machine.submit()
+    beats = sent(link)
+    assert {beat['uuid'] for beat in beats} == {CPU_ID, GPU_ID} and all(beat['retiring'] is True for beat in beats)
+    assert all(Heartbeat.unpack_or_none(_pack(beat)).retiring for beat in beats)
+    machine.client_state = ClientState.FINISHED
+    assert machine.submit() is HeartbeatState.FINAL
+    assert all(beat['retiring'] is True and beat['state'] == ClientState.FINISHED.value for beat in sent(link))
 
 
 @mark.unit

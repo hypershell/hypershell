@@ -157,6 +157,8 @@ class SiteRecord:
     sight, and `init_held` stays true until the identity has reported `bounds.init` clients.
     `instance` is the key every identity of one relay process advertises (None from a relay that
     advertises none), so the identities of one relay can be told from another's at the same site.
+    `retiring` is true once the identity has said it is retiring (a newer relay at its site superseded
+    it), and stays true while the record lives.
     """
 
     identity: str
@@ -169,6 +171,7 @@ class SiteRecord:
     rank: int
     init_held: bool
     instance: Optional[str] = None
+    retiring: bool = False
 
 
 class SiteRegistry:
@@ -177,7 +180,8 @@ class SiteRegistry:
 
     Each :meth:`record` overwrites that identity's previous record in place. A new identity is
     stamped with the next registration number and a new site name with the next rank; a site keeps
-    its rank after its identities leave, so a site that returns keeps its place in the order.
+    its rank after its identities leave, so a site that returns keeps its place in the order. An
+    identity that has said it is retiring stays so recorded until it is dropped.
     """
 
     def __init__(self: SiteRegistry) -> None:
@@ -188,7 +192,7 @@ class SiteRegistry:
         self._registered = count()
 
     def record(self: SiteRegistry, identity: str, *, site: str, zone: str, bounds: Bounds,
-               clients: int, host: str, instance: Optional[str] = None) -> SiteRecord:
+               clients: int, host: str, instance: Optional[str] = None, retiring: bool = False) -> SiteRecord:
         """Record the advertisement of `identity`, overwriting its previous one, and return the record."""
         with self._lock:
             rank = self._ranks.setdefault(site, len(self._ranks))
@@ -199,9 +203,10 @@ class SiteRegistry:
             else:
                 held = previous.init_held
                 registered = previous.registered
+                retiring = retiring or previous.retiring
             record = SiteRecord(identity=identity, site=site, zone=zone, bounds=bounds, clients=clients,
                                 host=host, registered=registered, rank=rank,
-                                init_held=held and clients < bounds.init, instance=instance)
+                                init_held=held and clients < bounds.init, instance=instance, retiring=retiring)
             self._records[identity] = record
             return record
 

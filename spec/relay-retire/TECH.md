@@ -3,10 +3,10 @@ slug: relay-retire
 title: Retire a superseded relay, and wake the main thread for signals
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/relay-retire
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -162,14 +162,17 @@ commit.
 | `core/topology.py` | `Topology(version, entries, checks=0, retired=frozenset())`, `TopologyReply(version, zones, checks=0, retired=False)` | `retired` = upstream identities of superseded instances; never part of the version decision |
 | `core/topology.py` | `reply_text(topology, identities)`, `read_topology(text)` | adds top-level `"retired": true` only when some requested identity is retired; reads `data.get('retired') is True`; protocol stays 1 |
 | `core/topology.py` | `handback_text(identity, tasks)`, `read_handback(text) -> (identity, [(id, schedule_time)])`, `handback_reply(accepted)`, `read_handback_reply(text) -> int`, `MAX_HANDBACK_TASKS = 1000`, `MAX_HANDBACK_REQUEST = 256 KiB`, `MAX_HANDBACK_FIELD = 64` | `{"protocol":1,"client":…,"tasks":[{"id":…,"schedule_time":…}]}` → `{"protocol":1,"accepted":n}`; identity and task ids must be UUIDs (returned canonical), schedule times ISO 8601 text (returned unchanged), no task twice; `ValueError` on anything malformed; errors answered with `error_text` |
-| `cluster/topology.py` | `retired_identities(records) -> FrozenSet[str]` | pure; every identity of every older instance of a relay-wide `Duplicate`; none for records with no instance key |
+| `cluster/topology.py` | `retired_identities(records) -> FrozenSet[str]`, `retiring_instances(records) -> Set[(site, instance)]` | pure; every identity of every older instance of a relay-wide `Duplicate`, and of every instance that says it is retiring; none for records with no instance key. `_arrange` picks the holder among instances not retiring only (review cycle 1, RV2) |
+| `core/heartbeat.py` | `Heartbeat.retiring: bool = False` | packed as top-level `"retiring": true` only when set; read as `data.get('retiring') is True`; a server of the earlier build ignores the key (review cycle 1, RV2) |
+| `core/topology.py` | `SiteRecord.retiring: bool = False`, `SiteRegistry.record(…, retiring=False)` | sticky per identity until the record is dropped; `HeartMonitor.record_site` passes `hb.retiring` |
 | `core/dispatch.py` | `Dispatcher.handback(text) -> str`, `Dispatcher.take_handbacks() -> List[(identity, [(id, schedule_time)])]` | database-free; queues under the lock, `_signal_need()`; refuses in memory; `DISPATCH_EXPOSED = ('request', 'takes_submissions', 'topology', 'handback')` |
 | `data/model.py` | `Task.revert_handed_back(client_id, assignments) -> List[str]` | one conditional UPDATE per row on `id`, `schedule_time` as dispatched, `completion_time IS NULL`, `client_id IN (client_id, NULL)`; §1 contention rule; returns ids reverted |
 | `server.py` | `Scheduler.revert_handed_back()` | at the top of `load_bundle`, beside `revert_unstaged`; INFO `Requeued N tasks handed back by relay (identity)` |
 | `relay/site.py` | `TopologyView.retired` (latched), `TopologyView.retire() -> bool` | set once by the heartbeat, never cleared (`retire()` is true only for the call that set it); `SiteScaler` launches none while set (`init`, `check_zones`, `reconcile`), and its `wait` never turns an unapplied version into a check once retired |
 | `relay/upstream.py` | `UpstreamPuller(…, retired=callable)` (default `never`); `UpstreamHeartbeat.fetch` latches and logs once | GATE and REQUEST check `retired()`; WARNING `Superseded at site S by a newer relay - retiring: no more upstream requests, site clients finish what they hold` |
 | `relay/store.py` | `unstarted(engine) -> List[(id, identity, schedule_time)]`, `drop_handed_back(engine, ids) -> int` | incomplete rows with no local `schedule_time` and an upstream stamp; delete matches `schedule_time IS NULL AND completion_time IS NULL`, stamps with them, one transaction under `_WRITE_LOCK` |
-| `relay/__init__.py` | `RelayThread.retire()`, `RelayThread.hand_back()`, `RelayThread.superseded()`, `handback_due` | PLAN §2.4 order; `hand_back` clears `handback_due` on success or refusal (`refuse_hand_back`, one WARNING) and leaves it set when the link loses a chunk; retried each check while the site finishes and once before `finish_upstream` |
+| `relay/__init__.py` | `RelayThread.retire()`, `RelayThread.withdraw() -> bool`, `RelayThread.hand_back()`, `RelayThread.superseded()`, `handback_due`, `withdrawn` | PLAN §2.4 order; `withdraw` runs once the relay-local scheduler has stopped (false while it runs): `server.revert_staged()` plus `Task.revert_staged` of the chunk in `scheduler.machine.loaded` (loaded, not staged); `hand_back` withdraws first and stays due while the scheduler runs; clears `handback_due` on success or refusal (`refuse_hand_back`, one WARNING) and leaves it set when the link loses a chunk; retried each check (in `wait_site` and `stop_site`) and once before `finish_upstream` |
+| `relay/upstream.py` | `UpstreamHeartbeat.submit` | every identity's beat carries `retiring=True` once the view is retired, the final beat included (review cycle 1, RV2) |
 
 ---
 
@@ -235,10 +238,31 @@ on its scheduler's next pass; every reply without a retired identity is byte-ide
       TimescaleDB, matched on the stamp as a relay received it, and under contention (lands after the
       relay's own late confirmation; settled, with no warning, after a result or another client's
       confirmation), per invariants §1.
+- **Review cycle 1 remediation (RV2, server side; GOAL "Ruled at review cycle 1").** Reopened.
+  - [x] `core/heartbeat.py`: optional `retiring` field, packed only when true, read only as JSON
+        `true` (shape chosen after reading the base's `Heartbeat.unpack_or_none`: it reads known keys
+        with `.get` and ignores the rest, so a top-level boolean key is invisible to an fb89670 server).
+  - [x] `core/topology.py`: `SiteRecord.retiring`, recorded sticky by `SiteRegistry.record`;
+        `server.py` `HeartMonitor.record_site` passes `hb.retiring` (one argument; the scheduler is
+        untouched).
+  - [x] `cluster/topology.py`: `_arrange` chooses the holder among instances not retiring, emits no
+        duplicate with a retiring holder, and `retired_identities` adds every identity of a retiring
+        instance; `TopologyPublisher.note_retiring` logs once for one with no holder. Relays that
+        never send the field are ordered by registration exactly as before.
+  - [x] Tests: `tests/test_topology_plan.py` (`RETIRING_ROWS`: later registration, re-registration
+        after eviction, one identity retiring, alone, two retiring, beside a no-instance record, and
+        the residual restart-before-the-mark row pinned on registration order; the earlier table
+        unchanged without the field; the registry keeps it; the beat wire against an fb89670-shaped
+        reader); `tests/test_topology_server.py` (evicted and re-registered through a real
+        `HeartMonitor` and publisher never retires the holder; alone at its site; a beat without the
+        field handled as before).
+  - Wire evidence beyond the suite: the fb89670 `HeartMonitor` itself (a `git archive` on
+    `PYTHONPATH`) fed a beat with `"retiring": true` records the identical `SiteRecord` and beat,
+    with no error.
 - **Verify:** see frontmatter (unit/integration suites above + the four `zone_drive.sh` founding
   modes, R9).
 - **Touches:** `src/hypershell/core/topology.py`, `cluster/topology.py`, `core/dispatch.py`,
-  `core/queue.py`, `data/model.py`, `server.py`, tests.
+  `core/queue.py`, `core/heartbeat.py`, `data/model.py`, `server.py`, tests.
 
 ## Phase P3 — Relay half of retire, docs, laptop evidence
 **Satisfies:** R2, R3, R4, R5, R6, R7, R8, R9, R10 · **Depends on:** P2
@@ -308,6 +332,32 @@ the founding case unchanged.
     check passes (60 of 60 tasks, A launched nothing after the warning, A2 launched within 10 s).
     Its successor is this cycle's `retire` mode; `spec/relay-topology/` and its committed evidence
     are left as that cycle's record.
+- **Review cycle 1 remediation (RV1, RV2 relay side; GOAL "Ruled at review cycle 1").** Reopened.
+  - [x] RV1, `relay/__init__.py`: `retire()` no longer withdraws while the relay-local scheduler may
+        still run. `withdraw()` waits for it to have stopped (false until then, so the hand-back stays
+        due and `wait_site`, `stop_site` and the step before `finish_upstream` try again), then takes
+        back the staged rows (`server.revert_staged()`) and the chunk the scheduler had loaded but not
+        staged (`scheduler.machine.loaded`, ids read with `sqlalchemy.inspect(...).identity` so no
+        expired row is refreshed on another thread's session) with `Task.revert_staged`. Every row
+        no site client has received is then unscheduled and handed back; a delivered row is never in
+        a pool or in `loaded`, so it stays (R5). No change to `server.py`'s scheduler or `core/fsm.py`.
+  - [x] RV1 tests (`tests/test_relay_retire.py`, from the reviewer's probe): a real
+        `SchedulerThread` stopped between load and stage hands back the three loaded rows and the one
+        never loaded, not the delivered one, then finishes upstream with the final heartbeat; a
+        scheduler that outlives `STOP_TIMEOUT` hands back nothing until it has stopped, then all four.
+        Both fail on `a1fcb8c` (one task handed back of four; the hand-back no longer due while the
+        scheduler still runs) and pass here.
+  - [x] RV2, `relay/upstream.py`: every beat says `retiring` once the view is retired.
+        `tests/test_relay_topology.py`: no beat says it before the mark, every identity's beat says it
+        from the next beat on, final beat included, even when later replies drop the mark.
+  - [x] RV2 end to end (`tests/test_relay_retire.py`, from the reviewer's probe): A retiring, B holding,
+        the upstream server restarted with A registering again after B: the new server retires A
+        again (held by B), B is never superseded and runs what is left, A exits 0 with its final
+        heartbeat, nothing evicted. Fails on `a1fcb8c` (the new server retires B) and passes here.
+  - [x] Docs: `docs/cli/relay.rst` (a retiring relay says so on every heartbeat, so a restarted
+        server or a re-registration keeps the newer relay) and `docs/cli/server.rst` (one sentence),
+        under the existing `versionchanged:: 2.9.0`; `AGENTS.md` and `invariants.md` holder rule
+        made true again.
 - **Verify:** see frontmatter (the drive modes, `relay_smoke.sh`, the founding modes, the full test
   suite, and the docs build with `-W`).
 - **Touches:** `src/hypershell/relay/__init__.py`, `relay/upstream.py`, `relay/site.py`,

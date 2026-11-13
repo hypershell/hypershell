@@ -82,9 +82,11 @@ and it ends none of those it has. It hands back to the upstream *server* every t
 *clients* has started, and the *server* puts them back in the queue at once, for the newer relay,
 within a few heartbeats rather than at an eviction. Its *clients* finish the tasks they hold and
 leave, and their results go back upstream. The old process then ends its registration with a final
-heartbeat and exits with status 0. A relay of an earlier release does not read the mark and behaves
-as before: tasks it pulled after being superseded wait until it exits and the upstream *server*
-evicts it.
+heartbeat and exits with status 0. While it retires it says so on every heartbeat, so an upstream
+*server* that restarts meanwhile, or that evicts it and sees it register again, retires it again at
+once and leaves the site with the newer relay, whichever of the two registers first. A relay of an
+earlier release does not read the mark and behaves as before: tasks it pulled after being
+superseded wait until it exits and the upstream *server* evicts it.
 
 .. versionchanged:: 2.9.0
    A superseded relay hands back the tasks its *clients* have not started, and exits.

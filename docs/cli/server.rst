@@ -73,7 +73,8 @@ rather than after its predecessor's eviction; if the older relay is in fact stil
 clients run beside the newer relay's until they leave by their idle timeout. The older relay is
 also told it is superseded: it asks for no more work, hands back the tasks none of its clients has
 started, which the server puts back in the queue at once, and exits once its clients have finished
-(see :ref:`Topology <cli_relay_topology>`).
+(see :ref:`Topology <cli_relay_topology>`). A relay that says on its heartbeat that it is retiring
+never holds its site, in whatever order it registered.
 
 .. versionchanged:: 2.9.0
    A superseded relay hands back the tasks its clients have not started, and exits.

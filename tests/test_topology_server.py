@@ -10,7 +10,8 @@ change. Relays fetch their own entries from the dispatcher over a real queue con
 that publishes nothing answers with a null version, and an older server has no such method at all.
 A relay superseded at its site reads itself retired there, and hands back over the same connection
 the assignments it holds unstarted, which the scheduler requeues on its next pass while each is
-still that relay's.
+still that relay's. A relay that says on its heartbeat that it is retiring is retired again at once,
+and never holds its site or retires the relay that does, even after it is evicted and registers again.
 """
 
 
@@ -27,6 +28,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from datetime import datetime, timedelta
+from dataclasses import replace
 
 # External libs
 import pytest
@@ -48,7 +50,7 @@ from hypershell.core.topology import (Bounds, Entry, Topology, SiteRegistry, req
 from hypershell.core.uuid import uuid
 from hypershell.cluster import topology as topology_module
 from hypershell.cluster.topology import (TopologyPublisher, TopologyPublisherState, TopologyPublisherThread,
-                                         AutoScalingServer, Distribution)
+                                         AutoScalingServer, Distribution, retired_identities)
 from hypershell.data.model import Task, Zone, zone_id, CANCEL_STATUS
 from hypershell.server import HeartMonitor, Scheduler, SchedulerState
 
@@ -406,6 +408,83 @@ def test_publisher_retires_every_identity_of_a_superseded_relay(task_db: Engine,
     notes = [r.getMessage() for r in caplog.records if 'retired at site' in r.getMessage()]
     assert notes == ['Relay i1 on h-a1 retired at site A (held by i2 on h-a2)']
     assert all(r.levelname == 'INFO' for r in caplog.records if 'retired at site' in r.getMessage())
+
+
+def relay_beat(identity: str, instance: str, retiring: bool = False, time: datetime = None) -> Heartbeat:
+    """A beat of relay `instance` at site A for the cpu zone, saying whether it is retiring."""
+    return Heartbeat.new(uuid=identity, host=f'h-{instance}', site='A', zone='cpu', bounds=BOUNDS, clients=1,
+                         instance=instance, retiring=retiring, time=time)
+
+
+@mark.integration
+def test_a_retiring_relay_evicted_and_registered_again_never_retires_the_holder(queues, task_db, caplog) -> None:
+    """Relay `old` says it is retiring while relay `new` holds site A. Evicted for missed beats and registered
+    again, so that it is now the most recently registered, it is still the one retired, again at once,
+    and `new` keeps the site; without the field it would have retired `new`."""
+    registry = SiteRegistry()
+    machine = monitor(queues, registry)
+    dispatcher = Dispatcher()
+    pub = publisher(registry, dispatcher)
+    old, new = str(uuid()), str(uuid())
+    caplog.set_level('INFO', logger='hypershell.cluster')
+    deliver(machine, relay_beat(old, 'old'))
+    deliver(machine, relay_beat(new, 'new'))
+    run_check(pub)
+    assert dispatcher.published.retired == frozenset({old})
+    deliver(machine, relay_beat(old, 'old', retiring=True))
+    stale = datetime.now().astimezone() - timedelta(seconds=3 * EVICT)
+    deliver(machine, relay_beat(old, 'old', retiring=True, time=stale))
+    machine.last_check = datetime.now().astimezone()
+    machine.check_clients()
+    assert old not in registry
+    run_check(pub)
+    assert dispatcher.published.retired == frozenset()
+    deliver(machine, relay_beat(old, 'old', retiring=True))
+    records = {record.identity: record for record in registry.snapshot()}
+    assert records[old].registered > records[new].registered and records[old].retiring
+    run_check(pub)
+    assert dispatcher.published.retired == frozenset({old})
+    assert fetched(dispatcher, old)['retired'] is True and 'retired' not in fetched(dispatcher, new)
+    assert dispatcher.published.entries[new].target > 0 and dispatcher.published.entries[old].target == 0
+    assert [r.getMessage() for r in caplog.records if 'retired at site' in r.getMessage()] == [
+        'Relay old on h-old retired at site A (held by new on h-new)']
+    plain = [record if record.identity != old else replace(record, retiring=False) for record in registry.snapshot()]
+    assert retired_identities(plain) == frozenset({new})
+
+
+@mark.integration
+def test_a_retiring_relay_alone_at_its_site_is_retired_and_holds_nothing(queues, task_db, caplog) -> None:
+    """A relay that says it is retiring and has no other relay at its site is retired again, logged once,
+    and assigned no clients there."""
+    registry = SiteRegistry()
+    machine = monitor(queues, registry)
+    dispatcher = Dispatcher()
+    pub = publisher(registry, dispatcher)
+    old = str(uuid())
+    with caplog.at_level('INFO', logger='hypershell.cluster'):
+        deliver(machine, relay_beat(old, 'old', retiring=True))
+        run_check(pub)
+        run_check(pub)
+    assert dispatcher.published.retired == frozenset({old})
+    assert fetched(dispatcher, old) == {'protocol': 1, 'version': dispatcher.published.version, 'checks': 2,
+                                        'zones': {'cpu': {'target': 0, 'seen': 1}}, 'retired': True}
+    assert [r.getMessage() for r in caplog.records if 'retired at site' in r.getMessage()] == [
+        'Relay old on h-old retired at site A (it says it is retiring)']
+
+
+@mark.integration
+def test_a_beat_without_the_retiring_field_is_handled_as_before(queues, task_db) -> None:
+    """A relay that never sends the field (an earlier release) is recorded as not retiring and ordered by
+    registration, exactly as before: the newer one holds and the older one alone is retired."""
+    registry = SiteRegistry()
+    machine = monitor(queues, registry)
+    first, second = str(uuid()), str(uuid())
+    for identity, instance in ((first, 'first'), (second, 'second')):
+        data = json.loads(relay_beat(identity, instance).pack())
+        assert 'retiring' not in data
+        deliver(machine, json.dumps(data).encode())
+    assert not any(record.retiring for record in registry.snapshot())
+    assert retired_identities(registry.snapshot()) == frozenset({first})
 
 
 @mark.integration

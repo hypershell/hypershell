@@ -18,8 +18,8 @@ upstream server lists the site clients, attributed to the site, as they come and
 identity's beat also advertises its zone, that zone's client bounds, the clients launched in it and
 the relay's instance key; after each beat the heartbeat reads the site topology the upstream server
 publishes, if any, for the relay's fleets to follow. A topology that says a newer relay at the site
-superseded this one retires the relay: the heartbeat records it once, for good, and the puller asks
-for nothing more.
+superseded this one retires the relay: the heartbeat records it once, for good, and says so on
+every beat from then on, under every identity; the puller asks for nothing more.
 
 Example:
     >>> from hypershell.relay.upstream import upstream_identity
@@ -812,13 +812,14 @@ class UpstreamHeartbeat(StateMachine):
         return HeartbeatState.SUBMIT
 
     def submit(self: UpstreamHeartbeat) -> HeartbeatState:
-        """Send one heartbeat under each zone identity, the roster with the holder's."""
+        """Send one heartbeat under each zone identity, the roster with the holder's; each says so once retired."""
         state = self.client_state  # atomic
         built = time.monotonic()  # Before any count is read into these beats.
         roster = self.read_roster() if state is ClientState.RUNNING else None
+        retiring = self.view is not None and self.view.retired
         beats = [Heartbeat.new(uuid=identity, state=state, site=self.site,
                                roster=roster if identity == self.identity else None,
-                               **self.advertisement(identity)).pack()
+                               retiring=retiring, **self.advertisement(identity)).pack()
                  for identity in self.identities]
         epoch = self.link.epoch
         try:
