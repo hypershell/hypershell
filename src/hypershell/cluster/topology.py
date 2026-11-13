@@ -170,8 +170,10 @@ def site_views(records: Iterable[SiteRecord]) -> Tuple[List[SiteView], List[Dupl
     Group live records into sites, with every duplicated site.
 
     The holder of each site-zone (see `_arrange`: the most recently registered relay at the site)
-    supplies its bounds; the zone's running count sums every identity of the site in that zone, so
-    the clients of an older relay still count against the site's bounds while they idle out.
+    supplies its bounds and its own launched clients as the running count. The clients an older,
+    superseded relay last advertised do not count against the site: a relay restarted after a crash
+    is planned at once rather than after its predecessor's eviction. If the older relay is in fact
+    still running, its clients run beside the holder's until they leave by idle exit.
     """
     arranged, duplicates = _arrange(records)
     zones: Dict[str, Dict[str, SiteZone]] = {}
@@ -181,8 +183,7 @@ def site_views(records: Iterable[SiteRecord]) -> Tuple[List[SiteView], List[Dupl
             continue
         ranks[site] = holder.rank
         zones.setdefault(site, {})[zone] = SiteZone(ZoneRef.from_name(holder.zone), holder.bounds,
-                                                    running=sum(record.clients for record in members),
-                                                    starting=holder.init_held)
+                                                    running=holder.clients, starting=holder.init_held)
     views = [SiteView(site, ranks[site], zones[site]) for site in sorted(zones, key=lambda name: (ranks[name], name))]
     return views, duplicates
 
@@ -245,18 +246,17 @@ def entries(targets: Mapping[str, Mapping[str, int]], records: Iterable[SiteReco
     """
     The entry of each live identity, from per-site, per-zone targets.
 
-    The holder of a site's zone is asked for the site's target less what the site's other
-    identities in that zone still run; every other identity is assigned none, so its clients retire
-    as they idle out. Each entry's `seen` is the identity's own launched count.
+    The holder of a site's zone is asked for the site's target; every other identity is assigned
+    none, so its clients retire as they idle out. Each entry's `seen` is the identity's own launched
+    count.
     """
     arranged, _ = _arrange(records)
     result: Dict[str, Entry] = {}
     for (site, zone), (holder, members) in arranged.items():
-        others = [record for record in members if record is not holder]
-        result.update({record.identity: Entry(record.zone, 0, record.clients) for record in others})
+        result.update({record.identity: Entry(record.zone, 0, record.clients)
+                       for record in members if record is not holder})
         if holder is not None:
-            target = targets.get(site, {}).get(zone, 0) - sum(record.clients for record in others)
-            result[holder.identity] = Entry(holder.zone, max(0, target), holder.clients)
+            result[holder.identity] = Entry(holder.zone, targets.get(site, {}).get(zone, 0), holder.clients)
     return result
 
 
@@ -277,8 +277,10 @@ class TopologyPublisher(StateMachine):
     Each check reads every zone's load in the group the scheduler loads from (as the scheduler
     reports it through `scheduler_group`, else its start rule), takes a snapshot of the relay
     advertisements in `registry`, and plans per site and zone. A plan whose entries differ from the
-    last published ones is published on `dispatcher` under the next version. The publisher never
-    launches or terminates a client and never ends by itself.
+    last published ones is published on `dispatcher` under the next version; either way the
+    topology on the dispatcher carries the count of checks finished, so a relay can tell that the
+    server planned again. The publisher never launches or terminates a client and never ends by
+    itself.
     """
 
     dispatcher: Dispatcher
@@ -292,6 +294,8 @@ class TopologyPublisher(StateMachine):
     scheduler_group: Optional[Callable[[], Optional[int]]]
 
     count: int
+    checks: int
+    topology: Optional[Topology]
     published: Optional[Dict[str, Entry]]
     pending: Optional[Dict[str, Entry]]
     targets: Dict[str, Dict[str, int]]
@@ -325,6 +329,8 @@ class TopologyPublisher(StateMachine):
         self.eager = eager
         self.scheduler_group = scheduler_group
         self.count = 0
+        self.checks = 0
+        self.topology = None
         self.published = None
         self.pending = None
         self.targets = {}
@@ -370,7 +376,7 @@ class TopologyPublisher(StateMachine):
         return scheduler_group(reported, attempts=self.attempts, eager=self.eager)
 
     def check(self: TopologyPublisher) -> TopologyPublisherState:
-        """Plan every zone over the live sites; publish if the plan changed."""
+        """Plan every zone over the live sites; publish if the plan changed, else count the check under the same version."""
         self.last_check = datetime.now()
         group = self.current_group()
         loads = read_zone_loads(group, self.knobs, own=None, discover=True,
@@ -383,16 +389,20 @@ class TopologyPublisher(StateMachine):
         self.log_check(loads, views, group)
         self.views, self.targets = views, targets
         planned = entries(targets, records)
+        self.checks += 1
         if planned != self.published:
             self.pending = planned
             return TopologyPublisherState.PUBLISH
+        self.topology = replace(self.topology, checks=self.checks)
+        self.dispatcher.publish(self.topology)
         return TopologyPublisherState.WAIT
 
     def publish(self: TopologyPublisher) -> TopologyPublisherState:
         """Publish the pending entries under the next version."""
         self.count += 1
         version = f'{INSTANCE}:{self.count}'
-        self.dispatcher.publish(Topology(version, dict(self.pending)))
+        self.topology = Topology(version, dict(self.pending), checks=self.checks)
+        self.dispatcher.publish(self.topology)
         self.published, self.pending = self.pending, None
         log.info(f'Topology {version} published ({len(self.published)} relay identities)')
         for view in self.views:

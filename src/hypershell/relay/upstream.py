@@ -780,6 +780,7 @@ class UpstreamHeartbeat(StateMachine):
     def submit(self: UpstreamHeartbeat) -> HeartbeatState:
         """Send one heartbeat under each zone identity, the roster with the holder's."""
         state = self.client_state  # atomic
+        built = time.monotonic()  # Before any count is read into these beats.
         roster = self.read_roster() if state is ClientState.RUNNING else None
         beats = [Heartbeat.new(uuid=identity, state=state, site=self.site,
                                roster=roster if identity == self.identity else None,
@@ -801,7 +802,7 @@ class UpstreamHeartbeat(StateMachine):
             self.sent_roster = roster
         if state is ClientState.RUNNING:
             log.trace(f'Upstream heartbeat - running ({", ".join(self.identities)})')
-            self.fetch()
+            self.fetch(built)
             return HeartbeatState.WAIT
         log.debug(f'Upstream heartbeat - final ({", ".join(self.identities)})')
         return HeartbeatState.FINAL
@@ -846,13 +847,14 @@ class UpstreamHeartbeat(StateMachine):
             clients = None
         return {'zone': zone, 'bounds': self.bounds.get(zone), 'clients': clients, 'instance': self.instance}
 
-    def fetch(self: UpstreamHeartbeat) -> None:
+    def fetch(self: UpstreamHeartbeat, built: Optional[float] = None) -> None:
         """Read the site topology published upstream for these identities into the view.
 
         An upstream server that publishes none (one of an earlier release, without the method, or
         one not autoscaling with relay sites) clears the view, so the fleets keep their local sizes;
         this is logged once each time it starts. A read that fails, on the link or otherwise, leaves
-        the view as it was.
+        the view as it was. A read is stamped with `built`, when the beat just sent was built (now
+        when not given).
         """
         if self.view is None:
             return
@@ -880,7 +882,7 @@ class UpstreamHeartbeat(StateMachine):
                 reason = 'an earlier release' if reply is None else 'not autoscaling with relay sites'
                 log.info(f'Upstream server publishes no topology ({reason}) - site clients kept by local size')
             self.published = False
-            self.view.set(None)
+            self.view.set(None, beat_at=built)
             return
         previous = self.view.reply
         if previous is None or previous.version != topology.version:
@@ -889,7 +891,7 @@ class UpstreamHeartbeat(StateMachine):
         if self.published is not True:
             log.info('Upstream server publishes a topology - site clients follow it')
         self.published = True
-        self.view.set(topology)
+        self.view.set(topology, beat_at=built)
 
     def finalize(self: UpstreamHeartbeat) -> HeartbeatState:
         """Stop heartbeats."""

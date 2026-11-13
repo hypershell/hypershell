@@ -265,19 +265,18 @@ def test_site_views_group_records_by_site_and_zone() -> None:
 
 @mark.unit
 def test_a_duplicated_site_is_held_by_the_newest_registration() -> None:
-    """Two identities advertising one site's zone: the newer holds it with its own bounds, the older gets
-    nothing, the holder is asked for the site's target less the older's running clients, and one duplicate
-    names both."""
+    """Two identities advertising one site's zone: the newer holds it with its own bounds and its own clients,
+    the older gets nothing and its clients no longer count against the site, and one duplicate names both."""
     older = record('a1-cpu', 'A', 'cpu', 3, registered=0, rank=0, bounds=Bounds(min=0, max=3, init=0), host='h1')
     newer = record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, bounds=Bounds(min=0, max=1, init=0), host='h2')
     views, duplicates = site_views([older, newer])
     assert duplicates == [Duplicate('A', holder=newer, older=older)]
-    assert views == [SiteView('A', 0, {CPU.id: SiteZone(CPU, Bounds(min=0, max=1, init=0), running=3,
+    assert views == [SiteView('A', 0, {CPU.id: SiteZone(CPU, Bounds(min=0, max=1, init=0), running=0,
                                                         starting=False)})]
     targets = plan_sites(loads(cpu=(9, 5.0)), knobs(), views)
     assert by_name(targets) == {'A': {'cpu': 1}}
-    assert entries(targets, [older, newer]) == {'a2-cpu': Entry('cpu', 0, 0), 'a1-cpu': Entry('cpu', 0, 3)}
-    # Once the older identity's clients have idled out, the holder gets the site's target.
+    assert entries(targets, [older, newer]) == {'a2-cpu': Entry('cpu', 1, 0), 'a1-cpu': Entry('cpu', 0, 3)}
+    # Once the older identity's clients have idled out, the holder's target is the same.
     older = record('a1-cpu', 'A', 'cpu', 0, registered=0, rank=0, host='h1')
     targets = plan_sites(loads(cpu=(9, 5.0)), knobs(), site_views([older, newer])[0])
     assert entries(targets, [older, newer]) == {'a2-cpu': Entry('cpu', 1, 0), 'a1-cpu': Entry('cpu', 0, 0)}
@@ -293,7 +292,7 @@ INSTANCE_ROWS = [
       record('a1-gpu', 'A', 'gpu', 1, registered=1, rank=0, instance='i1', host='h1'),
       record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, instance='i2', host='h2', bounds=CPU_1),
       record('a2-gpu', 'A', 'gpu', 0, registered=6, rank=0, instance='i2', host='h2')],
-     {'A': {'cpu': (1, 2), 'gpu': (3, 1)}},
+     {'A': {'cpu': (1, 0), 'gpu': (3, 0)}},
      [('i1', 'i2')],
      {'a1-cpu': Entry('cpu', 0, 2), 'a1-gpu': Entry('gpu', 0, 1)}),
     # A zone only the older relay serves leaves the site: it is not held there by the older relay.
@@ -302,7 +301,7 @@ INSTANCE_ROWS = [
       record('a1-mem', 'A', 'highmem', 2, registered=1, rank=0, instance='i1'),
       record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, instance='i2'),
       record('b-mem', 'B', 'highmem', 0, registered=7, rank=1, instance='j1')],
-     {'A': {'cpu': (3, 1)}, 'B': {'highmem': (3, 0)}},
+     {'A': {'cpu': (3, 0)}, 'B': {'highmem': (3, 0)}},
      [('i1', 'i2')],
      {'a1-cpu': Entry('cpu', 0, 1), 'a1-mem': Entry('highmem', 0, 2)}),
     # The newer relay is the one whose first identity registered last, whatever re-registered later.
@@ -327,7 +326,8 @@ INSTANCE_ROWS = [
 @mark.parametrize('case, records, views, relays, zeroed', INSTANCE_ROWS, ids=[row[0] for row in INSTANCE_ROWS])
 def test_a_duplicated_site_is_held_by_the_newest_relay(case, records, views, relays, zeroed) -> None:
     """Identities that advertise an instance key are held relay-wide: per site, the most recently
-    registered relay holds every zone it serves and every other relay there is assigned none."""
+    registered relay holds every zone it serves, planned on its own clients alone, and every other relay
+    there is assigned none."""
     found, duplicates = site_views(records)
     names = {ref.id: name for name, ref in REFS.items()}
     assert {view.name: {names[zone]: (sz.bounds.max, sz.running) for zone, sz in view.zones.items()}
@@ -343,10 +343,34 @@ def test_a_duplicated_site_is_held_by_the_newest_relay(case, records, views, rel
         for zone in view.zones:
             holder, = [record for record in records if record.site == view.name and REFS[record.zone].id == zone
                        and record.identity not in zeroed]
-            others = sum(record.clients for record in records if record.site == view.name
-                         and REFS[record.zone].id == zone and record is not holder)
-            assert planned[holder.identity] == Entry(holder.zone, max(0, targets[view.name][zone] - others),
-                                                     holder.clients)
+            assert view.zones[zone].running == holder.clients
+            assert planned[holder.identity] == Entry(holder.zone, targets[view.name][zone], holder.clients)
+
+
+# A relay restarted at its site after a crash: its predecessor is dead but not yet evicted, and still
+# advertises the clients it last reported. (case, the restarted relay's bounds, loads, its target).
+BOUNCE_ROWS = [
+    ('init-at-once', Bounds(min=0, max=2, init=2), {}, 2),
+    ('min-at-once', Bounds(min=1, max=2, init=1), {}, 1),
+    ('demand-at-once', Bounds(min=0, max=2, init=0), {'cpu': (9, 5.0)}, 1),
+]
+
+
+@mark.unit
+@mark.parametrize('case, bounds, work, target', BOUNCE_ROWS, ids=[row[0] for row in BOUNCE_ROWS])
+def test_a_restarted_relay_is_planned_at_once(case, bounds, work, target) -> None:
+    """The restarted relay holds its site and is planned at once, as if alone there: the superseded
+    relay's last-advertised clients no longer count against the site, so it does not wait out the
+    eviction window. The superseded relay is assigned none."""
+    records = [record('r1-cpu', 'A', 'cpu', 2, registered=0, rank=0, instance='i1', bounds=Bounds(min=0, max=2, init=2)),
+               record('r2-cpu', 'A', 'cpu', 0, registered=3, rank=0, instance='i2', bounds=bounds,
+                      init_held=bounds.init > 0)]
+    views, duplicates = site_views(records)
+    assert [(dup.older.instance, dup.holder.instance) for dup in duplicates] == [('i1', 'i2')]
+    assert views[0].zones[CPU.id].running == 0
+    targets = plan_sites(loads(**work), knobs(), views)
+    assert by_name(targets) == {'A': {'cpu': target}}
+    assert entries(targets, records) == {'r1-cpu': Entry('cpu', 0, 2), 'r2-cpu': Entry('cpu', target, 0)}
 
 
 @mark.unit
@@ -473,16 +497,21 @@ def test_topology_reply_null_entries_and_missing() -> None:
     assert read_topology(null) is None
     topology = Topology('server:3', {'a-cpu': Entry('cpu', 2, 1), 'b-cpu': Entry('cpu', 1, 0)})
     text = reply_text(topology, ['a-cpu', 'a-gpu'])
-    assert json.loads(text) == {'protocol': TOPOLOGY_PROTOCOL, 'version': 'server:3',
+    assert json.loads(text) == {'protocol': TOPOLOGY_PROTOCOL, 'version': 'server:3', 'checks': 0,
                                 'zones': {'cpu': {'target': 2, 'seen': 1}}}
     reply = read_topology(text)
-    assert reply == TopologyReply('server:3', {'cpu': Entry('cpu', 2, 1)})
+    assert reply == TopologyReply('server:3', {'cpu': Entry('cpu', 2, 1)}, checks=0)
+    checked = Topology('server:3', topology.entries, checks=7)
+    assert read_topology(reply_text(checked, ['a-cpu'])).checks == 7
     assert reply.assignment('cpu') == Entry('cpu', 2, 1)
     assert reply.assignment('gpu') == Entry('gpu', 0, 0)
     for bad in ('nope', json.dumps({'protocol': 99, 'version': None}),
                 json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': 'v'}),
                 json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': 'v', 'zones': {'cpu': {'target': 1}}}),
-                json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': 'v', 'zones': {'cpu': 1}})):
+                json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': 'v', 'zones': {'cpu': 1}}),
+                json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': 'v', 'zones': {}}),
+                json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': 'v', 'zones': {}, 'checks': -1}),
+                json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': 'v', 'zones': {}, 'checks': True})):
         with pytest.raises(ValueError):
             read_topology(bad)
 

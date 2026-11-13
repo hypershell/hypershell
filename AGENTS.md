@@ -430,13 +430,18 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   bounds and launched count on every heartbeat into an in-memory `SiteRegistry`; the
   `TopologyPublisher` reads zones through `demand.scheduler_group` (the same group rule, pinned by
   a test), plans with the pure `plan_sites`, and publishes a versioned topology on the dispatcher
-  (`Dispatcher.topology`, the third remotely exposed method) only when its entries change.
+  (`Dispatcher.topology`, the third remotely exposed method): a new version only when its entries
+  change, and at every check the count of checks made (`checks`, under the same version otherwise).
   Duplicates are held relay-wide: per site, the relay whose instance key (its first identity, on
-  every beat) registered last holds every zone it serves, and every older relay there gets zero.
+  every beat) registered last holds every zone it serves, planned on its own clients alone (an older
+  relay's last-advertised clients do not count against the site, so a restarted relay is planned at
+  once), and every older relay there gets zero.
 - The relay's fleets reconcile a published topology and never terminate: each is a
-  `relay/site.py::SiteScaler` that applies each version once (`target - max(seen, launched)`),
-  never replaces an exit by itself, and with no topology (none published, or an older server) is
-  the fixed fleet it always was.
+  `relay/site.py::SiteScaler` that applies each version once (`target - max(seen, launched)`). It
+  replaces a client that exited only when a later version asks, or when the server has finished two
+  checks (`checks`) past the first topology read after a beat that reported the exit and still
+  publishes the same version, so a slow server is never read as clients that left uncounted. With no
+  topology (none published, or an older server) it is the fixed fleet it always was.
 
 ## Configuration
 

@@ -3,7 +3,7 @@ slug: relay-topology
 title: 'Relay site-topology autoscaling: fill and spread across sites'
 kind: feature
 appetite: big
-status: blocked
+status: in_review
 branch: feature/relay-topology
 base: develop
 current_phase: done
@@ -81,7 +81,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: for mode in spread fill floor idle kill lower; do .agents/factory/bin/temp_site.sh
+  verify: for mode in spread fill floor idle kill lower stale bounce; do .agents/factory/bin/temp_site.sh
     sh "$PWD/spec/relay-topology/drive/topology_drive.sh" $mode || exit 1; done &&
     for mode in founding fixed dynamic restart; do .agents/factory/bin/temp_site.sh
     sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" $mode || exit 1; done && uv
@@ -184,20 +184,20 @@ commit.
 | Module | Name | Contract |
 |--------|------|----------|
 | `core/topology.py` | `Bounds(min, max, init)` | frozen; `to_dict`/`from_dict` (`{"min","max","init"}`), ints, `0 ≤ min ≤ init ≤ max`, `max ≥ 1` |
-| `core/topology.py` | `Entry(zone, target, seen)`, `Topology(version, entries)` | `version` = `"<server instance>:<n>"`; `entries` by relay identity |
+| `core/topology.py` | `Entry(zone, target, seen)`, `Topology(version, entries, checks=0)` | `version` = `"<server instance>:<n>"`; `entries` by relay identity; `checks` = the publisher's finished checks, advanced at every check, under the same version when the plan did not change (review cycle 1, RV1) |
 | `core/topology.py` | `SiteRegistry` | lock-guarded; `record(identity, *, site, zone, bounds, clients, host, instance=None)` overwrites per identity, stamps `registered` (monotonic) on first sight, `rank` per site name on first sight (kept), `init_held` until `clients ≥ init`; `drop(identity)`; `snapshot() -> List[SiteRecord]`; `SiteRecord.instance` is the advertised relay instance key (None when absent) |
-| `core/topology.py` | `request_text(site, identities)`, `read_request(text) -> (site, identities)`, `reply_text(topology, identities)`, `read_topology(text) -> Optional[TopologyReply]` | JSON, `TOPOLOGY_PROTOCOL = 1` (its own number, apart from the work-request protocol); `{"protocol","version":null}` when unpublished; the reply names only identities that have an entry, by zone name; `TopologyReply(version, zones).assignment(zone)` gives `Entry(zone, 0, 0)` for a zone with no entry (target 0); `read_request`/`read_topology` raise `ValueError` on anything malformed |
+| `core/topology.py` | `request_text(site, identities)`, `read_request(text) -> (site, identities)`, `reply_text(topology, identities)`, `read_topology(text) -> Optional[TopologyReply]` | JSON, `TOPOLOGY_PROTOCOL = 1` (its own number, apart from the work-request protocol); `{"protocol","version":null}` when unpublished; the reply names only identities that have an entry, by zone name; `TopologyReply(version, zones, checks=0).assignment(zone)` gives `Entry(zone, 0, 0)` for a zone with no entry (target 0); a reply with a version carries `checks` (a whole number ≥ 0, required); `read_request`/`read_topology` raise `ValueError` on anything malformed |
 | `core/heartbeat.py` | `Heartbeat.zone/bounds/clients/instance` | optional, packed only when set, read with `.get`; a malformed value (zone or instance not text, invalid bounds, a count that is not a whole number ≥ 0) decodes as None, so the identity is a non-participant rather than a crash in the heart monitor (an instance that is not text only drops the relay-wide rule) |
 | `core/dispatch.py` | `Dispatcher.topology(text) -> str`, `Dispatcher.publish(topology)` | under the dispatcher lock; `DISPATCH_EXPOSED = ('request', 'takes_submissions', 'topology')` |
 | `cluster/demand.py` | `scheduler_group(reported, *, attempts, eager) -> int` | additive; equals `AutoScaler.current_group` (pinned by a test) |
 | `cluster/topology.py` | `Distribution`, `parse_distribution(value)`, `parse_sites(value)` | `spread`/`fill`; list or comma string |
-| `cluster/topology.py` | `SiteZone`, `SiteView`, `Duplicate(site, holder, older, relay=False)`, `site_views(records) -> (views, duplicates)`, `plan_sites(loads, knobs, sites, *, distribution, order)`, `entries(targets, records)` | pure (PLAN §2.4); duplicates are held **relay-wide** (amended in P3, 2026-11-13): per site, the instance whose first identity registered last holds every zone it serves, every identity of an older instance gets `Entry(zone, 0, clients)` (a zone only it serves leaves the site's view), one `Duplicate(relay=True)` per older instance names the first identity of each; records with no instance key keep P1's per-zone rule among themselves and the holding instance's identity of that zone |
+| `cluster/topology.py` | `SiteZone`, `SiteView`, `Duplicate(site, holder, older, relay=False)`, `site_views(records) -> (views, duplicates)`, `plan_sites(loads, knobs, sites, *, distribution, order)`, `entries(targets, records)` | pure (PLAN §2.4); duplicates are held **relay-wide** (amended in P3, 2026-11-13): per site, the instance whose first identity registered last holds every zone it serves, every identity of an older instance gets `Entry(zone, 0, clients)` (a zone only it serves leaves the site's view), one `Duplicate(relay=True)` per older instance names the first identity of each; records with no instance key keep P1's per-zone rule among themselves and the holding instance's identity of that zone. Since review cycle 1 (RV2) a site-zone's `running` is the holder's own clients and the holder's entry is the site's whole target: superseded identities' clients do not count against the site |
 | `cluster/topology.py` | `TopologyPublisher`, `TopologyPublisherThread`, `AutoScalingServer`, `serve_with_sites(**options)` | FSM START→CHECK (first check at once)→PUBLISH→WAIT→CHECK, FINAL/HALT; publishes only on change; never launches; `AutoScalingServer` publishes an empty `<instance>:0` topology at construction, so a relay never reads null from it (P3); the duplicate warning is once per pair of relays (relay-wide) or of identities (per zone); `AutoScalingServer(address, auth, bundlesize, poll, max_retries, eager, redirect_failures, evict_after, tls, policy, factor, period, distribution=None, sites=None)` reads `[autoscale] distribution`/`sites` when not given (`ConfigurationError` naming the source); `ServerApp.run` calls `serve_with_sites` lazily |
 | `core/topology.py` | `error_text(message)` | the reply to an unreadable topology request (`{"protocol","error":"request","message"}`); `read_topology` raises `ValueError` on it |
 | `server.py` | `HeartMonitor(…, sites)`, `record_site(hb)`, `drop_site(uuid)`; `ServerThread(…, sites)` | a site beat lacking zone, bounds or clients is logged once at INFO and not recorded |
 | `relay/__init__.py` | `zone_bounds(settings, relay_wide) -> (advertised: Bounds, fallback: Bounds)`, `BOUND_OPTIONS`; `RelayThread(…, min_size, max_size, init_size)` (relay-wide bounds, None = unset), `.view`, `.advertised`, `.zone_launched(name)`; `RelayApp.relay_bounds`, `.check_bounds()` | PLAN §2.2 table, with the fallback `min` and `init` held within `max`; ValueError → `ArgumentError` naming the zone |
-| `relay/site.py` | `TopologyView(reply=None)` (`.reply`, `.set`), `SiteScaler(AutoScaler)`, `site_scaler(machine, launch, view)`, `launched_now(machine)`; `site_cluster`/`zone_fleet(…, init_size, min_size, max_size, view)` | `view.assignment(zone) -> Optional[(version, Entry)]`; `SiteScaler` launches `max(0, target − max(seen, launched))` once per version, else the parent's fixed fleet; it overrides `init`, `check_zones` and `wait` (a version not yet applied is checked at once, not at the period's end); `launched_now` counts launched processes still running, read by the heartbeat |
-| `relay/upstream.py` | `UpstreamHeartbeat(…, zones, bounds, launched, instance, view)`, `.fetch()` | every beat of an identity in `zones` carries its zone, bounds, `launched(zone)` and `instance`; each running beat is followed by `fetch()`: a missing method or `version: null` clears the view (INFO once per change), `LinkDown` or any other failure keeps it |
+| `relay/site.py` | `TopologyView(reply=None)` (`.reply`, `.beat_at`, `.set(reply, beat_at=None)`, `.read()`), `SiteScaler(AutoScaler)` (`RECHECKS = 2`), `site_scaler(machine, launch, view)`, `launched_now(machine)`; `site_cluster`/`zone_fleet(…, init_size, min_size, max_size, view)` | `view.assignment(zone) -> Optional[(version, Entry)]`; each read is stamped with the build time of the beat before it; `SiteScaler` launches `max(0, target − max(seen, launched))` once per version (applied again only on the server's evidence, see review cycle 1), else the parent's fixed fleet; it overrides `init`, `check_zones` and `wait` (a version not yet applied is checked at once, not at the period's end); `launched_now` counts launched processes still running, read by the heartbeat |
+| `relay/upstream.py` | `UpstreamHeartbeat(…, zones, bounds, launched, instance, view)`, `.fetch(built=None)` | every beat of an identity in `zones` carries its zone, bounds, `launched(zone)` and `instance`; each running beat is followed by `fetch()`: a missing method or `version: null` clears the view (INFO once per change), `LinkDown` or any other failure keeps it |
 
 ---
 
@@ -312,6 +312,7 @@ mode is unchanged.
 
 **Amendments (2026-11-13, at build):**
 
+- **Reopened at review cycle 1 (2026-11-13)** for RV1–RV3; see "Review cycle 1 remediation" below.
 - **Foreman ruling, 2026-11-13: duplicate sites are held relay-wide, not per zone.** P1 held a
   duplicated site per zone, which let an older (possibly gone) relay keep a zone the newer one does
   not serve, absorbing that zone's demand until eviction. Each relay process now advertises one
@@ -400,6 +401,9 @@ nothing, it runs today's fleets.
 
 **Amendments (2026-11-13, at build):**
 
+- **Reopened at review cycle 1 (2026-11-13)** to refresh the evidence and add the `stale` and
+  `bounce` modes to the gate; see "Review cycle 1 remediation" below, which also supersedes the
+  retry rule of the next item (RV1).
 - **Fix found by the drive: launches the server never counted are applied again.** A site client
   that left before any heartbeat counted it (the first drive run: a launcher that could not find
   `hyper-shell`) changes nothing the server sees, so the entry stayed `target 1, seen 0`, no new
@@ -588,6 +592,104 @@ with `TZ=UTC`, so the times of every node's logs compare.
 - **State (2026-11-13, after run B):** `done`; the cycle is `in_review`.
 
 ---
+
+## Review cycle 1 remediation (2026-11-13)
+
+`hs-review` cycle 1 (`REVIEW.md`, record `b8bb537`, reviewed `0ddebf9`) requested changes: RV1,
+RV2, RV3. P3 (which satisfies every R-ID the findings touch) and P4 (the laptop evidence, gate
+retuned with the two new drive modes) are reopened by script; P1, P2 and P5 stay done. Every source
+change below re-ran P1–P5's verifies (results at the end).
+
+**Amendments (2026-11-13, foreman rulings at review cycle 1; RV2's is the maintainer's, also
+recorded in `GOAL.md` Clarifications).**
+
+- **RV1 — a relay applies an unchanged version again only on the server's evidence.** The P4 fix
+  ("launches the server never counted are applied again") read the server's silence for three
+  relay periods as "my clients left before it counted them". A server whose `-P` exceeds three relay
+  periods is silent that long between checks, so the relay relaunched clients the server had
+  already counted (12 launches against a target of 2 in the review's reproduction). *Design chosen:*
+  the topology carries the publisher's count of finished checks (`checks`), advanced at every
+  check and republished under the same version when the plan did not change; each topology read is
+  stamped with the build time of the heartbeat sent just before it (`TopologyView.set(reply,
+  beat_at)`, from `UpstreamHeartbeat.submit`). A fleet that finds its launches short notes when
+  (`short_at`), takes the check count from the first read after a beat built later (`mark`: that
+  beat reported the zone short), and applies the version again only once `checks ≥ mark + 2` with
+  the version unchanged: the server has then planned with that report and still asks for the same
+  entry. Two checks, not one: the check after `mark` may have read the registry before that beat
+  arrived. *Why this over the alternatives the ruling named:* the server's period on the reply
+  still infers from elapsed time (a slow check, a slow beat, or a link outage breaks it), and the
+  reply's planning time against the client's exit time compares two hosts' clocks. A check counter
+  is clock-free and is the evidence itself; the beat stamp keeps a stale view (one read before the
+  exit, or kept through an outage) from counting. It adds one field to the reply, required with a
+  version (the topology protocol is unreleased, so `TOPOLOGY_PROTOCOL` stays 1), and no dispatcher
+  method. Re-applies are now spaced by the server's own period, so `RETRY_PERIODS` is gone.
+  *Consequence:* a client that leaves uncounted is replaced after two server checks rather than
+  three relay periods (P4's bug stays fixed); a counted client that idles out under a slow server is
+  never replaced unless the server, having planned again, still asks.
+- **RV2 — superseded relays' clients stop counting against the site** (maintainer ruling at review
+  cycle 1). `site_views` takes a site-zone's `running` from the holder's own clients and `entries`
+  gives the holder the site's whole target (no subtraction of older identities' clients). A relay
+  restarted after a crash is planned at once; if the older relay was in fact alive, its clients
+  over-provision briefly and retire by idle exit. The `site_views` docstring that called the old
+  counting deliberate is rewritten. The Q2 rule (newest holds, older gets zero, one warning) is
+  unchanged.
+- **RV3 — the text matches the code.** `AGENTS.md` (cluster section), `invariants.md` §11,
+  `docs/cli/relay.rst` (Topology) and `docs/cli/server.rst` (duplicated site) now say when a relay
+  replaces an exit (a later version asks, or the server finished two checks past a beat that
+  reported it and still publishes the same version) and that a newer relay is planned on its own
+  clients.
+- **Drive:** two modes, `stale` (server `-P 20`, relay period 1 s, `cpu` `init`/`max` 2, no work:
+  exactly 2 launches, no version applied again once the server checks again) and `bounce` (A
+  SIGKILLed with its clients once it runs 2, restarted at once as A2 at site A with its own relay
+  database, eviction 30 s: A2 launches within 10 s of its start and before A's eviction). `lower`
+  gains a check that A2 launches within 10 s of the duplicate warning. The drive's server period
+  and eviction became per-mode settings; a killed relay is skipped by the liveness checks in both
+  `kill` and `bounce`.
+
+**Red on the reviewed head, green after.** The tests and drive modes were written first and run
+against the unchanged source:
+
+| Check | Reviewed head | After |
+|-------|---------------|-------|
+| `test_relay_topology.py::test_site_scaler_does_not_take_a_slow_server_for_uncounted_exits` (RV1 reproduction, unit) | fail: 2 relaunched | pass |
+| `…::test_site_scaler_applies_again_once_the_server_planned_again` (P4 bug, unit) | error (no `checks`) | pass |
+| `…::test_site_scaler_counts_only_checks_after_the_beat_that_reported_the_exit`, `…::test_site_scaler_follows_a_new_version_over_applying_again`, `…::test_fetch_sets_the_view` (beat stamp) | error | pass |
+| `…::test_relay_launches_again_while_the_server_asks` (P4 bug, processes; either path) | pass | pass |
+| `test_topology_plan.py::test_a_restarted_relay_is_planned_at_once` (3 rows, RV2) | fail: target 0 | pass |
+| `test_topology_plan.py` duplicate tests, `INSTANCE_ROWS` (amended per the RV2 ruling) | fail | pass |
+| `test_topology_plan.py::test_topology_reply_null_entries_and_missing` (`checks` on the wire) | fail | pass |
+| `test_topology_server.py::test_publisher_plans_from_the_database_and_publishes_once_per_change` (`checks`), `::test_publisher_warns_once_per_duplicate` (RV2) | fail | pass |
+| drive `stale` (RV1 reproduction, `-P 20` against 1 s) | FAIL: 12 launches, 5 versions applied again | PASS: 2 launches, none again |
+| drive `bounce` (RV2, SIGKILL bounce) | FAIL: A2's first launch 32 s after its start, after A's eviction | PASS: 2 s after its start, 28 s before the eviction |
+| drive `lower` (RV2 with the older relay alive) | FAIL: A2's first launch 21 s after the warning | PASS: 1 s after |
+
+The process-level P4 test passes on both: a beat sometimes catches a short-lived client, so which
+path relaunches it (a new version, or the same version applied again) varies; the unit tests pin
+the second path.
+
+**Cluster evidence (`evidence/cluster/`, not re-run).** The judged scenarios, `spread-kill` and
+`fill`, have one relay per site, so RV2's change is not exercised there: with one identity per
+site-zone, the holder's own clients are the sum the planner used before. RV1's change touches only
+the path that applies an unchanged version again, and only makes it later or absent (two server
+checks of 5 s past a post-exit beat, against three relay periods of 2 s before); it never adds a
+launch. The records carry no relay log lines, so whether a re-apply happened on the cluster cannot
+be read from them. Every judged check (peaks within `max`, every exit idle or by the kill, no
+launch after every client left, a live relay seeing an idle exit per launch, regrowth after the
+eviction through new versions, the `fill` order) depends on new versions or on fewer launches, not
+on re-applies. So no behaviour the cluster scenarios judged changes; a rerun would re-confirm the
+same checks. The added `checks` field is on both sides of the same commit. Whether to rerun is the
+foreman's call.
+
+**Verification (2026-11-13).** Targeted (P1–P5 verify test files, the relay suite and the
+judge tests): 688 passed; relay smoke PASS. The three changed files alone: 120 passed. Drive: all
+eight topology modes PASS (`spread`, `fill`, `floor`, `idle`, `kill`, `lower`, `stale`, `bounce`;
+evidence in `evidence/laptop/`, every file regenerated, no version applied again in any run), and
+Z3's `founding`, `fixed`, `dynamic`, `restart` PASS. Full suite: 1921 passed, 88 skipped, 2
+warnings (the existing `fork()` deprecations), under the worktree's CPython 3.12. PostgreSQL suites
+against a local server (sandbox off): 131 passed, 1 skipped, 29 failed, every one "Template
+hs283/hs290a1 not listed" (20 and 9). Docs: the sandbox form of the `-W` gate (every extension but
+`sphinx_sitemap`, in its own environment) exit 0 with no warnings; `-b man` builds. The unmodified
+docs command is the foreman's to run outside the sandbox.
 
 ## How `hs-build` drives this
 

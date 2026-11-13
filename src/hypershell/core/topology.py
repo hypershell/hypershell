@@ -94,18 +94,26 @@ class Entry:
 
 @dataclass(frozen=True)
 class Topology:
-    """A published plan: its `version` (``"<server instance>:<n>"``) and an entry per relay identity."""
+    """
+    A published plan: its `version` (``"<server instance>:<n>"``) and an entry per relay identity.
+
+    `checks` counts the checks the publisher has finished, this one included; it advances at every
+    check, under the same version when the plan did not change, so a relay can tell a server that
+    planned again and found nothing to change from one that has not planned since.
+    """
 
     version: str
     entries: Mapping[str, Entry]
+    checks: int = 0
 
 
 @dataclass(frozen=True)
 class TopologyReply:
-    """A topology as one relay reads it: the version and the entries of its own zones, by zone name."""
+    """A topology as one relay reads it: the version, the entries of its own zones by zone name, and the checks."""
 
     version: str
     zones: Mapping[str, Entry]
+    checks: int = 0
 
     def assignment(self: TopologyReply, zone: str) -> Entry:
         """The entry of `zone`; a zone the topology does not name is assigned no clients."""
@@ -221,13 +229,15 @@ def reply_text(topology: Optional[Topology], identities: Iterable[str]) -> str:
     The reply to a topology request for `identities`: their entries by zone name.
 
     With nothing published the version is null, which a relay reads as "no topology". An identity
-    with no entry is left out, and the relay reads its zone as assigned no clients.
+    with no entry is left out, and the relay reads its zone as assigned no clients. The publisher's
+    count of finished checks goes with every version.
     """
     if topology is None:
         return json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': None})
     zones = {entry.zone: {'target': entry.target, 'seen': entry.seen}
              for entry in (topology.entries.get(identity) for identity in identities) if entry is not None}
-    return json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': topology.version, 'zones': zones})
+    return json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': topology.version, 'checks': topology.checks,
+                       'zones': zones})
 
 
 def error_text(message: str) -> str:
@@ -252,12 +262,14 @@ def read_topology(text: str) -> Optional[TopologyReply]:
     version = data.get('version')
     if version is None:
         return None
-    zones = data.get('zones')
+    zones, checks = data.get('zones'), data.get('checks')
     if not isinstance(version, str) or not isinstance(zones, dict):
         raise ValueError('Topology reply has no version or zones')
+    if isinstance(checks, bool) or not isinstance(checks, int) or checks < 0:
+        raise ValueError(f'Topology reply checks must be a whole number (given {checks!r})')
     try:
         return TopologyReply(version, {zone: Entry(zone, _whole(entry['target'], 'target'),
                                                    _whole(entry['seen'], 'seen'))
-                                       for zone, entry in zones.items()})
+                                       for zone, entry in zones.items()}, checks)
     except (KeyError, TypeError) as error:
         raise ValueError(f'Topology reply entry is malformed ({error})') from error

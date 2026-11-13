@@ -230,6 +230,16 @@ seed's R-ID each came from. R1, R4, R5 and R6 are amended by the maintainer ruli
   `demand.scheduler_group`) stays honest only through its equivalence test, which runs in P1's
   verify.
 
+**Ruled at review cycle 1** (2026-11-13):
+
+- **2026-11-13 — A superseded relay's clients stop counting against its site** (maintainer ruling
+  at review cycle 1, RV2; refines the Q2 ruling and R4, which stand). Once a newer relay instance
+  holds a site, the clients the superseded instance last advertised no longer count against that
+  site, so a relay restarted after a crash is planned at once instead of waiting out its
+  predecessor's eviction. If the older relay was in fact still alive, its clients over-provision
+  the site briefly and retire by idle exit, never terminated: that is accepted, consistent with the
+  "nothing terminates a client; differences work themselves out" ruling above.
+
 **Drift since the seed was written** (re-confirmed against `develop` `22684fd`, with relay #82 and
 Z3 #99 landed; scope holds):
 

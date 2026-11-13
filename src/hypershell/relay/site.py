@@ -29,9 +29,10 @@ The relay owns the clients it launches: `end_site_clients` ends any still runnin
 
 Every fleet's autoscaler is a `SiteScaler`. Against an upstream server that publishes a site topology
 (a server autoscaling with relay sites), it follows its zone's entry there: at each new version it
-launches what the server asks for beyond what it already counted, and nothing more. It never
-replaces a client that exits by itself and never ends one, so a lowered target, or a target of zero,
-takes effect as the zone's clients exit when idle. Without a topology it is the fixed fleet above.
+launches what the server asks for beyond what it already counted, and nothing more. It replaces a
+client that exits only when the server still asks for it, and never ends one, so a lowered target,
+or a target of zero, takes effect as the zone's clients exit when idle. Without a topology it is the
+fixed fleet above.
 Every launch names its zone to the launcher (`{zone}` and `HYPERSHELL_ZONE`), in both modes.
 
 Example:
@@ -200,12 +201,16 @@ class TopologyView:
     None until the relay reads one, and again whenever the upstream server publishes none (an
     earlier release, or a server not autoscaling with relay sites). A failed read leaves it as it
     was, so an outage never moves the relay's fleets between modes.
+
+    Each read is stamped with `beat_at`, the time (monotonic) the heartbeat sent just before it was
+    built, so a fleet can tell a read that follows a beat reporting its clients from one that does not.
     """
 
     def __init__(self: TopologyView, reply: Optional[TopologyReply] = None) -> None:
         """Initialize with nothing read."""
         self._lock = threading.Lock()
         self._reply = reply
+        self._beat_at = time.monotonic()
 
     @property
     def reply(self: TopologyView) -> Optional[TopologyReply]:
@@ -213,10 +218,22 @@ class TopologyView:
         with self._lock:
             return self._reply
 
-    def set(self: TopologyView, reply: Optional[TopologyReply]) -> None:
-        """Replace the topology with the one just read (None: none published)."""
+    @property
+    def beat_at(self: TopologyView) -> float:
+        """When the heartbeat before the last read was built (monotonic seconds)."""
+        with self._lock:
+            return self._beat_at
+
+    def set(self: TopologyView, reply: Optional[TopologyReply], beat_at: Optional[float] = None) -> None:
+        """Replace the topology with the one just read (None: none published), after a beat built at `beat_at` (now)."""
         with self._lock:
             self._reply = reply
+            self._beat_at = time.monotonic() if beat_at is None else beat_at
+
+    def read(self: TopologyView) -> Tuple[Optional[TopologyReply], float]:
+        """The topology last read and when the heartbeat before it was built, together."""
+        with self._lock:
+            return self._reply, self._beat_at
 
     def assignment(self: TopologyView, zone: str) -> Optional[Tuple[str, Entry]]:
         """The version and the entry of `zone` (a zone it does not name is assigned none); None with no topology."""
@@ -238,17 +255,23 @@ class SiteScaler(AutoScaler):
 
     One case is applied again: clients launched for a version that left before the server counted
     them (a launcher that failed, or a client that died at once) change nothing the server sees, so
-    no new version comes. While the version is unchanged, its launches are short and none of them
-    was counted (the zone has no more than `seen`), the version is applied again, at most once every
-    `RETRY_PERIODS` periods.
+    no new version comes. The version standing is no evidence of that by itself: a server that plans
+    less often than this fleet checks publishes nothing new between its checks either. So once its
+    launches are short (the zone has fewer than were launched, and no more than `seen`), the fleet
+    notes when it saw that (`short_at`), then the server's count of finished checks on the first read
+    after a beat built later (`mark`, that beat having reported the zone short). Once the server has
+    finished `RECHECKS` more checks and still publishes the same version, it has planned with that
+    report and asks for the same entry, and the version is applied again. One check is not enough:
+    it may have read the relay's beats before that one arrived.
     """
 
-    RETRY_PERIODS: Final[int] = 3
+    RECHECKS: Final[int] = 2
 
     view: Optional[TopologyView]
     applied: Optional[str]
     expected: int
-    applied_at: float
+    short_at: Optional[float]
+    mark: Optional[int]
 
     def __init__(self: SiteScaler, launch: ClientLaunch, *, view: Optional[TopologyView] = None, **options: Any) -> None:
         """Initialize as the fleet's autoscaler, following `view` when it holds a topology."""
@@ -256,11 +279,17 @@ class SiteScaler(AutoScaler):
         self.view = view
         self.applied = None
         self.expected = 0
-        self.applied_at = 0.0
+        self.short_at = None
+        self.mark = None
 
     def assignment(self: SiteScaler) -> Optional[Tuple[str, Entry]]:
         """The version and the entry of this fleet's zone, or None without a topology."""
         return None if self.view is None else self.view.assignment(self.own_zone.name)
+
+    def evidence(self: SiteScaler) -> Tuple[int, float]:
+        """The server's count of finished checks in the last read, and when the beat before that read was built."""
+        reply, beat_at = (None, 0.0) if self.view is None else self.view.read()
+        return (0 if reply is None else reply.checks), beat_at
 
     def init(self: SiteScaler) -> AutoScalerState:
         """Launch the initial clients: the topology's, or without one the fixed fleet's."""
@@ -294,7 +323,7 @@ class SiteScaler(AutoScaler):
                 return AutoScalerState.WAIT
             log.info(f'Topology {version} (zone: {self.own_zone.name}): {self.expected - launched} clients '
                      f'left before the server counted them - applying again')
-        self.applied, self.applied_at = version, time.monotonic()
+        self.applied, self.short_at, self.mark = version, None, None
         self.expected = launched + count
         log.info(f'Topology {version} (zone: {self.own_zone.name}, target: {entry.target}, seen: {entry.seen}, '
                  f'launched: {launched}) - launching {count}')
@@ -304,9 +333,19 @@ class SiteScaler(AutoScaler):
         return AutoScalerState.SCALE
 
     def uncounted(self: SiteScaler, launched: int, entry: Entry, count: int) -> bool:
-        """Whether the applied version's launches left before the server counted them, so it applies again."""
-        return (count > 0 and launched < self.expected and launched <= entry.seen
-                and time.monotonic() - self.applied_at >= self.RETRY_PERIODS * self.period)
+        """Whether the server planned again since a beat reported the applied version's launches short, still asking."""
+        if count == 0 or launched >= self.expected or launched > entry.seen:
+            self.short_at, self.mark = None, None
+            return False
+        checks, beat_at = self.evidence()
+        if self.short_at is None:
+            self.short_at = time.monotonic()
+            return False
+        if self.mark is None:
+            if beat_at > self.short_at:
+                self.mark = checks
+            return False
+        return checks >= self.mark + self.RECHECKS
 
 
 def site_scaler(machine: AutoScaler, launch: ClientLaunch, view: Optional[TopologyView]) -> SiteScaler:

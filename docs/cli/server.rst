@@ -67,7 +67,10 @@ A site whose relay is evicted drops out of the plan. Its unfinished tasks are pu
 evicted client, and under *dynamic* its share regrows at the remaining sites, one client per check.
 When two live relays advertise the same site, the one that registered last holds the site's entries
 for every zone it serves, the older one is asked for none in any zone (a zone only the older one
-serves goes to the other sites that serve it), and the server logs a warning naming both.
+serves goes to the other sites that serve it), and the server logs a warning naming both. The newer
+relay is planned on its own clients alone, so a relay restarted after a crash is planned at once
+rather than after its predecessor's eviction; if the older relay is in fact still running, its
+clients run beside the newer relay's until they leave by their idle timeout.
 
 For example, a server run in a container needs only its key and its settings in the environment:
 

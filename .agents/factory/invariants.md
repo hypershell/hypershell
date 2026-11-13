@@ -198,13 +198,17 @@ subsystems.
   nothing; it publishes. Its publisher reads the zones as above (`demand.scheduler_group`, pinned
   equal to `AutoScaler.current_group` by a test), plans per site and zone within the bounds each
   relay identity advertises on its heartbeat, and publishes a versioned topology on the dispatcher
-  (`Dispatcher.topology`) only when its entries change. It terminates nothing; it is refused with
-  `--no-db` and `--no-confirm`, since site failover rests on orphan recovery. A duplicated site is
-  held relay-wide (the relay instance that registered last holds every zone it serves; older ones
-  get zero), falling back per zone for beats with no instance key.
+  (`Dispatcher.topology`): a new version only when its entries change, and the count of checks made
+  (`checks`) at every check. It terminates nothing; it is refused with `--no-db` and
+  `--no-confirm`, since site failover rests on orphan recovery. A duplicated site is held relay-wide
+  (the relay instance that registered last holds every zone it serves, planned on its own clients
+  alone; older ones get zero and their clients no longer count against the site), falling back per
+  zone for beats with no instance key.
 - The relay's fleets reconcile a published topology and never terminate: `relay/site.py::SiteScaler`
-  applies each version once (`target - max(seen, launched)`), never replaces an exit by itself, and
-  with no topology is the fixed fleet.
+  applies each version once (`target - max(seen, launched)`), and replaces an exited client only
+  when a later version asks or when the server has finished two checks past the first topology read
+  after a beat that reported the exit and still publishes the same version (never on the relay's own
+  period alone). With no topology it is the fixed fleet.
 - `SSHCluster` shells out to the plain `ssh` binary (not paramiko; paramiko is only in
   `core/remote.py` for SFTP).
 - The relay's site fleets are launched only through `client_launch()`: every zone's by

@@ -70,7 +70,7 @@ is skipped by the parser):
 - **Recommended fix:** choose one owner. Either have `hs-release` Step 4.4 expect content changes (the current practice), and have `hs-plan` drop the man page from TECH's same-commit list; or give `hs-build` the exact regeneration commands (`sphinx-build -b man` and the three copies) and the rule that the `.TH` line is left as it is.
 - **Confidence:** med · **Effort:** small
 
-## F4 — The docs gate's `uv run --python 3.12` recreates the shared `.venv`, flipping the interpreter under every later `uv run`
+## F4 — The docs gate's `uv run --python 3.12` recreates the shared `.venv`, flipping the interpreter under every later `uv run` · seen again (review cycle 1 remediation: the retuned P4 verify still carries it; run with its own `UV_PROJECT_ENVIRONMENT`)
 `origin=hs-build:P3 severity=low category=tooling status=open target=.agents/factory/templates/TECH.md`
 - **What happened:** the docs gate (`uv run --python 3.12 --group docs sphinx-build …`, the P4 verify's last step, also used to check P3's docs) removed and recreated the worktree's `.venv` under CPython 3.12 while the project venv was 3.15. A pytest run sharing that venv then failed `test_main::test_version` (its `hs --version` subprocess reported 3.12), and every later `uv run` in the worktree stays on 3.12 until someone runs `uv sync --python <default>`.
 - **Skill cause:** the verify template pins the docs build to another interpreter in the same project environment, with no note that it replaces `.venv`; a phase that runs the docs gate and then its tests (or the next phase's) silently changes the interpreter under test.
@@ -97,3 +97,10 @@ is skipped by the parser):
 - **Skill cause:** the drift line is drawn at the shaping commit, not the first build commit, so every cycle whose gates record rulings trips it.
 - **Recommended fix:** surface only `GOAL.md` commits after the first `hs-build` commit; list earlier gate commits in `REVIEW.md`'s pre-flight without stopping.
 - **Confidence:** high · **Effort:** small
+
+## F8 — Remediation mode gives no order for proving a fix red on the reviewed head, though drives run the worktree's own source
+`origin=hs-build:remediation severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** review cycle 1 asked for tests that go red on the reviewed head and green after. The process-level checks (drive modes, server and relay subprocesses) import the worktree's `src/`, so the red run had to come before any source edit and finish before it: a drive still running launches new relays and site clients mid-run, which would load the edited code. The ordering (tests and drive modes first, red run, then source) was set by hand.
+- **Skill cause:** Step 1's remediation mode says to reopen phases and fix, with no step for demonstrating each finding red before the fix, nor a note that the worktree's source is live for every process a drive starts.
+- **Recommended fix:** add to remediation mode: write the finding's tests and drive checks first, run them against the unchanged source (wait for every background drive to finish), record the red result in `TECH.md`, then edit the source.
+- **Confidence:** med · **Effort:** small

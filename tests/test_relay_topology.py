@@ -14,7 +14,7 @@ with no topology it is the fixed fleet the relay always ran. Every launch names 
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 # Standard libs
 import os
@@ -25,8 +25,10 @@ import time
 import signal
 import subprocess
 from pathlib import Path
+from contextlib import contextmanager
 from queue import Queue
 from types import SimpleNamespace
+from dataclasses import replace
 
 # External libs
 import pytest
@@ -44,6 +46,7 @@ from hypershell.cluster.launch import AUTH_ENV, ZONE_ENV
 from hypershell.cluster.remote import AutoScaler, AutoScalerState, AutoScalerPhase
 from hypershell.cluster.demand import ZoneRef
 from hypershell.relay import RelayThread, RelayApp, zone_bounds
+from hypershell.relay import site as site_module
 from hypershell.relay.site import (site_cluster, zone_launch, zone_fleet, fence_site, TopologyView, SiteScaler,
                                    launched_now)
 from hypershell.relay.upstream import UpstreamHeartbeat, HeartbeatState, upstream_identity
@@ -207,28 +210,76 @@ def test_site_scaler_does_not_replace_exits_and_follows_new_versions() -> None:
 
 
 @mark.unit
-def test_site_scaler_applies_again_when_its_launches_left_uncounted() -> None:
-    """Clients that left before the server counted them change no version, so after a grace of
-    periods the same version is applied again; clients the server counted are never replaced."""
+def test_site_scaler_does_not_take_a_slow_server_for_uncounted_exits(monkeypatch) -> None:
+    """Clients that leave while the server has not planned again are not replaced, however long its
+    period: the same version standing is no evidence that they left before the server counted them."""
+    view = view_of('s:1', cpu=(2, 0))
+    machine, launch = scaler(view)
+    machine.phase = AutoScalerPhase.STEADY
+    assert apply_once(machine) == 2
+    for proc in launch.started:
+        proc.exit()  # Counted on the relay's beats, then idle; the server's next check is far off.
+    now = [time.monotonic()]
+    monkeypatch.setattr(site_module, 'time', SimpleNamespace(monotonic=lambda: now[0], time=time.time,
+                                                             sleep=time.sleep))
+    for _ in range(10):
+        now[0] += 10 * machine.period  # Many relay periods, and no new plan from the server.
+        assert apply_once(machine) == 0
+    assert len(launch.started) == 2
+
+
+@mark.unit
+def test_site_scaler_applies_again_once_the_server_planned_again() -> None:
+    """A version whose launches left before the server counted them is applied again only once the
+    server has planned twice since a beat that reported them gone, and still asks for them."""
     view = view_of('s:1', cpu=(1, 0))
     machine, launch = scaler(view)
     machine.phase = AutoScalerPhase.STEADY
     assert apply_once(machine) == 1
     launch.started[0].exit()  # Before any beat counted it: the server still plans target 1, seen 0.
-    assert apply_once(machine) == 0  # Within the grace.
-    machine.applied_at -= machine.RETRY_PERIODS * machine.period
+    assert apply_once(machine) == 0  # Seen short; no beat has reported it yet.
+    reply = TopologyReply('s:1', {'cpu': Entry('cpu', 1, 0)}, checks=4)
+    view.set(reply, beat_at=time.monotonic() + 1)  # Read after a beat that reported the exit.
+    assert apply_once(machine) == 0
+    view.set(replace(reply, checks=5), beat_at=time.monotonic() + 1)
+    assert apply_once(machine) == 0  # One check may have read the registry before that beat.
+    view.set(replace(reply, checks=6), beat_at=time.monotonic() + 1)
     assert apply_once(machine) == 1 and len(launch.started) == 2
+    view.set(replace(reply, checks=9), beat_at=time.monotonic() + 1)
     assert apply_once(machine) == 0  # Running again: nothing more.
-    counted = view_of('s:2', cpu=(2, 2))
-    machine.view = counted
-    machine.clients = []
-    for _ in range(2):
-        machine.actuator.launch_one()
+
+
+@mark.unit
+def test_site_scaler_counts_only_checks_after_the_beat_that_reported_the_exit() -> None:
+    """Checks the relay read from a beat sent before it saw the exit are not evidence, however many."""
+    view = view_of('s:1', cpu=(1, 0))
+    machine, launch = scaler(view)
+    machine.phase = AutoScalerPhase.STEADY
+    assert apply_once(machine) == 1
+    before = time.monotonic() - 1
+    launch.started[0].exit()
     assert apply_once(machine) == 0
-    for proc in machine.clients:
-        proc.exit()  # Counted by the server, then idle: never replaced.
-    machine.applied_at -= machine.RETRY_PERIODS * machine.period
+    for checks in range(1, 20):
+        view.set(TopologyReply('s:1', {'cpu': Entry('cpu', 1, 0)}, checks=checks), beat_at=before)
+        assert apply_once(machine) == 0
+
+
+@mark.unit
+def test_site_scaler_follows_a_new_version_over_applying_again() -> None:
+    """A new version read while launches are short is applied as any other: a lowered target replaces nothing."""
+    view = view_of('s:1', cpu=(2, 0))
+    machine, launch = scaler(view)
+    machine.phase = AutoScalerPhase.STEADY
+    assert apply_once(machine) == 2
+    for proc in launch.started:
+        proc.exit()
     assert apply_once(machine) == 0
+    view.set(TopologyReply('s:2', {'cpu': Entry('cpu', 0, 2)}, checks=1), beat_at=time.monotonic() + 1)
+    assert apply_once(machine) == 0
+    for checks in range(2, 6):
+        view.set(TopologyReply('s:2', {'cpu': Entry('cpu', 0, 2)}, checks=checks), beat_at=time.monotonic() + 1)
+        assert apply_once(machine) == 0
+    assert len(launch.started) == 2
 
 
 @mark.unit
@@ -430,12 +481,15 @@ def published(*entries: Tuple[str, Entry], version: str = 's:1') -> str:
 
 @mark.unit
 def test_fetch_sets_the_view(caplog) -> None:
-    """The reply read after a beat is the view: entries by zone, a null version as none."""
+    """The reply read after a beat is the view, stamped with the time that beat was built: entries by zone,
+    a null version as none."""
     dispatcher = Dispatcher(published((CPU_ID, Entry('cpu', 2, 0))))
     view = TopologyView()
     machine, link = relay_heartbeat(dispatcher, view=view)
     with caplog.at_level('INFO', logger='hypershell.relay.upstream'):
+        before = time.monotonic()
         machine.submit()
+        assert before <= view.beat_at <= time.monotonic()
         assert view.assignment('cpu') == ('s:1', Entry('cpu', 2, 0))
         assert view.assignment('gpu') == ('s:1', Entry('gpu', 0, 0))
         assert json.loads(dispatcher.requests[0]) == {'protocol': 1, 'site': 'A', 'identities': [CPU_ID, GPU_ID]}
@@ -553,29 +607,27 @@ def stop(proc: subprocess.Popen) -> None:
             pass
 
 
-@mark.integration
-def test_relay_follows_a_server_autoscaling_with_sites(temp_site: Path, tmp_path: Path) -> None:
-    """A relay serving two zones registers both upstream; work in one zone launches clients only there,
-    as many as that zone's advertised `init`, and nothing is ended."""
+@contextmanager
+def server_and_relay(tmp_path: Path, recorder: str, tables: str, *zones: str,
+                     server_args: Tuple[str, ...] = ('--autoscaling=fixed', '-P', '1'),
+                     relay_env: Optional[Dict[str, str]] = None) -> Iterator[SimpleNamespace]:
+    """An `hs server` autoscaling with sites and one `hs relay` at site A serving `zones`, each a process
+    in its own group, the relay launching through the shell script `recorder` (given the launch log)
+    with the zone tables `tables` and any more of its environment in `relay_env`; both are stopped on exit."""
     port = free_port()
     env = {**os.environ, 'HYPERSHELL_SERVER_AUTH': SERVER_KEY, 'HYPERSHELL_SERVER_EVICT': '30'}
-    subprocess.run(['hs', 'submit', '--zone', 'cpu', '-'], input=b'echo 1\necho 2\necho 3\n', env=env, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    server_log = tmp_path / 'server.log'
-    with open(server_log, 'w') as stream:
-        server = subprocess.Popen(['hs', 'server', '--autoscaling=fixed', '-P', '1', '--no-tls',
-                                   '-H', '127.0.0.1', '-p', str(port)], env=env, stdout=subprocess.DEVNULL,
-                                  stderr=stream, start_new_session=True)
-    relay = None
+    run = SimpleNamespace(env=env, server_log=tmp_path / 'server.log', relay_log=tmp_path / 'relay.log',
+                          launches=tmp_path / 'launches.txt', server=None, relay=None)
+    with open(run.server_log, 'w') as stream:
+        run.server = subprocess.Popen(['hs', 'server', *server_args, '--no-tls', '-H', '127.0.0.1', '-p', str(port)],
+                                      env=env, stdout=subprocess.DEVNULL, stderr=stream, start_new_session=True)
     try:
-        launches = tmp_path / 'launches.txt'
-        recorder = tmp_path / 'record.sh'
-        recorder.write_text(RECORDER)
+        script = tmp_path / 'record.sh'
+        script.write_text(recorder)
         config = tmp_path / 'relay.toml'
-        config.write_text(f'[relay]\nsite = "A"\nlauncher = "sh {recorder} {launches}"\n'
-                          f'[relay.zone.cpu]\ninit = 2\nmax = 3\n[relay.zone.gpu]\nmax = 2\n')
+        config.write_text(f'[relay]\nsite = "A"\nlauncher = "sh {script} {run.launches}"\n{tables}')
         (tmp_path / 'relay-site').mkdir()
-        relay_env = {**{k: v for k, v in os.environ.items() if k != 'HYPERSHELL_DATABASE_FILE'},
+        relay_env = {**{k: v for k, v in os.environ.items() if k != 'HYPERSHELL_DATABASE_FILE'}, **(relay_env or {}),
                      'HYPERSHELL_SITE': str(tmp_path / 'relay-site'),
                      'HYPERSHELL_CONFIG_FILE': str(config),
                      'HYPERSHELL_RELAY_DATABASE': str(tmp_path / 'relay.db'),
@@ -584,23 +636,68 @@ def test_relay_follows_a_server_autoscaling_with_sites(temp_site: Path, tmp_path
                      'HYPERSHELL_RELAY_UPSTREAM_AUTH': SERVER_KEY,
                      'HYPERSHELL_RELAY_UPSTREAM_TLS_ENABLED': 'false',
                      'HYPERSHELL_RELAY_UPSTREAM_HEARTRATE': '1'}
-        relay_log = tmp_path / 'relay.log'
-        with open(relay_log, 'w') as stream:
-            relay = subprocess.Popen(['hs', 'relay', '--zone', 'cpu', '--zone', 'gpu',
-                                      '--bind', '127.0.0.1', '--port', str(free_port())],
-                                     env=relay_env, stdout=subprocess.DEVNULL, stderr=stream, start_new_session=True)
+        zone_args = [arg for zone in zones for arg in ('--zone', zone)]
+        with open(run.relay_log, 'w') as stream:
+            run.relay = subprocess.Popen(['hs', 'relay', *zone_args, '--bind', '127.0.0.1', '--port', str(free_port())],
+                                         env=relay_env, stdout=subprocess.DEVNULL, stderr=stream,
+                                         start_new_session=True)
+        yield run
+    finally:
+        if run.relay is not None:
+            stop(run.relay)
+        stop(run.server)
+
+
+def launched_zones(run: SimpleNamespace) -> List[str]:
+    """The zone of each launch the recorder logged, in order."""
+    return [line.split()[0] for line in run.launches.read_text().splitlines()] if run.launches.exists() else []
+
+
+@mark.integration
+def test_relay_follows_a_server_autoscaling_with_sites(temp_site: Path, tmp_path: Path) -> None:
+    """A relay serving two zones registers both upstream; work in one zone launches clients only there,
+    as many as that zone's advertised `init`, and nothing is ended."""
+    subprocess.run(['hs', 'submit', '--zone', 'cpu', '-'], input=b'echo 1\necho 2\necho 3\n',
+                   env={**os.environ, 'HYPERSHELL_SERVER_AUTH': SERVER_KEY}, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    tables = '[relay.zone.cpu]\ninit = 2\nmax = 3\n[relay.zone.gpu]\nmax = 2\n'
+    with server_and_relay(tmp_path, RECORDER, tables, 'cpu', 'gpu') as run:
         registered = re.compile(r'Relay site registered \(site: A, zone: (\w+), min: 0, init: [02], max: [23],')
-        wait_for(lambda: set(registered.findall(server_log.read_text())) == {'cpu', 'gpu'}, 'both zones registered')
-        wait_for(lambda: launches.exists() and len(launches.read_text().splitlines()) >= 2, 'two cpu launches')
+        wait_for(lambda: set(registered.findall(run.server_log.read_text())) == {'cpu', 'gpu'},
+                 'both zones registered')
+        wait_for(lambda: len(launched_zones(run)) >= 2, 'two cpu launches')
         time.sleep(4)  # Later versions launch no more: the fixed policy holds the zone at its init.
-        zones = [line.split()[0] for line in launches.read_text().splitlines()]
+        zones = launched_zones(run)
         assert zones == ['cpu', 'cpu'], zones
-        text = relay_log.read_text()
+        text = run.relay_log.read_text()
         assert 'Upstream server publishes a topology' in text
         assert re.search(r'Topology \S+ \(zone: cpu, target: 2, seen: 0, launched: 0\) - launching 2', text)
         assert 'Terminating site client' not in text
-        assert relay.poll() is None and server.poll() is None
-    finally:
-        if relay is not None:
-            stop(relay)
-        stop(server)
+        assert run.relay.poll() is None and run.server.poll() is None
+
+
+# A launcher whose client is gone at once, before any beat can count it.
+VANISHING = '''\
+#!/bin/sh
+log=$1
+shift
+printf '%s %s\\n' "${HYPERSHELL_ZONE:--}" "$$" >> "$log"
+exit 0
+'''
+
+
+@mark.integration
+def test_relay_launches_again_while_the_server_asks(temp_site: Path, tmp_path: Path) -> None:
+    """Clients that leave at once are launched again while the server still asks for one: through a new
+    version when a beat counted them, or, when none did, through the same version applied again once the
+    server has planned since the relay reported them gone. Which path a launch takes depends on whether a
+    beat caught the client running; the unit tests above pin the second."""
+    subprocess.run(['hs', 'submit', '--zone', 'cpu', '-'], input=b'echo 1\n',
+                   env={**os.environ, 'HYPERSHELL_SERVER_AUTH': SERVER_KEY}, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with server_and_relay(tmp_path, VANISHING, '[relay.zone.cpu]\nmax = 1\n', 'cpu',
+                          relay_env={'HYPERSHELL_AUTOSCALE_PERIOD': '1'}) as run:
+        wait_for(lambda: len(launched_zones(run)) >= 3, 'a third launch', deadline=60)
+        assert set(launched_zones(run)) == {'cpu'}
+        assert 'Terminating site client' not in run.relay_log.read_text()
+        assert run.relay.poll() is None and run.server.poll() is None

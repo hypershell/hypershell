@@ -10,8 +10,8 @@
 #
 #   .agents/factory/bin/temp_site.sh sh "$PWD/spec/relay-topology/drive/topology_drive.sh" MODE
 #
-# The server evicts after 10 s and checks every second; the relays beat every second, check their
-# fleets every second, and their site clients exit after 2 idle seconds.
+# The server evicts after 10 s and checks every second (except as noted); the relays beat every
+# second, check their fleets every second, and their site clients exit after 2 idle seconds.
 #
 # Modes (tasks sleep one second unless noted):
 #   spread  cpu, highmem and gpu work in group 0; cpu demand (40 tasks) exceeds one site's max (2)
@@ -22,6 +22,12 @@
 #           relay B is killed (SIGKILL, then its site clients) once 10 tasks are complete
 #   lower   A runs with cpu max 3 and 60 cpu tasks; a second relay A2 for the same site A, with
 #           cpu max 1, starts once A has 3 clients (its launches are recorded as site A2)
+#   stale   the server checks every 20 s, 20 times the relay's period; relay A alone, cpu init 2 and
+#           max 2, and no work: the server's silence between checks must not read as clients that
+#           left before it counted them
+#   bounce  relay A alone, cpu max 2, 40 cpu tasks of 2 seconds, eviction after 30 s; once A runs 2
+#           clients it is killed (SIGKILL, then its site clients) and restarted at once as A2 (site A,
+#           the same bounds, its own relay database; launches recorded as site A2)
 #
 # Checks, all modes: every task completes once and none fails; every launch names one zone alike
 # in {zone}, HYPERSHELL_ZONE and --zone; no site's zone ever runs more clients than its max; no
@@ -32,7 +38,11 @@
 # connected (no relay identity leaves or is evicted) until drained. Kill: A launches no cpu client
 # before B's eviction and launches cpu clients after it; B's orphaned tasks are reverted. Lower:
 # the server warns naming both relays of site A; A launches nothing after that; each of A's
-# clients ends by idle exit; A2 never runs more than one client.
+# clients ends by idle exit; A2 never runs more than one client, and launches within a few periods
+# of the warning (A's clients no longer count against the site). Stale: once A's clients have left
+# and the server has checked again, A has launched exactly its init (2), and never applied a version
+# again. Bounce: the server warns naming both relays of site A; A2 launches within 10 s of its start
+# and before A's eviction; A's orphaned tasks are reverted at its eviction.
 #
 # Settings: TD_DEADLINE, seconds each wait is bounded by (default 180). TD_EVIDENCE, a directory:
 # when set, the launch log, the server's and relays' topology lines and the checks are written to
@@ -113,7 +123,7 @@ start_relay() {
 }
 
 # Workload and settings per mode.
-distribution=spread sites= factor=1
+distribution=spread sites= factor=1 period=1 evict=10 dead=
 a_bounds='[relay.zone.cpu]\nmax = 2\n[relay.zone.highmem]\nmax = 2\n'
 b_bounds='[relay.zone.cpu]\nmax = 2\n[relay.zone.gpu]\nmax = 2\n'
 case $mode in
@@ -124,20 +134,25 @@ case $mode in
         submit cpu 0 cpu 20 1; submit gpu 1 gpu 4 1; submit highmem 1 highmem 4 1 ;;
     idle) submit cpu 0 cpu 6 1; submit highmem 0 highmem 2 1; submit gpu 0 gpu 2 1 ;;
     kill)
-        sites=B distribution=fill factor=10
+        sites=B distribution=fill factor=10 dead=B
         a_bounds='[relay.zone.cpu]\nmax = 3\n[relay.zone.highmem]\nmax = 1\n'
         b_bounds='[relay.zone.cpu]\nmax = 20\n[relay.zone.gpu]\nmax = 1\n'
         submit cpu 0 cpu 40 2 ;;
     lower)
         a_bounds='[relay.zone.cpu]\nmax = 3\n'
         submit cpu 0 cpu 60 1 ;;
-    *) echo "usage: topology_drive.sh spread|fill|floor|idle|kill|lower" >&2; exit 2 ;;
+    stale) period=20 a_bounds='[relay.zone.cpu]\ninit = 2\nmax = 2\n' ;;
+    bounce)
+        evict=30 dead=A
+        a_bounds='[relay.zone.cpu]\nmax = 2\n'
+        submit cpu 0 cpu 40 2 ;;
+    *) echo "usage: topology_drive.sh spread|fill|floor|idle|kill|lower|stale|bounce" >&2; exit 2 ;;
 esac
 total=$("$HS" list --count)
 
-env HYPERSHELL_SERVER_AUTH="$key" HYPERSHELL_SERVER_EVICT=10 HYPERSHELL_LOGGING_LEVEL=DEBUG HYPERSHELL_LOGGING_STYLE=system \
+env HYPERSHELL_SERVER_AUTH="$key" HYPERSHELL_SERVER_EVICT="$evict" HYPERSHELL_LOGGING_LEVEL=DEBUG HYPERSHELL_LOGGING_STYLE=system \
     HYPERSHELL_AUTOSCALE_DISTRIBUTION="$distribution" HYPERSHELL_AUTOSCALE_SITES="$sites" \
-    "$HS" server --autoscaling=dynamic -P 1 -F "$factor" --no-tls -H 127.0.0.1 -p "$port" 2> server.log &
+    "$HS" server --autoscaling=dynamic -P "$period" -F "$factor" --no-tls -H 127.0.0.1 -p "$port" 2> server.log &
 server=$!
 started="$started $server"
 
@@ -159,7 +174,7 @@ wait_registered() {  # SITE
 }
 
 # B registers first, so the preference order of fill (B, then A) holds from the first plan.
-if [ "$mode" = lower ]; then
+if [ "$mode" = lower ] || [ "$mode" = stale ] || [ "$mode" = bounce ]; then
     start_relay A A A cpu "$a_bounds"
 else
     start_relay B B B 'cpu gpu' "$b_bounds"
@@ -187,7 +202,29 @@ alive_count() {  # LABEL ZONE
 remaining() { "$HS" list --remaining --count 2>/dev/null || echo '?'; }
 completed() { "$HS" list --completed --count 2>/dev/null || echo 0; }
 
-killed_at= warned_at= evicted_at=
+killed_at= warned_at= evicted_at= restarted_at=
+if [ "$mode" = stale ]; then
+    # Nothing to run: wait for A's launch, for its clients to leave, then for the server's next check.
+    waited=0
+    until [ -s "$log" ] && [ "$(alive_count A cpu)" = 0 ]; do
+        sample
+        waited=$((waited + 1))
+        if [ "$waited" -ge "$deadline" ]; then echo "FAIL A never launched, or its clients never left" >> "$checks"; status=1; break; fi
+        sleep 1
+    done
+    left_at=$(date +%s)
+    seen=$(grep -c 'Autoscale check (zone: cpu' server.log || true)
+    echo "A's clients left at $left_at, after $seen server checks" >> "$checks"
+    waited=0
+    while [ "$(grep -c 'Autoscale check (zone: cpu' server.log || true)" -le "$seen" ]; do
+        sample
+        waited=$((waited + 1))
+        if [ "$waited" -ge "$deadline" ]; then echo "FAIL the server never checked again" >> "$checks"; status=1; break; fi
+        sleep 1
+    done
+    sleep 3  # The relay reads and applies what that check published.
+    echo "the server checked again at $(date +%s)" >> "$checks"
+fi
 waited=0
 while [ "$(remaining)" != 0 ]; do
     sample
@@ -202,6 +239,25 @@ while [ "$(remaining)" != 0 ]; do
             if [ -n "$killed_at" ] && [ -z "$evicted_at" ] && grep -q 'Reverting orphaned tasks' server.log; then
                 evicted_at=$(logged_at 'Evicting client')
                 echo "B evicted at $evicted_at (orphaned tasks reverted)" >> "$checks"
+            fi
+            ;;
+        bounce)
+            if [ -z "$killed_at" ] && [ "$(alive_count A cpu)" -ge 2 ]; then
+                kill -KILL "$relay_A" 2>/dev/null || true
+                killed_at=$(date +%s)
+                for pid in $(sed -n 's/.* site=A pid=\([0-9]*\) .*/\1/p' "$log"); do kill -KILL "$pid" 2>/dev/null || true; done
+                echo "killed relay A at $killed_at" >> "$checks"
+                start_relay A2 A A2 cpu "$a_bounds"
+                restarted_at=$(date +%s)
+                echo "restarted as A2 at $restarted_at" >> "$checks"
+            fi
+            if [ -n "$killed_at" ] && [ -z "$warned_at" ] && grep -q 'advertised by two relays' server.log; then
+                warned_at=$(logged_at 'advertised by two relays')
+                echo "duplicate warning logged at $warned_at" >> "$checks"
+            fi
+            if [ -n "$killed_at" ] && [ -z "$evicted_at" ] && grep -q 'Reverting orphaned tasks' server.log; then
+                evicted_at=$(logged_at 'Evicting client')
+                echo "A evicted at $evicted_at (orphaned tasks reverted)" >> "$checks"
             fi
             ;;
         lower)
@@ -265,11 +321,11 @@ relays_alive=0
 for name in A B A2; do
     eval "pid=\${relay_$name:-}"
     [ -z "$pid" ] && continue
-    [ "$mode" = kill ] && [ "$name" = B ] && continue
+    [ "$name" = "$dead" ] && continue
     kill -0 "$pid" 2>/dev/null || relays_alive=1
 done
 check 'every live relay still runs after its clients left' "$relays_alive"
-if [ "$mode" != kill ]; then
+if [ -z "$dead" ]; then
     check 'no relay identity left or was evicted while running' \
         "$(holds sh -c '! grep -qE "Relay site left|Evicting client" server.log')"
 fi
@@ -283,7 +339,7 @@ drained=0
 for name in A B A2; do
     eval "pid=\${relay_$name:-}"
     [ -z "$pid" ] && continue
-    [ "$mode" = kill ] && [ "$name" = B ] && continue
+    [ "$name" = "$dead" ] && continue
     waited=0
     while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
     if kill -0 "$pid" 2>/dev/null; then drained=1; else wait "$pid" || drained=1; fi
@@ -388,6 +444,27 @@ case $mode in
         a_idle=$(grep -c 'Autoscale client disconnected' "$work/relay-A/relay.log" || true)
         echo "A launched $a_launched; idle exits seen by A: $a_idle" >> "$checks"
         check "every one of A's clients ended by idle exit" "$(holds test "$a_idle" = "$a_launched")"
+        a2_t=$(first_t A2 cpu)
+        echo "A2's first cpu launch at ${a2_t:-none}" >> "$checks"
+        check "A2 launched within 10 s of the warning, A's clients not counted against the site" \
+            "$(holds test -n "$a2_t" -a "${a2_t:-0}" -le "$((${warned_at:-0} + 10))")"
+        ;;
+    stale)
+        a_launched=$(launches_of A cpu)
+        again=$(grep -c 'applying again' "$work/relay-A/relay.log" || true)
+        echo "A launched $a_launched (init 2); versions applied again: $again" >> "$checks"
+        check 'A launched exactly its init (2) across the server'"'"'s silence' "$(holds test "$a_launched" = 2)"
+        check 'A applied no version again' "$(holds test "$again" = 0)"
+        ;;
+    bounce)
+        check 'relay A was killed and restarted as A2' "$(holds test -n "$killed_at" -a -n "$restarted_at")"
+        check 'the server warned naming both relays of site A' "$(holds test -n "$warned_at")"
+        check "A was evicted and its orphaned tasks reverted" "$(holds test -n "$evicted_at")"
+        a2_t=$(first_t A2 cpu)
+        echo "A2's first cpu launch at ${a2_t:-none}: $((${a2_t:-0} - ${restarted_at:-0})) s after its start" >> "$checks"
+        check 'A2 launched within 10 s of its start' \
+            "$(holds test -n "$a2_t" -a "${a2_t:-0}" -le "$((${restarted_at:-0} + 10))")"
+        check "A2 launched before A's eviction" "$(holds test -n "$a2_t" -a "${a2_t:-0}" -lt "${evicted_at:-0}")"
         ;;
 esac
 

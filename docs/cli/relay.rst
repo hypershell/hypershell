@@ -61,9 +61,13 @@ Against an upstream *server* autoscaling with relay sites (:ref:`hs server --aut
 these bounds, and publishes the result. The relay reads it after every heartbeat, and once before
 its site starts, and launches what the server asks of each zone beyond what that zone already has,
 each with the zone's own launcher. It never ends a *client* to reconcile: a lowered target, or a
-target of zero, takes effect as the zone's *clients* exit after ``relay.timeout`` idle seconds, and a
-*client* that exits is launched again only if the server asks for one. With no *clients* left the
-relay stays connected, ready to grow. A raised bound lets a later plan assign more; bounds are read
+target of zero, takes effect as the zone's *clients* exit after ``relay.timeout`` idle seconds. A
+*client* that exits is launched again only when the server still asks for it: when a later plan
+does, or, while the plan stands unchanged, once the server has planned twice more since the relay's
+heartbeat reported the exit (a *client* that leaves before any heartbeat counts it changes nothing
+the server sees, so no later plan comes). A server that plans less often than the relay checks is
+never taken for one that lost count. With no *clients* left the relay stays connected, ready to
+grow. A raised bound lets a later plan assign more; bounds are read
 when the relay starts, so changing them means restarting it.
 
 Against any other upstream *server* (one not autoscaling with relay sites, or an earlier release)

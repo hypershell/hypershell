@@ -189,7 +189,8 @@ def fetched(dispatcher: Dispatcher, *identities: str) -> Dict[str, Any]:
 @mark.integration
 def test_publisher_plans_from_the_database_and_publishes_once_per_change(task_db: Engine) -> None:
     """With cpu work in group 0 and gpu work gated in group 1, the first check publishes one cpu client at the
-    first site and the gpu floor at the gpu site; the same inputs publish nothing new; a changed report does."""
+    first site and the gpu floor at the gpu site; the same inputs publish no new version, only the count of
+    checks under the same one; a changed report publishes a new version."""
     Zone.ensure('cpu')
     Zone.ensure('gpu')
     add_tasks(5, zone_id('cpu'), group=0)
@@ -204,14 +205,15 @@ def test_publisher_plans_from_the_database_and_publishes_once_per_change(task_db
     assert machine.start() is TopologyPublisherState.CHECK
     assert run_check(machine) is TopologyPublisherState.PUBLISH
     topology = dispatcher.published
-    assert topology.version.endswith(':1')
+    assert topology.version.endswith(':1') and topology.checks == 1
     assert topology.entries == {'a-cpu': Entry('cpu', 1, 0), 'b-cpu': Entry('cpu', 0, 0),
                                 'b-gpu': Entry('gpu', 1, 0), 'b-mem': Entry('highmem', 0, 0)}
     assert run_check(machine) is TopologyPublisherState.WAIT
-    assert dispatcher.published is topology
+    assert dispatcher.published == Topology(topology.version, topology.entries, checks=2)
+    assert fetched(dispatcher, 'a-cpu')['checks'] == 2
     registry.record('a-cpu', site='A', zone='cpu', bounds=BOUNDS, clients=1, host='ha')
     assert run_check(machine) is TopologyPublisherState.PUBLISH
-    assert dispatcher.published.version.endswith(':2')
+    assert dispatcher.published.version.endswith(':2') and dispatcher.published.checks == 3
     assert dispatcher.published.entries['a-cpu'] == Entry('cpu', 1, 1)
     assert fetched(dispatcher, 'b-gpu', 'b-cpu')['zones'] == {'gpu': {'target': 1, 'seen': 0},
                                                              'cpu': {'target': 0, 'seen': 0}}
@@ -233,7 +235,8 @@ def test_publisher_fills_in_the_listed_order(task_db: Engine) -> None:
 
 @mark.integration
 def test_publisher_warns_once_per_duplicate(task_db: Engine, caplog) -> None:
-    """Two live identities advertising one site's zone are named in one warning; the older gets zero."""
+    """Two live identities advertising one site's zone are named in one warning; the older gets zero, and
+    the newer is planned on its own clients (its floor here), not held back by the older's."""
     registry = SiteRegistry()
     registry.record('a1-cpu', site='A', zone='cpu', bounds=BOUNDS, clients=2, host='h1')
     registry.record('a2-cpu', site='A', zone='cpu', bounds=Bounds(min=1, max=1, init=1), clients=0, host='h2')
@@ -245,7 +248,7 @@ def test_publisher_warns_once_per_duplicate(task_db: Engine, caplog) -> None:
     warnings = [r.getMessage() for r in caplog.records if 'advertised by two relays' in r.getMessage()]
     assert len(warnings) == 1
     assert 'a1-cpu on h1' in warnings[0] and 'a2-cpu on h2' in warnings[0]
-    assert dispatcher.published.entries == {'a1-cpu': Entry('cpu', 0, 2), 'a2-cpu': Entry('cpu', 0, 0)}
+    assert dispatcher.published.entries == {'a1-cpu': Entry('cpu', 0, 2), 'a2-cpu': Entry('cpu', 1, 0)}
 
 
 @mark.integration
