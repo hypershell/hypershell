@@ -109,9 +109,11 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
   Example partitions are `cpu`, `gpu` and `himem`.
 - **The drive is laptop-scale.** No cluster, no scheduler: `spec/zone-autoscale/drive/zone_drive.sh`
   in a `temp_site`, bounded by its own poll deadline (macOS has no `timeout`).
-- **Open question Q1** (PLAN §2.5, §5) decides the own default zone's `--zone`. Until it is answered,
-  build to PLAN's reading (today's argv). If the ruling is `--zone default` always, amend P2's
-  checklist, the one assertion and the drive's founding check, and note it in the commit body.
+- **Q1, resolved 2026-11-12** (GOAL Clarifications; PLAN §2.5). The own default zone keeps today's
+  argv, with no `--zone`. Every named zone, the own named `--zone` included, gets `--zone <name>`.
+  `{zone}` and `HYPERSHELL_ZONE` are on every launch, `default` included.
+- **Plan gate:** approved by the foreman on 2026-11-12, deviation rows included. `hs-build` may start
+  P1.
 
 ## The demand / actuation seam (built in P1–P3)
 
@@ -218,7 +220,7 @@ launches are byte-identical to today. A founding-case run with the shim records 
   - `AutoScalingCluster(discover_zones=True)` builds `launch_for` with `expose_zone=True` and sets
     `self.launch = launch_for(own)`. Off, it builds today's launch verbatim.
 - [ ] `relay/site.py::site_cluster`: pass `discover_zones=False`. That is the only `relay/` edit.
-- [ ] Apply PLAN §2.5 for `--zone` (Q1 reading unless ruled otherwise).
+- [ ] Apply PLAN §2.5 for `--zone` (Q1, as resolved 2026-11-12).
 - [ ] Tests in `tests/test_cluster_launch.py`:
   - the `expose_zone` cases from PLAN §6;
   - the 2.9.0a4 contract test parametrized with `expose_zone`;

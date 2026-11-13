@@ -1,6 +1,6 @@
 # PLAN — Zone-aware autoscaling (zone, cycle 3)
 
-> **Status:** Draft for review · **Last updated:** 2026-11-12
+> **Status:** Approved at the plan gate (foreman, 2026-11-12) · **Last updated:** 2026-11-12
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
 > [`research/`](research/) (digest: [`research/00-digest.md`](research/00-digest.md)). Every design
@@ -186,11 +186,10 @@ With discovery off, it builds today's single launch verbatim (no exposure) and n
   supported client accepts; the contract test already lists `--zone`.
 - `{zone}` and `HYPERSHELL_ZONE` are set for every launch with discovery on, the own zone included.
 
-[NEEDS CLARIFICATION: R3 says the autoscaler SHALL append `--zone`. For a zone-less cluster this
-design keeps today's argv (no `--zone`) for the own default zone, because R4 and the Outcome require the
-founding case to behave exactly as today and a client without `--zone` serves the default zone. Confirm
-this reading, or rule that every launch carries `--zone`, the own default zone included
-(`--zone default`). The ruling decides one test assertion and the drive's founding check (PLAN §5 Q1).]
+**Resolved (Q1; GOAL Clarifications, "2026-11-12 — R3 and R4 at the default zone").** This is how R3
+and R4 read together. When the cluster's own zone is the default zone, its launches keep today's argv
+exactly, with no `--zone`. Every launch into a named zone, the cluster's own named `--zone` included,
+gets `--zone <name>`. `{zone}` and `HYPERSHELL_ZONE` are exposed on every launch, `default` included.
 
 ### 2.6 CLI and docs — R3, R2
 
@@ -261,7 +260,7 @@ them) and again after this design was drafted:
 
 ### Deviation justifications
 
-None bends an invariant. Two rows add complexity:
+None bends an invariant. Two rows add complexity; both were accepted as written at the plan gate (foreman, 2026-11-12):
 
 | Deviation | Why needed | Simpler alternative rejected because |
 |-----------|-----------|--------------------------------------|
@@ -289,10 +288,8 @@ None bends an invariant. Two rows add complexity:
 
 ## 5. Risks & open questions
 
-- **Q1 (gate): `--zone` for a zone-less cluster's own default zone.** See the marker in §2.5. The plan
-  proceeds on "today's argv" because it keeps the founding case exactly as today. The alternative
-  changes one assertion (`test_autoscaling_mode_keeps_every_client_option[defaults]`) and one drive
-  check, and nothing else.
+- **Q1 (resolved at the gate, 2026-11-12):** the own default zone keeps today's argv, with no `--zone`.
+  See §2.5 and the GOAL Clarifications.
 - **Pacing per zone.** One launch per zone per period means a cluster with k active zones can start up
   to k clients in one check. That is the reading of "uniform values applied independently to each
   active zone" (R4), and it is identical for one zone. Documented in `--autoscaling`.

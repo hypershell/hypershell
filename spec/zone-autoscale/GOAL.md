@@ -186,6 +186,12 @@ recorded there. Those that bear on this cycle, carried from the seed unchanged:
 - **2026-11-12 — Relay fleets: unchanged** (foreman, `hs-plan` gate). The relay's site cluster and
   its per-zone fleets keep today's behaviour; the relay's tests stay green with no behaviour change
   in `relay/`.
+- **2026-11-12 — R3 and R4 at the default zone (`--zone`)** (foreman, `hs-plan` gate, Q1). A cluster
+  whose own zone is the default zone keeps today's launched argv exactly, with no `--zone`. R4 and the
+  founding case govern there, and a client with no `--zone` is already in the default zone, so this
+  is how R3 and R4 read together, not a weaker R3. Every launch into a named zone, the cluster's own
+  named `--zone` included, gets `--zone <name>`. `{zone}` and `HYPERSHELL_ZONE` are exposed on every
+  launch, `default` included.
 
 ## Related materials
 
