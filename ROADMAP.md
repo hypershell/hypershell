@@ -466,7 +466,7 @@ known limitation.
 
 *Horizon: near-term · Depends on: — · Refs: `spec/relay-topology/` RV5 and the 2026-11-13 ruling;
 the `docs/cli/relay.rst` note it removes*
-**Seed:** [`issues/relay-superseded-instance-retire.md`](issues/relay-superseded-instance-retire.md) · *status: unshaped*
+**Seed:** [`issues/relay-superseded-instance-retire.md`](issues/relay-superseded-instance-retire.md) · *status: adopted:relay-retire*
 
 ## A drain signal can be lost while the main thread waits on its worker
 
@@ -479,7 +479,7 @@ client and server before it.
 
 *Horizon: near-term, small · Depends on: — · Refs: `tests/test_relay_db.py` (the CI hang); the
 signal-teardown seed in Part I*
-**Seed:** [`issues/main-thread-signal-wake.md`](issues/main-thread-signal-wake.md) · *status: unshaped*
+**Seed:** [`issues/main-thread-signal-wake.md`](issues/main-thread-signal-wake.md) · *status: adopted:relay-retire*
 
 ## `rotatedb` lost-update window
 

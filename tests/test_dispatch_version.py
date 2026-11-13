@@ -84,12 +84,12 @@ def ask(dispatcher, wait: float = 0.0) -> dict:
 
 @mark.unit
 def test_dispatcher_remote_surface_is_pinned() -> None:
-    """A remote client may call exactly `request`, `takes_submissions` and `topology` on the dispatcher, nothing else.
+    """A remote client may call exactly `request`, `takes_submissions`, `topology` and `handback`, nothing else.
 
     The surface is pickle-framed RPC: adding a method to it or dropping one must change this test, both
     the declared tuple and the surface a connected client is handed.
     """
-    surface = ('request', 'takes_submissions', 'topology')
+    surface = ('request', 'takes_submissions', 'topology', 'handback')
     assert DISPATCH_EXPOSED == surface
     with QueueServer(config()) as server:
         client = QueueClient(config(server.address[1]))

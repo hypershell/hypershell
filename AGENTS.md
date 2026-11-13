@@ -184,8 +184,8 @@ accept loop around the stock `multiprocessing.managers.Server` on daemon threads
 process (`core/queue.py` `_InProcessServer`), whose handler threads and the server's own threads
 share the same queue objects. That loop leans on CPython privates; `tests/test_queue.py`
 `TestPrivateInternals` pins them. Remote clients see a pinned nine-method surface (`QUEUE_EXPOSED`)
-on the queues and a pinned two-method surface (`DISPATCH_EXPOSED`: `request` and
-`takes_submissions`) on the dispatcher; `tests/test_dispatch_version.py` pins the latter, so a
+on the queues and a pinned four-method surface (`DISPATCH_EXPOSED`: `request`,
+`takes_submissions`, `topology` and `handback`) on the dispatcher; `tests/test_dispatch_version.py` pins the latter, so a
 method added to or dropped from that pickle-framed RPC surface fails a test.
 
 **Two modes change the picture — check for them before assuming DB behavior:**
@@ -430,12 +430,13 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   bounds and launched count on every heartbeat into an in-memory `SiteRegistry`; the
   `TopologyPublisher` reads zones through `demand.scheduler_group` (the same group rule, pinned by
   a test), plans with the pure `plan_sites`, and publishes a versioned topology on the dispatcher
-  (`Dispatcher.topology`, the third remotely exposed method): a new version only when its entries
+  (`Dispatcher.topology`, one of the four remotely exposed methods): a new version only when its entries
   change, and at every check the count of checks made (`checks`, under the same version otherwise).
   Duplicates are held relay-wide: per site, the relay whose instance key (its first identity, on
   every beat) registered last holds every zone it serves, planned on its own clients alone (an older
   relay's last-advertised clients do not count against the site, so a restarted relay is planned at
-  once), and every older relay there gets zero.
+  once), and every older relay there gets zero and is marked retired. A relay that has read the mark
+  says `retiring` on every beat; it never holds a site or retires another, whenever it registered.
 - The relay's fleets reconcile a published topology and never terminate: each is a
   `relay/site.py::SiteScaler` with one rule. It launches `target - max(basis, live)` (`live`: its
   zone's clients still running, never a count of launches) each time it learns a new basis, the count

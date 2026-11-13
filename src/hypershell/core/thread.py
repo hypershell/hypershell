@@ -6,14 +6,18 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Optional, Type
+from typing import Optional, Type, Final
 
 # Standard libs
 import threading
 from abc import ABC, abstractmethod
 
 # Public interface
-__all__ = ['Thread', ]
+__all__ = ['Thread', 'join_waking', 'WAKE_INTERVAL']
+
+
+WAKE_INTERVAL: Final[float] = 0.5
+"""Seconds between wakes of a main thread waiting on its worker, so a signal handler tripped by any thread runs."""
 
 
 class Thread(threading.Thread, ABC):
@@ -54,3 +58,16 @@ class Thread(threading.Thread, ABC):
         super().join(timeout=timeout)
         if self.__exception:
             raise self.__exception
+
+
+def join_waking(thread: threading.Thread, interval: float = WAKE_INTERVAL) -> None:
+    """Join `thread`, returning to the interpreter every `interval` seconds until it ends.
+
+    CPython runs a signal handler only on the main thread, and only once that thread runs bytecode
+    again; a signal taken by another thread does not wake a main thread asleep in an untimed join.
+    Waiting in bounded steps lets the handler run within `interval`, whichever thread took the signal.
+    The last step is a plain `join`, so a :class:`Thread` re-raises the failure that ended it.
+    """
+    while thread.is_alive():
+        thread.join(timeout=interval)
+    thread.join()

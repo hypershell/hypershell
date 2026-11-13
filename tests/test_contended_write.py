@@ -48,6 +48,7 @@ from sqlalchemy.engine import Engine
 from hypershell.client import ClientInfo
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
+from hypershell.core.types import to_json_type
 from hypershell.data.model import Task, CANCEL_STATUS, serialize_tasks, deserialize_tasks
 from hypershell.server import Confirm, ConfirmState, Receiver
 from tests import main_lines
@@ -360,3 +361,72 @@ def test_contended_staged_revert_keeps_cancel(contended_db, caplog: pytest.LogCa
     assert (data['schedule_time'], data['completion_time']) == (cancelled, cancelled)
     assert data['exit_status'] == CANCEL_STATUS
     assert warnings_with(caplog, 'staged revert') == []
+
+
+def test_handback_revert_matches_the_dispatch(contended_db) -> None:
+    """A relay's hand-back, naming the schedule time as the relay received it, reverts its assignment on a
+    server database, and a stamp of another dispatch reverts nothing."""
+    task_id = submit()
+    stamp = to_json_type(dispatch_one(task_id).schedule_time)
+    confirm([task_id])
+    later = to_json_type(datetime.now().astimezone() + timedelta(seconds=1))
+
+    assert Task.revert_handed_back(CLIENT[0], [(task_id, later)]) == []
+    assert row(contended_db, task_id)['schedule_time'] is not None
+    assert Task.revert_handed_back(CLIENT[0], [(task_id, stamp)]) == [task_id]
+    data = row(contended_db, task_id)
+    assert {name: data[name] for name in REVERTED} == {name: None for name in REVERTED}
+
+
+def test_contended_handback_revert_lands(contended_db) -> None:
+    """A hand-back revert that waited on the relay's own late confirmation reverts the row."""
+    task_id = submit()
+    stamp = to_json_type(dispatch_one(task_id).schedule_time)
+    holder_sql = f'UPDATE task SET client_id = CAST(:client_id AS uuid), client_host = :client_host {BY_ID}'
+
+    outcome = contend(contended_db, holder_sql, {'client_id': CLIENT[0], 'client_host': CLIENT[1], 'id': task_id},
+                      lambda: Task.revert_handed_back(CLIENT[0], [(task_id, stamp)]))
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == [task_id]
+    data = row(contended_db, task_id)
+    assert {name: data[name] for name in REVERTED} == {name: None for name in REVERTED}
+
+
+def test_contended_handback_revert_keeps_a_result(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """A hand-back revert that waited on the result of its row leaves the result, settled and not contended."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = submit()
+    copy = dispatch_one(task_id)
+    stamp = to_json_type(copy.schedule_time)
+    confirm([task_id])
+    completed = datetime.now().astimezone()
+    holder_sql = f'UPDATE task SET completion_time = :completed, exit_status = 0, duration = 2 {BY_ID}'
+
+    outcome = contend(contended_db, holder_sql, {'completed': completed, 'id': task_id},
+                      lambda: Task.revert_handed_back(CLIENT[0], [(task_id, stamp)]))
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == []
+    data = row(contended_db, task_id)
+    assert (data['schedule_time'], data['completion_time']) == (copy.schedule_time, completed)
+    assert (data['client_id'], data['exit_status']) == (CLIENT[0], 0)
+    assert warnings_with(caplog, 'hand-back') == []
+
+
+def test_contended_handback_revert_skips_another_client(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """A hand-back revert that waited on the row being confirmed to another client leaves it with that client."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = submit()
+    stamp = to_json_type(dispatch_one(task_id).schedule_time)
+    other = str(uuid.uuid4())
+    holder_sql = f'UPDATE task SET client_id = CAST(:client_id AS uuid), client_host = :client_host {BY_ID}'
+
+    outcome = contend(contended_db, holder_sql, {'client_id': other, 'client_host': 'other', 'id': task_id},
+                      lambda: Task.revert_handed_back(CLIENT[0], [(task_id, stamp)]))
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == []
+    data = row(contended_db, task_id)
+    assert data['client_id'] == other and data['schedule_time'] is not None
+    assert warnings_with(caplog, 'hand-back') == []

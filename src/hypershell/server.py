@@ -69,7 +69,7 @@ from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes, parse_time
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
 from hypershell.core.dispatch import Dispatcher
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
@@ -245,6 +245,7 @@ class Scheduler(StateMachine):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
             return SchedulerState.FINAL
         self.revert_unstaged()
+        self.revert_handed_back()
         generation, refills = self.dispatcher.refills()
         if not refills:
             self.dispatcher.wait_need(generation, timeout=DEFAULT_REMOTE_TIMEOUT)
@@ -396,6 +397,16 @@ class Scheduler(StateMachine):
             reverted = Task.revert_staged(ids)
             kept = f'; {len(ids) - reverted} left as completed, cancelled or deleted' if reverted < len(ids) else ''
             log.info(f'Reverted {reverted} staged tasks (zone has no client{kept})')
+
+    def revert_handed_back(self: Scheduler) -> None:
+        """Requeue the tasks retired relays handed back, each only while it is still that relay's assignment.
+
+        A task completed, cancelled, dispatched again or deleted since is left as it is.
+        """
+        for identity, assignments in self.dispatcher.take_handbacks():
+            reverted = len(Task.revert_handed_back(identity, assignments))
+            kept = f'; {len(assignments) - reverted} already settled' if reverted < len(assignments) else ''
+            log.info(f'Requeued {reverted} tasks handed back by relay ({identity}{kept})')
 
     @staticmethod
     def finalize() -> SchedulerState:
@@ -815,7 +826,7 @@ class HeartMonitor(StateMachine):
             return
         known = hb.uuid in self.sites
         record = self.sites.record(hb.uuid, site=hb.site, zone=hb.zone, bounds=hb.bounds,
-                                   clients=hb.clients, host=hb.host, instance=hb.instance)
+                                   clients=hb.clients, host=hb.host, instance=hb.instance, retiring=hb.retiring)
         if not known:
             log.info(f'Relay site registered (site: {record.site}, zone: {record.zone}, '
                      f'min: {record.bounds.min}, init: {record.bounds.init}, max: {record.bounds.max}, '
@@ -1373,7 +1384,7 @@ def serve_from(source: Iterable[str],
                               evict_after=evict_after,
                               tls=tls)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise
@@ -1564,7 +1575,7 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                               evict_after=evict_after,
                               tls=tls)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise

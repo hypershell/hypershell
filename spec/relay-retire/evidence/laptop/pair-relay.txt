@@ -1,0 +1,169 @@
+# retire_drive pair-relay: launches (epoch, launcher label, pid, {zone} word, HYPERSHELL_ZONE, client --zone)
+launch t=1794601821 site=A pid=11067 word=cpu env=cpu client=cpu
+launch t=1794601821 site=A pid=11072 word=cpu env=cpu client=cpu
+launch t=1794601821 site=A pid=11074 word=cpu env=cpu client=cpu
+launch t=1794601835 site=A2 pid=11222 word=cpu env=cpu client=cpu
+launch t=1794601836 site=A2 pid=11223 word=cpu env=cpu client=cpu
+launch t=1794601860 site=A2 pid=11398 word=cpu env=cpu client=cpu
+launch t=1794601868 site=A2 pid=11453 word=cpu env=cpu client=cpu
+launch t=1794601875 site=A2 pid=11495 word=cpu env=cpu client=cpu
+launch t=1794601882 site=A2 pid=11555 word=cpu env=cpu client=cpu
+launch t=1794601889 site=A2 pid=11615 word=cpu env=cpu client=cpu
+launch t=1794601913 site=A2 pid=11792 word=cpu env=cpu client=cpu
+# retire_drive pair-relay: site clients running at A and A2 (epoch A A2), every second
+1794601819 0 0
+1794601821 0 0
+1794601822 3 0
+1794601824 3 0
+1794601825 3 0
+1794601827 3 0
+1794601828 3 0
+1794601830 3 0
+1794601831 3 0
+1794601832 3 0
+1794601834 3 0
+1794601835 3 0
+1794601837 3 2
+1794601838 3 2
+1794601840 3 2
+1794601841 3 2
+1794601843 3 2
+1794601844 0 2
+1794601845 0 2
+1794601847 0 2
+1794601848 0 1
+1794601850 0 1
+1794601851 0 1
+1794601853 0 1
+1794601854 0 1
+1794601855 0 1
+1794601857 0 1
+1794601858 0 0
+1794601860 0 0
+1794601861 0 1
+1794601863 0 1
+1794601864 0 1
+1794601869 0 1
+1794601870 0 1
+1794601871 0 1
+1794601873 0 1
+1794601874 0 0
+1794601875 0 1
+1794601877 0 1
+1794601878 0 1
+1794601880 0 1
+1794601881 0 0
+1794601882 0 1
+1794601884 0 1
+1794601885 0 1
+1794601886 0 1
+1794601888 0 0
+1794601889 0 1
+1794601890 0 1
+1794601892 0 1
+1794601893 0 1
+1794601895 0 1
+1794601896 0 1
+1794601897 0 1
+1794601899 0 1
+1794601900 0 1
+1794601902 0 1
+1794601903 0 1
+1794601904 0 1
+1794601906 0 1
+1794601907 0 1
+1794601908 0 1
+1794601910 0 1
+1794601911 0 0
+1794601913 0 0
+1794601914 0 1
+1794601915 0 1
+1794601917 0 1
+1794601918 0 1
+1794601919 0 1
+1794601921 0 1
+1794601922 0 1
+1794601924 0 1
+# server: registrations, duplicates, retirements, hand-backs, departures, evictions
+2026-11-13 20:30:19.161 <host>     INFO [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.server] Relay site registered (site: A, zone: cpu, min: 0, init: 3, max: 3, clients: 0) (<host>: feeff46c-d25c-5619-8fe4-d6e79b91f326)
+2026-11-13 20:30:34.971 <host>     INFO [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.server] Relay site registered (site: A, zone: cpu, min: 0, init: 2, max: 2, clients: 0) (<host>: 28501e34-a57f-56fd-b316-ed57b34794d9)
+2026-11-13 20:30:35.253 <host>  WARNING [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.cluster] Site A advertised by two relays (older: feeff46c-d25c-5619-8fe4-d6e79b91f326 on <host>, newer: 28501e34-a57f-56fd-b316-ed57b34794d9 on <host>) - the newer holds its entries
+2026-11-13 20:30:35.253 <host>     INFO [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.cluster] Relay feeff46c-d25c-5619-8fe4-d6e79b91f326 on <host> retired at site A (held by 28501e34-a57f-56fd-b316-ed57b34794d9 on <host>)
+2026-11-13 20:31:28.436 <host>  WARNING [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.server] Evicting client (<host>: feeff46c-d25c-5619-8fe4-d6e79b91f326)
+2026-11-13 20:31:28.437 <host>  WARNING [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.server] Reverting orphaned tasks (<host>: feeff46c-d25c-5619-8fe4-d6e79b91f326)
+2026-11-13 20:31:28.440 <host>     INFO [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.server] Relay site left (site: A, zone: cpu) (<host>: feeff46c-d25c-5619-8fe4-d6e79b91f326)
+2026-11-13 20:32:06.043 <host>     INFO [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.server] Relay site left (site: A, zone: cpu) (<host>: 28501e34-a57f-56fd-b316-ed57b34794d9)
+2026-11-13 20:32:06.170 <host>  WARNING [01a1d69a-9aa0-7041-989d-d913b5c664ad] [hypershell.cluster] Site A left the topology (no live relay) - its share is planned over the remaining sites
+# relay-A: identity, topology, retirement, hand-back, staged revert, final beat, exit
+2026-11-13 20:30:19.038 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay] Upstream identity feeff46c-d25c-5619-8fe4-d6e79b91f326 for zone cpu at site A
+2026-11-13 20:30:19.047 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+2026-11-13 20:30:19.159 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:0 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-13 20:30:20.160 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:1 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-13 20:30:21.172 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:2 (zone: cpu, target: 3, seen: 0, launched: 0) - launching 3
+2026-11-13 20:30:23.226 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:3 (zone: cpu, target: 3, seen: 3, launched: 3) - launching 0
+2026-11-13 20:30:35.318 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:4 (zone: cpu, target: 0, seen: 3, launched: 3) - launching 0
+2026-11-13 20:30:38.339 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:5 (zone: cpu, target: 0, seen: 3, launched: 3) - launching 0
+2026-11-13 20:30:42.689 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.server] Reverted 2 staged tasks (zone has no client)
+2026-11-13 20:30:45.388 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:6 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-13 20:30:49.419 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:7 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-13 20:30:59.502 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:8 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-13 20:31:03.525 <host>     INFO [01a1d69a-9ad2-71c1-a8c4-82970faf53b1] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:9 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+# relay-A2: identity, topology, retirement, hand-back, staged revert, final beat, exit
+2026-11-13 20:30:34.852 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay] Upstream identity 28501e34-a57f-56fd-b316-ed57b34794d9 for zone cpu at site A
+2026-11-13 20:30:34.864 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+2026-11-13 20:30:34.974 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:3 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-13 20:30:35.983 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:4 (zone: cpu, target: 2, seen: 0, launched: 0) - launching 2
+2026-11-13 20:30:38.011 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:5 (zone: cpu, target: 2, seen: 2, launched: 2) - launching 0
+2026-11-13 20:30:46.059 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:6 (zone: cpu, target: 2, seen: 2, launched: 2) - launching 0
+2026-11-13 20:30:50.092 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:7 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+2026-11-13 20:31:00.183 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:8 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+2026-11-13 20:31:03.205 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:9 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+2026-11-13 20:31:08.228 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:10 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+2026-11-13 20:31:10.261 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:11 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+2026-11-13 20:31:15.299 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:12 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+2026-11-13 20:31:17.326 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:13 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+2026-11-13 20:31:22.357 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:14 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+2026-11-13 20:31:24.385 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:15 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+2026-11-13 20:31:29.427 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:16 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+2026-11-13 20:31:30.445 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:17 (zone: cpu, target: 1, seen: 0, launched: 1) - launching 0
+2026-11-13 20:31:31.452 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:18 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+2026-11-13 20:31:50.898 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.server] Reverted 1 staged tasks (zone has no client)
+2026-11-13 20:31:53.647 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:19 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+2026-11-13 20:31:55.676 <host>     INFO [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.site] Topology 01a1d69a-9aa0-7041-989d-d913b5c664ad:20 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+2026-11-13 20:32:04.484 <host>  WARNING [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.upstream] Drain requested - no more upstream requests
+2026-11-13 20:32:06.036 <host>    DEBUG [01a1d69a-d899-7be3-bd2c-f9b669938d6e] [hypershell.relay.upstream] Upstream heartbeat - final (28501e34-a57f-56fd-b316-ed57b34794d9)
+# retire_drive pair-relay: facts
+source_server=<repo>/src/hypershell
+source_A=<site>/base/src/hypershell
+source_A2=<repo>/src/hypershell
+source_B=<repo>/src/hypershell
+total=12
+heartrate=1
+a2_started_at=1794601834
+stranded_at=1794601864
+a_self=0
+a_stopped_at=1794601864
+a2_running=1
+drained_at=1794601924
+a2_drained=0
+completed=12
+failed=0
+# retire_drive pair-relay: judgment
+PASS every task completed (12 of 12)
+PASS no task failed
+PASS every task ran exactly once (12 runs of 12 tasks)
+PASS no relay terminated a site client
+  A: hypershell from <site>/base/src/hypershell
+  A2: hypershell from <repo>/src/hypershell
+  server: hypershell from <repo>/src/hypershell
+PASS A2 started at site A
+PASS no topology read error at A
+PASS no topology read error at A2
+PASS A did not retire (no "Superseded" line, nothing handed back)
+PASS A did not exit by itself (as today: it stays until stopped)
+PASS as today: a task stayed on A's identity > 20 s with A at zero clients (01a1d69a-98dd-7d83-adc8-f4187de64bf5)
+PASS A's identities were evicted after A was stopped (its tasks put back then)
+  A evicted 24.4s after it was stopped
+PASS no hand-back reached the server
+PASS the server (this build) marked A retired
+PASS

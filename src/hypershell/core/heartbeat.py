@@ -5,7 +5,8 @@
 
 A relay's heartbeat may also carry its `site` and its `roster`, the site clients connected to it.
 Each of a relay's zone identities may also advertise its `zone`, that zone's client `bounds` and
-`clients`, the site clients launched in it. All of these are packed only when set and read as
+`clients`, the site clients launched in it. A relay a newer relay at its site has superseded says
+it is `retiring` on every beat from then on. All of these are packed only when set and read as
 optional, so a heartbeat without them (from an earlier release, or from an ordinary client) is
 still valid, and a server that does not know them ignores them.
 """
@@ -81,6 +82,7 @@ class Heartbeat:
     bounds: Optional[Bounds] = None
     clients: Optional[int] = None
     instance: Optional[str] = None
+    retiring: bool = False
 
     @classmethod
     def new(cls: Type[Heartbeat],
@@ -93,7 +95,8 @@ class Heartbeat:
             zone: Optional[str] = None,
             bounds: Optional[Bounds] = None,
             clients: Optional[int] = None,
-            instance: Optional[str] = None) -> Heartbeat:
+            instance: Optional[str] = None,
+            retiring: bool = False) -> Heartbeat:
         """Create new instance."""
         return cls(uuid=(uuid or INSTANCE),
                    host=(host or HOSTNAME),
@@ -104,7 +107,8 @@ class Heartbeat:
                    zone=zone,
                    bounds=bounds,
                    clients=clients,
-                   instance=instance)
+                   instance=instance,
+                   retiring=retiring)
 
     def pack(self: Heartbeat) -> bytes:
         """Serialize data (each optional field only when set)."""
@@ -124,6 +128,8 @@ class Heartbeat:
             data['clients'] = self.clients
         if self.instance is not None:
             data['instance'] = self.instance
+        if self.retiring:
+            data['retiring'] = True
         return serialize(data)
 
     @classmethod
@@ -143,7 +149,8 @@ class Heartbeat:
                        zone=_text_or_none(unpacked_data.get('zone')),
                        bounds=_bounds_or_none(unpacked_data.get('bounds')),
                        clients=_count_or_none(unpacked_data.get('clients')),
-                       instance=_text_or_none(unpacked_data.get('instance')))
+                       instance=_text_or_none(unpacked_data.get('instance')),
+                       retiring=unpacked_data.get('retiring') is True)
 
 
 # An advertisement field that is not valid is read as absent, so a malformed advertisement makes

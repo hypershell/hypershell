@@ -1,0 +1,31 @@
+# retire_judge.py over a copy of the record with A's exit status set to 1 and an eviction of A added
+rehearsal-retire-broken (retire): FAIL
+  PASS record.schema: schema 1, scenario retire
+  PASS run.deadline: finished within its deadline
+  PASS run.eviction_longer: eviction 1200 s, run deadline 900 s
+  PASS tasks.complete: 12 of 12 succeeded (12 rows, 12 completed)
+  PASS tasks.failed: 0 failed
+  PASS tasks.once: 12 runs of 12 tasks; repeated [], 0 unknown
+  PASS launch.some: 6 site clients launched: A 3, A2 3
+  PASS launch.nodes: site clients on nodes [1, 2, 3] (node 0 is the server)
+  PASS launch.zone_named: 0 launches whose {zone}, HYPERSHELL_ZONE and --zone differ or are not cpu
+  PASS launch.key: 0 site clients with the upstream key in their environment
+  PASS exit.clean: 6 site clients exited by themselves with status 0, 0 otherwise
+  PASS relay.no_terminate: "Terminating site client" lines: {'A': 0, 'A2': 0}
+  PASS a2.started: A2 registered at site A at [48.311] s
+  PASS server.retired: server marked A retired at [49.105] s; 1 duplicate warnings
+  PASS retire.mark: A logged "Superseded" 1 times, first at 49.313 s
+  FAIL retire.exit: A exited by itself: True, status 1, at 166.177 s
+  FAIL retire.no_evict: 1 evictions or orphan reverts of A
+  PASS retire.final: A held 1 identities: 1 final heartbeats, the server saw 1 leave
+  PASS retire.no_launch_after_mark: 0 launches by A after the mark at 49.313 s
+  PASS a2.stayed: A2: 0 evictions, 0 departures before its drain at 261.969 s, status 0
+  PASS samples.resolution: 1031 samples, largest gap 0.265 s
+  PASS retire.no_strand: no task stayed on A > 20 s with A at no site client
+  PASS R7.available: A held 5 tasks from the mark (4 started at A, 1 unstarted); 0 unstarted never seen available; A handed back 1, the server requeued 1 at +0.105 s
+  PASS R7.bound: last unstarted task available at +0.290 s of the mark; bound 6 s (3 x heartrate 2 s) + 1 s skew allowance
+  PASS R7.requeue_logged: requeue logged at +0.105 s of the mark (bound 6 s + 1 s)
+  PASS R7.non_vacuous: A held 1 unstarted at the mark, handed back 1
+  PASS record.scrubbed: found: {'hosts': 0, 'key': 0, 'paths': 0, 'users': 0, 'uuids': 0, 'words': 0}; 0 strings with a path or other unsafe character
+retire_judge: FAIL (1 runs, 1 failed, 0 inconclusive; required but not passed: retire)
+# exit status 1

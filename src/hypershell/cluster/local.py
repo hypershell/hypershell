@@ -12,7 +12,7 @@ from typing import Iterable, IO, Optional
 import secrets
 
 # Internal libs
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.tls import TLSConfig
@@ -44,7 +44,7 @@ def run_local(*args, **kwargs) -> None:
     """
     thread = LocalCluster.new(*args, **kwargs)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise

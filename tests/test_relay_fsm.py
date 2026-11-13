@@ -7,7 +7,8 @@ The puller, the returner and the heartbeat are stepped one action at a time agai
 and run in their threads to show a stop ends them within a deadline. A halted puller stops at its
 gate: a request it has already sent is inserted and confirmed first. The relay watches its parts:
 a site or upstream thread that fails, or ends out of turn, is raised so the relay takes its failure
-path. The relay process itself is run
+path. A retired puller ends at its gate and sends no request it has not yet sent; one already sent
+when the relay retires is inserted and confirmed first. The relay process itself is run
 against a queue server in this process standing in for the upstream server, with a launcher that
 starts no site client: it registers its zone identity there, pulls nothing while it has no site
 clients, and drains on SIGUSR1; against a server without the work-request protocol it exits with the
@@ -197,6 +198,45 @@ def test_puller_halted_mid_request_inserts_and_confirms_the_reply(relay_db: Engi
     thread.start()
     assert fake.entered.wait(DEADLINE)
     thread.stop()  # The halt lands while the request is outstanding ...
+    fake.release.set()  # ... and only then does the reply arrive.
+    thread.join(timeout=DEADLINE)
+    assert not thread.is_alive()
+
+    assert store.count_backlog(relay_db) == 3 and store.count_held(relay_db) == 3
+    info = confirmed.get_nowait()
+    assert sorted(json.loads(info)['task_ids']) == sorted(record['id'] for record in records)
+    assert confirmed.empty() and len(fake.requests) == 1
+
+
+@mark.unit
+def test_puller_ends_at_the_gate_once_retired(relay_db: Engine, no_signal) -> None:
+    """A retired puller ends at its gate, and one about to send ends instead, with no request made."""
+    connect_clients(relay_db, 1)
+    for state in (PullerState.GATE, PullerState.REQUEST):
+        fake = FakeDispatcher(reply(dispatched('echo a')))
+        machine = UpstreamPuller(queue=upstream(fake), engine=relay_db, identity=upstream_identity(None),
+                                 bundlesize=1000, local_bundlesize=1, poll=POLL, retired=lambda: True)
+        if state is PullerState.REQUEST:
+            machine.size = 1
+        machine.state = state
+        machine.state = machine.next()
+        assert machine.state is PullerState.FINAL
+        assert machine.next() is PullerState.HALT
+        assert fake.requests == []
+        assert store.count_backlog(relay_db) == 0
+
+
+@mark.unit
+def test_puller_retired_mid_request_inserts_and_confirms_the_reply(relay_db: Engine, no_signal) -> None:
+    """A request outstanding when the relay retires is inserted and confirmed; then the puller ends by itself."""
+    connect_clients(relay_db, 3)
+    records = dispatched('echo a', 'echo b', 'echo c')
+    fake, confirmed, retired = HeldRequest(reply(records)), Queue(), threading.Event()
+    thread = UpstreamPullerThread(queue=upstream(fake, confirmed), engine=relay_db, identity=upstream_identity(None),
+                                  bundlesize=1000, local_bundlesize=1, poll=POLL, retired=retired.is_set)
+    thread.start()
+    assert fake.entered.wait(DEADLINE)
+    retired.set()  # The mark is read while the request is outstanding ...
     fake.release.set()  # ... and only then does the reply arrive.
     thread.join(timeout=DEADLINE)
     assert not thread.is_alive()

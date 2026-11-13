@@ -6,16 +6,20 @@
 The planner splits each zone's clients over the live relay sites that serve it, within the bounds
 each site advertises, from the zone autoscaler's own per-zone demand. Its rules are table-tested
 here with no server, relay or database; the scheduler-group helper the publisher reads its group
-through is pinned equal to the autoscaler's own rule on a real SQLite file.
+through is pinned equal to the autoscaler's own rule on a real SQLite file. The retired mark a
+superseded relay reads, and the hand-back it answers with, are tested on their own wire, including
+against the reader and writer of the build before them; so is the `retiring` field a retired relay's
+heartbeat carries, and the rule that a relay saying so never holds a site or retires another.
 """
 
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 # Standard libs
 import json
+import uuid
 from datetime import datetime
 
 # External libs
@@ -28,11 +32,14 @@ from tests.test_zone_model import task_db, add_tasks, finish  # noqa: fixture
 from tests.test_zone_autoscale import zoned_scaler, scheduled
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.topology import (Bounds, Entry, Topology, TopologyReply, SiteRecord, SiteRegistry,
-                                      TOPOLOGY_PROTOCOL, request_text, read_request, reply_text, read_topology)
+                                      TOPOLOGY_PROTOCOL, request_text, read_request, reply_text, read_topology,
+                                      error_text, MAX_HANDBACK_TASKS, MAX_HANDBACK_REQUEST, handback_text,
+                                      read_handback, handback_reply, read_handback_reply, _whole)
 from hypershell.core.types import serialize, deserialize
 from hypershell.cluster.demand import AutoScalerPolicy, ScalingKnobs, ZoneLoad, ZoneRef, scheduler_group
 from hypershell.cluster.topology import (Distribution, parse_distribution, parse_sites, SiteZone, SiteView,
-                                         Duplicate, site_views, plan_sites, entries)
+                                         Duplicate, site_views, plan_sites, entries, retired_identities,
+                                         retiring_instances)
 from hypershell.data.model import Zone, zone_id
 
 
@@ -240,10 +247,10 @@ def test_parse_distribution_and_sites() -> None:
 
 def record(identity: str, site_name: str, zone: str, clients: int, registered: int, rank: int,
            bounds: Bounds = Bounds(min=0, max=3, init=0), init_held: bool = False, host: str = 'node',
-           instance: Optional[str] = None) -> SiteRecord:
+           instance: Optional[str] = None, retiring: bool = False) -> SiteRecord:
     """One recorded advertisement."""
     return SiteRecord(identity=identity, site=site_name, zone=zone, bounds=bounds, clients=clients, host=host,
-                      registered=registered, rank=rank, init_held=init_held, instance=instance)
+                      registered=registered, rank=rank, init_held=init_held, instance=instance, retiring=retiring)
 
 
 @mark.unit
@@ -600,3 +607,356 @@ class TestSchedulerGroupEquivalence:
         add_tasks(1, group=5)
         self.assert_equal(None, attempts=2, eager=eager)
         self.assert_equal(None, attempts=1, eager=eager)
+
+
+# --- Retirement: the mark ----------------------------------------------------------------------------
+
+# (case, records, the identities retired).
+RETIRED_ROWS = [
+    ('one-relay-retires-none',
+     [record('a-cpu', 'A', 'cpu', 1, registered=0, rank=0, instance='i1'),
+      record('a-gpu', 'A', 'gpu', 0, registered=1, rank=0, instance='i1')],
+     set()),
+    ('two-relays-retire-every-identity-of-the-older',
+     [record('a1-cpu', 'A', 'cpu', 2, registered=0, rank=0, instance='i1'),
+      record('a1-mem', 'A', 'highmem', 1, registered=1, rank=0, instance='i1'),
+      record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, instance='i2')],
+     {'a1-cpu', 'a1-mem'}),
+    ('three-relays-retire-both-older',
+     [record('a1-cpu', 'A', 'cpu', 0, registered=0, rank=0, instance='i1'),
+      record('a2-cpu', 'A', 'cpu', 0, registered=3, rank=0, instance='i2'),
+      record('a2-gpu', 'A', 'gpu', 0, registered=4, rank=0, instance='i2'),
+      record('a3-cpu', 'A', 'cpu', 0, registered=7, rank=0, instance='i3')],
+     {'a1-cpu', 'a2-cpu', 'a2-gpu'}),
+    ('newest-by-first-registration',
+     [record('a1-cpu', 'A', 'cpu', 0, registered=0, rank=0, instance='i1'),
+      record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, instance='i2'),
+      record('a1-gpu', 'A', 'gpu', 0, registered=9, rank=0, instance='i1')],
+     {'a1-cpu', 'a1-gpu'}),
+    ('records-without-an-instance-are-never-retired',
+     [record('old-cpu', 'A', 'cpu', 2, registered=0, rank=0),
+      record('a1-cpu', 'A', 'cpu', 0, registered=1, rank=0, instance='i1'),
+      record('a1-gpu', 'A', 'gpu', 0, registered=2, rank=0, instance='i1'),
+      record('old-gpu', 'A', 'gpu', 0, registered=3, rank=0)],
+     set()),
+    ('mixed-sites-and-records-without-an-instance',
+     [record('a1-cpu', 'A', 'cpu', 1, registered=0, rank=0, instance='i1'),
+      record('old-cpu', 'A', 'cpu', 0, registered=1, rank=0),
+      record('b-cpu', 'B', 'cpu', 0, registered=2, rank=1, instance='j1'),
+      record('a2-cpu', 'A', 'cpu', 0, registered=4, rank=0, instance='i2'),
+      record('old-gpu', 'B', 'gpu', 0, registered=5, rank=1)],
+     {'a1-cpu'}),
+    ('no-records', [], set()),
+]
+
+
+@mark.unit
+@mark.parametrize('case, records, retired', RETIRED_ROWS, ids=[row[0] for row in RETIRED_ROWS])
+def test_retired_identities_table(case, records, retired) -> None:
+    """Every identity of every relay superseded at its site is retired, and nothing else is: one relay per
+    site, a record advertising no instance key, and the holder never are."""
+    assert retired_identities(records) == frozenset(retired)
+    holders = {dup.holder.identity for dup in site_views(records)[1]}
+    assert not holders & retired
+
+
+# (case, records, the identities retired, the holder of each held site-zone as {(site, zone): identity}).
+RETIRING_ROWS = [
+    ('a-retiring-relay-registered-later-never-retires-the-holder',
+     [record('b-cpu', 'A', 'cpu', 1, registered=0, rank=0, instance='new'),
+      record('a-cpu', 'A', 'cpu', 1, registered=1, rank=0, instance='old', retiring=True)],
+     {'a-cpu'}, {('A', 'cpu'): 'b-cpu'}),
+    ('a-retiring-relay-re-registered-after-eviction-never-retires-the-holder',
+     [record('b-cpu', 'A', 'cpu', 2, registered=3, rank=0, instance='new'),
+      record('b-gpu', 'A', 'gpu', 0, registered=4, rank=0, instance='new'),
+      record('a-cpu', 'A', 'cpu', 1, registered=9, rank=0, instance='old', retiring=True),
+      record('a-gpu', 'A', 'gpu', 0, registered=10, rank=0, instance='old', retiring=True)],
+     {'a-cpu', 'a-gpu'}, {('A', 'cpu'): 'b-cpu', ('A', 'gpu'): 'b-gpu'}),
+    ('retiring-under-one-identity-retires-every-identity',
+     [record('b-cpu', 'A', 'cpu', 0, registered=0, rank=0, instance='new'),
+      record('a-cpu', 'A', 'cpu', 0, registered=1, rank=0, instance='old', retiring=True),
+      record('a-mem', 'A', 'highmem', 0, registered=2, rank=0, instance='old')],
+     {'a-cpu', 'a-mem'}, {('A', 'cpu'): 'b-cpu'}),
+    ('a-retiring-relay-alone-holds-nothing',
+     [record('a-cpu', 'A', 'cpu', 1, registered=0, rank=0, instance='old', retiring=True),
+      record('c-cpu', 'C', 'cpu', 0, registered=1, rank=1, instance='other')],
+     {'a-cpu'}, {('C', 'cpu'): 'c-cpu'}),
+    ('two-retiring-relays-hold-nothing-and-retire-no-other',
+     [record('a1-cpu', 'A', 'cpu', 0, registered=0, rank=0, instance='i1', retiring=True),
+      record('a2-cpu', 'A', 'cpu', 0, registered=1, rank=0, instance='i2', retiring=True),
+      record('a3-cpu', 'A', 'cpu', 0, registered=2, rank=0, instance='i3')],
+     {'a1-cpu', 'a2-cpu'}, {('A', 'cpu'): 'a3-cpu'}),
+    ('a-record-without-an-instance-holds-beside-a-retiring-relay',
+     [record('old-cpu', 'A', 'cpu', 0, registered=0, rank=0),
+      record('a-cpu', 'A', 'cpu', 0, registered=1, rank=0, instance='old', retiring=True)],
+     {'a-cpu'}, {('A', 'cpu'): 'old-cpu'}),
+    # The residual case, accepted: an upstream server restarted while neither relay had read the mark has
+    # only registration order to go on, so the relay that registers first again is the one retired.
+    ('residual-restart-before-either-read-the-mark-keeps-registration-order',
+     [record('b-cpu', 'A', 'cpu', 0, registered=0, rank=0, instance='new-process'),
+      record('a-cpu', 'A', 'cpu', 0, registered=1, rank=0, instance='old-process')],
+     {'b-cpu'}, {('A', 'cpu'): 'a-cpu'}),
+]
+
+
+@mark.unit
+@mark.parametrize('case, records, retired, holders', RETIRING_ROWS, ids=[row[0] for row in RETIRING_ROWS])
+def test_a_retiring_relay_never_holds_a_site_or_retires_another(case, records, retired, holders) -> None:
+    """A relay that says it is retiring is retired again under every identity, holds no site-zone and is
+    assigned none, and causes no other relay to be retired, whenever it registered; the holder is chosen
+    among the others as before. Relays that say nothing are ordered by registration, as before."""
+    assert retired_identities(records) == frozenset(retired)
+    views, duplicates = site_views(records)
+    assert not {dup.holder.identity for dup in duplicates} & set(retired)
+    arranged = entries({site: {zone_id(zone): 3 for zone in ('cpu', 'gpu', 'highmem')} for site in 'AC'}, records)
+    held = {identity for identity, entry in arranged.items() if entry.target}
+    assert held == set(holders.values())
+    assert all(arranged[identity].target == 0 for identity in retired)
+    assert {(view.name, sz.zone.name) for view in views for sz in view.zones.values()} == set(holders)
+
+
+@mark.unit
+def test_without_the_retiring_field_relays_are_ordered_as_before() -> None:
+    """Records that never say they are retiring (a relay of an earlier release) give exactly the holders,
+    entries and retired set they gave before the field existed: the retired table's rows are unchanged."""
+    for _, records, retired in RETIRED_ROWS:
+        assert not retiring_instances(records)
+        assert retired_identities(records) == frozenset(retired)
+
+
+@mark.unit
+def test_the_registry_keeps_a_retiring_identity_retiring() -> None:
+    """Once an identity has said it is retiring it stays so recorded, even on a beat that leaves it out;
+    dropped and recorded again, it starts from what that beat says."""
+    registry = SiteRegistry()
+    bounds = Bounds(min=0, max=3, init=0)
+    assert not registry.record('a', site='A', zone='cpu', bounds=bounds, clients=0, host='h', instance='i').retiring
+    assert registry.record('a', site='A', zone='cpu', bounds=bounds, clients=0, host='h', instance='i',
+                           retiring=True).retiring
+    assert registry.record('a', site='A', zone='cpu', bounds=bounds, clients=0, host='h', instance='i').retiring
+    registry.drop('a')
+    assert not registry.record('a', site='A', zone='cpu', bounds=bounds, clients=0, host='h', instance='i').retiring
+
+
+def base_unpack_heartbeat(data: bytes) -> Optional[Heartbeat]:
+    """A beat as a server of the build before the field reads it (`Heartbeat.unpack_or_none` of fb89670)."""
+    from hypershell.core.heartbeat import RosterEntry, _text_or_none, _bounds_or_none, _count_or_none
+    unpacked_data = deserialize(data)
+    if unpacked_data is None:
+        return None
+    roster = unpacked_data.get('roster')
+    return Heartbeat(uuid=unpacked_data['uuid'],
+                     host=unpacked_data['host'],
+                     time=datetime.fromisoformat(unpacked_data['time']),
+                     state=ClientState.from_value(unpacked_data['state']),
+                     site=unpacked_data.get('site'),
+                     roster=None if roster is None else [RosterEntry.from_dict(entry) for entry in roster],
+                     zone=_text_or_none(unpacked_data.get('zone')),
+                     bounds=_bounds_or_none(unpacked_data.get('bounds')),
+                     clients=_count_or_none(unpacked_data.get('clients')),
+                     instance=_text_or_none(unpacked_data.get('instance')))
+
+
+@mark.unit
+def test_a_retiring_beat_packs_one_more_key_that_the_earlier_build_ignores() -> None:
+    """A retiring relay's beat carries `retiring: true` beside today's keys and nothing else changes; the
+    build before the field reads it as the same beat without it. A beat not retiring packs exactly as
+    before, and reads back as not retiring."""
+    now = datetime.now().astimezone()
+    fields: Dict[str, Any] = dict(uuid='r1', host='h1', time=now, site='A', zone='cpu',
+                                  bounds=Bounds(min=0, max=3, init=0), clients=1, instance='i1')
+    plain, retiring = Heartbeat.new(**fields), Heartbeat.new(**fields, retiring=True)
+    assert deserialize(retiring.pack()) == {**deserialize(plain.pack()), 'retiring': True}
+    assert 'retiring' not in deserialize(plain.pack())
+    assert base_unpack_heartbeat(retiring.pack()) == base_unpack_heartbeat(plain.pack())
+    assert Heartbeat.unpack_or_none(retiring.pack()) == retiring
+    assert Heartbeat.unpack_or_none(plain.pack()).retiring is False
+
+
+@mark.unit
+@mark.parametrize('value', [False, 1, 'true', [True], None])
+def test_only_a_true_retiring_field_counts(value) -> None:
+    """Anything but a JSON `true` under the key reads as not retiring, and the beat is read as usual."""
+    data = deserialize(Heartbeat.new(uuid='r1', site='A', zone='cpu', bounds=Bounds(min=0, max=3, init=0),
+                                     clients=0, instance='i1').pack())
+    beat = Heartbeat.unpack_or_none(serialize({**data, 'retiring': value}))
+    assert beat.retiring is False and beat.zone == 'cpu' and beat.instance == 'i1'
+
+
+def base_reply_text(topology: Optional[Topology], identities: Iterable[str]) -> str:
+    """The reply as the build before the mark wrote it (`reply_text` of fb89670, unchanged)."""
+    if topology is None:
+        return json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': None})
+    zones = {entry.zone: {'target': entry.target, 'seen': entry.seen}
+             for entry in (topology.entries.get(identity) for identity in identities) if entry is not None}
+    return json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': topology.version, 'checks': topology.checks,
+                       'zones': zones})
+
+
+def base_read_topology(text: str) -> Optional[TopologyReply]:
+    """The reply as a relay of the build before the mark reads it (`read_topology` of fb89670, unchanged)."""
+    try:
+        data = json.loads(text)
+    except (TypeError, json.JSONDecodeError) as error:
+        raise ValueError(f'Topology reply is not JSON ({error})') from error
+    if not isinstance(data, dict) or data.get('protocol') != TOPOLOGY_PROTOCOL:
+        raise ValueError(f'Topology reply is not protocol {TOPOLOGY_PROTOCOL}')
+    if 'error' in data:
+        raise ValueError(f'Topology request refused ({data.get("message")})')
+    version = data.get('version')
+    if version is None:
+        return None
+    zones, checks = data.get('zones'), data.get('checks')
+    if not isinstance(version, str) or not isinstance(zones, dict):
+        raise ValueError('Topology reply has no version or zones')
+    if isinstance(checks, bool) or not isinstance(checks, int) or checks < 0:
+        raise ValueError(f'Topology reply checks must be a whole number (given {checks!r})')
+    try:
+        return TopologyReply(version, {zone: Entry(zone, _whole(entry['target'], 'target'),
+                                                   _whole(entry['seen'], 'seen'))
+                                       for zone, entry in zones.items()}, checks)
+    except (KeyError, TypeError) as error:
+        raise ValueError(f'Topology reply entry is malformed ({error})') from error
+
+
+RETIRING = Topology('server:4', {'a1-cpu': Entry('cpu', 0, 2), 'a1-mem': Entry('highmem', 0, 1),
+                                 'a2-cpu': Entry('cpu', 3, 0), 'b-cpu': Entry('cpu', 1, 0)},
+                    checks=9, retired=frozenset({'a1-cpu', 'a1-mem'}))
+
+
+@mark.unit
+def test_reply_is_marked_only_for_a_retired_identity() -> None:
+    """The reply to a superseded relay carries a top-level `retired: true` beside its zero entries; a request
+    naming any retired identity is marked; nothing published is never marked."""
+    marked = reply_text(RETIRING, ['a1-cpu', 'a1-mem'])
+    assert json.loads(marked) == {'protocol': TOPOLOGY_PROTOCOL, 'version': 'server:4', 'checks': 9,
+                                  'zones': {'cpu': {'target': 0, 'seen': 2}, 'highmem': {'target': 0, 'seen': 1}},
+                                  'retired': True}
+    assert read_topology(marked) == TopologyReply('server:4', {'cpu': Entry('cpu', 0, 2),
+                                                               'highmem': Entry('highmem', 0, 1)},
+                                                  checks=9, retired=True)
+    assert read_topology(reply_text(RETIRING, ['a1-mem'])).retired
+    assert read_topology(reply_text(RETIRING, ['a1-cpu', 'not-known'])).retired
+    assert reply_text(Topology('server:4', {}, retired=frozenset({'x'})), ['x']).endswith('"retired": true}')
+    assert reply_text(None, ['a1-cpu']) == json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'version': None})
+    unmarked = read_topology(reply_text(RETIRING, ['a2-cpu']))
+    assert unmarked.retired is False and unmarked.assignment('cpu') == Entry('cpu', 3, 0)
+
+
+@mark.unit
+@mark.parametrize('identities', [['a2-cpu'], ['b-cpu'], ['a2-cpu', 'b-cpu'], ['nobody'], []])
+def test_reply_without_a_retired_identity_is_unchanged(identities: List[str]) -> None:
+    """A reply that names no retired identity is the same text, byte for byte, as the build before the mark
+    wrote it, and as a topology with nothing retired."""
+    text = reply_text(RETIRING, identities)
+    assert text == base_reply_text(RETIRING, identities)
+    assert text == reply_text(Topology(RETIRING.version, RETIRING.entries, checks=RETIRING.checks), identities)
+    assert 'retired' not in text
+    assert reply_text(RETIRING, iter(identities)) == text
+
+
+@mark.unit
+def test_an_older_relay_reads_a_marked_reply_as_an_unmarked_one() -> None:
+    """A relay of the build before the mark reads a marked reply exactly as the same reply without it: its own
+    zero entries, its version and its checks, with no error."""
+    marked = reply_text(RETIRING, ['a1-cpu', 'a1-mem'])
+    plain = base_reply_text(RETIRING, ['a1-cpu', 'a1-mem'])
+    assert marked != plain
+    assert base_read_topology(marked) == base_read_topology(plain)
+    assert base_read_topology(marked).assignment('cpu') == Entry('cpu', 0, 2)
+    assert read_topology(plain).retired is False
+
+
+@mark.unit
+@mark.parametrize('value', [False, 1, 'true', [True], {'retired': True}, None])
+def test_only_a_true_mark_retires(value) -> None:
+    """Anything but a JSON `true` under the key reads as not retired."""
+    data = json.loads(reply_text(RETIRING, ['a2-cpu']))
+    data['retired'] = value
+    assert read_topology(json.dumps(data)).retired is False
+
+
+# --- Retirement: the hand-back wire ------------------------------------------------------------------
+
+RELAY = str(uuid.uuid4())
+STAMP = '2026-11-13 10:15:42.123456-05:00'
+
+
+def task_ids(count: int) -> List[str]:
+    """`count` new task ids."""
+    return [str(uuid.uuid4()) for _ in range(count)]
+
+
+@mark.unit
+def test_handback_round_trips() -> None:
+    """A hand-back names the relay and each task with its schedule time as received, unchanged; the reply
+    counts what the server took back."""
+    ids = task_ids(2)
+    text = handback_text(RELAY, [(ids[0], STAMP), (ids[1], '2026-11-13T15:15:42+00:00')])
+    assert json.loads(text) == {'protocol': TOPOLOGY_PROTOCOL, 'client': RELAY,
+                                'tasks': [{'id': ids[0], 'schedule_time': STAMP},
+                                          {'id': ids[1], 'schedule_time': '2026-11-13T15:15:42+00:00'}]}
+    assert read_handback(text) == (RELAY, [(ids[0], STAMP), (ids[1], '2026-11-13T15:15:42+00:00')])
+    assert read_handback(handback_text(RELAY, [])) == (RELAY, [])
+    assert read_handback(handback_text(RELAY.upper(), [(ids[0].upper(), STAMP)])) == (RELAY, [(ids[0], STAMP)])
+    assert json.loads(handback_reply(2)) == {'protocol': TOPOLOGY_PROTOCOL, 'accepted': 2}
+    assert read_handback_reply(handback_reply(2)) == 2
+
+
+def handback_data(**fields) -> str:
+    """A hand-back request with `fields` in place of a valid one's."""
+    return json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'client': RELAY,
+                       'tasks': [{'id': str(uuid.uuid4()), 'schedule_time': STAMP}], **fields})
+
+
+@mark.unit
+@mark.parametrize('text', [
+    None, 7, 'nope', '[]', '"text"',
+    handback_data(protocol=2), handback_data(protocol=True), json.dumps({'client': RELAY, 'tasks': []}),
+    handback_data(client=None), handback_data(client=''), handback_data(client='relay-a'),
+    handback_data(client='x' * 100), handback_data(client=7),
+    handback_data(tasks=None), handback_data(tasks={}), handback_data(tasks=['id']),
+    handback_data(tasks=[{'schedule_time': STAMP}]), handback_data(tasks=[{'id': 'task-1', 'schedule_time': STAMP}]),
+    handback_data(tasks=[{'id': RELAY}]), handback_data(tasks=[{'id': RELAY, 'schedule_time': None}]),
+    handback_data(tasks=[{'id': RELAY, 'schedule_time': 'yesterday'}]),
+    handback_data(tasks=[{'id': RELAY, 'schedule_time': 1763046942}]),
+    handback_data(tasks=[{'id': RELAY, 'schedule_time': STAMP + ' ' * 40}]),
+    handback_data(tasks=[{'id': RELAY, 'schedule_time': STAMP}, {'id': RELAY, 'schedule_time': STAMP}]),
+], ids=lambda text: str(text)[:60])
+def test_malformed_handback_is_refused(text) -> None:
+    """A hand-back that is not a protocol-1 object naming a UUID identity and distinct UUID tasks with ISO
+    schedule times is refused."""
+    with pytest.raises(ValueError):
+        read_handback(text)
+
+
+@mark.unit
+def test_handback_is_bounded() -> None:
+    """At most `MAX_HANDBACK_TASKS` tasks go in one hand-back, both ways, and the server reads at most
+    `MAX_HANDBACK_REQUEST` characters, which holds a full hand-back at its longest fields."""
+    full = [(task_id, STAMP) for task_id in task_ids(MAX_HANDBACK_TASKS)]
+    identity, tasks = read_handback(handback_text(RELAY, full))
+    assert identity == RELAY and len(tasks) == MAX_HANDBACK_TASKS
+    longest = handback_text('f' * 64, [('f' * 64, 'f' * 64)] * MAX_HANDBACK_TASKS)
+    assert len(longest) <= MAX_HANDBACK_REQUEST
+    with pytest.raises(ValueError, match='at most'):
+        handback_text(RELAY, full + [(str(uuid.uuid4()), STAMP)])
+    over = json.loads(handback_text(RELAY, full))
+    over['tasks'].append({'id': str(uuid.uuid4()), 'schedule_time': STAMP})
+    with pytest.raises(ValueError, match='at most'):
+        read_handback(json.dumps(over))
+    with pytest.raises(ValueError, match='too long'):
+        read_handback(handback_data(pad='x' * MAX_HANDBACK_REQUEST))
+
+
+@mark.unit
+def test_handback_reply_refusal_and_malformed() -> None:
+    """A refusal reads as a ValueError naming the server's reason, as does any reply that is not a count."""
+    with pytest.raises(ValueError, match='refused \\(server has no database\\)'):
+        read_handback_reply(error_text('server has no database'))
+    for bad in (None, 'nope', '[]', json.dumps({'protocol': 2, 'accepted': 1}),
+                json.dumps({'protocol': TOPOLOGY_PROTOCOL}), json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'accepted': -1}),
+                json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'accepted': True}),
+                json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'accepted': 1.5})):
+        with pytest.raises(ValueError):
+            read_handback_reply(bad)

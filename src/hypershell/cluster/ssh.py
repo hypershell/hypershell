@@ -21,7 +21,7 @@ from cmdkit.config import ConfigurationError, Namespace
 # Internal libs
 from hypershell.core.tls import TLSConfig
 from hypershell.core.config import config, blame
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
@@ -61,7 +61,7 @@ def run_ssh(*args, **kwargs) -> None:
     """
     thread = SSHCluster.new(*args, **kwargs)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise

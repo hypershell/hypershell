@@ -203,7 +203,8 @@ subsystems.
   `--no-confirm`, since site failover rests on orphan recovery. A duplicated site is held relay-wide
   (the relay instance that registered last holds every zone it serves, planned on its own clients
   alone; older ones get zero and their clients no longer count against the site), falling back per
-  zone for beats with no instance key.
+  zone for beats with no instance key. A relay whose beats say `retiring` never holds a site or
+  causes another to be retired, whenever it registered.
 - The relay's fleets reconcile a published topology and never terminate: `relay/site.py::SiteScaler`
   launches `target - max(basis, live)` each time it learns a new basis, the count the server's plan
   rests on (a new version's `seen`; or, while its running clients `live` stay below `target` under an

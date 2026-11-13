@@ -9,7 +9,9 @@ zone identity's beat advertises them with the zone's launched clients and the re
 and each beat is followed by a read of the published topology. Each fleet's `SiteScaler` launches
 what the server asks for beyond the count its plan is known to rest on (a new version's `seen`, or the
 clients running once the server has planned on them twice), and never ends a client; with no topology
-it is the fixed fleet the relay always ran. Every launch names its zone.
+it is the fixed fleet the relay always ran. Every launch names its zone. A reply that marks the relay
+superseded at its site retires it for good, logged once, whatever later replies say; a retired
+relay's fleets launch nothing, with a topology or without one.
 """
 
 
@@ -40,7 +42,7 @@ from cmdkit.cli import ArgumentError
 # Internal libs
 from tests.conftest import free_port
 from tests.test_zone_model import task_db, add_tasks  # noqa: fixture
-from hypershell.core.heartbeat import Heartbeat
+from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.reconnect import LinkDown
 from hypershell.core.topology import Bounds, Entry, TopologyReply, reply_text, Topology
 from hypershell.core.types import deserialize
@@ -587,6 +589,26 @@ def test_site_scaler_checks_at_once_on_a_new_version() -> None:
 
 
 @mark.unit
+def test_site_scaler_launches_nothing_once_retired(monkeypatch) -> None:
+    """A retired view stops every launch: at start, at a new version, under an unchanged plan the server
+    planned again, without a topology, and the wait never turns a version not applied into a busy check."""
+    view = view_of('s:1', cpu=(2, 0))
+    view.retire()
+    machine, launch = scaler(view, size=3)
+    assert machine.init() is AutoScalerState.WAIT and machine.phase is AutoScalerPhase.STEADY
+    view.set(TopologyReply('s:2', {'cpu': Entry('cpu', 3, 0)}, checks=10))
+    assert machine.check_zones() is AutoScalerState.WAIT
+    assert machine.reconcile('s:2', Entry('cpu', 3, 0)) is AutoScalerState.WAIT
+    view.set(None)
+    assert machine.check_zones() is AutoScalerState.WAIT
+    view.set(TopologyReply('s:3', {'cpu': Entry('cpu', 3, 0)}))
+    monkeypatch.setattr(site_module.time, 'sleep', lambda seconds: None)
+    assert machine.wait() is AutoScalerState.WAIT
+    assert launch.started == [] and machine.clients == []
+    assert view.retired
+
+
+@mark.unit
 def test_launched_now_counts_running_clients() -> None:
     """The advertised count is the clients still running, whether or not a check has cleaned the rest."""
     machine, launch = scaler(None)
@@ -765,6 +787,68 @@ def test_fetch_failure_keeps_the_view(caplog) -> None:
         machine.fetch()
     assert view.reply is kept
     assert any('Topology not read' in record.getMessage() for record in caplog.records)
+
+
+def marked(*entries: Tuple[str, Entry], version: str = 's:1') -> str:
+    """A server's reply naming `entries` (identity, entry), every identity in it retired."""
+    identities = [identity for identity, _ in entries]
+    return reply_text(Topology(version, dict(entries), retired=frozenset(identities)), identities)
+
+
+@mark.unit
+def test_fetch_retires_once_and_for_good(caplog) -> None:
+    """The first reply that marks the relay retires the view and logs one warning; later marked replies log
+    nothing more, and the mark stays when a reply drops it or the server stops publishing."""
+    dispatcher = Dispatcher(published((CPU_ID, Entry('cpu', 2, 0))))
+    view = TopologyView()
+    machine, link = relay_heartbeat(dispatcher, view=view)
+    with caplog.at_level('DEBUG', logger='hypershell.relay.upstream'):
+        machine.submit()
+        assert not view.retired
+        dispatcher.reply = marked((CPU_ID, Entry('cpu', 0, 1)), version='s:2')
+        machine.submit()
+        assert view.retired and view.assignment('cpu') == ('s:2', Entry('cpu', 0, 1))
+        machine.submit()
+        dispatcher.reply = published((CPU_ID, Entry('cpu', 2, 0)), version='s:3')
+        machine.submit()
+        assert view.retired and view.assignment('cpu') == ('s:3', Entry('cpu', 2, 0))
+        dispatcher.reply = json.dumps({'protocol': 1, 'version': None})
+        machine.submit()
+        assert view.retired and view.reply is None
+    warnings = [record.getMessage() for record in caplog.records if record.levelname == 'WARNING']
+    assert warnings == ['Superseded at site A by a newer relay - retiring: no more upstream requests, '
+                        'site clients finish what they hold']
+
+
+@mark.unit
+def test_a_retired_relay_says_so_on_every_beat_under_every_identity() -> None:
+    """Before the mark no beat carries `retiring`; from the first beat after the relay reads the mark, every
+    identity's beat says it is retiring, including the final one, even once replies drop the mark."""
+    dispatcher = Dispatcher(published((CPU_ID, Entry('cpu', 2, 0))))
+    view = TopologyView()
+    machine, link = relay_heartbeat(dispatcher, view=view)
+    machine.submit()
+    assert all('retiring' not in beat for beat in sent(link))
+    dispatcher.reply = marked((CPU_ID, Entry('cpu', 0, 1)), version='s:2')
+    machine.submit()  # This beat is sent before the reply is read.
+    assert all('retiring' not in beat for beat in sent(link)) and view.retired
+    dispatcher.reply = published((CPU_ID, Entry('cpu', 2, 0)), version='s:3')
+    machine.submit()
+    beats = sent(link)
+    assert {beat['uuid'] for beat in beats} == {CPU_ID, GPU_ID} and all(beat['retiring'] is True for beat in beats)
+    assert all(Heartbeat.unpack_or_none(_pack(beat)).retiring for beat in beats)
+    machine.client_state = ClientState.FINISHED
+    assert machine.submit() is HeartbeatState.FINAL
+    assert all(beat['retiring'] is True and beat['state'] == ClientState.FINISHED.value for beat in sent(link))
+
+
+@mark.unit
+def test_view_retires_once() -> None:
+    """Only the first retirement of a view reports that it set it."""
+    view = TopologyView()
+    assert not view.retired
+    assert view.retire() is True
+    assert view.retire() is False and view.retired
 
 
 # --- The relay's fleets and launches -------------------------------------------------------------------

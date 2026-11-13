@@ -983,7 +983,7 @@ QUEUE_EXPOSED: Final[Tuple[str, ...]] = ('empty', 'full', 'get', 'get_nowait', '
 
 
 # Methods a remote client may call on the dispatcher.
-DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', 'takes_submissions', 'topology')
+DISPATCH_EXPOSED: Final[Tuple[str, ...]] = ('request', 'takes_submissions', 'topology', 'handback')
 
 
 def _provider(obj: Any) -> Callable[[], Any]:

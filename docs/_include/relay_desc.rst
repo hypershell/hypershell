@@ -47,7 +47,9 @@ serves them all. Every launch names its zone to the launcher: ``{zone}`` in the 
 arguments is replaced by the zone's name (``default`` for the default zone), and the launched process
 has it in ``HYPERSHELL_ZONE``. Each zone advertises its client bounds upstream; against an upstream
 *server* autoscaling with relay sites, each fleet follows the topology it publishes (see
-:ref:`Topology <cli_relay_topology>`).
+:ref:`Topology <cli_relay_topology>`). A relay that a newer relay at its site supersedes asks for no
+more work, launches no *client*, hands back the tasks no *client* has started, lets its *clients*
+finish, and exits.
 The first zone's identity lists every *client* at the site upstream. Each identity sends its own
 heartbeat, so if the relay fails, the upstream *server* evicts each one and puts back what each
 held, in every zone.

@@ -22,7 +22,7 @@ from subprocess import Popen
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig
 from hypershell.core.config import default
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.data.model import Task, Client
@@ -82,7 +82,7 @@ def run_cluster(*args, autoscaling: bool = False, **kwargs) -> None:
     else:
         thread = RemoteCluster.new(*args, **kwargs)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise
