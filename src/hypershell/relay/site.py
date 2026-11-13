@@ -235,16 +235,28 @@ class SiteScaler(AutoScaler):
     unless a later version asks for one, so a fleet with no work retires through idle exit, and a
     target below what runs launches nothing. No client is ever ended to meet a target. A new version
     is applied as soon as it is read, not only at the next period.
+
+    One case is applied again: clients launched for a version that left before the server counted
+    them (a launcher that failed, or a client that died at once) change nothing the server sees, so
+    no new version comes. While the version is unchanged, its launches are short and none of them
+    was counted (the zone has no more than `seen`), the version is applied again, at most once every
+    `RETRY_PERIODS` periods.
     """
+
+    RETRY_PERIODS: Final[int] = 3
 
     view: Optional[TopologyView]
     applied: Optional[str]
+    expected: int
+    applied_at: float
 
     def __init__(self: SiteScaler, launch: ClientLaunch, *, view: Optional[TopologyView] = None, **options: Any) -> None:
         """Initialize as the fleet's autoscaler, following `view` when it holds a topology."""
         super().__init__(launch, **options)
         self.view = view
         self.applied = None
+        self.expected = 0
+        self.applied_at = 0.0
 
     def assignment(self: SiteScaler) -> Optional[Tuple[str, Entry]]:
         """The version and the entry of this fleet's zone, or None without a topology."""
@@ -275,17 +287,26 @@ class SiteScaler(AutoScaler):
 
     def reconcile(self: SiteScaler, version: str, entry: Entry) -> AutoScalerState:
         """Apply `version` once: launch what its entry asks for beyond what this zone has."""
-        if version == self.applied:
-            return AutoScalerState.WAIT
-        self.applied = version
         launched = self.launched().get(self.own_zone.id, 0)
         count = max(0, entry.target - max(entry.seen, launched))
+        if version == self.applied:
+            if not self.uncounted(launched, entry, count):
+                return AutoScalerState.WAIT
+            log.info(f'Topology {version} (zone: {self.own_zone.name}): {self.expected - launched} clients '
+                     f'left before the server counted them - applying again')
+        self.applied, self.applied_at = version, time.monotonic()
+        self.expected = launched + count
         log.info(f'Topology {version} (zone: {self.own_zone.name}, target: {entry.target}, seen: {entry.seen}, '
                  f'launched: {launched}) - launching {count}')
         if count == 0:
             return AutoScalerState.WAIT
         self.pending = {self.own_zone: launched + count}
         return AutoScalerState.SCALE
+
+    def uncounted(self: SiteScaler, launched: int, entry: Entry, count: int) -> bool:
+        """Whether the applied version's launches left before the server counted them, so it applies again."""
+        return (count > 0 and launched < self.expected and launched <= entry.seen
+                and time.monotonic() - self.applied_at >= self.RETRY_PERIODS * self.period)
 
 
 def site_scaler(machine: AutoScaler, launch: ClientLaunch, view: Optional[TopologyView]) -> SiteScaler:

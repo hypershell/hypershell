@@ -1,0 +1,82 @@
+# topology_drive lower: launches (epoch, launcher label, pid, {zone} word, HYPERSHELL_ZONE, client --zone)
+launch t=1794550962 site=A pid=7088 word=cpu env=cpu client=cpu
+launch t=1794550966 site=A pid=8256 word=cpu env=cpu client=cpu
+launch t=1794550969 site=A pid=8493 word=cpu env=cpu client=cpu
+launch t=1794550990 site=A2 pid=10520 word=cpu env=cpu client=cpu
+# server: registrations, versions, duplicates, departures, evictions
+2026-11-13 01:22:40.648 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:1 published (0 relay identities)
+2026-11-13 01:22:40.714 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.server] Relay site registered (site: A, zone: cpu, min: 0, init: 0, max: 3, clients: 0) (<host>: c89e8d01-dc96-550c-8e1a-bde2656828f0)
+2026-11-13 01:22:41.654 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:2 published (1 relay identities)
+2026-11-13 01:22:41.654 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:2 (site: A, zone: cpu, target: 1, launched: 0)
+2026-11-13 01:22:44.678 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:3 published (1 relay identities)
+2026-11-13 01:22:44.678 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:3 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 01:22:45.687 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:4 published (1 relay identities)
+2026-11-13 01:22:45.687 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:4 (site: A, zone: cpu, target: 2, launched: 1)
+2026-11-13 01:22:48.698 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:5 published (1 relay identities)
+2026-11-13 01:22:48.698 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:5 (site: A, zone: cpu, target: 3, launched: 2)
+2026-11-13 01:22:50.714 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:6 published (1 relay identities)
+2026-11-13 01:22:50.714 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:6 (site: A, zone: cpu, target: 3, launched: 3)
+2026-11-13 01:22:50.748 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.server] Relay site registered (site: A, zone: cpu, min: 0, init: 0, max: 1, clients: 0) (<host>: e480aa69-6c7a-5f1d-a457-05740b0a70e3)
+2026-11-13 01:22:51.718 <host>  WARNING [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Site A advertised by two relays (older: c89e8d01-dc96-550c-8e1a-bde2656828f0 on <host>, newer: e480aa69-6c7a-5f1d-a457-05740b0a70e3 on <host>) - the newer holds its entries
+2026-11-13 01:22:51.719 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:7 published (2 relay identities)
+2026-11-13 01:22:51.719 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:7 (site: A, zone: cpu, target: 1, launched: 3)
+2026-11-13 01:23:09.864 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:8 published (2 relay identities)
+2026-11-13 01:23:09.864 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:8 (site: A, zone: cpu, target: 1, launched: 0)
+2026-11-13 01:23:10.876 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:9 published (2 relay identities)
+2026-11-13 01:23:10.876 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:9 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 01:23:11.887 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:10 published (2 relay identities)
+2026-11-13 01:23:11.887 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:10 (site: A, zone: cpu, target: 1, launched: 1)
+2026-11-13 01:23:14.901 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:11 published (2 relay identities)
+2026-11-13 01:23:14.901 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:11 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 01:23:23.960 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.server] Relay site left (site: A, zone: cpu) (<host>: e480aa69-6c7a-5f1d-a457-05740b0a70e3)
+2026-11-13 01:23:23.982 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:12 published (1 relay identities)
+2026-11-13 01:23:23.982 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:12 (site: A, zone: cpu, target: 0, launched: 0)
+2026-11-13 01:23:24.269 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.server] Relay site left (site: A, zone: cpu) (<host>: c89e8d01-dc96-550c-8e1a-bde2656828f0)
+2026-11-13 01:23:24.991 <host>  WARNING [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Site A left the topology (no live relay) - its share is planned over the remaining sites
+2026-11-13 01:23:24.991 <host>     INFO [01a1d392-90b5-7881-8179-ba2d0a29a201] [hypershell.cluster] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:13 published (0 relay identities)
+# relay-A: topology reads and applications, idle exits
+    INFO [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:0 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:1 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:2 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:3 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:4 (zone: cpu, target: 2, seen: 1, launched: 1) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:5 (zone: cpu, target: 3, seen: 2, launched: 2) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:6 (zone: cpu, target: 3, seen: 3, launched: 3) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:7 (zone: cpu, target: 0, seen: 3, launched: 3) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (7088)
+    INFO [hypershell.cluster] Autoscale client disconnected (8256)
+    INFO [hypershell.cluster] Autoscale client disconnected (8493)
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:8 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:9 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:10 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:11 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+# relay-A2: topology reads and applications, idle exits
+    INFO [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:5 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:6 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:7 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:8 (zone: cpu, target: 1, seen: 0, launched: 0) - launching 1
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:9 (zone: cpu, target: 0, seen: 0, launched: 1) - launching 0
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:10 (zone: cpu, target: 1, seen: 1, launched: 1) - launching 0
+    INFO [hypershell.cluster] Autoscale client disconnected (10520)
+    INFO [hypershell.relay.site] Topology 01a1d392-90b5-7881-8179-ba2d0a29a201:11 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+# topology_drive lower: checks
+duplicate warning logged at 1794550971
+PASS no launch after every client left
+PASS every live relay still runs after its clients left
+PASS no relay identity left or was evicted while running
+PASS every live relay drained and exited 0
+PASS every task completed (60)
+PASS no task failed
+PASS some client was launched
+PASS every launch names one zone in {zone}, HYPERSHELL_ZONE and --zone
+PASS no relay terminated a site client
+peak A cpu 3 (max 3)
+PASS no site-zone ran more clients than its max
+PASS A2 started
+PASS the server warned naming both relays of site A
+PASS A launched nothing after the warning
+A launched 3; idle exits seen by A: 3
+PASS every one of A's clients ended by idle exit
+# topology_drive lower: PASS

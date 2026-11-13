@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay-topology
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -67,7 +67,7 @@ phases:
 - id: P4
   name: Laptop drive (two relays, three zones), evidence, full regression and docs
     gate
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -396,15 +396,49 @@ nothing, it runs today's fleets.
   `share/`, `AGENTS.md`, `.agents/factory/invariants.md`.
 
 ## Phase P4 — Laptop drive, evidence, full regression and docs gate
+
+**Amendments (2026-11-13, at build):**
+
+- **Fix found by the drive: launches the server never counted are applied again.** A site client
+  that left before any heartbeat counted it (the first drive run: a launcher that could not find
+  `hyper-shell`) changes nothing the server sees, so the entry stayed `target 1, seen 0`, no new
+  version came, and a relay that applies each version once never launched again. `SiteScaler` now
+  applies an unchanged version again when its launches are short and the zone has no more than
+  `seen` (none was counted), at most once every `SiteScaler.RETRY_PERIODS` (3) periods; a client the
+  server counted is never replaced this way. Table-tested in `test_relay_topology.py`; P1–P3's
+  verifies re-ran after it.
+- **Drive modes, as built** (PLAN §6, with the laptop's own numbers):
+  - B starts and registers before A in every two-relay mode, so `fill`'s preference order holds
+    from the first plan.
+  - `kill` runs under `fill` (`sites = B`, factor 10, B's `cpu.max` 20, A's 3, 40 tasks of 2 s),
+    and B is killed once 10 tasks are complete. Under `spread` the survivor reaches its own `max`
+    before the dead relay is evicted (the dead relay keeps its room until eviction), so regrowth
+    after eviction cannot be told apart. Here A launches no `cpu` client before B's eviction and
+    must launch after it: the zone's share regrows at the survivor.
+  - `floor`: the held floor (B's `gpu.min = 1`) keeps a client after the work too (the Zone-floor
+    ruling), so that zone is left out of the idle checks and the floor's relaunch after the work is
+    checked instead.
+  - `lower` starts A2 (`site = A`, `cpu.max = 1`) once A runs 3 clients; the server log is in the
+    system style so the drive reads the warning's and the eviction's times.
+  - The "nothing is launched again" window starts 6 s after the last task completes and every client
+    has left: a relay returns results up to `bundlewait` (5 s) after its clients ran them, and until
+    then the server counts them as work and may plan one more client (seen once in `lower`: A2
+    launched one 2 s after the drive's snapshot).
+  - The site clients' 2 s idle timeout makes some clients exit between bundles while work remains,
+    and they are launched again by the next version; peaks stay within each `max` and nothing is
+    terminated.
+- **Docs gate, sandbox form:** `sphinx_sitemap` cannot bind a socket in the build sandbox, so the
+  gate runs with every other extension (`-D extensions=…`, as zone-autoscale P4 recorded); the
+  unmodified command is the foreman's to run.
 **Satisfies:** R1–R7 (end to end) · **Depends on:** P3
 **Goal:** one server with no launcher and two relays, as separate processes on loopback, show spread,
 fill, the gated floor, per-zone idle exit, failover regrowth and the lowered-`max` handoff in live
 runs. Logs are kept as evidence, the full suite is green, and docs build with `-W`.
 
-- [ ] `spec/relay-topology/drive/topology_shim.sh LOG SITE {zone}`, built on `zone_shim.sh`. It logs
+- [x] `spec/relay-topology/drive/topology_shim.sh LOG SITE {zone}`, built on `zone_shim.sh`. It logs
       `launch t=<epoch> site=<SITE> pid=<pid> word=<{zone}> env=<HYPERSHELL_ZONE> client=<--zone or ->`,
       rewrites `-H` to `127.0.0.1`, and `exec`s the client.
-- [ ] `spec/relay-topology/drive/topology_drive.sh MODE`, run under `temp_site.sh`, bounded by its own
+- [x] `spec/relay-topology/drive/topology_drive.sh MODE`, run under `temp_site.sh`, bounded by its own
       poll deadline (`TD_DEADLINE`; macOS has no `timeout`).
   - **Server:** `hs server --autoscaling=dynamic -P 1` with `HYPERSHELL_SERVER_EVICT=10`, the operator
     key from the environment, a DEBUG log, and `[autoscale] distribution`/`sites` per mode.
@@ -414,12 +448,19 @@ runs. Logs are kept as evidence, the full suite is green, and docs build with `-
   - Tasks are submitted with `hs submit --zone`/`-g`.
   - Modes and checks are those of PLAN §6.
   - The script never deletes anything; it prints its scratch path and ends every process it started.
-- [ ] `TD_EVIDENCE=<dir>` writes scrubbed `MODE.txt` files: the shim log, the publisher's version
+- [x] `TD_EVIDENCE=<dir>` writes scrubbed `MODE.txt` files: the shim log, the publisher's version
       lines, the relays' topology lines, and pass/fail per check, with host, user and paths replaced.
       Run all six modes once with `TD_EVIDENCE="$PWD/spec/relay-topology/evidence/laptop"` and commit
       the files with a `README.md` giving the commit, the kind of host and the PASS lines.
-- [ ] Fix anything the drive, the full suite or the `-W` docs build finds. Any source change re-runs
+- [x] Fix anything the drive, the full suite or the `-W` docs build finds. Any source change re-runs
       P1–P3's verifies before this phase is marked done.
+- **Results (2026-11-13):** six topology modes PASS (evidence in `evidence/laptop/`); Z3's
+  `founding`, `fixed`, `dynamic`, `restart` PASS; full suite 1852 passed, 91 skipped (environmental:
+  PostgreSQL/Timescale unset, fish absent, a fixture regeneration, two Python-version GC cases);
+  relay smoke PASS; PostgreSQL suites against a local server (sandbox off): 131 passed, 1 skipped
+  (needs a server without TimescaleDB), 29 failed, every one "Template hs283/hs290a1 not listed";
+  `test_zone_postgres.py` 5/5. Docs: the sandbox form of the gate, exit 0, no warnings; `-b man`
+  builds.
 - **Verify:** see frontmatter (six topology modes, four Z3 modes as the `hs cluster` guard, full
   suite, docs). If the sandbox blocks `sphinx_sitemap`'s socket, use the sandbox form zone-autoscale
   P4 recorded, and run the unmodified command outside the sandbox before review.

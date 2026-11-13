@@ -207,6 +207,31 @@ def test_site_scaler_does_not_replace_exits_and_follows_new_versions() -> None:
 
 
 @mark.unit
+def test_site_scaler_applies_again_when_its_launches_left_uncounted() -> None:
+    """Clients that left before the server counted them change no version, so after a grace of
+    periods the same version is applied again; clients the server counted are never replaced."""
+    view = view_of('s:1', cpu=(1, 0))
+    machine, launch = scaler(view)
+    machine.phase = AutoScalerPhase.STEADY
+    assert apply_once(machine) == 1
+    launch.started[0].exit()  # Before any beat counted it: the server still plans target 1, seen 0.
+    assert apply_once(machine) == 0  # Within the grace.
+    machine.applied_at -= machine.RETRY_PERIODS * machine.period
+    assert apply_once(machine) == 1 and len(launch.started) == 2
+    assert apply_once(machine) == 0  # Running again: nothing more.
+    counted = view_of('s:2', cpu=(2, 2))
+    machine.view = counted
+    machine.clients = []
+    for _ in range(2):
+        machine.actuator.launch_one()
+    assert apply_once(machine) == 0
+    for proc in machine.clients:
+        proc.exit()  # Counted by the server, then idle: never replaced.
+    machine.applied_at -= machine.RETRY_PERIODS * machine.period
+    assert apply_once(machine) == 0
+
+
+@mark.unit
 def test_site_scaler_missing_entry_is_zero() -> None:
     """A topology that names other zones only assigns this zone none."""
     machine, launch = scaler(view_of('s:1', gpu=(3, 0)))
