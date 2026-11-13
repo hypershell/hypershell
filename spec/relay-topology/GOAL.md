@@ -220,6 +220,16 @@ seed's R-ID each came from. R1, R4, R5 and R6 are amended by the maintainer ruli
   `size`). `size` stays as shorthand for `init` = `min` = `max`, so a relay configured only with
   `size` behaves exactly as today.
 
+**Ruled at the plan gate** (2026-11-12):
+
+- **2026-11-12 — Q1: relay launches always expose their zone** (foreman ruling; PLAN §5, deviation
+  3). Relay launches always expose `{zone}` and `HYPERSHELL_ZONE`, with or without a topology. That
+  is one launch path, matching Z3's exposure on every launch. Fleet sizes and argv are unchanged;
+  the only addition to a site client's environment is that variable. The plan was approved with all
+  five deviation rows as written. Deviation 4 (the group-read rule duplicated in
+  `demand.scheduler_group`) stays honest only through its equivalence test, which runs in P1's
+  verify.
+
 **Drift since the seed was written** (re-confirmed against `develop` `22684fd`, with relay #82 and
 Z3 #99 landed; scope holds):
 

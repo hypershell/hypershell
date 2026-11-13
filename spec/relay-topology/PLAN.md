@@ -1,6 +1,6 @@
 # PLAN — Relay site-topology autoscaling: fill and spread across sites
 
-> **Status:** Draft for review · **Last updated:** 2026-11-12
+> **Status:** Approved at the plan gate (foreman, 2026-11-12) · **Last updated:** 2026-11-12
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
 > [`research/`](research/) (digest: [`research/00-digest.md`](research/00-digest.md)). Every design
@@ -418,13 +418,14 @@ task-row write, exit status, retry, resource or signal path changes) and **again
 ### Deviation justifications
 
 None of these changes what an R-ID SHALL do. Each adds surface or complexity, and each test edit
-listed is a declared amendment, not drift.
+listed is a declared amendment, not drift. All five rows were accepted as written at the plan gate
+(foreman, 2026-11-12). Row 4 stays honest only through its equivalence test, which runs in P1's verify.
 
 | Deviation | Why needed | Simpler alternative rejected because |
 |-----------|-----------|--------------------------------------|
 | 1. Dispatcher remote surface gains `topology`; `test_dispatcher_remote_surface_is_pinned` amended to the new tuple | A relay with no clients must learn its targets, and a heartbeat has no reply (research 01) | Fields in the work-request reply never reach a zero-client relay, and a probe request can take tasks |
 | 2. Relay beats gain `zone`/`bounds`/`clients`; the exact-key asserts in `test_beat_with_site_and_roster_round_trips` and `test_relay_beat_carries_site_and_roster` amended to include them | R4's advertisement and D6's counts need a carrier on every connect, and the beat is the one the reconnect path already sends first | A dedicated advertisement message would need a new queue and its own reconnect ordering, while old servers already ignore unknown beat keys |
-| 3. Relay launches expose their zone in fallback too: the environment gains `HYPERSHELL_ZONE`, and a literal `{zone}` in a launcher word is replaced; the env asserts at `test_relay_launch.py:334` and `:572` amended **[NEEDS CLARIFICATION: Q1]** | One launch per zone, built and fenced at construction; a `{zone}` launcher must work before the relay knows the mode | Two launch sets per zone, chosen after the probe, double the fenced launches and make the fallback ignore `{zone}`. R6's fleet size is unchanged either way. |
+| 3. Relay launches expose their zone in fallback too: the environment gains `HYPERSHELL_ZONE`, and a literal `{zone}` in a launcher word is replaced; the env asserts at `test_relay_launch.py:334` and `:572` amended. **Decided (Q1):** always expose, with or without a topology (GOAL Clarifications, "Ruled at the plan gate", 2026-11-12 — Q1) | One launch per zone, built and fenced at construction; a `{zone}` launcher must work before the relay knows the mode | Two launch sets per zone, chosen after the probe, double the fenced launches and make the fallback ignore `{zone}`. R6's fleet size is unchanged either way. |
 | 4. The group-read rule (D2) appears twice: `AutoScaler.current_group` and the new `demand.scheduler_group` | Keeps `cluster/remote.py` (high blast radius) untouched this cycle | Refactoring `AutoScaler` to call the helper is a behaviour-preserving edit to a high-blast file for five lines. An equivalence test pins the two instead, and a follow-up may fold them. |
 | 5. `SiteScaler` replaces the fleets' machines after construction | Reuses `AutoScaler`'s lifecycle and `LaunchActuator` with zone exposure (D7), with no `remote.py` edit, so the relay's supervision (`check_site`, `stop_site`, `abort`, `end_site_clients`) needs no change | A `target` hook on `AutoScaler` touches a high-blast file. A new relay-level reconciler breaks the fleet-shape tests and needs every launch prebuilt (research 03). |
 
@@ -454,11 +455,10 @@ listed is a declared amendment, not drift.
 
 ## 5. Risks & open questions
 
-- **Q1 [NEEDS CLARIFICATION]: zone exposure in fallback.** The plan exposes `{zone}`/`HYPERSHELL_ZONE`
-  on every relay launch, topology or not (deviation 3). Fleet sizes, argv without `{zone}`, keys and
-  the fence are unchanged. The site-client environment gains one variable, and a literal `{zone}` in a
-  launcher word is replaced. *Plan default: expose always.* The alternative is exposure under a
-  topology only, which means two launch sets per zone.
+- **Q1, decided: zone exposure in fallback.** Relay launches always expose `{zone}` and
+  `HYPERSHELL_ZONE`, with or without a topology (GOAL Clarifications, "Ruled at the plan gate", 2026-11-12 — Q1; deviation 3). That is one launch path, as
+  Z3 exposes on every launch. Fleet sizes and argv are unchanged, and the only addition to a site
+  client's environment is that variable.
 - **Defaults cap small.** With nothing configured, a relay advertises `min 0, init 0, max = size = 1`
   for each zone, so each site contributes at most one client per zone. That is safe, but operators must
   set `max` (or `size`). The relay docs and the `hs server --autoscaling` help say so.

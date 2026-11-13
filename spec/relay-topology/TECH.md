@@ -123,8 +123,9 @@ commit.
   in docs), and example zones are `cpu`, `highmem` and `gpu`.
 - **No cluster tools, no submissions.** No builder calls a cluster tool or submits a job. P5's batch
   script is run by the foreman.
-- **Plan gate:** pending. Q1 (PLAN §5) is open, with the plan default (expose always) in force until
-  it is ruled.
+- **Plan gate:** approved by the foreman on 2026-11-12, all five deviation rows included. Q1 is ruled:
+  relay launches always expose their zone (GOAL Clarifications, "Ruled at the plan gate"). The
+  `scheduler_group` equivalence test (deviation 4) runs in P1's verify. `hs-build` may start P1.
 
 ## Interfaces (built in P1–P3)
 
@@ -158,7 +159,10 @@ Nothing is wired, and no behaviour changes.
 - [ ] `cluster/topology.py`: `Distribution`, `parse_distribution`, `parse_sites`, `SiteZone`,
       `SiteView`, `Duplicate`, `site_views`, `plan_sites` and `entries`, exactly as PLAN §2.4.
       `plan_sites` calls `zone_demand` per zone with
-      `dataclasses.replace(knobs, init_size=0, min_size=0, max_size=Σmax)`; `demand.py` is unchanged.
+      `dataclasses.replace(knobs, init_size=0, min_size=0, max_size=Σmax)`; `demand.py`'s three seam
+      functions are unchanged.
+- [ ] `cluster/demand.py`: the additive `scheduler_group(reported, *, attempts, eager)` (PLAN §2.4, D2):
+      the reported group, else `Task.starting_group(Task.current_group())`. Deviation 4.
 - [ ] `tests/test_topology_plan.py` (`@mark.unit`). Table tests over `plan_sites` (parametrized rows:
       loads, knobs, sites, distribution, order → targets), plus `site_views` and `entries`:
   - spread across peers, with ties broken by order;
@@ -180,9 +184,13 @@ Nothing is wired, and no behaviour changes.
   - a beat without the new keys decodes with them None;
   - the topology reply for null, entries, and an identity with no entry;
   - `SiteRegistry`: overwrite in place, `registered` and `rank` order, `drop`, and `init_held` clearing.
+- [ ] Equivalence test in the same file (`@mark.unit`, deviation 4, kept in P1's verify):
+      `scheduler_group` equals `AutoScaler.current_group` over the `TestSchedulerGroup` cases (a
+      reported group; None → the start rule).
 - **Verify:** see frontmatter (new tests plus the beat, Z3 and autoscaler suites unchanged).
 - **Touches:** `src/hypershell/core/topology.py` (new), `src/hypershell/core/heartbeat.py`,
-  `src/hypershell/cluster/topology.py` (new), `tests/test_topology_plan.py` (new).
+  `src/hypershell/cluster/topology.py` (new), `src/hypershell/cluster/demand.py`,
+  `tests/test_topology_plan.py` (new).
 
 ## Phase P2 — Server: `hs server --autoscaling` publishes a versioned topology
 **Satisfies:** R1, R2, R3, R4, R7 (server half) · **Depends on:** P1
@@ -206,7 +214,7 @@ mode is unchanged.
     `-F/--factor` and `-P/--period`. `--autoscaling` implies forever. It is refused with FILE,
     `--restart`, `--no-db` and `--no-confirm` (`ArgumentError`). It keeps every key check. `run()`
     imports `cluster.topology.AutoScalingServer` lazily.
-- [ ] `cluster/demand.py`: `scheduler_group(reported, *, attempts, eager)`. `cluster/topology.py`:
+- [ ] `cluster/topology.py` (the publisher reads its group through P1's `scheduler_group`):
       `TopologyPublisher`/`TopologyPublisherThread` and `AutoScalingServer` (PLAN §2.1, §2.4):
   - publish only on change, with the version bumped then;
   - INFO lines per site and zone at each version;
@@ -223,8 +231,6 @@ mode is unchanged.
   - `@mark.integration`, on a temp DB with tasks in `cpu` (group 0) and `gpu` (group 1): a publisher
     check with two fake sites publishes per the planner. A second check with the same inputs publishes
     nothing new. The `gpu` floor holds while group 0 runs.
-  - `@mark.unit`: `scheduler_group` equals `AutoScaler.current_group` over the `TestSchedulerGroup`
-    cases (reported, None → start rule).
   - `@mark.unit`: `parse_distribution`/`parse_sites` (list, comma string, unknown value).
 - [ ] `tests/test_server.py`: the new refusals and the mode's help text (usage and help still equal
       `ServerApp.interface`). `tests/test_dispatch_version.py`: amend the pinned surface (deviation 1),
@@ -243,7 +249,7 @@ mode is unchanged.
 - **Verify:** see frontmatter (server, dispatch, roster, autoscaler and completion suites; the
   founding drive for `hs cluster`).
 - **Touches:** `src/hypershell/core/{dispatch,queue,config}.py`, `src/hypershell/server.py`,
-  `src/hypershell/cluster/{demand,topology}.py`, `tests/test_topology_server.py`, `tests/test_server.py`,
+  `src/hypershell/cluster/topology.py`, `tests/test_topology_server.py`, `tests/test_server.py`,
   `tests/test_dispatch_version.py`, `docs/`, `share/`, `AGENTS.md`, `.agents/factory/invariants.md`.
 
 ## Phase P3 — Relay: bounds, advertisement and fetch, `SiteScaler`, zone exposure, fallback
