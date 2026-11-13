@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Judge of the relay-retire laptop drive (retire_drive.sh), from the files of one run.
+"""Judge of the relay-retire drives: the laptop drive (retire_drive.sh), from the files of one run,
+and the multi-node drive (retire_cluster.sh), from its records.
 
-    python retire_judge.py strand RUN [HOLD]   exit 0 once a task has stranded at relay A (see below)
-    python retire_judge.py judge RUN MODE      check the run; exit 0 PASS, 1 FAIL, 2 INCONCLUSIVE
+    python retire_judge.py strand RUN [HOLD]          exit 0 once a task has stranded at relay A (see below)
+    python retire_judge.py judge RUN MODE             check a laptop run; exit 0 PASS, 1 FAIL, 2 INCONCLUSIVE
+    python retire_judge.py PATH [--require retire]    check multi-node records (see "Cluster mode")
 
 RUN is the drive's scratch directory. It holds the upstream server's log (server.log) and each
 relay's (relay-NAME/relay.log), all in the system log style with UTC times; the launch log
@@ -23,12 +25,26 @@ leaves the incomplete set while still A's was started there (run by a site clien
 allowed to finish it); every other one must be seen unassigned or assigned to another client within
 three heartbeat intervals of the mark. A run in which A held nothing unstarted and handed back
 nothing proves nothing, and is INCONCLUSIVE.
+
+Cluster mode. PATH is one record written by retire_collect.py, or a directory searched recursively
+for them (`*.json` holding a `scenario` and `transitions`). Each run is printed with every check as
+PASS, FAIL or INCONCLUSIVE, then its verdict; the last line is the overall verdict. The checks are the
+laptop's (mode retire) over the record: the samples are rebuilt from each task's transitions, A's
+running site clients from its launch records, and A's identities are its name. A record's times keep
+the clock of the node that wrote them, so where a check compares times from two nodes it allows
+SKEW seconds (the relay-topology harness's allowance): the R7 follow starts at the last sample at or
+before the mark less SKEW, and R7's bound is three heartbeat intervals plus SKEW (the delay without
+the allowance is printed beside it). Exit status: 0 if at least one run was found, every run passed
+and every scenario named by --require passed in some run; 1 if a run failed or none was found; 2 if
+none failed but a run was inconclusive or a required scenario did not pass.
 """
 
 import os
 import re
 import sys
 import json
+import argparse
+from pathlib import Path
 from datetime import datetime, timezone
 
 LINE_TIME = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) ')
@@ -39,6 +55,10 @@ REQUEUED = re.compile(r'Requeued (\d+) tasks handed back by relay \(([0-9a-f-]{3
 HANDED = re.compile(r'Handed back (\d+) tasks no site client started \(([0-9a-f-]{36})\)')
 LAUNCHING = re.compile(r'Topology \S+ \(zone: [^)]*\) - launching ([1-9]\d*)|applying again, launching ([1-9]\d*)')
 SUPERSEDED = 'Superseded at site'
+SKEW = 1.0  # seconds: tolerance between node clocks where a cluster record's times from two nodes meet
+STRAND_HOLD = 20.0
+SAFE = re.compile(r'^[A-Za-z0-9 ._:,+-]*$')
+SCENARIOS = ('retire',)
 
 
 def stamp(line):
@@ -109,12 +129,16 @@ def alive(run):
 
 def strand(run, hold=20.0):
     """The first (task, time) at which a task has stayed on A's identities for `hold` seconds with A at no client."""
-    ids = identities(run, 'A')
-    counts = alive(run)
+    return strand_samples(samples(run), alive(run), identities(run, 'A'), hold)
+
+
+def strand_samples(found, counts, ids, hold=20.0):
+    """`strand` over samples (time, {task: client}), A's running site clients (time, count) and A's
+    identities (or its name, in a cluster record)."""
     if not ids or not counts:
         return None
     index, zero_since, on_since = 0, None, {}
-    for t, rows in samples(run):
+    for t, rows in found:
         while index + 1 < len(counts) and counts[index + 1][0] <= t:
             index += 1
         current = counts[index][1] if counts[index][0] <= t else None
@@ -131,7 +155,11 @@ def strand(run, hold=20.0):
 def follow(run, ids, mark):
     """The tasks held under `ids` from the last sample before `mark`, each mapped to ('started', t),
     ('available', t) or None (never seen leaving)."""
-    found = samples(run)
+    return follow_samples(samples(run), ids, mark)
+
+
+def follow_samples(found, ids, mark):
+    """`follow` over samples (time, {task: client})."""
     start = 0
     for index, (t, _) in enumerate(found):
         if t <= mark:
@@ -325,8 +353,236 @@ def judge_idle(run, fact, verdict):
     verdict.check('every relay drained and exited 0', fact.get('drained') == '0')
 
 
+# --- Cluster mode -----------------------------------------------------------------------------------
+
+def record_samples(record):
+    """The upstream samples rebuilt from a record's transitions, as (time, {task: owner}): one at every
+    transition and one a second between the first and last sample."""
+    steps = {int(task): items for task, items in record.get('transitions', {}).items()}
+    points = {t for items in steps.values() for t, _ in items}
+    sampled = record.get('samples', {})
+    if sampled.get('first') is not None and sampled.get('last') is not None:
+        t = sampled['first']
+        while t < sampled['last']:
+            points.add(round(t, 3))
+            t += 1.0
+        points.add(sampled['last'])
+    found = []
+    for t in sorted(points):
+        rows = {}
+        for task, items in steps.items():
+            now = None
+            seen = False
+            for when, owner in items:
+                if when <= t:
+                    now, seen = owner, True
+            if seen and now != 'done':
+                rows[task] = now
+        found.append((t, rows))
+    return found
+
+
+def record_alive(record, name='A'):
+    """A relay's running site clients over a record's run, as (time, count), from its launch records."""
+    changes = []
+    for item in record.get('launches', []):
+        if item.get('relay') != name:
+            continue
+        began = item.get('t_start') if item.get('t_start') is not None else item.get('t_launch')
+        if began is not None:
+            changes.append((began, 1))
+        if item.get('t_end') is not None:
+            changes.append((item['t_end'], -1))
+    counts, running = [(0.0, 0)], 0
+    for t, step in sorted(changes):
+        running += step
+        counts.append((t, running))
+    return counts
+
+
+def strings(value):
+    """Every string in a record, keys included."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield str(key)
+            yield from strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from strings(item)
+    elif isinstance(value, str):
+        yield value
+
+
+def judge_record(record):
+    """Every check of one multi-node run, as (name, result, detail); result is True, False or None
+    (inconclusive)."""
+    checks = []
+    add = lambda name, ok, detail: checks.append((name, None if ok is None else bool(ok), detail))
+    tasks, events = record.get('tasks', {}), record.get('events', {})
+    settings = record.get('settings', {})
+    relays, server = record.get('relays', {}), record.get('server', {})
+    a, a2 = relays.get('A', {}), relays.get('A2', {})
+    launches = record.get('launches', [])
+    heartrate = float(settings.get('heartrate', 0) or 0)
+    bound = 3 * heartrate
+
+    add('record.schema', record.get('schema') == 1 and record.get('scenario') in SCENARIOS,
+        f'schema {record.get("schema")}, scenario {record.get("scenario")}')
+    ended = [name for name in ('deadline', 'stall', 'open') if name in events]
+    add('run.deadline', not ended, 'finished within its deadline' if not ended else f'events: {ended}')
+    add('run.eviction_longer', settings.get('evict', 0) > settings.get('run_timeout', float('inf')),
+        f'eviction {settings.get("evict")} s, run deadline {settings.get("run_timeout")} s')
+    total = tasks.get('total', 0)
+    add('tasks.complete', total > 0 and tasks.get('rows') == total and tasks.get('completed') == total
+        and tasks.get('succeeded') == total,
+        f'{tasks.get("succeeded")} of {total} succeeded ({tasks.get("rows")} rows, {tasks.get("completed")} completed)')
+    add('tasks.failed', tasks.get('failed') == 0, f'{tasks.get("failed")} failed')
+    add('tasks.once', total > 0 and tasks.get('runs') == total and tasks.get('ran') == total
+        and not tasks.get('repeated') and not tasks.get('unknown_runs'),
+        f'{tasks.get("runs")} runs of {tasks.get("ran")} tasks; repeated {tasks.get("repeated")}, '
+        f'{tasks.get("unknown_runs")} unknown')
+
+    add('launch.some', launches and any(item.get('relay') == 'A' for item in launches),
+        f'{len(launches)} site clients launched: ' +
+        ', '.join(f'{name} {sum(1 for item in launches if item.get("relay") == name)}' for name in ('A', 'A2')))
+    nodes = sorted({item.get('node') for item in launches}, key=str)
+    add('launch.nodes', launches and all(isinstance(n, int) and n >= 1 for n in nodes),
+        f'site clients on nodes {nodes} (node 0 is the server)')
+    unnamed = [item for item in launches if not (item.get('word') == item.get('env') == item.get('client') == 'cpu')]
+    add('launch.zone_named', launches and not unnamed,
+        f'{len(unnamed)} launches whose {{zone}}, HYPERSHELL_ZONE and --zone differ or are not cpu')
+    keyed = sum(1 for item in launches if item.get('key'))
+    add('launch.key', not keyed, f'{keyed} site clients with the upstream key in their environment')
+    unclean = [item for item in launches if item.get('t_end') is None or item.get('status') != 0
+               or item.get('killed') or item.get('signal') is not None]
+    add('exit.clean', launches and not unclean,
+        f'{len(launches) - len(unclean)} site clients exited by themselves with status 0, {len(unclean)} otherwise')
+    terminating = {name: relays.get(name, {}).get('terminating') for name in ('A', 'A2')}
+    add('relay.no_terminate', all(v == 0 for v in terminating.values()), f'"Terminating site client" lines: {terminating}')
+
+    registered = [entry for entry in server.get('registered', []) if entry.get('relay') == 'A2']
+    add('a2.started', a2.get('started') and any(entry.get('site') == 'A' for entry in registered),
+        f'A2 registered at site A at {[entry.get("t") for entry in registered]} s')
+    retired = [entry for entry in server.get('retired', []) if entry.get('relay') == 'A' and entry.get('site') == 'A']
+    add('server.retired', retired and server.get('duplicate_warnings', 0) >= 1,
+        f'server marked A retired at {[entry.get("t") for entry in retired]} s; '
+        f'{server.get("duplicate_warnings")} duplicate warnings')
+    mark = a.get('mark')
+    add('retire.mark', a.get('superseded') == 1 and mark is not None,
+        f'A logged "Superseded" {a.get("superseded")} times, first at {mark} s')
+    add('retire.exit', a.get('self') and a.get('rc') == 0,
+        f'A exited by itself: {a.get("self")}, status {a.get("rc")}, at {a.get("exited_at")} s')
+    evicted = [entry for entry in server.get('evicted', []) + server.get('reverted', []) if entry.get('relay') == 'A']
+    add('retire.no_evict', not evicted, f'{len(evicted)} evictions or orphan reverts of A')
+    finals = [entry for entry in a.get('final_heartbeats', []) if entry.get('relay') == 'A']
+    left = [entry for entry in server.get('left', []) if entry.get('relay') == 'A']
+    count = a.get('identities', 0)
+    add('retire.final', count > 0 and len(finals) >= count and len(left) >= count,
+        f'A held {count} identities: {len(finals)} final heartbeats, the server saw {len(left)} leave')
+    if mark is not None:
+        late = [item for item in launches if item.get('relay') == 'A' and (item.get('t_launch') or 0) > mark]
+        late += [entry for entry in a.get('launching', []) if (entry.get('t') or 0) > mark]
+        add('retire.no_launch_after_mark', not late, f'{len(late)} launches by A after the mark at {mark} s')
+    drained = a2.get('drained_at')
+    a2_gone = [entry for entry in server.get('evicted', []) if entry.get('relay') == 'A2']
+    a2_early = [entry for entry in server.get('left', []) if entry.get('relay') == 'A2'
+                and (drained is None or (entry.get('t') or 0) < drained - SKEW)]
+    add('a2.stayed', not a2_gone and not a2_early and drained is not None and a2.get('rc') == 0,
+        f'A2: {len(a2_gone)} evictions, {len(a2_early)} departures before its drain at {drained} s, '
+        f'status {a2.get("rc")}')
+
+    found = record_samples(record)
+    sampled = record.get('samples', {})
+    add('samples.resolution', sampled.get('count', 0) > 0 and sampled.get('max_gap') is not None
+        and sampled['max_gap'] <= max(heartrate, 1.0),
+        f'{sampled.get("count")} samples, largest gap {sampled.get("max_gap")} s')
+    stranded = strand_samples(found, record_alive(record), {'A'}, STRAND_HOLD)
+    add('retire.no_strand', stranded is None,
+        'no task stayed on A > 20 s with A at no site client' if stranded is None
+        else f'task {stranded[0]} stranded at A by {stranded[1]} s')
+    if mark is None:
+        add('R7.mark_read', False, 'A never read the mark')
+        return checks
+    outcome = follow_samples(found, {'A'}, mark - SKEW)
+    started = sorted(task for task, result in outcome.items() if result and result[0] == 'started')
+    unstarted = {task: result for task, result in outcome.items() if not (result and result[0] == 'started')}
+    handed = sum(entry.get('count', 0) for entry in a.get('handed_back', []))
+    requeued = [entry for entry in server.get('requeued', []) if entry.get('relay') == 'A']
+    missing = sorted(task for task, result in unstarted.items() if result is None)
+    add('R7.available', not missing,
+        f'A held {len(outcome)} tasks from the mark ({len(started)} started at A, {len(unstarted)} unstarted); '
+        f'{len(missing)} unstarted never seen available; A handed back {handed}, the server requeued '
+        + (', '.join(f'{entry.get("count")} at +{entry["t"] - mark:.3f} s' for entry in requeued) or 'none'))
+    if unstarted and not missing:
+        delay = max(result[1] for result in unstarted.values()) - mark
+        add('R7.bound', delay <= bound + SKEW,
+            f'last unstarted task available at +{delay:.3f} s of the mark; bound {bound:g} s '
+            f'(3 x heartrate {heartrate:g} s) + {SKEW:g} s skew allowance')
+    if requeued:
+        first_t = min(entry['t'] for entry in requeued)
+        add('R7.requeue_logged', first_t - mark <= bound + SKEW,
+            f'requeue logged at +{first_t - mark:.3f} s of the mark (bound {bound:g} s + {SKEW:g} s)')
+    if not unstarted and handed == 0:
+        add('R7.non_vacuous', None, 'A held nothing unstarted at the mark and handed back nothing')
+    else:
+        add('R7.non_vacuous', True, f'A held {len(unstarted)} unstarted at the mark, handed back {handed}')
+
+    scrub = record.get('scrub', {})
+    unsafe = [text for text in strings(record) if not SAFE.match(text)]
+    add('record.scrubbed', scrub and not any(scrub.values()) and not unsafe,
+        f'found: {scrub}; {len(unsafe)} strings with a path or other unsafe character')
+    return checks
+
+
+def records(path):
+    """The multi-node records under a path."""
+    files = [path] if path.is_file() else sorted(path.rglob('*.json'))
+    for file in files:
+        try:
+            value = json.loads(file.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(value, dict) and 'scenario' in value and 'transitions' in value:
+            yield file, value
+
+
+def cluster(argv):
+    """Judge every multi-node record found; print each check and the verdict."""
+    parser = argparse.ArgumentParser(prog='retire_judge.py', description='Judge multi-node relay-retire records.')
+    parser.add_argument('path', type=Path)
+    parser.add_argument('--require', default='', help='scenarios that must have passed (comma separated)')
+    args = parser.parse_args(argv)
+    required = [name for name in args.require.split(',') if name]
+    unknown = [name for name in required if name not in SCENARIOS]
+    if unknown:
+        print(f'retire_judge: unknown scenarios: {", ".join(unknown)}', file=sys.stderr)
+        return 1
+    passed, failed, unsure, found = set(), 0, 0, 0
+    for file, record in records(args.path):
+        found += 1
+        checks = judge_record(record)
+        bad = any(result is False for _, result, _ in checks)
+        unclear = not bad and any(result is None for _, result, _ in checks)
+        verdict = 'FAIL' if bad else 'INCONCLUSIVE' if unclear else 'PASS'
+        print(f'{record.get("run_id", file.stem)} ({record.get("scenario")}): {verdict}')
+        for name, result, detail in checks:
+            print(f'  {"INCONCLUSIVE" if result is None else "PASS" if result else "FAIL"} {name}: {detail}')
+        failed += bad
+        unsure += unclear
+        if verdict == 'PASS':
+            passed.add(record.get('scenario'))
+    missing = [name for name in required if name not in passed]
+    status = 1 if failed or not found else 2 if unsure or missing else 0
+    detail = (f'{found} runs, {failed} failed, {unsure} inconclusive'
+              + (f'; required but not passed: {", ".join(missing)}' if missing else ''))
+    print(f'retire_judge: {["PASS", "FAIL", "INCONCLUSIVE"][status]} ({detail})')
+    return status
+
+
 def main():
-    """Strand watch or judgment."""
+    """Strand watch, laptop judgment, or the multi-node records."""
+    if len(sys.argv) < 3 or sys.argv[1] not in ('strand', 'judge'):
+        return cluster(sys.argv[1:])
     command, run = sys.argv[1], sys.argv[2]
     if command == 'strand':
         found = strand(run, float(sys.argv[3]) if len(sys.argv) > 3 else 20.0)

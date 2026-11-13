@@ -83,7 +83,7 @@ phases:
   - P3
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: crest
   verify: uv run pytest -v tests/test_retire_judge.py && uv run python spec/relay-retire/drive/retire_judge.py
     spec/relay-retire/evidence/cluster --require retire
 review:
@@ -321,17 +321,45 @@ A retires, hands back, finishes and exits 0 with no eviction, and its unstarted 
 within 3 × its heartbeat interval.
 
 **Run A** (builder):
-- [ ] `spec/relay-retire/drive/retire_cluster.sh` in the `topology_cluster.sh` contract (configured by
+- [x] `spec/relay-retire/drive/retire_cluster.sh` in the `topology_cluster.sh` contract (configured by
       environment only, run inside an allocation the foreman holds, no `#SBATCH`, no submission, no
       site names, own key and deadline, cleanup by recorded PID): roles server, A, A2 (A2 on A's
       node is fine, recorder label `A2` with `site = "A"`), heartrate 2 s, eviction longer than the
       run, tasks ≫ site-client idle timeout, `$TASK_ID` run log, system-style logs, `TZ=UTC`.
-- [ ] Collector and `retire_judge.py` cluster mode: the laptop checks, the R7 bound with the clock-skew
+- [x] Collector and `retire_judge.py` cluster mode: the laptop checks, the R7 bound with the clock-skew
       allowance, A's exit status from its role record; `tests/test_retire_judge.py` (unit) over
       synthetic records, including a broken record the judge must fail and an inconclusive one.
-- [ ] Local rehearsal through the stand-in `srun` (as `topology_rehearse.sh`), recorded under
+- [x] Local rehearsal through the stand-in `srun` (as `topology_rehearse.sh`), recorded under
       `spec/relay-retire/evidence/rehearsal/`; then set `hill: crest` and wait for the foreman.
 
+- **Build notes (P4 run A, amendments).**
+  - *Files.* `retire_cluster.sh` (the drive), `retire_role.py` (plan, status, server with its
+    sampler, relay A or A2), `retire_launch.sh` and `retire_record.sh` (copied from the
+    relay-topology drive's launcher and recorder, which stay as that cycle's record),
+    `retire_collect.py` (the record), `retire_judge.py PATH [--require retire]` (cluster mode beside
+    the laptop modes; `strand` and `follow` now share their sample-based core with it), and
+    `retire_rehearse.sh`. The foreman's wrapper contract is `topology_cluster.sh`'s unchanged (`HS`,
+    `HSD_WORK`, `HSD_RESULTS`, `HSD_NODE_TMP`, `HSD_SRUN_ARGS`, `HSD_LABEL`, `HSD_RUN_ID`): only the
+    script path changes.
+  - *Staging.* Node 0 runs the server and its read-only sampler of the task table (0.25 s); node 1
+    runs relay A, and A2 once A's role cues it; site clients land round robin on nodes 1 to N-1 as
+    overlapping job steps. Relay A's role watches its own relay database (read-only) for the P3
+    trigger: A has launched its 3 clients and has held a task no site client took for 2 s.
+  - *Knobs, calibrated from P3 for heartrate 2 s and a cluster's latencies.* Server
+    `--autoscaling=fixed -P 1`; relays A `init = max = 3`, A2 `init = max = 2`, autoscale period 1 s;
+    12 tasks of 40 s (P3: 10 s); site-client idle timeout 5 s (P3: 3 s); eviction 1200 s against a
+    900 s run deadline (the script refuses an eviction not longer than the deadline); a run with no
+    completion for 180 s once A2 has started ends early as a FAIL. In the rehearsal A's clients each
+    took a second task when their first finished, and A held the tasks it pulled for them after that
+    (the trigger fired 43 s after the submission in both rehearsals); the mark reached A 2 s after the
+    cue, while A's clients had 36 s (first rehearsal) and 117 s (second) of what they held left. The 40 s tasks keep that margin for A2's
+    start on a shared filesystem and the scheduler's step latency; a shorter margin risks A's clients
+    finishing first, A relaunching under its old target, and an INCONCLUSIVE run.
+  - *Clock skew.* A record's times keep the clock of the node that wrote them. Where the judge
+    compares two nodes' times (A's mark against the server's samples and requeue line; A2's
+    departure against its drain) it allows 1 s, the relay-topology judge's `SKEW`: R7's bound is
+    6 s + 1 s, and the follow starts at the last sample at or before the mark less 1 s. The delay
+    without the allowance is printed beside it.
 **Run B** (after the foreman's run): the foreman commits the scrubbed records to
 `spec/relay-retire/evidence/cluster/`; the gate runs the judge on them.
 - **Verify:** `uv run pytest -v tests/test_retire_judge.py && uv run python

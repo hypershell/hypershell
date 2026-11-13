@@ -1,0 +1,479 @@
+{
+ "bounds": {
+  "A": {
+   "cpu": {
+    "init": 3,
+    "max": 3,
+    "min": 0
+   }
+  },
+  "A2": {
+   "cpu": {
+    "init": 2,
+    "max": 2,
+    "min": 0
+   }
+  }
+ },
+ "events": {
+  "a-exited": 166.53,
+  "a2": 47.322,
+  "a2-registered": 48.409,
+  "completed": 256.717,
+  "drain": 261.813,
+  "end": 266.915,
+  "held": 47.315,
+  "observed": 261.799,
+  "quiet": 256.776,
+  "registered": 3.129,
+  "submitted": 4.148
+ },
+ "hypershell": "2.9.0a7",
+ "label": "rehearsal",
+ "launches": [
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "relay": "A",
+   "signal": null,
+   "status": 0,
+   "t_end": 165.643,
+   "t_kill": null,
+   "t_launch": 4.121,
+   "t_start": 4.147,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "relay": "A",
+   "signal": null,
+   "status": 0,
+   "t_end": 44.986,
+   "t_kill": null,
+   "t_launch": 4.123,
+   "t_start": 4.262,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "relay": "A",
+   "signal": null,
+   "status": 0,
+   "t_end": 10.88,
+   "t_kill": null,
+   "t_launch": 4.125,
+   "t_start": 4.378,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 1,
+   "relay": "A2",
+   "signal": null,
+   "status": 0,
+   "t_end": 132.396,
+   "t_kill": null,
+   "t_launch": 51.356,
+   "t_start": 51.402,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 2,
+   "relay": "A2",
+   "signal": null,
+   "status": 0,
+   "t_end": 132.469,
+   "t_kill": null,
+   "t_launch": 51.361,
+   "t_start": 51.512,
+   "word": "cpu"
+  },
+  {
+   "client": "cpu",
+   "env": "cpu",
+   "key": false,
+   "killed": false,
+   "node": 3,
+   "relay": "A2",
+   "signal": null,
+   "status": 0,
+   "t_end": 256.249,
+   "t_kill": null,
+   "t_launch": 134.941,
+   "t_start": 134.985,
+   "word": "cpu"
+  }
+ ],
+ "local": true,
+ "nodes": 4,
+ "python": "3.15.2",
+ "relays": {
+  "A": {
+   "drain_requested": null,
+   "drained_at": null,
+   "errors": 0,
+   "exited_at": 166.177,
+   "final_heartbeats": [
+    {
+     "relay": "A",
+     "t": 165.57
+    }
+   ],
+   "handback_failed": 0,
+   "handed_back": [
+    {
+     "count": 1,
+     "t": 49.42
+    }
+   ],
+   "identities": 1,
+   "launching": [
+    {
+     "count": 3,
+     "t": 4.11
+    }
+   ],
+   "mark": 49.313,
+   "rc": 0,
+   "self": true,
+   "started": true,
+   "started_at": 1.672,
+   "stopped": false,
+   "stopped_at": null,
+   "superseded": 1,
+   "terminating": 0,
+   "topology_errors": 0
+  },
+  "A2": {
+   "drain_requested": 261.987,
+   "drained_at": 261.969,
+   "errors": 0,
+   "exited_at": 264.506,
+   "final_heartbeats": [
+    {
+     "relay": "A2",
+     "t": 264.125
+    }
+   ],
+   "handback_failed": 0,
+   "handed_back": [],
+   "identities": 1,
+   "launching": [
+    {
+     "count": 2,
+     "t": 51.324
+    },
+    {
+     "count": 1,
+     "t": 134.911
+    }
+   ],
+   "mark": null,
+   "rc": 0,
+   "self": false,
+   "started": true,
+   "started_at": 47.888,
+   "stopped": false,
+   "stopped_at": null,
+   "superseded": 0,
+   "terminating": 0,
+   "topology_errors": 0
+  }
+ },
+ "run_id": "rehearsal-retire",
+ "samples": {
+  "count": 1031,
+  "first": 0.702,
+  "last": 265.417,
+  "max_gap": 0.265
+ },
+ "scenario": "retire",
+ "schema": 1,
+ "scrub": {
+  "hosts": 0,
+  "key": 0,
+  "paths": 0,
+  "users": 0,
+  "uuids": 0,
+  "words": 0
+ },
+ "server": {
+  "duplicate_warnings": 1,
+  "errors": 1,
+  "evicted": [],
+  "exported": true,
+  "left": [
+   {
+    "relay": "A",
+    "t": 165.573
+   },
+   {
+    "relay": "A2",
+    "t": 264.131
+   }
+  ],
+  "rc": 4,
+  "refused_handbacks": 0,
+  "registered": [
+   {
+    "relay": "A",
+    "site": "A",
+    "t": 2.099,
+    "zone": "cpu"
+   },
+   {
+    "relay": "A2",
+    "site": "A",
+    "t": 48.311,
+    "zone": "cpu"
+   }
+  ],
+  "requeued": [
+   {
+    "count": 1,
+    "relay": "A",
+    "t": 49.418
+   }
+  ],
+  "retired": [
+   {
+    "relay": "A",
+    "site": "A",
+    "t": 49.105
+   }
+  ],
+  "reverted": []
+ },
+ "settings": {
+  "evict": 1200,
+  "heartrate": 2,
+  "hold": 2.0,
+  "period": 1,
+  "quiet": 5,
+  "relay_period": 1,
+  "run_timeout": 900,
+  "sample": 0.25,
+  "timeout": 5
+ },
+ "tasks": {
+  "completed": 12,
+  "failed": 0,
+  "max_attempt": 1,
+  "ran": 12,
+  "repeated": [],
+  "rows": 12,
+  "runs": 12,
+  "succeeded": 12,
+  "total": 12,
+  "unknown_runs": 0
+ },
+ "transitions": {
+  "0": [
+   [
+    4.036,
+    null
+   ],
+   [
+    4.556,
+    "A"
+   ],
+   [
+    44.725,
+    "done"
+   ]
+  ],
+  "1": [
+   [
+    4.036,
+    null
+   ],
+   [
+    4.556,
+    "A"
+   ],
+   [
+    84.812,
+    "done"
+   ]
+  ],
+  "10": [
+   [
+    4.036,
+    null
+   ],
+   [
+    92.022,
+    "A2"
+   ],
+   [
+    215.637,
+    "done"
+   ]
+  ],
+  "11": [
+   [
+    4.036,
+    null
+   ],
+   [
+    132.071,
+    "A2"
+   ],
+   [
+    255.69,
+    "done"
+   ]
+  ],
+  "2": [
+   [
+    4.036,
+    null
+   ],
+   [
+    4.814,
+    "A"
+   ],
+   [
+    49.863,
+    "done"
+   ]
+  ],
+  "3": [
+   [
+    4.036,
+    null
+   ],
+   [
+    4.814,
+    "A"
+   ],
+   [
+    124.873,
+    "done"
+   ]
+  ],
+  "4": [
+   [
+    4.036,
+    null
+   ],
+   [
+    44.981,
+    "A"
+   ],
+   [
+    165.007,
+    "done"
+   ]
+  ],
+  "5": [
+   [
+    4.036,
+    null
+   ],
+   [
+    44.981,
+    "A"
+   ],
+   [
+    49.603,
+    null
+   ],
+   [
+    92.022,
+    "A2"
+   ],
+   [
+    175.558,
+    "done"
+   ]
+  ],
+  "6": [
+   [
+    4.036,
+    null
+   ],
+   [
+    51.926,
+    "A2"
+   ],
+   [
+    92.022,
+    "done"
+   ]
+  ],
+  "7": [
+   [
+    4.036,
+    null
+   ],
+   [
+    51.926,
+    "A2"
+   ],
+   [
+    92.022,
+    "done"
+   ]
+  ],
+  "8": [
+   [
+    4.036,
+    null
+   ],
+   [
+    51.926,
+    "A2"
+   ],
+   [
+    132.071,
+    "done"
+   ]
+  ],
+  "9": [
+   [
+    4.036,
+    null
+   ],
+   [
+    51.926,
+    "A2"
+   ],
+   [
+    132.071,
+    "done"
+   ]
+  ]
+ },
+ "trigger": {
+  "t": 46.921,
+  "undelivered": 1
+ },
+ "wall_s": 266.915,
+ "workload": [
+  {
+   "group": 0,
+   "sleep": 40.0,
+   "tasks": 12,
+   "zone": "cpu"
+  }
+ ]
+}
