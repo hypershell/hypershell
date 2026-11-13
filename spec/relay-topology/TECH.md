@@ -90,7 +90,7 @@ phases:
 - id: P5
   name: 'Multi-node test-cluster run (split gate): run A builds the batch script and
     judge, run B judges the foreman''s logs'
-  status: pending
+  status: in_progress
   satisfies:
   - R2
   - R3
@@ -100,7 +100,7 @@ phases:
   - P4
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: crest
   verify: uv run pytest -v tests/test_topology_judge.py && uv run python spec/relay-topology/drive/topology_judge.py
     spec/relay-topology/evidence/cluster --require spread-kill,fill
 review:
@@ -172,8 +172,8 @@ commit.
 - **Generic names; this repo is public.** Docs, tests, drives, records and the batch script name no
   real cluster, account, partition, QOS, host, user or path. Example sites are `A`/`B` (or `east`/`west`
   in docs), and example zones are `cpu`, `highmem` and `gpu`.
-- **No cluster tools, no submissions.** No builder calls a cluster tool or submits a job. P5's batch
-  script is run by the foreman.
+- **No cluster tools, no submissions.** No builder calls a cluster tool or submits a job. P5's drive
+  is run by the foreman, inside an allocation the foreman holds.
 - **Plan gate:** approved by the foreman on 2026-11-12, all five deviation rows included. Q1 is ruled:
   relay launches always expose their zone (GOAL Clarifications, "Ruled at the plan gate"). The
   `scheduler_group` equivalence test (deviation 4) runs in P1's verify. `hs-build` may start P1.
@@ -469,59 +469,99 @@ runs. Logs are kept as evidence, the full suite is green, and docs build with `-
 
 ## Phase P5 — Multi-node test-cluster run (split gate)
 **Satisfies:** R2, R3, R4, R5 (on real nodes) · **Depends on:** P4
-**Goal:** a self-contained batch script the foreman submits shows the topology on a real
-allocation. One node runs the server with no launcher, and two nodes run relays serving different
+**Goal:** a drive the foreman runs inside a held allocation shows the topology on real
+nodes. One node runs the server with no launcher, and two nodes run relays serving different
 zones through the scheduler's own `srun`, with clients landing on the allocation's nodes. The gate is
 split: **Run A** builds and rehearses, and the phase then waits (hill `crest`, `in_progress`) on the
 foreman's run. **Run B** judges the collected records, and only then is the phase `done`.
 
-**Run A** (builder):
+**Amendment (2026-11-13, run A; the foreman's contract, superseding PLAN §6's `INSTALL SCRATCH`
+batch script).** The foreman's scheduler wrapper builds a venv at the commit and runs the drive
+inside an allocation it already holds (4 nodes, 1 task per node, 8 CPUs each, at most 1 hour), the
+way `relay_drive.sh` is run: configured only by environment variables, with the account and
+partition added by the wrapper at submit time. So the drive is not a batch script: it has no
+`#SBATCH` lines and no positional arguments, never submits, and names no site. Further changes, as
+built: tasks are submitted only once both relays are registered (B first), so that the first plan
+with work sees both sites and `fill`'s listed order (A first) is shown over registration rank (the
+first rehearsal had B launch alone before A registered); the gated floor (`gpu.min 1`) is left out,
+since P4 covered it on the laptop and a held floor keeps a client past the work, which the idle and
+drain checks need gone; the kill comes once group 0 (highmem, gpu) is done and each site has
+launched 2 `cpu` clients, and regrowth is judged as A's `cpu` peak after B's eviction above its
+peak between the kill and the eviction (spread places growth at the smallest base, and the dead
+relay keeps its last reported count until eviction, so A holds); eviction is 20 s, the server's
+floor being over 10 s; there is no TLS on the allocation's network (the key still authenticates;
+TLS was the relay cycle's evidence); the server log uses the system style and every process runs
+with `TZ=UTC`, so the times of every node's logs compare.
 
-- [ ] `spec/relay-topology/drive/topology_cluster.sh INSTALL SCRATCH`:
-  - `#SBATCH --nodes=4`, `#SBATCH --time=01:00:00`, and nothing site-specific (no account, partition
-    or QOS; the foreman adds them at submit time).
-  - `INSTALL` is the prefix whose `bin/hs` and `bin/python` are under test, and `SCRATCH` is a shared
-    directory for logs and records. It reads node names from `scontrol show hostnames
-    "$SLURM_JOB_NODELIST"` and unsets every inherited `HYPERSHELL_*`.
-  - Every role is an `srun --overlap --nodes=1 --ntasks=1 --nodelist=<node> --export=ALL` step:
-    - node 0 runs `hs server --autoscaling=dynamic -P 5` with `evict` 30 and a key minted into a 0600
-      file under `SCRATCH`;
-    - node 1 runs relay A (`cpu`, `highmem`);
-    - node 2 runs relay B (`cpu`, `gpu`);
-    - each relay's launcher is `srun --overlap --nodes=1 --ntasks=1 --exclude=<node 0> --export=ALL sh
-      <recorder> <log> {zone}`, so clients land on nodes 1–3.
-  - Two runs within the hour, each bounded by its own deadline:
-    - `r1-spread-kill`: about 600 tasks of 2 s in group 0 (`cpu`), plus `highmem` and `gpu` in group 1;
-      bounds `cpu.max` 3 per site, `gpu.min` 1, `highmem.min` 0; SIGKILL relay B once a third of the
-      tasks are complete.
-    - `r2-fill`: `sites = B,A` and the same workload, with no kill.
-- [ ] `spec/relay-topology/drive/topology_record.sh LOG ZONE_WORD -- CLIENT_ARGV`. It appends `t, node,
-      word, env zone, --zone, pid, key_present (bool)` and then `exec`s the client.
-- [ ] A collector, run at the end of each run (`topology_collect.py`, stdlib plus the venv's python),
-      writes `SCRATCH/results/<run>.json`. It holds counts and booleans only:
-  - tasks per group, completed once, failed;
-  - launches per site-zone with their timestamps relative to start;
-  - peak launched vs advertised max;
-  - the gated-zone launches before group 0 ended;
-  - the fill order;
-  - evictions and orphan reverts (server-log regexes, as `relay_probe.py:52-58`);
-  - A's `cpu` launches after B's eviction;
-  - `Terminating site client` lines before the drain, and idle exits seen;
-  - key present in any launch;
-  - the scrub check.
-- [ ] `spec/relay-topology/drive/topology_judge.py DIR [--require spread-kill,fill]` (stdlib) and
-      `tests/test_topology_judge.py` (`@mark.unit`): a good record of each run passes, each bad record
-      fails its named check, and the CLI handles a tree, one run, no runs and `--require`.
-- [ ] Local rehearsal, `TC_MODE=local sh spec/relay-topology/drive/topology_cluster.sh INSTALL SCRATCH`.
-      It runs on one machine with stand-in `srun`/`scontrol` from `TC_STANDIN` (scratch, not
-      committed), loopback, and both runs shortened. The judge passes on its records.
-- [ ] **Run A gate** (recorded in the phase notes, not the frontmatter verify):
-      `uv run pytest -v tests/test_topology_judge.py` plus the local rehearsal PASS. Then set `hill:
-      crest`, leave the phase `in_progress`, and hand back to the foreman:
-  - the exact submit line: `sbatch [<foreman's account/partition/QOS flags>]
-    spec/relay-topology/drive/topology_cluster.sh <INSTALL> <SCRATCH>`;
-  - what to copy: `SCRATCH/results/*.json` only, never the key, logs or identities;
-  - where to copy it: `spec/relay-topology/evidence/cluster/`.
+**Run A** (builder) — done 2026-11-13:
+
+- [x] `spec/relay-topology/drive/topology_cluster.sh` (POSIX `sh`), the drive. Environment contract:
+      `HS` (the `hs` under test; `python` and `hyper-shell` beside it), `HSD_WORK` (shared work
+      directory), `HSD_RESULTS` (results directory), `HSD_NODE_TMP` (node-local temp, the same path
+      on every node), `HSD_SRUN_ARGS` (extra flags for every job step, client steps included),
+      `HSD_LABEL`, `HSD_RUN_ID` (prefix; run ids are `<prefix>-spread-kill`, `<prefix>-fill`).
+      Every inherited `HYPERSHELL_*` is unset. Nodes come from `scontrol show hostnames
+      "$SLURM_JOB_NODELIST"`: node 0 the server, node 1 relay A, node 2 relay B; A's clients land
+      on nodes 1 and 3+, B's on 2 and 3+. Every role is `srun --overlap --nodes=1 --ntasks=1
+      --nodelist=NODE --export=ALL $HSD_SRUN_ARGS`. Rehearsal and tuning knobs (`HSD_SRUN`,
+      `HSD_NODES`, `HSD_LOCAL`, timings, sizes) have the cluster values as defaults. Each run has
+      its own key (0600), deadline (`HSD_TIMEOUT`, 900 s) and cleanup: roles and recorders stop
+      their processes on the run's `abort` flag or deadline, and leftover steps get SIGTERM, then
+      SIGKILL, by recorded pid, on exit, error or signal; a run that could end past `HSD_BUDGET`
+      (2400 s) is skipped and fails.
+- [x] `topology_role.py` (stdlib): `plan`, `status`, `server` (node 0: `hs server
+      --autoscaling=dynamic -P 5 -F 1`, evict 20, DB in node-local temp, submits on the drive's cue,
+      writes progress, exports the tasks on stop) and `relay SITE` (`hs relay` with `[relay.zone.*]`
+      bounds, heartrate 2, site-client idle timeout 10 s, 2 threads, DEBUG log; SIGKILL, SIGUSR1
+      drain or SIGTERM on the drive's flags).
+- [x] `topology_launch.sh {zone}` (the relays' launcher: next client node round robin, then
+      `$HSD_SRUN --overlap --nodes=1 --ntasks=1 --nodelist=NODE --export=ALL $HSD_SRUN_ARGS sh
+      topology_record.sh …`) and `topology_record.sh` (on the client's node: one record per client
+      with the relay-side launch time, start time, node, `{zone}` word, `HYPERSHELL_ZONE`, `--zone`,
+      whether the upstream key is in its environment or argv; runs the client as a child and records
+      its exit status, a passed-on signal, or the kill it delivered on the drive's `kill-B` flag).
+- [x] `topology_collect.py` writes `HSD_RESULTS/<run id>.json`: plan (bounds, distribution, sites,
+      workload, settings), task counts and per-group first schedule and last completion, one entry
+      per launch (site, zone words, node index, launch/start/end times, status, killed), each
+      relay's registrations, evictions, reverts and departures (from the server log), idle exits,
+      non-zero exits and `Terminating site client` lines (from its log) and how it ended, the
+      drive's events (submitted, kill, completed, quiet, observed, drain), times in seconds from the
+      run's start. It scans itself for node names, host, user, paths and key (`scrub`, all 0).
+- [x] `topology_judge.py PATH [--require spread-kill,fill]` (stdlib) and
+      `tests/test_topology_judge.py` (59 `@mark.unit` tests: a good record of each scenario passes,
+      51 bad records each fail their named check, and the CLI over a tree, one record, a failing
+      run, no runs and `--require`). Checks: common — schema, deadline, tasks complete and none
+      failed, group order, launches, zone named alike, placement (highmem only at A, gpu only at B),
+      nodes other than the server's, peak ≤ max per site-zone, no key, every exit recorded, every
+      exit idle (status 0) or by the kill, no `Terminating site client`, each live relay saw an idle
+      exit per launch, no launch after all clients left, live relays stayed and drained with status
+      0, record scrubbed; spread-kill — cpu at both sites before the kill, group 0 done first, B
+      killed, both B identities evicted and reverted after the kill, site B left the topology, A's
+      cpu regrew after the eviction; fill — listed order over rank, the preferred site launched its
+      max before the other's first cpu launch, no kill or eviction.
+- [x] `topology_rehearse.sh`: the whole drive on one machine with a stand-in `srun` written to
+      scratch (ignores resource flags, names the node from `--nodelist`, points a client's `-H` at
+      loopback), four named nodes, scaled down (1 s checks, 12 s evict, 1 s tasks), then the judge
+      with `--require spread-kill,fill`. Evidence: `evidence/rehearsal/` (`.txt`, scrubbed).
+- [x] **Run A gate (2026-11-13):** `uv run pytest -v tests/test_topology_judge.py` 59 passed; the
+      rehearsal PASS (spread-kill 60 s, fill 46 s): B killed at 20.4 s, evicted and reverted at
+      32.4 s, A's cpu peak 2 between kill and eviction, 5 (max) after; fill: A launched 3 (max)
+      before B's first. The judge with one assertion broken on purpose (`launch.peak` counting a
+      peak equal to max as over) failed both runs, exit 1; restored, it passed again. No process
+      of the rehearsal was left (every relay, server and client recorded its exit).
+- **Hand-back to the foreman (run A).**
+  - *Run:* inside the 4-node allocation, `HS=<venv>/bin/hs HSD_WORK=<shared> HSD_RESULTS=<results>
+    HSD_NODE_TMP=<node-local> HSD_SRUN_ARGS=<site step flags> HSD_LABEL=<short sha>
+    HSD_RUN_ID=topology-<short sha> sh spec/relay-topology/drive/topology_cluster.sh`. Expected
+    wall time about 8–10 min (spread-kill about 5, fill about 3); worst case 30 min plus
+    collection, within its own 900 s deadline per run. Exit 0 only if both scenarios pass.
+  - *Copy:* `HSD_RESULTS/*.json` only, unchanged, into `spec/relay-topology/evidence/cluster/`;
+    never the work directory (key, logs, launch records).
+  - *Watch for:* nested job steps from inside the relay step (as the relay drive's launcher did);
+    steps that wait with "Requested nodes are busy" need more step flags in `HSD_SRUN_ARGS`; site
+    clients resolve relay nodes by host name and relays the server by its node name; the server's
+    `rc` is 4 at the drive's SIGINT (keyboard interrupt of a forever server) and is recorded, not
+    judged.
 
 **Run B** (after the foreman's run):
 
@@ -529,8 +569,10 @@ foreman's run. **Run B** judges the collected records, and only then is the phas
       Run the frontmatter verify and write `SUMMARY.txt`. The phase is `done` only when it passes.
 - **Verify:** see frontmatter (judge tests, then the judge over the delivered records with both runs
   required).
-- **Touches:** `spec/relay-topology/drive/`, `spec/relay-topology/evidence/cluster/`,
-  `tests/test_topology_judge.py`.
+- **Touches:** `spec/relay-topology/drive/`, `spec/relay-topology/evidence/rehearsal/`,
+  `spec/relay-topology/evidence/cluster/`, `tests/test_topology_judge.py`.
+- **State (2026-11-13, after run A):** `in_progress`, hill `crest`, waiting on the foreman's external
+  run; `current_phase` stays P5. Run B copies the records and runs the frontmatter verify.
 
 ---
 

@@ -55,7 +55,7 @@ is skipped by the parser):
 - **Recommended fix:** in Step 1, accept a detached `HEAD` equal to `origin/develop` after the fetch; in Step 3, branch with `git switch --no-track -c {branch} origin/develop` (or `HEAD` when equal).
 - **Confidence:** high · **Effort:** small
 
-## F2 — Step 6 gives a phase one `verify:`, with no form for a split gate (run A built here, run B judged after an external run)
+## F2 — Step 6 gives a phase one `verify:`, with no form for a split gate (run A built here, run B judged after an external run) · seen again
 `origin=hs-plan:step-6 severity=low category=template status=open target=.agents/factory/templates/TECH.md`
 - **What happened:** the brief required the multi-node phase's gate to be split: run A builds and rehearses the batch script, and run B judges the foreman's records. The frontmatter holds one `verify:` per phase, so P5 carries run B's command, and run A's gate and the `crest`/`in_progress` wait had to be written as prose in the phase body.
 - **Skill cause:** Step 6 and the TECH template assume a phase's verify can run when the build finishes. They have no field or convention for an external-wait gate. The same gap was met at build time in `spec/relay/META.md` F6.
