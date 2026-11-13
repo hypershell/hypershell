@@ -437,11 +437,14 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   relay's last-advertised clients do not count against the site, so a restarted relay is planned at
   once), and every older relay there gets zero.
 - The relay's fleets reconcile a published topology and never terminate: each is a
-  `relay/site.py::SiteScaler` that applies each version once (`target - max(seen, launched)`). It
-  replaces a client that exited only when a later version asks, or when the server has finished two
-  checks (`checks`) past the first topology read after a beat that reported the exit and still
-  publishes the same version, so a slow server is never read as clients that left uncounted. With no
-  topology (none published, or an older server) it is the fixed fleet it always was.
+  `relay/site.py::SiteScaler` with one rule. It launches `target - max(basis, live)` (`live`: its
+  zone's clients still running, never a count of launches) each time it learns a new basis, the count
+  the server's plan rests on: a new version's `seen`, or, while `live < target` under an unchanged
+  version, `live` itself once the server has finished two checks (`checks`) past a topology read that
+  followed a beat reporting it. It never launches beyond the target in hand nor on its own period
+  alone, so a slow server is never read as clients that left uncounted, and a counted client that
+  left before the relay read the plan made with it is replaced. With no topology (none published, or
+  an older server) it is the fixed fleet it always was.
 
 ## Configuration
 

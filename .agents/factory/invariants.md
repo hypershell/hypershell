@@ -205,10 +205,12 @@ subsystems.
   alone; older ones get zero and their clients no longer count against the site), falling back per
   zone for beats with no instance key.
 - The relay's fleets reconcile a published topology and never terminate: `relay/site.py::SiteScaler`
-  applies each version once (`target - max(seen, launched)`), and replaces an exited client only
-  when a later version asks or when the server has finished two checks past the first topology read
-  after a beat that reported the exit and still publishes the same version (never on the relay's own
-  period alone). With no topology it is the fixed fleet.
+  launches `target - max(basis, live)` each time it learns a new basis, the count the server's plan
+  rests on (a new version's `seen`; or, while its running clients `live` stay below `target` under an
+  unchanged version, `live` once the server has finished two checks past a topology read that
+  followed a beat reporting it). Shortfall is measured against running clients, never cumulative
+  launches; nothing launches beyond the target in hand or on the relay's own period alone. With no
+  topology it is the fixed fleet.
 - `SSHCluster` shells out to the plain `ssh` binary (not paramiko; paramiko is only in
   `core/remote.py` for SFTP).
 - The relay's site fleets are launched only through `client_launch()`: every zone's by

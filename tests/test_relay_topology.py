@@ -6,9 +6,10 @@
 Each zone a relay serves has client bounds: those it advertises upstream for a server autoscaling
 with relay sites to plan with, and those of its fallback fleet when nothing is published. Every
 zone identity's beat advertises them with the zone's launched clients and the relay's instance key,
-and each beat is followed by a read of the published topology. Each fleet's `SiteScaler` applies a
-version once, launching what the server asks for beyond what the zone has, and never ends a client;
-with no topology it is the fixed fleet the relay always ran. Every launch names its zone.
+and each beat is followed by a read of the published topology. Each fleet's `SiteScaler` launches
+what the server asks for beyond the count its plan is known to rest on (a new version's `seen`, or the
+clients running once the server has planned on them twice), and never ends a client; with no topology
+it is the fixed fleet the relay always ran. Every launch names its zone.
 """
 
 
@@ -20,6 +21,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 import os
 import re
 import sys
+import random
 import json
 import time
 import signal
@@ -280,6 +282,237 @@ def test_site_scaler_follows_a_new_version_over_applying_again() -> None:
         view.set(TopologyReply('s:2', {'cpu': Entry('cpu', 0, 2)}, checks=checks), beat_at=time.monotonic() + 1)
         assert apply_once(machine) == 0
     assert len(launch.started) == 2
+
+
+@mark.unit
+def test_site_scaler_replaces_a_counted_exit_the_unchanged_plan_still_asks_for() -> None:
+    """A client the server counted that leaves before the relay reads the plan made with it is
+    replaced once the server has planned again on what runs, though the plan comes back unchanged."""
+    view = view_of('s:1', cpu=(3, 0))
+    machine, launch = scaler(view)
+    machine.phase = AutoScalerPhase.STEADY
+    assert apply_once(machine) == 3
+    launch.started[0].exit()  # Counted by the server: it plans target 3 from 3, then from 2.
+    launch.started[1].exit()  # Leaves before the relay reads that plan.
+    reply = TopologyReply('s:2', {'cpu': Entry('cpu', 3, 2)}, checks=2)
+    view.set(reply, beat_at=time.monotonic())
+    assert apply_once(machine) == 1  # Three asked for, two seen: one more; two run.
+    assert apply_once(machine) == 0  # No beat yet reported the two that run.
+    for checks in range(3, 5):  # The server plans on the two: the same target 3, seen 2.
+        view.set(replace(reply, checks=checks), beat_at=time.monotonic() + 1)
+        assert apply_once(machine) == 0
+    view.set(replace(reply, checks=5), beat_at=time.monotonic() + 1)
+    assert apply_once(machine) == 1 and launched_now(machine) == 3
+    view.set(replace(reply, checks=9), beat_at=time.monotonic() + 1)
+    assert apply_once(machine) == 0
+
+
+# --- The reconciler over sequences of events ------------------------------------------------------
+
+class Clock:
+    """A monotonic clock that moves only when told to."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def tick(self) -> float:
+        self.now += 1.0
+        return self.now
+
+
+class FailingLaunch(FakeLaunch):
+    """A client launch whose every client exits at once (a launcher that always fails)."""
+
+    def start(self, **options: Any) -> Proc:
+        proc = super().start(**options)
+        proc.status = 1
+        return proc
+
+
+class Site:
+    """
+    One relay site-zone under a server that publishes a topology, stepped one event at a time.
+
+    The server plans each check from the count on the last beat it recorded (`plan(seen, counted)`
+    gives the target, `counted` being the most it ever recorded), publishes a new version only
+    when the entry changes, and counts every check. A beat carries the fleet's running count and
+    is followed by a read of the topology, as the relay's heartbeat is. The server records a beat
+    when it is delivered, which may come late, but always before the second check that starts
+    after the read that followed it. Events:
+
+        B  a beat and the read after it      D  the server records every beat sent
+        P  a server check                    X  a running client exits
+        R  a check of the relay's fleet      S  B D P B R
+    """
+
+    def __init__(self, plan: Any, launch: Optional[FakeLaunch] = None) -> None:
+        self.view = TopologyView()
+        self.launch = launch or FakeLaunch()
+        self.machine = SiteScaler(self.launch, view=self.view, policy='fixed', period=3600, init_size=2,
+                                  min_size=2, max_size=2, own_zone=ZoneRef.from_name('cpu'))
+        self.machine.phase = AutoScalerPhase.STEADY
+        self.planner = plan
+        self.recorded = 0
+        self.counted = 0
+        self.sent: List[Tuple[int, int]] = []
+        self.checks = 0
+        self.version = 0
+        self.entry = Entry('cpu', plan(0, 0), 0)
+        self.peak = self.entry.target
+        self.view.set(self.reply())
+        self.launches: List[Tuple[int, Entry]] = []
+        self.exits = 0
+
+    def reply(self) -> TopologyReply:
+        return TopologyReply(f's:{self.version}', {'cpu': self.entry}, checks=self.checks)
+
+    @property
+    def live(self) -> int:
+        return launched_now(self.machine)
+
+    def beat(self) -> None:
+        built = site_module.time.tick()
+        self.sent.append((self.live, self.checks))
+        self.view.set(self.reply(), beat_at=built)
+
+    def deliver(self, before: Optional[int] = None) -> None:
+        while self.sent and (before is None or self.sent[0][1] <= before):
+            self.recorded = self.sent.pop(0)[0]
+            self.counted = max(self.counted, self.recorded)
+
+    def plan(self) -> None:
+        self.deliver(before=self.checks - 1)  # This check is the second since those reads.
+        self.checks += 1
+        entry = Entry('cpu', self.planner(self.recorded, self.counted), self.recorded)
+        if entry != self.entry:
+            self.entry, self.version = entry, self.version + 1
+        self.peak = max(self.peak, entry.target)
+
+    def exit(self) -> None:
+        running = [proc for proc in self.launch.started if proc.status is None]
+        if running:
+            running[0].exit()
+            self.exits += 1
+
+    def relay(self) -> None:
+        site_module.time.tick()
+        _, entry = self.view.assignment('cpu')
+        started = apply_once(self.machine)
+        if started:
+            assert self.live <= entry.target, f'launched {started} beyond target {entry.target}'
+            self.launches.append((started, entry))
+
+    def run(self, events: str) -> Site:
+        steps = {'B': self.beat, 'D': self.deliver, 'P': self.plan, 'X': self.exit, 'R': self.relay}
+        for event in events.replace(' ', '').replace('S', 'BDPBR'):
+            steps[event]()
+        return self
+
+    @property
+    def launched(self) -> int:
+        return sum(count for count, _ in self.launches)
+
+
+def growth(seen: int, counted: int) -> int:  # noqa: unused counted
+    """Dynamic growth with work: one more than the server sees, up to a max of 3."""
+    return min(3, seen + 1)
+
+
+def floor(seen: int, counted: int) -> int:  # noqa: unused
+    """A held floor: min = init = max = 3."""
+    return 3
+
+
+def one(seen: int, counted: int) -> int:  # noqa: unused
+    """A standing target of one client."""
+    return 1
+
+
+def starting(seen: int, counted: int) -> int:  # noqa: unused seen
+    """No work, init 2: held until a beat has counted 2, then nothing."""
+    return 2 if counted < 2 else 0
+
+
+SETTLE = 'S' * 12
+
+SEQUENCE_ROWS = [
+    # (case, plan, events, launches, running at the end)
+    ('a-counted-exit-during-growth', growth, f'R BDP BR BDP X B R {SETTLE}', 4, 3),
+    ('two-counted-exits-at-a-floor', floor, f'R BDP X BDP X B R {SETTLE}', 5, 3),
+    ('an-exit-before-any-beat', one, f'R X {SETTLE}', 2, 1),
+    ('a-slow-server-is-not-a-lost-count', starting, f'R BDR BDR X X {"BDR" * 10} {SETTLE}', 2, 0),
+    ('exits-under-a-standing-target', floor, f'R BDP {"X" * 3} {SETTLE}', 6, 3),
+]
+
+
+@pytest.fixture
+def clock(monkeypatch) -> Clock:
+    """The relay's monotonic clock, moved only by the test."""
+    clock = Clock()
+    monkeypatch.setattr(site_module, 'time', SimpleNamespace(monotonic=clock.monotonic, tick=clock.tick,
+                                                             time=time.time, sleep=time.sleep))
+    return clock
+
+
+@mark.unit
+@mark.parametrize('case, plan, events, launches, running', SEQUENCE_ROWS, ids=[row[0] for row in SEQUENCE_ROWS])
+def test_site_scaler_converges_over_event_sequences(clock, case, plan, events, launches, running) -> None:
+    """Over plans, exits and beats in a given order, the fleet ends at the server's target, never
+    launching beyond the target in hand, and launches only what the server asks for."""
+    site = Site(plan).run(events)
+    assert site.launched == launches
+    assert site.live == running == site.entry.target
+
+
+@mark.unit
+def test_site_scaler_never_replaces_under_a_lowered_target(clock) -> None:
+    """A lowered target replaces no exit while the zone runs at least that many."""
+    target = [3]
+    site = Site(lambda seen, counted: target[0]).run(f'R BDP {SETTLE}')
+    assert site.launched == 3
+    target[0] = 1
+    site.run(f'BDP BR X {SETTLE} X {SETTLE}')
+    assert site.launched == 3 and site.live == 1
+    site.run(f'X {SETTLE}')
+    assert site.launched == 4 and site.live == 1  # Below the target: the server asks for one again.
+
+
+@mark.unit
+def test_site_scaler_relaunches_a_failing_launcher_only_while_asked(clock) -> None:
+    """A launcher whose clients always fail is used again only after the server has planned on the
+    failure and still asks, and never once it asks for none."""
+    target = [1]
+    site = Site(lambda seen, counted: target[0], launch=FailingLaunch())
+    site.run('S' * 30)
+    asked = site.launched
+    assert 4 <= asked <= 10  # Again every few server checks: at most once per two checks.
+    target[0] = 0
+    site.run('S' * 30)
+    assert site.launched == asked and site.live == 0
+
+
+EVENT_WEIGHTS = {'B': 3, 'D': 2, 'P': 2, 'R': 3, 'X': 1}
+
+
+@mark.unit
+@mark.parametrize('plan', [growth, floor, starting])
+def test_site_scaler_converges_over_random_event_sequences(clock, plan) -> None:
+    """Over many random orders of plans, beats, exits and fleet checks, the fleet never launches
+    beyond the target in hand (asserted at every launch), and once exits stop it reaches the
+    server's target."""
+    events, weights = zip(*EVENT_WEIGHTS.items())
+    for seed in range(300):
+        rng = random.Random(seed)
+        prefix = ''.join(rng.choices(events, weights=weights, k=60))
+        site = Site(plan).run(prefix)
+        site.run(SETTLE)
+        assert site.live >= site.entry.target, f'seed {seed}: {prefix} ends at {site.live} of {site.entry.target}'
+        if plan is not starting:
+            assert site.live == site.entry.target, f'seed {seed}: {prefix}'
+        assert site.launched <= site.peak + site.exits, f'seed {seed}: {prefix}'
 
 
 @mark.unit

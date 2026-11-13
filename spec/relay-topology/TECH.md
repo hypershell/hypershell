@@ -3,7 +3,7 @@ slug: relay-topology
 title: 'Relay site-topology autoscaling: fill and spread across sites'
 kind: feature
 appetite: big
-status: blocked
+status: in_review
 branch: feature/relay-topology
 base: develop
 current_phase: done
@@ -81,9 +81,9 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: for mode in spread fill floor idle kill lower stale bounce; do .agents/factory/bin/temp_site.sh
-    sh "$PWD/spec/relay-topology/drive/topology_drive.sh" $mode || exit 1; done &&
-    for mode in founding fixed dynamic restart; do .agents/factory/bin/temp_site.sh
+  verify: for mode in spread fill floor idle kill lower stale bounce stall3 stall-min2;
+    do .agents/factory/bin/temp_site.sh sh "$PWD/spec/relay-topology/drive/topology_drive.sh"
+    $mode || exit 1; done && for mode in founding fixed dynamic restart; do .agents/factory/bin/temp_site.sh
     sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" $mode || exit 1; done && uv
     run pytest && uv run --python 3.12 --group docs sphinx-build -W --keep-going -q
     -E -b html docs docs/_build/html
@@ -196,7 +196,7 @@ commit.
 | `core/topology.py` | `error_text(message)` | the reply to an unreadable topology request (`{"protocol","error":"request","message"}`); `read_topology` raises `ValueError` on it |
 | `server.py` | `HeartMonitor(…, sites)`, `record_site(hb)`, `drop_site(uuid)`; `ServerThread(…, sites)` | a site beat lacking zone, bounds or clients is logged once at INFO and not recorded |
 | `relay/__init__.py` | `zone_bounds(settings, relay_wide) -> (advertised: Bounds, fallback: Bounds)`, `BOUND_OPTIONS`; `RelayThread(…, min_size, max_size, init_size)` (relay-wide bounds, None = unset), `.view`, `.advertised`, `.zone_launched(name)`; `RelayApp.relay_bounds`, `.check_bounds()` | PLAN §2.2 table, with the fallback `min` and `init` held within `max`; ValueError → `ArgumentError` naming the zone |
-| `relay/site.py` | `TopologyView(reply=None)` (`.reply`, `.beat_at`, `.set(reply, beat_at=None)`, `.read()`), `SiteScaler(AutoScaler)` (`RECHECKS = 2`), `site_scaler(machine, launch, view)`, `launched_now(machine)`; `site_cluster`/`zone_fleet(…, init_size, min_size, max_size, view)` | `view.assignment(zone) -> Optional[(version, Entry)]`; each read is stamped with the build time of the beat before it; `SiteScaler` launches `max(0, target − max(seen, launched))` once per version (applied again only on the server's evidence, see review cycle 1), else the parent's fixed fleet; it overrides `init`, `check_zones` and `wait` (a version not yet applied is checked at once, not at the period's end); `launched_now` counts launched processes still running, read by the heartbeat |
+| `relay/site.py` | `TopologyView(reply=None)` (`.reply`, `.beat_at`, `.set(reply, beat_at=None)`, `.read()`), `SiteScaler(AutoScaler)` (`RECHECKS = 2`), `site_scaler(machine, launch, view)`, `launched_now(machine)`; `site_cluster`/`zone_fleet(…, init_size, min_size, max_size, view)` | `view.assignment(zone) -> Optional[(version, Entry)]`; each read is stamped with the build time of the beat before it; `SiteScaler` launches `max(0, target − max(basis, live))` each time it learns a new basis (a new version's `seen`; or, while `live < target` under an unchanged version, `live` once the server has finished `RECHECKS` checks past a read that followed a beat reporting it; review cycle 2, RV4), else the parent's fixed fleet; it overrides `init`, `check_zones` and `wait` (a version not yet applied is checked at once, not at the period's end); `launched_now` counts launched processes still running, read by the heartbeat |
 | `relay/upstream.py` | `UpstreamHeartbeat(…, zones, bounds, launched, instance, view)`, `.fetch(built=None)` | every beat of an identity in `zones` carries its zone, bounds, `launched(zone)` and `instance`; each running beat is followed by `fetch()`: a missing method or `version: null` clears the view (INFO once per change), `LinkDown` or any other failure keeps it |
 
 ---
@@ -313,6 +313,8 @@ mode is unchanged.
 **Amendments (2026-11-13, at build):**
 
 - **Reopened at review cycle 1 (2026-11-13)** for RV1–RV3; see "Review cycle 1 remediation" below.
+- **Reopened at review cycle 2 (2026-11-13)** for RV4; see "Review cycle 2 remediation" below, which
+  restates `SiteScaler`'s rule.
 - **Foreman ruling, 2026-11-13: duplicate sites are held relay-wide, not per zone.** P1 held a
   duplicated site per zone, which let an older (possibly gone) relay keep a zone the newer one does
   not serve, absorbing that zone's demand until eviction. Each relay process now advertises one
@@ -401,6 +403,8 @@ nothing, it runs today's fleets.
 
 **Amendments (2026-11-13, at build):**
 
+- **Reopened at review cycle 2 (2026-11-13)** to add the `stall3` and `stall-min2` modes to the gate
+  and refresh the evidence; see "Review cycle 2 remediation" below.
 - **Reopened at review cycle 1 (2026-11-13)** to refresh the evidence and add the `stale` and
   `bounce` modes to the gate; see "Review cycle 1 remediation" below, which also supersedes the
   retry rule of the next item (RV1).
@@ -690,6 +694,119 @@ against a local server (sandbox off): 131 passed, 1 skipped, 29 failed, every on
 hs283/hs290a1 not listed" (20 and 9). Docs: the sandbox form of the `-W` gate (every extension but
 `sphinx_sitemap`, in its own environment) exit 0 with no warnings; `-b man` builds. The unmodified
 docs command is the foreman's to run outside the sandbox.
+
+## Review cycle 2 remediation (2026-11-13)
+
+`hs-review` cycle 2 (`REVIEW.md`, record `37e0a60`, reviewed `7ddd16f`) requested changes: RV4. P3
+(the relay's `SiteScaler`) and P4 (the laptop gate, retuned with two new drive modes) are reopened by
+script; P1, P2 and P5 stay done. This is the last review cycle the factory allows, so the foreman
+ruled that the fix restate the reconciler as one rule, not add a case.
+
+**RV4.** The cycle-1 `SiteScaler` applied each version once and kept a second, special path that
+applied it again. That path measured its shortfall against `expected`, the count the version's
+launches should have reached (`launched + count` when applied), and reset whenever the zone ran at
+least that many. When a client the server had counted exited before the relay read the plan made
+with it, the relay launched `target − seen`, reached `expected`, and the server's next plan was the
+same entry: no new version, and the re-apply path reset, though the zone ran one short of the
+target. It stayed short, below its `min` too, until the plan changed for another reason.
+
+**The rule (foreman ruling at review cycle 2).** A fleet following a topology launches
+`target − max(basis, live)` clients (none when that is not positive) each time it learns a new
+*basis*, and at no other time. `live` is the zone's clients launched here and still running (the
+relay's own count, the one its beats advertise), never a count of launches. The *basis* is the count
+of the zone's clients the server's current plan is known to rest on:
+
+- a version not yet applied gives its `seen`, the count the server planned from;
+- otherwise, while `live < target`, the server's own evidence gives `live`: the server has finished
+  two checks (`RECHECKS`, the cycle-1 `checks` counter) since a topology read that followed a beat
+  reporting `live`. One check may have read the registry before that beat was recorded; the second
+  starts after the first finished, which is after the read, so it planned with `live`, and its entry
+  (the same one, or the relay would hold a new version) still asks for `target`.
+
+The fleet tracks `held` (the `live` it last saw), `since` (when it first saw it) and `mark` (the
+`checks` of the first read whose beat was built after `since`); a change in `live`, or a launch,
+starts that afresh, and a `checks` lower than `mark` (a new server) re-marks. Why it converges: once exits
+stop, a fleet below its target either reads a new version (applied at once) or, the plan standing,
+its `live` stands too until it launches, so two server checks later the evidence holds and it launches
+`target − live`, reaching the target in hand. Why it never over-launches: every launch stops at the
+target in hand, and only on a basis the server stated or planned on, so nothing is launched on the
+relay's own period alone. Implemented in `relay/site.py` (`SiteScaler.reconcile`, `.planned_on`);
+`expected`, `short_at` and `uncounted` are gone.
+
+What the earlier cycles fixed still holds, by the same rule:
+
+| Case | How the rule keeps it |
+|------|-----------------------|
+| RV1: `-P 20` against a 1 s relay launches exactly its target | clients that idle out after the server counted them change `live`, but no basis comes until the server checks twice on the new count, and by then its plan (init lapsed, no work) asks for none: a new version with target 0 |
+| A lowered target terminates nothing and replaces nothing | `target ≤ live` gives no launch on either basis; the excess retires by idle exit |
+| A client that exits before any beat counted it is replaced (P4) | the plan stays `target, seen` unchanged; two checks after a beat reports the lower `live`, the basis is `live` |
+| A restarted relay is planned at once (RV2) | server-side, unchanged; the relay applies the first version it reads |
+| A launcher that always fails relaunches only while the server asks | each failed launch leaves `live` unchanged, so another needs two more server checks on it and a target still above it |
+| The explicit floor holds while gated | the floor is the server's target; an exit below it is replaced by a new version or, unchanged, by the evidence |
+
+**Tests, red on the reviewed head (`37e0a60`) and green after.** The tests and drive modes were
+written first and run against the reviewed head's `relay/site.py`, swapped in for the run and
+restored before the fix:
+
+| Check | Reviewed head | After |
+|-------|---------------|-------|
+| `test_relay_topology.py::test_site_scaler_replaces_a_counted_exit_the_unchanged_plan_still_asks_for` (RV4, unit) | fail: 0 launched after two checks | pass |
+| `…::test_site_scaler_converges_over_event_sequences[a-counted-exit-during-growth]` (`stall3`'s sequence) | fail: 3 launches, 2 running of 3 | pass: 4, 3 |
+| `…[two-counted-exits-at-a-floor]` (`stall-min2`'s sequence) | fail: 4 launches, 2 running of 3 | pass: 5, 3 |
+| `…[an-exit-before-any-beat]`, `…[a-slow-server-is-not-a-lost-count]`, `…[exits-under-a-standing-target]` | pass | pass |
+| `…::test_site_scaler_never_replaces_under_a_lowered_target`, `…::test_site_scaler_relaunches_a_failing_launcher_only_while_asked` | pass | pass |
+| `…::test_site_scaler_converges_over_random_event_sequences[growth, floor, starting]` (300 seeds each) | fail: seeds 1, 92, 62 end short (2 of 3, 1 of 2, 1 of 2) | pass |
+| drive `stall3` | FAIL: race reproduced, A never ran 3 again (peak 2 after the kill), no plan applied again | PASS: 3 again 9 s after the kill, one plan applied again |
+| drive `stall-min2` | FAIL: race reproduced, A sat at 2 under a floor of 3, no plan applied again | PASS: 3 again 10 s after the second kill, one plan applied again |
+
+The guard rows (`an-exit-before-any-beat`, `a-slow-server-is-not-a-lost-count`, the lowered target,
+the failing launcher) pass on both: they pin what cycle 1 fixed. The random-sequence test drives a
+model server (planning from the last recorded beat, publishing only on change, counting every
+check, recording a beat no later than the second check after the read that followed it) and the
+real `SiteScaler` through 300 random orders of 60 events per plan (dynamic growth to 3, a floor of
+3, an `init` of 2 that lapses), asserting at every launch that the fleet stays within the target in
+hand, that launches never exceed the highest target plus exits, and that once exits stop the fleet
+ends at the server's target.
+
+**Drive.** Two modes, after the reviewer's reproductions, run with relay A alone, the server
+checking every 4 s and site clients idle for 30 s (so no client leaves between bundles and hides the
+stall behind a new version); the relay's site server evicts a killed client after 20 s, reverting its
+task. `topology_trigger.py` follows the server log and kills a client the instant the server
+publishes `target 3, seen 2`, before the relay's next beat and read.
+
+- `stall3`: `cpu` `max` 3, 90 tasks of 2 s, under growth.
+- `stall-min2`: `cpu` `min = init = max = 3`, 60 tasks of 2 s; one client killed once the server
+  has seen 3, a second as it publishes `target 3, seen 2`.
+
+Each checks that the race happened (A logged `target: 3, seen: 2, launched: 1) - launching 1`) and
+that A ran 3 clients again within 30 s of the kill. `stall-min2`'s zone is a held floor, so it is
+left out of the idle-exit checks, as `floor`'s `gpu` is.
+
+**Cluster-judged behaviour.** No behaviour the cluster scenarios judged changes, so the
+records in `evidence/cluster/` stand; a rerun would re-confirm the same checks, and whether to rerun
+is the foreman's call. A new version is applied exactly as before (`target − max(seen, live)`, the
+cycle-1 formula). The rule differs from cycle 1 only under an unchanged version: it launches where
+cycle 1 stalled (a counted client that left before the relay read the plan made with it), and in
+the uncounted case it still waits for the same two server checks. Both scenarios have one relay
+per site, idle timeout 10 s and `-P 5`; every judged check rests on new versions or on fewer
+launches: peaks within `max` (every launch stops at the target in hand, itself within `max`), every
+exit idle or by the kill (nothing is terminated), no launch after every client left (the target is
+then 0, no floor being set), a live relay seeing an idle exit per launch, regrowth after the
+eviction, and the `fill` order (a preferred site that the race had left one short would now reach
+its `max` sooner, which only strengthens that check). The records carry no relay log lines, so
+whether the race occurred on the cluster cannot be read from them.
+
+**Verification (2026-11-13).** Targeted (P1–P5 verify test files, the relay suite, the
+Z3 autoscaler suites and the judge tests): 611 passed; relay smoke PASS; the judge over
+`evidence/cluster` with `--require spread-kill,fill` PASS (2 runs, 0 failed). Drive: all ten topology
+modes PASS (`spread`, `fill`, `floor`, `idle`, `kill`, `lower`, `stale`, `bounce`, `stall3`,
+`stall-min2`; evidence in `evidence/laptop/`, every file regenerated; only the two stall runs applied
+a plan again, once each), and Z3's `founding`, `fixed`, `dynamic`, `restart` PASS. Full suite: 1932
+passed, 88 skipped, 2 warnings (the existing `fork()` deprecations), CPython 3.12.13, 16 min 42 s.
+PostgreSQL suites against a local server (sandbox off): 131 passed, 1 skipped, 29 failed, every one
+"Template hs283/hs290a1 not listed" (20 and 9). Docs: the sandbox form of the `-W` gate (every
+extension but `sphinx_sitemap`, in its own `UV_PROJECT_ENVIRONMENT`) exit 0 with no Sphinx
+warnings. The unmodified docs command is the foreman's to run outside the sandbox.
 
 ## How `hs-build` drives this
 

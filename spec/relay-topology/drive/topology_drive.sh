@@ -28,6 +28,13 @@
 #   bounce  relay A alone, cpu max 2, 40 cpu tasks of 2 seconds, eviction after 30 s; once A runs 2
 #           clients it is killed (SIGKILL, then its site clients) and restarted at once as A2 (site A,
 #           the same bounds, its own relay database; launches recorded as site A2)
+#   stall3  relay A alone, cpu max 3, 90 cpu tasks of 2 seconds, the server checking every 4 s and
+#           site clients idle for 30 s; when the server publishes target 3 having seen 2, one of A's
+#           clients is killed (SIGKILL) before A reads that plan, so A launches one and runs 2, and
+#           the server's next plan is the same entry (no new version)
+#   stall-min2  as stall3, with cpu min = init = max = 3 and 60 tasks: once A runs 3 and the server
+#           has seen them, one client is killed; when the server publishes target 3 having seen 2,
+#           a second is killed before A reads it, so again A runs 2 under an unchanged plan
 #
 # Checks, all modes: every task completes once and none fails; every launch names one zone alike
 # in {zone}, HYPERSHELL_ZONE and --zone; no site's zone ever runs more clients than its max; no
@@ -42,7 +49,10 @@
 # of the warning (A's clients no longer count against the site). Stale: once A's clients have left
 # and the server has checked again, A has launched exactly its init (2), and never applied a version
 # again. Bounce: the server warns naming both relays of site A; A2 launches within 10 s of its start
-# and before A's eviction; A's orphaned tasks are reverted at its eviction.
+# and before A's eviction; A's orphaned tasks are reverted at its eviction. Stall3 and stall-min2:
+# the race happened (A read target 3, seen 2 with one client running), and A ran 3 clients again
+# within 30 s of the kill (the server planning twice on the 2 running, unchanged, is the evidence
+# A acts on); a killed client's task is reverted by A's site server (eviction after 20 s).
 #
 # Settings: TD_DEADLINE, seconds each wait is bounded by (default 180). TD_EVIDENCE, a directory:
 # when set, the launch log, the server's and relays' topology lines and the checks are written to
@@ -104,8 +114,8 @@ start_relay() {
     dir=$work/relay-$1
     mkdir -p "$dir"
     {
-        printf '[relay]\nsite = "%s"\ntimeout = 2\nlauncher = "sh %s %s %s {zone}"\n' \
-            "$2" "$here/topology_shim.sh" "$log" "$3"
+        printf '[relay]\nsite = "%s"\ntimeout = %s\nlauncher = "sh %s %s %s {zone}"\n' \
+            "$2" "$client_timeout" "$here/topology_shim.sh" "$log" "$3"
         printf "$5"
     } > "$dir/relay.toml"
     zone_args=
@@ -116,14 +126,14 @@ start_relay() {
         HYPERSHELL_RELAY_UPSTREAM_HOST=127.0.0.1 HYPERSHELL_RELAY_UPSTREAM_PORT="$port" \
         HYPERSHELL_RELAY_UPSTREAM_AUTH="$key" HYPERSHELL_RELAY_UPSTREAM_TLS_ENABLED=false \
         HYPERSHELL_RELAY_UPSTREAM_HEARTRATE=1 HYPERSHELL_SERVER_TLS_ENABLED=false \
-        HYPERSHELL_AUTOSCALE_PERIOD=1 HYPERSHELL_LOGGING_LEVEL=DEBUG \
+        HYPERSHELL_AUTOSCALE_PERIOD=1 HYPERSHELL_LOGGING_LEVEL=DEBUG ${site_evict:+HYPERSHELL_SERVER_EVICT=$site_evict} \
         "$HS" relay $zone_args --bind 127.0.0.1 --port "$(free_port)" 2> "$dir/relay.log" &
     eval "relay_$1=$!"
     started="$started $!"
 }
 
 # Workload and settings per mode.
-distribution=spread sites= factor=1 period=1 evict=10 dead=
+distribution=spread sites= factor=1 period=1 evict=10 dead= client_timeout=2 site_evict= floored=
 a_bounds='[relay.zone.cpu]\nmax = 2\n[relay.zone.highmem]\nmax = 2\n'
 b_bounds='[relay.zone.cpu]\nmax = 2\n[relay.zone.gpu]\nmax = 2\n'
 case $mode in
@@ -146,7 +156,15 @@ case $mode in
         evict=30 dead=A
         a_bounds='[relay.zone.cpu]\nmax = 2\n'
         submit cpu 0 cpu 40 2 ;;
-    *) echo "usage: topology_drive.sh spread|fill|floor|idle|kill|lower|stale|bounce" >&2; exit 2 ;;
+    stall3)
+        period=4 client_timeout=30 site_evict=20
+        a_bounds='[relay.zone.cpu]\nmax = 3\n'
+        submit cpu 0 cpu 90 2 ;;
+    stall-min2)
+        period=4 client_timeout=30 site_evict=20 floored=' site=A .* word=cpu '
+        a_bounds='[relay.zone.cpu]\nmin = 3\ninit = 3\nmax = 3\n'
+        submit cpu 0 cpu 60 2 ;;
+    *) echo "usage: topology_drive.sh spread|fill|floor|idle|kill|lower|stale|bounce|stall3|stall-min2" >&2; exit 2 ;;
 esac
 total=$("$HS" list --count)
 
@@ -174,7 +192,7 @@ wait_registered() {  # SITE
 }
 
 # B registers first, so the preference order of fill (B, then A) holds from the first plan.
-if [ "$mode" = lower ] || [ "$mode" = stale ] || [ "$mode" = bounce ]; then
+if [ "$mode" = lower ] || [ "$mode" = stale ] || [ "$mode" = bounce ] || [ "$mode" = stall3 ] || [ "$mode" = stall-min2 ]; then
     start_relay A A A cpu "$a_bounds"
 else
     start_relay B B B 'cpu gpu' "$b_bounds"
@@ -202,7 +220,23 @@ alive_count() {  # LABEL ZONE
 remaining() { "$HS" list --remaining --count 2>/dev/null || echo '?'; }
 completed() { "$HS" list --completed --count 2>/dev/null || echo 0; }
 
-killed_at= warned_at= evicted_at= restarted_at=
+killed_at= warned_at= evicted_at= restarted_at= armed= recovered_at=
+# Stall modes: kill one of A's clients the moment the server publishes target 3 having seen 2.
+trigger=$work/trigger.txt
+arm_trigger() {  # OFFSET in server.log
+    "$PY" "$here/topology_trigger.py" server.log "$1" 'zone: cpu, target: 3, launched: 2\)' "$log" A 1 \
+        "$trigger" "$deadline" &
+    started="$started $!"
+}
+first_running() {  # LABEL
+    while read -r _ _ label pid _; do
+        if [ "${label#site=}" = "$1" ] && kill -0 "${pid#pid=}" 2>/dev/null; then echo "${pid#pid=}"; return; fi
+    done < "$log"
+}
+if [ "$mode" = stall3 ]; then
+    arm_trigger 0
+    armed=1
+fi
 if [ "$mode" = stale ]; then
     # Nothing to run: wait for A's launch, for its clients to leave, then for the server's next check.
     waited=0
@@ -260,6 +294,23 @@ while [ "$(remaining)" != 0 ]; do
                 echo "A evicted at $evicted_at (orphaned tasks reverted)" >> "$checks"
             fi
             ;;
+        stall3|stall-min2)
+            if [ "$mode" = stall-min2 ] && [ -z "$armed" ] && [ "$(alive_count A cpu)" -ge 3 ] &&
+                    grep -q 'zone: cpu, target: 3, launched: 3)' server.log; then
+                arm_trigger "$(wc -c < server.log)"
+                armed=1
+                pid=$(first_running A)
+                kill -KILL "$pid" 2>/dev/null || true
+                echo "killed one of A's clients at $(date +%s), the server having seen 3" >> "$checks"
+            fi
+            if [ -z "$killed_at" ] && [ -s "$trigger" ]; then
+                killed_at=$(cut -d ' ' -f 2 "$trigger")
+                echo "killed one of A's clients at $killed_at, as the server published target 3, seen 2" >> "$checks"
+            fi
+            if [ -n "$killed_at" ] && [ -z "$recovered_at" ] && [ "$(alive_count A cpu)" -ge 3 ]; then
+                recovered_at=$(date +%s)
+            fi
+            ;;
         lower)
             if [ -z "${relay_A2:-}" ] && [ "$(alive_count A cpu)" -ge 3 ]; then
                 start_relay A2 A A2 cpu '[relay.zone.cpu]\nmax = 1\n'
@@ -284,9 +335,10 @@ done_at=$(date +%s)
 sleep 6
 
 # Every client leaves by its own idle timeout while the relays run, and nothing more is launched,
-# except in a zone with a floor (floor mode: B's gpu, min 1), which the server holds with no work.
-floored=' site=B .* word=gpu '
-unfloored() { if [ "$mode" = floor ]; then grep -v -e "$floored" "$log" || true; else cat "$log"; fi; }
+# except in a zone with a floor (floor mode: B's gpu, min 1; stall-min2: A's cpu, min 3), which the
+# server holds with no work.
+if [ "$mode" = floor ]; then floored=' site=B .* word=gpu '; fi
+unfloored() { if [ -n "$floored" ]; then grep -v -e "$floored" "$log" || true; else cat "$log"; fi; }
 waited=0
 while :; do
     sample
@@ -304,7 +356,7 @@ while :; do
     sleep 1
 done
 launched_after_work=$(unfloored | wc -l)
-floor_after_work=$(grep -c -e "$floored" "$log" || true)
+floor_after_work=$(if [ -n "$floored" ]; then grep -c -e "$floored" "$log" || true; else echo 0; fi)
 sleep 5
 check 'no launch after every client left' "$(holds test "$(unfloored | wc -l)" = "$launched_after_work")"
 if [ "$mode" = floor ]; then
@@ -367,6 +419,7 @@ max_of() {  # LABEL ZONE
     case "$mode:$1:$2" in
         kill:A:cpu) echo 3 ;; kill:B:cpu) echo 20 ;; kill:*:*) echo 1 ;;
         lower:A:cpu) echo 3 ;; lower:A2:cpu) echo 1 ;;
+        stall3:A:cpu|stall-min2:A:cpu) echo 3 ;;
         floor:B:gpu|*:*:*) echo 2 ;;
     esac
 }
@@ -455,6 +508,15 @@ case $mode in
         echo "A launched $a_launched (init 2); versions applied again: $again" >> "$checks"
         check 'A launched exactly its init (2) across the server'"'"'s silence' "$(holds test "$a_launched" = 2)"
         check 'A applied no version again' "$(holds test "$again" = 0)"
+        ;;
+    stall3|stall-min2)
+        check "a client the server counted was killed as it published target 3, seen 2" "$(holds test -n "$killed_at")"
+        raced=$(grep -c 'target: 3, seen: 2, launched: 1) - launching 1' "$work/relay-A/relay.log" || true)
+        check 'A read that plan with one client running (the race happened)' "$(holds test "$raced" -ge 1)"
+        again=$(grep -c 'applying again' "$work/relay-A/relay.log" || true)
+        echo "A ran 3 cpu clients again at ${recovered_at:-never}; plans applied again: $again" >> "$checks"
+        check 'A ran its target (3) again within 30 s of the kill' \
+            "$(holds test -n "$recovered_at" -a "${recovered_at:-0}" -le "$((${killed_at:-0} + 30))")"
         ;;
     bounce)
         check 'relay A was killed and restarted as A2' "$(holds test -n "$killed_at" -a -n "$restarted_at")"

@@ -28,11 +28,12 @@ a private copy without them, so its clients keep the file's other settings (`[se
 The relay owns the clients it launches: `end_site_clients` ends any still running when it stops.
 
 Every fleet's autoscaler is a `SiteScaler`. Against an upstream server that publishes a site topology
-(a server autoscaling with relay sites), it follows its zone's entry there: at each new version it
-launches what the server asks for beyond what it already counted, and nothing more. It replaces a
-client that exits only when the server still asks for it, and never ends one, so a lowered target,
-or a target of zero, takes effect as the zone's clients exit when idle. Without a topology it is the
-fixed fleet above.
+(a server autoscaling with relay sites), it follows its zone's entry there: it launches what the
+server asks for beyond the count the server is known to have planned on (at a new version, the count
+the server saw; once the server has planned again on the clients running, that count), and nothing
+more. It replaces a client that exits only when the server still asks for it, and never ends one, so
+a lowered target, or a target of zero, takes effect as the zone's clients exit when idle. Without a
+topology it is the fixed fleet above.
 Every launch names its zone to the launcher (`{zone}` and `HYPERSHELL_ZONE`), in both modes.
 
 Example:
@@ -246,31 +247,36 @@ class SiteScaler(AutoScaler):
     The autoscaler of one zone's fleet at a relay's site.
 
     Without a topology (no `view`, or nothing published upstream) it is the fixed fleet its parent
-    runs. With one, the zone's entry decides: each version is applied once, by launching the
-    clients the server asked for beyond what this zone has, the larger of the count the server
-    planned from (`seen`) and the clients launched here now. A client that exits is not replaced
-    unless a later version asks for one, so a fleet with no work retires through idle exit, and a
-    target below what runs launches nothing. No client is ever ended to meet a target. A new version
-    is applied as soon as it is read, not only at the next period.
+    runs. With one, the zone's entry decides, by one rule. The fleet launches `target - max(basis,
+    live)` clients (none when that is not positive) each time it learns a new basis, and at no
+    other time. `live` is the zone's clients launched here and still running. The basis is the
+    count of them the server's current plan is known to rest on:
 
-    One case is applied again: clients launched for a version that left before the server counted
-    them (a launcher that failed, or a client that died at once) change nothing the server sees, so
-    no new version comes. The version standing is no evidence of that by itself: a server that plans
-    less often than this fleet checks publishes nothing new between its checks either. So once its
-    launches are short (the zone has fewer than were launched, and no more than `seen`), the fleet
-    notes when it saw that (`short_at`), then the server's count of finished checks on the first read
-    after a beat built later (`mark`, that beat having reported the zone short). Once the server has
-    finished `RECHECKS` more checks and still publishes the same version, it has planned with that
-    report and asks for the same entry, and the version is applied again. One check is not enough:
-    it may have read the relay's beats before that one arrived.
+    - a version not yet applied gives its `seen`, the count the server planned from;
+    - otherwise, while `live` stays below `target`, the server's own evidence gives `live` itself:
+      the server has finished `RECHECKS` checks since a topology read that followed a beat
+      reporting `live`, so its plan rests on that count, and it still asks for `target`.
+
+    So a fleet never launches beyond the target in hand, and never on its own period alone: a
+    client that exits is replaced only when the server, having planned on the exit, still asks for
+    it, whether its plan came back as a new version or unchanged (a client that left before any
+    beat counted it, or one the server counted that left before the relay read the plan made with
+    it, changes nothing the server publishes). A target at or below what runs launches nothing, and
+    no client is ever ended, so a lowered target, or a target of zero, takes effect as the zone's
+    clients exit when idle. A new version is applied as soon as it is read, not only at the next
+    period.
+
+    One check is not enough evidence: it may have read the relay's beats before that one arrived.
+    The count of checks comes with every read (`checks`), and each read is stamped with when the
+    beat before it was built, so a read that follows no beat reporting `live` never counts.
     """
 
     RECHECKS: Final[int] = 2
 
     view: Optional[TopologyView]
     applied: Optional[str]
-    expected: int
-    short_at: Optional[float]
+    held: Optional[int]
+    since: float
     mark: Optional[int]
 
     def __init__(self: SiteScaler, launch: ClientLaunch, *, view: Optional[TopologyView] = None, **options: Any) -> None:
@@ -278,8 +284,8 @@ class SiteScaler(AutoScaler):
         super().__init__(launch, **options)
         self.view = view
         self.applied = None
-        self.expected = 0
-        self.short_at = None
+        self.held = None
+        self.since = 0.0
         self.mark = None
 
     def assignment(self: SiteScaler) -> Optional[Tuple[str, Entry]]:
@@ -315,35 +321,34 @@ class SiteScaler(AutoScaler):
         return self.reconcile(*assignment)
 
     def reconcile(self: SiteScaler, version: str, entry: Entry) -> AutoScalerState:
-        """Apply `version` once: launch what its entry asks for beyond what this zone has."""
-        launched = self.launched().get(self.own_zone.id, 0)
-        count = max(0, entry.target - max(entry.seen, launched))
-        if version == self.applied:
-            if not self.uncounted(launched, entry, count):
-                return AutoScalerState.WAIT
-            log.info(f'Topology {version} (zone: {self.own_zone.name}): {self.expected - launched} clients '
-                     f'left before the server counted them - applying again')
-        self.applied, self.short_at, self.mark = version, None, None
-        self.expected = launched + count
-        log.info(f'Topology {version} (zone: {self.own_zone.name}, target: {entry.target}, seen: {entry.seen}, '
-                 f'launched: {launched}) - launching {count}')
+        """Launch `target - max(basis, live)` clients if a new basis is known (see the class), else nothing."""
+        live = self.launched().get(self.own_zone.id, 0)
+        planned = self.planned_on(live)
+        if version != self.applied:
+            self.applied = version
+            count = max(0, entry.target - max(entry.seen, live))
+            log.info(f'Topology {version} (zone: {self.own_zone.name}, target: {entry.target}, seen: {entry.seen}, '
+                     f'launched: {live}) - launching {count}')
+        elif planned and live < entry.target:
+            count = entry.target - live
+            log.info(f'Topology {version} (zone: {self.own_zone.name}, target: {entry.target}, launched: {live}): '
+                     f'the server planned again on {live} running - applying again, launching {count}')
+        else:
+            return AutoScalerState.WAIT
         if count == 0:
             return AutoScalerState.WAIT
-        self.pending = {self.own_zone: launched + count}
+        self.held, self.mark = None, None
+        self.pending = {self.own_zone: live + count}
         return AutoScalerState.SCALE
 
-    def uncounted(self: SiteScaler, launched: int, entry: Entry, count: int) -> bool:
-        """Whether the server planned again since a beat reported the applied version's launches short, still asking."""
-        if count == 0 or launched >= self.expected or launched > entry.seen:
-            self.short_at, self.mark = None, None
-            return False
+    def planned_on(self: SiteScaler, live: int) -> bool:
+        """Whether the server has finished `RECHECKS` checks since a read that followed a beat reporting `live`."""
         checks, beat_at = self.evidence()
-        if self.short_at is None:
-            self.short_at = time.monotonic()
+        if live != self.held:
+            self.held, self.since, self.mark = live, time.monotonic(), None
             return False
-        if self.mark is None:
-            if beat_at > self.short_at:
-                self.mark = checks
+        if self.mark is None or checks < self.mark:  # Not yet marked, or a new server counting afresh.
+            self.mark = checks if beat_at > self.since else None
             return False
         return checks >= self.mark + self.RECHECKS
 

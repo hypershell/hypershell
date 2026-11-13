@@ -59,16 +59,19 @@ of the zone's identity advertises them upstream, with the *clients* launched in 
 Against an upstream *server* autoscaling with relay sites (:ref:`hs server --autoscaling
 <cli_server_sites>`), the server plans every zone's *clients* over the relays that serve it, within
 these bounds, and publishes the result. The relay reads it after every heartbeat, and once before
-its site starts, and launches what the server asks of each zone beyond what that zone already has,
-each with the zone's own launcher. It never ends a *client* to reconcile: a lowered target, or a
-target of zero, takes effect as the zone's *clients* exit after ``relay.timeout`` idle seconds. A
-*client* that exits is launched again only when the server still asks for it: when a later plan
-does, or, while the plan stands unchanged, once the server has planned twice more since the relay's
-heartbeat reported the exit (a *client* that leaves before any heartbeat counts it changes nothing
-the server sees, so no later plan comes). A server that plans less often than the relay checks is
-never taken for one that lost count. With no *clients* left the relay stays connected, ready to
-grow. A raised bound lets a later plan assign more; bounds are read
-when the relay starts, so changing them means restarting it.
+its site starts. For each zone it follows one rule: it launches the server's target less the count
+the server's plan is known to rest on, or that zone's running *clients* if more, each time it learns
+that count, and at no other time. A new plan states the count the server saw. While the plan stands
+unchanged and the zone runs fewer *clients* than its target, the count is the zone's running
+*clients* themselves, once the server has planned twice more since a heartbeat reported them: a
+*client* that leaves before any heartbeat counts it, or after the server counted it but before the
+relay read the plan made with it, changes nothing the server publishes. So a *client* that exits is
+launched again only when the server, having planned on the exit, still asks for it; the relay never
+launches beyond the target, and a server that plans less often than the relay checks is never taken
+for one that lost count. It never ends a *client* to reconcile: a lowered target, or a target of
+zero, takes effect as the zone's *clients* exit after ``relay.timeout`` idle seconds. With no
+*clients* left the relay stays connected, ready to grow. A raised bound lets a later plan assign
+more; bounds are read when the relay starts, so changing them means restarting it.
 
 Against any other upstream *server* (one not autoscaling with relay sites, or an earlier release)
 each zone keeps its own fleet, as before: ``init`` *clients* at start and one launched again while
