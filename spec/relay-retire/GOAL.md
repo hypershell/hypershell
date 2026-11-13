@@ -190,19 +190,25 @@ in [`spec/relay-topology/GOAL.md`](../relay-topology/GOAL.md) or
   remain connected at zero local clients")? — **A:** No. R5 governs scale-down of a relay that
   holds its site; a retired relay is a new state that exists only in the duplicated-site case, and
   R9 restates R5 for every relay not marked retired. `relay-topology` R4's "clients retiring
-  through idle exit, never terminated" holds under R3 (shaping, 2026-11-13; for the maintainer's
-  sign-off at this gate).
+  through idle exit, never terminated" holds under R3; the retired relay's exit is the maintainer's
+  own design ("send the shutdown request sentinel down to the old client") (shaping, 2026-11-13;
+  confirmed by the foreman at the GOAL gate, under the maintainer's mandate, 2026-11-13).
 - **Q:** What bound does R7 set? — **A:** Two observable halves. Binary: no eviction of the older
   relay's identities, every task complete, the older relay exits 0. Timed: its unstarted tasks are
   available upstream within three of its heartbeat intervals of its first read of the retired mark,
-  the seed's "a few heartbeats" made concrete (shaper's proposal, 2026-11-13; for the maintainer's
-  sign-off at this gate).
+  the seed's "a few heartbeats" made concrete (shaper's proposal, 2026-11-13; the bound confirmed
+  by the foreman at the GOAL gate, under the maintainer's mandate, 2026-11-13).
 - **Q:** May a retired relay keep feeding its local backlog to the clients still connected, or must
   it hand all of it back? — **A:** Left to `hs-plan`: the seed records that either answer meets the
   outcome, and R4, R5 and R7 bind whichever is chosen (shaping, 2026-11-13).
 - **Q:** The wake interval? — **A:** Left to `hs-plan`, held to R11–R12's 2-second bound; the seed
   notes one second matches `STOP_CHECK_INTERVAL` (`src/hypershell/relay/__init__.py:120`)
   (shaping, 2026-11-13).
+
+**Ruled at the GOAL gate** (2026-11-13): approved as written by the foreman, gate judge under the
+maintainer's mandate. The two Clarifications left for sign-off here are confirmed: a retired relay
+exiting does not contradict `relay-topology` R5, and R7's bound of three heartbeat intervals stands.
+The contract is locked; `hs-plan` designs against it.
 
 ## Related materials
 
