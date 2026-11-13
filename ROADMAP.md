@@ -453,6 +453,22 @@ stray blank line.
 downstream address); `spec/relay/` C4-2, C5-1*
 **Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: unshaped*
 
+## A role's first upstream call after a server restart can fail as a remote error
+
+When the upstream server restarts at the same address, a relay's link roles should see the lost
+connection and reconnect. The first call a role makes on a new worker thread, through a client
+created before the restart, can instead fail with a remote `KeyError`: the new thread dials the
+restarted server with a proxy id the old server minted, and the link treats it as a non-transport
+error. In the puller it ends the relay with exit status 5; in the hand-back role it refuses the
+hand-back and leaves the tasks to eviction, although the restarted server has already requeued them.
+The window in a whole relay is narrow, and a small harness reproduces it every time. A stale-proxy
+error on a role's first call after a reconnect should count as a transport loss, or the roles'
+proxies should be re-created on reconnect.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/relay-retire/REVIEW.md` (O1); the relay
+abort races and rough edges above*
+**Seed:** [`issues/upstream-link-restart-proxy.md`](issues/upstream-link-restart-proxy.md) · *status: unshaped*
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
