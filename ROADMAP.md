@@ -637,25 +637,11 @@ Refs: —*
 
 # Part II — The 2.9.0 feature cycle
 
-Shaped GOALs, already negotiated with dated clarifications, agreed appetites, non-goals, and
-drafted R-IDs. They carry `status: shaped`: the shaping conversation happened, but acceptance into a
+A shaped GOAL, already negotiated with dated clarifications, an agreed appetite, non-goals, and
+drafted R-IDs. It carries `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
 drifted, then adopt largely as written. The last four entries are `unshaped` test-infrastructure
 seeds: three split out of shipped cycles, one found out of cycle.
-
-## Relay site-topology autoscaling: fill and spread across sites
-
-With relays in place, each site still sizes its own fleet; the true server, which holds the pressure
-signal, cannot say "fill the cheap site first, spill to the next" or "spread across what is live",
-and site failover moves the tasks but not the capacity. Here the server stops launching and
-publishes a versioned per-site topology under `fill` (the SU-cost mode) or `spread`, with per-site
-`min`/`max`/`init`; each relay reconciles only its own entry, and scale-down stays idle-exit. Carved
-out of relay at its promotion, because it extends zone autoscaling's per-zone pressure.
-
-*Horizon: mid-term · Depends on: — (both prerequisites landed: zone autoscaling, `zone-autoscale`,
-#99, and relay itself, #82) · Refs: the original relay seed's R11–R15 and R16's topology
-half (`spec/relay/GOAL.md` C1)*
-**Seed:** [`issues/relay-topology.md`](issues/relay-topology.md) · *status: adopted:relay-topology*
 
 ## Turso provider, partition-attached listing, and S3 captured output
 
