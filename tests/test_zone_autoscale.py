@@ -21,7 +21,7 @@ from hypershell.cluster import demand
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ScalingKnobs, ZoneLoad,
                                        read_zone_loads, zone_demand, fleet_demand)
 from hypershell.cluster.remote import AutoScaler, AutoScalerState
-from hypershell.cluster.launch import client_launch
+from hypershell.cluster.launch import client_launch, LaunchActuator
 from hypershell.data.model import (Task, Client, Zone, TaskGroupInfo, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME,
                                    CANCEL_STATUS)
 
@@ -291,3 +291,112 @@ class TestReadZoneLoads:
         loads = read_zone_loads(0, knobs('dynamic', factor=2), own=DEFAULT, discover=True, attempts=1, eager=False)
         assert sorted(asked) == sorted([DEFAULT_ZONE_ID, CPU.id])
         assert loads[CPU.id].pressure == 1.5
+
+
+class FakeProc:
+    """A stand-in for a launched client process."""
+
+    def __init__(self, zone: str, pid: int) -> None:
+        self.zone, self.pid, self.status = zone, pid, None
+
+    def poll(self) -> Optional[int]:
+        return self.status
+
+
+class FakeLaunch:
+    """A stand-in launch of one zone that records the processes it starts."""
+
+    def __init__(self, zone: str, started: List[FakeProc]) -> None:
+        self.zone, self.started = zone, started
+
+    def start(self, **options) -> FakeProc:
+        proc = FakeProc(self.zone, len(self.started) + 1)
+        self.started.append(proc)
+        return proc
+
+    def describe(self) -> str:
+        return f'shim {self.zone}'
+
+
+def make_actuator(own: ZoneRef = DEFAULT) -> tuple:
+    """An actuator over fake launches, with the started processes and the zones built."""
+    started, built = [], []
+
+    def launch_for(zone: ZoneRef) -> FakeLaunch:
+        built.append(zone.name)
+        return FakeLaunch(zone.name, started)
+
+    return LaunchActuator(FakeLaunch(own.name, started), own=own, launch_for=launch_for), started, built
+
+
+@mark.unit
+class TestLaunchActuator:
+    """Starting clients zone by zone, and counting them per zone."""
+
+    def test_apply_launches_the_shortfall(self) -> None:
+        """Each zone gets the clients it lacks to reach its desired count, and no more."""
+        actuator, started, built = make_actuator()
+        assert actuator.apply({DEFAULT: 2, CPU: 1}) == 3
+        assert [proc.zone for proc in started] == ['default', 'default', 'cpu']
+        assert actuator.launched() == {DEFAULT.id: 2, CPU.id: 1}
+        assert actuator.apply({DEFAULT: 1, CPU: 2, GPU: 0}) == 1
+        assert actuator.launched() == {DEFAULT.id: 2, CPU.id: 2}
+        assert built == ['cpu']
+        assert actuator.clients == started
+
+    def test_launch_of_a_zone_is_built_once(self) -> None:
+        """A zone's launch is built at its first client and kept; the own zone's is the one given."""
+        actuator, started, built = make_actuator(own=GPU)
+        for _ in range(3):
+            actuator.launch_one(CPU)
+            actuator.launch_one()
+        assert built == ['cpu']
+        assert [proc.zone for proc in started] == ['cpu', 'gpu'] * 3
+        assert actuator.launched() == {CPU.id: 3, GPU.id: 3}
+
+    def test_clean_drops_exited_and_never_terminates(self) -> None:
+        """Exited clients are dropped from their zone's count; nothing is ever stopped."""
+        actuator, started, _ = make_actuator()
+        actuator.apply({DEFAULT: 1, CPU: 2})
+        started[1].status = 0
+        started[2].status = 3
+        assert actuator.clean() == started[1:]
+        assert actuator.clients == started[:1]
+        assert actuator.launched() == {DEFAULT.id: 1}
+        assert actuator.apply({CPU: 1}) == 1
+
+    def test_assigned_clients_count_as_own(self) -> None:
+        """A process the actuator did not start counts in the own zone; its own keep their zone."""
+        actuator, started, _ = make_actuator(own=CPU)
+        actuator.apply({GPU: 1})
+        actuator.clients = [*actuator.clients, None, None]
+        assert actuator.launched() == {GPU.id: 1, CPU.id: 2}
+        actuator.clients = [None]
+        assert actuator.launched() == {CPU.id: 1}
+
+    def test_without_launch_for_every_zone_uses_the_one_launch(self) -> None:
+        """With no builder, every client is started with the one launch given."""
+        started = []
+        actuator = LaunchActuator(FakeLaunch('default', started))
+        actuator.apply({CPU: 1})
+        assert [proc.zone for proc in started] == ['default']
+        assert actuator.launched() == {CPU.id: 1}
+
+
+@mark.unit
+def test_autoscaler_scales_through_its_actuator() -> None:
+    """The autoscaler's launch and clients are its actuator's; a scale launches what its check left pending."""
+    started = []
+    scaler = AutoScaler(FakeLaunch('default', started), policy='fixed',
+                        launch_for=lambda zone: FakeLaunch(zone.name, started))
+    assert scaler.launch is scaler.actuator.launch
+    assert scaler.clients is scaler.actuator.clients
+    scaler.scale()
+    assert [proc.zone for proc in started] == ['default']
+    scaler.pending = {CPU: 1, DEFAULT: 2}
+    scaler.scale()
+    assert [proc.zone for proc in started] == ['default', 'cpu', 'default']
+    assert scaler.pending == {}
+    assert scaler.launched() == {DEFAULT.id: 2, CPU.id: 1}
+    scaler.clients = []
+    assert scaler.launched() == {}

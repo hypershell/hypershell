@@ -42,7 +42,7 @@ from cmdkit.app import exit_status
 from tests import create_taskfile_echo
 from hypershell import client as client_module
 from hypershell.client import DEFAULT_AUTH, task_env
-from hypershell.cluster.launch import AUTH_ENV, OMPI_ENV_LIST, ClientLaunch, client_launch
+from hypershell.cluster.launch import AUTH_ENV, OMPI_ENV_LIST, ZONE_ENV, ClientLaunch, client_launch
 from hypershell.core.logging import HOSTNAME
 from hypershell.cluster.remote import AutoScaler, AutoScalingCluster
 from hypershell.cluster.ssh import SSHCluster, DEFAULT_REMOTE_EXE
@@ -638,6 +638,23 @@ def test_autoscaling_mode_keeps_every_client_option(options: Dict[str, Any]) -> 
     assert not set(cluster.launch.argv) & KEY_OPTIONS
 
 
+@mark.parametrize('zone, name', [pytest.param(None, 'default', id='default'), pytest.param('blue', 'blue', id='zone')])
+def test_autoscaling_mode_names_its_zone_to_the_launcher(zone: Optional[str], name: str) -> None:
+    """The autoscaler's own launch names its zone in the environment and in the launcher's words only."""
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    options = dict(launcher='zone-shim {zone}', launcher_args=['--partition={zone}'], remote_exe='hs',
+                   template='echo {zone} {}', bind=(LOOPBACK, port), tls=None, zone=zone)
+    cluster = AutoScalingCluster(**options)
+    assert cluster.launch.env[ZONE_ENV] == name
+    assert cluster.launch.argv[:3] == ['zone-shim', name, f'--partition={name}']
+    assert cluster.launch.argv[cluster.launch.argv.index('-t') + 1] == 'echo {zone} {}'
+    assert cluster.autoscaler.machine.launch is cluster.launch
+    unexposed = AutoScalingCluster(discover_zones=False, **options)
+    assert ZONE_ENV not in unexposed.launch.env
+    assert unexposed.launch.argv[:3] == ['zone-shim', '{zone}', '--partition={zone}']
+    assert unexposed.launch.argv[3:] == cluster.launch.argv[3:]
+
+
 def test_autoscaling_mode_starts_every_client_through_one_launch(tmp_path: Path) -> None:
     """Each scale-up starts a client from the autoscaler's one launch: key in the environment only."""
     key = 'k' * 32
@@ -970,13 +987,16 @@ def emitted_client_options(launch: ClientLaunch, remote_exe: str, ssh_host: Opti
     return command[2:]
 
 
-@mark.parametrize('ssh_host', [pytest.param(None, id='launcher'), pytest.param('node-7', id='ssh')])
+@mark.parametrize('ssh_host, expose_zone', [pytest.param(None, False, id='launcher'),
+                                             pytest.param(None, True, id='launcher-zone'),
+                                             pytest.param('node-7', False, id='ssh')])
 @mark.parametrize('options', LAUNCH_OPTIONS)
-def test_launch_contract_uses_only_known_client_options(options: Dict[str, Any], ssh_host: Optional[str]) -> None:
+def test_launch_contract_uses_only_known_client_options(options: Dict[str, Any], ssh_host: Optional[str],
+                                                        expose_zone: bool) -> None:
     """Every option a launch passes to the client, in every mode, is one a 2.9.0a4 client accepts."""
     params = {**LAUNCH_BASE, **options}
     remote_exe, address = params.pop('remote_exe'), params.pop('address')
-    launch = client_launch(remote_exe, address, 'k' * 32, ssh_host=ssh_host, **params)
+    launch = client_launch(remote_exe, address, 'k' * 32, ssh_host=ssh_host, expose_zone=expose_zone, **params)
     words = iter(emitted_client_options(launch, remote_exe, ssh_host))
     emitted = []
     for word in words:
@@ -1194,6 +1214,83 @@ def test_client_launch_forwards_key_by_name_beside_mpirun_x(monkeypatch: MonkeyP
     assert launch.argv[:start] == [*launcher, *launcher_args, '-x', AUTH_ENV]
     assert key not in ' '.join(launch.argv)
     assert key not in launch.describe()
+
+
+def zone_launch(launcher: List[str], launcher_args: List[str] = (), zone: Optional[str] = 'gpu',
+                template: str = '{}', expose_zone: bool = True, **options: Any) -> ClientLaunch:
+    """A launch of `zone` that exposes it, with small fixed client options."""
+    return client_launch('hs', ('localhost', 50001), 'k' * 32, launcher=launcher, launcher_args=launcher_args,
+                         num_threads=1, bundlesize=1, bundlewait=5, template=template, delay_start=0,
+                         task_signalwait=10, zone=zone, expose_zone=expose_zone, **options)
+
+
+@mark.parametrize('launcher, launcher_args, zone, expected', [
+    pytest.param(['shim', '{zone}'], [], 'gpu', ['shim', 'gpu'], id='launcher-word'),
+    pytest.param(['srun'], ['--partition={zone}', '-n1'], 'gpu', ['srun', '--partition=gpu', '-n1'], id='option-value'),
+    pytest.param(['shim', '{zone}'], ['-J', 'run-{zone}-{zone}'], 'big mem', ['shim', 'big mem', '-J',
+                                                                               'run-big mem-big mem'], id='spaced-name'),
+    pytest.param(['sh', '-c', 'echo ${HOME} {} {zone}'], [], 'gpu', ['sh', '-c', 'echo ${HOME} {} gpu'],
+                 id='other-braces'),
+    pytest.param(['shim', '{zone}'], [], None, ['shim', 'default'], id='default-zone'),
+    pytest.param(['srun'], [], 'gpu', ['srun'], id='no-zone-word'),
+])
+def test_client_launch_exposes_zone_to_launcher(monkeypatch: MonkeyPatch, launcher: List[str],
+                                                launcher_args: List[str], zone: Optional[str],
+                                                expected: List[str]) -> None:
+    """With `expose_zone`, `{zone}` in each launcher word becomes the zone's name, and the environment names it."""
+    monkeypatch.delenv(OMPI_ENV_LIST, raising=False)
+    launch = zone_launch(launcher, launcher_args, zone=zone, template='echo {zone} {}')
+    start = launch.argv.index('hs')
+    assert launch.argv[:start] == expected
+    assert launch.argv[launch.argv.index('-t') + 1] == 'echo {zone} {}'
+    assert launch.env == {AUTH_ENV: 'k' * 32, ZONE_ENV: 'default' if zone is None else zone}
+    client_args = launch.argv[start:]
+    assert client_args == zone_launch(launcher, launcher_args, zone=zone, template='echo {zone} {}',
+                                      expose_zone=False).argv[start:]
+    assert ('--zone' in client_args) is (zone is not None)
+
+
+def test_client_launch_exposes_no_zone_by_default() -> None:
+    """Without `expose_zone`, `{zone}` reaches the launcher as written and the environment does not name a zone."""
+    launch = zone_launch(['shim', '{zone}'], expose_zone=False)
+    assert launch.argv[:2] == ['shim', '{zone}']
+    assert ZONE_ENV not in launch.env
+
+
+@mark.parametrize('launcher, launcher_args', [
+    pytest.param(['mpirun'], ['--host', '{zone}-node'], id='parameter'),
+    pytest.param(['mpirun', '-x', 'LD_LIBRARY_PATH'], [], id='forward-option'),
+])
+def test_client_launch_never_forwards_zone_to_open_mpi(monkeypatch: MonkeyPatch, launcher: List[str],
+                                                       launcher_args: List[str]) -> None:
+    """Exposing the zone leaves the Open MPI key forwarding exactly as it is without it."""
+    monkeypatch.delenv(OMPI_ENV_LIST, raising=False)
+    exposed = zone_launch(launcher, launcher_args)
+    plain = zone_launch(launcher, launcher_args, expose_zone=False)
+    assert {name: value for name, value in exposed.env.items() if name != ZONE_ENV} == plain.env
+    assert ZONE_ENV not in exposed.env.get(OMPI_ENV_LIST, '')
+    assert ZONE_ENV not in exposed.argv
+    assert [word for word in exposed.argv if word != 'gpu-node'] == [word for word in plain.argv
+                                                                     if word != '{zone}-node']
+
+
+def test_ssh_launch_refuses_to_expose_zone() -> None:
+    """An SSH launch has no launcher to name a zone to, so asking it to is an error."""
+    with pytest.raises(ValueError):
+        zone_launch(['ssh'], ssh_host='node-7')
+
+
+def test_client_zone_never_comes_from_configuration(temp_site: Path) -> None:
+    """A client given no --zone serves the default zone, even when the environment names a zone."""
+    script = ('from hypershell.core.config import config\n'
+              'from hypershell.client import ClientApp\n'
+              'app = ClientApp.from_cmdline([\'-H\', \'localhost\'])\n'
+              'app.check_args()\n'
+              'print(config.zone, app.zone)\n')
+    env = {**os.environ, ZONE_ENV: 'gpu'}
+    result = subprocess.run([sys.executable, '-c', script], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ['gpu', 'None']
 
 
 def test_ssh_env_export_never_carries_key(stand_ins: StandIns, temp_site: Path) -> None:

@@ -22,6 +22,11 @@ Modes
     case you would specify ``--launcher=srun``; however, the *ARGS* are not merely the executable
     but the full listing, e.g., ``--launcher='srun --mpi=pmi2'``.
 
+    With ``--autoscaling``, each launch names the zone of the client it starts: ``{zone}`` in
+    *ARGS* is replaced by the zone's name (``default`` for the default zone), and the launched
+    process has the name in its ``HYPERSHELL_ZONE`` environment variable. The client's own
+    ``--template`` is never changed. See ``--autoscaling`` for an example.
+
 Options
 ^^^^^^^
 
@@ -341,6 +346,21 @@ Options
     A *dynamic* policy maintains a ``--min-size`` (default: 0) and grows up to some
     ``--max-size`` depending on the observed *task pressure* given the specified scaling
     ``--factor``.
+
+    Each launch names its zone to the launcher, as ``{zone}`` in the ``--launcher`` arguments
+    and as ``HYPERSHELL_ZONE`` in its environment, so one launcher can send the clients of each
+    zone to the resource that serves it. When partitions are named after zones, the launcher
+    alone can do it (``--launcher='srun -p {zone} -n1'``). Otherwise a small script given as
+    ``--launcher='sh launch.sh'`` can choose, for example::
+
+        #!/bin/sh
+        # Start one client on the partition that serves its zone.
+        case "$HYPERSHELL_ZONE" in
+            gpu)   partition=gpu ;;
+            himem) partition=himem ;;
+            *)     partition=cpu ;;
+        esac
+        exec srun -p "$partition" -n1 "$@"
 
     See also ``--factor``, ``--period``, ``--init-size``, ``--min-size``, and ``--max-size``.
 

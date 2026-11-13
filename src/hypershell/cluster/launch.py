@@ -10,17 +10,21 @@ hand the key to the client in the launched process's environment, as
 :const:`AUTH_ENV`, which every client reads as the default for its key. SSH launches
 write the key to ssh's standard input, and a POSIX `sh` step on the remote host reads
 it into :const:`AUTH_ENV` before it starts the client.
+
+An autoscaling cluster starts clients zone by zone through a :class:`LaunchActuator`, which
+builds one launch per zone; a launch built with `expose_zone` names its zone to the launcher.
 """
 
 
 # Type annotations
 from __future__ import annotations
-from typing import Tuple, List, Dict, FrozenSet, Iterable, Mapping, Sequence, Optional, Final
+from typing import Tuple, List, Dict, Set, FrozenSet, Iterable, Mapping, Sequence, Callable, Optional, Final
 
 # Standard libs
 import io
 import os
 import re
+import sys
 import shlex
 from dataclasses import dataclass, field
 from subprocess import Popen, PIPE
@@ -29,14 +33,23 @@ from subprocess import Popen, PIPE
 from hypershell.core.config import load_task_env
 from hypershell.core.logging import Logger
 from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
+from hypershell.data.model import DEFAULT_ZONE_NAME
+from hypershell.cluster.demand import ZoneRef
 
 # Public interface
-__all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'MPI_LAUNCHERS', 'SSH_NO_KEY_MESSAGE', 'ClientLaunch', 'client_launch',
+__all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'ZONE_ENV', 'ZONE_WORD', 'MPI_LAUNCHERS', 'SSH_NO_KEY_MESSAGE',
+           'ClientLaunch', 'LaunchActuator', 'client_launch',
            'is_mpi_launcher', 'ssh_env_exports', 'ssh_launch_args', 'ssh_remote_script', 'redact_secrets']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
 
+
+ZONE_ENV: Final[str] = 'HYPERSHELL_ZONE'
+"""Variable that names the zone of a launch to the launcher, in the launched process's environment."""
+
+ZONE_WORD: Final[str] = '{zone}'
+"""Text replaced by the zone's name in the launcher and its arguments of a launch that exposes its zone."""
 
 MPI_LAUNCHERS: Final[FrozenSet[str]] = frozenset({'mpirun', 'mpiexec', 'orterun', 'prterun'})
 """Program names of launchers that Open MPI may provide, which forward the key variable only by name."""
@@ -146,7 +159,8 @@ def client_launch(remote_exe: str,
                   task_timeout: int = None,
                   ratelimit: int = None,
                   tls_enabled: bool = True,
-                  zone: Optional[str] = None) -> ClientLaunch:
+                  zone: Optional[str] = None,
+                  expose_zone: bool = False) -> ClientLaunch:
     """
     Build the client invocation for a cluster launch.
 
@@ -167,6 +181,14 @@ def client_launch(remote_exe: str,
     The launch owns that input, so a bare `-n` among the ssh arguments is dropped (see
     :func:`ssh_launch_args`).
 
+    With `expose_zone` (launcher mode only; SSH launches refuse it), the launch names its zone
+    to the launcher: :const:`ZONE_WORD` in any word of `launcher` or `launcher_args` is replaced by
+    the zone's name, and the environment gets :const:`ZONE_ENV` set to it. The name is `zone`, or
+    `default` when `zone` is None. Words are replaced after splitting, so a name with a space stays
+    one word and other braces are untouched. The client's own options, its template included, are
+    never replaced, and Open MPI is not asked to forward :const:`ZONE_ENV`: the launcher reads it
+    where it starts, and the client gets its zone from `--zone` alone.
+
     The calling process's environment is read, never modified.
 
     Example:
@@ -183,18 +205,123 @@ def client_launch(remote_exe: str,
                              client_timeout=client_timeout, task_timeout=task_timeout, ratelimit=ratelimit,
                              tls_enabled=tls_enabled, zone=zone)
     if ssh_host is not None:
+        if expose_zone:
+            raise ValueError('An SSH launch does not expose its zone (a launcher mode does)')
         script = ssh_remote_script(remote_exe, options)
         exports = ssh_env_exports(ssh_exports or {})
         return ClientLaunch(argv=[*launcher[:1], *ssh_launch_args([*launcher[1:], *launcher_args]),
                                   '-T', ssh_host, *exports, 'sh', '-c', shlex.quote(script)],
                             env={}, stdin=auth + '\n', inherit_env=True)
     launcher_words, env = [*launcher, *launcher_args], {AUTH_ENV: auth}
+    if expose_zone:
+        name = DEFAULT_ZONE_NAME if zone is None else zone
+        launcher_words = [word.replace(ZONE_WORD, name) for word in launcher_words]
+        env[ZONE_ENV] = name
     if launcher and is_mpi_launcher(launcher[0]):
         if any(is_forward_option(word) for word in launcher_words[1:]):
             launcher_words.extend([OMPI_FORWARD, AUTH_ENV])
         else:
             env[OMPI_ENV_LIST] = ompi_env_list()
     return ClientLaunch(argv=[*launcher_words, remote_exe, 'client', *options], env=env)
+
+
+class LaunchActuator:
+    """
+    Starts clients zone by zone and keeps the processes it started. It never terminates one.
+
+    The launch of the `own` zone (the default zone if not given) is `launch`. The launch of any
+    other zone is built by `launch_for` at the zone's first client and kept for every later one;
+    its description is logged once, then. Without `launch_for`, every client is started with
+    `launch`, whatever zone is asked for.
+
+    `clients` is the flat list of started processes that have not yet been cleaned, every zone
+    together. It may be assigned; a process the actuator did not start counts in the own zone.
+    """
+
+    launch: ClientLaunch
+    own: ZoneRef
+    launch_for: Optional[Callable[[ZoneRef], ClientLaunch]]
+
+    def __init__(self: LaunchActuator, launch: ClientLaunch, own: Optional[ZoneRef] = None,
+                 launch_for: Optional[Callable[[ZoneRef], ClientLaunch]] = None) -> None:
+        """Initialize with the own zone's launch and the builder of every other zone's."""
+        self.launch = launch
+        self.own = own if own is not None else ZoneRef.from_name(None)
+        self.launch_for = launch_for
+        self.launches: Dict[str, ClientLaunch] = {self.own.id: launch}
+        self.described: Set[str] = set()
+        self._clients: List[Popen] = []
+        self.zones: Dict[int, str] = {}
+
+    @property
+    def clients(self: LaunchActuator) -> List[Popen]:
+        """Started processes not yet cleaned, every zone together."""
+        return self._clients
+
+    @clients.setter
+    def clients(self: LaunchActuator, value: List[Popen]) -> None:
+        """Replace the started processes; zones are kept for those the actuator started."""
+        self._clients = value
+        kept = {id(proc) for proc in value}
+        self.zones = {key: zone for key, zone in self.zones.items() if key in kept}
+
+    def launched(self: LaunchActuator) -> Dict[str, int]:
+        """Started processes not yet cleaned, per zone id."""
+        counts: Dict[str, int] = {}
+        for proc in self._clients:
+            zone = self.zones.get(id(proc), self.own.id)
+            counts[zone] = counts.get(zone, 0) + 1
+        return counts
+
+    def launch_of(self: LaunchActuator, zone: ZoneRef) -> ClientLaunch:
+        """The launch of `zone`, built at its first use and kept."""
+        if zone.id not in self.launches:
+            self.launches[zone.id] = self.launch if self.launch_for is None else self.launch_for(zone)
+        return self.launches[zone.id]
+
+    def describe(self: LaunchActuator, zone: Optional[ZoneRef] = None) -> None:
+        """Log the launch of `zone` (the own zone if not given), once."""
+        zone = zone if zone is not None else self.own
+        if zone.id not in self.described:
+            self.described.add(zone.id)
+            log.debug(f'Autoscale launcher (zone {zone.name}): ' + self.launch_of(zone).describe())
+
+    def launch_one(self: LaunchActuator, zone: Optional[ZoneRef] = None) -> Popen:
+        """Start one client in `zone` (the own zone if not given)."""
+        zone = zone if zone is not None else self.own
+        self.describe(zone)
+        proc = self.launch_of(zone).start(stdout=sys.stdout, stderr=sys.stderr, bufsize=0, universal_newlines=True)
+        log.info(f'Autoscale adding client ({proc.pid}, zone: {zone.name})')
+        self._clients.append(proc)
+        self.zones[id(proc)] = zone.id
+        return proc
+
+    def apply(self: LaunchActuator, desired: Mapping[ZoneRef, int]) -> int:
+        """Start the clients each zone lacks to reach its `desired` count; return how many were started."""
+        launched = self.launched()
+        started = 0
+        for zone, count in desired.items():
+            for _ in range(count - launched.get(zone.id, 0)):
+                self.launch_one(zone)
+                started += 1
+        return started
+
+    def clean(self: LaunchActuator) -> List[Popen]:
+        """Drop the processes that have exited, and return them."""
+        exited = []
+        for i, client in enumerate(self._clients):
+            log.trace(f'Autoscale clean ({i+1}: {client.pid})')
+            status = client.poll()
+            if status is not None:
+                exited.append(client)
+                if status != 0:
+                    log.warning(f'Autoscale client ({i+1}) exited with status {status}')
+                else:
+                    log.info(f'Autoscale client disconnected ({client.pid})')
+        if exited:
+            gone = {id(client) for client in exited}
+            self.clients = [client for client in self._clients if id(client) not in gone]
+        return exited
 
 
 def is_mpi_launcher(program: str) -> bool:

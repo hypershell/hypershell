@@ -15,8 +15,9 @@
 #
 # Checks, all modes: every task completes and none fails; every launched client exits by itself
 # (idle exit) while the cluster still runs. Founding: every launch is in the default zone with no
-# --zone. Fixed and dynamic: each zone is launched into, every launch names one zone, no gpu launch
-# is made while group 0 has work, and each task sees its own zone in HYPERSHELL_ZONE.
+# --zone, and names the default zone in {zone} and HYPERSHELL_ZONE. Fixed and dynamic: each zone
+# is launched into, every launch names one zone, no gpu launch is made while group 0 has work,
+# and each task sees its own zone in HYPERSHELL_ZONE.
 #
 # Settings: ZD_DEADLINE, seconds each wait is bounded by (default 120).
 set -eu
@@ -119,6 +120,8 @@ case $mode in
     founding)
         awk '{ split($5, kv, "="); if (kv[2] != "-") exit 1 }' "$log" \
             || fail 'a launch named a zone (--zone) in the run without zones'
+        awk '$3 != "word=default" || $4 != "env=default" { exit 1 }' "$log" \
+            || fail 'a launch did not name the default zone in {zone} and HYPERSHELL_ZONE'
         ;;
     fixed|dynamic)
         # word == env == --zone, except the own default zone, which keeps today's command line.

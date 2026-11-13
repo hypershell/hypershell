@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-autoscale
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
 - id: P2
   name: 'Per-zone launch path: {zone}, HYPERSHELL_ZONE and --zone through client_launch
     and LaunchActuator'
-  status: pending
+  status: done
   satisfies:
   - R3
   depends_on:
@@ -153,7 +153,7 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 | reading | `demand.read_zone_loads(group, knobs, *, own, discover, attempts, eager)` | current group, knobs, own `ZoneRef` or None, discovery switch, the server's retry rule → `Dict[zone_id, ZoneLoad]`. This is the only DB access. |
 | demand | `demand.zone_demand(load, launched, knobs, *, own, initial)` | one zone's `ZoneLoad`, its fleet size, knobs → desired count (≥ `launched`, ≤ `launched + 1` once steady). Pure. |
 | demand | `demand.fleet_demand(loads, launched, knobs, *, own, initial)` | all loads, `Mapping[zone_id, int]` fleet sizes, knobs, own `ZoneRef` or None → `Dict[ZoneRef, int]` desired (the own zone always included). Pure. |
-| actuation | `launch.LaunchActuator(launch, own, launch_for)` | `.launched() -> Dict[zone_id, int]`; `.apply(desired: Mapping[ZoneRef, int]) -> int` launches the shortfall per zone and never terminates; `.launch_one(zone=None) -> Popen`; `.clean() -> List[Popen]`; `.clients: List[Popen]` (flat). |
+| actuation | `launch.LaunchActuator(launch, own, launch_for)` | `.launched() -> Dict[zone_id, int]`; `.apply(desired: Mapping[ZoneRef, int]) -> int` launches the shortfall per zone and never terminates; `.launch_one(zone=None) -> Popen`; `.clean() -> List[Popen]`; `.clients: List[Popen]` (flat); `.describe(zone=None)` logs a zone's launch once; `.launch_of(zone) -> ClientLaunch` (cached). |
 | actuation | `launch.client_launch(..., zone=name, expose_zone=True)` | one zone's `ClientLaunch` with `{zone}` in the launcher words, `HYPERSHELL_ZONE` in env, and `--zone` per PLAN §2.5. |
 | glue | `remote.AutoScaler` | FSM: `check_*` = `read_zone_loads` → `fleet_demand(launched=actuator.launched())` → `self.pending`; `scale` = `actuator.apply(pending)`. |
 
@@ -236,13 +236,13 @@ green. Nothing user-visible changes.
 launches are byte-identical to today. A founding-case run with the shim records `default` in both
 `{zone}` and `HYPERSHELL_ZONE`, with the argv unchanged.
 
-- [ ] `cluster/launch.py`: `client_launch(..., expose_zone=False)` per PLAN §2.3. It replaces `{zone}`
+- [x] `cluster/launch.py`: `client_launch(..., expose_zone=False)` per PLAN §2.3. It replaces `{zone}`
   per launcher word and launcher argument after `shlex.split`, adds `HYPERSHELL_ZONE` to `env`, does
   no Open MPI forwarding of it, never touches `-t`, and refuses with SSH.
-- [ ] `cluster/launch.py`: `LaunchActuator` per PLAN §2.3: a cached launch per zone, `describe()`
+- [x] `cluster/launch.py`: `LaunchActuator` per PLAN §2.3: a cached launch per zone, `describe()`
   logged once per zone, a flat assignable `clients`, untracked entries counted as own, and `clean()`
   moved here from `AutoScaler`.
-- [ ] `cluster/remote.py`:
+- [x] `cluster/remote.py`:
   - `AutoScaler` holds a `LaunchActuator`; `clients`/`launch` become properties onto it, with a
     `clients` setter;
   - `scale()` = `apply(pending)`, or one own-zone launch when nothing is pending;
@@ -250,18 +250,18 @@ launches are byte-identical to today. A founding-case run with the shim records 
     `AutoScalerThread`;
   - `AutoScalingCluster(discover_zones=True)` builds `launch_for` with `expose_zone=True` and sets
     `self.launch = launch_for(own)`. Off, it builds today's launch verbatim.
-- [ ] `relay/site.py::site_cluster`: pass `discover_zones=False`. That is the only `relay/` edit.
-- [ ] Apply PLAN §2.5 for `--zone` (Q1, as resolved 2026-11-12).
-- [ ] Tests in `tests/test_cluster_launch.py`:
+- [x] `relay/site.py::site_cluster`: pass `discover_zones=False`. That is the only `relay/` edit.
+- [x] Apply PLAN §2.5 for `--zone` (Q1, as resolved 2026-11-12).
+- [x] Tests in `tests/test_cluster_launch.py`:
   - the `expose_zone` cases from PLAN §6;
   - the 2.9.0a4 contract test parametrized with `expose_zone`;
   - `test_autoscaling_mode_keeps_every_client_option` unchanged, with a sibling asserting
     `HYPERSHELL_ZONE` in `cluster.launch.env`;
   - a test that the client's zone never comes from `config.zone` (`HYPERSHELL_ZONE` set, no
     `--zone` → default zone).
-- [ ] Tests in `tests/test_zone_autoscale.py`: `LaunchActuator` accounting, caching and `apply`
+- [x] Tests in `tests/test_zone_autoscale.py`: `LaunchActuator` accounting, caching and `apply`
   shortfall, using a fake `launch_for` that records launches.
-- [ ] Docs, same commit:
+- [x] Docs, same commit:
   - `docs/_include/cluster_help.rst` and `APP_HELP`: `--launcher` gets `{zone}`/`HYPERSHELL_ZONE`,
     and `--autoscaling` gets the generic launcher-shim example;
   - `docs/_include/config_param_ref.rst` (`[autoscale] .launcher`);
@@ -269,7 +269,7 @@ launches are byte-identical to today. A founding-case run with the shim records 
   - `docs/cli/cluster.rst`: `.. versionchanged:: 2.9.0`;
   - `AutoScalingCluster` docstring;
   - one line in AGENTS.md (cluster section) and invariants.md §11, in lockstep.
-- [ ] Drive: founding mode now also asserts `word == env == default` on every launch.
+- [x] Drive: founding mode now also asserts `word == env == default` on every launch.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/cluster/launch.py`, `src/hypershell/cluster/remote.py`,
   `src/hypershell/cluster/__init__.py`, `src/hypershell/relay/site.py`, `tests/test_cluster_launch.py`,

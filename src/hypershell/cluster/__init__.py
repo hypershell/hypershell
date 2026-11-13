@@ -72,7 +72,7 @@ Arguments:
 Modes:
   --ssh                HOST...  Launch directly with SSH host(s).
   --mpi                         Same as --launcher=mpirun.
-  --launcher           ARGS...  Use specific launch interface.
+  --launcher           ARGS...  Use specific launch interface ({{zone}} and HYPERSHELL_ZONE name each autoscaled zone).
 
 Options:
   -N, --num-threads    NUM      Number of executor threads per client, 0=auto (default: {DEFAULT_NUM_THREADS}).

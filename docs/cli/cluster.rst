@@ -22,4 +22,9 @@ Description
    :pr:`50`: ``--restart`` with a *FILE* submits only the tasks that never landed, and a file
    that was already submitted is refused unless ``--repeat`` or ``--update`` is given.
 
+.. versionchanged:: 2.9.0
+   With ``--autoscaling``, each launch names its client's zone to the launcher, as ``{zone}`` in
+   the ``--launcher`` arguments and as ``HYPERSHELL_ZONE`` in its environment. A launcher that
+   held a literal ``{zone}`` now receives the zone's name in its place.
+
 .. include:: ../_include/cluster_help.rst

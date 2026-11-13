@@ -606,7 +606,7 @@ function _hs_cluster() {
         '(--repeat)--update[Submit only new tasks from a known file (use with --restart)]' \
         '(--mpi --launcher)--ssh[Launch directly with SSH host(s)]::host:_hs_known_hosts' \
         '(--ssh --launcher)--mpi[Same as --launcher=mpirun]' \
-        '(--ssh --mpi)--launcher[Use specific launch interface]:launcher:_command_names -e' \
+        '(--ssh --mpi)--launcher[Use specific launch interface ({zone} names each autoscaled zone)]:launcher:_command_names -e' \
         '--ssh-args[Command-line arguments for SSH]:ssh args:' \
         '--ssh-group[SSH nodelist group in config]:ssh group:_hs_ssh_groups' \
         '(-E --env)'{-E,--env}'[Send environment variables]' \

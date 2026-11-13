@@ -107,7 +107,7 @@ def site_cluster(address: Tuple[str, int],
                                  max_retries=0, poll=poll, client_timeout=client_timeout,
                                  policy=SITE_POLICY, period=period,
                                  init_size=size, min_size=size, max_size=size,
-                                 tls=tls, zone=zone, evict_after=evict_after)
+                                 tls=tls, zone=zone, evict_after=evict_after, discover_zones=False)
     if cluster.server.confirm is not None:
         cluster.server.confirm.machine.strict = False
     return cluster
