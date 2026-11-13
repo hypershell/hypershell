@@ -50,7 +50,7 @@ from hypershell.core.exceptions import get_shared_exception_mapping, handle_exce
 from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.queue import QueueClient, QueueConfig
 from hypershell.core.reconnect import UpstreamLink
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.data import ensuredb
 from hypershell.data.core import engine
@@ -63,8 +63,8 @@ from hypershell.core.topology import Bounds
 from hypershell.cluster.demand import ZoneRef
 from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
                                        served_zones, upstream_config, upstream_key, relay_site,
-                                       drain_signalled, DEFAULT_UPSTREAM_BUNDLESIZE, DEFAULT_UPSTREAM_HEARTRATE,
-                                       DEFAULT_RETENTION, LINK_STAGES)
+                                       drain_signalled, log_drain, DEFAULT_UPSTREAM_BUNDLESIZE,
+                                       DEFAULT_UPSTREAM_HEARTRATE, DEFAULT_RETENTION, LINK_STAGES)
 from hypershell.cluster.remote import AutoScalingCluster, AutoScalerThread
 from hypershell.server import ServerThread
 
@@ -650,6 +650,8 @@ class RelayThread(Thread):
         """
         while True:
             self.cluster.join(timeout=STOP_CHECK_INTERVAL)
+            if draining():
+                log_drain()
             if not self.cluster.is_alive():
                 log.warning('Relay-local server stopped')
                 return
@@ -1012,7 +1014,7 @@ class RelayApp(Application):
                              evict=config.server.evict)
         try:
             thread.start()
-            thread.join()
+            join_waking(thread)
         except BaseException:  # A failure, SIGINT, or SIGTERM (`RelayTerminated`).
             thread.stop()
             raise

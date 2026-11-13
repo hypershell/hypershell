@@ -29,7 +29,7 @@ from dataclasses import dataclass, replace
 # Internal libs
 from hypershell.core.config import config, blame, ConfigurationError, PARAM_UNSET
 from hypershell.core.fsm import State, StateMachine
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.tls import TLSConfig
 from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.dispatch import Dispatcher
@@ -576,7 +576,7 @@ def serve_with_sites(**options) -> None:
     """Run a server autoscaling with relay sites until stopped (see :class:`AutoScalingServer`)."""
     thread = AutoScalingServer.new(**options)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise

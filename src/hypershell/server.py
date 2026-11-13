@@ -69,7 +69,7 @@ from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes, parse_time
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.queue import QueueServer, QueueConfig, DEFAULT_REMOTE_TIMEOUT, make_sentinel
 from hypershell.core.dispatch import Dispatcher
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2
@@ -1373,7 +1373,7 @@ def serve_from(source: Iterable[str],
                               evict_after=evict_after,
                               tls=tls)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise
@@ -1564,7 +1564,7 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                               evict_after=evict_after,
                               tls=tls)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise

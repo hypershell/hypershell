@@ -1,57 +1,97 @@
 ---
 slug: relay-retire
-title: "Retire a superseded relay, and wake the main thread for signals"
+title: Retire a superseded relay, and wake the main thread for signals
 kind: fix
 appetite: big
 status: in_progress
 branch: fix/relay-retire
 base: develop
-current_phase: P1
-last_updated: "2026-11-13"
+current_phase: P2
+last_updated: '2026-11-13'
 phases:
-  - id: P1
-    name: "Main-thread signal wake: one bounded-step wait for every long-running command"
-    status: pending
-    satisfies: [R11, R12, R13, R14, R15]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_signal_wake.py tests/test_signal.py tests/test_relay_db.py tests/test_client.py tests/test_server.py tests/test_server_fsm.py tests/test_relay_fsm.py tests/test_relay_workload.py"
-  - id: P2
-    name: "Server half of retire: the retired mark on the topology reply, the handback call, and the dispatch-matched requeue"
-    status: pending
-    satisfies: [R1, R4, R5, R8, R9]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_topology_plan.py tests/test_topology_server.py tests/test_dispatch.py tests/test_dispatch_version.py tests/test_server.py tests/test_server_fsm.py tests/test_relay_topology.py && for mode in founding fixed dynamic restart; do .agents/factory/bin/temp_site.sh sh \"$PWD/spec/zone-autoscale/drive/zone_drive.sh\" $mode || exit 1; done"
-  - id: P3
-    name: "Relay half of retire: latch, stop pulling and launching, withdraw and hand back, finish and exit; docs; laptop evidence"
-    status: pending
-    satisfies: [R2, R3, R4, R5, R6, R7, R8, R9, R10]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "for mode in retire retire-red pair-relay pair-server idle; do .agents/factory/bin/temp_site.sh sh \"$PWD/spec/relay-retire/drive/retire_drive.sh\" $mode || exit 1; done && sh spec/relay/drive/relay_smoke.sh && for mode in founding fixed dynamic restart; do .agents/factory/bin/temp_site.sh sh \"$PWD/spec/zone-autoscale/drive/zone_drive.sh\" $mode || exit 1; done && uv run pytest && uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html"
-  - id: P4
-    name: "Multi-node cluster run of the retire scenario (split gate: builder prepares and rehearses, foreman runs, gate judges)"
-    status: pending
-    satisfies: [R3, R5, R6, R7]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_retire_judge.py && uv run python spec/relay-retire/drive/retire_judge.py spec/relay-retire/evidence/cluster --require retire"
+- id: P1
+  name: 'Main-thread signal wake: one bounded-step wait for every long-running command'
+  status: done
+  satisfies:
+  - R11
+  - R12
+  - R13
+  - R14
+  - R15
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_signal_wake.py tests/test_signal.py tests/test_relay_db.py
+    tests/test_client.py tests/test_server.py tests/test_server_fsm.py tests/test_relay_fsm.py
+    tests/test_relay_workload.py
+- id: P2
+  name: 'Server half of retire: the retired mark on the topology reply, the handback
+    call, and the dispatch-matched requeue'
+  status: pending
+  satisfies:
+  - R1
+  - R4
+  - R5
+  - R8
+  - R9
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_topology_plan.py tests/test_topology_server.py
+    tests/test_dispatch.py tests/test_dispatch_version.py tests/test_server.py tests/test_server_fsm.py
+    tests/test_relay_topology.py && for mode in founding fixed dynamic restart; do
+    .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
+    $mode || exit 1; done
+- id: P3
+  name: 'Relay half of retire: latch, stop pulling and launching, withdraw and hand
+    back, finish and exit; docs; laptop evidence'
+  status: pending
+  satisfies:
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  - R10
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: for mode in retire retire-red pair-relay pair-server idle; do .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/relay-retire/drive/retire_drive.sh" $mode || exit 1; done && sh
+    spec/relay/drive/relay_smoke.sh && for mode in founding fixed dynamic restart;
+    do .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
+    $mode || exit 1; done && uv run pytest && uv run --python 3.12 --group docs sphinx-build
+    -W --keep-going -q -E -b html docs docs/_build/html
+- id: P4
+  name: 'Multi-node cluster run of the retire scenario (split gate: builder prepares
+    and rehearses, foreman runs, gate judges)'
+  status: pending
+  satisfies:
+  - R3
+  - R5
+  - R6
+  - R7
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_retire_judge.py && uv run python spec/relay-retire/drive/retire_judge.py
+    spec/relay-retire/evidence/cluster --require retire
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Retire a superseded relay, and wake the main thread for signals
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -138,27 +178,27 @@ commit.
 SIGUSR1/SIGUSR2/SIGHUP taken by any thread is acted on within 2 s; nothing else changes. First
 because it is small, independent of retire, and stops the CI hang every later phase's CI run risks.
 
-- [ ] `core/thread.py`: `WAKE_INTERVAL` and `join_waking()` (PLAN §2.5); unit tests in
+- [x] `core/thread.py`: `WAKE_INTERVAL` and `join_waking()` (PLAN §2.5); unit tests in
       `tests/test_signal_wake.py`: a finished thread returns at once; a worker failure is re-raised
       unchanged; a handler for a signal `pthread_kill`ed at the worker runs on the main thread within
       `WAKE_INTERVAL` + slack while the main thread waits.
-- [ ] Switch the nine main-thread untimed joins named in PLAN §2.5 (relay, client, server ×2,
+- [x] Switch the nine main-thread untimed joins named in PLAN §2.5 (relay, client, server ×2,
       `serve_with_sites`, cluster local/ssh/remote, submit) to `join_waking(thread)`; leave every
       `try`/`except`/`finally` as it is.
-- [ ] `relay/upstream.py`: `log_drain()` once-only; the puller's gate calls it in place of its
+- [x] `relay/upstream.py`: `log_drain()` once-only; the puller's gate calls it in place of its
       direct WARNING, and `RelayThread.wait_site` calls it the first time `draining()` is true
       (R11's 1.5 s bound; same single line as today).
-- [ ] R15 tests (`@mark.integration`, in `tests/test_signal_wake.py`): `hs relay`, `hs client`,
+- [x] R15 tests (`@mark.integration`, in `tests/test_signal_wake.py`): `hs relay`, `hs client`,
       `hs server` each through the injector wrapper of PLAN §6 (a file named `hs`; its thread waits
       for a go-file and for the main thread parked in its join, then sends SIGUSR1 to its own thread
       with `signal.pthread_kill`); relay asserts exit 0 and "Drain requested"; client (beside a plain
       server, fired after "Registered client") exit 0 and "Signal interrupt (SIGUSR1)"; server (a
       plain client connected first) exit 0, "Signal interrupt (SIGUSR1)" and "Done". Run them once against `develop`'s source (a `git archive fb89670 src` export on
       `PYTHONPATH`, no stash) and record in the commit body that each fails there.
-- [ ] R12 coverage beyond R15: the same injector drives `hs cluster` (local) and `hs submit`; each
+- [x] R12 coverage beyond R15: the same injector drives `hs cluster` (local) and `hs submit`; each
       acts on the self-`pthread_kill`ed SIGUSR1 as it does when the main thread takes it (no red
       requirement).
-- [ ] R13/R14: SIGTERM/SIGINT and worker-failure paths unchanged — existing tests stay green; add
+- [x] R13/R14: SIGTERM/SIGINT and worker-failure paths unchanged — existing tests stay green; add
       one test that a worker exception still surfaces through `.wait()` with today's exit status.
 - **Verify:** `uv run pytest -v tests/test_signal_wake.py tests/test_signal.py tests/test_relay_db.py
   tests/test_client.py tests/test_server.py tests/test_server_fsm.py tests/test_relay_fsm.py

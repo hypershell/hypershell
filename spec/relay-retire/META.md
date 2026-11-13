@@ -32,3 +32,10 @@
 - **Skill cause:** Step 1 only checks that `GOAL.md` is committed and free of `[NEEDS CLARIFICATION]`; it does not cover Clarifications marked for sign-off at the gate, nor say that the gate's rulings are recorded in `GOAL.md` in their own commit before the plan commit.
 - **Recommended fix:** In Step 1, add: "If Clarifications are marked for sign-off at this gate, record the gate's rulings (attribution + a dated 'Ruled at the GOAL gate' line) and commit `GOAL.md` alone (`[{category}] Record {slug} GOAL-gate rulings`) before research; STOP if no ruling was given."
 - **Confidence:** high · **Effort:** small
+
+## F4 — No place to record plan-gate rulings handed to the first build
+`origin=hs-build:P1 severity=low category=missing-guidance status=open target=.claude/skills/hs-build/SKILL.md`
+- **What happened:** The P1 invocation carried the plan-gate rulings (deviation rows approved, clarifications accepted) with an instruction to record them "as the skill directs". `hs-build` has no step for it, and Step 1 requires a clean tree before any work; I followed the `relay-topology` precedent (`f01dce0`) by hand: mark PLAN.md's status approved, note the acceptance under the deviation table and §5, and commit that alone before the build commit.
+- **Skill cause:** Neither `hs-plan` (which ends at the draft) nor `hs-build` (which starts at the FSM) owns the plan gate, so the rulings' home and commit are left to precedent.
+- **Recommended fix:** In `hs-build` Step 1, add: "If the invocation carries plan-gate rulings and PLAN.md still reads `Draft for review`, record them (status line `Approved at the plan gate (who, date)`, a dated 'Ruled at the plan gate' paragraph) and commit PLAN.md alone (`[{category}] Record {slug} plan-gate rulings`) before building." Same family as F3.
+- **Confidence:** high · **Effort:** small

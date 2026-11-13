@@ -61,7 +61,7 @@ from hypershell.relay import store
 
 # Public interface
 __all__ = ['upstream_identity', 'served_zones', 'upstream_config', 'upstream_key', 'relay_site', 'request_text', 'read_reply',
-           'RelayInsertError', 'drain_signalled',
+           'RelayInsertError', 'drain_signalled', 'log_drain',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
            'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
            'HeartbeatState', 'UpstreamHeartbeat', 'UpstreamHeartbeatThread',
@@ -168,6 +168,24 @@ def relay_site(site: Optional[str] = None) -> str:
 def drain_signalled() -> bool:
     """True once the process has received a drain signal (SIGUSR1 or SIGUSR2) through the stock handler."""
     return check_signal() in (SIGUSR1, SIGUSR2)
+
+
+_DRAIN_LOGGED: bool = False
+_DRAIN_LOCK: Final[threading.Lock] = threading.Lock()
+
+
+def log_drain() -> None:
+    """Log the drain once per process, from whichever of the puller and the relay thread sees it first.
+
+    The puller sees the drain at its gate, which an outstanding upstream request can hold for a
+    while; the relay thread looks every check, so the line comes promptly either way.
+    """
+    global _DRAIN_LOGGED
+    with _DRAIN_LOCK:
+        if _DRAIN_LOGGED:
+            return
+        _DRAIN_LOGGED = True
+    log.warning('Drain requested - no more upstream requests')
 
 
 def request_text(identity: str, zone: Optional[str], size: int, wait: float) -> str:
@@ -340,7 +358,7 @@ class UpstreamPuller(StateMachine):
         if self.stopping:  # atomic
             return PullerState.FINAL
         if self.drain():
-            log.warning('Drain requested - no more upstream requests')
+            log_drain()
             return PullerState.FINAL
         if self.finished and self.finish_idle():
             log.info('Upstream server is shutting down - no more upstream requests')

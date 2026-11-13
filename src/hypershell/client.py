@@ -66,7 +66,7 @@ from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
 from hypershell.core.types import parse_bytes, parse_time, serialize, deserialize
-from hypershell.core.thread import Thread
+from hypershell.core.thread import Thread, join_waking
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2, SIGINT
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
@@ -1515,7 +1515,7 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
                               tls=tls,
                               zone=zone)
     try:
-        thread.join()
+        join_waking(thread)
     except Exception:
         thread.stop()
         raise
