@@ -93,3 +93,10 @@ is skipped by the parser):
 - **Skill cause:** "Current state" runs `git diff --stat develop...HEAD`, and Step 1 defaults `base` to the branch name `develop`, with no fetch and no comparison against `origin`. The same finding is open in several earlier cycles' META files.
 - **Recommended fix:** resolve `{base}` to `origin/{base}` after a fetch (or to `git merge-base HEAD origin/{base}`), and use that SHA in the diffstat, the drift check and the reviewer's diff command.
 - **Confidence:** high · **Effort:** small
+
+## F7 — Remediation mode says nothing on where the human gate's rulings go, while GOAL is "locked"
+`origin=hs-build:P3 severity=low category=missing-guidance status=open target=.agents/skills/hs-build/SKILL.md`
+- **What happened:** review cycle 1 tripped the human gate, and the maintainer's rulings (F1–F4) had to land as dated GOAL Clarification lines in the remediation commit. The foreman's brief said so; the skill does not.
+- **Skill cause:** Safety Principles say "Amend `TECH.md` freely; GOAL is locked", and Step 1.3 (remediation) covers only `REVIEW.md` → `TECH.md`. A remediation after a human-gate ruling has no instruction to record the ruling, so a builder following the skill alone either leaves it in chat or edits a "locked" file without guidance.
+- **Recommended fix:** in Step 1.3, add: when `REVIEW.md` records a human gate, append each ruling to `GOAL.md` Clarifications as a dated line naming the finding (append only; no R-ID text changes), in the remediation commit.
+- **Confidence:** med · **Effort:** small

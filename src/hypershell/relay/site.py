@@ -55,6 +55,7 @@ from hypershell.core.tls import TLSConfig
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.cluster.launch import ClientLaunch, client_launch
 from hypershell.cluster.remote import AutoScalingCluster, AutoScalerThread, DEFAULT_REMOTE_EXE
+from hypershell.cluster.demand import ZoneRef
 
 # Public interface
 __all__ = ['site_cluster', 'site_launch', 'zone_launch', 'zone_fleet', 'SITE_POLICY', 'DEFAULT_SITE_PERIOD', 'fence_site',
@@ -146,7 +147,8 @@ def zone_launch(cluster: AutoScalingCluster,
 def zone_fleet(launch: ClientLaunch, zone: Optional[str], size: int = 1,
                period: int = DEFAULT_SITE_PERIOD) -> AutoScalerThread:
     """A fixed fleet of `size` site clients launched with `launch`, one launched again whenever one exits."""
-    fleet = AutoScalerThread(launch, policy=SITE_POLICY, period=period, init_size=size, min_size=size, max_size=size)
+    fleet = AutoScalerThread(launch, policy=SITE_POLICY, period=period, init_size=size, min_size=size, max_size=size,
+                             own_zone=ZoneRef.from_name(zone))
     fleet.name = f'hypershell-autoscaler-{zone}'
     return fleet
 

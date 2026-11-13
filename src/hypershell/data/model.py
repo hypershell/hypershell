@@ -719,6 +719,23 @@ class Task(Entity):
             return TaskGroupInfo(next_group)
 
     @classmethod
+    def starting_group(cls: Type[Task], group: int, attempts: int, eager: bool = False) -> Optional[int]:
+        """
+        The task group to start in, given the most recently scheduled `group`, or None.
+
+        That group is kept while it holds failures still to be retried or halted on. Otherwise the
+        start is the lowest group holding incomplete tasks, which is lower than `group` when tasks
+        were submitted late. None means no task is incomplete and `group` holds nothing to retry.
+        """
+        if cls.count_remaining(group=group) == 0:
+            # With every task in the group complete, increment_group holds the group while a
+            # failure awaits retry, and halts it on a failure that has used its retries.
+            held = cls.increment_group(group, attempts=attempts, eager=eager)
+            if not held.viable or cls.count_retryable(attempts, group=group, eager=eager) > 0:
+                return group
+        return cls.lowest_incomplete_group()
+
+    @classmethod
     def lowest_incomplete_group(cls: Type[Task]) -> Optional[int]:
         """The smallest group holding a task that has not completed, or None."""
         return Session.query(func.min(cls.group)).filter(cls.completion_time.is_(None)).scalar()

@@ -13,13 +13,18 @@
 #   fixed     default and cpu tasks in group 0, gpu tasks in group 1, fixed policy
 #   dynamic   the same three zones under the dynamic policy with a max-size of 3: default and gpu
 #             have twelve tasks of a second each, cpu has three quick ones
+#   restart   a restart with a late lower group, fixed policy, init-size 0: gpu group 1 is partly
+#             run by a plain cluster first, then two more gpu tasks and three cpu tasks in group 0
+#             (submitted late, below it) are left for the autoscaling restart
 #
 # Checks, all modes: every task completes and none fails; every launched client exits by itself
 # (idle exit) while the cluster still runs. Founding: every launch is in the default zone with no
 # --zone, and names the default zone in {zone} and HYPERSHELL_ZONE. Fixed and dynamic: each zone
 # is launched into, every launch names one zone, no gpu launch is made while group 0 has work,
 # and each task sees its own zone in HYPERSHELL_ZONE. Dynamic: some zone grew past one client
-# on its own pressure while another stayed at one, and no zone passed the max-size.
+# on its own pressure while another stayed at one, and no zone passed the max-size. Restart: cpu
+# and gpu are each launched into, cpu first, no gpu launch is made while group 0 has work, no
+# client of the default zone (which has no work) is launched, and each task sees its own zone.
 #
 # Settings: ZD_DEADLINE, seconds each wait is bounded by (default 120). ZD_EVIDENCE, a directory:
 # when set, the run's launch log, task log and autoscaler log lines are written to MODE.txt there,
@@ -35,11 +40,23 @@ log=$PWD/launches.log out=$PWD/tasks.log
 
 # Each zone as NAME:GROUP:TASKS:SECONDS (seconds each task takes).
 case $mode in
-    founding) zones='default:0:3:0' policy=fixed max=1 ;;
-    fixed) zones='default:0:3:0 cpu:0:3:0 gpu:1:3:0' policy=fixed max=1 ;;
-    dynamic) zones='default:0:12:1 cpu:0:3:0 gpu:1:12:1' policy=dynamic max=3 ;;
-    *) echo "usage: zone_drive.sh founding|fixed|dynamic" >&2; exit 2 ;;
+    founding) zones='default:0:3:0' policy=fixed max=1 init=1 ;;
+    fixed) zones='default:0:3:0 cpu:0:3:0 gpu:1:3:0' policy=fixed max=1 init=1 ;;
+    dynamic) zones='default:0:12:1 cpu:0:3:0 gpu:1:12:1' policy=dynamic max=3 init=1 ;;
+    restart) zones='cpu:0:3:0 gpu:1:2:0' policy=fixed max=1 init=0 ;;
+    *) echo "usage: zone_drive.sh founding|fixed|dynamic|restart" >&2; exit 2 ;;
 esac
+
+port=$(uv run --quiet python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+
+if [ "$mode" = restart ]; then
+    # Group 1 (gpu) is the most recently scheduled group when the restart begins: two of its tasks
+    # have run to completion. The tasks below are then submitted, cpu's late in the lower group 0.
+    printf '%s\n' true true > tasks-before.in
+    uv run --quiet hs submit -g 1 --zone gpu -f tasks-before.in 2>/dev/null
+    uv run --quiet hs cluster --restart --zone gpu -N 1 -H 127.0.0.1 -p "$port" > before.out 2>&1
+    [ "$(uv run --quiet hs list -g 1 --remaining --count)" = 0 ] || { echo "zone_drive: group 1 did not run" >&2; exit 1; }
+fi
 
 for spec in $zones; do
     IFS=: read -r zone group count work <<EOF
@@ -57,10 +74,9 @@ EOF
     fi
 done 2>/dev/null
 
-port=$(uv run --quiet python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 HYPERSHELL_LOGGING_LEVEL=DEBUG uv run --quiet hs cluster --restart --autoscaling="$policy" \
     --launcher="sh $here/zone_shim.sh $log {zone}" \
-    -H 127.0.0.1 -p "$port" -T 2 -P 1 -I 1 -X 0 -Y "$max" > cluster.out 2>&1 &
+    -H 127.0.0.1 -p "$port" -T 2 -P 1 -I "$init" -X 0 -Y "$max" > cluster.out 2>&1 &
 pid=$!
 
 status=0
@@ -101,7 +117,7 @@ sleep 3
 kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
 
-grep -E 'Autoscale (check|adding|start|launcher|min-size|max-size)' cluster.out > autoscaler.log || true
+grep -E 'Autoscale (check|adding|start|launcher|min-size|max-size|pressure|pause)' cluster.out > autoscaler.log || true
 echo '--- launches'
 cat "$log"
 echo '--- tasks'
@@ -132,13 +148,13 @@ case $mode in
         awk '$3 != "word=default" || $4 != "env=default" { exit 1 }' "$log" \
             || fail 'a launch did not name the default zone in {zone} and HYPERSHELL_ZONE'
         ;;
-    fixed|dynamic)
+    fixed|dynamic|restart)
         # word == env == --zone, except the own default zone, which keeps today's command line.
         awk '{ for (i = 3; i <= 6; i++) { split($i, kv, "="); v[i] = kv[2] }
                if (v[3] != v[4]) exit 1
                if (v[5] != v[3] && !(v[3] == "default" && v[5] == "-")) exit 1 }' "$log" \
             || fail 'a launch disagrees on its zone across {zone}, HYPERSHELL_ZONE and --zone'
-        for zone in default cpu gpu; do
+        for zone in $(for spec in $zones; do echo "$spec"; done | cut -d: -f1); do
             grep -q " word=$zone " "$log" || fail "no client was launched into zone $zone"
         done
         awk '$3 == "word=gpu" && $6 != "g0=0" { exit 1 }' "$log" \
@@ -146,6 +162,11 @@ case $mode in
         awk '$1 != $2 { exit 1 }' "$out" || fail 'a task saw another zone in HYPERSHELL_ZONE'
         ;;
 esac
+
+if [ "$mode" = restart ]; then
+    head -n 1 "$log" | grep -q ' word=cpu ' || fail 'the first client was not launched into cpu, the active zone'
+    if grep -q ' word=default ' "$log"; then fail 'a client was launched into the default zone, which has no work'; fi
+fi
 
 if [ "$mode" = dynamic ]; then
     awk '{ n[$3]++ } END { grew = 0; one = 0

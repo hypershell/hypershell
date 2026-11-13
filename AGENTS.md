@@ -420,6 +420,9 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   (never the client's `-t`), `HYPERSHELL_ZONE` is added to the launch env (never to the Open MPI
   forward list), `expose_zone` refuses SSH, and the own default zone keeps today's argv (no
   `--zone`). The relay's site cluster passes `discover_zones=False` and exposes nothing.
+- The autoscaler reads every zone from the group the scheduler loads from
+  (`Scheduler.active_group`, else `Task.starting_group`, the scheduler's own start rule), not
+  `Task.current_group()`, which is only the most recently scheduled group.
 
 ## Configuration
 

@@ -93,26 +93,29 @@ class ZoneLoad:
 
 
 def read_zone_loads(group: int, knobs: ScalingKnobs, *, own: Optional[ZoneRef], discover: bool,
-                    attempts: int, eager: bool) -> Dict[str, ZoneLoad]:
+                    attempts: int, eager: bool, own_idle: bool = False) -> Dict[str, ZoneLoad]:
     """
-    Read the load of each zone to scale, keyed by zone id, with `group` the current task group.
+    Read the load of each zone to scale, keyed by zone id, with `group` the scheduler's current group.
 
-    The `own` zone is always read when given, in `group`. With `discover`, so is every zone with
-    work in the group the scheduler runs next: `group` while it holds incomplete tasks or failures
-    awaiting a retry (under the server's `attempts` and `eager`), else the next group with
-    incomplete tasks. Only a client's request moves the scheduler on, so a zone with no client
-    would otherwise never see its group start. A zone whose work is all in later groups has none
-    in that group and is not read. A discovered zone id with no recorded name cannot be handed to
-    a launcher and is skipped with a warning. Failures awaiting a retry count for named zones only;
-    the default zone's retries are scheduled whether or not a client of it is asking. Pressure is
-    read only under the dynamic policy.
+    With `discover`, every zone with work in the group the scheduler runs next is read: `group`
+    while it holds incomplete tasks or failures awaiting a retry (under the server's `attempts` and
+    `eager`), else the next group with incomplete tasks. Only a client's request moves the scheduler
+    on, so a zone with no client would otherwise never see its group start. A zone whose work is
+    all in later groups has none in that group and is not read. The `own` zone is always read when
+    given: in `group`, or, when it is `own_idle` (no client of it launched or registered), in that
+    same next group, since no client of it is left to ask. A discovered zone id with no recorded
+    name cannot be handed to a launcher and is skipped with a warning. Failures awaiting a retry
+    count for named zones only; the default zone's retries are scheduled whether or not a client
+    of it is asking. Pressure is read only under the dynamic policy.
     """
-    ahead = Task.increment_group(group, attempts=attempts, eager=eager).value if discover else group
+    own_idle = own is not None and own_idle
+    ahead = Task.increment_group(group, attempts=attempts, eager=eager).value if discover or own_idle else group
+    own_group = ahead if own_idle else group
     remaining = Task.count_remaining_by_zone(ahead) if discover else {}
     retryable = {zone: count for zone, count in Task.count_retryable_by_zone(attempts, ahead, eager=eager).items()
                  if zone != DEFAULT_ZONE_ID and (discover or (own is not None and zone == own.id))}
-    if own is not None and ahead != group:
-        # The own zone is read in the current group, where it has no work left, as without zones.
+    if own is not None and own_group != ahead:
+        # The own zone, with a client of it, is read in the current group, where it has no work left.
         remaining.pop(own.id, None)
         retryable.pop(own.id, None)
     zones: Dict[str, ZoneRef] = {} if own is None else {own.id: own}
@@ -122,10 +125,11 @@ def read_zone_loads(group: int, knobs: ScalingKnobs, *, own: Optional[ZoneRef], 
     if unnamed := [zone for zone in found if zone not in names]:
         log.warning(f'Autoscale skipping zones with no recorded name ({", ".join(unnamed)})')
     zones.update({zone: ZoneRef(zone, names[zone]) for zone in found if zone in names})
-    groups = {zone: group if own is not None and zone == own.id else ahead for zone in zones}
+    groups = {zone: own_group if own is not None and zone == own.id else ahead for zone in zones}
     return {
         zone: ZoneLoad(ref,
-                       remaining=remaining.get(zone, 0) if discover else Task.count_remaining(group=group, zone=zone),
+                       remaining=(remaining.get(zone, 0) if discover else
+                                  Task.count_remaining(group=groups[zone], zone=zone)),
                        retryable=retryable.get(zone, 0),
                        pressure=(Task.task_pressure(knobs.factor, group=groups[zone], zone=zone)
                                  if knobs.policy is AutoScalerPolicy.DYNAMIC else None),

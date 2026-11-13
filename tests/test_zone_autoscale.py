@@ -20,8 +20,11 @@ from tests.test_zone_model import task_db, add_tasks, finish  # noqa: fixture
 from hypershell.cluster import demand
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ScalingKnobs, ZoneLoad,
                                        read_zone_loads, zone_demand, fleet_demand)
+from hypershell.cluster import remote, launch as launch_module
 from hypershell.cluster.remote import AutoScaler, AutoScalerState, AutoScalingCluster
 from hypershell.cluster.launch import client_launch, LaunchActuator
+from hypershell.relay.site import zone_fleet
+from hypershell.server import Scheduler
 from hypershell.data.model import (Task, Client, Zone, TaskGroupInfo, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME,
                                    CANCEL_STATUS)
 
@@ -167,6 +170,8 @@ def test_autoscaler_decides_through_demand(monkeypatch: MonkeyPatch, policy: str
         raise AssertionError('discovery is off')
 
     monkeypatch.setattr(Task, 'current_group', lambda: TaskGroupInfo(3, 'testing'))
+    monkeypatch.setattr(Task, 'starting_group', lambda group, attempts, eager=False: group)
+    monkeypatch.setattr(Task, 'increment_group', lambda group, attempts, eager=False: TaskGroupInfo(group, 'testing'))
     monkeypatch.setattr(Task, 'count_remaining', count_remaining)
     monkeypatch.setattr(Task, 'task_pressure', task_pressure)
     monkeypatch.setattr(Task, 'count_remaining_by_zone', unexpected)
@@ -190,6 +195,8 @@ def test_autoscaler_own_named_zone(monkeypatch: MonkeyPatch) -> None:
     """A named own zone is read by its id, and its initial size launches into it."""
     asked = []
     monkeypatch.setattr(Task, 'current_group', lambda: TaskGroupInfo(0, 'testing'))
+    monkeypatch.setattr(Task, 'starting_group', lambda group, attempts, eager=False: group)
+    monkeypatch.setattr(Task, 'increment_group', lambda group, attempts, eager=False: TaskGroupInfo(group, 'testing'))
     monkeypatch.setattr(Task, 'count_remaining', lambda group=None, zone=None: asked.append(zone) or 4)
     monkeypatch.setattr(Client, 'count_connected', lambda: 0)
     scaler = make_scaler('fixed', clients=0, own_zone=ZoneRef.from_name('gpu'))
@@ -434,6 +441,7 @@ class FleetDB:
                             lambda attempts, group, eager=False: (dict(self.retryable.get(group, {}))
                                                                   if attempts > 1 or eager else {}))
         monkeypatch.setattr(Task, 'increment_group', self.increment_group)
+        monkeypatch.setattr(Task, 'starting_group', self.starting_group)
         monkeypatch.setattr(Task, 'task_pressure', lambda factor, group=None, zone=None: self.pressure.get(zone))
         monkeypatch.setattr(Zone, 'names_for_ids', lambda ids: {i: names[i] for i in ids if i in names})
         monkeypatch.setattr(Client, 'count_connected', lambda: 0)
@@ -444,6 +452,14 @@ class FleetDB:
             (attempts > 1 or eager) and any(self.retryable.get(previous, {}).values()))
         later = sorted(group for group, zones in self.remaining.items() if any(zones.values()))
         return TaskGroupInfo(previous if held or not later else later[0], 'testing')
+
+    def starting_group(self, group: int, attempts: int, eager: bool = False) -> Optional[int]:
+        """The group the scheduler starts from: `group` while it holds a retry, else the lowest group with tasks."""
+        if not any(self.remaining.get(group, {}).values()) and (
+                (attempts > 1 or eager) and any(self.retryable.get(group, {}).values())):
+            return group
+        pending = sorted(group for group, zones in self.remaining.items() if any(zones.values()))
+        return pending[0] if pending else None
 
 
 class Proc(FakeProc):
@@ -465,7 +481,12 @@ class Launch(FakeLaunch):
 
 
 def zoned_scaler(policy: str = 'fixed', own: ZoneRef = DEFAULT, **opts) -> tuple:
-    """An autoscaler with discovery on over fake launches, and the list of clients it started."""
+    """An autoscaler with discovery on over fake launches, and the list of clients it started.
+
+    A `scheduler_group` of None is left out, so the autoscaler takes the group from the database.
+    """
+    if opts.get('scheduler_group', ...) is None:
+        del opts['scheduler_group']
     started = []
     scaler = AutoScaler(Launch(own.name, started), policy=policy, own_zone=own,
                         launch_for=lambda zone: Launch(zone.name, started), **opts)
@@ -509,7 +530,7 @@ class TestZonedAutoScaler:
     def test_gated_zone_is_never_launched(self, monkeypatch: MonkeyPatch) -> None:
         """A zone whose work is all in a later group is not launched until that group is current."""
         db = FleetDB(monkeypatch, remaining={0: {CPU.id: 3}, 1: {GPU.id: 3}})
-        scaler, started = zoned_scaler()
+        scaler, started = zoned_scaler(scheduler_group=lambda: db.group)
         run_checks(scaler, 5)
         assert zones_of(started) == {'cpu': 1}
         db.group = 1
@@ -517,15 +538,19 @@ class TestZonedAutoScaler:
         assert zones_of(started) == {'cpu': 1, 'gpu': 1}
 
     def test_next_group_is_discovered_before_it_is_scheduled(self, monkeypatch: MonkeyPatch) -> None:
-        """Once the current group has no work, a zone of the next group gets a client before any of its tasks is
-        scheduled, since only a client's request moves the scheduler on; the own zone is read as before."""
-        FleetDB(monkeypatch, remaining={0: {}, 1: {DEFAULT.id: 3, GPU.id: 3}}, group=0)
-        scaler, started = zoned_scaler()
+        """Once the scheduler's group has no work, a zone of the next group gets a client before any of its tasks is
+        scheduled, since only a client's request moves the scheduler on. The own zone, with no client of it, is read
+        there too; with a registered client it is read in the scheduler's group, as before."""
+        FleetDB(monkeypatch, remaining={0: {}, 1: {DEFAULT.id: 3, GPU.id: 3}})
+        scaler, started = zoned_scaler(scheduler_group=lambda: 0)
         assert scaler.check_fixed() is AutoScalerState.SCALE
-        assert scaler.pending == {GPU: 1}
+        assert scaler.pending == {DEFAULT: 1, GPU: 1}
         scaler.scale()
         run_checks(scaler, 3)
-        assert zones_of(started) == {'gpu': 1}
+        assert zones_of(started) == {'default': 1, 'gpu': 1}
+        scaler, started = zoned_scaler(scheduler_group=lambda: 0, registered=lambda zone: int(zone == DEFAULT.id))
+        assert scaler.check_fixed() is AutoScalerState.SCALE
+        assert scaler.pending == {GPU: 1}
 
     def test_next_group_waits_while_the_current_group_has_work(self, monkeypatch: MonkeyPatch) -> None:
         """A failure awaiting a retry holds the current group, so the next group's zones get no client yet."""
@@ -604,3 +629,147 @@ def test_cluster_discovers_zones_by_default() -> None:
     assert machine.registered is not None
     plain = AutoScalingCluster(discover_zones=False, **options).autoscaler.machine
     assert not plain.discover and plain.registered is None
+
+
+def scheduled(count: int, zone: Optional[str], group: int, done: int = 0) -> List[str]:
+    """Submit and schedule `count` tasks of `zone` in `group`, completing the first `done` of them."""
+    ids = add_tasks(count, zone, group=group)
+    Task.next(limit=count, attempts=1, group=group, zone=zone)
+    for task_id in ids[:done]:
+        finish(task_id, 0)
+    return ids
+
+
+@mark.integration
+class TestSchedulerGroup:
+    """Every zone is read from the group the scheduler loads from, on a real SQLite file."""
+
+    @staticmethod
+    def started_scheduler() -> Scheduler:
+        """A scheduler driven in-process through its start, as a restarted server's is."""
+        scheduler = Scheduler(queue=None, poll=0, forever_mode=True, restart_mode=True)
+        assert scheduler.active_group is None
+        scheduler.start()
+        return scheduler
+
+    def test_restart_with_a_late_lower_group(self, task_db: Engine) -> None:
+        """After a restart with a late lower group under a partly run group, the zone of the lower group gets a
+        client and the zone of the gated group does not, from the scheduler's group or its starting rule."""
+        Zone.ensure('cpu')
+        Zone.ensure('gpu')
+        scheduled(2, GPU.id, group=2, done=2)
+        add_tasks(2, GPU.id, group=2)
+        add_tasks(3, CPU.id, group=1)
+        assert Task.current_group().value == 2
+        scaler, started = zoned_scaler()
+        run_checks(scaler, 3)
+        assert zones_of(started) == {'cpu': 1}
+        scheduler = self.started_scheduler()
+        assert scheduler.active_group == scaler.current_group() == 1
+        scaler, started = zoned_scaler(scheduler_group=lambda: scheduler.active_group)
+        run_checks(scaler, 3)
+        assert zones_of(started) == {'cpu': 1}
+
+    def test_late_lower_group_while_running(self, task_db: Engine) -> None:
+        """A lower group submitted while the scheduler runs a higher one waits behind it, and so does its zone."""
+        Zone.ensure('cpu')
+        Zone.ensure('gpu')
+        scheduled(2, GPU.id, group=2)
+        add_tasks(3, CPU.id, group=1)
+        group = {'value': 2}
+        scaler, started = zoned_scaler(scheduler_group=lambda: group['value'])
+        run_checks(scaler, 3)
+        assert zones_of(started) == {'gpu': 1}
+        group['value'] = 1
+        run_checks(scaler, 2)
+        assert zones_of(started) == {'gpu': 1, 'cpu': 1}
+
+    @mark.parametrize('policy', ['fixed', 'dynamic'])
+    def test_zoneless_group_boundary_with_every_client_gone(self, task_db: Engine, policy: str) -> None:
+        """Without zones, the next group's work gets a client once every client has idled out at a group boundary,
+        whether the scheduler's group is reported (not yet moved) or taken from its starting rule."""
+        scheduled(2, None, group=0, done=2)
+        add_tasks(3, group=1)
+        assert Task.current_group().value == 0
+        for source in (None, lambda: 0):
+            scaler, started = zoned_scaler(policy, scheduler_group=source, registered=lambda zone: 0)
+            run_checks(scaler, 3)
+            assert zones_of(started) == {'default': 1}
+        scaler, started = zoned_scaler(policy, scheduler_group=lambda: 0, registered=lambda zone: 1)
+        run_checks(scaler, 3)
+        assert zones_of(started) == {}
+
+    def test_own_named_zone_at_a_group_change(self, task_db: Engine) -> None:
+        """The own named zone, its clients gone, gets a client for its work in the next group."""
+        Zone.ensure('cpu')
+        scheduled(2, CPU.id, group=0, done=2)
+        add_tasks(2, CPU.id, group=1)
+        for source in (None, lambda: 0):
+            scaler, started = zoned_scaler(own=CPU, scheduler_group=source, registered=lambda zone: 0)
+            run_checks(scaler, 3)
+            assert zones_of(started) == {'cpu': 1}
+
+    def test_scheduler_reports_no_group_until_started(self, task_db: Engine) -> None:
+        """The scheduler's group is unknown before its start and while its first group waits on tasks."""
+        scheduler = self.started_scheduler()
+        assert scheduler.first_group_pending and scheduler.active_group is None
+        add_tasks(1, group=4)
+        assert Task.starting_group(Task.current_group().value, attempts=1) == 4
+        scaler, _ = zoned_scaler(scheduler_group=lambda: scheduler.active_group)
+        assert scaler.current_group() == 4
+
+
+@mark.unit
+class TestCheckLog:
+    """The autoscaler's log lines, one set per zone."""
+
+    @staticmethod
+    def logged(monkeypatch: MonkeyPatch, scaler: AutoScaler) -> List[str]:
+        """The debug lines of one check."""
+        lines = []
+        monkeypatch.setattr(remote.log, 'debug', lines.append)
+        scaler.check_dynamic()
+        return lines
+
+    @mark.parametrize('pressure, launched, line', [
+        (2.5, 1, 'Autoscale pressure high (zone: default, 2.50)'),
+        (2.5, 3, 'Autoscale pressure high (zone: default, 2.50)'),
+        (0.5, 1, 'Autoscale pressure low (zone: default, 0.50)'),
+        (None, 0, 'Autoscale pause (zone: default, no clients and no active tasks)'),
+        (None, 1, 'Autoscale pause (zone: default, waiting on clients to complete initial tasks)'),
+    ])
+    def test_dynamic_policy_lines(self, monkeypatch: MonkeyPatch, pressure: Optional[float], launched: int,
+                                  line: str) -> None:
+        """The dynamic policy logs its pressure and its pauses per zone."""
+        FleetDB(monkeypatch, remaining={0: {DEFAULT.id: 5 if launched else 0}}, pressure={DEFAULT.id: pressure})
+        scaler, _ = zoned_scaler('dynamic', max_size=3, registered=lambda zone: 1)
+        scaler.clients = [None] * launched
+        lines = self.logged(monkeypatch, scaler)
+        assert line in lines
+        if launched == 3:
+            assert 'Autoscale max-size reached (zone: default, 3 >= 3)' in lines
+
+    def test_min_size_comes_first(self, monkeypatch: MonkeyPatch) -> None:
+        """Below min-size, the min-size line is the only decision logged, as before zones."""
+        FleetDB(monkeypatch, remaining={0: {DEFAULT.id: 5}}, pressure={DEFAULT.id: 2.5})
+        scaler, _ = zoned_scaler('dynamic', min_size=2, registered=lambda zone: 0)
+        lines = self.logged(monkeypatch, scaler)
+        assert lines[1:] == ['Autoscale min-size reached (zone: default, 0 < 2)']
+
+
+@mark.unit
+@mark.parametrize('zone, ref', [('gpu', GPU), (None, DEFAULT)])
+def test_relay_fleet_names_its_zone(monkeypatch: MonkeyPatch, zone: Optional[str], ref: ZoneRef) -> None:
+    """A relay's per-zone fleet is the fleet of its own zone, so its launches are counted and logged there."""
+    lines = []
+    monkeypatch.setattr(launch_module.log, 'info', lines.append)
+    monkeypatch.setattr(launch_module.log, 'debug', lines.append)
+    started = []
+    fleet = zone_fleet(FakeLaunch(ref.name, started), zone, size=2).machine
+    assert fleet.own_zone == ref and not fleet.discover
+    fleet.start()
+    while fleet.init() is AutoScalerState.SCALE:
+        fleet.scale()
+    assert fleet.launched() == {ref.id: 2}
+    assert f'Autoscale launcher (zone {ref.name}): shim {ref.name}' in lines
+    assert lines.count(f'Autoscale adding client (1, zone: {ref.name})') == 1

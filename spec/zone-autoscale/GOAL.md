@@ -192,6 +192,23 @@ recorded there. Those that bear on this cycle, carried from the seed unchanged:
   is how R3 and R4 read together, not a weaker R3. Every launch into a named zone, the cluster's own
   named `--zone` included, gets `--zone <name>`. `{zone}` and `HYPERSHELL_ZONE` are exposed on every
   launch, `default` included.
+- **2026-11-12 — F1: the autoscaler's group is the scheduler's** (maintainer ruling at review cycle
+  1). Discovery and the own-zone read start from the same group the scheduler starts from (its
+  `starting_group()` rule: the lowest incomplete group), not `Task.current_group()`, so after a
+  restart with a late lower group the autoscaler never launches for a gated zone and does launch for
+  the active one. Reuse the scheduler's own function over a copy.
+- **2026-11-12 — F2: an own zone with no client is read in the next group** (maintainer ruling at
+  review cycle 1). When the cluster's own zone, named or default, has no eligible work in the
+  starting group and no registered clients, it is read in the next group under the same read-only
+  advance rule every other zone uses. This changes the zone-less case only where it stalls forever
+  today; everywhere else its decisions, argv and launch counts stay exactly as today.
+- **2026-11-12 — F3: log text is not a contract** (maintainer ruling at review cycle 1). R4's
+  "identical to today's behavior" does not cover log text. The new per-zone log format stays, and
+  the dynamic policy's `pressure high/low` and `pause` lines come back as per-zone lines, since they
+  carry diagnosis.
+- **2026-11-12 — F4: relay fleets name their zone** (maintainer ruling at review cycle 1). The
+  relay's per-zone fleets pass their own zone, so their log lines name it. No decision change in
+  `relay/`; the relay's tests stay green.
 
 ## Related materials
 

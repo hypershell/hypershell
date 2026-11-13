@@ -41,7 +41,8 @@ def patch_queries(monkeypatch: MonkeyPatch,
     """
     Patch database-backed queries used by scaling checks, capturing `task_pressure` calls.
     Every task is in the default zone, so a zone-scoped query answers as the unscoped one;
-    the zone a query asked for is recorded apart from the asserted call.
+    the zone a query asked for is recorded apart from the asserted call. The scheduler starts
+    from and stays in the patched group.
     """
     calls = {}
     counts = {None: total, group: in_group}
@@ -52,6 +53,8 @@ def patch_queries(monkeypatch: MonkeyPatch,
         return pressure
 
     monkeypatch.setattr(Task, 'current_group', lambda: TaskGroupInfo(group, 'testing'))
+    monkeypatch.setattr(Task, 'starting_group', lambda group, attempts, eager=False: group)
+    monkeypatch.setattr(Task, 'increment_group', lambda group, attempts, eager=False: TaskGroupInfo(group, 'testing'))
     monkeypatch.setattr(Task, 'count_remaining', lambda group=None, zone=None: counts.get(group, 0))
     monkeypatch.setattr(Task, 'count_remaining_by_zone',
                         lambda group: {DEFAULT_ZONE_ID: counts[group]} if counts.get(group) else {})

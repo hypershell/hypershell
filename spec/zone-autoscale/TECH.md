@@ -3,10 +3,10 @@ slug: zone-autoscale
 title: Zone-aware autoscaling (zone, cycle 3)
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/zone-autoscale
 base: develop
-current_phase: done
+current_phase: P4
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -54,13 +54,15 @@ phases:
   hill: uphill
   verify: uv run pytest -v tests/test_zone_autoscale.py tests/test_autoscale.py tests/test_zone_model.py
     tests/test_relay_launch.py tests/test_relay_fsm.py tests/test_completions.py tests/test_cluster.py
+    tests/test_group_order.py tests/test_retry_gate.py tests/test_relay_return.py
     && uv run pytest -v tests/test_cluster_launch.py -k autoscaling && .agents/factory/bin/temp_site.sh
     sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" fixed && .agents/factory/bin/temp_site.sh
-    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding
+    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding && .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" restart
 - id: P4
   name: Per-zone pressure under the dynamic policy, laptop evidence, full regression
     and docs gate
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -75,7 +77,8 @@ phases:
   verify: .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
     dynamic && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
     fixed && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
-    founding && uv run pytest && uv run --python 3.12 --group docs sphinx-build -W
+    founding && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
+    restart && uv run pytest && uv run --python 3.12 --group docs sphinx-build -W
     --keep-going -q -E -b html docs docs/_build/html
 review:
   last_reviewed_commit: 86fe37225a9337724f08c9692ba2c82c6e9ba327
@@ -151,12 +154,12 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 
 | Side | Name | Inputs → outputs |
 |------|------|------------------|
-| reading | `demand.read_zone_loads(group, knobs, *, own, discover, attempts, eager)` | current group, knobs, own `ZoneRef` or None, discovery switch, the server's retry rule → `Dict[zone_id, ZoneLoad]`. This is the only DB access. The own zone is read in `group`; with `discover`, other zones are found in the group the scheduler runs next (`Task.increment_group(group, attempts, eager)`, P3 amendment). |
+| reading | `demand.read_zone_loads(group, knobs, *, own, discover, attempts, eager, own_idle=False)` | the scheduler's group, knobs, own `ZoneRef` or None, discovery switch, the server's retry rule, whether the own zone has no client launched or registered → `Dict[zone_id, ZoneLoad]`. This is the only DB access. The own zone is read in `group`, or in the group the scheduler runs next when `own_idle`; with `discover`, other zones are found in that next group (`Task.increment_group(group, attempts, eager)`, P3 amendment and remediation). |
 | demand | `demand.zone_demand(load, launched, knobs, *, own, initial)` | one zone's `ZoneLoad`, its fleet size, knobs → desired count (≥ `launched`, ≤ `launched + 1` once steady). Pure. |
 | demand | `demand.fleet_demand(loads, launched, knobs, *, own, initial)` | all loads, `Mapping[zone_id, int]` fleet sizes, knobs, own `ZoneRef` or None → `Dict[ZoneRef, int]` desired (the own zone always included). Pure. |
 | actuation | `launch.LaunchActuator(launch, own, launch_for)` | `.launched() -> Dict[zone_id, int]`; `.apply(desired: Mapping[ZoneRef, int]) -> int` launches the shortfall per zone and never terminates; `.launch_one(zone=None) -> Popen`; `.clean() -> List[Popen]`; `.clients: List[Popen]` (flat); `.describe(zone=None)` logs a zone's launch once; `.launch_of(zone) -> ClientLaunch` (cached). |
 | actuation | `launch.client_launch(..., zone=name, expose_zone=True)` | one zone's `ClientLaunch` with `{zone}` in the launcher words, `HYPERSHELL_ZONE` in env, and `--zone` per PLAN §2.5. |
-| glue | `remote.AutoScaler` | FSM: `check_*` = `read_zone_loads` → `fleet_demand(launched=actuator.launched())` → `self.pending`; `scale` = `actuator.apply(pending)`. |
+| glue | `remote.AutoScaler` | FSM: `check_*` = `current_group()` → `read_zone_loads` → `fleet_demand(launched=actuator.launched())` → `self.pending`; `scale` = `actuator.apply(pending)`. `current_group()` is `scheduler_group()` (the live `Scheduler.active_group`, wired by `AutoScalingCluster`), else `Task.starting_group(Task.current_group())`, the scheduler's own start rule (P3 remediation). |
 
 Types: `ZoneRef(id, name)` (`ZoneRef.from_name(name)`: None, '' and `default` give the default zone), `ScalingKnobs(policy, factor, init_size, min_size, max_size)`,
 `ZoneLoad(zone, remaining, retryable, pressure, group)` with `.work` (`group` is the group read, for logging,
@@ -318,9 +321,48 @@ launched while group 0 has work, and every client retires by idle exit.
   scheduler's own rule, read only, so R2 still holds (no zone of a later group is read while the
   current one has work). The own zone is still read in `group`, exactly as before, so the
   zone-less case is unchanged. `ZoneLoad` gains `group` (logging only, out of equality). Known
-  edge, left as it is today: an own zone whose only work is in the next group, with no client of
+  edge, left as it is today (superseded by the remediation below, F2): an own zone whose only work is in the next group, with no client of
   any zone left to ask, waits as the founding case does. Tests: two unit tests and one
   integration test in `tests/test_zone_autoscale.py`.
+- **Remediation (review cycle 1, `REVIEW.md` F1–F4; maintainer rulings 2026-11-12, GOAL
+  Clarifications).** Reopened; `P4` reopened with it for the evidence and the regression.
+  - [x] **F1.** The autoscaler reads every zone from the group the scheduler loads from, not
+    `Task.current_group()` (the most recently scheduled group, which differs after a restart with a
+    late lower group). The scheduler's start rule moves, unchanged, into
+    `Task.starting_group(group, attempts, eager)` (`data/model.py`), which `Scheduler.starting_group`
+    now calls; `Scheduler.active_group` reports the group it loads from (None before its start and
+    while its first group waits on tasks). `AutoScaler.current_group()` takes the scheduler's report
+    when `AutoScalingCluster` wires it (`scheduler_group`), else applies `Task.starting_group` to
+    `Task.current_group()`. **Amendment:** the ruling names the start rule; applied at every check
+    on its own, it would read a late lower group while the scheduler is still running the higher one
+    (the scheduler finishes its current group first), which provisions the gated zone mid-run, so the
+    live report comes first and the rule is the fallback (no scheduler in process, or not yet known).
+  - [x] **F2.** `read_zone_loads(own_idle=)`: the own zone, named or default, with no client
+    launched or registered (`AutoScaler.check_zones`) is read in the group the scheduler runs next,
+    under the read-only rule every other zone uses. A group the scheduler moves past has no work in
+    any zone, so this is "no eligible work in the starting group". **Amendment:** "no registered
+    clients" is read together with "none launched": a launched client still starting moves the
+    scheduler itself, and requiring both keeps the zone-less case unchanged except where nothing
+    runs at all.
+  - [x] **F3.** `AutoScaler.log_check` logs the dynamic policy's `Autoscale pressure high|low
+    (zone: Z, P)` and `Autoscale pause (zone: Z, …)` lines per zone, as before zones; nothing else
+    in the log format changes.
+  - [x] **F4.** `relay/site.py::zone_fleet` passes `own_zone=ZoneRef.from_name(zone)`, so a relay
+    fleet counts and logs its launches in its own zone. Decisions are unchanged (min = max = size).
+  - [x] Tests (`tests/test_zone_autoscale.py`), red on the pre-remediation source, green after:
+    `TestSchedulerGroup` (restart with a late lower group, from the scheduler's report and from the
+    start rule; a late lower group while running stays gated; the zone-less group boundary with
+    every client gone, fixed and dynamic; the own named zone at a group change; the scheduler's
+    group unknown until started), `TestCheckLog` (F3 lines, min-size first),
+    `test_relay_fleet_names_its_zone` (F4). Existing tests adapted: `FleetDB` stands in for
+    `Task.starting_group`; `test_gated_zone_is_never_launched` reports the scheduler's group;
+    `test_next_group_is_discovered_before_it_is_scheduled` now expects the idle own zone to be read
+    in the next group (the F2 ruling), with a sibling for a registered own zone (read as before).
+    `tests/test_autoscale.py`: `patch_queries` widened again (`starting_group`, `increment_group`
+    hold the patched group); every founding-case assertion unchanged.
+  - [x] Drive: new `restart` mode (`zone_drive.sh`), the review's F1 scenario. Pre-remediation
+    source: FAIL (24 `gpu` launches in 40 s, all while group 0 had work, none into `cpu`, every task left).
+  - [x] `AGENTS.md` and `invariants.md` §11: the group-read rule, in lockstep.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/cluster/remote.py`, `src/hypershell/cluster/__init__.py`,
   `tests/test_zone_autoscale.py`, `docs/_include/cluster_help.rst`, `docs/_include/cluster_desc.rst`,
@@ -363,6 +405,11 @@ modes' logs are kept as evidence, the full suite is green, and the docs build pa
     --keep-going -q -E -b html -D extensions=sphinx.ext.autodoc,sphinx.ext.napoleon,sphinx.ext.intersphinx,sphinx.ext.extlinks,sphinx.ext.viewcode,sphinxext.opengraph,sphinx_inline_tabs,sphinx_copybutton,sphinxcontrib.details.directive,sphinx_reredirects
     docs docs/_build/html` (every extension but `sphinx_sitemap`): exit 0, no warnings. The
     unmodified frontmatter command is to be run outside the sandbox before review.
+- **Remediation (review cycle 1).** Reopened with P3.
+  - [ ] Re-run the four drive modes (`founding`, `fixed`, `dynamic`, `restart`) with
+    `ZD_EVIDENCE` and refresh `evidence/laptop/` (the autoscaler lines now include `pressure` and
+    `pause`); keep the pre-remediation `restart` run as `restart-base.txt`; update the README.
+  - [ ] Full suite, the PostgreSQL suites against a local server, and the docs gate.
 - **Touches:** `spec/zone-autoscale/drive/`, `spec/zone-autoscale/evidence/laptop/`, and, only for
   fixes, any file P1–P3 touched.
 

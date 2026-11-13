@@ -330,20 +330,24 @@ class Scheduler(StateMachine):
         """
         if self.first_group_pending:
             return group
-        if Task.count_remaining(group=group) == 0:
-            # With every task in the group complete, increment_group holds the group while a
-            # failure awaits retry, and halts it on a failure that has used its retries.
-            held = Task.increment_group(group, attempts=self.attempts, eager=self.eager)
-            if not held.viable or Task.count_retryable(self.attempts, group=group, eager=self.eager) > 0:
-                return group
-        lowest = Task.lowest_incomplete_group()
-        if lowest is None:
+        start = Task.starting_group(group, attempts=self.attempts, eager=self.eager)
+        if start is None:
             log.debug('No incomplete tasks - first task group chosen once tasks arrive')
             self.first_group_pending = True
             return group
-        if lowest != group:
-            log.debug(f'Moving to task group {lowest} (lowest group with incomplete tasks)')
-        return lowest
+        if start != group:
+            log.debug(f'Moving to task group {start} (lowest group with incomplete tasks)')
+        return start
+
+    @property
+    def active_group(self: Scheduler) -> Optional[int]:
+        """
+        The task group tasks are loaded from now, or None while it is not yet known.
+
+        None before the scheduler has started, and while it waits for the first tasks to choose
+        its first group. Read from other threads (the autoscaler), so it only reads attributes.
+        """
+        return None if self.first_group_pending else self.current_group
 
     def pack_bundle(self: Scheduler) -> SchedulerState:
         """Hand the loaded chunks, encoded once here, to their zones' pools."""
