@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:relay-retire
 kind: fix
 appetite: small
 lane: public
