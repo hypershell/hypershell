@@ -3,10 +3,10 @@ slug: relay-topology
 title: 'Relay site-topology autoscaling: fill and spread across sites'
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/relay-topology
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -90,7 +90,7 @@ phases:
 - id: P5
   name: 'Multi-node test-cluster run (split gate): run A builds the batch script and
     judge, run B judges the foreman''s logs'
-  status: in_progress
+  status: done
   satisfies:
   - R2
   - R3
@@ -100,7 +100,7 @@ phases:
   - P4
   parallel: false
   hammerable: false
-  hill: crest
+  hill: downhill
   verify: uv run pytest -v tests/test_topology_judge.py && uv run python spec/relay-topology/drive/topology_judge.py
     spec/relay-topology/evidence/cluster --require spread-kill,fill
 review:
@@ -565,14 +565,26 @@ with `TZ=UTC`, so the times of every node's logs compare.
 
 **Run B** (after the foreman's run):
 
-- [ ] Copy the records unchanged and re-scrub them: no host, user, cluster, account, partition or path.
-      Run the frontmatter verify and write `SUMMARY.txt`. The phase is `done` only when it passes.
+- [x] Copy the records unchanged and re-scrub them: no host, user, cluster, account, partition or path.
+      Run the frontmatter verify and write `README.md` (amended from `SUMMARY.txt`, matching
+      `evidence/laptop/`). The phase is `done` only when it passes.
+- [x] **Run B gate (2026-11-13):** the foreman's run of `793d386` in a 4-node allocation (1 task of
+      8 CPUs per node), records `topology-793d386-45729057-{spread-kill,fill}.json`, checked by the
+      foreman for host names, users and paths and copied unchanged. `uv run pytest -v
+      tests/test_topology_judge.py` 59 passed; the judge over `evidence/cluster` with `--require
+      spread-kill,fill` PASS (2 runs, 0 failed). Drive 479 s (spread-kill 322 s, fill 157 s).
+      spread-kill: B killed at 149.1 s, both B identities evicted and reverted at 169.2 s, A's cpu
+      peak 2 between kill and eviction, 6 (max) after; fill: A launched 4 (max) cpu before B's first
+      at 32.9 s. An earlier attempt on the same commit failed `relay.idle_seen` in both scenarios:
+      on one node the relay's nested client steps were refused ("Unable to satisfy cpu bind
+      request", status 192), inheriting the outer step's CPU binding; the rerun added
+      `--cpu-bind=none` to `HSD_SRUN_ARGS` (a site argument, no drive change). The judge was right
+      to fail it. Notes in `evidence/cluster/README.md`.
 - **Verify:** see frontmatter (judge tests, then the judge over the delivered records with both runs
   required).
 - **Touches:** `spec/relay-topology/drive/`, `spec/relay-topology/evidence/rehearsal/`,
   `spec/relay-topology/evidence/cluster/`, `tests/test_topology_judge.py`.
-- **State (2026-11-13, after run A):** `in_progress`, hill `crest`, waiting on the foreman's external
-  run; `current_phase` stays P5. Run B copies the records and runs the frontmatter verify.
+- **State (2026-11-13, after run B):** `done`; the cycle is `in_review`.
 
 ---
 
