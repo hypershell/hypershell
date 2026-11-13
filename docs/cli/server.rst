@@ -65,8 +65,9 @@ timeout. A relay with no clients stays connected, ready to grow.
 
 A site whose relay is evicted drops out of the plan. Its unfinished tasks are put back as for any
 evicted client, and under *dynamic* its share regrows at the remaining sites, one client per check.
-When two live relays advertise the same site, the one that registered last holds the site's entries,
-the older one is asked for none, and the server logs a warning naming both.
+When two live relays advertise the same site, the one that registered last holds the site's entries
+for every zone it serves, the older one is asked for none in any zone (a zone only the older one
+serves goes to the other sites that serve it), and the server logs a warning naming both.
 
 For example, a server run in a container needs only its key and its settings in the environment:
 

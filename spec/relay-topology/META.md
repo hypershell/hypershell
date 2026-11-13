@@ -68,3 +68,10 @@ is skipped by the parser):
 - **Skill cause:** `hs-release` Step 4.4 expects the release diff of `share/man/man1` to show only the `.TH` line ("CLI content is already current on the branch"), but no lifecycle skill tells a cycle to regenerate the pages, and `hs-plan` carries the "man page in the same commit" phrase into TECH with no command for it.
 - **Recommended fix:** choose one owner. Either have `hs-release` Step 4.4 expect content changes (the current practice), and have `hs-plan` drop the man page from TECH's same-commit list; or give `hs-build` the exact regeneration commands (`sphinx-build -b man` and the three copies) and the rule that the `.TH` line is left as it is.
 - **Confidence:** med · **Effort:** small
+
+## F4 — The docs gate's `uv run --python 3.12` recreates the shared `.venv`, flipping the interpreter under every later `uv run`
+`origin=hs-build:P3 severity=low category=tooling status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** the docs gate (`uv run --python 3.12 --group docs sphinx-build …`, the P4 verify's last step, also used to check P3's docs) removed and recreated the worktree's `.venv` under CPython 3.12 while the project venv was 3.15. A pytest run sharing that venv then failed `test_main::test_version` (its `hs --version` subprocess reported 3.12), and every later `uv run` in the worktree stays on 3.12 until someone runs `uv sync --python <default>`.
+- **Skill cause:** the verify template pins the docs build to another interpreter in the same project environment, with no note that it replaces `.venv`; a phase that runs the docs gate and then its tests (or the next phase's) silently changes the interpreter under test.
+- **Recommended fix:** give the docs gate its own environment (`UV_PROJECT_ENVIRONMENT=.venv-docs uv run --python 3.12 --group docs …`), or say in the template that it must run last and be followed by `uv sync` before any other `uv run`.
+- **Confidence:** high · **Effort:** small

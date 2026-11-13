@@ -80,6 +80,7 @@ class Heartbeat:
     zone: Optional[str] = None
     bounds: Optional[Bounds] = None
     clients: Optional[int] = None
+    instance: Optional[str] = None
 
     @classmethod
     def new(cls: Type[Heartbeat],
@@ -91,7 +92,8 @@ class Heartbeat:
             roster: Optional[List[RosterEntry]] = None,
             zone: Optional[str] = None,
             bounds: Optional[Bounds] = None,
-            clients: Optional[int] = None) -> Heartbeat:
+            clients: Optional[int] = None,
+            instance: Optional[str] = None) -> Heartbeat:
         """Create new instance."""
         return cls(uuid=(uuid or INSTANCE),
                    host=(host or HOSTNAME),
@@ -101,7 +103,8 @@ class Heartbeat:
                    roster=roster,
                    zone=zone,
                    bounds=bounds,
-                   clients=clients)
+                   clients=clients,
+                   instance=instance)
 
     def pack(self: Heartbeat) -> bytes:
         """Serialize data (each optional field only when set)."""
@@ -119,6 +122,8 @@ class Heartbeat:
             data['bounds'] = self.bounds.to_dict()
         if self.clients is not None:
             data['clients'] = self.clients
+        if self.instance is not None:
+            data['instance'] = self.instance
         return serialize(data)
 
     @classmethod
@@ -137,7 +142,8 @@ class Heartbeat:
                        roster=None if roster is None else [RosterEntry.from_dict(entry) for entry in roster],
                        zone=_text_or_none(unpacked_data.get('zone')),
                        bounds=_bounds_or_none(unpacked_data.get('bounds')),
-                       clients=_count_or_none(unpacked_data.get('clients')))
+                       clients=_count_or_none(unpacked_data.get('clients')),
+                       instance=_text_or_none(unpacked_data.get('instance')))
 
 
 # An advertisement field that is not valid is read as absent, so a malformed advertisement makes

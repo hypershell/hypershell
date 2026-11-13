@@ -195,6 +195,9 @@ function _hs_config_set() {
 				autoscale.distribution)
 					COMPREPLY=($(compgen -W "spread fill" -- "${current}"))
 					;;
+				relay.min | relay.max | relay.init)
+					COMPREPLY=($(compgen -W "0 1 2 4 8 16" -- "${current}"))
+					;;
 				console.theme)
 					COMPREPLY=($(compgen -W "$(hs config get --list-console-themes 2>/dev/null)" -- "${current}"))
 					;;

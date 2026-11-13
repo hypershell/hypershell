@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/relay-topology
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -46,7 +46,7 @@ phases:
 - id: P3
   name: 'Relay: per-zone bounds, advertisement and fetch, SiteScaler reconcile, zone
     exposure, fallback'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -184,18 +184,19 @@ commit.
 |--------|------|----------|
 | `core/topology.py` | `Bounds(min, max, init)` | frozen; `to_dict`/`from_dict` (`{"min","max","init"}`), ints, `0 ≤ min ≤ init ≤ max`, `max ≥ 1` |
 | `core/topology.py` | `Entry(zone, target, seen)`, `Topology(version, entries)` | `version` = `"<server instance>:<n>"`; `entries` by relay identity |
-| `core/topology.py` | `SiteRegistry` | lock-guarded; `record(identity, *, site, zone, bounds, clients, host)` overwrites per identity, stamps `registered` (monotonic) on first sight, `rank` per site name on first sight (kept), `init_held` until `clients ≥ init`; `drop(identity)`; `snapshot() -> List[SiteRecord]` |
+| `core/topology.py` | `SiteRegistry` | lock-guarded; `record(identity, *, site, zone, bounds, clients, host, instance=None)` overwrites per identity, stamps `registered` (monotonic) on first sight, `rank` per site name on first sight (kept), `init_held` until `clients ≥ init`; `drop(identity)`; `snapshot() -> List[SiteRecord]`; `SiteRecord.instance` is the advertised relay instance key (None when absent) |
 | `core/topology.py` | `request_text(site, identities)`, `read_request(text) -> (site, identities)`, `reply_text(topology, identities)`, `read_topology(text) -> Optional[TopologyReply]` | JSON, `TOPOLOGY_PROTOCOL = 1` (its own number, apart from the work-request protocol); `{"protocol","version":null}` when unpublished; the reply names only identities that have an entry, by zone name; `TopologyReply(version, zones).assignment(zone)` gives `Entry(zone, 0, 0)` for a zone with no entry (target 0); `read_request`/`read_topology` raise `ValueError` on anything malformed |
-| `core/heartbeat.py` | `Heartbeat.zone/bounds/clients` | optional, packed only when set, read with `.get`; a malformed value (zone not text, invalid bounds, a count that is not a whole number ≥ 0) decodes as None, so the identity is a non-participant rather than a crash in the heart monitor |
+| `core/heartbeat.py` | `Heartbeat.zone/bounds/clients/instance` | optional, packed only when set, read with `.get`; a malformed value (zone or instance not text, invalid bounds, a count that is not a whole number ≥ 0) decodes as None, so the identity is a non-participant rather than a crash in the heart monitor (an instance that is not text only drops the relay-wide rule) |
 | `core/dispatch.py` | `Dispatcher.topology(text) -> str`, `Dispatcher.publish(topology)` | under the dispatcher lock; `DISPATCH_EXPOSED = ('request', 'takes_submissions', 'topology')` |
 | `cluster/demand.py` | `scheduler_group(reported, *, attempts, eager) -> int` | additive; equals `AutoScaler.current_group` (pinned by a test) |
 | `cluster/topology.py` | `Distribution`, `parse_distribution(value)`, `parse_sites(value)` | `spread`/`fill`; list or comma string |
-| `cluster/topology.py` | `SiteZone`, `SiteView`, `Duplicate`, `site_views(records) -> (views, duplicates)`, `plan_sites(loads, knobs, sites, *, distribution, order)`, `entries(targets, records)` | pure (PLAN §2.4); a holder is chosen per site **and zone** (the newest identity advertising that zone at that site), so a `Duplicate` names one zone's holder and older record |
-| `cluster/topology.py` | `TopologyPublisher`, `TopologyPublisherThread`, `AutoScalingServer`, `serve_with_sites(**options)` | FSM START→CHECK (first check at once)→PUBLISH→WAIT→CHECK, FINAL/HALT; publishes only on change; never launches; `AutoScalingServer(address, auth, bundlesize, poll, max_retries, eager, redirect_failures, evict_after, tls, policy, factor, period, distribution=None, sites=None)` reads `[autoscale] distribution`/`sites` when not given (`ConfigurationError` naming the source); `ServerApp.run` calls `serve_with_sites` lazily |
+| `cluster/topology.py` | `SiteZone`, `SiteView`, `Duplicate(site, holder, older, relay=False)`, `site_views(records) -> (views, duplicates)`, `plan_sites(loads, knobs, sites, *, distribution, order)`, `entries(targets, records)` | pure (PLAN §2.4); duplicates are held **relay-wide** (amended in P3, 2026-11-13): per site, the instance whose first identity registered last holds every zone it serves, every identity of an older instance gets `Entry(zone, 0, clients)` (a zone only it serves leaves the site's view), one `Duplicate(relay=True)` per older instance names the first identity of each; records with no instance key keep P1's per-zone rule among themselves and the holding instance's identity of that zone |
+| `cluster/topology.py` | `TopologyPublisher`, `TopologyPublisherThread`, `AutoScalingServer`, `serve_with_sites(**options)` | FSM START→CHECK (first check at once)→PUBLISH→WAIT→CHECK, FINAL/HALT; publishes only on change; never launches; `AutoScalingServer` publishes an empty `<instance>:0` topology at construction, so a relay never reads null from it (P3); the duplicate warning is once per pair of relays (relay-wide) or of identities (per zone); `AutoScalingServer(address, auth, bundlesize, poll, max_retries, eager, redirect_failures, evict_after, tls, policy, factor, period, distribution=None, sites=None)` reads `[autoscale] distribution`/`sites` when not given (`ConfigurationError` naming the source); `ServerApp.run` calls `serve_with_sites` lazily |
 | `core/topology.py` | `error_text(message)` | the reply to an unreadable topology request (`{"protocol","error":"request","message"}`); `read_topology` raises `ValueError` on it |
 | `server.py` | `HeartMonitor(…, sites)`, `record_site(hb)`, `drop_site(uuid)`; `ServerThread(…, sites)` | a site beat lacking zone, bounds or clients is logged once at INFO and not recorded |
-| `relay/__init__.py` | `zone_bounds(settings, relay_wide) -> (advertised: Bounds, fallback: Bounds)` | PLAN §2.2 table |
-| `relay/site.py` | `TopologyView`, `SiteScaler(AutoScaler)` | `view.assignment(zone) -> Optional[(version, Entry)]`; `SiteScaler` launches `max(0, target − max(seen, launched))` once per version, else the parent's fixed fleet |
+| `relay/__init__.py` | `zone_bounds(settings, relay_wide) -> (advertised: Bounds, fallback: Bounds)`, `BOUND_OPTIONS`; `RelayThread(…, min_size, max_size, init_size)` (relay-wide bounds, None = unset), `.view`, `.advertised`, `.zone_launched(name)`; `RelayApp.relay_bounds`, `.check_bounds()` | PLAN §2.2 table, with the fallback `min` and `init` held within `max`; ValueError → `ArgumentError` naming the zone |
+| `relay/site.py` | `TopologyView(reply=None)` (`.reply`, `.set`), `SiteScaler(AutoScaler)`, `site_scaler(machine, launch, view)`, `launched_now(machine)`; `site_cluster`/`zone_fleet(…, init_size, min_size, max_size, view)` | `view.assignment(zone) -> Optional[(version, Entry)]`; `SiteScaler` launches `max(0, target − max(seen, launched))` once per version, else the parent's fixed fleet; it overrides `init`, `check_zones` and `wait` (a version not yet applied is checked at once, not at the period's end); `launched_now` counts launched processes still running, read by the heartbeat |
+| `relay/upstream.py` | `UpstreamHeartbeat(…, zones, bounds, launched, instance, view)`, `.fetch()` | every beat of an identity in `zones` carries its zone, bounds, `launched(zone)` and `instance`; each running beat is followed by `fetch()`: a missing method or `version: null` clears the view (INFO once per change), `LinkDown` or any other failure keeps it |
 
 ---
 
@@ -307,13 +308,45 @@ mode is unchanged.
   `tests/test_dispatch_version.py`, `docs/`, `share/`, `AGENTS.md`, `.agents/factory/invariants.md`.
 
 ## Phase P3 — Relay: bounds, advertisement and fetch, `SiteScaler`, zone exposure, fallback
+
+**Amendments (2026-11-13, at build):**
+
+- **Foreman ruling, 2026-11-13: duplicate sites are held relay-wide, not per zone.** P1 held a
+  duplicated site per zone, which let an older (possibly gone) relay keep a zone the newer one does
+  not serve, absorbing that zone's demand until eviction. Each relay process now advertises one
+  instance key (its first upstream identity: stable for the process, new each time a relay starts)
+  as one more optional key, `instance`, on every beat of every zone identity. The server groups
+  identities by instance; per site, the instance whose first identity registered last holds every
+  zone it serves, and every identity of every other instance at that site gets target 0, with one
+  warning naming both relays. A zone only an older instance serves leaves the site, so it is planned
+  over the other sites that serve it. Beats without the key fall back to P1's per-zone rule. This
+  extends deviation row 2 by the one key (PLAN §3). Built in `core/heartbeat.py`,
+  `core/topology.py`, `server.py` and `cluster/topology.py`; table-tested in
+  `test_topology_plan.py` (`INSTANCE_ROWS`) and `test_topology_server.py`.
+- **Deviation 2's test amendment was not needed.** The two exact-key tests in `test_relay_roster.py`
+  build beats with no advertisement (`relay_beat`, and an `UpstreamHeartbeat` given no zones), so
+  their key sets are unchanged and the tests are untouched. The advertisement on the relay's own
+  beats is asserted in `test_relay_topology.py`.
+- **An autoscaling server publishes before it listens.** `AutoScalingServer` publishes an empty
+  `<instance>:0` topology at construction: a relay that connected before the publisher's first
+  check read `version: null` and started its fallback fleet (seen in the first integration run).
+- **`SiteScaler` also overrides `wait`,** so a version read mid-period is applied at once; the relay
+  site period defaults to `[autoscale] period` (60 s).
+- **The advertised count is `launched_now`** (launched processes still running, by `poll`), not
+  `machine.launched()`, which drops exited clients only at each period's clean.
+- **The integration test runs the server and the relay as processes** (`hs server --autoscaling`,
+  `hs relay`), as every relay test does (AGENTS.md: nothing in a relay dials its relay-local server
+  in-process, and tests run the upstream server and each relay as separate processes).
+- **The probe tolerates a failing call.** Any failure of the topology read leaves the view as it
+  was (a warning), so the topology can never fail a relay. `test_relay_launch.py`'s `HeldLink`
+  raises on every call; its start-up tests pass unchanged, the probe logging that warning.
 **Satisfies:** R1, R2, R4, R5, R6, R7 (relay half) · **Depends on:** P2
 **Goal:** a relay advertises each zone's bounds and launched count on every beat. It fetches the
 topology at heartbeat cadence and reconciles its own entries through its own launchers, which see
 `{zone}`, `HYPERSHELL_ZONE` and `--zone`. It never terminates a client. Against a server that publishes
 nothing, it runs today's fleets.
 
-- [ ] `relay/__init__.py`:
+- [x] `relay/__init__.py`:
   - `ZONE_OPTIONS` gains `min`, `max` and `init`;
   - `[relay] min`/`max`/`init` defaults go in `core/config.py` (`PARAM_UNSET`);
   - `zone_bounds` per the PLAN §2.2 table;
@@ -322,7 +355,7 @@ nothing, it runs today's fleets.
   - `RelayThread` builds fleets with the fallback bounds and the heartbeat with the zone map,
     advertised bounds and `launched`;
   - probe the topology once after `wait_link()`, before `cluster.start()`.
-- [ ] `relay/site.py`:
+- [x] `relay/site.py`:
   - `site_cluster`/`zone_fleet` take `init`/`min`/`max` (`size` is kept as shorthand);
   - `zone_launch(..., expose_zone=True)`;
   - `site_cluster` sets `cluster.launch = zone_launch(cluster, zone, …)`;
@@ -330,10 +363,10 @@ nothing, it runs today's fleets.
   - `SiteScaler(AutoScaler)`, assigned as `cluster.autoscaler.machine` and each fleet's `machine`
     (PLAN §2.5), with the delta logged: `Topology <version> (zone: Z, target: T, seen: S, launched: L)
     - launching N`.
-- [ ] `relay/upstream.py`: `UpstreamHeartbeat` puts `zone`/`bounds`/`clients` on each identity's beat
+- [x] `relay/upstream.py`: `UpstreamHeartbeat` puts `zone`/`bounds`/`clients` on each identity's beat
       and fetches after each successful submit through the link (`hasattr` guard). A missing method or
       `version: null` sets the view to None, logged once at INFO. `LinkDown` keeps the view.
-- [ ] `tests/test_relay_topology.py`:
+- [x] `tests/test_relay_topology.py`:
   - `@mark.unit`: the `zone_bounds` table, including `size`-only = today's fleet and `min = 0`
     fallback floor 1, plus refusals.
   - `@mark.unit`, with a fake actuator: the `SiteScaler` delta table (target vs seen vs launched; the
@@ -345,9 +378,9 @@ nothing, it runs today's fleets.
   - `@mark.integration`: an in-process `hs server --autoscaling` `AutoScalingServer` with one relay
     serving two zones and a recording launcher. The relay's identities appear in the registry; work
     in one zone launches only there; nothing is terminated.
-- [ ] Declared amendments only (deviations 2 and 3): the beat key sets in `test_relay_roster.py`, and
+- [x] Declared amendments only (deviations 2 and 3): the beat key sets in `test_relay_roster.py`, and
       `ZONE_ENV` in `test_relay_launch.py:334`/`:572`. Every other relay test is unchanged.
-- [ ] Docs and assets, same commit:
+- [x] Docs and assets, same commit:
   - `docs/_include/relay_help.rst`, `relay_desc.rst`, `APP_HELP`;
   - `docs/cli/relay.rst`: a "Topology" section with `.. versionadded:: 2.9.0`. It covers the bounds,
     their defaults, `size` as shorthand, `{zone}`/`HYPERSHELL_ZONE` on relay launchers, the fallback,

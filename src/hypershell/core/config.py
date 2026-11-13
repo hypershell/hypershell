@@ -204,6 +204,9 @@ default = Namespace({
         'zone': PARAM_UNSET,      # Zone(s) served: a name, a list, or one [relay.zone.<name>] table each
         'site': PARAM_UNSET,      # Site name the relay gives upstream (default: the relay's host name)
         'size': 1,                # Number of site clients the relay keeps launched (at least 1)
+        'min': PARAM_UNSET,       # Fewest clients per zone a topology assigns (default: 0)
+        'max': PARAM_UNSET,       # Most clients per zone a topology assigns (default: size)
+        'init': PARAM_UNSET,      # Clients per zone a topology assigns at start (default: min)
         'launcher': '',           # Command prefix to launch each site client (empty means 'hs client ...')
         'launcher_args': '',      # Extra arguments for the launcher
         'num_threads': 1,         # Executor threads per site client

@@ -273,6 +273,7 @@ function _hs_config_set() {
                 server.auth)       _hs_authkey ;;
                 autoscale.policy)  _values 'autoscale policy' fixed dynamic ;;
                 autoscale.distribution) _values 'autoscale distribution' spread fill ;;
+                relay.min|relay.max|relay.init) _values 'site clients per zone' 0 1 2 4 8 16 ;;
                 console.theme)     _hs_themes ;;
                 *)
                     local current_value

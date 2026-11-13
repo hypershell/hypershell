@@ -815,7 +815,7 @@ class HeartMonitor(StateMachine):
             return
         known = hb.uuid in self.sites
         record = self.sites.record(hb.uuid, site=hb.site, zone=hb.zone, bounds=hb.bounds,
-                                   clients=hb.clients, host=hb.host)
+                                   clients=hb.clients, host=hb.host, instance=hb.instance)
         if not known:
             log.info(f'Relay site registered (site: {record.site}, zone: {record.zone}, '
                      f'min: {record.bounds.min}, init: {record.bounds.init}, max: {record.bounds.max}, '

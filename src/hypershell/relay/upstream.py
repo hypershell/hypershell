@@ -14,7 +14,10 @@ returner moves completed site rows into the relay's outbox and hands them back u
 returns its results, each matched upstream against the assignment it answers; a result is marked
 returned only once its put has returned. The heartbeat keeps each identity registered upstream, and
 carries the relay's site and its roster (the site clients connected to the relay-local server), so the
-upstream server lists the site clients, attributed to the site, as they come and go.
+upstream server lists the site clients, attributed to the site, as they come and go. Each zone
+identity's beat also advertises its zone, that zone's client bounds, the clients launched in it and
+the relay's instance key; after each beat the heartbeat reads the site topology the upstream server
+publishes, if any, for the relay's fleets to follow.
 
 Example:
     >>> from hypershell.relay.upstream import upstream_identity
@@ -24,7 +27,7 @@ Example:
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Final
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Final
 
 # Standard libs
 import json
@@ -44,6 +47,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from hypershell.core.config import config, PARAM_UNSET, resolve_auth
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
+from hypershell.core.topology import Bounds, request_text as topology_request, read_topology
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.queue import QueueConfig, QueueVersionError, PROTOCOL, DEFAULT_REMOTE_TIMEOUT
 from hypershell.core.signal import check_signal, SIGUSR1, SIGUSR2
@@ -702,6 +706,12 @@ class UpstreamHeartbeat(StateMachine):
     While the upstream link is down the heartbeat waits for it (WAIT_LINK) and beats as soon as it is
     back: that first beat registers the identity again if the upstream server evicted it, and passes
     the link's `beat` stage, after which confirmations, results and requests follow.
+
+    With `zones` (each identity's zone name), every beat of an identity in it also advertises that
+    zone's `bounds`, its `launched` count and the relay's `instance` key, on every beat, so the
+    advertisement reaches the upstream server on the first beat of every connection. With `view`,
+    each running beat is followed by a read of the site topology the upstream server publishes for
+    these identities (see `fetch`).
     """
 
     queue: Any
@@ -714,6 +724,12 @@ class UpstreamHeartbeat(StateMachine):
     site: Optional[str]
     roster: Optional[Callable[[], List[RosterEntry]]]
     sent_roster: Optional[List[RosterEntry]]
+    zones: Dict[str, str]
+    bounds: Dict[str, Bounds]
+    launched: Optional[Callable[[str], int]]
+    instance: Optional[str]
+    view: Any
+    published: Optional[bool]
 
     state = HeartbeatState.START
     states = HeartbeatState
@@ -721,7 +737,12 @@ class UpstreamHeartbeat(StateMachine):
     def __init__(self: UpstreamHeartbeat, queue: Any, identity: str,
                  heartrate: float = DEFAULT_UPSTREAM_HEARTRATE, site: Optional[str] = None,
                  roster: Optional[Callable[[], List[RosterEntry]]] = None,
-                 identities: Optional[Sequence[str]] = None) -> None:
+                 identities: Optional[Sequence[str]] = None,
+                 zones: Optional[Mapping[str, str]] = None,
+                 bounds: Optional[Mapping[str, Bounds]] = None,
+                 launched: Optional[Callable[[str], int]] = None,
+                 instance: Optional[str] = None,
+                 view: Any = None) -> None:
         """Initialize with the upstream link (or a connected client) and the zone identity (or every one, holder first)."""
         self.queue = queue
         self.link = as_link(queue)
@@ -734,6 +755,12 @@ class UpstreamHeartbeat(StateMachine):
         self.previous = time.monotonic()
         self.client_state = ClientState.RUNNING
         self.wake = threading.Event()
+        self.zones = dict(zones or {})
+        self.bounds = dict(bounds or {})
+        self.launched = launched
+        self.instance = instance
+        self.view = view
+        self.published = None
 
     @functools.cached_property
     def actions(self: UpstreamHeartbeat) -> Dict[HeartbeatState, Callable[[], HeartbeatState]]:
@@ -755,7 +782,8 @@ class UpstreamHeartbeat(StateMachine):
         state = self.client_state  # atomic
         roster = self.read_roster() if state is ClientState.RUNNING else None
         beats = [Heartbeat.new(uuid=identity, state=state, site=self.site,
-                               roster=roster if identity == self.identity else None).pack()
+                               roster=roster if identity == self.identity else None,
+                               **self.advertisement(identity)).pack()
                  for identity in self.identities]
         epoch = self.link.epoch
         try:
@@ -773,6 +801,7 @@ class UpstreamHeartbeat(StateMachine):
             self.sent_roster = roster
         if state is ClientState.RUNNING:
             log.trace(f'Upstream heartbeat - running ({", ".join(self.identities)})')
+            self.fetch()
             return HeartbeatState.WAIT
         log.debug(f'Upstream heartbeat - final ({", ".join(self.identities)})')
         return HeartbeatState.FINAL
@@ -805,6 +834,63 @@ class UpstreamHeartbeat(StateMachine):
             log.debug(f'Roster not read for upstream heartbeat ({error.__class__.__name__}: {error})')
             return None
 
+    def advertisement(self: UpstreamHeartbeat, identity: str) -> Dict[str, Any]:
+        """The fields `identity` advertises on its beat: its zone, bounds, launched count and the relay's instance key."""
+        zone = self.zones.get(identity)
+        if zone is None:
+            return {}
+        try:
+            clients = None if self.launched is None else self.launched(zone)
+        except Exception as error:  # A count that cannot be read leaves this beat's advertisement out.
+            log.debug(f'Launched clients not counted for upstream heartbeat ({error.__class__.__name__}: {error})')
+            clients = None
+        return {'zone': zone, 'bounds': self.bounds.get(zone), 'clients': clients, 'instance': self.instance}
+
+    def fetch(self: UpstreamHeartbeat) -> None:
+        """Read the site topology published upstream for these identities into the view.
+
+        An upstream server that publishes none (one of an earlier release, without the method, or
+        one not autoscaling with relay sites) clears the view, so the fleets keep their local sizes;
+        this is logged once each time it starts. A read that fails, on the link or otherwise, leaves
+        the view as it was.
+        """
+        if self.view is None:
+            return
+        text = topology_request(self.site or '', self.identities)
+
+        def call(client: Any) -> Optional[str]:
+            method = getattr(getattr(client, 'dispatcher', None), 'topology', None)
+            return None if method is None else method(text)
+
+        try:
+            reply = self.link.call('heartbeat', call)
+        except LinkDown:
+            log.debug('Topology not read (upstream link down) - keeping the last one')
+            return
+        except Exception as error:
+            log.warning(f'Topology not read ({error.__class__.__name__}: {error}) - keeping the last one')
+            return
+        try:
+            topology = None if reply is None else read_topology(reply)
+        except ValueError as error:
+            log.warning(f'Topology not read ({error}) - keeping the last one')
+            return
+        if topology is None:
+            if self.published is not False:
+                reason = 'an earlier release' if reply is None else 'not autoscaling with relay sites'
+                log.info(f'Upstream server publishes no topology ({reason}) - site clients kept by local size')
+            self.published = False
+            self.view.set(None)
+            return
+        previous = self.view.reply
+        if previous is None or previous.version != topology.version:
+            zones = ', '.join(f'{zone}: {entry.target}' for zone, entry in sorted(topology.zones.items()))
+            log.debug(f'Topology {topology.version} read ({zones or "no entries"})')
+        if self.published is not True:
+            log.info('Upstream server publishes a topology - site clients follow it')
+        self.published = True
+        self.view.set(topology)
+
     def finalize(self: UpstreamHeartbeat) -> HeartbeatState:
         """Stop heartbeats."""
         log.debug(f'Done (upstream heartbeat: {self.identity})')
@@ -827,11 +913,17 @@ class UpstreamHeartbeatThread(Thread):
     def __init__(self: UpstreamHeartbeatThread, queue: Any, identity: str,
                  heartrate: float = DEFAULT_UPSTREAM_HEARTRATE, site: Optional[str] = None,
                  roster: Optional[Callable[[], List[RosterEntry]]] = None,
-                 identities: Optional[Sequence[str]] = None) -> None:
+                 identities: Optional[Sequence[str]] = None,
+                 zones: Optional[Mapping[str, str]] = None,
+                 bounds: Optional[Mapping[str, Bounds]] = None,
+                 launched: Optional[Callable[[str], int]] = None,
+                 instance: Optional[str] = None,
+                 view: Any = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-heartbeat')
         self.machine = UpstreamHeartbeat(queue=queue, identity=identity, heartrate=heartrate,
-                                         site=site, roster=roster, identities=identities)
+                                         site=site, roster=roster, identities=identities, zones=zones,
+                                         bounds=bounds, launched=launched, instance=instance, view=view)
 
     def run_with_exceptions(self: UpstreamHeartbeatThread) -> None:
         """Run machine."""

@@ -119,6 +119,8 @@ class SiteRecord:
 
     `registered` orders identities by first sight on this server, `rank` orders site names by first
     sight, and `init_held` stays true until the identity has reported `bounds.init` clients.
+    `instance` is the key every identity of one relay process advertises (None from a relay that
+    advertises none), so the identities of one relay can be told from another's at the same site.
     """
 
     identity: str
@@ -130,6 +132,7 @@ class SiteRecord:
     registered: int
     rank: int
     init_held: bool
+    instance: Optional[str] = None
 
 
 class SiteRegistry:
@@ -149,7 +152,7 @@ class SiteRegistry:
         self._registered = count()
 
     def record(self: SiteRegistry, identity: str, *, site: str, zone: str, bounds: Bounds,
-               clients: int, host: str) -> SiteRecord:
+               clients: int, host: str, instance: Optional[str] = None) -> SiteRecord:
         """Record the advertisement of `identity`, overwriting its previous one, and return the record."""
         with self._lock:
             rank = self._ranks.setdefault(site, len(self._ranks))
@@ -162,7 +165,7 @@ class SiteRegistry:
                 registered = previous.registered
             record = SiteRecord(identity=identity, site=site, zone=zone, bounds=bounds, clients=clients,
                                 host=host, registered=registered, rank=rank,
-                                init_held=held and clients < bounds.init)
+                                init_held=held and clients < bounds.init, instance=instance)
             self._records[identity] = record
             return record
 

@@ -29,14 +29,17 @@ Options
     Number of *clients* the relay keeps launched at its site (default: 1).
 
     A *client* that exits is launched again. The size must be at least 1: with no *client* at the
-    site the relay would never ask upstream for work. See also ``relay.size``.
+    site the relay would never ask upstream for work. Against an upstream *server* autoscaling with
+    relay sites, the size is instead the default ``max`` each zone advertises (see ``relay.max``),
+    and *clients* are launched as the published topology asks. See also ``relay.size``.
 
 ``--launcher`` *CMD*
     Command prefix used to launch each *client* at the site (default: none).
 
     With none, *clients* run directly on the relay's host. Otherwise each is launched as
-    ``CMD [ARGS...] hyper-shell client ...`` (e.g., ``srun``). The *clients* connect back to the
-    relay by its host name. The launcher must pass the environment through: each *client*
+    ``CMD [ARGS...] hyper-shell client ...`` (e.g., ``srun``). A ``{zone}`` in the launcher or
+    its arguments is replaced by the zone the *client* serves, and the launched process has it in
+    ``HYPERSHELL_ZONE``. The *clients* connect back to the relay by its host name. The launcher must pass the environment through: each *client*
     receives the site key there (``HYPERSHELL_SERVER_AUTH``), never on its command line.
     See also ``relay.launcher``.
 

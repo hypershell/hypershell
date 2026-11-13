@@ -652,8 +652,9 @@
         Zone or zones the relay serves (default: none, the default zone).
 
         One zone name, a list of names, or one table per zone, ``[relay.zone.NAME]``, which may
-        give that zone's own ``launcher``, ``launcher_args`` and ``size`` (each in place of the
-        relay's, for that zone's *clients* only); an empty table serves the zone with the relay's.
+        give that zone's own ``launcher``, ``launcher_args``, ``size``, ``min``, ``max`` and
+        ``init`` (each in place of the relay's, for that zone's *clients* only); an empty table
+        serves the zone with the relay's.
         Upstream the relay is one *client* per zone, each with its own identity; at the site it
         keeps one fleet of *clients* per zone, all served by the relay-local *server*. The first
         zone's identity lists the site's *clients* upstream.
@@ -664,6 +665,7 @@
 
             [relay.zone.gpu]
             size = 2
+            max = 4
             launcher = "srun"
             launcher_args = "--gres=gpu:1"
 
@@ -677,7 +679,41 @@
     ``.size``
         Number of *clients* the relay keeps launched at its site (default: `1`, at least `1`).
 
+        Against an upstream *server* autoscaling with relay sites it is the default ``.max``.
         See also ``-N``, ``--size`` command-line option.
+
+    ``.min``
+        Fewest *clients* of each zone an upstream topology assigns this site (default: `0`).
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+
+        Held even while the zone's tasks wait in a later *task group*. A zone's own
+        ``[relay.zone.NAME]`` table may set its own. Without a topology, a zone's fleet keeps at
+        least this many *clients* launched (at least `1`, by default the size). Each zone
+        advertises its bounds upstream; see :ref:`Topology <cli_relay_topology>`.
+
+    ``.max``
+        Most *clients* of each zone an upstream topology assigns this site (default: the size).
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+
+        Lowering it never ends a running *client*: the zone launches no more, and its *clients*
+        exit when idle. A zone's own ``[relay.zone.NAME]`` table may set its own.
+
+    ``.init``
+        *Clients* of each zone an upstream topology assigns this site when the relay starts
+        (default: ``.min``).
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+
+        Without a topology, the *clients* each zone's fleet starts with (by default the size).
+        Bounds must satisfy ``min <= init <= max``, with ``max`` at least `1`.
 
     ``.launcher``
         Command prefix used to launch each *client* at the site (default: none).

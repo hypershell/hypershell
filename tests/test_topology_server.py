@@ -249,6 +249,41 @@ def test_publisher_warns_once_per_duplicate(task_db: Engine, caplog) -> None:
 
 
 @mark.integration
+def test_publisher_warns_once_per_duplicated_relay(task_db: Engine, caplog) -> None:
+    """Two relays advertising one site with an instance key each: one warning names both relays, and
+    every identity of the older relay is assigned zero, including a zone the newer relay does not serve."""
+    registry = SiteRegistry()
+    registry.record('a1-cpu', site='A', zone='cpu', bounds=BOUNDS, clients=2, host='h1', instance='a1-cpu')
+    registry.record('a1-mem', site='A', zone='highmem', bounds=BOUNDS, clients=1, host='h1', instance='a1-cpu')
+    registry.record('a2-cpu', site='A', zone='cpu', bounds=BOUNDS, clients=0, host='h2', instance='a2-cpu')
+    dispatcher = Dispatcher()
+    machine = publisher(registry, dispatcher)
+    with caplog.at_level('WARNING', logger='hypershell.cluster'):
+        run_check(machine)
+        run_check(machine)
+    warnings = [r.getMessage() for r in caplog.records if 'advertised by two relays' in r.getMessage()]
+    assert len(warnings) == 1
+    assert 'older: a1-cpu on h1' in warnings[0] and 'newer: a2-cpu on h2' in warnings[0]
+    assert 'zone:' not in warnings[0]
+    published = dispatcher.published.entries
+    assert published['a1-cpu'] == Entry('cpu', 0, 2) and published['a1-mem'] == Entry('highmem', 0, 1)
+    assert published['a2-cpu'].zone == 'cpu'
+
+
+@mark.integration
+def test_heart_monitor_records_the_relay_instance(queues, task_db) -> None:
+    """A beat's instance key is recorded with its identity; a beat without one records none."""
+    registry = SiteRegistry()
+    machine = monitor(queues, registry)
+    keyed, plain = str(uuid()), str(uuid())
+    deliver(machine, Heartbeat.new(uuid=keyed, host='relay-host', site='A', zone='cpu', bounds=BOUNDS,
+                                   clients=0, instance='relay-1'))
+    deliver(machine, site_beat(plain))
+    instances = {record.identity: record.instance for record in registry.snapshot()}
+    assert instances == {keyed: 'relay-1', plain: None}
+
+
+@mark.integration
 def test_publisher_with_no_sites_publishes_an_empty_topology(task_db: Engine) -> None:
     """With no live relay the topology is published empty, so every relay that asks reads zero."""
     add_tasks(2, group=0)
@@ -286,6 +321,16 @@ def test_autoscaling_server_wires_one_registry() -> None:
     assert (machine.distribution, machine.order) == (Distribution.FILL, ['B', 'A'])
     with pytest.raises(ValueError, match='site distribution'):
         AutoScalingServer(address=('127.0.0.1', 0), auth=AUTH, distribution='even')
+
+
+@mark.unit
+def test_autoscaling_server_publishes_before_it_listens() -> None:
+    """A relay connecting before the first check reads an empty topology, never none, so it launches nothing."""
+    server = AutoScalingServer(address=('127.0.0.1', 0), auth=AUTH, policy='dynamic', period=5)
+    dispatcher = server.server.queue.dispatcher
+    assert dispatcher.published.entries == {} and dispatcher.published.version.endswith(':0')
+    reply = read_topology(dispatcher.topology(request_text('A', ['a-cpu'])))
+    assert reply.assignment('cpu') == Entry('cpu', 0, 0)
 
 
 @mark.integration

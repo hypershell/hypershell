@@ -239,10 +239,11 @@ def test_parse_distribution_and_sites() -> None:
 # --- Site views and entries ------------------------------------------------------------------------
 
 def record(identity: str, site_name: str, zone: str, clients: int, registered: int, rank: int,
-           bounds: Bounds = Bounds(min=0, max=3, init=0), init_held: bool = False, host: str = 'node') -> SiteRecord:
+           bounds: Bounds = Bounds(min=0, max=3, init=0), init_held: bool = False, host: str = 'node',
+           instance: Optional[str] = None) -> SiteRecord:
     """One recorded advertisement."""
     return SiteRecord(identity=identity, site=site_name, zone=zone, bounds=bounds, clients=clients, host=host,
-                      registered=registered, rank=rank, init_held=init_held)
+                      registered=registered, rank=rank, init_held=init_held, instance=instance)
 
 
 @mark.unit
@@ -280,6 +281,98 @@ def test_a_duplicated_site_is_held_by_the_newest_registration() -> None:
     older = record('a1-cpu', 'A', 'cpu', 0, registered=0, rank=0, host='h1')
     targets = plan_sites(loads(cpu=(9, 5.0)), knobs(), site_views([older, newer])[0])
     assert entries(targets, [older, newer]) == {'a2-cpu': Entry('cpu', 1, 0), 'a1-cpu': Entry('cpu', 0, 0)}
+
+
+# The relay-wide rule: (case, records, expected views by site -> zone -> (holder bounds max, running),
+# expected relay duplicates as (older instance, newer instance), expected entries by identity).
+CPU_1 = Bounds(min=0, max=1, init=0)
+INSTANCE_ROWS = [
+    # The newer relay holds every zone it serves; the older relay's identities are all assigned none.
+    ('newest-holds-the-site',
+     [record('a1-cpu', 'A', 'cpu', 2, registered=0, rank=0, instance='i1', host='h1'),
+      record('a1-gpu', 'A', 'gpu', 1, registered=1, rank=0, instance='i1', host='h1'),
+      record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, instance='i2', host='h2', bounds=CPU_1),
+      record('a2-gpu', 'A', 'gpu', 0, registered=6, rank=0, instance='i2', host='h2')],
+     {'A': {'cpu': (1, 2), 'gpu': (3, 1)}},
+     [('i1', 'i2')],
+     {'a1-cpu': Entry('cpu', 0, 2), 'a1-gpu': Entry('gpu', 0, 1)}),
+    # A zone only the older relay serves leaves the site: it is not held there by the older relay.
+    ('older-only-zone-leaves-the-site',
+     [record('a1-cpu', 'A', 'cpu', 1, registered=0, rank=0, instance='i1'),
+      record('a1-mem', 'A', 'highmem', 2, registered=1, rank=0, instance='i1'),
+      record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, instance='i2'),
+      record('b-mem', 'B', 'highmem', 0, registered=7, rank=1, instance='j1')],
+     {'A': {'cpu': (3, 1)}, 'B': {'highmem': (3, 0)}},
+     [('i1', 'i2')],
+     {'a1-cpu': Entry('cpu', 0, 1), 'a1-mem': Entry('highmem', 0, 2)}),
+    # The newer relay is the one whose first identity registered last, whatever re-registered later.
+    ('newest-by-first-registration',
+     [record('a1-cpu', 'A', 'cpu', 0, registered=0, rank=0, instance='i1'),
+      record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, instance='i2'),
+      record('a1-gpu', 'A', 'gpu', 0, registered=9, rank=0, instance='i1')],
+     {'A': {'cpu': (3, 0)}},
+     [('i1', 'i2')],
+     {'a1-cpu': Entry('cpu', 0, 0), 'a1-gpu': Entry('gpu', 0, 0)}),
+    # One relay's identities are never duplicates of each other.
+    ('one-relay-is-no-duplicate',
+     [record('a-cpu', 'A', 'cpu', 1, registered=0, rank=0, instance='i1'),
+      record('a-gpu', 'A', 'gpu', 0, registered=1, rank=0, instance='i1')],
+     {'A': {'cpu': (3, 1), 'gpu': (3, 0)}},
+     [],
+     {}),
+]
+
+
+@mark.unit
+@mark.parametrize('case, records, views, relays, zeroed', INSTANCE_ROWS, ids=[row[0] for row in INSTANCE_ROWS])
+def test_a_duplicated_site_is_held_by_the_newest_relay(case, records, views, relays, zeroed) -> None:
+    """Identities that advertise an instance key are held relay-wide: per site, the most recently
+    registered relay holds every zone it serves and every other relay there is assigned none."""
+    found, duplicates = site_views(records)
+    names = {ref.id: name for name, ref in REFS.items()}
+    assert {view.name: {names[zone]: (sz.bounds.max, sz.running) for zone, sz in view.zones.items()}
+            for view in found} == views
+    assert [(dup.older.instance, dup.holder.instance) for dup in duplicates] == relays
+    assert all(dup.relay for dup in duplicates)
+    targets = plan_sites(loads(cpu=(9, 5.0), gpu=(9, 5.0), highmem=(9, 5.0)), knobs(), found)
+    planned = entries(targets, records)
+    assert set(planned) == {record.identity for record in records}
+    for identity, entry in zeroed.items():
+        assert planned[identity] == entry
+    for view in found:
+        for zone in view.zones:
+            holder, = [record for record in records if record.site == view.name and REFS[record.zone].id == zone
+                       and record.identity not in zeroed]
+            others = sum(record.clients for record in records if record.site == view.name
+                         and REFS[record.zone].id == zone and record is not holder)
+            assert planned[holder.identity] == Entry(holder.zone, max(0, targets[view.name][zone] - others),
+                                                     holder.clients)
+
+
+@mark.unit
+def test_a_zone_the_older_relay_alone_serves_goes_to_other_sites() -> None:
+    """The older relay's zone is planned over the other sites that serve it, never back to the older relay."""
+    records = [record('a1-cpu', 'A', 'cpu', 0, registered=0, rank=0, instance='i1'),
+               record('a1-mem', 'A', 'highmem', 0, registered=1, rank=0, instance='i1'),
+               record('a2-cpu', 'A', 'cpu', 0, registered=5, rank=0, instance='i2'),
+               record('b-mem', 'B', 'highmem', 0, registered=7, rank=1, instance='j1')]
+    targets = plan_sites(loads(highmem=(9, 5.0)), knobs(), site_views(records)[0])
+    assert by_name(targets) == {'A': {'cpu': 0}, 'B': {'highmem': 1}}
+    planned = entries(targets, records)
+    assert planned['a1-mem'] == Entry('highmem', 0, 0) and planned['b-mem'] == Entry('highmem', 1, 0)
+
+
+@mark.unit
+def test_records_without_an_instance_keep_the_per_zone_rule() -> None:
+    """A record with no instance key competes per zone with the holding relay's identity in that zone."""
+    records = [record('a1-cpu', 'A', 'cpu', 0, registered=0, rank=0, instance='i1'),
+               record('a1-gpu', 'A', 'gpu', 0, registered=1, rank=0, instance='i1'),
+               record('old-cpu', 'A', 'cpu', 2, registered=4, rank=0)]
+    views, duplicates = site_views(records)
+    assert duplicates == [Duplicate('A', holder=records[2], older=records[0])]
+    assert views[0].zones[CPU.id].running == 2 and set(views[0].zones) == {CPU.id, GPU.id}
+    planned = entries({'A': {CPU.id: 3, GPU.id: 1}}, records)
+    assert planned == {'old-cpu': Entry('cpu', 3, 2), 'a1-cpu': Entry('cpu', 0, 0), 'a1-gpu': Entry('gpu', 1, 0)}
 
 
 @mark.unit
@@ -321,7 +414,10 @@ def test_beat_with_advertisement_round_trips() -> None:
     again = Heartbeat.unpack_or_none(beat.pack())
     assert (again.site, again.zone, again.bounds, again.clients) == ('A', 'cpu', bounds, 2)
     zero = Heartbeat.unpack_or_none(Heartbeat.new(uuid='r1', site='A', zone='cpu', bounds=bounds, clients=0).pack())
-    assert zero.clients == 0
+    assert zero.clients == 0 and zero.instance is None
+    keyed = Heartbeat.new(uuid='r1', site='A', zone='cpu', bounds=bounds, clients=2, instance='i1')
+    assert deserialize(keyed.pack())['instance'] == 'i1'
+    assert Heartbeat.unpack_or_none(keyed.pack()).instance == 'i1'
 
 
 @mark.unit
@@ -344,6 +440,9 @@ def test_malformed_advertisement_reads_as_absent() -> None:
                      'site': 'A', 'zone': 5, 'bounds': {'min': 3, 'max': 1, 'init': 0}, 'clients': -1})
     beat = Heartbeat.unpack_or_none(bad)
     assert beat.site == 'A' and beat.zone is None and beat.bounds is None and beat.clients is None
+    odd = serialize({'uuid': 'r1', 'host': 'h1', 'time': str(now), 'state': ClientState.RUNNING.value,
+                     'site': 'A', 'instance': 7})
+    assert Heartbeat.unpack_or_none(odd).instance is None
     worse = serialize({'uuid': 'r1', 'host': 'h1', 'time': str(now), 'state': ClientState.RUNNING.value,
                        'bounds': 'all', 'clients': True})
     beat = Heartbeat.unpack_or_none(worse)

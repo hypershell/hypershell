@@ -187,7 +187,8 @@ subsystems.
 - Autoscaled launches are per zone (`LaunchActuator`, `client_launch(..., expose_zone=True)`):
   `{zone}` in launcher words only (never `-t`), `HYPERSHELL_ZONE` in the launch env and never in
   the Open MPI forward list, no exposure over SSH, and no `--zone` for the own default zone. The
-  relay's site cluster uses `discover_zones=False`.
+  relay's site cluster uses `discover_zones=False`, and relay launches expose their zone in every
+  mode (`relay/site.py::zone_launch`, `expose_zone=True`).
 - The autoscaler reads every zone from the scheduler's group (`Scheduler.active_group`; before
   it is known, the start rule `Task.starting_group`), never from `Task.current_group()` alone: the
   most recently scheduled group differs after a restart with a late lower group and at a group
@@ -198,11 +199,17 @@ subsystems.
   equal to `AutoScaler.current_group` by a test), plans per site and zone within the bounds each
   relay identity advertises on its heartbeat, and publishes a versioned topology on the dispatcher
   (`Dispatcher.topology`) only when its entries change. It terminates nothing; it is refused with
-  `--no-db` and `--no-confirm`, since site failover rests on orphan recovery.
+  `--no-db` and `--no-confirm`, since site failover rests on orphan recovery. A duplicated site is
+  held relay-wide (the relay instance that registered last holds every zone it serves; older ones
+  get zero), falling back per zone for beats with no instance key.
+- The relay's fleets reconcile a published topology and never terminate: `relay/site.py::SiteScaler`
+  applies each version once (`target - max(seen, launched)`), never replaces an exit by itself, and
+  with no topology is the fixed fleet.
 - `SSHCluster` shells out to the plain `ssh` binary (not paramiko; paramiko is only in
   `core/remote.py` for SFTP).
-- The relay's site fleets are launched only through `client_launch()`: the first zone's by
-  `AutoScalingCluster`, each further zone's by `relay/site.py::zone_launch` with the same values, and
+- The relay's site fleets are launched only through `client_launch()`: every zone's by
+  `relay/site.py::zone_launch` with the cluster's values (the first zone's set as the
+  `AutoScalingCluster`'s launch), and
   every launch passes `fence_site` (no upstream key on a site argv or in a site environment). Nothing
   in a relay dials its own relay-local server in-process.
 - `submit.py` queue-mode silently ignores `-t/--tag` (asymmetric vs DB mode).

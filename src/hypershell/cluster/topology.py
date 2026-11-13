@@ -112,38 +112,77 @@ class SiteView:
 
 @dataclass(frozen=True)
 class Duplicate:
-    """Two live identities advertising one zone at one site: the newer holds it, the older is assigned none."""
+    """
+    Two live relays advertising one site: the newer holds the site's entries, the older is assigned none.
+
+    With `relay`, they are two relay processes, told apart by the instance key each advertises, and
+    `holder` and `older` are the first-registered identity of each. Otherwise they are two identities
+    advertising one zone at the site from relays that advertise no instance key.
+    """
 
     site: str
     holder: SiteRecord
     older: SiteRecord
+    relay: bool = False
 
 
-def _holders(records: Iterable[SiteRecord]) -> Dict[Tuple[str, str], List[SiteRecord]]:
-    """Live records by site and zone id, newest registration first."""
-    groups: Dict[Tuple[str, str], List[SiteRecord]] = {}
-    for record in sorted(records, key=lambda record: record.registered, reverse=True):
-        groups.setdefault((record.site, ZoneRef.from_name(record.zone).id), []).append(record)
-    return groups
+# Every live record of one site in one zone, with the record holding that site-zone (None for none).
+Held = Tuple[Optional[SiteRecord], List[SiteRecord]]
+
+
+def _arrange(records: Iterable[SiteRecord]) -> Tuple[Dict[Tuple[str, str], Held], List[Duplicate]]:
+    """
+    Live records by site and zone id, each with its holder, and every duplicate.
+
+    At each site, the relay instance whose first identity registered most recently holds every zone
+    it serves, and every identity of an older instance there is assigned none, so a zone that only an
+    older instance serves is left to the other sites. A record that advertises no instance key is held
+    per zone: of those and the holding instance's identity in a zone, the most recently registered one
+    holds the zone.
+    """
+    by_site: Dict[str, List[SiteRecord]] = {}
+    for record in sorted(records, key=lambda record: record.registered):
+        by_site.setdefault(record.site, []).append(record)
+    arranged: Dict[Tuple[str, str], Held] = {}
+    duplicates: List[Duplicate] = []
+    for site, group in by_site.items():
+        first: Dict[str, SiteRecord] = {}
+        for record in group:
+            if record.instance is not None:
+                first.setdefault(record.instance, record)
+        newest = max(first, key=lambda instance: first[instance].registered) if first else None
+        duplicates.extend(Duplicate(site, holder=first[newest], older=record, relay=True)
+                          for instance, record in first.items() if instance != newest)
+        zones: Dict[str, List[SiteRecord]] = {}
+        for record in group:
+            zones.setdefault(ZoneRef.from_name(record.zone).id, []).append(record)
+        for zone, members in zones.items():
+            eligible = sorted((record for record in members if record.instance in (None, newest)),
+                              key=lambda record: record.registered, reverse=True)
+            holder = eligible[0] if eligible else None
+            duplicates.extend(Duplicate(site, holder=holder, older=record) for record in eligible[1:])
+            arranged[(site, zone)] = (holder, members)
+    return arranged, duplicates
 
 
 def site_views(records: Iterable[SiteRecord]) -> Tuple[List[SiteView], List[Duplicate]]:
     """
-    Group live records into sites, with every duplicated site and zone.
+    Group live records into sites, with every duplicated site.
 
-    Within a site, the most recently registered identity of a zone holds that zone and supplies its
-    bounds; the zone's running count sums every identity of the site in that zone.
+    The holder of each site-zone (see `_arrange`: the most recently registered relay at the site)
+    supplies its bounds; the zone's running count sums every identity of the site in that zone, so
+    the clients of an older relay still count against the site's bounds while they idle out.
     """
+    arranged, duplicates = _arrange(records)
     zones: Dict[str, Dict[str, SiteZone]] = {}
     ranks: Dict[str, int] = {}
-    duplicates: List[Duplicate] = []
-    for (site, zone), group in _holders(records).items():
-        holder = group[0]
+    for (site, zone), (holder, members) in arranged.items():
+        if holder is None:
+            continue
         ranks[site] = holder.rank
         zones.setdefault(site, {})[zone] = SiteZone(ZoneRef.from_name(holder.zone), holder.bounds,
-                                                    running=sum(record.clients for record in group),
+                                                    running=sum(record.clients for record in members),
                                                     starting=holder.init_held)
-        duplicates.extend(Duplicate(site, holder, older) for older in group[1:])
     views = [SiteView(site, ranks[site], zones[site]) for site in sorted(zones, key=lambda name: (ranks[name], name))]
     return views, duplicates
 
@@ -206,16 +245,18 @@ def entries(targets: Mapping[str, Mapping[str, int]], records: Iterable[SiteReco
     """
     The entry of each live identity, from per-site, per-zone targets.
 
-    The holder of a site's zone is asked for the site's target less what the site's older
-    identities in that zone still run; an older identity is assigned none, so its clients retire
+    The holder of a site's zone is asked for the site's target less what the site's other
+    identities in that zone still run; every other identity is assigned none, so its clients retire
     as they idle out. Each entry's `seen` is the identity's own launched count.
     """
+    arranged, _ = _arrange(records)
     result: Dict[str, Entry] = {}
-    for (site, zone), group in _holders(records).items():
-        holder, older = group[0], group[1:]
-        target = targets.get(site, {}).get(zone, 0) - sum(record.clients for record in older)
-        result[holder.identity] = Entry(holder.zone, max(0, target), holder.clients)
-        result.update({record.identity: Entry(record.zone, 0, record.clients) for record in older})
+    for (site, zone), (holder, members) in arranged.items():
+        others = [record for record in members if record is not holder]
+        result.update({record.identity: Entry(record.zone, 0, record.clients) for record in others})
+        if holder is not None:
+            target = targets.get(site, {}).get(zone, 0) - sum(record.clients for record in others)
+            result[holder.identity] = Entry(holder.zone, max(0, target), holder.clients)
     return result
 
 
@@ -361,15 +402,16 @@ class TopologyPublisher(StateMachine):
         return TopologyPublisherState.WAIT
 
     def warn_duplicates(self: TopologyPublisher, duplicates: List[Duplicate]) -> None:
-        """Warn once for each pair of identities advertising one site's zone."""
+        """Warn once for each pair of relays advertising one site (or, for relays with no instance key, one site's zone)."""
         for dup in duplicates:
-            pair = (dup.older.identity, dup.holder.identity)
-            if pair not in self.warned:
-                self.warned.add(pair)
+            older = dup.older.instance if dup.relay else dup.older.identity
+            newer = dup.holder.instance if dup.relay else dup.holder.identity
+            if (older, newer) not in self.warned:
+                self.warned.add((older, newer))
+                zone = '' if dup.relay else f' (zone: {dup.holder.zone})'
                 log.warning(f'Site {dup.site} advertised by two relays '
-                            f'(older: {dup.older.identity} on {dup.older.host}, '
-                            f'newer: {dup.holder.identity} on {dup.holder.host}) - the newer holds its entries '
-                            f'(zone: {dup.holder.zone})')
+                            f'(older: {older} on {dup.older.host}, newer: {newer} on {dup.holder.host}) '
+                            f'- the newer holds its entries{zone}')
 
     def warn_dropped(self: TopologyPublisher, views: List[SiteView]) -> None:
         """Warn for each site of the last plan that has no live relay left."""
@@ -500,6 +542,9 @@ class AutoScalingServer(Thread):
                                                  distribution=distribution, order=order,
                                                  attempts=max_retries + 1, eager=eager,
                                                  scheduler_group=reported)
+        # A relay that connects before the first check reads a topology with no entries, never none:
+        # it waits for its entries rather than launching its local fleet.
+        self.server.queue.dispatcher.publish(Topology(f'{INSTANCE}:0', {}))
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: AutoScalingServer) -> None:
