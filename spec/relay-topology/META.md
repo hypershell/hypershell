@@ -20,6 +20,7 @@ knows what **not** to change. One line each, naming the skill/step. Skip the sec
 nothing stands out.
 
 - `hs-feature` Step 4, "Promoting an issue" (`shaped`): re-confirm, cite drift, adopt largely as written kept the promotion to the two amended R-IDs and the open questions, without reopening the seed's settled clarifications.
+- `hs-review` Step 2's `spec/` exclusion with the base `invariants.md`: the blind reviewer still graded the branch's own `AGENTS.md`/`invariants.md` edits as claims, which is how RV3 surfaced.
 
 ## Friction findings
 
@@ -74,4 +75,25 @@ is skipped by the parser):
 - **What happened:** the docs gate (`uv run --python 3.12 --group docs sphinx-build …`, the P4 verify's last step, also used to check P3's docs) removed and recreated the worktree's `.venv` under CPython 3.12 while the project venv was 3.15. A pytest run sharing that venv then failed `test_main::test_version` (its `hs --version` subprocess reported 3.12), and every later `uv run` in the worktree stays on 3.12 until someone runs `uv sync --python <default>`.
 - **Skill cause:** the verify template pins the docs build to another interpreter in the same project environment, with no note that it replaces `.venv`; a phase that runs the docs gate and then its tests (or the next phase's) silently changes the interpreter under test.
 - **Recommended fix:** give the docs gate its own environment (`UV_PROJECT_ENVIRONMENT=.venv-docs uv run --python 3.12 --group docs …`), or say in the template that it must run last and be followed by `uv sync` before any other `uv run`.
+- **Confidence:** high · **Effort:** small
+
+## F5 — The review's base resolves to the stale local `develop` · seen again (other cycles)
+`origin=hs-review:step-1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** the injected diffstat and Step 1's default `base` use the local `develop`, which is stale here; the cycle's merge base is `origin/develop` `22684fd`. The graded diff, the drift check and the reviewer's brief used `origin/develop` only because the foreman named it. Same finding open in `spec/zone-autoscale/META.md` F6 and `spec/group-advance-strands-lower-group/META.md` F9.
+- **Skill cause:** "Current state" runs `git diff --stat develop...HEAD`, and Step 1 takes `base` as a branch name with no fetch and no ancestry check.
+- **Recommended fix:** resolve `{base}` to `git merge-base HEAD origin/{base}` after a fetch, and use that SHA in the diffstat, the drift check and the reviewer's diff command.
+- **Confidence:** high · **Effort:** small
+
+## F6 — Step 2 hands over "the full text of `invariants.md`" without saying which copy, when the branch edits it · seen again (other cycles)
+`origin=hs-review:step-2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** this branch edits `.agents/factory/invariants.md` and `AGENTS.md` (§11, naming its own `SiteScaler` and publisher design). The base copy went to the reviewer only because the foreman said so; the branch's edits were graded as diff, and one was false (RV3). Same finding open in `spec/zone-autoscale/META.md` F4.
+- **Skill cause:** Step 2 and the rubric treat `invariants.md` and `AGENTS.md` as fixed inputs, while §12 makes a cycle edit them in lockstep, so the branch copy is both a graded claim and author intent.
+- **Recommended fix:** in Step 2, hand over `git show {base}:.agents/factory/invariants.md` and the base `AGENTS.md`, and tell the reviewer that branch edits to either are part of the diff.
+- **Confidence:** high · **Effort:** small
+
+## F7 — Step 1's drift check flags the GOAL and plan gates' dated rulings as mid-build drift · seen again (other cycles)
+`origin=hs-review:step-1 severity=low category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** `git log origin/develop..HEAD -- spec/relay-topology/GOAL.md` listed the shaping commit plus `d0c8fd7` (GOAL-gate rulings) and `f01dce0` (plan-gate ruling), both before the first build commit `d170337`. The skill says to confirm with the human before grading; the orchestrator, a subagent with no way to ask, recorded it in `REVIEW.md` and graded the amended contract. Same finding open in `spec/zone-autoscale/META.md` F5.
+- **Skill cause:** the drift line is drawn at the shaping commit, not the first build commit, so every cycle whose gates record rulings trips it.
+- **Recommended fix:** surface only `GOAL.md` commits after the first `hs-build` commit; list earlier gate commits in `REVIEW.md`'s pre-flight without stopping.
 - **Confidence:** high · **Effort:** small

@@ -3,7 +3,7 @@ slug: relay-topology
 title: 'Relay site-topology autoscaling: fill and spread across sites'
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/relay-topology
 base: develop
 current_phase: done
@@ -104,10 +104,11 @@ phases:
   verify: uv run pytest -v tests/test_topology_judge.py && uv run python spec/relay-topology/drive/topology_judge.py
     spec/relay-topology/evidence/cluster --require spread-kill,fill
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 0ddebf9fd88e8a52490b7ccb34ab2dcacc0c7781
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: RV1 stale-version relaunch, RV2 crashed-relay site
+    stall, RV3 invariant text'
+  cycle: 1
 ---
 # TECH.md — Relay site-topology autoscaling: fill and spread across sites
 
