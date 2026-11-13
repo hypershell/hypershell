@@ -77,14 +77,14 @@ is skipped by the parser):
 - **Recommended fix:** give the docs gate its own environment (`UV_PROJECT_ENVIRONMENT=.venv-docs uv run --python 3.12 --group docs …`), or say in the template that it must run last and be followed by `uv sync` before any other `uv run`.
 - **Confidence:** high · **Effort:** small
 
-## F5 — The review's base resolves to the stale local `develop` · seen again (other cycles)
+## F5 — The review's base resolves to the stale local `develop` · seen again (other cycles) · seen again (review cycle 2)
 `origin=hs-review:step-1 severity=medium category=instruction status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** the injected diffstat and Step 1's default `base` use the local `develop`, which is stale here; the cycle's merge base is `origin/develop` `22684fd`. The graded diff, the drift check and the reviewer's brief used `origin/develop` only because the foreman named it. Same finding open in `spec/zone-autoscale/META.md` F6 and `spec/group-advance-strands-lower-group/META.md` F9.
 - **Skill cause:** "Current state" runs `git diff --stat develop...HEAD`, and Step 1 takes `base` as a branch name with no fetch and no ancestry check.
 - **Recommended fix:** resolve `{base}` to `git merge-base HEAD origin/{base}` after a fetch, and use that SHA in the diffstat, the drift check and the reviewer's diff command.
 - **Confidence:** high · **Effort:** small
 
-## F6 — Step 2 hands over "the full text of `invariants.md`" without saying which copy, when the branch edits it · seen again (other cycles)
+## F6 — Step 2 hands over "the full text of `invariants.md`" without saying which copy, when the branch edits it · seen again (other cycles) · seen again (review cycle 2: the remediation edits §11 again)
 `origin=hs-review:step-2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** this branch edits `.agents/factory/invariants.md` and `AGENTS.md` (§11, naming its own `SiteScaler` and publisher design). The base copy went to the reviewer only because the foreman said so; the branch's edits were graded as diff, and one was false (RV3). Same finding open in `spec/zone-autoscale/META.md` F4.
 - **Skill cause:** Step 2 and the rubric treat `invariants.md` and `AGENTS.md` as fixed inputs, while §12 makes a cycle edit them in lockstep, so the branch copy is both a graded claim and author intent.

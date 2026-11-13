@@ -167,3 +167,134 @@ Every server, relay and site client the reviewer and the orchestrator started wa
 a harness script, which stopped them by recorded PID (SIGTERM, then SIGKILL to the process group)
 and reported none still alive. A process listing after the review showed no HyperShell process from
 this review.
+
+## Review cycle 2 — changes-requested (2026-11-13)
+
+- **Reviewed commit:** 7ddd16f3d4b57c5410eeabd9d3f52a08c60a418b  ·  **Base:** `origin/develop` `22684fd`  ·  **Date:** 2026-11-13
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md` (escalate to human on non-convergence)
+- **Mode:** re-review scoped to the remediation `b8bb537..7ddd16f`, as the foreman's brief set it, rather
+  than the default fresh pass over the whole diff. One fresh blind reviewer got verbatim copies of
+  `GOAL.md`, the base `invariants.md` and `AGENTS.md`, the rubric, and the Findings section of cycle 1.
+  Its primary diff was `git diff b8bb537..7ddd16f -- . ':(exclude)spec/'`, with the whole spec-excluded
+  branch diff for context. It was told not to read `PLAN.md`, `TECH.md`, `research/`, `META.md`,
+  `REVIEW.md`, `evidence/` or `drive/`, nor the branch's commit bodies, and it built its own harnesses.
+  The orchestrator ran the full suite, the PostgreSQL suite and the docs build, and reproduced RV1
+  and RV2 with a harness of its own.
+
+### Pre-flight
+
+- **Contract drift.** `7ddd16f` adds one dated Clarification to `GOAL.md`, "Ruled at review cycle 1
+  (2026-11-13)". It is the maintainer's RV2 ruling: a superseded relay's clients stop counting
+  against its site. Nothing else in the contract moved. The foreman's brief names it, and this
+  cycle grades against it.
+- **Build state.** `TECH.md` is `status: in_review`, with `review.cycle` 1 before this cycle.
+- **Invariants handed to the reviewer.** The base copy (META F6). The remediation edits `AGENTS.md`
+  and `invariants.md` §11 again, and those edits were graded as part of the diff.
+
+### Verification run
+
+- **Full suite (orchestrator, sandboxed):** `uv run pytest -q tests` → **1921 passed, 88 skipped**,
+  2 warnings (the existing `fork()` deprecation warnings in `tests/test_logging.py`), 16 min 51 s,
+  CPython 3.12.13.
+- **PostgreSQL suite (orchestrator, sandbox off, local server):**
+  `HS_TEST_POSTGRES=… HS_TEST_TIMESCALE=community uv run pytest tests/test_upgrade_postgres.py
+  tests/test_writeback_postgres.py tests/test_timescale.py tests/test_contended_write.py
+  tests/test_zone_postgres.py` → **131 passed, 1 skipped, 29 failed**. Every failure is the
+  expected missing template: 20 name `hs283` and 9 name `hs290a1`. No other failures.
+- **Docs (orchestrator):** `UV_PROJECT_ENVIRONMENT=<tmp> uv run --python 3.12 --group docs
+  sphinx-build -W --keep-going -q -E -b html -D extensions=<conf.py's list without sphinx_sitemap>
+  docs <tmp>` → **exit 0, no warnings**. The shared `.venv` was left as it was.
+- **Targeted tests (reviewer):** `tests/test_relay_topology.py tests/test_topology_plan.py
+  tests/test_topology_server.py` → **120 passed**.
+- **Orchestrator's RV1 harness:** server `--autoscaling=dynamic -P 20`, evict 60, and one relay with
+  autoscale period 1 s and heartrate 1 s. Settings: `[relay.zone.cpu] init = 2, max = 2`,
+  `timeout = 2`, no work, 135 s.
+  - Results: **2 launches**, 0 `applying again` lines, 6 server checks.
+  - The server published `:2` (target 2, seen 0), then `:3` (target 0, seen 0) once a beat had
+    counted the two clients. The relay launched 2 at `:2` and 0 at `:3`.
+  - Cycle 1 made 12 launches in the same scenario.
+- **Orchestrator's RV2 harness:** server `-P 1`, evict 40, relay A with `max = 2`, and 40 cpu tasks
+  of 2 s.
+  - Once A ran 2 clients, A and its clients were SIGKILLed and A2 was started at once at site A.
+  - **A2's first launch came 3 s after the kill.** The server logged the two-relay warning 1 s
+    after A2 registered.
+  - A was evicted 41 s after the kill, and its orphaned tasks were reverted then. Cycle 1 measured
+    43.7 s to A2's first launch.
+- **Reviewer's harness runs (18):** `rv1`, re-apply probes (a launcher that exits at once, the
+  first launches failing, every launch failing with `min = 2`), `rv2` and `rv2-init0`, `twolive`
+  (two live relays at one site), `stall*` (RV4 below), `founding-base`/`founding-branch`, four
+  `compat-*` pairings of base and branch relays and servers, and `vanish-work`.
+
+### RV1–RV3 status
+
+| ID | Status | Evidence |
+|----|--------|----------|
+| RV1 | **closed** | Both harnesses made exactly 2 launches over 6 server checks at `-P 20`, with no re-apply. The re-apply path the fix keeps still works. In the reviewer's run of a launcher that exits at once, at `-P 5`, there was one re-apply about two server checks after the mark. With every launch failing and `min = 2`, the relay made 2 launches per two server checks, which is the server still asking. No over-launch, and no churn beyond what the server asks. |
+| RV2 | **closed** | The restarted relay launched 3 s after the kill (orchestrator) and 3.4 s after the restart (reviewer, `-P 2`), long before the old relay's eviction (+41 s and +43 s). `twolive` checked two live relays at one site. The older relay was assigned 0 at once, and its 2 clients kept working and exited idle (status 0) when the work ran out. They were never relaunched or terminated, and no relay logged `Terminating`. The site ran 4 clients against a `max` of 2 for about 27 s, as the cycle-1 ruling accepts. |
+| RV3 | **closed for its two claims** | `checks` advances at every check (`cluster/topology.py:392-397`), and the relay never re-applies on its own period alone. The holder is planned on its own clients (`cluster/topology.py:186`, `:255`), and the `server.rst` text matches both runs. The new `relay.rst` sentence on replacing an exited client describes a case that RV4 shows the code missing. |
+
+### Requirement → evidence matrix (as the remediation touches it)
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R1 | The floor holds in steady state (`rv1`, `twolive`). It is not held after RV4's exit: `stall-min2` sat at 2 clients against `min = init = max = 3` for 16 checks. | ❌ (RV4) |
+| R2 | The server publishes without launching. The versioned topology carries `checks`, under the same version when the plan is unchanged. In RV4's case the relay does not reconcile to its entry. | ❌ (RV4) |
+| R3 | `rv2`: the old relay's eviction logs `Relay site left`, its orphaned tasks are reverted, and the holder regrows. | ✅ |
+| R4 / Q2 / 2026-11-13 ruling | The warning names both relays. The restarted relay is planned at once, and the older one is assigned 0. | ✅ |
+| R5 | Nothing terminated in any run. Clients retire by idle exit, and nothing is replaced on the relay's own period. | ✅ |
+| R6 | A branch relay against a base `hs server --forever` logged `publishes no topology (an earlier release)` and ran its fixed fleet: 20/20 tasks, 13 launches, against 12 for a base relay and base server. With `min 1 / init 2 / max 2` it runs the fixed fallback fleet. | ✅ |
+| R7 | The remediation changes prose only. The `-W` build is clean. | ✅ (RV4 touches one sentence) |
+| Founding case | `hs cluster --forever --autoscaling=dynamic -P 2 -I 1 -Y 3 -T 3` with cpu 40×1 s and gpu 15×2 s. Base and branch launched identically: default@0.0, cpu@2.1, gpu@2.1, cpu@4.1, cpu@6.1, gpu@6.1, gpu@8.2, gpu@16.3. | ✅ |
+| Wire compatibility | A base relay against the branch server logs `advertises no zone or bounds: it takes no part` and keeps its fixed fleet: 20/20 tasks, 0 errors. A branch relay against a base server is the R6 row. `read_topology` requires `checks` (`core/topology.py:279-280`) under the same protocol number, but no released server publishes a topology, so no released pair is affected. | ✅ |
+
+Unmapped changes (possible scope creep): none. The `server_and_relay` test helper serves the new
+RV1 integration test.
+
+### Findings
+
+#### RV4 [MEDIUM/CONFIRMED] A relay stays short of its entry for good when a counted client exits before the relay reads the next version
+- **Where:** `src/hypershell/relay/site.py:320` (`count = target - max(seen, launched)`) and `:337`
+  (`uncounted` resets when `launched >= self.expected`). The same guard was in the cycle-1 code
+  (`0ddebf9`, `site.py:308`), and the remediation kept it.
+- **Failure scenario:**
+  1. The server plans `(target T, seen S)`. Before the relay reads that version, one of the clients
+     the server counted exits, so the relay runs `L < S`.
+  2. The relay launches `T − S` and reaches `L + T − S`, which is also `expected`.
+  3. When that equals `S` (one exit during a +1 dynamic growth step, or two exits around one check
+     at a floor), the server's next plan is the same entry, so no new version comes.
+  4. `uncounted` never fires, because `launched == expected`, although `count` is 1 or more.
+
+  The zone stays below the server's target until the plan changes for another reason, including
+  below its advertised `min`. The new `docs/cli/relay.rst:64-68` sentence describes the relaunch
+  that this case needs (the plan unchanged and two more checks since a beat reported the exit),
+  and it does not happen.
+- **Evidence (reviewer, re-read by the orchestrator from the run logs):**
+  - `stall3`, dynamic: server `-P 4`, `max = 3`, 300 two-second tasks. One client was SIGKILLed as
+    the server published `:4`. The relay logged `:4 (zone: cpu, target: 3, seen: 2, launched: 1) -
+    launching 1`. For the next 77 s (about 19 checks) the server logged `clients: 2` with pressure
+    about 100 and published nothing new (4 versions in all). Control without the kill: 1→2→3 by
+    17 s.
+  - `stall-min2`, fixed: `min = init = max = 3`, 30 tasks of `sleep 600`. Two clients were killed
+    around one check. The relay logged `:4 (target: 3, seen: 2, launched: 1) - launching 1`, and
+    the server then logged `clients: 2` for 16 checks with no new version and no `applying again`.
+  - The precondition also appeared 3 times in the `rv2` run, where the target fell at the next
+    check and no stall followed.
+- **Touches:** R2 (the relay reconciles to its entry) and R1 (a zone's `min` is held). It also
+  touches the new `relay.rst` sentence (R7) and the §11 text in `AGENTS.md:440-443` and
+  `invariants.md:207-210`. The §11 text says "only when", so it is not strictly false, but it
+  should describe the fixed behaviour.
+- **Severity:** MEDIUM. The trigger is an exit in roughly one relay heartbeat after a server check,
+  but once the stall happens it lasts.
+
+### Human-gate triggers
+
+- None. RV4 is in `relay/site.py`, outside the high-blast-radius core, and touches no security or
+  DB-lifecycle invariant.
+
+### Processes
+
+- The reviewer ran 18 harnesses, about 154 PIDs in all, and the orchestrator ran 2. Each started
+  and stopped its server, relays and site clients inside one invocation, by recorded PID (SIGTERM,
+  then SIGKILL). Each reported no survivors.
+- A process listing afterwards showed no HyperShell server, relay or site client from this review.
