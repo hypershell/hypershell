@@ -1,6 +1,6 @@
 # PLAN — Retire a superseded relay, and wake the main thread for signals
 
-> **Status:** Draft for review · **Last updated:** 2026-11-13
+> **Status:** Approved at the plan gate (foreman, 2026-11-13) · **Last updated:** 2026-11-13
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md) (locked at
 > the GOAL gate, 2026-11-13); the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail
 > is in [`research/`](research/) (digest: [`research/00-digest.md`](research/00-digest.md)). Every
@@ -246,6 +246,10 @@ this design.
 
 ### Deviation justifications
 
+Both rows, and the declared amendment of `test_dispatcher_remote_surface_is_pinned` (P2), were
+accepted as written at the plan gate (foreman, gate judge under the maintainer's mandate,
+2026-11-13).
+
 | Deviation | Why needed | Simpler alternative rejected because |
 |-----------|-----------|--------------------------------------|
 | A new dispatcher method (`handback`) and a new `Task` revert that matches the dispatch | R4 needs the server to requeue tasks of a live identity, selectively (R5), within seconds (R7) | `revert_orphaned` on a final-heartbeat variant reverts the identity's started tasks too (R5) and only after the clients finish (R7); a new heartbeat state kills older servers' heart monitors; `revert_staged` by id alone could revert a row re-dispatched to another client (research 04 §3) |
@@ -274,6 +278,13 @@ this design.
   `PYTHONPATH` for one role ([`research/03-evidence.md`](research/03-evidence.md)).
 
 ## 5. Risks & open questions
+
+**Ruled at the plan gate** (foreman, gate judge under the maintainer's mandate, 2026-11-13): the
+§3 deviation rows are approved (the `handback` dispatcher call and dispatch-matched `Task` revert;
+stopping the relay-local scheduler early on retirement; the declared amendment to
+`test_dispatcher_remote_surface_is_pinned`); handing back everything undelivered is accepted;
+one-way retirement is accepted; the 0.5 s wake interval and the moved once-only "Drain requested"
+line are accepted.
 
 - **A newer instance that dies right after superseding.** Retirement is one-way: the old relay
   retires even if the newer one is then evicted, leaving the site without a relay until one is
