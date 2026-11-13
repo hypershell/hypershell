@@ -73,7 +73,7 @@ phases:
 - id: P4
   name: 'Multi-node cluster run of the retire scenario (split gate: builder prepares
     and rehearses, foreman runs, gate judges)'
-  status: pending
+  status: done
   satisfies:
   - R3
   - R5
@@ -83,7 +83,7 @@ phases:
   - P3
   parallel: false
   hammerable: false
-  hill: crest
+  hill: downhill
   verify: uv run pytest -v tests/test_retire_judge.py && uv run python spec/relay-retire/drive/retire_judge.py
     spec/relay-retire/evidence/cluster --require retire
 review:
@@ -362,6 +362,8 @@ within 3 × its heartbeat interval.
     without the allowance is printed beside it.
 **Run B** (after the foreman's run): the foreman commits the scrubbed records to
 `spec/relay-retire/evidence/cluster/`; the gate runs the judge on them.
+- Run B done (2026-11-13): one 4-node job at `29c9bc7`, scenario `retire`, PASS in 335 s; R7 +1.193 s
+  of the mark against 6 s + 1 s. Record and README in `evidence/cluster/`.
 - **Verify:** `uv run pytest -v tests/test_retire_judge.py && uv run python
   spec/relay-retire/drive/retire_judge.py spec/relay-retire/evidence/cluster --require retire`.
 - **Touches:** `spec/relay-retire/drive/`, `spec/relay-retire/evidence/`, `tests/test_retire_judge.py`.
