@@ -87,8 +87,8 @@ def zone_demand(load: ZoneLoad, launched: int, knobs: ScalingKnobs, *, own: bool
     idle exit, R5) and, once steady, at most `launched + 1`."""
 
 def fleet_demand(loads: Mapping[str, ZoneLoad], launched: Mapping[str, int], knobs: ScalingKnobs, *,
-                 own: Optional[str], initial: bool) -> Dict[ZoneRef, int]:
-    """Pure. zone_demand for every zone in `loads` (and the own zone when `initial`)."""
+                 own: Optional[ZoneRef], initial: bool) -> Dict[ZoneRef, int]:
+    """Pure. zone_demand for every zone in `loads`, and for the own zone (read as no work if absent)."""
 ```
 
 `zone_demand` is today's `check_fixed`/`check_dynamic` table applied to one zone. With `L` launched in

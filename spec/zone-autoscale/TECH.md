@@ -1,57 +1,88 @@
 ---
 slug: zone-autoscale
-title: "Zone-aware autoscaling (zone, cycle 3)"
+title: Zone-aware autoscaling (zone, cycle 3)
 kind: feature
 appetite: big
 status: in_progress
 branch: feature/zone-autoscale
 base: develop
-current_phase: P1
-last_updated: "2026-11-12"
+current_phase: P2
+last_updated: '2026-11-12'
 phases:
-  - id: P1
-    name: "Per-zone signal and the demand seam; the autoscaler decides through it (own zone only)"
-    status: pending
-    satisfies: [R1, R4]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: 'uv run pytest -v tests/test_zone_autoscale.py tests/test_zone_model.py tests/test_zone_postgres.py tests/test_autoscale.py tests/test_relay_launch.py tests/test_relay_fsm.py && uv run pytest -v tests/test_cluster_launch.py -k autoscaling && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding'
-  - id: P2
-    name: "Per-zone launch path: {zone}, HYPERSHELL_ZONE and --zone through client_launch and LaunchActuator"
-    status: pending
-    satisfies: [R3]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: 'uv run pytest -v tests/test_cluster_launch.py tests/test_relay_launch.py tests/test_relay_fsm.py tests/test_autoscale.py tests/test_zone_autoscale.py tests/test_completions.py && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding'
-  - id: P3
-    name: "Zone discovery and per-zone fleets under the fixed policy, end to end"
-    status: pending
-    satisfies: [R1, R2, R4, R5]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: 'uv run pytest -v tests/test_zone_autoscale.py tests/test_autoscale.py tests/test_zone_model.py tests/test_relay_launch.py tests/test_relay_fsm.py tests/test_completions.py tests/test_cluster.py && uv run pytest -v tests/test_cluster_launch.py -k autoscaling && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" fixed && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding'
-  - id: P4
-    name: "Per-zone pressure under the dynamic policy, laptop evidence, full regression and docs gate"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: '.agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" dynamic && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" fixed && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding && uv run pytest && uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs docs/_build/html'
+- id: P1
+  name: Per-zone signal and the demand seam; the autoscaler decides through it (own
+    zone only)
+  status: done
+  satisfies:
+  - R1
+  - R4
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_zone_autoscale.py tests/test_zone_model.py tests/test_zone_postgres.py
+    tests/test_autoscale.py tests/test_relay_launch.py tests/test_relay_fsm.py &&
+    uv run pytest -v tests/test_cluster_launch.py -k autoscaling && .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding
+- id: P2
+  name: 'Per-zone launch path: {zone}, HYPERSHELL_ZONE and --zone through client_launch
+    and LaunchActuator'
+  status: pending
+  satisfies:
+  - R3
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_cluster_launch.py tests/test_relay_launch.py
+    tests/test_relay_fsm.py tests/test_autoscale.py tests/test_zone_autoscale.py tests/test_completions.py
+    && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
+    founding
+- id: P3
+  name: Zone discovery and per-zone fleets under the fixed policy, end to end
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R4
+  - R5
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_zone_autoscale.py tests/test_autoscale.py tests/test_zone_model.py
+    tests/test_relay_launch.py tests/test_relay_fsm.py tests/test_completions.py tests/test_cluster.py
+    && uv run pytest -v tests/test_cluster_launch.py -k autoscaling && .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" fixed && .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" founding
+- id: P4
+  name: Per-zone pressure under the dynamic policy, laptop evidence, full regression
+    and docs gate
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
+    dynamic && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
+    fixed && .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh"
+    founding && uv run pytest && uv run --python 3.12 --group docs sphinx-build -W
+    --keep-going -q -E -b html docs docs/_build/html
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Zone-aware autoscaling (zone, cycle 3)
 
 The **context engine and finite-state machine** for building this feature. The YAML
@@ -121,12 +152,12 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 |------|------|------------------|
 | reading | `demand.read_zone_loads(group, knobs, *, own, discover, attempts, eager)` | current group, knobs, own `ZoneRef` or None, discovery switch, the server's retry rule → `Dict[zone_id, ZoneLoad]`. This is the only DB access. |
 | demand | `demand.zone_demand(load, launched, knobs, *, own, initial)` | one zone's `ZoneLoad`, its fleet size, knobs → desired count (≥ `launched`, ≤ `launched + 1` once steady). Pure. |
-| demand | `demand.fleet_demand(loads, launched, knobs, *, own, initial)` | all loads, `Mapping[zone_id, int]` fleet sizes → `Dict[ZoneRef, int]` desired. Pure. |
+| demand | `demand.fleet_demand(loads, launched, knobs, *, own, initial)` | all loads, `Mapping[zone_id, int]` fleet sizes, knobs, own `ZoneRef` or None → `Dict[ZoneRef, int]` desired (the own zone always included). Pure. |
 | actuation | `launch.LaunchActuator(launch, own, launch_for)` | `.launched() -> Dict[zone_id, int]`; `.apply(desired: Mapping[ZoneRef, int]) -> int` launches the shortfall per zone and never terminates; `.launch_one(zone=None) -> Popen`; `.clean() -> List[Popen]`; `.clients: List[Popen]` (flat). |
 | actuation | `launch.client_launch(..., zone=name, expose_zone=True)` | one zone's `ClientLaunch` with `{zone}` in the launcher words, `HYPERSHELL_ZONE` in env, and `--zone` per PLAN §2.5. |
 | glue | `remote.AutoScaler` | FSM: `check_*` = `read_zone_loads` → `fleet_demand(launched=actuator.launched())` → `self.pending`; `scale` = `actuator.apply(pending)`. |
 
-Types: `ZoneRef(id, name)`, `ScalingKnobs(policy, factor, init_size, min_size, max_size)`,
+Types: `ZoneRef(id, name)` (`ZoneRef.from_name(name)`: None, '' and `default` give the default zone), `ScalingKnobs(policy, factor, init_size, min_size, max_size)`,
 `ZoneLoad(zone, remaining, retryable, pressure)` with `.work`. `AutoScalerPolicy` moves to
 `cluster/demand.py` and is re-exported by `cluster/remote.py`.
 
@@ -160,33 +191,33 @@ Types: `ZoneRef(id, name)`, `ScalingKnobs(policy, factor, init_size, min_size, m
 through them for its own zone only, with discovery not yet on, and every founding-case test stays
 green. Nothing user-visible changes.
 
-- [ ] `data/model.py`: add `zone: str = None` (through `_filter_zone`) to `count_remaining`,
+- [x] `data/model.py`: add `zone: str = None` (through `_filter_zone`) to `count_remaining`,
   `effective_rate_by_client`, `effective_rate`, `avg_duration`, `time_to_completion` and
   `task_pressure`. Add `count_remaining_by_zone(group)` and `count_retryable_by_zone(attempts, group,
   eager=False)` (PLAN §2.1). NULL maps to `DEFAULT_ZONE_ID`; no `min`/`max` over the uuid column;
   `CANCEL_STATUS` comes from `query_retryable`.
-- [ ] New `cluster/demand.py`: `AutoScalerPolicy` (moved; re-export from `cluster/remote.py` and keep
+- [x] New `cluster/demand.py`: `AutoScalerPolicy` (moved; re-export from `cluster/remote.py` and keep
   it in `__all__`), `ZoneRef`, `ScalingKnobs`, `ZoneLoad`, `read_zone_loads`, `zone_demand` and
   `fleet_demand`, exactly as in PLAN §2.2. Discovery is implemented and unit-tested here but not yet
   switched on by any caller.
-- [ ] `cluster/remote.py`: `check_fixed()`/`check_dynamic()` read `read_zone_loads(…, own=<own zone>,
+- [x] `cluster/remote.py`: `check_fixed()`/`check_dynamic()` read `read_zone_loads(…, own=<own zone>,
   discover=False, …)` and decide with `fleet_demand`. `init()` uses `fleet_demand(initial=True)`. Both
   stay zero-argument and return `AutoScalerState`. The own zone comes from a new `own_zone` keyword
   (None means default); `AutoScalingCluster` passes its `zone`. The per-zone log line replaces the old
   one. Keep the DEBUG "Autoscale launcher" record (`test_autoscaling_mode_logs_never_hold_key`).
-- [ ] `tests/test_autoscale.py`: the declared `patch_queries` widening only, as PLAN §4 describes.
+- [x] `tests/test_autoscale.py`: the declared `patch_queries` widening only, as PLAN §4 describes.
   The 11 decision assertions are unchanged.
-- [ ] New `tests/test_zone_autoscale.py`:
+- [x] New `tests/test_zone_autoscale.py`:
   - unit: the `zone_demand` table;
   - unit: a parametrized equivalence of `zone_demand(own=True)` to today's `check_fixed`/`check_dynamic`
     table over (policy, launched, work, pressure, min, max);
   - unit: other zones get no init/min;
   - integration: `read_zone_loads` on a real DB, with discovery, the retry edge, a gated zone absent,
     an unnamed zone id skipped with a warning, and the default zone keyed `DEFAULT_ZONE_ID`.
-- [ ] `tests/test_zone_model.py` (+ `test_zone_postgres.py`): the zone-filtered helpers, including
+- [x] `tests/test_zone_model.py` (+ `test_zone_postgres.py`): the zone-filtered helpers, including
   filtered == unfiltered in a zone-less DB, `count_remaining_by_zone` and `count_retryable_by_zone`
   (cancelled excluded; the `attempts <= 1 and not eager` rule).
-- [ ] New `spec/zone-autoscale/drive/zone_shim.sh` and `zone_drive.sh` (from
+- [x] New `spec/zone-autoscale/drive/zone_shim.sh` and `zone_drive.sh` (from
   [03](research/03-launcher-docs-verify.md), modes `founding|fixed|dynamic`). Founding mode asserts:
   - every launch is in the default zone with no `--zone`;
   - all tasks complete and none failed;

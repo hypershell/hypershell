@@ -838,12 +838,39 @@ class Task(Entity):
         return tasks
 
     @classmethod
-    def count_remaining(cls: Type[Task], group: int = None) -> int:
-        """Count of remaining unfinished tasks (all task groups unless `group` given)."""
+    def count_remaining(cls: Type[Task], group: int = None, zone: str = None) -> int:
+        """Count of remaining unfinished tasks (all task groups unless `group` given, in one `zone` if given)."""
         query = cls.query().filter(cls.completion_time.is_(None))
         if group is not None:
             query = query.filter(cls.group == group)
-        return query.count()
+        return cls._filter_zone(query, zone).count()
+
+    @classmethod
+    def count_remaining_by_zone(cls: Type[Task], group: int) -> Dict[str, int]:
+        """Count of unfinished tasks in `group` by zone id; the default zone is keyed by its reserved id."""
+        counts = dict(cls.query(cls.zone, func.count(cls.id))
+                      .filter(cls.group == group)
+                      .filter(cls.completion_time.is_(None))
+                      .group_by(cls.zone).all())
+        if None in counts:
+            counts[DEFAULT_ZONE_ID] = counts.pop(None)
+        return counts
+
+    @classmethod
+    def count_retryable_by_zone(cls: Type[Task], attempts: int, group: int, eager: bool = False) -> Dict[str, int]:
+        """
+        Count failed tasks in `group` awaiting retry by zone id, under the rule of `count_retryable`.
+        The default zone is keyed by its reserved id. Without `eager`, failures are only retried
+        when `attempts` exceeds one, so nothing is counted.
+        """
+        if attempts <= 1 and not eager:
+            return {}
+        counts = dict(cls.query_retryable(attempts, group=group)
+                      .with_entities(cls.zone, func.count(cls.id))
+                      .group_by(cls.zone).all())
+        if None in counts:
+            counts[DEFAULT_ZONE_ID] = counts.pop(None)
+        return counts
 
     @classmethod
     def count_interrupted(cls: Type[Task]) -> int:
@@ -1129,48 +1156,45 @@ class Task(Entity):
             return None
 
     @classmethod
-    def effective_rate_by_client(cls: Type[Task]) -> Optional[Dict[str, float]]:
-        """Effective completion rate in tasks per second by client."""
+    def effective_rate_by_client(cls: Type[Task], zone: str = None) -> Optional[Dict[str, float]]:
+        """
+        Effective completion rate in tasks per second by client (over tasks of one `zone` if given).
+        A client serves exactly one zone, so the tasks of a zone select the clients of that zone.
+        """
         if server_id := cls.latest_server():
+            query = (cls.query(cls.client_id,
+                               func.max(cls.completion_time),
+                               func.min(cls.start_time),
+                               func.count(cls.id))
+                     .join(Client, Task.client_id == Client.id)
+                     .filter(cls.server_id == server_id)
+                     .filter(cls.completion_time.isnot(None))
+                     .filter(Client.disconnected_at == None))  # noqa: comparison to None
             return {
                 id: 1 / ((t_max - t_min).total_seconds() / t_n)
-                for id, t_max, t_min, t_n in (
-                    cls.query(
-                        cls.client_id,
-                        func.max(cls.completion_time),
-                        func.min(cls.start_time),
-                        func.count(cls.id)
-                    )
-                    .join(Client, Task.client_id == Client.id)
-                    .filter(cls.server_id == server_id)
-                    .filter(cls.completion_time.isnot(None))
-                    .filter(Client.disconnected_at == None)  # noqa: comparison to None
-                    .group_by(cls.client_id)
-                    .all()
-            )}
+                for id, t_max, t_min, t_n in cls._filter_zone(query, zone).group_by(cls.client_id).all()
+            }
         else:
             return None
 
     @classmethod
-    def effective_rate(cls: Type[Task]) -> Optional[float]:
-        """Effective completion rate in tasks per second."""
-        if by_client := cls.effective_rate_by_client():
+    def effective_rate(cls: Type[Task], zone: str = None) -> Optional[float]:
+        """Effective completion rate in tasks per second (in one `zone` if given)."""
+        if by_client := cls.effective_rate_by_client(zone=zone):
             return sum(by_client.values())
         else:
             return None
 
     @classmethod
-    def avg_duration(cls: Type[Task]) -> Optional[float]:
-        """Average task duration by active clients."""
+    def avg_duration(cls: Type[Task], zone: str = None) -> Optional[float]:
+        """Average task duration by active clients (over tasks of one `zone` if given)."""
         if server_id := cls.latest_server():
-            if duration := (
-                cls.query(func.avg(cls.duration))
-                .join(Client, Task.client_id == Client.id)
-                .filter(cls.server_id == server_id)
-                .filter(cls.duration.isnot(None))
-                .filter(Client.disconnected_at == None)  # noqa: comparison to None
-                .one()[0]
-            ):
+            query = (cls.query(func.avg(cls.duration))
+                     .join(Client, Task.client_id == Client.id)
+                     .filter(cls.server_id == server_id)
+                     .filter(cls.duration.isnot(None))
+                     .filter(Client.disconnected_at == None))  # noqa: comparison to None
+            if duration := cls._filter_zone(query, zone).one()[0]:
                 return float(duration)
             else:
                 return None
@@ -1178,18 +1202,18 @@ class Task(Entity):
             return None
 
     @classmethod
-    def time_to_completion(cls: Type[Task], group: int = None) -> Optional[float]:
-        """Estimated time in seconds until all unscheduled tasks are completed."""
-        if rate := cls.effective_rate():
-            return cls.count_remaining(group=group) / rate
+    def time_to_completion(cls: Type[Task], group: int = None, zone: str = None) -> Optional[float]:
+        """Estimated time in seconds until all incomplete tasks are completed (in one `zone` if given)."""
+        if rate := cls.effective_rate(zone=zone):
+            return cls.count_remaining(group=group, zone=zone) / rate
         else:
             return None
 
     @classmethod
-    def task_pressure(cls: Type[Task], factor: float, group: int = None) -> Optional[float]:
-        """Ratio of current ETC to relative `factor` of task duration."""
-        if avg_duration := cls.avg_duration():
-            if toc := cls.time_to_completion(group=group):
+    def task_pressure(cls: Type[Task], factor: float, group: int = None, zone: str = None) -> Optional[float]:
+        """Ratio of current ETC to relative `factor` of task duration (in one `zone` if given)."""
+        if avg_duration := cls.avg_duration(zone=zone):
+            if toc := cls.time_to_completion(group=group, zone=zone):
                 return toc / (factor * avg_duration)
             else:
                 return None
