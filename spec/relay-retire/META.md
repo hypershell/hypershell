@@ -39,3 +39,17 @@
 - **Skill cause:** Neither `hs-plan` (which ends at the draft) nor `hs-build` (which starts at the FSM) owns the plan gate, so the rulings' home and commit are left to precedent.
 - **Recommended fix:** In `hs-build` Step 1, add: "If the invocation carries plan-gate rulings and PLAN.md still reads `Draft for review`, record them (status line `Approved at the plan gate (who, date)`, a dated 'Ruled at the plan gate' paragraph) and commit PLAN.md alone (`[{category}] Record {slug} plan-gate rulings`) before building." Same family as F3.
 - **Confidence:** high · **Effort:** small
+
+## F5 — The injected diffstat and Step 1 base read the local `develop`, which is stale in a worktree cycle
+`origin=hs-review:step1 severity=low category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** "Current state" runs `git diff --stat develop...HEAD` and Step 1 says the base defaults to `develop`; in this worktree the local `develop` ref lags `origin/develop` (`fb89670`), so the foreman had to tell the reviewer to fetch and diff against `origin/develop` instead.
+- **Skill cause:** The skill names the local branch where every cycle's base is the remote one; the same assumption as F2, in `hs-review`.
+- **Recommended fix:** Inject `git fetch origin develop` and diff against `origin/{base}` (merge base) in "Current state" and Step 2's diff command; say so in Step 1.
+- **Confidence:** high · **Effort:** small
+
+## F6 — The required docs build replaces the worktree's `.venv` when it holds another Python
+`origin=hs-review:step2 severity=medium category=tooling status=open target=.agents/factory/review-rubric.md`
+- **What happened:** The rubric requires the docs build with `-W`; `AGENTS.md` gives it as `uv run --python 3.12 --group docs sphinx-build …`. Run in the worktree, uv removed and recreated `.venv` on 3.12, which broke a full-suite run going on beside it (it was stopped and re-run, and `.venv` re-synced). Run in the sandbox, `sphinx_sitemap` also fails on a socket bind.
+- **Skill cause:** Neither the rubric nor `AGENTS.md` § Docs says that the `--python 3.12` pin re-creates the project environment, or how to keep it apart.
+- **Recommended fix:** Give the docs build its own environment in the rubric and `AGENTS.md` (`UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build …`), and note that it needs the sandbox off for `sphinx_sitemap`.
+- **Confidence:** high · **Effort:** small
