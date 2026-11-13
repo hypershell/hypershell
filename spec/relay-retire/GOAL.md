@@ -210,6 +210,20 @@ maintainer's mandate. The two Clarifications left for sign-off here are confirme
 exiting does not contradict `relay-topology` R5, and R7's bound of three heartbeat intervals stands.
 The contract is locked; `hs-plan` designs against it.
 
+**Ruled at review cycle 1** (2026-11-13, foreman, gate judge under the maintainer's mandate). Both
+findings are fixed in this cycle; neither is deferred.
+- *RV1* (a chunk the relay-local scheduler was loading when `retire()` stopped it): every row the
+  relay holds that no site client has received counts as unstarted for R4, whether or not the
+  relay-local scheduler had marked it scheduled. The fix stays in relay code; the scheduler
+  (`server.py`, `core/fsm.py`) is not changed.
+- *RV2* (an upstream restart reorders registration): the non-goal "which instance holds a duplicated
+  site is unchanged" reads as *among relays that are not retiring*. A relay that has read the mark
+  says so on every heartbeat; the server never lets a retiring instance hold a site or retire another
+  instance, and marks it retired again at once. A relay of an earlier release never says so and is
+  ordered as today. The residual case, an upstream restart while neither instance has read the mark,
+  keeps registration order: one relay may retire in favour of the other, and the site keeps a live
+  holder, so nothing is stranded. That case is accepted, not fixed.
+
 ## Related materials
 
 - Seeds: [`issues/relay-superseded-instance-retire.md`](../../issues/relay-superseded-instance-retire.md)
