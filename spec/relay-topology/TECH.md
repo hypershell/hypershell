@@ -3,7 +3,7 @@ slug: relay-topology
 title: 'Relay site-topology autoscaling: fill and spread across sites'
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/relay-topology
 base: develop
 current_phase: done
