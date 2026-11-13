@@ -17,7 +17,9 @@ carries the relay's site and its roster (the site clients connected to the relay
 upstream server lists the site clients, attributed to the site, as they come and go. Each zone
 identity's beat also advertises its zone, that zone's client bounds, the clients launched in it and
 the relay's instance key; after each beat the heartbeat reads the site topology the upstream server
-publishes, if any, for the relay's fleets to follow.
+publishes, if any, for the relay's fleets to follow. A topology that says a newer relay at the site
+superseded this one retires the relay: the heartbeat records it once, for good, and the puller asks
+for nothing more.
 
 Example:
     >>> from hypershell.relay.upstream import upstream_identity
@@ -61,7 +63,7 @@ from hypershell.relay import store
 
 # Public interface
 __all__ = ['upstream_identity', 'served_zones', 'upstream_config', 'upstream_key', 'relay_site', 'request_text', 'read_reply',
-           'RelayInsertError', 'drain_signalled', 'log_drain',
+           'RelayInsertError', 'drain_signalled', 'log_drain', 'never',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
            'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
            'HeartbeatState', 'UpstreamHeartbeat', 'UpstreamHeartbeatThread',
@@ -174,6 +176,11 @@ _DRAIN_LOGGED: bool = False
 _DRAIN_LOCK: Final[threading.Lock] = threading.Lock()
 
 
+def never() -> bool:
+    """False: the default of a condition that never holds (a puller never retired)."""
+    return False
+
+
 def log_drain() -> None:
     """Log the drain once per process, from whichever of the puller and the relay thread sees it first.
 
@@ -249,9 +256,11 @@ class UpstreamPuller(StateMachine):
     and a late confirmation would claim them from it. The tasks still run here, and their results
     still land if the upstream server kept the assignment.
 
-    Pulling ends at the gate: on a drain (`drain` returns true) or once told to halt. A request
-    already sent is always seen through first: its reply is inserted and confirmed before the
-    machine stops, so a bundle cut for the relay upstream is never dropped while the link holds.
+    Pulling ends at the gate: on a drain (`drain` returns true), once the relay is retired (`retired`
+    returns true: a newer relay superseded it at its site), or once told to halt; a request not yet
+    sent is not sent once retired. A request already sent is always seen through first: its reply is
+    inserted and confirmed before the machine stops, so a bundle cut for the relay upstream is never
+    dropped while the link holds.
     """
 
     queue: Any
@@ -269,6 +278,7 @@ class UpstreamPuller(StateMachine):
     wait_request: float
     server_id: str
     drain: Callable[[], bool]
+    retired: Callable[[], bool]
     stopping: bool
 
     size: int
@@ -285,7 +295,8 @@ class UpstreamPuller(StateMachine):
                  wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE,
                  drain: Callable[[], bool] = drain_signalled,
                  zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
-                 connected: Optional[Callable[[Optional[str]], int]] = None) -> None:
+                 connected: Optional[Callable[[Optional[str]], int]] = None,
+                 retired: Callable[[], bool] = never) -> None:
         """Initialize with the upstream link (or a connected client), the relay database and the zone identity.
 
         `zones`, if given, are every (identity, zone) served, in place of `identity` and `zone`; with
@@ -307,6 +318,7 @@ class UpstreamPuller(StateMachine):
         self.wait_request = wait if len(self.zones) == 1 else min(wait, ZONE_REQUEST_WAIT)
         self.server_id = server_id
         self.drain = drain
+        self.retired = retired
         self.stopping = False
         self.size = 0
         self.bundle = []
@@ -351,7 +363,7 @@ class UpstreamPuller(StateMachine):
         return store.count_backlog(self.engine, zone=zone_id(zone))
 
     def gate(self: UpstreamPuller) -> PullerState:
-        """Ask for work only at or below the low-water mark, and only on a ready link; end on a drain or halt.
+        """Ask for work only at or below the low-water mark, on a ready link; end on a drain, retirement or halt.
 
         Zones are taken in turn, from the one after the zone last asked for: the first with room is asked.
         """
@@ -359,6 +371,9 @@ class UpstreamPuller(StateMachine):
             return PullerState.FINAL
         if self.drain():
             log_drain()
+            return PullerState.FINAL
+        if self.retired():
+            log.debug(f'Retired - no more upstream requests (puller: {self.identity})')
             return PullerState.FINAL
         if self.finished and self.finish_idle():
             log.info('Upstream server is shutting down - no more upstream requests')
@@ -396,8 +411,8 @@ class UpstreamPuller(StateMachine):
         return len(self.finished) == len(self.zones)
 
     def request(self: UpstreamPuller) -> PullerState:
-        """Request up to `size` tasks under the zone identity (the upstream server bounds the wait)."""
-        if self.stopping:  # atomic; once past here the request is sent and its reply seen through
+        """Request up to `size` tasks under the zone identity (the upstream server bounds the wait), unless retired."""
+        if self.stopping or self.retired():  # atomic; once past here the request is sent and seen through
             return PullerState.FINAL
         text = request_text(self.identity, self.zone, self.size, self.wait_request)
         try:
@@ -491,13 +506,14 @@ class UpstreamPullerThread(Thread):
                  wait: float = DEFAULT_REQUEST_WAIT, server_id: str = INSTANCE,
                  drain: Callable[[], bool] = drain_signalled,
                  zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
-                 connected: Optional[Callable[[Optional[str]], int]] = None) -> None:
+                 connected: Optional[Callable[[Optional[str]], int]] = None,
+                 retired: Callable[[], bool] = never) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-puller')
         self.machine = UpstreamPuller(queue=queue, engine=engine, identity=identity, zone=zone,
                                       bundlesize=bundlesize, local_bundlesize=local_bundlesize, poll=poll,
                                       wait=wait, server_id=server_id, drain=drain, zones=zones,
-                                      connected=connected)
+                                      connected=connected, retired=retired)
 
     def run_with_exceptions(self: UpstreamPullerThread) -> None:
         """Run machine."""
@@ -873,6 +889,9 @@ class UpstreamHeartbeat(StateMachine):
         this is logged once each time it starts. A read that fails, on the link or otherwise, leaves
         the view as it was. A read is stamped with `built`, when the beat just sent was built (now
         when not given).
+
+        The first reply that marks this relay retired (a newer relay superseded it at its site)
+        retires the view, for good, and is logged once as a warning.
         """
         if self.view is None:
             return
@@ -902,6 +921,9 @@ class UpstreamHeartbeat(StateMachine):
             self.published = False
             self.view.set(None, beat_at=built)
             return
+        if topology.retired and self.view.retire():
+            log.warning(f'Superseded at site {self.site} by a newer relay - retiring: no more upstream requests, '
+                        f'site clients finish what they hold')
         previous = self.view.reply
         if previous is None or previous.version != topology.version:
             zones = ', '.join(f'{zone}: {entry.target}' for zone, entry in sorted(topology.zones.items()))

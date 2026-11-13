@@ -74,10 +74,20 @@ zero, takes effect as the zone's *clients* exit after ``relay.timeout`` idle sec
 more; bounds are read when the relay starts, so changing them means restarting it.
 
 When a relay restarts while its old process is still running, both advertise the same site, and
-the upstream *server* assigns the site's *clients* to the newer one only. The old process may hold
-a few tasks it pulled after being superseded, for *clients* that were about to leave by their idle
-timeout. Those tasks wait until the old process exits and the upstream *server* evicts it, which
-puts them back.
+the upstream *server* assigns the site's *clients* to the newer one only. It also marks the old
+process superseded in the topology that process reads after each heartbeat, so the old process
+learns of it within one check of the *server* (``autoscale.period``) after the newer relay
+registers. The old process then retires. It asks for no more work and launches no more *clients*,
+and it ends none of those it has. It hands back to the upstream *server* every task none of its
+*clients* has started, and the *server* puts them back in the queue at once, for the newer relay,
+within a few heartbeats rather than at an eviction. Its *clients* finish the tasks they hold and
+leave, and their results go back upstream. The old process then ends its registration with a final
+heartbeat and exits with status 0. A relay of an earlier release does not read the mark and behaves
+as before: tasks it pulled after being superseded wait until it exits and the upstream *server*
+evicts it.
+
+.. versionchanged:: 2.9.0
+   A superseded relay hands back the tasks its *clients* have not started, and exits.
 
 Against any other upstream *server* (one not autoscaling with relay sites, or an earlier release)
 each zone keeps its own fleet, as before: ``init`` *clients* at start and one launched again while

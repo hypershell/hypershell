@@ -28,6 +28,12 @@ A received task stamped by another upstream server instance than the tasks held 
 restarted, and so put back everything unfinished) drops, in the same transaction, the held tasks the
 earlier instance assigned that have not started here (`drop_superseded`).
 
+A relay superseded at its site by a newer relay hands back upstream what no site client has received:
+`unstarted` lists every held task with no local `schedule_time` (never staged, or staged and taken
+back) and an upstream stamp, with the identity it was confirmed under and the stamp as received; once
+the upstream server has acknowledged a hand-back, `drop_handed_back` deletes those tasks and their
+stamps in one transaction, each only while it is still unstarted here.
+
 Completed rows leave the task table for the outbox in one transaction (`collect_results`), each as
 the record that goes upstream: the leaf's result with the upstream stamp restored. Moving them out
 keeps a failed row (the relay-local server never retries) from holding its task group. A result is
@@ -74,7 +80,7 @@ __all__ = ['RelayBase', 'RelayTask', 'RelayResult', 'RESULT_PENDING', 'RESULT_RE
            'LOCAL_STAMP_COLUMNS', 'local_row', 'insert_received', 'count_backlog', 'count_connected', 'count_held',
            'roster',
            'result_record', 'collect_results', 'pending_results', 'mark_returned', 'prune_returned',
-           'COLLECT_BATCH', 'PRUNE_BATCH', 'drop_superseded']
+           'COLLECT_BATCH', 'PRUNE_BATCH', 'drop_superseded', 'unstarted', 'drop_handed_back']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -251,6 +257,43 @@ def drop_superseded(conn: Connection, server_id: str, keep: List[str] = ()) -> i
         return 0
     dropped = conn.execute(delete(table).where(table.c.id.in_(ids), table.c.schedule_time.is_(None))).rowcount
     conn.execute(delete(stamps).where(stamps.c.id.in_(ids), ~exists().where(table.c.id == stamps.c.id)))
+    return dropped
+
+
+def unstarted(engine: Engine) -> List[Tuple[str, str, str]]:
+    """Every held task no site client has received, as (id, identity, schedule time), oldest received first.
+
+    That is every incomplete task with no local `schedule_time` that has an upstream stamp; the
+    identity is the upstream client id it was confirmed under, and the schedule time is the stamp's
+    text as received. A task received with no stamp (from an upstream server without a database) is
+    never listed.
+    """
+    table, stamps = Task.__table__, RelayTask.__table__
+    query = (select(table.c.id, stamps.c.identity, stamps.c.schedule_time)
+             .join(stamps, stamps.c.id == table.c.id)
+             .where(table.c.schedule_time.is_(None), table.c.completion_time.is_(None),
+                    stamps.c.schedule_time.isnot(None))
+             .order_by(stamps.c.received_at, table.c.id))
+    with engine.connect() as conn:
+        return [(id, identity, schedule_time) for id, identity, schedule_time in conn.execute(query)]
+
+
+def drop_handed_back(engine: Engine, ids: List[str]) -> int:
+    """Delete the tasks `ids` handed back upstream, with their stamps, in one transaction; return how many.
+
+    Only a task still unstarted here (no local `schedule_time` and no `completion_time`) is deleted,
+    and only the stamps of the tasks deleted go with them.
+    """
+    if not ids:
+        return 0
+    table, stamps = Task.__table__, RelayTask.__table__
+    unstarted_here = (table.c.id.in_(ids), table.c.schedule_time.is_(None), table.c.completion_time.is_(None))
+    with _WRITE_LOCK, engine.begin() as conn:
+        found = conn.execute(select(table.c.id).where(*unstarted_here)).scalars().all()
+        if not found:
+            return 0
+        dropped = conn.execute(delete(table).where(table.c.id.in_(found), *unstarted_here[1:])).rowcount
+        conn.execute(delete(stamps).where(stamps.c.id.in_(found), ~exists().where(table.c.id == stamps.c.id)))
     return dropped
 
 

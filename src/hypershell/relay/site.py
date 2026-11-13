@@ -33,7 +33,8 @@ server asks for beyond the count the server is known to have planned on (at a ne
 the server saw; once the server has planned again on the clients running, that count), and nothing
 more. It replaces a client that exits only when the server still asks for it, and never ends one, so
 a lowered target, or a target of zero, takes effect as the zone's clients exit when idle. Without a
-topology it is the fixed fleet above.
+topology it is the fixed fleet above. Once the relay has read that a newer relay superseded it at its
+site (`TopologyView.retired`), no fleet launches anything again, and none ends a client.
 Every launch names its zone to the launcher (`{zone}` and `HYPERSHELL_ZONE`), in both modes.
 
 Example:
@@ -205,6 +206,9 @@ class TopologyView:
 
     Each read is stamped with `beat_at`, the time (monotonic) the heartbeat sent just before it was
     built, so a fleet can tell a read that follows a beat reporting its clients from one that does not.
+
+    `retired` is set the first time a read says a newer relay at the site superseded this one, and is
+    never cleared, whatever later reads say.
     """
 
     def __init__(self: TopologyView, reply: Optional[TopologyReply] = None) -> None:
@@ -212,6 +216,20 @@ class TopologyView:
         self._lock = threading.Lock()
         self._reply = reply
         self._beat_at = time.monotonic()
+        self._retired = threading.Event()
+
+    @property
+    def retired(self: TopologyView) -> bool:
+        """True once a read has said a newer relay at the site superseded this one (never cleared)."""
+        return self._retired.is_set()
+
+    def retire(self: TopologyView) -> bool:
+        """Mark the relay superseded; true only for the call that set it."""
+        with self._lock:
+            if self._retired.is_set():
+                return False
+            self._retired.set()
+            return True
 
     @property
     def reply(self: TopologyView) -> Optional[TopologyReply]:
@@ -269,6 +287,9 @@ class SiteScaler(AutoScaler):
     One check is not enough evidence: it may have read the relay's beats before that one arrived.
     The count of checks comes with every read (`checks`), and each read is stamped with when the
     beat before it was built, so a read that follows no beat reporting `live` never counts.
+
+    Once the view is retired (a newer relay superseded this one at its site), the fleet launches
+    nothing, with a topology or without one.
     """
 
     RECHECKS: Final[int] = 2
@@ -297,8 +318,16 @@ class SiteScaler(AutoScaler):
         reply, beat_at = (None, 0.0) if self.view is None else self.view.read()
         return (0 if reply is None else reply.checks), beat_at
 
+    @property
+    def retired(self: SiteScaler) -> bool:
+        """Whether the relay was superseded at its site, so the fleet launches nothing."""
+        return self.view is not None and self.view.retired
+
     def init(self: SiteScaler) -> AutoScalerState:
-        """Launch the initial clients: the topology's, or without one the fixed fleet's."""
+        """Launch the initial clients: the topology's, or without one the fixed fleet's (none once retired)."""
+        if self.retired:
+            self.phase = AutoScalerPhase.STEADY
+            return AutoScalerState.WAIT
         assignment = self.assignment()
         if assignment is None:
             return super().init()
@@ -306,15 +335,17 @@ class SiteScaler(AutoScaler):
         return self.reconcile(*assignment)
 
     def wait(self: SiteScaler) -> AutoScalerState:
-        """Wait for the period, or check at once when a version not yet applied has been read."""
-        if self.phase is AutoScalerPhase.STEADY:
+        """Wait for the period, or check at once when a version not yet applied has been read (never once retired)."""
+        if self.phase is AutoScalerPhase.STEADY and not self.retired:
             assignment = self.assignment()
             if assignment is not None and assignment[0] != self.applied:
                 return AutoScalerState.CHECK
         return super().wait()
 
     def check_zones(self: SiteScaler) -> AutoScalerState:
-        """Follow the topology's entry, or without one keep the fixed fleet."""
+        """Follow the topology's entry, or without one keep the fixed fleet (launch nothing once retired)."""
+        if self.retired:
+            return AutoScalerState.WAIT
         assignment = self.assignment()
         if assignment is None:
             return super().check_zones()
@@ -322,6 +353,8 @@ class SiteScaler(AutoScaler):
 
     def reconcile(self: SiteScaler, version: str, entry: Entry) -> AutoScalerState:
         """Launch `target - max(basis, live)` clients if a new basis is known (see the class), else nothing."""
+        if self.retired:
+            return AutoScalerState.WAIT
         live = self.launched().get(self.own_zone.id, 0)
         planned = self.planned_on(live)
         if version != self.applied:

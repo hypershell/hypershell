@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/relay-retire
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -48,7 +48,7 @@ phases:
 - id: P3
   name: 'Relay half of retire: latch, stop pulling and launching, withdraw and hand
     back, finish and exit; docs; laptop evidence'
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -165,10 +165,10 @@ commit.
 | `core/dispatch.py` | `Dispatcher.handback(text) -> str`, `Dispatcher.take_handbacks() -> List[(identity, [(id, schedule_time)])]` | database-free; queues under the lock, `_signal_need()`; refuses in memory; `DISPATCH_EXPOSED = ('request', 'takes_submissions', 'topology', 'handback')` |
 | `data/model.py` | `Task.revert_handed_back(client_id, assignments) -> List[str]` | one conditional UPDATE per row on `id`, `schedule_time` as dispatched, `completion_time IS NULL`, `client_id IN (client_id, NULL)`; §1 contention rule; returns ids reverted |
 | `server.py` | `Scheduler.revert_handed_back()` | at the top of `load_bundle`, beside `revert_unstaged`; INFO `Requeued N tasks handed back by relay (identity)` |
-| `relay/site.py` | `TopologyView.retired` (latched), `TopologyView.retire()` | set once by the heartbeat, never cleared; `SiteScaler` launches none while set |
-| `relay/upstream.py` | `UpstreamPuller(…, retired=callable)`; `UpstreamHeartbeat.fetch` latches and logs once | GATE and REQUEST check `retired()` |
+| `relay/site.py` | `TopologyView.retired` (latched), `TopologyView.retire() -> bool` | set once by the heartbeat, never cleared (`retire()` is true only for the call that set it); `SiteScaler` launches none while set (`init`, `check_zones`, `reconcile`), and its `wait` never turns an unapplied version into a check once retired |
+| `relay/upstream.py` | `UpstreamPuller(…, retired=callable)` (default `never`); `UpstreamHeartbeat.fetch` latches and logs once | GATE and REQUEST check `retired()`; WARNING `Superseded at site S by a newer relay - retiring: no more upstream requests, site clients finish what they hold` |
 | `relay/store.py` | `unstarted(engine) -> List[(id, identity, schedule_time)]`, `drop_handed_back(engine, ids) -> int` | incomplete rows with no local `schedule_time` and an upstream stamp; delete matches `schedule_time IS NULL AND completion_time IS NULL`, stamps with them, one transaction under `_WRITE_LOCK` |
-| `relay/__init__.py` | `RelayThread.retire()`, `RelayThread.hand_back() -> bool` | PLAN §2.4 order; hand-back retried each check while the site finishes and once before `finish_upstream` |
+| `relay/__init__.py` | `RelayThread.retire()`, `RelayThread.hand_back()`, `RelayThread.superseded()`, `handback_due` | PLAN §2.4 order; `hand_back` clears `handback_due` on success or refusal (`refuse_hand_back`, one WARNING) and leaves it set when the link loses a chunk; retried each check while the site finishes and once before `finish_upstream` |
 
 ---
 
@@ -246,24 +246,29 @@ client has received, lets its clients finish, sends its final heartbeat under ev
 exits 0; proven red on `develop` and green here in the RV5 scenario, with the old/new pairings and
 the founding case unchanged.
 
-- [ ] `relay/site.py`: `TopologyView.retired` latch; `SiteScaler` launches none while retired.
-- [ ] `relay/upstream.py`: `fetch` latches and logs the single WARNING (R2); `UpstreamPuller` checks
+- [x] `relay/site.py`: `TopologyView.retired` latch; `SiteScaler` launches none while retired.
+- [x] `relay/upstream.py`: `fetch` latches and logs the single WARNING (R2); `UpstreamPuller` checks
       `retired()` at GATE and REQUEST.
-- [ ] `relay/store.py`: `unstarted`, `drop_handed_back` (PLAN §2.4).
-- [ ] `relay/__init__.py`: `RelayThread.retire()` and `hand_back()` in PLAN §2.4's order; `wait_site`
+- [x] `relay/store.py`: `unstarted`, `drop_handed_back` (PLAN §2.4).
+- [x] `relay/__init__.py`: `RelayThread.retire()` and `hand_back()` in PLAN §2.4's order; `wait_site`
       calls `retire()` once; `stop_site` loop and the step before `finish_upstream` retry a pending
       hand-back; module and class docstrings say what a retired relay does.
-- [ ] Docs (R10, same commit): remove `docs/cli/relay.rst:76-80`; add the retired behaviour there and
+- [x] Docs (R10, same commit): remove `docs/cli/relay.rst:76-80`; add the retired behaviour there and
       one sentence in `docs/cli/server.rst`'s duplicate paragraph, `.. versionchanged:: 2.9.0`; one
-      sentence in `APP_HELP` and the regenerated `docs/_include/relay_help.rst`.
-- [ ] Tests: `tests/test_relay_topology.py` (latch survives a reply without the mark; single log;
+      sentence in `APP_HELP` and its prose mirror `docs/_include/relay_desc.rst` (amended in build:
+      `relay_help.rst` holds only the options, which do not change; the help prose lives in
+      `relay_desc.rst`, which no tool generates).
+- [x] Tests: `tests/test_relay_topology.py` (latch survives a reply without the mark; single log;
       `SiteScaler` launches none), `tests/test_relay_fsm.py` (puller ends at GATE and does not send
       from REQUEST once retired; an in-flight request is inserted and confirmed),
       a relay-store test (`unstarted` excludes delivered and unstamped rows; `drop_handed_back` never
       deletes a row that gained a local `schedule_time`), and an integration test of `retire()` against
       a real upstream queue server (handed-back rows requeued upstream; a delivered row runs once
-      and its result lands; final heartbeat; exit path) and of the refusal/lost-link fallbacks.
-- [ ] `spec/relay-retire/drive/retire_drive.sh` (POSIX `sh`, built from
+      and its result lands; final heartbeat; exit path) and of the refusal/lost-link fallbacks
+      (built as `tests/test_relay_retire.py`: the store tests, `hand_back` over a real queue server in
+      chunks with the scheduler's requeue, a server without the call, an error reply, a link lost and
+      back; and one end-to-end test, a server autoscaling with sites and relays A and A2 as processes).
+- [x] `spec/relay-retire/drive/retire_drive.sh` (POSIX `sh`, built from
       `spec/relay-topology/drive/topology_drive.sh` and its shim; that cycle's files stay as its
       record) and `retire_judge.py`, modes (PLAN §6):
   - `retire` — RV5 on this branch: judge as PLAN §6, including R7's timed check (≤ 3 × heartrate
@@ -278,7 +283,30 @@ the founding case unchanged.
   - `idle` — one relay per site stays connected at zero clients (R9 / relay-topology R5).
   Calibrate on `develop` ×3 before fixing the knobs (research 03 §4); keep the whole verify under
   ~10 minutes. `DRIVE_EVIDENCE=<dir>` writes scrubbed `MODE.txt` to `spec/relay-retire/evidence/laptop/`.
-- [ ] Record the red and green runs (`retire-red`, `retire`) and the pairings as evidence.
+- [x] Record the red and green runs (`retire-red`, `retire`) and the pairings as evidence.
+- **Build notes (P3, amendments).**
+  - *Drive knobs, calibrated.* With `--autoscaling=dynamic` and A2 started once A ran 3 clients, A
+    read the mark before it held anything its clients had not taken (every run INCONCLUSIVE): the
+    dynamic plan replaces A's idle clients, which take what A pulls. The drive therefore runs the
+    server `--autoscaling=fixed -P 1` (no replacement while a client runs), relays with `init = max`
+    (A 3, A2 2), 12 tasks of 10 s, site-client timeout 3 s, heartrate 1 s, and starts A2 once A has
+    run 3 clients and held a task no site client took (relay database, read-only) for 2 s running:
+    RV5's "pulling for a client past its idle timeout". Eviction 120 s (`retire`, `retire-red`), 20 s
+    (pairings). `retire-red` on `fb89670` reproduced the stranding 3 of 3 (+ the gate run), each in
+    under 60 s; `retire` passes with the hand-back non-vacuous.
+  - *Judge.* `retire_judge.py strand RUN` is the bounded red watch the drive polls each second (a
+    task on A's identity > 20 s with A at zero clients); `retire_judge.py judge RUN MODE` judges a
+    run (P4 extends it for the cluster record).
+  - *The relay-topology `lower` laptop mode* (PLAN §5), run once on this branch: A reads the mark,
+    retires and exits 0, so that committed mode fails three checks. Two are the ones PLAN §5 names:
+    "every live relay still runs after its clients left" and "no relay identity left or was evicted
+    while running" (A's final heartbeat logs `Relay site left`; nothing was evicted). The third is
+    "every one of A's clients ended by idle exit" (0 of 3 seen): A's clients now leave on the
+    relay-local server's shutdown reply after A stopped its fleets, so no autoscaler logs their
+    disconnect; none was terminated ("no relay terminated a site client" passes), and every other
+    check passes (60 of 60 tasks, A launched nothing after the warning, A2 launched within 10 s).
+    Its successor is this cycle's `retire` mode; `spec/relay-topology/` and its committed evidence
+    are left as that cycle's record.
 - **Verify:** see frontmatter (the drive modes, `relay_smoke.sh`, the founding modes, the full test
   suite, and the docs build with `-W`).
 - **Touches:** `src/hypershell/relay/__init__.py`, `relay/upstream.py`, `relay/site.py`,

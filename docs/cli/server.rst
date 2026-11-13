@@ -70,7 +70,13 @@ for every zone it serves, the older one is asked for none in any zone (a zone on
 serves goes to the other sites that serve it), and the server logs a warning naming both. The newer
 relay is planned on its own clients alone, so a relay restarted after a crash is planned at once
 rather than after its predecessor's eviction; if the older relay is in fact still running, its
-clients run beside the newer relay's until they leave by their idle timeout.
+clients run beside the newer relay's until they leave by their idle timeout. The older relay is
+also told it is superseded: it asks for no more work, hands back the tasks none of its clients has
+started, which the server puts back in the queue at once, and exits once its clients have finished
+(see :ref:`Topology <cli_relay_topology>`).
+
+.. versionchanged:: 2.9.0
+   A superseded relay hands back the tasks its clients have not started, and exits.
 
 For example, a server run in a container needs only its key and its settings in the environment:
 
