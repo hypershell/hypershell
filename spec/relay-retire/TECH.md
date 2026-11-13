@@ -3,7 +3,7 @@ slug: relay-retire
 title: Retire a superseded relay, and wake the main thread for signals
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/relay-retire
 base: develop
 current_phase: done
