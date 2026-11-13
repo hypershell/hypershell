@@ -470,6 +470,14 @@ Unmapped changes (possible scope creep): none.
     superseded relay. That route is a GOAL change, since the rubric's deferral exception does not
     apply: the behaviour is not on `develop`.
 
+### Maintainer ruling (2026-11-13)
+
+- The maintainer took the second route: RV5 is accepted as a known limitation of the duplicated-site
+  case for this cycle, and the branch ships at cycle 3 with no fourth build↔review cycle. The fix is
+  deferred to a follow-up seed. The ruling is recorded in `GOAL.md` (Clarifications, "Ruled at
+  review cycle 3"), and `docs/cli/relay.rst` states the limitation for users. The findings above
+  stand as written; RV5 stays open, carried by the follow-up.
+
 ### Processes
 
 - Every server, relay, `hs cluster` and site client this review started was started by the harness.

@@ -3,7 +3,7 @@ slug: relay-topology
 title: 'Relay site-topology autoscaling: fill and spread across sites'
 kind: feature
 appetite: big
-status: blocked
+status: in_review
 branch: feature/relay-topology
 base: develop
 current_phase: done
@@ -106,8 +106,10 @@ phases:
 review:
   last_reviewed_commit: b98e994e608ab354c8b7472c98f9fa43af64b83d
   verdict: changes-requested
-  blocked_reason: 'review cycle 3 (loop spent, escalated): RV5 a superseded relay
-    strands the tasks it holds once its last client leaves'
+  blocked_reason: 'cleared by maintainer ruling (2026-11-13): review cycle 3 RV5 accepted
+    as a known limitation of the duplicated-site case, fix deferred to a follow-up
+    seed; ships at cycle 3 with no further review pass (GOAL Clarifications; REVIEW
+    cycle 3, Maintainer ruling)'
   cycle: 3
 ---
 # TECH.md — Relay site-topology autoscaling: fill and spread across sites
@@ -807,6 +809,23 @@ PostgreSQL suites against a local server (sandbox off): 131 passed, 1 skipped, 2
 "Template hs283/hs290a1 not listed" (20 and 9). Docs: the sandbox form of the `-W` gate (every
 extension but `sphinx_sitemap`, in its own `UV_PROJECT_ENVIRONMENT`) exit 0 with no Sphinx
 warnings. The unmodified docs command is the foreman's to run outside the sandbox.
+
+## Review cycle 3 — maintainer ruling and publish (2026-11-13)
+
+Review cycle 3 closed RV1–RV4 and found RV5 (a superseded relay strands the tasks it holds once
+its last client leaves), with the bounded loop spent. The maintainer accepted RV5 as a known
+limitation of the duplicated-site case and ruled to ship at cycle 3; the fix goes to a follow-up
+seed. Recorded in `GOAL.md` (Clarifications, "Ruled at review cycle 3"), `REVIEW.md` (cycle 3,
+"Maintainer ruling") and the frontmatter's `review.blocked_reason`; `review.verdict` stays
+`changes-requested` and `review.cycle` 3, since no further review pass ran. No `src/` change
+follows `b98e994`. After it, the branch adds only spec records and one user-docs paragraph
+(`docs/cli/relay.rst`, the limitation), on the maintainer's ruling.
+
+**Cluster rerun at `b98e994`.** The foreman reran the multi-node drive on the final reconciler
+(same drive and judge as P5): `topology-b98e994-45755911-{spread-kill,fill}.json` in
+`evidence/cluster/`, both PASS; the judge over the folder with `--require spread-kill,fill` prints
+PASS (4 runs, 0 failed). The `793d386` records stay as P5's; `evidence/cluster/README.md` says which
+records are current.
 
 ## How `hs-build` drives this
 

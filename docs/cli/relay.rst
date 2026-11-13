@@ -73,6 +73,12 @@ zero, takes effect as the zone's *clients* exit after ``relay.timeout`` idle sec
 *clients* left the relay stays connected, ready to grow. A raised bound lets a later plan assign
 more; bounds are read when the relay starts, so changing them means restarting it.
 
+When a relay restarts while its old process is still running, both advertise the same site, and
+the upstream *server* assigns the site's *clients* to the newer one only. The old process may hold
+a few tasks it pulled after being superseded, for *clients* that were about to leave by their idle
+timeout. Those tasks wait until the old process exits and the upstream *server* evicts it, which
+puts them back.
+
 Against any other upstream *server* (one not autoscaling with relay sites, or an earlier release)
 each zone keeps its own fleet, as before: ``init`` *clients* at start and one launched again while
 fewer than ``min`` run, where here ``min`` is at least 1 and each defaults to the size. A relay

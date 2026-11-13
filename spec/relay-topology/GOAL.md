@@ -240,6 +240,21 @@ seed's R-ID each came from. R1, R4, R5 and R6 are amended by the maintainer ruli
   the site briefly and retire by idle exit, never terminated: that is accepted, consistent with the
   "nothing terminates a client; differences work themselves out" ruling above.
 
+**Ruled at review cycle 3** (2026-11-13):
+
+- **2026-11-13 — RV5 is a known limitation of the duplicated-site case** (maintainer ruling at
+  review cycle 3, after the bounded review loop was spent; R4, R5 and the rulings above stand
+  unchanged). When two live relays advertise the same site, the older instance is assigned zero,
+  but it keeps pulling work upstream for its connected clients while they wind down, including a
+  client that has reached its idle timeout and is still finishing what it holds. When that last
+  client leaves, the tasks the older relay pulled after it was superseded stay held there with no
+  client: it launches none under its zero entry, and the upstream server does not put them back
+  while that relay stays connected. They are recovered only once the older relay exits and the
+  server evicts it, as for any evicted relay. This affects only a site advertised by two live
+  relays at once (in practice, a relay restarted while its old process is still running); a site
+  with one relay is not affected. The cycle ships with this limitation, documented in the relay's
+  user docs, and the fix is deferred to a follow-up seed.
+
 **Drift since the seed was written** (re-confirmed against `develop` `22684fd`, with relay #82 and
 Z3 #99 landed; scope holds):
 
