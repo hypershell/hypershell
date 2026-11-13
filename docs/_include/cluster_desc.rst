@@ -29,6 +29,8 @@ fast at scale; for very large workflows, a one-time ``submit`` followed by a bar
 file re-read) is cheaper than re-feeding the *FILE* each run.
 
 Use ``--autoscaling`` with either *fixed* or *dynamic* to run a persistent, elastically scalable
-cluster using an external ``--launcher`` to bring up clients as needed.
+cluster using an external ``--launcher`` to bring up clients as needed. Clients are scaled per zone:
+each zone with tasks in the active group gets its own clients, and the launcher is told which zone
+each one is for.
 
 Use ``hsx`` in place of ``hs cluster``.

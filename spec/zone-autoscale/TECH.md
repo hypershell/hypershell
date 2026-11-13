@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/zone-autoscale
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -41,7 +41,7 @@ phases:
     founding
 - id: P3
   name: Zone discovery and per-zone fleets under the fixed policy, end to end
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -150,7 +150,7 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 
 | Side | Name | Inputs → outputs |
 |------|------|------------------|
-| reading | `demand.read_zone_loads(group, knobs, *, own, discover, attempts, eager)` | current group, knobs, own `ZoneRef` or None, discovery switch, the server's retry rule → `Dict[zone_id, ZoneLoad]`. This is the only DB access. |
+| reading | `demand.read_zone_loads(group, knobs, *, own, discover, attempts, eager)` | current group, knobs, own `ZoneRef` or None, discovery switch, the server's retry rule → `Dict[zone_id, ZoneLoad]`. This is the only DB access. The own zone is read in `group`; with `discover`, other zones are found in the group the scheduler runs next (`Task.increment_group(group, attempts, eager)`, P3 amendment). |
 | demand | `demand.zone_demand(load, launched, knobs, *, own, initial)` | one zone's `ZoneLoad`, its fleet size, knobs → desired count (≥ `launched`, ≤ `launched + 1` once steady). Pure. |
 | demand | `demand.fleet_demand(loads, launched, knobs, *, own, initial)` | all loads, `Mapping[zone_id, int]` fleet sizes, knobs, own `ZoneRef` or None → `Dict[ZoneRef, int]` desired (the own zone always included). Pure. |
 | actuation | `launch.LaunchActuator(launch, own, launch_for)` | `.launched() -> Dict[zone_id, int]`; `.apply(desired: Mapping[ZoneRef, int]) -> int` launches the shortfall per zone and never terminates; `.launch_one(zone=None) -> Popen`; `.clean() -> List[Popen]`; `.clients: List[Popen]` (flat); `.describe(zone=None)` logs a zone's launch once; `.launch_of(zone) -> ClientLaunch` (cached). |
@@ -158,7 +158,8 @@ checklists below are the work. `hs-build` executes the next actionable phase, ru
 | glue | `remote.AutoScaler` | FSM: `check_*` = `read_zone_loads` → `fleet_demand(launched=actuator.launched())` → `self.pending`; `scale` = `actuator.apply(pending)`. |
 
 Types: `ZoneRef(id, name)` (`ZoneRef.from_name(name)`: None, '' and `default` give the default zone), `ScalingKnobs(policy, factor, init_size, min_size, max_size)`,
-`ZoneLoad(zone, remaining, retryable, pressure)` with `.work`. `AutoScalerPolicy` moves to
+`ZoneLoad(zone, remaining, retryable, pressure, group)` with `.work` (`group` is the group read, for logging,
+and is left out of equality). `AutoScalerPolicy` moves to
 `cluster/demand.py` and is re-exported by `cluster/remote.py`.
 
 ## Forward compatibility (`issues/relay-topology.md`)
@@ -283,7 +284,7 @@ launches are byte-identical to today. A founding-case run with the shim records 
 `gpu` (group 1). Each zone gets its own clients through the shim with the right zone, `gpu` is never
 launched while group 0 has work, and every client retires by idle exit.
 
-- [ ] `cluster/remote.py`:
+- [x] `cluster/remote.py`:
   - `check_fixed()`/`check_dynamic()` call `read_zone_loads(discover=<launch_for given>, attempts,
     eager)`, decide with `fleet_demand(launched=actuator.launched())`, set `self.pending` (one launch
     per zone per check at most), and log per zone with the registered count from `registered` (falling
@@ -291,7 +292,7 @@ launched while group 0 has work, and every client retires by idle exit.
   - names come from `ZoneRef`;
   - `AutoScalingCluster` passes `attempts`/`eager` (the server's), `registered` (the dispatcher's
     `clients`, lazily) and `own_zone`.
-- [ ] Tests in `tests/test_zone_autoscale.py` (unit, fake actuator):
+- [x] Tests in `tests/test_zone_autoscale.py` (unit, fake actuator):
   - three zones, with the own zone's init/min only;
   - a gated zone never launched;
   - the retry edge launches a named zone;
@@ -299,13 +300,26 @@ launched while group 0 has work, and every client retires by idle exit.
   - `pending` capped at one per zone per check;
   - the autoscaler never ends by itself, and no termination.
   The relay tests are re-run unchanged.
-- [ ] Docs, same commit:
+- [x] Docs, same commit:
   - `docs/_include/cluster_help.rst` and `APP_HELP`: `--zone` under autoscaling is the own zone, and
     `--autoscaling` covers per-zone scaling, uniform knobs and pacing per zone;
   - `docs/_include/cluster_desc.rst`: one sentence;
   - the `--zone` description in `share/zsh/site-functions/_hs`;
   - `docs/cli/cluster.rst`: extend the `versionchanged`.
-- [ ] Drive `fixed` mode passes all of PLAN §6's three-zone assertions.
+- [x] Drive `fixed` mode passes all of PLAN §6's three-zone assertions.
+- **Amendment (P3 build): discovery reads the group the scheduler runs next.** The current group
+  is read as `Task.current_group()`, the group of the most recently scheduled task, and the
+  scheduler moves on only when a client asks for work. A zone of the next group has no client, so
+  its tasks were never scheduled and the drive's `gpu` zone was never discovered (first `fixed`
+  run: tasks remained after the deadline). So, with discovery on, `read_zone_loads` finds other
+  zones in `Task.increment_group(group, attempts, eager)`: `group` while it holds incomplete tasks
+  or failures awaiting a retry, else the lowest group with incomplete tasks. That is the
+  scheduler's own rule, read only, so R2 still holds (no zone of a later group is read while the
+  current one has work). The own zone is still read in `group`, exactly as before, so the
+  zone-less case is unchanged. `ZoneLoad` gains `group` (logging only, out of equality). Known
+  edge, left as it is today: an own zone whose only work is in the next group, with no client of
+  any zone left to ask, waits as the founding case does. Tests: two unit tests and one
+  integration test in `tests/test_zone_autoscale.py`.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/cluster/remote.py`, `src/hypershell/cluster/__init__.py`,
   `tests/test_zone_autoscale.py`, `docs/_include/cluster_help.rst`, `docs/_include/cluster_desc.rst`,

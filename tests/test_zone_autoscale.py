@@ -20,7 +20,7 @@ from tests.test_zone_model import task_db, add_tasks, finish  # noqa: fixture
 from hypershell.cluster import demand
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ScalingKnobs, ZoneLoad,
                                        read_zone_loads, zone_demand, fleet_demand)
-from hypershell.cluster.remote import AutoScaler, AutoScalerState
+from hypershell.cluster.remote import AutoScaler, AutoScalerState, AutoScalingCluster
 from hypershell.cluster.launch import client_launch, LaunchActuator
 from hypershell.data.model import (Task, Client, Zone, TaskGroupInfo, zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME,
                                    CANCEL_STATUS)
@@ -280,6 +280,23 @@ class TestReadZoneLoads:
         assert loads == {DEFAULT_ZONE_ID: load(DEFAULT), CPU.id: load(CPU, remaining=1)}
         assert len(warned) == 1 and GPU.id in warned[0]
 
+    def test_next_group_once_the_current_group_is_done(self, task_db: Engine) -> None:
+        """With the current group complete, other zones are read in the next group and the own zone in its own."""
+        self.setup_zones()
+        cpu_id, = add_tasks(1, CPU.id, group=0)
+        add_tasks(2, group=1)
+        add_tasks(4, GPU.id, group=1)
+        loads = read_zone_loads(0, knobs(), own=DEFAULT, discover=True, attempts=1, eager=False)
+        assert loads == {DEFAULT_ZONE_ID: load(DEFAULT), CPU.id: load(CPU, remaining=1)}
+        finish(cpu_id, 0)
+        loads = read_zone_loads(0, knobs(), own=DEFAULT, discover=True, attempts=1, eager=False)
+        assert loads == {DEFAULT_ZONE_ID: load(DEFAULT), GPU.id: load(GPU, remaining=4)}
+        assert (loads[DEFAULT_ZONE_ID].group, loads[GPU.id].group) == (0, 1)
+        loads = read_zone_loads(0, knobs(), own=None, discover=True, attempts=1, eager=False)
+        assert loads == {DEFAULT_ZONE_ID: load(DEFAULT, remaining=2), GPU.id: load(GPU, remaining=4)}
+        assert read_zone_loads(0, knobs(), own=DEFAULT, discover=False, attempts=1, eager=False) == {
+            DEFAULT_ZONE_ID: load(DEFAULT)}
+
     def test_pressure_under_dynamic_only(self, task_db: Engine, monkeypatch: MonkeyPatch) -> None:
         """Pressure is read per zone and group under the dynamic policy, and never under the fixed one."""
         asked = []
@@ -400,3 +417,190 @@ def test_autoscaler_scales_through_its_actuator() -> None:
     assert scaler.launched() == {DEFAULT.id: 2, CPU.id: 1}
     scaler.clients = []
     assert scaler.launched() == {}
+
+
+class FleetDB:
+    """A stand-in for the readings of the database, with tasks per group and zone."""
+
+    def __init__(self, monkeypatch: MonkeyPatch, remaining: Dict[int, Dict[str, int]],
+                 retryable: Dict[int, Dict[str, int]] = None, pressure: Dict[str, float] = None,
+                 group: int = 0) -> None:
+        self.remaining, self.retryable = remaining, retryable or {}
+        self.pressure, self.group = pressure or {}, group
+        names = {zone.id: zone.name for zone in (CPU, GPU)}
+        monkeypatch.setattr(Task, 'current_group', lambda: TaskGroupInfo(self.group, 'testing'))
+        monkeypatch.setattr(Task, 'count_remaining_by_zone', lambda group: dict(self.remaining.get(group, {})))
+        monkeypatch.setattr(Task, 'count_retryable_by_zone',
+                            lambda attempts, group, eager=False: (dict(self.retryable.get(group, {}))
+                                                                  if attempts > 1 or eager else {}))
+        monkeypatch.setattr(Task, 'increment_group', self.increment_group)
+        monkeypatch.setattr(Task, 'task_pressure', lambda factor, group=None, zone=None: self.pressure.get(zone))
+        monkeypatch.setattr(Zone, 'names_for_ids', lambda ids: {i: names[i] for i in ids if i in names})
+        monkeypatch.setattr(Client, 'count_connected', lambda: 0)
+
+    def increment_group(self, previous: int, attempts: int, eager: bool = False) -> TaskGroupInfo:
+        """The group the scheduler runs next: `previous` while it has work, else the lowest group with tasks."""
+        held = any(self.remaining.get(previous, {}).values()) or (
+            (attempts > 1 or eager) and any(self.retryable.get(previous, {}).values()))
+        later = sorted(group for group, zones in self.remaining.items() if any(zones.values()))
+        return TaskGroupInfo(previous if held or not later else later[0], 'testing')
+
+
+class Proc(FakeProc):
+    """A launched client that fails the test if anything tries to stop it."""
+
+    def terminate(self) -> None:
+        raise AssertionError('the autoscaler terminated a client')
+
+    kill = send_signal = terminate
+
+
+class Launch(FakeLaunch):
+    """A launch whose clients refuse to be stopped."""
+
+    def start(self, **options) -> Proc:
+        proc = Proc(self.zone, len(self.started) + 1)
+        self.started.append(proc)
+        return proc
+
+
+def zoned_scaler(policy: str = 'fixed', own: ZoneRef = DEFAULT, **opts) -> tuple:
+    """An autoscaler with discovery on over fake launches, and the list of clients it started."""
+    started = []
+    scaler = AutoScaler(Launch(own.name, started), policy=policy, own_zone=own,
+                        launch_for=lambda zone: Launch(zone.name, started), **opts)
+    return scaler, started
+
+
+def run_checks(scaler: AutoScaler, count: int) -> List[AutoScalerState]:
+    """Run `count` checks, each followed by the scale it asks for; return the state of each check."""
+    states = []
+    for _ in range(count):
+        state = scaler.actions[scaler.check()]()
+        states.append(state)
+        if state is AutoScalerState.SCALE:
+            scaler.scale()
+    return states
+
+
+def zones_of(started: List[FakeProc]) -> Dict[str, int]:
+    """Clients started per zone name."""
+    counts: Dict[str, int] = {}
+    for proc in started:
+        counts[proc.zone] = counts.get(proc.zone, 0) + 1
+    return counts
+
+
+@mark.unit
+class TestZonedAutoScaler:
+    """The autoscaler with discovery on: each zone with current-group work gets its own fleet."""
+
+    def test_three_zones_with_own_zone_init_and_min_only(self, monkeypatch: MonkeyPatch) -> None:
+        """Init and min-size launch into the own zone only; every other zone with work gets one client."""
+        FleetDB(monkeypatch, remaining={0: {DEFAULT.id: 3, CPU.id: 3}, 1: {GPU.id: 3}})
+        scaler, started = zoned_scaler(init_size=2, min_size=3)
+        assert scaler.discover
+        while scaler.init() is AutoScalerState.SCALE:
+            scaler.scale()
+        assert zones_of(started) == {'default': 2}
+        run_checks(scaler, 5)
+        assert zones_of(started) == {'default': 3, 'cpu': 1}
+
+    def test_gated_zone_is_never_launched(self, monkeypatch: MonkeyPatch) -> None:
+        """A zone whose work is all in a later group is not launched until that group is current."""
+        db = FleetDB(monkeypatch, remaining={0: {CPU.id: 3}, 1: {GPU.id: 3}})
+        scaler, started = zoned_scaler()
+        run_checks(scaler, 5)
+        assert zones_of(started) == {'cpu': 1}
+        db.group = 1
+        run_checks(scaler, 3)
+        assert zones_of(started) == {'cpu': 1, 'gpu': 1}
+
+    def test_next_group_is_discovered_before_it_is_scheduled(self, monkeypatch: MonkeyPatch) -> None:
+        """Once the current group has no work, a zone of the next group gets a client before any of its tasks is
+        scheduled, since only a client's request moves the scheduler on; the own zone is read as before."""
+        FleetDB(monkeypatch, remaining={0: {}, 1: {DEFAULT.id: 3, GPU.id: 3}}, group=0)
+        scaler, started = zoned_scaler()
+        assert scaler.check_fixed() is AutoScalerState.SCALE
+        assert scaler.pending == {GPU: 1}
+        scaler.scale()
+        run_checks(scaler, 3)
+        assert zones_of(started) == {'gpu': 1}
+
+    def test_next_group_waits_while_the_current_group_has_work(self, monkeypatch: MonkeyPatch) -> None:
+        """A failure awaiting a retry holds the current group, so the next group's zones get no client yet."""
+        FleetDB(monkeypatch, remaining={0: {}, 1: {GPU.id: 3}}, retryable={0: {CPU.id: 1}}, group=0)
+        scaler, started = zoned_scaler(attempts=2)
+        run_checks(scaler, 3)
+        assert zones_of(started) == {'cpu': 1}
+
+    @mark.parametrize('attempts, eager, launched', [(1, False, False), (2, False, True), (1, True, True)])
+    def test_retry_edge_launches_a_named_zone(self, monkeypatch: MonkeyPatch, attempts: int, eager: bool,
+                                              launched: bool) -> None:
+        """A named zone whose only current-group work is a failure awaiting retry gets a client."""
+        FleetDB(monkeypatch, remaining={0: {}}, retryable={0: {CPU.id: 1}})
+        scaler, started = zoned_scaler(attempts=attempts, eager=eager)
+        run_checks(scaler, 2)
+        assert zones_of(started) == ({'cpu': 1} if launched else {})
+
+    def test_max_size_per_zone_under_dynamic(self, monkeypatch: MonkeyPatch) -> None:
+        """Under pressure each zone grows to max-size on its own; a zone without pressure stays at one."""
+        FleetDB(monkeypatch, remaining={0: {DEFAULT.id: 9, CPU.id: 9, GPU.id: 9}},
+                pressure={DEFAULT.id: 4.0, CPU.id: 4.0, GPU.id: 0.5})
+        scaler, started = zoned_scaler('dynamic', max_size=3)
+        run_checks(scaler, 10)
+        assert zones_of(started) == {'default': 3, 'cpu': 3}
+        FleetDB(monkeypatch, remaining={0: {GPU.id: 9}}, pressure={GPU.id: None})
+        run_checks(scaler, 2)
+        assert zones_of(started) == {'default': 3, 'cpu': 3, 'gpu': 1}
+
+    def test_pending_is_one_launch_per_zone_per_check(self, monkeypatch: MonkeyPatch) -> None:
+        """Each check asks for at most one more client in each zone, whatever the demand."""
+        FleetDB(monkeypatch, remaining={0: {DEFAULT.id: 9, CPU.id: 9}}, pressure={DEFAULT.id: 9.0, CPU.id: 9.0})
+        scaler, started = zoned_scaler('dynamic', min_size=5, max_size=10)
+        scaler.check()
+        assert scaler.check_dynamic() is AutoScalerState.SCALE
+        assert scaler.pending == {DEFAULT: 1, CPU: 1}
+        monkeypatch.setattr('hypershell.cluster.remote.fleet_demand',
+                            lambda loads, launched, knobs, *, own, initial: {DEFAULT: 7, CPU: 4})
+        scaler.scale()
+        assert scaler.check_dynamic() is AutoScalerState.SCALE
+        assert scaler.pending == {DEFAULT: 2, CPU: 2}
+
+    def test_registered_count_per_zone(self, monkeypatch: MonkeyPatch) -> None:
+        """The registered count of each zone is asked for by its id, and the database is not read for it."""
+        FleetDB(monkeypatch, remaining={0: {DEFAULT.id: 1, CPU.id: 1}})
+        monkeypatch.setattr(Client, 'count_connected', lambda: (_ for _ in ()).throw(AssertionError('read')))
+        asked = []
+        scaler, _ = zoned_scaler(registered=lambda zone: asked.append(zone) or 0)
+        scaler.check_fixed()
+        assert sorted(asked) == sorted([DEFAULT.id, CPU.id])
+
+    @mark.parametrize('policy', ['fixed', 'dynamic'])
+    def test_never_ends_and_never_terminates(self, monkeypatch: MonkeyPatch, policy: str) -> None:
+        """With work gone and every client exited, the autoscaler waits; it never halts or stops a client."""
+        db = FleetDB(monkeypatch, remaining={0: {DEFAULT.id: 2, CPU.id: 2}, 1: {GPU.id: 2}})
+        scaler, started = zoned_scaler(policy, init_size=1)
+        while scaler.init() is AutoScalerState.SCALE:
+            scaler.scale()
+        states = run_checks(scaler, 3)
+        db.remaining, db.group = {1: {GPU.id: 2}}, 1
+        states += run_checks(scaler, 3)
+        for proc in started:
+            proc.status = 0
+        db.remaining = {}
+        states += run_checks(scaler, 5)
+        assert set(states) <= {AutoScalerState.SCALE, AutoScalerState.WAIT}
+        assert states[-5:] == [AutoScalerState.WAIT] * 5
+        assert scaler.clients == [] and zones_of(started) == {'default': 1, 'cpu': 1, 'gpu': 1}
+
+
+@mark.unit
+def test_cluster_discovers_zones_by_default() -> None:
+    """An autoscaling cluster scales every zone with the server's retry rule; the relay's form does not."""
+    options = dict(launcher='srun -n1', remote_exe='hs', policy='fixed', max_retries=2, eager=True)
+    machine = AutoScalingCluster(**options).autoscaler.machine
+    assert machine.discover and machine.attempts == 3 and machine.eager
+    assert machine.registered is not None
+    plain = AutoScalingCluster(discover_zones=False, **options).autoscaler.machine
+    assert not plain.discover and plain.registered is None

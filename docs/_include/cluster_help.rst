@@ -122,11 +122,16 @@ Options
     bundles directly to the queue.
 
 ``--zone`` *NAME*
-    Zone of the submitted tasks and of every client the cluster launches (default: none).
+    Zone of the submitted tasks and of every client the cluster launches; the own zone with
+    ``--autoscaling`` (default: none).
 
     The tasks read from *FILE* (or ``--from-json``) are placed in this zone, and each client is
     launched with the same ``--zone``, so it runs them. Zones are recorded in the database, so
     ``--zone`` cannot be used with ``--no-db``.
+
+    With ``--autoscaling``, this is the cluster's own zone: the one that ``--init-size`` and
+    ``--min-size`` apply to. Any other zone with tasks in the active *task group* gets clients
+    of its own, each launched with ``--zone`` set to that zone.
 
 ``--initdb``
     Auto-initialize database.
@@ -329,7 +334,7 @@ Options
     See also ``--task-timeout``.
 
 ``-A``, ``--autoscaling`` [*MODE*]
-    Enable autoscaling (default: disabled). Used with ``--launcher``.
+    Enable autoscaling per zone (default: disabled). Used with ``--launcher``.
 
     Specifying this option on its own triggers the use of the autoscaler, with the default
     *policy* or the configured policy. The *policy* can be specified directly here
@@ -346,6 +351,14 @@ Options
     A *dynamic* policy maintains a ``--min-size`` (default: 0) and grows up to some
     ``--max-size`` depending on the observed *task pressure* given the specified scaling
     ``--factor``.
+
+    Clients are scaled per zone. Each zone with tasks in the active *task group* has a fleet of
+    its own, sized by the same policy and the same values of ``--factor`` and ``--max-size``,
+    with its own task pressure. ``--init-size`` and ``--min-size`` apply only to the cluster's
+    own zone (``--zone``, else the default zone); every other zone gets clients only while it
+    has work in the active group, so a zone whose tasks wait in a later group gets none yet.
+    Each ``--period``, at most one client is added per zone, so several zones can each add one
+    at once. Clients of a zone whose work is done leave by ``--timeout`` as usual.
 
     Each launch names its zone to the launcher, as ``{zone}`` in the ``--launcher`` arguments
     and as ``HYPERSHELL_ZONE`` in its environment, so one launcher can send the clients of each

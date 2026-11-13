@@ -368,9 +368,11 @@ class AutoScaler(StateMachine):
 
     Clients are launched through a :class:`~hypershell.cluster.launch.LaunchActuator`: `launch`
     starts the clients of the `own_zone` (the default zone if not given), and `launch_for`, when
-    given, builds the launch of any other zone. `attempts` and `eager` are the server's retry
-    rule, under which failed tasks count as work. `registered`, when given, counts the clients a
-    zone has registered, for logging; it is called with a zone id.
+    given, builds the launch of any other zone. With `launch_for`, each check also discovers every
+    zone with work in the current task group and sizes it under the same knobs; without it, only
+    the own zone is scaled. `attempts` and `eager` are the server's retry rule, under which failed
+    tasks count as work. `registered`, when given, counts the clients a zone has registered, for
+    logging; it is called with a zone id.
     """
 
     policy: AutoScalerPolicy
@@ -447,6 +449,11 @@ class AutoScaler(StateMachine):
         """Launched clients per zone id."""
         return self.actuator.launched()
 
+    @property
+    def discover(self: AutoScaler) -> bool:
+        """Whether zones other than the own zone are discovered and scaled."""
+        return self.actuator.launch_for is not None
+
     @cached_property
     def actions(self: AutoScaler) -> Dict[AutoScalerState, Callable[[], AutoScalerState]]:
         return {
@@ -510,16 +517,19 @@ class AutoScaler(StateMachine):
     def check_zones(self: AutoScaler) -> AutoScalerState:
         """Decide the clients each zone needs under the policy, and scale if any zone needs one."""
         group = Task.current_group().value
-        loads = read_zone_loads(group, self.knobs, own=self.own_zone, discover=False,
+        loads = read_zone_loads(group, self.knobs, own=self.own_zone, discover=self.discover,
                                 attempts=self.attempts, eager=self.eager)
         launched = self.launched()
         desired = fleet_demand(loads, launched, self.knobs, own=self.own_zone, initial=False)
-        registered = Client.count_connected()
+        connected = None if self.registered is not None else Client.count_connected()
         self.pending = {}
         for zone, count in desired.items():
+            have = launched.get(zone.id, 0)
+            count = min(count, have + 1)  # NOTE: at most one launch per zone per check
             load = loads.get(zone.id) or ZoneLoad(zone, remaining=0, retryable=0, pressure=None)
-            self.log_check(zone, load, group, launched.get(zone.id, 0), registered, count)
-            if count > launched.get(zone.id, 0):
+            registered = connected if self.registered is None else self.registered(zone.id)
+            self.log_check(zone, load, group if load.group is None else load.group, have, registered, count)
+            if count > have:
                 self.pending[zone] = count
         return AutoScalerState.SCALE if self.pending else AutoScalerState.WAIT
 
@@ -850,9 +860,13 @@ class AutoScalingCluster(Thread):
         launch_for = None if not discover_zones else (
             lambda ref: build(zone=zone if ref.id == own.id else ref.name, expose_zone=True))
         self.launch = build(zone=zone) if launch_for is None else launch_for(own)
+        # Failed tasks count as a zone's work under the server's own retry rule.
+        # Registered clients per zone come from the dispatcher, looked up at each check (logging only).
+        registered = None if not discover_zones else (lambda zone_id: self.server.queue.dispatcher.clients(zone_id))
         self.autoscaler = AutoScalerThread(self.launch, policy=policy, factor=factor, period=period,
                                            init_size=init_size, min_size=min_size, max_size=max_size,
-                                           own_zone=own, launch_for=launch_for)
+                                           own_zone=own, launch_for=launch_for, attempts=max_retries + 1,
+                                           eager=eager, registered=registered)
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: AutoScalingCluster) -> None:
