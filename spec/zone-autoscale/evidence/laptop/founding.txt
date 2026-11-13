@@ -1,13 +1,13 @@
 # zone_drive founding: launches (pid, {zone} word, HYPERSHELL_ZONE, client --zone, group-0 tasks left)
-launch pid=83614 word=default env=default client=- g0=3
+launch pid=50625 word=default env=default client=- g0=3
 # zone_drive founding: tasks (zone, HYPERSHELL_ZONE seen by the task, index)
 default default 1
 default default 2
 default default 3
 # zone_drive founding: autoscaler log lines
     INFO [hypershell.cluster] Autoscale start (policy: fixed, init-size: 1)
-   DEBUG [hypershell.cluster] Autoscale launcher (zone default): sh <repo>/spec/zone-autoscale/drive/zone_shim.sh <site>/launches.log default <repo>/.venv/bin/hs client -H <host> -p 54630 -N 1 -b 1 -w 5 -t '{}' -d 0 -S 10 -T 2
-    INFO [hypershell.cluster] Autoscale adding client (83614, zone: default)
+   DEBUG [hypershell.cluster] Autoscale launcher (zone default): sh <repo>/spec/zone-autoscale/drive/zone_shim.sh <site>/launches.log default <repo>/.venv/bin/hs client -H <host> -p 54599 -N 1 -b 1 -w 5 -t '{}' -d 0 -S 10 -T 2
+    INFO [hypershell.cluster] Autoscale adding client (50625, zone: default)
    DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 1/1, tasks: 0 in group 0)
    DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 1/1, tasks: 0 in group 0)
    DEBUG [hypershell.cluster] Autoscale check (zone: default, clients: 1/1, tasks: 0 in group 0)

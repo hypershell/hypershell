@@ -3,10 +3,10 @@ slug: zone-autoscale
 title: Zone-aware autoscaling (zone, cycle 3)
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/zone-autoscale
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -62,7 +62,7 @@ phases:
 - id: P4
   name: Per-zone pressure under the dynamic policy, laptop evidence, full regression
     and docs gate
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -406,10 +406,16 @@ modes' logs are kept as evidence, the full suite is green, and the docs build pa
     docs docs/_build/html` (every extension but `sphinx_sitemap`): exit 0, no warnings. The
     unmodified frontmatter command is to be run outside the sandbox before review.
 - **Remediation (review cycle 1).** Reopened with P3.
-  - [ ] Re-run the four drive modes (`founding`, `fixed`, `dynamic`, `restart`) with
+  - [x] Re-run the four drive modes (`founding`, `fixed`, `dynamic`, `restart`) with
     `ZD_EVIDENCE` and refresh `evidence/laptop/` (the autoscaler lines now include `pressure` and
     `pause`); keep the pre-remediation `restart` run as `restart-base.txt`; update the README.
-  - [ ] Full suite, the PostgreSQL suites against a local server, and the docs gate.
+    All four PASS; `restart-base.txt` FAIL as expected.
+  - [x] Full suite, the PostgreSQL suites against a local server, and the docs gate. Full suite:
+    1732 passed, 88 skipped (the same environmental skips as before). PostgreSQL 18 with
+    TimescaleDB (Community) on localhost: 131 passed, 1 skipped, 29 failed, every failure "Template
+    hs283/hs290a1 not listed in HS_TEST_POSTGRES_TEMPLATES" (the legacy templates need Docker);
+    `tests/test_zone_postgres.py` all passed. Docs: the sandbox form of the gate (every extension
+    but `sphinx_sitemap`), exit 0, no warnings.
 - **Touches:** `spec/zone-autoscale/drive/`, `spec/zone-autoscale/evidence/laptop/`, and, only for
   fixes, any file P1–P3 touched.
 
