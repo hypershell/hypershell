@@ -21,6 +21,9 @@ nothing stands out.
 
 - `hs-feature` Step 4, "Promoting an issue" (`shaped`): adopt as written, re-confirm against `develop`, cite drift. It kept a
   three-cycle seed's settled clarifications out of re-litigation and pointed the work at line drift.
+- `hs-plan` Step 3, briefs written to `research/NN-topic.md` by parallel subagents: three briefs (signal,
+  relay seam, launcher/verify) came back with file:line findings and a rehearsed drive, so the plan
+  synthesized from files, not transcripts.
 
 ## Friction findings
 
@@ -61,4 +64,11 @@ is skipped by the parser):
 - **What happened:** the `zone` seed's remaining R13–R17 had to become this GOAL's R-IDs. The seed says its numbering "is kept so citations elsewhere still resolve"; the template numbers from `R1`; Z2 renumbered with the seed ID in brackets. The precedent was followed (R1–R5 with `[seed R13]`…), by inference.
 - **Skill cause:** "Promoting an issue" covers `shaped` seeds but not a seed split across cycles, so the numbering convention lives only in an earlier GOAL.
 - **Recommended fix:** add one line to Step 4: when promoting part of a multi-cycle seed, number from `R1` and give the seed's R-ID in brackets on each criterion.
+- **Confidence:** med · **Effort:** small
+
+## F3 — No rule for a gate question that arises during planning when the rest of the plan stands
+`origin=hs-plan:step-4 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** two R-IDs disagreed at one point. R3 says `--zone` is appended to every launch; R4 says the zone-less case is identical to today. One design choice decides it, and the rest of the plan does not depend on it. The skill says to STOP only for markers in `GOAL.md` and for an unavoidable invariant conflict. So the plan was committed with a `[NEEDS CLARIFICATION]` in PLAN §2.5 and the question was raised at the sign-off gate, by inference.
+- **Skill cause:** Steps 4–6 do not say whether a plan may carry a scoped `[NEEDS CLARIFICATION]` to the gate, or whether `hs-build` must refuse to start while one is open.
+- **Recommended fix:** add to Step 4 or 9: a design question confined to named phase items may be committed as a `[NEEDS CLARIFICATION]` in PLAN §5 with the proposed reading, listed in the Step 9 report. `hs-build` stops before any phase whose checklist names it until it is resolved.
 - **Confidence:** med · **Effort:** small

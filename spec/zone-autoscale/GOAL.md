@@ -179,6 +179,13 @@ recorded there. Those that bear on this cycle, carried from the seed unchanged:
   never into the client's own task template (`-t`, whose `{}` is the task's argument). Pressure
   today divides by one global `avg_duration()`; whether the per-zone signal needs a per-zone
   duration is the plan's call under R1.
+- **2026-11-12 — Empty edge: confirmed** (foreman, `hs-plan` gate). The cluster's own zone (its
+  `--zone`, else the default zone) keeps today's init-size and min-size behaviour exactly; every
+  other zone is sized from its current-group work only (no init or min launches for it, and
+  idle-exit retires it).
+- **2026-11-12 — Relay fleets: unchanged** (foreman, `hs-plan` gate). The relay's site cluster and
+  its per-zone fleets keep today's behaviour; the relay's tests stay green with no behaviour change
+  in `relay/`.
 
 ## Related materials
 
