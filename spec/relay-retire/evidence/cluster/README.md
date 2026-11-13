@@ -6,7 +6,19 @@ scans itself for node names, host, user, paths and key (`record.scrubbed`, all 0
 
 | Record | Scenario | Commit | Wall time | Judge |
 |--------|----------|--------|-----------|-------|
+| `retire-824e19f-45774110-retire.json` | `retire` | `824e19f` | 329 s | PASS |
 | `retire-29c9bc7-45764803-retire.json` | `retire` | `29c9bc7` | 335 s | PASS |
+
+**Current: `824e19f`**, the review-cycle-1 remediation (RV1, RV2) and the last commit to change
+`src/`, reviewed and approved at review cycle 2. The drive and judge are unchanged from the
+`29c9bc7` run. A2 registered at 62.0 s; the server marked A retired at 62.0 s; A logged
+"Superseded" once at 63.0 s and launched nothing after it. A held 5 tasks at the mark (4 started
+by its site clients, 1 unstarted), handed back the 1 unstarted, and the server requeued it at
++0.975 s; it was seen available upstream at +1.130 s of the mark (R7, bound 6 s + 1 s). A exited
+by itself with status 0 at 179.6 s, with no eviction and no orphan revert; 12 of 12 tasks
+succeeded, each run once; no site client was terminated.
+
+The `29c9bc7` record below is the one P4 was first judged on (run B), kept as that phase's record.
 
 **Topology.** 4 nodes; node 0 ran `hs server --autoscaling=fixed -P 1` with no launcher and a
 read-only sampler of its task table; relay A (site A, `cpu`, init and max 3) on node 1, then relay
