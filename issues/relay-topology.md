@@ -1,5 +1,5 @@
 ---
-status: shaped
+status: adopted:relay-topology
 kind: feature
 appetite: big
 lane: public

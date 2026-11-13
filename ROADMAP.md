@@ -643,7 +643,7 @@ out of relay at its promotion, because it extends zone autoscaling's per-zone pr
 *Horizon: mid-term · Depends on: zone autoscaling (Z3, `issues/zone.md` R13–R17); relay itself,
 the other prerequisite, landed (#82) · Refs: the original relay seed's R11–R15 and R16's topology
 half (`spec/relay/GOAL.md` C1)*
-**Seed:** [`issues/relay-topology.md`](issues/relay-topology.md) · *status: shaped*
+**Seed:** [`issues/relay-topology.md`](issues/relay-topology.md) · *status: adopted:relay-topology*
 
 ## Turso provider, partition-attached listing, and S3 captured output
 
