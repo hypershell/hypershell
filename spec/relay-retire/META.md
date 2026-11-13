@@ -25,3 +25,10 @@
 - **Skill cause:** The steps and allowed-tools predate the worktree practice every recent cycle uses.
 - **Recommended fix:** Make Step 3 a worktree under `.worktrees/{slug}` and add `Bash(git worktree *)` to allowed-tools (same as the open step-3 findings in earlier cycles' META files).
 - **Confidence:** high · **Effort:** small
+
+## F3 — No step for recording GOAL-gate rulings before planning
+`origin=hs-plan:step1 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The GOAL reached `hs-plan` with two Clarifications left "for the maintainer's sign-off at this gate", and the gate judge's confirmations came with the invocation. The skill has no step for recording them or for the GOAL lock; I followed the `relay-topology` precedent (`d0c8fd7`, "Record … GOAL-gate rulings") by hand: amend each Clarification's attribution, add a "Ruled at the GOAL gate" paragraph, and commit it apart from the plan.
+- **Skill cause:** Step 1 only checks that `GOAL.md` is committed and free of `[NEEDS CLARIFICATION]`; it does not cover Clarifications marked for sign-off at the gate, nor say that the gate's rulings are recorded in `GOAL.md` in their own commit before the plan commit.
+- **Recommended fix:** In Step 1, add: "If Clarifications are marked for sign-off at this gate, record the gate's rulings (attribution + a dated 'Ruled at the GOAL gate' line) and commit `GOAL.md` alone (`[{category}] Record {slug} GOAL-gate rulings`) before research; STOP if no ruling was given."
+- **Confidence:** high · **Effort:** small
