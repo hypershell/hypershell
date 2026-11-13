@@ -245,6 +245,7 @@ class Scheduler(StateMachine):
             log.warning(f'Signal interrupt ({SIGNAL_MAP[check_signal()]})')
             return SchedulerState.FINAL
         self.revert_unstaged()
+        self.revert_handed_back()
         generation, refills = self.dispatcher.refills()
         if not refills:
             self.dispatcher.wait_need(generation, timeout=DEFAULT_REMOTE_TIMEOUT)
@@ -396,6 +397,16 @@ class Scheduler(StateMachine):
             reverted = Task.revert_staged(ids)
             kept = f'; {len(ids) - reverted} left as completed, cancelled or deleted' if reverted < len(ids) else ''
             log.info(f'Reverted {reverted} staged tasks (zone has no client{kept})')
+
+    def revert_handed_back(self: Scheduler) -> None:
+        """Requeue the tasks retired relays handed back, each only while it is still that relay's assignment.
+
+        A task completed, cancelled, dispatched again or deleted since is left as it is.
+        """
+        for identity, assignments in self.dispatcher.take_handbacks():
+            reverted = len(Task.revert_handed_back(identity, assignments))
+            kept = f'; {len(assignments) - reverted} already settled' if reverted < len(assignments) else ''
+            log.info(f'Requeued {reverted} tasks handed back by relay ({identity}{kept})')
 
     @staticmethod
     def finalize() -> SchedulerState:

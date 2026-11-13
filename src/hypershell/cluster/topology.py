@@ -11,13 +11,15 @@ relays' latest advertisements as inputs and return targets, so every rule is tes
 
 The :class:`TopologyPublisher` runs those functions at each check and publishes a new version of
 the topology on the server's dispatcher whenever the plan changes; relays fetch their own entries
-from there. :class:`AutoScalingServer` runs it beside a server in forever mode.
+from there. It also names, at every check, the identities of each relay a newer relay at its site
+has superseded, so that relay retires. :class:`AutoScalingServer` runs it beside a server in forever
+mode.
 """
 
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Callable, Dict, IO, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, IO, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 # Standard libs
 import time
@@ -41,7 +43,7 @@ from hypershell.server import (ServerThread, DEFAULT_BIND, DEFAULT_PORT, DEFAULT
 
 # Public interface
 __all__ = ['Distribution', 'parse_distribution', 'parse_sites',
-           'SiteZone', 'SiteView', 'Duplicate', 'site_views', 'plan_sites', 'entries',
+           'SiteZone', 'SiteView', 'Duplicate', 'site_views', 'plan_sites', 'entries', 'retired_identities',
            'TopologyPublisherState', 'TopologyPublisher', 'TopologyPublisherThread', 'AutoScalingServer',
            'serve_with_sites']
 
@@ -188,6 +190,20 @@ def site_views(records: Iterable[SiteRecord]) -> Tuple[List[SiteView], List[Dupl
     return views, duplicates
 
 
+def retired_identities(records: Iterable[SiteRecord]) -> FrozenSet[str]:
+    """
+    The identities of every relay instance superseded at its site by a newer one.
+
+    Every identity of the older instance is retired, including a zone the newer instance does not
+    serve. A record that advertises no instance key is never retired.
+    """
+    records = list(records)
+    _, duplicates = _arrange(records)
+    older = {(dup.site, dup.older.instance) for dup in duplicates if dup.relay}
+    return frozenset(record.identity for record in records
+                     if record.instance is not None and (record.site, record.instance) in older)
+
+
 def _preference(sites: Sequence[SiteView], order: Sequence[str]) -> List[SiteView]:
     """Sites in preference order: those listed in `order` as listed, then the rest by rank."""
     listed = {name: place for place, name in enumerate(order)}
@@ -279,7 +295,8 @@ class TopologyPublisher(StateMachine):
     advertisements in `registry`, and plans per site and zone. A plan whose entries differ from the
     last published ones is published on `dispatcher` under the next version; either way the
     topology on the dispatcher carries the count of checks finished, so a relay can tell that the
-    server planned again. The publisher never launches or terminates a client and never ends by
+    server planned again, and the identities of every superseded relay, so it can retire. Neither
+    makes a new version. The publisher never launches or terminates a client and never ends by
     itself.
     """
 
@@ -300,7 +317,9 @@ class TopologyPublisher(StateMachine):
     pending: Optional[Dict[str, Entry]]
     targets: Dict[str, Dict[str, int]]
     views: List[SiteView]
+    retired: FrozenSet[str]
     warned: Set[Tuple[str, str]]
+    noted: Set[Tuple[str, str]]
     last_check: datetime
     wait_check: timedelta
 
@@ -335,7 +354,9 @@ class TopologyPublisher(StateMachine):
         self.pending = None
         self.targets = {}
         self.views = []
+        self.retired = frozenset()
         self.warned = set()
+        self.noted = set()
         self.last_check = datetime.now()
         self.wait_check = timedelta(seconds=period)
 
@@ -376,7 +397,11 @@ class TopologyPublisher(StateMachine):
         return scheduler_group(reported, attempts=self.attempts, eager=self.eager)
 
     def check(self: TopologyPublisher) -> TopologyPublisherState:
-        """Plan every zone over the live sites; publish if the plan changed, else count the check under the same version."""
+        """
+        Plan every zone over the live sites; publish if the plan changed, else count the check under the same version.
+
+        The retired identities are taken from the same snapshot as the plan and go with either.
+        """
         self.last_check = datetime.now()
         group = self.current_group()
         loads = read_zone_loads(group, self.knobs, own=None, discover=True,
@@ -384,6 +409,8 @@ class TopologyPublisher(StateMachine):
         records = self.registry.snapshot()
         views, duplicates = site_views(records)
         self.warn_duplicates(duplicates)
+        self.note_retired(duplicates)
+        self.retired = retired_identities(records)
         self.warn_dropped(views)
         targets = plan_sites(loads, self.knobs, views, distribution=self.distribution, order=self.order)
         self.log_check(loads, views, group)
@@ -393,7 +420,7 @@ class TopologyPublisher(StateMachine):
         if planned != self.published:
             self.pending = planned
             return TopologyPublisherState.PUBLISH
-        self.topology = replace(self.topology, checks=self.checks)
+        self.topology = replace(self.topology, checks=self.checks, retired=self.retired)
         self.dispatcher.publish(self.topology)
         return TopologyPublisherState.WAIT
 
@@ -401,7 +428,7 @@ class TopologyPublisher(StateMachine):
         """Publish the pending entries under the next version."""
         self.count += 1
         version = f'{INSTANCE}:{self.count}'
-        self.topology = Topology(version, dict(self.pending), checks=self.checks)
+        self.topology = Topology(version, dict(self.pending), checks=self.checks, retired=self.retired)
         self.dispatcher.publish(self.topology)
         self.published, self.pending = self.pending, None
         log.info(f'Topology {version} published ({len(self.published)} relay identities)')
@@ -422,6 +449,14 @@ class TopologyPublisher(StateMachine):
                 log.warning(f'Site {dup.site} advertised by two relays '
                             f'(older: {older} on {dup.older.host}, newer: {newer} on {dup.holder.host}) '
                             f'- the newer holds its entries{zone}')
+
+    def note_retired(self: TopologyPublisher, duplicates: List[Duplicate]) -> None:
+        """Log once for each relay instance a newer relay at its site supersedes: it is told to retire."""
+        for dup in duplicates:
+            if dup.relay and (dup.site, dup.older.instance) not in self.noted:
+                self.noted.add((dup.site, dup.older.instance))
+                log.info(f'Relay {dup.older.instance} on {dup.older.host} retired at site {dup.site} '
+                         f'(held by {dup.holder.instance} on {dup.holder.host})')
 
     def warn_dropped(self: TopologyPublisher, views: List[SiteView]) -> None:
         """Warn for each site of the last plan that has no live relay left."""

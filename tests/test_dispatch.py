@@ -16,15 +16,18 @@ import json
 import time
 import random
 import logging
+import uuid
 import threading
 from queue import Queue
 
 # External libs
+import pytest
 from pytest import mark, fixture
 
 # Internal libs
 from hypershell.core import dispatch
 from hypershell.core.dispatch import Dispatcher, PROTOCOL
+from hypershell.core.topology import TOPOLOGY_PROTOCOL, MAX_HANDBACK_TASKS, handback_text, read_handback_reply
 from hypershell.data.model import Task, DEFAULT_ZONE_ID, serialize_tasks
 
 
@@ -317,3 +320,75 @@ def test_staged_rows_are_taken_back_for_revert() -> None:
     assert dispatcher.take_staged() == ['t1', 't2']
     assert dispatcher.take_staged() == []
     assert ask(dispatcher, size=5, wait=0)['tasks'] == []
+
+
+# --- Hand-back of a retired relay's tasks -------------------------------------------------------------
+
+RELAY = str(uuid.uuid4())
+STAMP = '2026-11-13 10:15:42.123456-05:00'
+
+
+def held(count: int) -> List[tuple]:
+    """`count` (task id, schedule time) assignments a relay holds."""
+    return [(str(uuid.uuid4()), STAMP) for _ in range(count)]
+
+
+@mark.unit
+def test_handback_is_queued_for_the_scheduler_in_arrival_order() -> None:
+    """Each hand-back is queued as given and acknowledged with its count; the scheduler takes them all at once,
+    oldest first, and a second take finds none. An empty hand-back is acknowledged and queues nothing."""
+    dispatcher = Dispatcher()
+    first, second = held(3), held(1)
+    other = str(uuid.uuid4())
+    assert read_handback_reply(dispatcher.handback(handback_text(RELAY, first))) == 3
+    assert read_handback_reply(dispatcher.handback(handback_text(other, second))) == 1
+    assert read_handback_reply(dispatcher.handback(handback_text(RELAY, []))) == 0
+    assert dispatcher.take_handbacks() == [(RELAY, first), (other, second)]
+    assert dispatcher.take_handbacks() == []
+
+
+@mark.unit
+def test_handback_wakes_the_scheduler() -> None:
+    """A scheduler waiting for need is woken by a hand-back, well before its timeout; an empty one wakes nothing."""
+    dispatcher = Dispatcher()
+    generation, _ = dispatcher.refills()
+    dispatcher.handback(handback_text(RELAY, []))
+    assert dispatcher.generation == generation
+    threading.Timer(0.2, lambda: dispatcher.handback(handback_text(RELAY, held(2)))).start()
+    start = time.monotonic()
+    assert dispatcher.wait_need(generation, timeout=5) is True
+    assert time.monotonic() - start < 1.0
+    assert len(dispatcher.take_handbacks()[0][1]) == 2
+
+
+@mark.unit
+def test_bad_handback_gets_an_error_reply(records: List[logging.LogRecord]) -> None:
+    """A hand-back the server cannot read is refused with an error reply and a warning, never raised, and
+    nothing is queued."""
+    dispatcher = Dispatcher()
+    over = json.loads(handback_text(RELAY, held(MAX_HANDBACK_TASKS)))
+    over['tasks'].append({'id': str(uuid.uuid4()), 'schedule_time': STAMP})
+    for text in ('nope', None, json.dumps({'protocol': 2, 'client': RELAY, 'tasks': []}),
+                 json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'client': 'relay-a', 'tasks': []}),
+                 json.dumps({'protocol': TOPOLOGY_PROTOCOL, 'client': RELAY, 'tasks': [{'id': RELAY}]}),
+                 json.dumps(over), 'x' * (300 * 1024)):
+        reply = json.loads(dispatcher.handback(text))
+        assert reply['protocol'] == TOPOLOGY_PROTOCOL and reply['error'] == 'request' and reply['message']
+    assert dispatcher.take_handbacks() == []
+    refusals = [r for r in records if r.getMessage().startswith('Refused hand-back')]
+    assert len(refusals) == 7 and all(r.levelno == logging.WARNING for r in refusals)
+
+
+@mark.unit
+def test_handback_is_refused_in_memory(records: List[logging.LogRecord]) -> None:
+    """A server without a database has nothing to revert: the hand-back is refused, so the relay keeps its rows."""
+    dispatcher = Dispatcher(inbound=Queue())
+    generation = dispatcher.generation
+    reply = dispatcher.handback(handback_text(RELAY, held(2)))
+    assert json.loads(reply)['error'] == 'request'
+    with pytest.raises(ValueError, match='no database'):
+        read_handback_reply(reply)
+    assert dispatcher.take_handbacks() == [] and dispatcher.generation == generation
+    assert any('Refused hand-back from relay' in r.getMessage() and r.levelno == logging.WARNING for r in records)
+    configured = Dispatcher().configure(in_memory=True)
+    assert 'error' in json.loads(configured.handback(handback_text(RELAY, held(1))))

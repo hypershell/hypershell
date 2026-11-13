@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: fix/relay-retire
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -28,7 +28,7 @@ phases:
 - id: P2
   name: 'Server half of retire: the retired mark on the topology reply, the handback
     call, and the dispatch-matched requeue'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R4
@@ -160,7 +160,7 @@ commit.
 | `relay/upstream.py` | `log_drain()` | once per process (lock-guarded flag): WARNING `Drain requested - no more upstream requests`; called by the puller's gate and by `RelayThread.wait_site` |
 | `core/topology.py` | `Topology(version, entries, checks=0, retired=frozenset())`, `TopologyReply(version, zones, checks=0, retired=False)` | `retired` = upstream identities of superseded instances; never part of the version decision |
 | `core/topology.py` | `reply_text(topology, identities)`, `read_topology(text)` | adds top-level `"retired": true` only when some requested identity is retired; reads `data.get('retired') is True`; protocol stays 1 |
-| `core/topology.py` | `handback_text(identity, tasks)`, `read_handback(text) -> (identity, [(id, schedule_time)])`, `handback_reply(accepted)`, `read_handback_reply(text) -> int`, `MAX_HANDBACK_TASKS = 1000`, `MAX_HANDBACK_REQUEST` | `{"protocol":1,"client":…,"tasks":[{"id":…,"schedule_time":…}]}` → `{"protocol":1,"accepted":n}`; `ValueError` on anything malformed; errors answered with `error_text` |
+| `core/topology.py` | `handback_text(identity, tasks)`, `read_handback(text) -> (identity, [(id, schedule_time)])`, `handback_reply(accepted)`, `read_handback_reply(text) -> int`, `MAX_HANDBACK_TASKS = 1000`, `MAX_HANDBACK_REQUEST = 256 KiB`, `MAX_HANDBACK_FIELD = 64` | `{"protocol":1,"client":…,"tasks":[{"id":…,"schedule_time":…}]}` → `{"protocol":1,"accepted":n}`; identity and task ids must be UUIDs (returned canonical), schedule times ISO 8601 text (returned unchanged), no task twice; `ValueError` on anything malformed; errors answered with `error_text` |
 | `cluster/topology.py` | `retired_identities(records) -> FrozenSet[str]` | pure; every identity of every older instance of a relay-wide `Duplicate`; none for records with no instance key |
 | `core/dispatch.py` | `Dispatcher.handback(text) -> str`, `Dispatcher.take_handbacks() -> List[(identity, [(id, schedule_time)])]` | database-free; queues under the lock, `_signal_need()`; refuses in memory; `DISPATCH_EXPOSED = ('request', 'takes_submissions', 'topology', 'handback')` |
 | `data/model.py` | `Task.revert_handed_back(client_id, assignments) -> List[str]` | one conditional UPDATE per row on `id`, `schedule_time` as dispatched, `completion_time IS NULL`, `client_id IN (client_id, NULL)`; §1 contention rule; returns ids reverted |
@@ -213,16 +213,16 @@ because it is small, independent of retire, and stops the CI hang every later ph
 that instance's topology reply, accepts a hand-back of named assignments, and requeues exactly those
 on its scheduler's next pass; every reply without a retired identity is byte-identical to today's.
 
-- [ ] `core/topology.py`: `Topology.retired`, `TopologyReply.retired`, `reply_text`/`read_topology`
+- [x] `core/topology.py`: `Topology.retired`, `TopologyReply.retired`, `reply_text`/`read_topology`
       (PLAN §2.1); hand-back wire helpers and bounds (PLAN §2.2).
-- [ ] `cluster/topology.py`: `retired_identities`; `TopologyPublisher.check`/`publish` carry it on
+- [x] `cluster/topology.py`: `retired_identities`; `TopologyPublisher.check`/`publish` carry it on
       every check without a new version; INFO once per newly retired instance.
-- [ ] `core/dispatch.py` + `core/queue.py`: `Dispatcher.handback`, `take_handbacks`;
+- [x] `core/dispatch.py` + `core/queue.py`: `Dispatcher.handback`, `take_handbacks`;
       `DISPATCH_EXPOSED` gains `'handback'` (declared amendment of the pinned-surface test).
-- [ ] `data/model.py`: `Task.revert_handed_back` (PLAN §2.3; invariants §1 contention rule, modelled
+- [x] `data/model.py`: `Task.revert_handed_back` (PLAN §2.3; invariants §1 contention rule, modelled
       on `__apply_result`).
-- [ ] `server.py`: `Scheduler.revert_handed_back()` at the top of `load_bundle`.
-- [ ] Tests: `tests/test_topology_plan.py` (`retired_identities` table: one relay, two instances,
+- [x] `server.py`: `Scheduler.revert_handed_back()` at the top of `load_bundle`.
+- [x] Tests: `tests/test_topology_plan.py` (`retired_identities` table: one relay, two instances,
       three instances, mixed with no-instance records; reply with/without mark; an 8403388-shaped
       reader — the `read_topology` of `fb89670` copied into the test as a fixture function — reads a
       marked reply exactly as an unmarked one); `tests/test_topology_server.py` (publisher carries
@@ -230,6 +230,10 @@ on its scheduler's next pass; every reply without a retired identity is byte-ide
       assignments; skips a row re-dispatched, completed or cancelled; reverts an unconfirmed one;
       the requeued rows are staged for another client); `tests/test_dispatch.py` (validation,
       bounds, in-memory refusal, wake of the scheduler).
+- [x] (Added in build) `tests/test_contended_write.py`: the hand-back revert on PostgreSQL and
+      TimescaleDB, matched on the stamp as a relay received it, and under contention (lands after the
+      relay's own late confirmation; settled, with no warning, after a result or another client's
+      confirmation), per invariants §1.
 - **Verify:** see frontmatter (unit/integration suites above + the four `zone_drive.sh` founding
   modes, R9).
 - **Touches:** `src/hypershell/core/topology.py`, `cluster/topology.py`, `core/dispatch.py`,

@@ -16,7 +16,9 @@ and its reply are JSON text, and staged rows are carried as their ids and encode
 
 A server autoscaling with relay sites also publishes its site topology here, and a relay fetches its
 own entries with one call, ``topology``, also as JSON text. A server that publishes none answers
-with a null version.
+with a null version. A relay that reads itself retired there hands back the tasks it holds unstarted
+with one more call, ``handback``: the dispatcher queues the named assignments and wakes the
+scheduler, which reverts them on its next pass.
 """
 
 
@@ -35,7 +37,8 @@ from queue import Queue, Empty as QueueEmpty
 
 # Internal libs
 from hypershell.core.logging import Logger
-from hypershell.core.topology import Topology, read_request, reply_text, error_text
+from hypershell.core.topology import (Topology, read_request, reply_text, error_text, read_handback,
+                                      handback_reply)
 from hypershell.data.model import zone_id, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME
 
 # Public interface
@@ -216,6 +219,7 @@ class Dispatcher:
         self.demand: Dict[str, Tuple[str, int]] = {}
         self.unstaging: set = set()
         self.published: Optional[Topology] = None
+        self.handbacks: List[Tuple[str, List[Tuple[str, str]]]] = []
 
     def configure(self: Dispatcher, bundlesize: Optional[int] = None, queuesize: Optional[int] = None,
                   bundlemax: Optional[int] = None, in_memory: Optional[bool] = None) -> Dispatcher:
@@ -451,6 +455,37 @@ class Dispatcher:
         with self.lock:
             published = self.published
         return reply_text(published, identities)
+
+    def handback(self: Dispatcher, text: str) -> str:
+        """
+        Accept a retired relay's hand-back of the tasks it holds unstarted, for the scheduler to revert.
+
+        The request names the relay's identity and each task with the schedule time it was sent
+        under. It is queued as given and the scheduler is woken; the reply counts the tasks queued.
+        A request that cannot be read, or one sent to a server without a database, is refused with
+        an error reply; this method never raises for one.
+        """
+        try:
+            identity, tasks = read_handback(text)
+        except ValueError as error:
+            log.warning(f'Refused hand-back: {error}')
+            return error_text(str(error))
+        with self.lock:
+            in_memory = self.in_memory
+            if not in_memory and tasks:
+                self.handbacks.append((identity, tasks))
+                self._signal_need()
+        if in_memory:
+            log.warning(f'Refused hand-back from relay ({identity}): server has no database')
+            return error_text('server has no database')
+        log.debug(f'Accepted hand-back of {len(tasks)} tasks from relay ({identity})')
+        return handback_reply(len(tasks))
+
+    def take_handbacks(self: Dispatcher) -> List[Tuple[str, List[Tuple[str, str]]]]:
+        """Remove and return every queued hand-back as (identity, [(task id, schedule time), ...]), oldest first."""
+        with self.lock:
+            handbacks, self.handbacks = self.handbacks, []
+            return handbacks
 
     def forget(self: Dispatcher, client_id: str) -> None:
         """Drop a finished or evicted client's demand; a zone it was the last client of is marked for unstaging."""

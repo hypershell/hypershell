@@ -1024,6 +1024,76 @@ class Task(Entity):
         return len(reverted)
 
     @classmethod
+    @cache
+    def __handback_statements(cls: Type[Task]) -> Tuple[Any, Any]:
+        """The conditional revert of one handed-back assignment, and the SELECT that reads it again.
+
+        Both match the row by `id` and the `schedule_time` it was dispatched under. The revert also
+        requires no `completion_time` and a `client_id` that is the relay's identity or NULL; the
+        SELECT reads those two columns, so a revert that matched nothing can tell a settled row from
+        one missed under contention. Built once per process, with binds typed from the table.
+        """
+        table = cls.__table__
+        same_dispatch = (table.c.id == bindparam('r_id', type_=table.c.id.type),
+                         table.c.schedule_time == bindparam('r_schedule_time', type_=table.c.schedule_time.type))
+        held = or_(table.c.client_id == bindparam('r_client_id', type_=table.c.client_id.type),
+                   table.c.client_id.is_(None))
+        write = (
+            update(table)
+            .where(*same_dispatch, table.c.completion_time.is_(None), held)
+            .values({name: None for name in cls.revert_columns})
+        )
+        dispatched = select(table.c.completion_time, table.c.client_id).where(*same_dispatch)
+        return write, dispatched
+
+    @classmethod
+    def revert_handed_back(cls: Type[Task], client_id: str, assignments: List[Tuple[str, str]]) -> List[str]:
+        """Revert the assignments a relay hands back, each only while it is still that relay's; return the ids reverted.
+
+        Each assignment is a task id with the `schedule_time` it was dispatched under, as the text
+        the relay received, read as a returned result's is. Each is one conditional UPDATE matching
+        that `id` and `schedule_time`, no `completion_time`, and a `client_id` that is `client_id`
+        or NULL (a confirmation the relay never saw land), so the check and the write are one atomic
+        statement. A row that matched nothing is re-run only while a fresh read finds it still under
+        that dispatch, incomplete and held by that client or none, at most `CONTENDED_RERUNS` times,
+        then logged as a warning and left as it is. A row that no longer qualifies (completed,
+        cancelled, reverted and dispatched again, held by another client, or deleted) is skipped.
+        The whole call is one transaction.
+        """
+        write, dispatched = cls.__handback_statements()
+        attempts = 1 + CONTENDED_RERUNS
+        reverted = []
+        try:
+            for id, stamp in assignments:
+                schedule_time = from_json_type(stamp)
+                if not isinstance(schedule_time, datetime):
+                    log.debug(f'Ignored hand-back of task ({id}) - schedule time {stamp!r} is not a time')
+                    continue
+                params = {'r_id': id, 'r_schedule_time': schedule_time, 'r_client_id': client_id}
+                for attempt in range(1, attempts + 1):
+                    # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per row.
+                    if Session.execute(write, params).rowcount == 1:
+                        reverted.append(id)
+                        break
+                    found = Session.execute(dispatched, params).first()
+                    if found is None or found[0] is not None or found[1] not in (None, client_id):
+                        log.debug(f'Ignored hand-back of task ({id}) - no longer held under that dispatch')
+                        break
+                    if attempt < attempts:
+                        log.debug(f'Re-running contended hand-back revert for task ({id}) '
+                                  f'(attempt {attempt + 1} of {attempts})')
+                else:
+                    log.warning(f'Contended hand-back revert did not land for task ({id}) '
+                                f'after {attempts} attempts - task left with relay ({client_id})')
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        for id in reverted:
+            log.trace(f'Reverted handed-back task ({id})')
+        return reverted
+
+    @classmethod
     def revert(cls: Type[Task], id: str) -> None:
         """Revert single task by `id`."""
         cls.revert_all([id, ])

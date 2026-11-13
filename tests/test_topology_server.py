@@ -8,6 +8,9 @@ registry, and drops the record when the identity is evicted or finishes. The top
 from the zones' loads on a throwaway database and publishes a new version only when its entries
 change. Relays fetch their own entries from the dispatcher over a real queue connection; a server
 that publishes nothing answers with a null version, and an older server has no such method at all.
+A relay superseded at its site reads itself retired there, and hands back over the same connection
+the assignments it holds unstarted, which the scheduler requeues on its next pass while each is
+still that relay's.
 """
 
 
@@ -35,16 +38,19 @@ from cmdkit.app import exit_status
 import hypershell.server
 from tests.test_relay_roster import queues, deliver, EVICT  # noqa: fixture
 from tests.test_zone_model import task_db, add_tasks  # noqa: fixture
+from tests.test_topology_plan import base_read_topology
 from hypershell.core import queue as queue_module
 from hypershell.core.queue import QueueServer, QueueClient, QueueConfig
 from hypershell.core.dispatch import Dispatcher
 from hypershell.core.heartbeat import Heartbeat, ClientState
-from hypershell.core.topology import Bounds, Entry, Topology, SiteRegistry, request_text, read_topology
+from hypershell.core.topology import (Bounds, Entry, Topology, SiteRegistry, request_text, read_topology,
+                                      handback_text, read_handback_reply)
 from hypershell.core.uuid import uuid
+from hypershell.cluster import topology as topology_module
 from hypershell.cluster.topology import (TopologyPublisher, TopologyPublisherState, TopologyPublisherThread,
                                          AutoScalingServer, Distribution)
-from hypershell.data.model import Zone, zone_id
-from hypershell.server import HeartMonitor
+from hypershell.data.model import Task, Zone, zone_id, CANCEL_STATUS
+from hypershell.server import HeartMonitor, Scheduler, SchedulerState
 
 
 AUTH = 'topology-server-key-0123456789'
@@ -362,3 +368,175 @@ def test_old_server_has_no_topology_method(monkeypatch: MonkeyPatch) -> None:
         client.connect()
         assert not hasattr(client.dispatcher, 'topology')
         assert isinstance(client.dispatcher.takes_submissions(), bool)
+
+
+# --- Retirement: the mark rides on the topology -----------------------------------------------------------
+
+def relay_records(registry: SiteRegistry, name: str, instance: str, *zones: str, clients: int = 0) -> None:
+    """Record a relay instance `name` at site A serving `zones`, one identity per zone."""
+    for zone in zones:
+        registry.record(f'{name}-{zone}', site='A', zone=zone, bounds=BOUNDS, clients=clients, host=f'h-{name}',
+                        instance=instance)
+
+
+@mark.integration
+def test_publisher_retires_every_identity_of_a_superseded_relay(task_db: Engine, caplog) -> None:
+    """Once a newer relay registers at the site, the next check publishes every identity of the older one as
+    retired, logged once; only those identities' replies carry the mark, and later checks keep it under the
+    same version."""
+    registry = SiteRegistry()
+    relay_records(registry, 'a1', 'i1', 'cpu', 'highmem', clients=1)
+    dispatcher = Dispatcher()
+    machine = publisher(registry, dispatcher)
+    run_check(machine)
+    assert dispatcher.published.retired == frozenset()
+    assert 'retired' not in fetched(dispatcher, 'a1-cpu', 'a1-highmem')
+    relay_records(registry, 'a2', 'i2', 'cpu')
+    with caplog.at_level('INFO', logger='hypershell.cluster'):
+        assert run_check(machine) is TopologyPublisherState.PUBLISH
+        version = dispatcher.published.version
+        assert dispatcher.published.retired == frozenset({'a1-cpu', 'a1-highmem'})
+        assert run_check(machine) is TopologyPublisherState.WAIT
+        assert run_check(machine) is TopologyPublisherState.WAIT
+    assert dispatcher.published.version == version and dispatcher.published.checks == 4
+    assert dispatcher.published.retired == frozenset({'a1-cpu', 'a1-highmem'})
+    assert fetched(dispatcher, 'a1-cpu', 'a1-highmem')['retired'] is True
+    assert fetched(dispatcher, 'a1-highmem')['retired'] is True
+    assert 'retired' not in fetched(dispatcher, 'a2-cpu')
+    notes = [r.getMessage() for r in caplog.records if 'retired at site' in r.getMessage()]
+    assert notes == ['Relay i1 on h-a1 retired at site A (held by i2 on h-a2)']
+    assert all(r.levelname == 'INFO' for r in caplog.records if 'retired at site' in r.getMessage())
+
+
+@mark.integration
+def test_retired_identities_never_decide_the_version(task_db: Engine, monkeypatch: MonkeyPatch) -> None:
+    """With the plan unchanged, a change in the retired set alone makes no new version: it is carried on the
+    check's topology under the same version, as the count of checks is."""
+    registry = SiteRegistry()
+    relay_records(registry, 'a1', 'i1', 'cpu')
+    dispatcher = Dispatcher()
+    machine = publisher(registry, dispatcher)
+    run_check(machine)
+    first = dispatcher.published
+    monkeypatch.setattr(topology_module, 'retired_identities', lambda records: frozenset({'a1-cpu'}))
+    assert run_check(machine) is TopologyPublisherState.WAIT
+    assert dispatcher.published == Topology(first.version, first.entries, checks=2, retired=frozenset({'a1-cpu'}))
+    monkeypatch.setattr(topology_module, 'retired_identities', lambda records: frozenset())
+    assert run_check(machine) is TopologyPublisherState.WAIT
+    assert dispatcher.published == Topology(first.version, first.entries, checks=3)
+
+
+@mark.integration
+def test_a_relay_of_the_earlier_build_reads_a_marked_reply_over_the_wire() -> None:
+    """Over a real queue connection, the marked reply a superseded relay of the earlier build fetches reads, with
+    that build's reader, exactly as the reply without the mark; this build reads the mark."""
+    with QueueServer(loopback()) as server:
+        client = QueueClient(loopback(server.address[1]))
+        client.connect()
+        ask = request_text('A', ['a1-cpu'])
+        entries = {'a1-cpu': Entry('cpu', 0, 2), 'a2-cpu': Entry('cpu', 1, 0)}
+        server.dispatcher.publish(Topology('srv:2', entries, checks=5))
+        plain = client.dispatcher.topology(ask)
+        server.dispatcher.publish(Topology('srv:2', entries, checks=5, retired=frozenset({'a1-cpu'})))
+        marked = client.dispatcher.topology(ask)
+        assert marked != plain and json.loads(marked)['retired'] is True
+        assert base_read_topology(marked) == base_read_topology(plain)
+        assert read_topology(marked).retired and not read_topology(plain).retired
+        assert client.dispatcher.topology(request_text('A', ['a2-cpu'])) == json.dumps(
+            {'protocol': 1, 'version': 'srv:2', 'checks': 5, 'zones': {'cpu': {'target': 1, 'seen': 0}}})
+
+
+@mark.integration
+def test_server_of_the_earlier_build_has_no_handback_method(monkeypatch: MonkeyPatch) -> None:
+    """A server exposing the dispatcher surface of the build before hand-back hands a relay a proxy with no
+    `handback`, which the relay detects locally with no round trip; its replies never carry the mark."""
+    monkeypatch.setattr(queue_module, 'DISPATCH_EXPOSED', ('request', 'takes_submissions', 'topology'))
+    with QueueServer(loopback()) as server:
+        client = QueueClient(loopback(server.address[1]))
+        client.connect()
+        assert getattr(client.dispatcher, 'handback', None) is None
+        server.dispatcher.publish(Topology('srv:1', {'a1-cpu': Entry('cpu', 0, 0)}))
+        assert read_topology(client.dispatcher.topology(request_text('A', ['a1-cpu']))).retired is False
+
+
+# --- Retirement: the hand-back requeues ------------------------------------------------------------------
+
+RELAY = str(uuid())
+OTHER = str(uuid())
+NEWER = str(uuid())
+
+
+def work(dispatcher: Any, client: str, size: int) -> list:
+    """The task records a work request of `client` for `size` default-zone tasks receives."""
+    return json.loads(dispatcher.request(json.dumps({'protocol': 1, 'client': client, 'host': 'relay-host',
+                                                     'zone': None, 'size': size, 'wait': 0})))['tasks']
+
+
+def row(task_id: str) -> Task:
+    """The task's row, read fresh."""
+    return Task.query(caching=False).filter(Task.id == task_id).one()
+
+
+@mark.integration
+def test_handback_over_a_queue_server_requeues_only_the_relays_assignments(task_db: Engine, caplog) -> None:
+    """A relay hands back seven assignments over its own connection. The scheduler's next pass reverts the
+    three still its own (two confirmed to it, one whose confirmation never landed) and skips one completed,
+    one cancelled, one reverted and dispatched again, and one held by another client; the three are staged
+    again and go to the next client that asks."""
+    ids = add_tasks(7)
+    with QueueServer(loopback()) as server:
+        server.dispatcher.configure(bundlesize=10)
+        scheduler = Scheduler(queue=server, bundlesize=10, forever_mode=True)
+        assert scheduler.start() is SchedulerState.LOAD
+        assert scheduler.load_bundle() is SchedulerState.PACK
+        scheduler.pack_bundle()
+        relay = QueueClient(loopback(server.address[1]))
+        relay.connect()
+        stamps = {record['id']: record['schedule_time'] for record in work(relay.dispatcher, RELAY, 7)}
+        assert set(stamps) == set(ids)
+        Task.confirm_all(ids[:5], RELAY, 'relay-host')
+        Task.confirm_all(ids[6:], OTHER, 'other-host')
+        Task.update(ids[1], completion_time=datetime.now().astimezone(), exit_status=0)
+        Task.cancel(ids[2])
+        Task.revert(ids[3])
+        again, = Task.next(limit=1)
+        assert again.id == ids[3]
+        Task.confirm_all([ids[3]], OTHER, 'other-host')
+        redispatched = row(ids[3]).schedule_time
+
+        reply = relay.dispatcher.handback(handback_text(RELAY, [(task_id, stamps[task_id]) for task_id in ids]))
+        assert read_handback_reply(reply) == 7
+        assert row(ids[0]).schedule_time is not None
+        with caplog.at_level('INFO', logger='hypershell.server'):
+            assert scheduler.load_bundle() is SchedulerState.PACK
+        scheduler.pack_bundle()
+        requeued = {ids[0], ids[4], ids[5]}
+        assert [r.getMessage() for r in caplog.records if r.getMessage().startswith('Requeued')] == [
+            f'Requeued 3 tasks handed back by relay ({RELAY}; 4 already settled)']
+        delivered = work(relay.dispatcher, NEWER, 10)
+        assert {record['id'] for record in delivered} == requeued
+        assert all(record['schedule_time'] != stamps[record['id']] for record in delivered)
+
+    assert row(ids[1]).exit_status == 0 and row(ids[1]).completion_time is not None
+    assert row(ids[2]).exit_status == CANCEL_STATUS
+    assert (row(ids[3]).schedule_time, row(ids[3]).client_id) == (redispatched, OTHER)
+    assert row(ids[6]).client_id == OTHER and row(ids[6]).schedule_time is not None
+    assert all(row(task_id).client_id is None for task_id in requeued)
+
+
+@mark.integration
+def test_handback_revert_matches_the_dispatch_exactly(task_db: Engine) -> None:
+    """The revert writes only a row still under the schedule time it was handed back with, incomplete, and held
+    by that relay or no client; it reports the ids it reverted, and a stamp that is not a time reverts nothing."""
+    ids = add_tasks(4)
+    stamps = {task.id: task.to_json()['schedule_time'] for task in Task.next(limit=4)}
+    Task.confirm_all(ids[:3], RELAY, 'relay-host')
+    later = datetime.now().astimezone().isoformat(sep=' ')
+    assert Task.revert_handed_back(RELAY, [(ids[0], later)]) == []
+    assert Task.revert_handed_back(OTHER, [(ids[1], stamps[ids[1]])]) == []
+    assert Task.revert_handed_back(RELAY, [(ids[2], 'not-a-time')]) == []
+    assert all(row(task_id).schedule_time is not None for task_id in ids)
+    assert Task.revert_handed_back(RELAY, [(task_id, stamps[task_id]) for task_id in ids]) == ids
+    assert all(row(task_id).schedule_time is None and row(task_id).client_id is None for task_id in ids)
+    assert Task.revert_handed_back(RELAY, [(task_id, stamps[task_id]) for task_id in ids]) == []
+    assert Task.revert_handed_back(RELAY, [(str(uuid()), stamps[ids[0]])]) == []
