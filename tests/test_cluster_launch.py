@@ -72,11 +72,14 @@ STAND_IN_HEAD: Final[str] = """\
 import os, sys, json, uuid
 RECORDS = {records!r}
 def record(role, **fields):
+    # Written under a .part name and renamed into place, so a test polling for *.json never
+    # reads a record that is still being written.
     path = os.path.join(RECORDS, f'{{uuid.uuid4().hex}}.json')
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
+    with os.fdopen(os.open(path + '.part', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
         json.dump({{'role': role, 'name': os.path.basename(sys.argv[0]), 'argv': sys.argv,
                     'key': os.environ.get({auth_env!r}), 'ompi': os.environ.get({ompi_env!r}),
                     'level': os.environ.get('HYPERSHELL_LOGGING_LEVEL'), **fields}}, stream)
+    os.rename(path + '.part', path)
 """
 
 # A launcher that passes its environment through, as `srun` and `mpirun` do by default.
