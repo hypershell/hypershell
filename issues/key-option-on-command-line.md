@@ -93,9 +93,8 @@ For 2.9:
   Its help text changes with this.
 - Open question for `/hs-plan`: the Python API's `auth=` parameters are not a command line and
   are not in scope; say so in the GOAL so nobody removes them.
-- Related: [`server-auth-variant-collision.md`](server-auth-variant-collision.md). The `auth_env`
-  and `auth_eval` forms are the other way to keep a key out of a file, and they are broken today.
-  Removing `-k` makes that seed more urgent.
+- Related: `spec/server-auth-variant-collision/` (#97). The `auth_env` and `auth_eval` forms are
+  the other way to keep a key out of a file; that cycle made them work in a configuration file.
 - Related: [`env-config-key-mapping.md`](env-config-key-mapping.md), on which configuration keys
   an environment variable can reach.
 - Related: `spec/authkey-handling-hardening/` and `spec/launch-hint-followups/` (#80, #81), where

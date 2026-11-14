@@ -361,18 +361,6 @@ misread while `autoscale.period = "5m"` works.
 *Horizon: near-term, small · Depends on: `duration-units-remaining` (landed, #106) · Refs: its GOAL's Non-goals*
 **Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: unshaped*
 
-## `auth_env` and `auth_eval` in a config file break every command
-
-`docs/security.rst` recommends `auth_eval` / `auth_env` to keep the authkey out of the config file,
-but the built-in defaults already define `server.auth` (`src/hypershell/core/config.py:134`), and
-cmdkit refuses a key that has more than one variant. With either suffix in a config file, every
-`hs` command, `hs config get` included, dies at import with `'auth' has more than one variant`.
-A variant should take precedence over the default, and an unset variable should be an error, never
-a fallback to the default key. Pre-existing since 2.8.0.
-
-*Horizon: near-term, small · Depends on: — · Refs: `docs/security.rst`*
-**Seed:** [`issues/server-auth-variant-collision.md`](issues/server-auth-variant-collision.md) · *status: adopted:server-auth-variant-collision*
-
 ## The queue key can still be given on a command line
 
 Since 2.9.0a5 and 2.8.5, `hs cluster` hands its key to the clients it launches in their
@@ -409,8 +397,8 @@ cmdkit). A key with an underscore of its own is out of reach: `server.tls.min_ve
 crashes `hs server`. `[export]` values reach tasks re-stringified (`007` becomes `7`). Every documented
 key should be settable, with the text given. Pre-existing since 2.7.0.
 
-*Horizon: near-term · Depends on: — · Refs: the `auth_env` collision above (shape together); relay
-(its zone tables add more keys)*
+*Horizon: near-term · Depends on: — · Refs: `server-auth-variant-collision` (landed, #97: the file
+form of `auth_env`; the environment form stays here); relay (its zone tables add more keys)*
 **Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: unshaped*
 
 ## `hs cluster` waits forever when every launched client fails

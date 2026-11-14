@@ -133,9 +133,9 @@ An `[export]` variable reaches a task with the name and value the user wrote.
 
 ## Notes
 
-- Related: [`server-auth-variant-collision.md`](server-auth-variant-collision.md) — the file form of
-  `auth_env` / `auth_eval` breaks every command. That seed lists the environment form as untested;
-  it does not collide, it nests (above), so R4 here and R1 there should be shaped together.
+- Related: `spec/server-auth-variant-collision/` (#97) made the file form of `auth_env` /
+  `auth_eval` work for `server.auth` and `relay.upstream.auth`. Its GOAL leaves the environment form
+  to this seed: it does not collide, it nests (above), and R4 here covers it.
   [`templating-and-remote-env-contract.md`](templating-and-remote-env-contract.md) R3 quotes the
   `HYPERSHELL_*` values that `--ssh --env` forwards; on the remote host they go through this same
   mapping. Relay's `[relay.zone.*]` tables (#82) add the per-zone tables
