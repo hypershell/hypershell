@@ -206,3 +206,23 @@ in their `Application` classes).
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-13)
+
+Foreman, gate judge under the maintainer's mandate. Approved with one extension.
+
+1. The refusing `argparse.Action`, with `-k`/`--auth` registered only to refuse, is approved.
+2. `cluster/launch.py` redaction stays as it is.
+3. **Extension:** `hs cluster` and `hs relay` also register the same refusing action for `-k` and
+   `--auth`, so a user carrying the habit to those commands gets the refusal, not an echo of the key
+   (GOAL Outcome, "any command"). Check first that neither command uses `-k` or `--auth` for
+   anything else. If one does, leave that command alone and record why. Ambiguous-prefix echoes
+   (`--au=K`) are out of scope; the foreman seeds the general fix (an unknown or ambiguous option's
+   value echoed by the parser) separately.
+4. `hs submit cmd -k X` without `--` refusing is accepted as R1 requires. The squash note says so.
+5. `export HYPERSHELL_SERVER_AUTH=…` or `server.auth` in a config file, in examples, is approved.
+6. `tests/test_key_option.py` passing a dummy key to prove the refusal is allowed by R8's
+   whole-repo check.
+
+Build on a supported Python: the worktree's `.venv` is CPython 3.15; re-sync it with
+`uv sync --python 3.14` before running verify.
