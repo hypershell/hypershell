@@ -211,26 +211,26 @@ those named below as non-goals.
   (resolved 2026-11-13).
 - **Q:** Appetite? — **A:** `big`: three seeds each `small` on their own, two shared fixes in
   high-blast-radius files that change every server, and an investigation; the seeds' own
-  frontmatter is left as written (shaper's proposal, 2026-11-13; **for sign-off at the GOAL gate**).
+  frontmatter is left as written (shaper's proposal, 2026-11-13; signed off by the foreman at the GOAL gate).
 - **Q:** The eviction-revert fix: relay-local only, or every server? — **A:** Every server, as one
   conditional revert: a row is reverted only while it is still the evicted client's in-flight work,
   in the statement that writes it. That is R1 for a relay and the fix
   `issues/orphan-revert-loses-result.md` asks for on a primary server, and its replay test is part
   of R9. A relay-local variant would leave the primary server's lost-result window open while
   forking the eviction path. The relay review's build probe found the unit suite unchanged with the
-  shared change. **Proposed:** mark `orphan-revert-loses-result` `adopted:relay-hardening` too at
+  shared change. `orphan-revert-loses-result` is marked `adopted:relay-hardening` too, at
   the gate, as `writeback-scoped-conditional` and `relay-retire` did for a seed the GOAL subsumes;
-  this commit leaves it `unshaped` (shaper's proposal, 2026-11-13; **for sign-off at the GOAL gate**).
+  the GOAL-gate commit marks it (shaper's proposal, 2026-11-13; signed off by the foreman at the GOAL gate).
 - **Q:** The dispatch stamp: every server, or only the relay-visible half? — **A:** Every server,
   and both the gone row and the contended row (R2), because `Task.next` is one shared function, a
   relay-only branch would fork the dispatch path, and any new per-row stamp must follow invariant §1
   on a 0-row match anyway. The `retried` mark and the rest of the contended-write seed are left to
-  the next cycle (Non-goals) (shaper's proposal, 2026-11-13; **for sign-off at the GOAL gate**).
+  the next cycle (Non-goals) (shaper's proposal, 2026-11-13; signed off by the foreman at the GOAL gate).
 - **Q:** TLS mismatch: fail fast, or a hint in the retry warning? — **A:** Fail fast at the first
   connection, in both directions (R4), as the seed's outcome asks ("says so and exits, as a client
   does"). If `hs-plan` finds the `--no-tls`-relay-against-TLS-upstream direction cannot be told
   from a stalled upstream within one deadline, it returns to the gate rather than weaken R4
-  (shaper's proposal, 2026-11-13; **for sign-off at the GOAL gate**).
+  (shaper's proposal, 2026-11-13; signed off by the foreman at the GOAL gate).
 - **Q:** Which rule keeps an idle zone asking (C5-1)? — **A:** Left to `hs-plan`: ending an idle
   zone only after a site period with no client, one more request per idle zone at the finish, or a
   shutdown reply that says whether anything is staged anywhere; R5 and R10 bind whichever is chosen
@@ -238,16 +238,24 @@ those named below as non-goals.
 - **Q:** Clock skew: age by the server's clock, or warn? — **A:** Age by the server's own receive
   time, for every client (R7). It removes the dependency rather than surfacing it, needs no wire
   change, and only ever spares a client that is still beating. It changes eviction for every client,
-  which R10 states (shaper's proposal, 2026-11-13; **for sign-off at the GOAL gate**).
+  which R10 states (shaper's proposal, 2026-11-13; signed off by the foreman at the GOAL gate).
 - **Q:** What bounds the tail investigation (R8)? — **A:** An investigation with a bounded outcome,
   not a guaranteed fix. Budget: at most 10 runs of `spec/relay/drive/relay_throughput.py` (2000 ×
   0.2 s, 32 executors) on the laptop with `HYPERSHELL_LOGGING_LEVEL=DEBUG` and scratch kept; if none
   shows a tail over 5 s, one cluster job of at most 10 such runs on Linux, where it was seen, and no
   more. Outcome (a) applies only if the fix fits this cycle's appetite; a cause whose fix does not
   is recorded under (b) and seeded. Either outcome closes R8; the release does not wait on a fix
-  (shaper's proposal, 2026-11-13; **for sign-off at the GOAL gate**).
+  (shaper's proposal, 2026-11-13; signed off by the foreman at the GOAL gate).
 - **Q:** The man page synopsis? — **A:** Already fixed on `develop` by #89; dropped from this
   cycle (shaping, 2026-11-13, verified in `docs/manual.rst` and `share/man/man1/hs.1` at `2ffb5cc`).
+
+**Ruled at the GOAL gate** (2026-11-13): approved as written by the foreman, gate judge under the
+maintainer's mandate. Confirmed: appetite big; the shared conditional eviction revert for every
+server, with `orphan-revert-loses-result` adopted by this cycle; the dispatch stamp for every
+server, both the gone and the contended row; TLS mismatch fails fast in both directions (a
+direction that cannot be told apart within one deadline comes back to the gate); eviction ages by
+the server's receive time for every client; and the R8 budget, whose one conditional cluster job the
+foreman submits. The contract is locked; `hs-plan` designs against it.
 
 ## Evidence plan
 

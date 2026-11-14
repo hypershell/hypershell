@@ -299,7 +299,7 @@ with no sign to the operator. Making the revert conditional on the row still bei
 it.
 
 *Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same shape); resilience*
-**Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
+**Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md) · *status: adopted:relay-hardening*
 
 ## Contended Scheduler and `hs update` writes fail on a TimescaleDB hypertable
 
