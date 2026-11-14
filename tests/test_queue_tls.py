@@ -822,6 +822,16 @@ def test_burst_of_clients_with_default_deadline(server_tls) -> None:
 
 # Handshake deadline configuration and logging
 
+LONG = '1' + '0' * 400  # An integer far too large to wait for: TOML takes one
+LONGEST = '9' * 5000  # More digits than Python converts to an integer
+
+
+def short_id(value) -> str:
+    """A test id that names a very long number by its length."""
+    text = str(value) if not isinstance(value, int) or value < 10 ** 20 else 'int-' + str(len(str(value)))
+    return text if len(text) <= 20 else f'{type(value).__name__}-{len(text)}'
+
+
 @mark.unit
 @mark.parametrize('value, seconds', [(30, 30), ('30', 30), ('30s', 30), ('1m', 60), (2.5, 3), ('1:30', 90)])
 def test_handshake_seconds_accepts_duration_forms(value, seconds: int) -> None:
@@ -859,7 +869,7 @@ def test_from_namespace_keeps_the_configured_value() -> None:
 
 
 @mark.unit
-@mark.parametrize('value', [0, -5, 'abc'])
+@mark.parametrize('value', [0, -5, 'abc', '30d', LONG], ids=short_id)
 def test_tls_server_refuses_bad_handshake_before_binding(server_tls, value) -> None:
     """A TLS queue server with a bad deadline does not start and leaves its port free."""
     with socket.socket() as probe:
@@ -871,6 +881,26 @@ def test_tls_server_refuses_bad_handshake_before_binding(server_tls, value) -> N
     assert HANDSHAKE_KEY in str(exc_info.value) and TIME_FORMS in str(exc_info.value)
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', port))  # Nothing was left listening there
+
+
+@mark.unit
+@mark.parametrize('value', ['30d', 4294968, '4294968', '49d17h2m48s', 86401, '1d1s', LONG, int(LONG), LONGEST],
+                   ids=short_id)
+def test_handshake_seconds_refuses_more_than_a_day(value) -> None:
+    """A deadline above one day is refused, naming the key, the limit and the accepted forms; so is an
+    integer too large to represent, and the message does not repeat it in full."""
+    with raises(TLSError) as exc_info:
+        handshake_seconds(value)
+    message = str(exc_info.value)
+    assert message.startswith(HANDSHAKE_KEY) and TIME_FORMS in message
+    assert len(message) < len(TIME_FORMS) + 200, message[:300]
+
+
+@mark.unit
+@mark.parametrize('value', ['1d', '24h', 86400, '86400', '23h59m59.5s', '1-00'])
+def test_handshake_seconds_accepts_one_day(value) -> None:
+    """Exactly one day is the most accepted, in any duration form."""
+    assert handshake_seconds(value) == 86400
 
 
 @mark.unit
@@ -911,7 +941,7 @@ def test_commands_carry_handshake_onto_tls(app: str, monkeypatch, tmp_path: Path
 
 @mark.unit
 @mark.parametrize('app', ['server', 'cluster', 'relay'])
-@mark.parametrize('value', [0, -5, 'abc'])
+@mark.parametrize('value', [0, -5, 'abc', '30d'])
 def test_commands_refuse_bad_handshake(app: str, value, monkeypatch) -> None:
     """hs server, hs cluster and hs relay refuse a bad deadline as an argument error naming the key."""
     from cmdkit.cli import ArgumentError
@@ -919,6 +949,7 @@ def test_commands_refuse_bad_handshake(app: str, value, monkeypatch) -> None:
     from hypershell.cluster import ClusterApp
     from hypershell.relay import RelayApp
     monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', value)
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'enabled', True)
     with raises(ArgumentError) as exc_info:
         if app == 'relay':
             RelayApp.from_cmdline([]).check_args()
@@ -929,14 +960,27 @@ def test_commands_refuse_bad_handshake(app: str, value, monkeypatch) -> None:
 
 @mark.unit
 @mark.parametrize('app', ['server', 'cluster'])
-def test_commands_without_tls_ignore_handshake(app: str, monkeypatch) -> None:
-    """With --no-tls, hs server and hs cluster never read the deadline."""
+@mark.parametrize('plain', ['--no-tls', 'enabled = false'])
+@mark.parametrize('value', ['abc', '30d'])
+def test_commands_without_tls_ignore_handshake(app: str, plain: str, value: str, monkeypatch) -> None:
+    """A server made plain by --no-tls or by server.tls.enabled = false never reads the deadline, so
+    hs server and hs cluster start with any value."""
     from hypershell.server import ServerApp
     from hypershell.cluster import ClusterApp
-    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', 'abc')
-    command = (ServerApp if app == 'server' else ClusterApp).from_cmdline(['--no-tls'])
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', value)
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'enabled', plain == '--no-tls')
+    command = (ServerApp if app == 'server' else ClusterApp).from_cmdline(['--no-tls'] if plain == '--no-tls' else [])
     command.enable_tls()
     assert command.tls is None
+
+
+@mark.unit
+def test_relay_without_tls_ignores_handshake(monkeypatch) -> None:
+    """A relay whose site-local server is plain (server.tls.enabled = false) never reads the deadline."""
+    from hypershell.relay import RelayApp
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', 'abc')
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'enabled', False)
+    RelayApp.from_cmdline([]).check_args()
 
 
 MARKER = 'handshake-peer-marker.example'

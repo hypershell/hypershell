@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/listener-handshake-deadline
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -30,7 +30,7 @@ phases:
     test -s spec/listener-handshake-deadline/evidence/red-develop.txt && test -s spec/listener-handshake-deadline/evidence/red-review-1.txt
 - id: P2
   name: server.tls.handshake refusal at start, and deadline logging
-  status: in_progress
+  status: done
   satisfies:
   - R4
   - R5
@@ -185,6 +185,22 @@ deadline closes are logged per R5.
       naming the key, and no record contains the bytes the slow peer sent; a handshake that fails
       otherwise (peer sends non-TLS bytes and closes) logs develop's `Queue server dropped a
       connection` at DEBUG and no WARNING.
+- [x] *Review cycle 1, ruling 1 (F1):* `handshake_seconds` refuses a value above one day
+      (`MAX_HANDSHAKE = 86400`) with the same `TLSError` as other bad values, naming the key, the
+      limit and the forms; a number with more digits than Python converts is refused the same way,
+      and a long value is cut short in the message. `HANDSHAKE_TIMEOUT_CEILING` is gone from
+      `core/queue.py`: a day is well inside the `ssl` module's longest wait. Tests: `30d`, `4294968`
+      (int and string), `49d17h2m48s`, `86401`, `1d1s`, a 401-digit integer (string and int) and a
+      5000-digit string refused; `1d`, `24h`, `86400`, `1-00` and `23h59m59.5s` accepted as 86400; a
+      TLS `QueueServer` and all three commands refuse `30d`.
+- [x] *Review cycle 1, ruling 2 (F2):* `ServerApp.enable_tls` and `ClusterApp.enable_tls` check the key
+      only when `server.tls.enabled` is true as well as no `--no-tls`, the switch `from_namespace`
+      reads, as `RelayApp.check_handshake` does. Tests: both commands, both ways of turning TLS off,
+      with `abc` and `30d`; the relay with `enabled = false`.
+- [x] *Amended in remediation:* the `refuse` drive also refuses `30d`, `4294968` and a 401-digit
+      integer, and starts `hs server` and `hs cluster` made plain by `--no-tls` or by
+      `HYPERSHELL_SERVER_TLS_ENABLED=false` with `abc` and `30d` (each task file its own, so a site
+      database takes it as new). Red against f75d5e6's `src` in `evidence/red-review-1.txt`.
 - **Verify:** the P2 `verify:` — the suites, and the `refuse` drive (`hs server`, `hs cluster`,
   `hs relay` each exit non-zero naming `server.tls.handshake` for `0`, `-5`, `abc`).
 - **Touches:** `src/hypershell/core/queue.py`, `src/hypershell/server.py`,

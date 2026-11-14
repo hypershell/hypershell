@@ -576,11 +576,6 @@ def _cut(conn) -> None:
         pass
 
 
-# Largest socket timeout a handshake is given at once (about 31 years); a longer configured deadline
-# is held to it, since some platforms refuse a timeout much past it
-HANDSHAKE_TIMEOUT_CEILING: Final[float] = 1e9
-
-
 def _peer_text(peer: Optional[Tuple[str, int]]) -> str:
     """A peer's address as ``host:port`` for a log line, or 'unknown peer'."""
     return f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
@@ -590,8 +585,9 @@ def _complete_handshake(ssl_sock: ssl.SSLSocket, deadline_at: float) -> None:
     """Run the server side of the TLS handshake on `ssl_sock`, ending by `deadline_at` (monotonic).
 
     The socket timeout is set to what is left before `deadline_at`, and one handshake call measures
-    its timeout once, from its start, so data the peer sends does not extend it. The socket is
-    blocking again afterwards.
+    its timeout once, from its start, so data the peer sends does not extend it. The deadline is at
+    most a day (:func:`~hypershell.core.tls.handshake_seconds`), well inside the longest wait the
+    ``ssl`` module keeps. The socket is blocking again afterwards.
 
     Raises:
         TimeoutError: the deadline passed first (``errno`` is None).
@@ -599,7 +595,7 @@ def _complete_handshake(ssl_sock: ssl.SSLSocket, deadline_at: float) -> None:
     remaining = deadline_at - time.monotonic()
     if remaining <= 0:
         raise TimeoutError('TLS handshake deadline passed')
-    ssl_sock.settimeout(min(remaining, HANDSHAKE_TIMEOUT_CEILING))
+    ssl_sock.settimeout(remaining)
     ssl_sock.do_handshake()
     ssl_sock.settimeout(None)
 

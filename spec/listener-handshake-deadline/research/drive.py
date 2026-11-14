@@ -16,7 +16,10 @@ Scenarios (each prints PASS or FAIL lines and exits non-zero on any FAIL):
                                                hs server with a task file; a client finishes the tasks
     cluster  [--handshake SEC]                 hs cluster (local), clients start 3 s after the server
     relay    [--handshake SEC]                 hs server upstream, hs relay with its site client delayed 3 s
-    refuse                                     hs server, hs cluster and hs relay refuse handshake = 0, -5, abc
+    refuse                                     hs server, hs cluster and hs relay refuse handshake = 0, -5, abc,
+                                               30d, 4294968 and a 401-digit integer; hs server and hs cluster
+                                               made plain (--no-tls, or server.tls.enabled = false) start
+                                               with abc or 30d
 
 Without --handshake the default deadline applies and the held connection must still be open when the
 work is done (the server served others while it was pending); a close when the server stops,
@@ -130,10 +133,11 @@ class Held(threading.Thread):
             pass
 
 
-def taskfile() -> str:
-    path = os.path.join(os.getcwd(), 'tasks.in')
+def taskfile(tag: str = '') -> str:
+    """A task file; a `tag` gives it its own name and content, so a site database takes it as new."""
+    path = os.path.join(os.getcwd(), f'tasks{tag}.in')
     with open(path, 'w') as stream:
-        stream.writelines(f'echo {n}\n' for n in range(TASKS))
+        stream.writelines(f'echo {n} {tag}\n' for n in range(TASKS))
     return path
 
 
@@ -257,13 +261,22 @@ def scenario_relay(args) -> None:
     wait(relay, 10)
 
 
+REFUSED = ('0', '-5', 'abc', '30d', '4294968', '1' + '0' * 400)
+
+
+def shown(value: str) -> str:
+    return repr(value) if len(value) <= 20 else f'<{len(value)}-digit integer>'
+
+
 def scenario_refuse(args) -> None:
+    """Each TLS server command refuses a bad value naming the key; a server made plain, by --no-tls or by
+    server.tls.enabled = false, starts whatever the value."""
     hs = shutil.which('hs')
-    for value in ('0', '-5', 'abc'):
+    for n, value in enumerate(REFUSED):
         env = {'HYPERSHELL_SERVER_AUTH': KEY, 'HYPERSHELL_SERVER_TLS_HANDSHAKE': value,
                'HYPERSHELL_RELAY_UPSTREAM_AUTH': KEY}
-        for argv in ([hs, 'server', taskfile(), '-H', '127.0.0.1', '-p', str(free_port())],
-                     [hs, 'cluster', taskfile(), '-H', '127.0.0.1', '-p', str(free_port())],
+        for argv in ([hs, 'server', taskfile(f'-refuse-{n}-server'), '-H', '127.0.0.1', '-p', str(free_port())],
+                     [hs, 'cluster', taskfile(f'-refuse-{n}-cluster'), '-H', '127.0.0.1', '-p', str(free_port())],
                      [hs, 'relay', '-H', '127.0.0.1', '-p', str(free_port()), '--bind', '127.0.0.1',
                       '--port', str(free_port()), '--database', os.path.join(os.getcwd(), f'refuse-{value}.db')]):
             with tempfile.TemporaryFile('w+') as output:
@@ -275,9 +288,31 @@ def scenario_refuse(args) -> None:
                 output.seek(0)
                 text = output.read()
             report(code not in (None, 0) and 'server.tls.handshake' in text,
-                   f'{argv[1]} refuses handshake = {value!r} naming server.tls.handshake (exit {code})')
+                   f'{argv[1]} refuses handshake = {shown(value)} naming server.tls.handshake (exit {code})')
             if code not in (None, 0) and 'server.tls.handshake' not in text:
                 print(text[-600:], flush=True)
+    for value in ('abc', '30d'):
+        for how in ('--no-tls', 'enabled = false'):
+            env = {'HYPERSHELL_SERVER_AUTH': KEY, 'HYPERSHELL_SERVER_TLS_HANDSHAKE': value}
+            extra = ['--no-tls'] if how == '--no-tls' else []
+            if how != '--no-tls':
+                env['HYPERSHELL_SERVER_TLS_ENABLED'] = 'false'
+            tag = f'-{value}-{"no-tls" if extra else "disabled"}'
+            for argv in ([hs, 'server', taskfile(f'{tag}-server'), '-H', '127.0.0.1', '-p', str(free_port()), *extra],
+                         [hs, 'cluster', taskfile(f'{tag}-cluster'), '-H', '127.0.0.1', '-p', str(free_port()), *extra]):
+                with tempfile.TemporaryFile('w+') as output:
+                    proc = start(argv, env=env, stdout=output, stderr=subprocess.STDOUT)
+                    code = wait(proc, 5)
+                    if code is None:  # Started and still serving: that is the pass; stop it now
+                        proc.terminate()
+                        wait(proc, 10)
+                    output.seek(0)
+                    text = output.read()
+                report(code in (None, 0) and 'server.tls.handshake' not in text,
+                       f'{argv[1]} made plain by {how} starts with handshake = {value!r} '
+                       f'({"still serving after 5 s" if code is None else f"exit {code}"})')
+                if code not in (None, 0):
+                    print(text[-600:], flush=True)
 
 
 def main() -> int:

@@ -1882,12 +1882,17 @@ class ServerApp(Application):
             return False
 
     def enable_tls(self: ServerApp) -> None:
-        """Configure TLS if enabled; refuse a handshake deadline that is not valid before anything else."""
+        """Configure TLS if enabled; refuse a handshake deadline that is not valid before anything else.
+
+        The server uses TLS unless ``--no-tls`` is given or ``server.tls.enabled`` is false (the switch
+        :func:`~hypershell.core.tls.from_namespace` reads); a plain server never reads the deadline.
+        """
         if self.tls_enabled:
-            try:
-                handshake_seconds(config.server.tls.get('handshake', DEFAULT_HANDSHAKE))
-            except TLSError as error:
-                raise ArgumentError(str(error)) from error
+            if bool(config.server.tls.get('enabled', False)):
+                try:
+                    handshake_seconds(config.server.tls.get('handshake', DEFAULT_HANDSHAKE))
+                except TLSError as error:
+                    raise ArgumentError(str(error)) from error
             self.tls = tls_from_namespace({
                 **config.server.tls,
                 'cert': self.tls_cert,
