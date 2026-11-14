@@ -326,18 +326,19 @@ misread while `autoscale.period = "5m"` works.
 *Horizon: near-term, small · Depends on: `duration-units-remaining` (landed, #106) · Refs: its GOAL's Non-goals*
 **Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: unshaped*
 
-## The queue key can still be given on a command line
+## On the 2.8 line, the queue key can still be given on a command line without a warning
 
-Since 2.9.0a5 and 2.8.5, `hs cluster` hands its key to the clients it launches in their
-environment, never on a command line, where a process listing shows it to every user on the host.
-The `-k`/`--auth` option of `hs client`, `hs server` and `hs submit -q` still puts it there, on the
-long-lived processes a person starts by hand, and the help, man pages, completions and tutorials
-all show it. Nothing needs the option: each command already reads `HYPERSHELL_SERVER_AUTH` or
-`server.auth`. On 2.8 the option should warn; on 2.9 it should be refused. Pre-existing in
-`develop` and on the 2.8 line.
+Since #104, 2.9 refuses `-k`/`--auth` on `hs client`, `hs server` and `hs submit -q`, and its docs
+no longer show it. The 2.8 line (2.8.7) still takes the option silently, so a long-lived server or
+client started by hand shows its key to every user on the host, and the 2.8 help, man pages,
+completions and docs still offer it. This is the 2.8.x backport: keep the option there for
+compatibility, but warn each time, without the key, naming `HYPERSHELL_SERVER_AUTH` and
+`server.auth`, and mark it deprecated in the 2.8 docs. Whether and when to ship it is the
+maintainer's call. Pre-existing on the 2.8 line.
 
-*Horizon: near-term, small · Depends on: — · Refs: the key hand-off hardening (#80, #81)*
-**Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: adopted:key-option-refused*
+*Horizon: maintainer's call (a 2.8.x hotfix against `master`) · Depends on: — · Refs:
+`key-option-refused` (landed, #104: the 2.9 half); the key hand-off hardening (#80, #81)*
+**Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: unshaped*
 
 ## A mistyped option can print its value, a key included, to stderr and the log
 
@@ -347,8 +348,8 @@ option reaches stderr and any log file. `-k`/`--auth` itself is refused without 
 `key-option-refused`; other forms, such as `hs server --au=KEY`, still echo. The general fix belongs
 in cmdkit's argument-error path.
 
-*Horizon: near-term, small · Depends on: `key-option-refused` · Refs: its plan's refusal-mechanism
-probes; cmdkit*
+*Horizon: near-term, small · Depends on: `key-option-refused` (landed, #104) · Refs: its plan's
+refusal-mechanism probes; cmdkit*
 **Seed:** [`issues/parser-echoes-option-values.md`](issues/parser-echoes-option-values.md) · *status: unshaped*
 
 ## Environment variables cannot reach every configuration key
