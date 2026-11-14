@@ -55,7 +55,8 @@ Design elements include but are not limited to:
     *HyperShell* 2.9 is in pre-release. Highlights so far:
 
     * **Zones and relays:** place tasks and clients by name, and run one campaign across several
-      sites.
+      sites. With ``--autoscaling``, ``hs cluster`` scales each zone on its own, and ``hs server``
+      spreads clients across relay sites within the bounds each relay sets.
     * **TimescaleDB and in-place upgrades:** a TimescaleDB provider with compression, and the first
       2.9 process upgrades a 2.8 database in place.
     * **Task files:** submit tasks from JSON, submit the same file again safely, and pin each task

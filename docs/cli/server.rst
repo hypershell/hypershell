@@ -27,6 +27,7 @@ Autoscaling with relay sites
 ----------------------------
 
 .. versionadded:: 2.9.0
+   :pr:`100`
 
 With ``--autoscaling``, the server keeps no launcher of its own. It can run anywhere its relays can
 reach, off-cluster or in a container, and the capacity comes from the :ref:`relays <cli_relay>`
@@ -77,7 +78,7 @@ started, which the server puts back in the queue at once, and exits once its cli
 never holds its site, in whatever order it registered.
 
 .. versionchanged:: 2.9.0
-   A superseded relay hands back the tasks its clients have not started, and exits.
+   :pr:`101`: a superseded relay hands back the tasks its clients have not started, and exits.
 
 For example, a server run in a container needs only its key and its settings in the environment:
 

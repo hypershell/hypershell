@@ -543,7 +543,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               ``{zone}`` and ``HYPERSHELL_ZONE``.
+               :pr:`99`: ``{zone}`` and ``HYPERSHELL_ZONE``.
 
         A server autoscaling with relay sites launches nothing and ignores this setting: each
         relay launches its own site clients with its own launcher.
@@ -563,6 +563,7 @@
         .. only:: html
 
             .. versionadded:: 2.9.0
+               :pr:`100`
 
     ``.sites``
         Preferred site order for the `fill` distribution (default: none).
@@ -576,6 +577,7 @@
         .. only:: html
 
             .. versionadded:: 2.9.0
+               :pr:`100`
 
     ``[size]``
         ``.init``
@@ -688,6 +690,7 @@
         .. only:: html
 
             .. versionadded:: 2.9.0
+               :pr:`100`
 
         Held even while the zone's tasks wait in a later *task group*. A zone's own
         ``[relay.zone.NAME]`` table may set its own. Without a topology, a zone's fleet keeps at
@@ -700,6 +703,7 @@
         .. only:: html
 
             .. versionadded:: 2.9.0
+               :pr:`100`
 
         Lowering it never ends a running *client*: the zone launches no more, and its *clients*
         exit when idle. A zone's own ``[relay.zone.NAME]`` table may set its own.
@@ -711,6 +715,7 @@
         .. only:: html
 
             .. versionadded:: 2.9.0
+               :pr:`100`
 
         Without a topology, the *clients* each zone's fleet starts with (by default the size).
         Bounds must satisfy ``min <= init <= max``, with ``max`` at least `1`.

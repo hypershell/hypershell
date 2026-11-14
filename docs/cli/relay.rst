@@ -27,6 +27,7 @@ Topology
 --------
 
 .. versionadded:: 2.9.0
+   :pr:`100`
 
 Each zone a relay serves has client bounds: ``min``, ``max`` and ``init``, set for every zone in
 ``[relay]`` or for one zone in its ``[relay.zone.NAME]`` table, beside its launcher. Every heartbeat
@@ -89,7 +90,7 @@ earlier release does not read the mark and behaves as before: tasks it pulled af
 superseded wait until it exits and the upstream *server* evicts it.
 
 .. versionchanged:: 2.9.0
-   A superseded relay hands back the tasks its *clients* have not started, and exits.
+   :pr:`101`: a superseded relay hands back the tasks its *clients* have not started, and exits.
 
 Against any other upstream *server* (one not autoscaling with relay sites, or an earlier release)
 each zone keeps its own fleet, as before: ``init`` *clients* at start and one launched again while
