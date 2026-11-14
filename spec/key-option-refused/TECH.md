@@ -3,7 +3,7 @@ slug: key-option-refused
 title: Refuse the queue key on a command line
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/key-option-refused
 base: develop
 current_phase: done
@@ -61,10 +61,11 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     $TMPDIR/docs-html
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: fcd3ba759d1f5bc998ae916f27b9d58c41969685
+  verdict: changes-requested
+  blocked_reason: F2 versionchanged gaps (R6); F1 -k registration breaks cluster/relay
+    option values (R4); F3, F5
+  cycle: 1
 ---
 # TECH.md — Refuse the queue key on a command line
 

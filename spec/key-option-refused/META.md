@@ -60,3 +60,10 @@ is skipped by the parser):
 - **Skill cause:** Step 6 and the TECH template show only pytest and CLI-drive verify examples; nothing says how a docs build in `verify:` should run, so a planner copies the last TECH that did one.
 - **Recommended fix:** Add a docs-build `verify:` example to the TECH template (separate `UV_PROJECT_ENVIRONMENT` under `$TMPDIR`, output under `$TMPDIR`, a note that `sphinx_sitemap` needs the sandbox off), and a man-page grep recipe for cycles that prove a docs change through `-b man` (roff writes `\-k` and `\fB…\fP`, so a plain grep misses).
 - **Confidence:** high · **Effort:** small
+
+## F4 — The reviewer's `spec/` exclusion hides the executable drives a GOAL can grade
+`origin=hs-review:step2 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** R8 grades `spec/*/drive/*` (here `spec/relay/drive/relay_throughput.py`), but the only diff Step 2 lets the reviewer see is `git diff {base}...HEAD -- . ':(exclude)spec/'`, which drops it; the orchestrator had to add `git diff {base}...HEAD -- 'spec/*/drive/*'` to the reviewer's inputs by hand.
+- **Skill cause:** Step 2 and the rubric's "What the reviewer sees" treat everything under `spec/` as author artifacts, but executable drives are code a GOAL can hold to a requirement.
+- **Recommended fix:** Add the drives to the reviewer's inputs in Step 2 and the rubric (`git diff {base}...HEAD -- 'spec/*/drive/*'`), keeping `{slug}`'s own PLAN/TECH/research/META excluded.
+- **Confidence:** high · **Effort:** small
