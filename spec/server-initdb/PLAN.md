@@ -241,3 +241,15 @@ For the plan gate:
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+1. **Test placement:** one new module plus the one-path CI line, as proposed.
+2. **R2's "same error"** means the same message text and exit status; the logger name may differ.
+3. **`--no-db` with no database configured** starts in memory, as R5 implies. Without `--no-db`
+   the missing-configuration error is unchanged.
+4. **`hs initdb`'s help** stays as it is this cycle.
+5. **The `--initdb` help line** stays, now true.
+6. **One `versionchanged:: 2.9.0`** in `docs/cli/server.rst`, covering both flags.
