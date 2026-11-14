@@ -4,10 +4,10 @@ title: A cluster whose clients all fail says so and exits; one advertised addres
   for every launch mode
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/cluster-launch-failures
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -73,7 +73,7 @@ phases:
 - id: P4
   name: 'Gate: agent docs, every drive, the suite under 3.14 and 3.11, the relay smoke,
     the docs build'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -281,14 +281,30 @@ exit non-zero while no client is or was registered; 0 keeps today's loop; relay 
 **Satisfies:** R1–R8 · **Depends on:** P3
 **Goal:** the whole contract proven together; agent docs state the new rules.
 
-- [ ] `AGENTS.md:415-416`, `:574` and `.agents/factory/invariants.md:185`: the advertised-address
+- [x] `AGENTS.md:415-416`, `:574` and `.agents/factory/invariants.md:185`: the advertised-address
       rule (`cluster/launch.py::advertised_host`; `--advertise`/`server.advertise`; must be routable
       from clients; the relay without override); one line each on R1 (every launched client gone with
       work left → exit 5, `cluster/watch.py`) and R3 (`autoscale.failed_launches`, off for relay fleets).
-- [ ] Re-read the GOAL's evidence plan against the drive and tests; record any gap.
-- [ ] If #103 has landed on `develop`, rebase first and run the gate after the rebase.
+- [x] Re-read the GOAL's evidence plan against the drive and tests; record any gap.
+- [x] If #103 has landed on `develop`, rebase first and run the gate after the rebase.
 - **Verify:** see frontmatter (every drive mode, the relay smoke, the suite under 3.14 and 3.11, docs
   build).
+- **Built (notes):** the branch was rebased onto `origin/develop` `6da633d` (relay hardening #103 and
+  roadmap commits) before the gate, with no conflicts (P1–P3 touched none of #103's hunks; this
+  phase's agent-doc edits were made after the rebase); every commit re-signed. Against #103:
+  `cluster/watch.py`'s reads (`receiver.machine.held`, `scheduler.machine.current_group/attempts/
+  eager`, `server.submitter`) are unchanged by it (`ServerThread.stop` gains `revert_handed_back`
+  after `revert_staged`; `HeartMonitor` ages clients by receive time; neither is read here), and
+  `Client` rows are still stamped with `INSTANCE` at registration and reconnect. Relay site fleets
+  are untouched by its puller changes (`site_scaler`/`zone_fleet` unchanged; relay smoke passes).
+- **Gate results (rebased head):** nine drive modes pass (`fail` 5 after 9 s, `fail-db` 5 after 6 s,
+  `ssh-fail` 5 after 7 s, `autoscale-fail` 5 after 10 s; `zero`, `autoscale-off` still running at their
+  bounds; `healthy`, `ssh-partial`, `advertise` as specified); relay smoke PASS (41 checks); suite
+  3.14: 2739 passed, 109 skipped; 3.11: 2736 passed, 112 skipped; Sphinx `-W` build clean.
+- **Evidence-plan re-read:** every unit and drive bullet is covered (`test_cluster_advertise.py`,
+  `test_cluster_exit.py`, `test_autoscale_failed_launches.py`, the nine drive modes). One gap, as
+  ruled at the plan gate (5): the man pages are not regenerated in this cycle; they come from the
+  edited snippets and are rebuilt by `hs-release`.
 - **Touches:** `AGENTS.md`, `.agents/factory/invariants.md`.
 
 ---
