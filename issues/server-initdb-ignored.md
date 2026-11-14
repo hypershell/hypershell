@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:server-initdb
 kind: fix
 appetite: small
 lane: public

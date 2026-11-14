@@ -91,9 +91,8 @@ Individual pragmas can also be set from the command line:
 
 .. note::
 
-    Running ``hs initdb`` (or launching with ``--initdb``) additionally performs a
-    ``PRAGMA optimize``. This is safe to run routinely and helps SQLite keep its query-planner
-    statistics current. See `optimize <https://sqlite.org/pragma.html#pragma_optimize>`_ for details.
+    Running ``hs initdb`` additionally performs a ``PRAGMA optimize``. This is safe to run
+    routinely and helps SQLite keep its query-planner statistics current. See `optimize <https://sqlite.org/pragma.html#pragma_optimize>`_ for details.
 
 -------------------
 
@@ -108,8 +107,8 @@ Initialization
    :pr:`69`: a database from an earlier release is upgraded in place on first use.
 
 SQLite is automatically initialized upon opening the connection but
-Postgres must be explicitly initialized via ``hs initdb`` or at launch with
-the ``--initdb`` command-line option.
+Postgres must be explicitly initialized via ``hs initdb``, or by launching ``hs server``,
+``hs submit``, or ``hs cluster`` with the ``--initdb`` command-line option.
 
 An existing database created by an earlier release is upgraded in place on first use,
 for both SQLite and Postgres; there is no separate migration step. The upgrade only adds what
@@ -203,9 +202,8 @@ PostgreSQL and needs both the ``postgres`` and the ``uuid7`` extras (see :ref:`i
         provider = "timescale"
         database = "hypershell"
 
-Then initialize the database with ``hs initdb``, or launch ``hs submit`` or ``hs cluster`` with
-``--initdb``, which runs the same initialization. There is nothing else to run. ``hs server`` does
-not initialize the database, even with ``--initdb``; run ``hs initdb`` before launching it.
+Then initialize the database with ``hs initdb``, or launch ``hs server``, ``hs submit``, or
+``hs cluster`` with ``--initdb``, which runs the same initialization. There is nothing else to run.
 
 |
 
@@ -241,8 +239,8 @@ This is equivalent to the following statements, which you therefore never need t
         CALL add_columnstore_policy('task', after => INTERVAL '4 weeks');
 
 Each step is checked first and applied only where something is missing, so running
-``hs initdb`` again, launching ``hs submit`` or ``hs cluster`` with ``--initdb`` every time, or
-truncating the database with ``hs initdb --truncate`` always arrives at the same state, with one
+``hs initdb`` again, launching ``hs server``, ``hs submit``, or ``hs cluster`` with ``--initdb``
+every time, or truncating the database with ``hs initdb --truncate`` always arrives at the same state, with one
 policy. A database already in shape logs nothing. Initialization runs in one transaction,
 serialized with the schema step, so concurrent launches are safe.
 
@@ -254,9 +252,9 @@ keep theirs (recompress them by hand if needed). Turning the columnstore off is 
 you; ``hs initdb`` warns instead. If the policy's last run failed, ``hs initdb`` warns and points
 to ``timescaledb_information.job_stats``.
 
-Only ``hs initdb`` (with or without ``--truncate``), and ``hs submit`` or ``hs cluster`` launched
-with ``--initdb``, run this initialization. Every other command, including ``hs server`` with or
-without ``--initdb`` and ``hs submit`` or ``hs cluster`` without it, runs only the schema step, as
+Only ``hs initdb`` (with or without ``--truncate``), and ``hs server``, ``hs submit``, or
+``hs cluster`` launched with ``--initdb``, run this initialization. Every other command, including
+``hs server``, ``hs submit``, and ``hs cluster`` without ``--initdb``, runs only the schema step, as
 for PostgreSQL, and stops on a database that was never initialized. Run ``hs initdb`` after
 upgrading *HyperShell* or TimescaleDB.
 
