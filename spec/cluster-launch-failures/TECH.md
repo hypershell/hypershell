@@ -4,7 +4,7 @@ title: A cluster whose clients all fail says so and exits; one advertised addres
   for every launch mode
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/cluster-launch-failures
 base: develop
 current_phase: done
@@ -142,7 +142,8 @@ one atomic code+state commit.
 - **Stay out of #103's files:** no edit to `server.py`, `core/dispatch.py`, `data/model.py`,
   `core/reconnect.py`, `relay/__init__.py`, `relay/upstream.py`. Relay edits are `relay/site.py`'s
   address line and its docstrings only. If a phase finds it needs one of those files, stop and
-  escalate.
+  escalate. *Exception (review-cycle-1 rulings, maintainer sign-off):* `server.py`'s scheduler wait
+  and halt and `ServerThread.stop`, for F1 and F2 only; `core/dispatch.py` stays untouched.
 - No spec ids in source; comments are declarative statements. Tests are `@mark.unit` or
   `@mark.integration`.
 - Error wording the drive checks (keep these phrases): R1 `every launched client has exited with
@@ -231,6 +232,40 @@ is warned about as it happens; a run whose clients do the work ends as today.
 - **Touches:** `src/hypershell/submit.py`, `src/hypershell/cluster/{watch,remote,ssh}.py`, `docs/…`,
   `tests/…`.
 
+### Review-cycle-1 remediation (reopened; rulings in `PLAN.md`)
+
+- [x] **F1:** `Scheduler.halt` flags `halting` and wakes the dispatcher's `need` condition under its
+      lock; `Scheduler.wait_need` (both waits in `load_bundle`) waits on that condition only while not
+      halting and the generation is unchanged, so a halt is seen before the wait or ends it at once
+      (`server.py`). `SchedulerThread.stop` reaches it through `machine.halt()`. The shutdown order
+      (§6) is unchanged: the staged and handed-back reverts still run in `wait_heartbeat`, after the
+      scheduler has stopped. `core/dispatch.py` is not touched (the wait reads its public `need` and
+      `generation`).
+- [x] **F2:** `ServerThread.stop(leave_input=False)` passes `leave_input` to the submitter;
+      `SubmitThread.stop` and `LiveSubmitThread.stop` then call `LoaderThread.leave()` (halt, no
+      join) instead of `stop`, and both `run` paths wait with `LoaderThread.join_unless_left()`, which
+      returns once the loader ends or is left. Committed rows stay committed. Only `watch_launched`
+      (R1's failure stop) passes `leave_input=True`; every other stop and a normal run read the input
+      to its end as before (`submit.py`, `server.py`, `cluster/watch.py`).
+- [x] Tests (`tests/test_cluster_exit.py`): unit — a halt ends the scheduler's 30 s wait (during and
+      before it); a left loader is not waited on and enqueues nothing more; a loader not left is
+      waited on to the end of its input; the stand-in server records `leave_input`. Integration
+      (database, default `server.poll`) — one task with a launcher that fails at 17 s; a client killed
+      at 16 s holding both its tasks; `--forever` with a task added at 17 s; each exits with
+      `ClusterLaunchError` within 10 s of the exit or the submit. CLI — `hs cluster --launcher false`
+      reading one line on standard input from a producer that stays open, with and without `--no-db`:
+      exit 5 within 15 s of the start, no fatal error at interpreter exit.
+- **Red then green** (`git archive 81c4de6 src`, run with `PYTHONPATH=<base>/src`): late launcher
+  15.0 s after the exit (head 2.9 s); killed client 16.4 s (head 2.4 s); late `--forever` task 15.1 s
+  after the submit (head 3.0 s); open input, `--no-db` and database, still running at 30 s (head:
+  exit 5 after 6.5 s and 4.4 s).
+- **Not changed (outside the ruling; for the foreman):** R3's stop in
+  `AutoScalingCluster.run_with_exceptions` still calls `server.stop(wait=True)`. The F1 fix speeds
+  it up, but with tasks on standard input from a producer that stays open it still waits on the
+  loader: `hs cluster --autoscaling fixed -P 2s --launcher false` (database) given one line was still
+  running at 30 s, its log ending at "Stopping (loader)" after three failed launches. Passing
+  `leave_input=True` there is the same one-word change, if ruled in.
+
 ## Phase P3 — Autoscaling's failed-launch limit; relay fleets never stop
 **Satisfies:** R2, R3, R5, R8 (key docs) · **Depends on:** P2
 **Goal:** `hs cluster --autoscaling` stops after `autoscale.failed_launches` launched clients in a row
@@ -307,6 +342,12 @@ exit non-zero while no client is or was registered; 0 keeps today's loop; relay 
   ruled at the plan gate (5): the man pages are not regenerated in this cycle; they come from the
   edited snippets and are rebuilt by `hs-release`.
 - **Touches:** `AGENTS.md`, `.agents/factory/invariants.md`.
+- **Gate re-run after the review-cycle-1 remediation (F1, F2):** nine drive modes pass, one at a
+  time (`fail` 5 after 9 s, `fail-db` 5 after 5 s, `ssh-fail` 5 after 4 s, `autoscale-fail` 5 after
+  9 s; `zero`, `autoscale-off` still running at their bounds; `healthy`, `ssh-partial`, `advertise`
+  as specified); relay smoke PASS (41 checks); suite 3.14: 2747 passed, 109 skipped; 3.11, the
+  touched area (`test_cluster_exit`, `test_submit`, `test_cluster`, `test_cluster_launch`,
+  `test_restart`, `test_server_fsm`): 289 passed, 1 skipped; Sphinx `-W` build clean (no docs changed).
 
 ---
 

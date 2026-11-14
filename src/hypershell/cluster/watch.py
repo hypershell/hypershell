@@ -164,8 +164,10 @@ def watch_launched(server: ServerThread,
     A process that exits non-zero is warned about at once, naming it. Once every process has exited,
     at least one of them non-zero, and the server still has work (:func:`work_remains`), the server
     is stopped and :class:`ClusterLaunchError` is raised, naming every process, how it exited and the
-    address in `advertised`. When the server ends on its own, the processes still running are waited
-    on, and any that exits non-zero is warned about. A failure that ended the server is raised.
+    address in `advertised`. That stop does not wait on input still being read: no client is left to
+    run it, and a producer that stays open would hold the stop forever. When the server ends on its
+    own, the processes still running are waited on, and any that exits non-zero is warned about. A
+    failure that ended the server is raised.
     """
     codes: List[Optional[int]] = [None] * len(launched)
 
@@ -179,7 +181,7 @@ def watch_launched(server: ServerThread,
             if codes[index] is None and (code := proc.poll()) is not None:
                 record(index, code)
         if None not in codes and any(code != 0 for code in codes) and work_remains(server):
-            server.stop(wait=True)
+            server.stop(wait=True, leave_input=True)
             exits = '; '.join(f'{name} exited with {exit_text(code)}' for (name, _), code in zip(launched, codes))
             host, port = advertised
             raise ClusterLaunchError(f'every launched client has exited with tasks remaining: {exits}; '
