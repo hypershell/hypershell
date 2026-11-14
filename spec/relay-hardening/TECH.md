@@ -5,7 +5,7 @@ title: 'Relay hardening for 2.9.0: no aborts on removed rows or a restarted upst
   clock'
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/relay-hardening
 base: develop
 current_phase: done
@@ -148,11 +148,12 @@ phases:
   verify: uv run pytest -v tests/test_tail_judge.py && uv run python spec/relay-hardening/drive/tail_judge.py
     --budget 10 --outcome spec/relay-hardening/evidence/laptop
 review:
-  last_reviewed_commit: a7413400fe513991a0fb414f8b007474dfc3b824
+  last_reviewed_commit: ff0973aeea2df99ac856d41afba838a338e9260c
   verdict: changes-requested
-  blocked_reason: 'Review cycle 1: RV2-RV4 LOW confirmed (invariants.md §1 sentence,
-    red.txt harness-red entries, pair judge path); RV1 plausible, maintainer triage'
-  cycle: 1
+  blocked_reason: 'Review cycle 2: RV6 LOW confirmed (PLAIN_CHECK_WAIT 1 s: a slow
+    cleartext upstream is retried, not failed fast); RV5 plausible (held task after
+    the target falls to 0), maintainer triage'
+  cycle: 2
 ---
 # TECH.md — Relay hardening for 2.9.0
 

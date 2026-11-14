@@ -193,3 +193,200 @@ The reviewer's drives stopped their servers, relays and site clients by recorded
 its probe servers ran in-process and were shut down in `finally`; nothing was killed by name, and a
 process listing afterwards showed no HyperShell process from this review. The orchestrator started no
 long-running process. `git status --porcelain` was empty on hand-back.
+
+## Review cycle 2 — changes-requested (2026-11-14)
+
+- **Reviewed commit:** ff0973aeea2df99ac856d41afba838a338e9260c  ·  **Base:** `origin/develop` `6c46cbd` (merge base `2ffb5cc`)  ·  **Date:** 2026-11-14
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`. A third cycle that does not converge
+  goes to the maintainer.
+- **Mode:** a fresh blind pass over the whole spec-excluded diff, the default for a later cycle, not
+  one scoped to the remediation. One fresh reviewer (no `debate`, no `completeness`) got frozen
+  copies of `GOAL.md`, the base `invariants.md` and `AGENTS.md`, and the rubric, read from a scratch
+  directory rather than pasted into its prompt. It also got the two diff commands of cycle 1, and
+  the gate rulings below as readings of the contract. It was told not to read `PLAN.md`, `TECH.md`,
+  `REVIEW.md`, `META.md`, `research/` or `evidence/`. It was not told what RV1–RV4 said. It was asked
+  to give the remediation commit the same scrutiny as the rest of the diff, naming the areas it
+  touched. The orchestrator graded RV1–RV4 itself by executed command, graded R8's record, re-ran
+  the reviewer's probes, and dropped two of its four findings on sanity check.
+
+### Pre-flight
+
+- **Base.** `TECH.md` `base: develop`; `origin/develop` is `6c46cbd`, merge base `2ffb5cc`.
+- **Build state.** `TECH.md` `status: in_review`; review cycle 1 left `changes-requested`. Since
+  then: `fcea305` (the cycle-1 rulings, recorded in `PLAN.md`) and `ff0973a` (the remediation).
+- **Contract drift.** `git log --oneline origin/develop..HEAD -- spec/relay-hardening/GOAL.md`
+  still lists only `26b6543` (shape) and `95f8740` (GOAL-gate lock). The contract did not move.
+- **Contract readings applied.**
+  - Cycle 1's four readings: R10's exemptions; R8 fixes (i) and (ii); R8 outcome (b); R2's TimescaleDB leg in CI.
+  - The cycle-1 rulings:
+    - R5's one-task request is made only by a zone whose fleet would launch a client for it (a
+      topology target above 0 at this relay, or no topology). A zone at target 0 ends as before.
+      A unit-level test at the puller suffices if a two-relay drive does not fit.
+    - Every `red.txt` entry must be red on `2ffb5cc` for the defect itself.
+- **Invariants.** The code is graded against the base `invariants.md` and `AGENTS.md`. The branch's
+  edits to both are graded as part of the diff.
+
+### Verification run
+
+**Reviewer**
+- SQLite: `uv run pytest -q -p no:cacheprovider` → 2116 passed, 101 skipped.
+- PostgreSQL legs (`tests/test_contended_write.py`, `test_writeback_postgres.py`,
+  `test_zone_postgres.py`, `test_contended_recovery.py`):
+  - `HS_TEST_TIMESCALE=community` → 75 passed.
+  - `HS_TEST_TIMESCALE=` (the first three files) → 47 passed.
+- The `2ffb5cc` copies of the nine modified test files, run against the head → 216 passed, 12 skipped, 7 failed.
+  - Every failure is a sanctioned exemption under R10's readings.
+  - Four of them age a client by its own clock (R7).
+  - Three of them expect no request from the idle zone (R5's one extra request).
+- Docs: `sphinx-build -W --keep-going -E` in a separate venv → exit 0.
+- Drives (`temp_site.sh … hardening_drive.sh MODE`), all PASS, exit 0: `tls-on`, `tls-off`, `zones`,
+  `zones-nodb`, `restart`, and `pair-relay` and `pair-server` with `DRIVE_BASE_SRC` set to a `2ffb5cc` export.
+  - As in cycle 1, `restart` hit no stale proxy id end to end; R3 rests on the unit harness.
+
+**Orchestrator**
+- `HS_TEST_POSTGRES=… HS_TEST_TIMESCALE=community sh spec/relay-hardening/drive/red_check.sh` → 24 of 24 red, exit 0.
+  - Every line is red by an assertion or by its named error: `StaleDataError`, `RemoteError`, or
+    `Failed` (the relay still running).
+- `RED_BASE_REV=a741340 RED_LIST=…/red-a741340.txt sh spec/relay-hardening/drive/red_check.sh` → 8 of 8 red.
+  - One node's failure, read on `a741340`, is `assert drive(machine) is PullerState.FINAL` → `GATE`: the zone asked.
+- `tail_judge.py --budget 10 --outcome spec/relay-hardening/evidence/laptop` → 10 runs, `outcome b: holds`, PASS.
+  - The R8 record, the seed and the `ROADMAP.md` entry are unchanged since cycle 1 (`git diff a741340 HEAD`).
+- The reviewer's two probes (RV5, RV6), re-run as described under each finding.
+
+### Cycle-1 findings
+
+| Finding | Status | Evidence |
+|---|---|---|
+| RV1 (MEDIUM, PLAUSIBLE) | **Resolved per the cycle-1 ruling** | See below |
+| RV2 (LOW, CONFIRMED) | **Fixed** | See below |
+| RV3 (LOW, CONFIRMED) | **Fixed** | See below |
+| RV4 (LOW, CONFIRMED) | **Fixed** | See below |
+
+**RV1.** A zone that has heard nothing, has no site client and holds nothing now asks after a
+shutdown only while `launches()` says its fleet would start a client. That is true under a topology
+that gives the zone a target above 0 at this relay, or when no topology is published
+(`relay/upstream.py:492-501`, `:531-539`).
+- The fleet reads the same `ZoneRef.from_name(zone).name` from the same view.
+- The 8-case unit test, built from a real `plan_sites` plan, is red on `a741340` (8 of 8) and green on the head.
+- Docs say it in `relay_desc.rst` and in the `versionchanged` clause of `relay.rst`.
+- The residual case, where the target falls to 0 after the zone has asked, is RV5.
+
+**RV2.** The sentence now covers only the conditional writes, and `AGENTS.md` carries the same sentence.
+- It matches `__write_rows`: `revert_staged` (pending, not strict) and the `held` and `unscheduled`
+  conditions skip a gone row. `confirm_all` (strict) and `revert_all` raise.
+
+**RV3.** The eight entries are dropped.
+- `red_check.sh` counts a test red only for a failure in the call, either an assertion or the error
+  its line names. Its plugin marks a `ValueError` on `2ffb5cc` as NOT RED.
+- The reviewer read every base failure, and all 24 are the defect.
+- The checker still counts any assertion in the call as red, whatever made it fail. Its header says
+  so, and the list it checks is correct, so this is a limit of the tool, not a finding.
+
+**RV4.** The drive records `base_src`, and `on_base` in the judge compares real paths.
+- Both pair modes pass with `DRIVE_BASE_SRC`.
+
+### Requirement → evidence matrix
+
+Only the changes since cycle 1 are listed; the cycle-1 matrix stands otherwise.
+
+| R-ID | Change since cycle 1 | Verified how | Status |
+|------|----------------------|--------------|--------|
+| R1 | none | revert tests in `test_relay_return`, `test_contended_recovery` and `test_contended_write`, red on `2ffb5cc` for the defect | ✅ |
+| R2 | none | dispatch tests in `test_relay_return` and `test_contended_write`, red on `2ffb5cc`; contended landing passes on PostgreSQL and TimescaleDB 2.32 (the 2.31 leg is CI's, per reading 4) | ✅ |
+| R3 | none | the four-role restart harness, red on `2ffb5cc` with `RemoteError` ending `KeyError: '<proxy id>'` | ✅ |
+| R4 | `PLAIN_CHECK_WAIT` 5 s → 1 s | both directions in `test_relay_workload` and the drives (exit 5 in about 1.1 s); unreachable-at-start still retried | ⚠️ RV6 |
+| R5 | `launches()` gates the one-task request | unit tests with and without a database, the 8 topology cases, the `zones` and `zones-nodb` drives | ✅ per ruling; RV5 (plausible) |
+| R6 | `relay_desc.rst` sentence on autoscaled sites | read; docs `-W` | ✅ |
+| R7 | none | `test_server_fsm` clock tests and `test_relay_roster`, red on `2ffb5cc` | ✅ |
+| R8 | none | `tail_judge.py` PASS; fixes (i) and (ii) keep §6 order; seed claims checked against `relay/__init__.py`, `relay/site.py` and `Dispatcher.wait_need` | ✅ |
+| R9 | `red_check.sh` and `red_outcome.py`; `red.txt` down to 24 entries; `red-a741340.txt` added | 24 of 24 and 8 of 8 red, each base failure read | ✅ |
+| R10 | — | full suites; base copies of the modified tests fail only on exempt changes; both pair drives pass; no wire field added | ✅ |
+
+Unmapped changes (possible scope creep): `PLAIN_CHECK_WAIT` 5 s → 1 s answers no cycle-1 finding.
+It is graded under R4 (RV6). Nothing else.
+
+**Invariant edits.** Both edits are accurate, in step with each other, and weaken no rule (RV2 above).
+The reviewer found no violation of the base invariants:
+- §1: the conditional writes, one UPDATE on a first-time match.
+- §4: `revert_orphaned` behind `not in_memory and not no_confirm`.
+- §6: shutdown order kept.
+- §9: the probes send no key; the connection keeps its configured context and fingerprint check.
+- §12: docs in the same commit, markers present, `-W` clean.
+
+### Findings
+
+#### RV5 [MEDIUM/PLAUSIBLE] A task an idle zone took while its target was above 0 is held for good if the target then falls to 0 before a client starts
+- **Where:** `src/hypershell/relay/upstream.py:529` (a zone holding a task is passed over) and
+  `:531` (`launches()` is asked only of a zone that holds nothing).
+- **Failure scenario.**
+  - After a shutdown, a zone with no site client asks for one task while the view gives it a target above 0 here.
+  - The task is inserted and confirmed.
+  - A newer plan then sets the zone's target here to 0 before the fleet has a client running.
+    That can happen when the client moves to another site, or while the fleet holds back on a stale
+    `seen` count (`relay/site.py:273-275`).
+  - The fleet launches nothing at target 0. The gate skips the zone on every pass because it now
+    holds a task (`bound == 0`, `backlog == 1`), and never asks `launches()` again.
+  - The puller never ends, and a non-forever upstream server waits for the relay until it is drained or stopped.
+- **Compared with the base.** `2ffb5cc` ended the zone at the shutdown and took nothing.
+- **Compared with RV1.** RV1's case is closed. This is the same hold, reached by a change of target after the ask.
+- **Evidence.**
+  - The probe used the test module's `finishing_upstream`, `zoned_puller` and `drive`. It set the
+    view to target 1, drove the puller, then set target 0. Run with
+    `uv run python -m pytest -p tests.conftest -q -s <probe>`.
+  - It printed `states [GATE, GATE, GATE, GATE, GATE] … held 1` after 5×200 steps (the reviewer's
+    run, re-run by the orchestrator).
+  - Not reproduced end to end. A two-relay plan change would have to land inside the fleet's launch window.
+- **Touches:** R5 and R10 (the relay and a non-forever upstream still finish).
+- **Triage (maintainer).** Fix it this cycle or seed it. A fix could let a zone holding only what
+  it asked for at the shutdown ask `launches()` again, and hand the task back at target 0.
+
+#### RV6 [LOW/CONFIRMED] With a 1 s challenge wait, a TLS relay against a cleartext upstream on a slow path retries forever
+- **Where:** `src/hypershell/relay/upstream.py:144` (`PLAIN_CHECK_WAIT = 1.0`, 5.0 at cycle 1) and
+  `:256`. The wait is `min(PLAIN_CHECK_WAIT, deadline left)`.
+- **Failure scenario.**
+  - A relay with TLS on connects to a cleartext upstream whose challenge arrives more than 1 s after
+    the connection opens, because of a slow network path or a loaded server.
+  - The TLS connect fails with `SSLError` as it should. `speaks_plain` then gives up after 1 s on a
+    second connection, and the `SSLError` is retried as a transport error.
+  - Every later attempt does the same, so the relay never exits. R4's "within one
+    `relay.upstream.deadline`" fails on that path, and the behaviour is `2ffb5cc`'s.
+- **Not affected.**
+  - Neither check can misclassify a matching upstream: a TLS server sends nothing first, and a
+    cleartext server never completes a handshake.
+  - An upstream unreachable at start is still retried.
+- **Evidence.**
+  - Setup: a real cleartext `QueueServer` behind a local proxy that delays each forwarded chunk by
+    `PROBE_DELAY`, and a TLS-on `UpstreamLink` with `first_connect` (deadline 30 s).
+  - Reviewer: 0.2 s → `TLSError` after 0.4 s; 0.6 s → after 1.2 s; 1.1 s → `wait_up -> False`,
+    `DOWN`, 15 attempts in 40 s.
+  - Orchestrator, at 1.1 s: `WAIT=1.0` → `wait_up -> False; state=DOWN; attempts=14` (40.8 s).
+    With `PLAIN_CHECK_WAIT` patched to 5.0, cycle 1's value, the mismatch was found in 2.2 s
+    (`TLSError … must agree on TLS`).
+- **Touches:** R4.
+- **Fix.** Let the challenge wait run as long as a slow path needs, within the deadline left, or
+  take the cleartext evidence from the failed handshake itself.
+
+**Dropped on sanity check.**
+- *The red checker counts any call-phase assertion as red.* Its header documents this, the entries
+  it checks are each red for the defect (read one by one), and no tool can tell what made an
+  assertion fail. It is folded into RV3's status.
+- *The `relay-shutdown-tail` title, "up to about 5 s late", against the body's "about 7 s".* The
+  title measures the delay over the 1.7 s tail with nothing waiting; the body states the tail.
+  Both match the evidence. This is wording, not a misstated defect.
+
+### Human-gate triggers
+
+- Not triggered by a CONFIRMED finding.
+  - RV6 is in `relay/upstream.py`, outside the high-blast-radius core.
+  - It does not touch TLS posture: no cleartext connection is made, and a missed mismatch is retried as before.
+- RV5 is PLAUSIBLE and needs the maintainer's triage: fix it in the next build cycle, or seed it.
+
+### Processes
+
+- The reviewer's drives stopped their servers, relays and site clients by recorded PID. Its test
+  fixtures and in-process probe servers shut down, and a final process listing showed none of its
+  processes left.
+- The orchestrator ran only pytest processes (the red checks and two in-process probes), and each
+  exited.
+- `git status --porcelain` was empty on hand-back.
