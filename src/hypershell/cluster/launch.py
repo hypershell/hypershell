@@ -280,6 +280,7 @@ class LaunchActuator:
         self.described: Set[str] = set()
         self._clients: List[Popen] = []
         self.zones: Dict[int, str] = {}
+        self.names: Dict[str, str] = {self.own.id: self.own.name}
 
     @property
     def clients(self: LaunchActuator) -> List[Popen]:
@@ -300,6 +301,11 @@ class LaunchActuator:
             zone = self.zones.get(id(proc), self.own.id)
             counts[zone] = counts.get(zone, 0) + 1
         return counts
+
+    def zone_of(self: LaunchActuator, proc: Popen) -> ZoneRef:
+        """The zone `proc` was started in (the own zone for a process the actuator did not start), while not cleaned."""
+        zone = self.zones.get(id(proc), self.own.id)
+        return ZoneRef(zone, self.names.get(zone, self.own.name))
 
     def launch_of(self: LaunchActuator, zone: ZoneRef) -> ClientLaunch:
         """The launch of `zone`, built at its first use and kept."""
@@ -322,6 +328,7 @@ class LaunchActuator:
         log.info(f'Autoscale adding client ({proc.pid}, zone: {zone.name})')
         self._clients.append(proc)
         self.zones[id(proc)] = zone.id
+        self.names[zone.id] = zone.name
         return proc
 
     def apply(self: LaunchActuator, desired: Mapping[ZoneRef, int]) -> int:
@@ -335,7 +342,7 @@ class LaunchActuator:
         return started
 
     def clean(self: LaunchActuator) -> List[Popen]:
-        """Drop the processes that have exited, and return them."""
+        """Drop the processes that have exited, and return them; each non-zero exit is warned about, naming its pid and zone."""
         exited = []
         for i, client in enumerate(self._clients):
             log.trace(f'Autoscale clean ({i+1}: {client.pid})')
@@ -343,7 +350,8 @@ class LaunchActuator:
             if status is not None:
                 exited.append(client)
                 if status != 0:
-                    log.warning(f'Autoscale client ({i+1}) exited with status {status}')
+                    zone = self.zone_of(client)
+                    log.warning(f'Autoscale client ({client.pid}, zone: {zone.name}) exited with status {status}')
                 else:
                     log.info(f'Autoscale client disconnected ({client.pid})')
         if exited:

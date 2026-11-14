@@ -34,7 +34,7 @@ from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source
                                GatedSource, source_fingerprint_and_count, apply_source_gate)
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
-from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster,
+from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster, configured_failed_launches,
                                        DEFAULT_AUTOSCALE_FACTOR, DEFAULT_AUTOSCALE_PERIOD,
                                        DEFAULT_AUTOSCALE_MIN_SIZE, DEFAULT_AUTOSCALE_MAX_SIZE,
                                        DEFAULT_AUTOSCALE_INIT_SIZE)
@@ -329,7 +329,13 @@ class ClusterApp(Application):
                     policy=self.autoscaling_policy, factor=self.autoscaling_factor,
                     period=self.autoscaling_period, init_size=self.autoscaling_initial,
                     min_size=self.autoscaling_minimum, max_size=self.autoscaling_maximum,
-                    remote_exe=self.remote_exe, bind=(bind, self.port), advertise=self.advertise_host)
+                    remote_exe=self.remote_exe, bind=(bind, self.port), advertise=self.advertise_host,
+                    failed_launches=self.failed_launches)
+
+    @cached_property
+    def failed_launches(self: ClusterApp) -> int:
+        """Launched clients in a row that may fail with none registered before autoscaling stops (`autoscale.failed_launches`)."""
+        return configured_failed_launches()
 
     @cached_property
     def advertise_host(self: ClusterApp) -> Optional[str]:
@@ -417,6 +423,8 @@ class ClusterApp(Application):
             raise ArgumentError('Cannot use --autoscaling with --mpi mode')
         if self.autoscaling_policy is not None and self.in_memory:
             raise ArgumentError('Cannot use --autoscaling without database (given --no-db)')
+        if self.autoscaling_policy is not None:
+            _ = self.failed_launches  # NOTE: a bad setting is refused before anything starts
         if self.autoscaling_policy is not None and self.restart_mode:
             log.warning('Using --restart is redundant with --autoscaling (implies --forever)')
         if self.autoscaling_policy is not None and self.forever_mode:

@@ -385,6 +385,9 @@ Options
 
     A *fixed* policy will seek to maintain a definite size and allows for recovery in the
     event that clients halt for some reason (e.g., due to expected faults or timeouts).
+    A launch that keeps failing is not repeated forever, under either policy: once
+    ``autoscale.failed_launches`` launched clients in a row (default: 3) exit non-zero while no
+    client is registered, the cluster stops and exits non-zero, naming them.
 
     A *dynamic* policy maintains a ``--min-size`` (default: 0) and grows up to some
     ``--max-size`` depending on the observed *task pressure* given the specified scaling

@@ -45,6 +45,9 @@ for them to connect.
 Use ``--autoscaling`` with either *fixed* or *dynamic* to run a persistent, elastically scalable
 cluster using an external ``--launcher`` to bring up clients as needed. Clients are scaled per zone:
 each zone with tasks in the active group gets its own clients, and the launcher is told which zone
-each one is for.
+each one is for. When ``autoscale.failed_launches`` launched clients in a row (3 by default) exit
+non-zero while no client is registered with the server, the autoscaler launches no more, and the
+cluster stops its server and exits non-zero with one error naming them and the address the clients
+were told to dial.
 
 Use ``hsx`` in place of ``hs cluster``.

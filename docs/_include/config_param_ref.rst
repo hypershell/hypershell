@@ -636,6 +636,28 @@
             .. versionadded:: 2.9.0
                :pr:`100`
 
+    ``.failed_launches``
+        Launched clients in a row that may exit non-zero, with no client registered, before an
+        autoscaling cluster stops (default: 3).
+
+        Under ``hs cluster --autoscaling``, a run of launched clients that exit non-zero while no
+        client of the cluster is registered with its server means the launch itself is failing
+        (a bad launcher, an address the clients cannot reach, a TLS setting they do not share).
+        Once the run reaches this number, the autoscaler launches no more, and the cluster stops
+        its server and exits non-zero with one error naming the failed launches, their exit
+        statuses and the address the clients were told to dial. A launched client that exits 0,
+        or any client registering with the server, ends the run. Set ``0`` to relaunch without
+        end, as before, for a cluster that must outlast an outage of its launcher.
+
+        A relay's site fleets (``hs relay``) and a server autoscaling with relay sites ignore this
+        setting: a relay keeps relaunching its failing site clients, warning at each one.
+
+        Its environment form is ``HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES``.
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+
     ``[size]``
         ``.init``
             Initial size of cluster (default: 1).

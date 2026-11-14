@@ -184,6 +184,7 @@ default = Namespace({
         'launcher': '',     # Empty means just 'hs client ...'
         'distribution': 'spread',  # Relay sites only: either 'spread' or 'fill'
         'sites': PARAM_UNSET,      # Relay sites only: preferred site order for 'fill' (list or comma string)
+        'failed_launches': 3,      # Stop after this many failed launches in a row with no client (0: never)
         'size': {
             'init': 1,
             'min': 0,

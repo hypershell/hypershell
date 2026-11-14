@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/cluster-launch-failures
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -51,7 +51,7 @@ phases:
 - id: P3
   name: 'Autoscaling: autoscale.failed_launches stops a cluster whose launches all
     fail; relay fleets never stop'
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -236,25 +236,25 @@ is warned about as it happens; a run whose clients do the work ends as today.
 exit non-zero while no client is or was registered; 0 keeps today's loop; relay fleets and
 `hs server --autoscaling` unchanged.
 
-- [ ] `core/config.py`: `autoscale.failed_launches = 3`. `cluster/remote.py`:
+- [x] `core/config.py`: `autoscale.failed_launches = 3`. `cluster/remote.py`:
       `DEFAULT_AUTOSCALE_FAILED_LAUNCHES`; `configured_failed_launches()` (environment path
       `autoscale.failed.launches` when `config.which` says `env`, guarding `KeyError`; else the key;
       bool, non-integer or negative → `ConfigurationError` naming its source).
-- [ ] `client_registrations()` over `Client.query()` (`server_id == INSTANCE`: all rows, and those
+- [x] `client_registrations()` over `Client.query()` (`server_id == INSTANCE`: all rows, and those
       not disconnected).
-- [ ] `AutoScaler`/`AutoScalerThread`: `failed_launches=0`, `registrations=None`; `clean()` returns
+- [x] `AutoScaler`/`AutoScalerThread`: `failed_launches=0`, `registrations=None`; `clean()` returns
       the exited processes; the counter in `check()` with `seen`, the run of `(pid, zone, status)`,
       `exhausted` and `FINAL`; nothing read when the limit is 0.
-- [ ] `AutoScalingCluster`: `failed_launches=DEFAULT_AUTOSCALE_FAILED_LAUNCHES`,
+- [x] `AutoScalingCluster`: `failed_launches=DEFAULT_AUTOSCALE_FAILED_LAUNCHES`,
       `registrations=client_registrations`; `run_with_exceptions` stops the server and raises
       `ClusterLaunchError` when the autoscaler is exhausted; `stop()` skips a server no longer alive.
-- [ ] `LaunchActuator.clean`: the warning names pid and zone, keeping `exited with status N`.
-- [ ] `ClusterApp`: validate and pass `configured_failed_launches()` in autoscaling mode.
-- [ ] Docs: `config_param_ref.rst` `autoscale.failed_launches` after `.sites` (with
+- [x] `LaunchActuator.clean`: the warning names pid and zone, keeping `exited with status N`.
+- [x] `ClusterApp`: validate and pass `configured_failed_launches()` in autoscaling mode.
+- [x] Docs: `config_param_ref.rst` `autoscale.failed_launches` after `.sites` (with
       `HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES`, default, 0 = off, relay fleets exempt;
       `.. only:: html` + `versionadded:: 2.9.0`); the autoscaling prose (`cluster_desc.rst`/
       `docs/cli/cluster.rst`): the cluster exits non-zero after that many failed launches.
-- [ ] Tests: new `tests/test_autoscale_failed_launches.py` (three failures stop, no fourth launch;
+- [x] Tests: new `tests/test_autoscale_failed_launches.py` (three failures stop, no fourth launch;
       fail, fail, 0, fail, fail → no stop; `ever` rising resets; `now > 0` never stops; 0 never stops
       and never reads registrations; `site_cluster(...).autoscaler.machine.failed_launches == 0`,
       `zone_fleet(...).machine.failed_launches == 0`, a fixed `SiteScaler` on a failing launch over
@@ -264,6 +264,16 @@ exit non-zero while no client is or was registered; 0 keeps today's loop; relay 
       `FINAL` as an end.
 - **Verify:** see frontmatter (unit tests, `autoscale-fail`/`autoscale-off`/`advertise` drives, the
   zone-autoscale drive's `founding` and `fixed` modes, docs build).
+- **Built (amendments):** `AutoScaler.clean()` returns each exited process with its zone
+  (`(Popen, ZoneRef)`, launch order), so the run can name the zone; `LaunchActuator` keeps zone names
+  (`names`) and gains `zone_of(proc)`. `AutoScalingCluster.stop()` also skips halting an autoscaler
+  that ended exhausted (no repeated "Stopping" line after the error). `cluster_help.rst`'s
+  `--autoscaling` entry gained one sentence on the limit. Measured: the `autoscale-fail` drive exits
+  5 after 11 s (`-P 2s`); the cluster-level test (`period=1`) within its 25 s bound.
+- **Red on `develop` (`6da633d`):** all 26 tests of `tests/test_autoscale_failed_launches.py` fail
+  there (run with `develop`'s `src` first on `PYTHONPATH`); behaviourally, the cluster with a
+  failing launcher was still running at the 25 s bound with no error (`elapsed 28.7 s`), the warning
+  named a list index, not the pid, and a bad `HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES` was not refused.
 - **Touches:** `src/hypershell/core/config.py`, `src/hypershell/cluster/{remote,launch,__init__}.py`,
   `docs/…`, `tests/…`.
 

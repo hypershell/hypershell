@@ -47,4 +47,10 @@ Description
    at least one non-zero, with tasks remaining, exits non-zero naming them, instead of waiting
    forever; each non-zero exit is warned about as it happens.
 
+.. versionchanged:: 2.9.0
+   With ``--autoscaling``, a cluster stops and exits non-zero once ``autoscale.failed_launches``
+   launched clients in a row (3 by default) have exited non-zero with no client registered,
+   instead of relaunching them forever; ``0`` keeps relaunching. Each non-zero exit is warned
+   about naming the client's process id and zone.
+
 .. include:: ../_include/cluster_help.rst
