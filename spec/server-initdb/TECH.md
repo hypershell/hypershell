@@ -3,7 +3,7 @@ slug: server-initdb
 title: hs server --initdb initializes the database
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/server-initdb
 base: develop
 current_phase: done
