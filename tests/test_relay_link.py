@@ -7,6 +7,11 @@ The link is driven with a fake client factory, an injected clock and random sour
 records each backoff wait and advances the clock instead of waiting. Calls run on real worker threads
 (the deadline is real time, kept short here). A restart of the upstream server is driven for real: a
 link on a queue server that is shut down and started again on the same port.
+
+So is a TLS mismatch at the first connection, as the relay connects: a link with TLS on against a
+cleartext queue server, and one with TLS off against an `hs server` process with TLS on, each fail
+at once with an error that names the relay's setting. A link that has connected once keeps trying
+again after a mismatch, and one that cannot reach its server at first keeps trying until it can.
 """
 
 
@@ -18,6 +23,7 @@ from typing import Any, Callable, List, Optional
 import ssl
 import time
 import logging
+import secrets
 import threading
 from queue import Full as QueueFull
 from multiprocessing import AuthenticationError
@@ -30,13 +36,16 @@ from pytest import mark
 # Internal libs
 from hypershell.core import reconnect
 from hypershell.core.queue import QueueVersionError, QueueServer, QueueClient, QueueConfig
-from hypershell.core.tls import TLSError
+from hypershell.core.tls import TLSError, TLSConfig, ensure_default_materials
 from hypershell.core.heartbeat import Heartbeat
 from hypershell.core.topology import handback_text
 from hypershell.core.reconnect import (UpstreamLink, FixedLink, LinkDown, LinkState, as_link, backoff_delay,
                                        is_fatal, is_transport, REPORT_INTERVAL)
 from hypershell.data.model import serialize_tasks
+from hypershell.relay import upstream as relay_upstream
 from hypershell.relay.upstream import request_text
+from tests.conftest import free_port
+from tests.test_dispatch_workload import Group, group, wait_listening  # noqa: fixture
 
 
 DEADLINE = 10.0  # Seconds a test waits on the link's own threads.
@@ -471,3 +480,129 @@ def test_first_call_after_an_upstream_restart_is_a_lost_link(role: str, caplog) 
         link.stop(DEADLINE)
         if new is not None:
             new.shutdown()
+
+
+# --- A TLS mismatch at the first connection --------------------------------------------------------
+
+@pytest.fixture(scope='module')
+def tls_materials(tmp_path_factory) -> tuple:
+    """A self-signed certificate and key for loopback, made once for this module."""
+    return ensure_default_materials(str(tmp_path_factory.mktemp('tls')), hostnames=['localhost', '127.0.0.1'])
+
+
+def server_tls(materials: tuple) -> TLSConfig:
+    """A queue server's TLS configuration from `materials`."""
+    cert, key = materials
+    return TLSConfig(enabled=True, cert=cert, key=key, cafile=cert)
+
+
+def client_tls(materials: tuple) -> TLSConfig:
+    """A queue client's TLS configuration, trusting the certificate of `materials`."""
+    cert, _ = materials
+    return TLSConfig(enabled=True, cafile=cert)
+
+
+def relay_link(config: QueueConfig) -> UpstreamLink:
+    """A link to `config`'s server that connects first as the relay does."""
+    return UpstreamLink(lambda: QueueClient(config), name=f'{config.host}:{config.port}',
+                        deadline=5, backoff_base=0.01, backoff_cap=0.02,
+                        first_connect=relay_upstream.first_connect(config))
+
+
+@mark.integration
+def test_tls_link_against_a_cleartext_upstream_fails_at_once(tls_materials) -> None:
+    """A link with TLS on against a server with TLS off fails at its first connection, naming its setting."""
+    server = QueueServer(loopback())
+    server.start()
+    config = QueueConfig(host='127.0.0.1', port=server.address[1], auth=AUTH, size=2, tls=client_tls(tls_materials))
+    link = None
+    try:
+        start = time.monotonic()
+        link = relay_link(config)
+        link.start()
+        with pytest.raises(TLSError) as raised:
+            link.wait_up(DEADLINE)
+        assert time.monotonic() - start < 1
+        assert link.state is LinkState.FAILED
+        message = str(raised.value)
+        assert 'does not use TLS' in message and '[relay.upstream.tls] enabled' in message
+        assert 'must agree on TLS' in message
+    finally:
+        if link is not None:
+            link.stop(DEADLINE)
+        server.shutdown()
+
+
+@mark.integration
+def test_cleartext_link_against_a_tls_upstream_fails_at_once(group: Group) -> None:
+    """A link with TLS off against an `hs server` with TLS on fails at its first connection, naming its setting."""
+    port, key = free_port(), secrets.token_hex(16)
+    server = group.start('server', 'server', '--forever', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_AUTH': key})
+    wait_listening(server, port, group, 'server')
+    config = QueueConfig(host='127.0.0.1', port=port, auth=key, size=2)
+    link = None
+    try:
+        start = time.monotonic()
+        link = relay_link(config)
+        link.start()
+        with pytest.raises(TLSError) as raised:
+            link.wait_up(DEADLINE)
+        assert time.monotonic() - start < 1
+        assert link.state is LinkState.FAILED
+        message = str(raised.value)
+        assert 'uses TLS' in message and '--no-tls' in message and 'must agree on TLS' in message
+    finally:
+        if link is not None:
+            link.stop(DEADLINE)
+
+
+@mark.integration
+def test_tls_mismatch_after_a_first_connection_is_retried(tls_materials) -> None:
+    """Once a link has connected, a server on its port with TLS off is a lost link: it keeps trying, never fails."""
+    old = QueueServer(QueueConfig(host='127.0.0.1', port=0, auth=AUTH, size=2, tls=server_tls(tls_materials)))
+    old.start()
+    port = old.address[1]
+    config = QueueConfig(host='127.0.0.1', port=port, auth=AUTH, size=2, tls=client_tls(tls_materials))
+    link = relay_link(config)
+    new = None
+    try:
+        link.start()
+        assert link.wait_up(DEADLINE)
+        link.call('warm-up', lambda client: client.dispatcher)
+        old.shutdown()
+        new = QueueServer(loopback(port))
+        new.start()
+        with pytest.raises(LinkDown):
+            link.call('puller', ROLE_CALLS['puller'])
+        assert wait_for(lambda: link.attempts >= 3)
+        assert link.state is LinkState.DOWN and link.failure is None
+        assert not link.wait_up(0.2)
+    finally:
+        link.stop(DEADLINE)
+        if new is not None:
+            new.shutdown()
+
+
+@mark.integration
+@mark.parametrize('tls', [True, False], ids=['tls', 'cleartext'])
+def test_upstream_unreachable_at_first_is_retried_until_it_answers(tls: bool, tls_materials) -> None:
+    """A link whose server refuses at first keeps trying, and connects once a server with its TLS setting answers."""
+    port = free_port()
+    config = QueueConfig(host='127.0.0.1', port=port, auth=AUTH, size=2,
+                         tls=client_tls(tls_materials) if tls else None)
+    link = relay_link(config)
+    server = None
+    try:
+        link.start()
+        assert wait_for(lambda: link.attempts >= 3)
+        assert link.state is LinkState.DOWN and link.failure is None
+        server = QueueServer(QueueConfig(host='127.0.0.1', port=port, auth=AUTH, size=2,
+                                         tls=server_tls(tls_materials) if tls else None))
+        server.start()
+        assert link.wait_up(DEADLINE)
+        link.call('puller', ROLE_CALLS['puller'])
+    finally:
+        link.stop(DEADLINE)
+        if server is not None:
+            server.shutdown()

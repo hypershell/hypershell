@@ -8,7 +8,7 @@ appetite: big
 status: in_progress
 branch: fix/relay-hardening
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -65,7 +65,7 @@ phases:
     tests/test_relay_connector.py && sh spec/relay-hardening/drive/red_check.sh
 - id: P4
   name: TLS mismatch with the upstream fails fast at first connection, both directions
-  status: pending
+  status: done
   satisfies:
   - R4
   - R9
@@ -324,18 +324,18 @@ first attempt, in both directions, with no site client launched and an error nam
 refused/unroutable at start and losses after a first connection retry as today. Design: PLAN §2 R4;
 research 04.
 
-- [ ] `core/reconnect.py`: an optional first-connection hook on `UpstreamLink`, called inside the
+- [x] `core/reconnect.py`: an optional first-connection hook on `UpstreamLink`, called inside the
       `dial` connect thread only while `not self.connected`, with the remaining deadline; a mismatch
       error class subclassing `TLSError` (fatal through `FATAL_ERRORS` unchanged).
-- [ ] `relay/upstream.py`: `speaks_tls(address, timeout)` (IPv4, throwaway `CERT_NONE` context, no
+- [x] `relay/upstream.py`: `speaks_tls(address, timeout)` (IPv4, throwaway `CERT_NONE` context, no
       data, no key; true only on a completed handshake) and `speaks_plain(address, timeout)` (4-byte
       big-endian length then `#CHALLENGE#`; optionally capped at 5 s); the hook: `--no-tls` → check
       TLS before the dial; TLS → on an `SSLError` other than `SSLCertVerificationError`, check plain,
       raise the mismatch from the original or re-raise it. Messages as research 04 §Wording, naming
       `--no-tls` / `[relay.upstream.tls] enabled` and "must agree on TLS".
-- [ ] `relay/__init__.py`: `RelayApp.exceptions` (`:1094-1100`) maps the mismatch to
+- [x] `relay/__init__.py`: `RelayApp.exceptions` (`:1094-1100`) maps the mismatch to
       `handle_exception` with `exit_status.runtime_error` (one CRITICAL line, no traceback file).
-- [ ] R9 tests: `tests/test_relay_link.py` — both directions against an in-process `QueueServer`
+- [x] R9 tests: `tests/test_relay_link.py` — both directions against an in-process `QueueServer`
       with/without TLS, `wait_up` raises the mismatch in < 1 s with the setting and "must agree" in
       the text (red ×2; bound every wait, since on `2ffb5cc` the plain → TLS case never returns on
       its own); connected-once-then-mismatched → DOWN and retrying, not FAILED;
@@ -344,13 +344,24 @@ research 04.
       with and without `--no-tls`, key in `HYPERSHELL_SERVER_AUTH`, relay opposite with
       `HYPERSHELL_RELAY_UPSTREAM_DEADLINE=5` and a recording launcher: exit 5 within 5 s, the text,
       no launch, no "Relay-local server ready" (red ×2).
-- [ ] Docs: one sentence in `docs/cli/relay.rst` (TLS on the upstream hop) that a TLS setting that
+- [x] Docs: one sentence in `docs/cli/relay.rst` (TLS on the upstream hop) that a TLS setting that
       differs from the upstream server's ends the relay at once with an error, with
       `.. versionchanged:: 2.9.0`.
+      *As built:* the hook is `UpstreamLink(first_connect=…)`, called with the new client and the
+      seconds left of the attempt in place of `client.connect()`; the relay passes
+      `relay.upstream.first_connect(upstream)`. The error is `reconnect.TLSMismatchError`. A TLS
+      relay checks for a cleartext challenge only on a plain `ssl.SSLError`: a certificate failure,
+      `SSLEOFError` and `SSLZeroReturnError` are re-raised as they are. `speaks_plain` is capped at
+      `PLAIN_CHECK_WAIT` (5 s). The docs sentence is in `docs/_include/relay_desc.rst` (beside the
+      relay that waits for an unreachable upstream, so the man page carries it too), with the
+      `versionchanged` after its `.. include::` in `docs/cli/relay.rst`. The cleartext → TLS link
+      test serves its TLS upstream from an `hs server` process, killed with the test, so every wait
+      is bounded. The two link tests are red on `2ffb5cc` because the relay's hook does not exist
+      there; the two CLI tests are red by behaviour (the relay is still running at the 12 s bound).
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/core/reconnect.py`, `src/hypershell/relay/upstream.py`,
   `src/hypershell/relay/__init__.py`, `tests/test_relay_link.py`, `tests/test_relay_workload.py`,
-  `docs/cli/relay.rst`, `drive/red.txt`.
+  `docs/_include/relay_desc.rst`, `docs/cli/relay.rst`, `drive/red.txt`.
 
 ## Phase P5 — Idle zones and the relay docs
 **Satisfies:** R5, R6, R9, R10 · **Depends on:** P4

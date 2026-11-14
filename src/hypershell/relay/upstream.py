@@ -21,6 +21,10 @@ publishes, if any, for the relay's fleets to follow. A topology that says a newe
 superseded this one retires the relay: the heartbeat records it once, for good, and says so on
 every beat from then on, under every identity; the puller asks for nothing more.
 
+The relay's first connection upstream checks that the upstream server's TLS setting is its own (see
+`first_connect`), so a relay with TLS on and an upstream server with it off, or the other way around,
+fails at once instead of trying again.
+
 Example:
     >>> from hypershell.relay.upstream import upstream_identity
     >>> identity = upstream_identity('gpu')
@@ -32,8 +36,11 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Final
 
 # Standard libs
+import ssl
 import json
 import time
+import socket
+import struct
 import functools
 import threading
 from enum import Enum
@@ -56,13 +63,14 @@ from hypershell.core.signal import check_signal, SIGUSR1, SIGUSR2
 from hypershell.core.thread import Thread
 from hypershell.core.tls import from_namespace as tls_from_namespace
 from hypershell.core.dispatch import build_version
-from hypershell.core.reconnect import LinkDown, as_link
+from hypershell.core.reconnect import LinkDown, TLSMismatchError, as_link
 from hypershell.client import ClientInfo
 from hypershell.data.model import DEFAULT_ZONE_NAME, zone_id
 from hypershell.relay import store
 
 # Public interface
 __all__ = ['upstream_identity', 'served_zones', 'upstream_config', 'upstream_key', 'relay_site', 'request_text', 'read_reply',
+           'speaks_tls', 'speaks_plain', 'first_connect',
            'RelayInsertError', 'drain_signalled', 'log_drain', 'never',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
            'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
@@ -129,6 +137,12 @@ RETURN_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, )
 PULL_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, STAGE_DRAIN)
 """Stages passed before work is requested (held results go back first)."""
 
+CHALLENGE: Final[bytes] = b'#CHALLENGE#'
+"""What an authenticating multiprocessing server sends first on a connection, after a 4-byte length."""
+
+PLAIN_CHECK_WAIT: Final[float] = 5.0
+"""Longest wait in seconds for a cleartext server's challenge, when checking for one."""
+
 
 def upstream_identity(zone: Optional[str], instance: str = INSTANCE) -> str:
     """The upstream client id of a relay `instance` for the zone named `zone` (None is the default zone)."""
@@ -148,6 +162,101 @@ def upstream_config(host: Optional[str] = None, port: Optional[int] = None, no_t
     section = config.relay.upstream
     tls = None if no_tls else tls_from_namespace(section.get('tls'))
     return QueueConfig(host=host or section.host, port=int(port or section.port), auth=upstream_key(), tls=tls)
+
+
+def speaks_tls(address: Tuple[str, int], timeout: float) -> bool:
+    """Whether the server at `address` completes a TLS handshake within `timeout` seconds.
+
+    The handshake verifies nothing and is all that is sent: no key, and no data after it. A refused
+    or unreachable address raises, as a connection attempt would; any other failure is false.
+    """
+    if timeout <= 0:
+        return False
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    end = time.monotonic() + timeout
+    # Dial IPv4 only, as the queue clients do.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw:
+        raw.settimeout(timeout)
+        raw.connect(address)
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return False
+        raw.settimeout(remaining)
+        try:
+            with context.wrap_socket(raw):
+                return True
+        except OSError:  # Covers TLS errors, resets and the timeout.
+            return False
+
+
+def speaks_plain(address: Tuple[str, int], timeout: float) -> bool:
+    """Whether the server at `address` opens a connection with a cleartext challenge within `timeout` seconds.
+
+    An authenticating multiprocessing server sends its challenge as soon as it accepts a connection:
+    a 4-byte big-endian length, then `CHALLENGE`. Nothing is sent to it. Any failure is false.
+    """
+    if timeout <= 0:
+        return False
+    expected = 4 + len(CHALLENGE)
+    end = time.monotonic() + timeout
+    data = b''
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw:
+            raw.settimeout(timeout)
+            raw.connect(address)
+            while len(data) < expected:
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    return False
+                raw.settimeout(remaining)
+                chunk = raw.recv(expected - len(data))
+                if not chunk:
+                    return False
+                data += chunk
+    except OSError:
+        return False
+    length, = struct.unpack('!i', data[:4])
+    return length > len(CHALLENGE) and data[4:] == CHALLENGE
+
+
+def first_connect(upstream: QueueConfig) -> Callable[[Any, float], None]:
+    """Connect a client to the `upstream` server for the first time, failing at once on a TLS mismatch.
+
+    Given to the upstream link, which calls it with a new client and the seconds left of the
+    attempt's deadline until the link first connects. With TLS off, the relay first checks whether
+    the upstream server completes a TLS handshake; with TLS on, a TLS error on connecting (other
+    than a certificate that does not verify, or a closed connection) is checked for a cleartext
+    server's challenge. Either finding raises `TLSMismatchError`, naming the relay's own setting.
+    Anything else connects, or fails, as the client's own `connect` does.
+    """
+    address = (upstream.host, int(upstream.port))
+    name = f'{upstream.host}:{upstream.port}'
+    tls = upstream.tls is not None and upstream.tls.is_active()
+
+    def connect(client: Any, timeout: float) -> None:
+        end = time.monotonic() + timeout
+        if not tls:
+            if speaks_tls(address, timeout):
+                raise TLSMismatchError(f'Upstream server {name} uses TLS, and this relay has TLS off '
+                                       f'(--no-tls, or [relay.upstream.tls] enabled = false): '
+                                       f'the relay and its upstream server must agree on TLS')
+            client.connect()
+            return
+        try:
+            client.connect()
+        except (ssl.SSLCertVerificationError, ssl.SSLEOFError, ssl.SSLZeroReturnError):
+            raise
+        except ssl.SSLError as error:
+            if speaks_plain(address, min(PLAIN_CHECK_WAIT, end - time.monotonic())):
+                raise TLSMismatchError(f'Upstream server {name} does not use TLS, and this relay has TLS on '
+                                       f'([relay.upstream.tls] enabled, the default): the relay and its '
+                                       f'upstream server must agree on TLS (--no-tls on both, or on neither)'
+                                       ) from error
+            raise
+
+    return connect
 
 
 def upstream_key(base: Any = None) -> str:

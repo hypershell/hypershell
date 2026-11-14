@@ -29,3 +29,9 @@ tests/test_relay_link.py::test_first_call_after_an_upstream_restart_is_a_lost_li
 tests/test_relay_link.py::test_first_call_after_an_upstream_restart_is_a_lost_link[heartbeat]
 tests/test_relay_link.py::test_first_call_after_an_upstream_restart_is_a_lost_link[returner]
 tests/test_relay_link.py::test_first_call_after_an_upstream_restart_is_a_lost_link[handback]
+
+# P4: a TLS mismatch with the upstream server fails fast at first connection, both directions (R4).
+tests/test_relay_link.py::test_tls_link_against_a_cleartext_upstream_fails_at_once
+tests/test_relay_link.py::test_cleartext_link_against_a_tls_upstream_fails_at_once
+tests/test_relay_workload.py::test_relay_exits_at_once_when_its_tls_setting_is_not_its_upstream_servers[tls-relay-cleartext-upstream]
+tests/test_relay_workload.py::test_relay_exits_at_once_when_its_tls_setting_is_not_its_upstream_servers[cleartext-relay-tls-upstream]

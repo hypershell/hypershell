@@ -19,7 +19,8 @@ puts them back in the queue for the other relay.
 
 A relay also works against an upstream server running without a database, rides through its upstream
 server dying and coming back (its held results then refused as stale, and the tasks run again), ends
-(non-zero) with its site when its upstream server comes back refusing it or its own relay-local receiver dies, finishes everything it holds
+(non-zero) with its site when its upstream server comes back refusing it or its own relay-local receiver dies, exits
+at once, launching nothing, when its TLS setting is not its upstream server's, finishes everything it holds
 when told to drain (what it has not yet staged too), returns the times its site clients report as the
 instants they were from another time zone, and hands its site clients the relay's configuration file
 without the relay settings in it, a copy it removes when SIGINT or SIGTERM ends it.
@@ -54,6 +55,7 @@ from collections import Counter
 import psutil
 import pytest
 from pytest import mark
+from cmdkit.app import exit_status
 
 # Internal libs
 from hypershell.core.config import RELAY_MARKER
@@ -780,6 +782,51 @@ def test_relay_exits_and_ends_its_site_when_its_upstream_server_comes_back_unusa
         assert 'Ended 2 site clients' in relay_log
     finally:
         release(group, relay, barrier)
+
+
+RECORDING_LAUNCHER = """\
+#!/bin/sh
+# The loopback launcher, recording each launch first.
+echo launched >> '{record}'
+exec '{loopback}' "$@"
+"""
+
+TLS_MISMATCH_BOUND = 12  # Seconds a test waits for the relay to exit on a TLS mismatch.
+
+
+@mark.integration
+@mark.parametrize('relay_tls', [True, False], ids=['tls-relay-cleartext-upstream', 'cleartext-relay-tls-upstream'])
+def test_relay_exits_at_once_when_its_tls_setting_is_not_its_upstream_servers(group: Group, relay_tls: bool) -> None:
+    """A relay whose TLS setting differs from its upstream server's exits with status 5 within its upstream deadline
+    of starting, with an error naming its own setting, and launches no site client."""
+    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    server = group.start('server', 'server', '--forever', *(['--no-tls'] if relay_tls else []),
+                         '-H', 'localhost', '-p', str(port), env={'HYPERSHELL_SERVER_AUTH': key})
+    wait_listening(server, port, group, 'server')
+    record = group.site / 'launches'
+    launcher = wrapped_launcher(group.site, 'recording-launcher', RECORDING_LAUNCHER, record=str(record))
+    start = time.monotonic()
+    relay = start_relay(group, 'relay', port, key, 2, *([] if relay_tls else ['--no-tls']),
+                        '--launcher', str(launcher), HYPERSHELL_RELAY_UPSTREAM_DEADLINE='5')
+    try:
+        status = relay.wait(timeout=TLS_MISMATCH_BOUND)
+    except subprocess.TimeoutExpired:
+        pytest.fail(f'relay still running {TLS_MISMATCH_BOUND} seconds after it started against an upstream server '
+                    f'with the other TLS setting:\n{group.text("relay")}')
+    elapsed = time.monotonic() - start
+    relay_log = group.text('relay')
+    assert status == exit_status.runtime_error, relay_log
+    assert elapsed < 5, relay_log
+    mismatch, = [line for line in relay_log.splitlines() if 'CRITICAL' in line]
+    assert 'TLSMismatchError' in mismatch and 'must agree on TLS' in mismatch
+    if relay_tls:
+        assert f'Upstream server localhost:{port} does not use TLS' in mismatch
+        assert '[relay.upstream.tls] enabled' in mismatch
+    else:
+        assert f'Upstream server localhost:{port} uses TLS' in mismatch and '--no-tls' in mismatch
+    assert 'Relay-local server ready' not in relay_log and 'Traceback' not in relay_log
+    assert not record.exists(), 'a site client was launched'
+    assert server.poll() is None, group.text('server')
 
 
 @mark.integration

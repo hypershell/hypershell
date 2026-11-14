@@ -17,6 +17,11 @@ work-request protocol, a wrong key, a certificate that does not verify) fails th
 raised to every caller from then on, unchanged, so the program exits as a client would. Any other
 error (a full queue, say) is the caller's to handle and leaves the link as it was.
 
+Until the link has first connected, each attempt may connect through a hook of the caller's, given
+what is left of the attempt's deadline, in place of the client's own `connect`. The relay checks
+there that its upstream server's TLS setting is its own, and raises a `TLSMismatchError` (fatal)
+when it is not, since no new connection cures that.
+
 While the link is down a reconnector thread dials again, with full-jitter exponential backoff
 (each wait drawn uniformly between zero and the base times two to the number of failed attempts,
 capped), each attempt with the same deadline. A new connection is a new epoch with new worker
@@ -66,8 +71,8 @@ from hypershell.core.queue import QueueVersionError
 from hypershell.core.tls import TLSError
 
 # Public interface
-__all__ = ['UpstreamLink', 'FixedLink', 'LinkDown', 'LinkState', 'as_link', 'is_fatal', 'is_transport',
-           'is_stale_proxy', 'backoff_delay', 'DEFAULT_DEADLINE', 'DEFAULT_BACKOFF_BASE', 'DEFAULT_BACKOFF_CAP',
+__all__ = ['UpstreamLink', 'FixedLink', 'LinkDown', 'LinkState', 'TLSMismatchError', 'as_link', 'is_fatal',
+           'is_transport', 'is_stale_proxy', 'backoff_delay', 'DEFAULT_DEADLINE', 'DEFAULT_BACKOFF_BASE', 'DEFAULT_BACKOFF_CAP',
            'DEFAULT_EVICT_HINT', 'REPORT_INTERVAL']
 
 # Initialize logger
@@ -144,6 +149,10 @@ def backoff_delay(attempt: int, fraction: float, base: float = DEFAULT_BACKOFF_B
 
 class LinkDown(ConnectionError):
     """The link is down: the call was not made, or its outcome is unknown."""
+
+
+class TLSMismatchError(TLSError):
+    """The peer uses TLS and this end does not, or the other way around: the two must agree."""
 
 
 class LinkState(Enum):
@@ -245,6 +254,11 @@ class UpstreamLink:
         sleep (callable, optional):
             Waits the given seconds; returns true if the link was halted meanwhile.
             Default: a wait on the link's halt event.
+
+        first_connect (callable, optional):
+            Connects a new client, given the seconds left of the attempt's deadline, in place of
+            its `connect`, on each attempt until the link first connects. It may raise an error
+            of its own (a fatal one ends the link).
     """
 
     def __init__(self: UpstreamLink,
@@ -257,8 +271,10 @@ class UpstreamLink:
                  stages: Iterable[str] = (),
                  clock: Callable[[], float] = time.monotonic,
                  rng: Callable[[], float] = random.random,
-                 sleep: Optional[Callable[[float], bool]] = None) -> None:
+                 sleep: Optional[Callable[[float], bool]] = None,
+                 first_connect: Optional[Callable[[Any, float], None]] = None) -> None:
         self.factory = factory
+        self.first_connect = first_connect
         self.name = name
         self.deadline = float(deadline)
         self.evict_hint = float(evict_hint)
@@ -482,15 +498,22 @@ class UpstreamLink:
         return True
 
     def dial(self: UpstreamLink) -> Any:
-        """A new connected client, from a thread given at most the deadline (left behind if it overruns)."""
+        """A new connected client, from a thread given at most the deadline (left behind if it overruns).
+
+        Until the link first connects, the client is connected through `first_connect`, if given.
+        """
         box: Dict[str, Any] = {}
         done = threading.Event()
         abandoned = threading.Event()
+        end = time.monotonic() + self.deadline
 
         def connect() -> None:
             try:
                 client = self.factory()
-                client.connect()
+                if self.first_connect is not None and not self.connected:
+                    self.first_connect(client, max(0.0, end - time.monotonic()))
+                else:
+                    client.connect()
                 box['client'] = client
             except BaseException as error:  # Handed to the reconnector.
                 box['error'] = error

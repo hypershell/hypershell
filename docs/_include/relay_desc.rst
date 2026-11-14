@@ -76,7 +76,10 @@ costs nothing: the results land. After a longer one, or after the upstream *serv
 upstream *server* has put those tasks back for other *clients*, so their results are refused as
 stale and the tasks run again. A relay that is started while its upstream *server* cannot be reached
 waits for it before it starts its site, and a relay restarted on the same relay database returns the
-results its earlier run still held.
+results its earlier run still held. A relay and an upstream *server* that differ on TLS (on at one
+end, ``--no-tls`` at the other) would each wait for the other, so the relay checks for this when it
+first connects: it exits at once with a non-zero status, before it starts its site, with an error
+that names its own TLS setting.
 
 The relay database is always a private SQLite file, whatever database is configured, and the
 configured database is never opened. One relay runs per process, and a second relay refuses to

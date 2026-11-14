@@ -16,6 +16,9 @@ Description
 
 .. include:: ../_include/relay_desc.rst
 
+.. versionchanged:: 2.9.0
+   a relay whose TLS setting differs from its upstream *server*'s exits at once, with an error.
+
 |
 
 .. include:: ../_include/relay_help.rst
