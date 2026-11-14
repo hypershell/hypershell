@@ -22,7 +22,7 @@ from cmdkit.cli import Interface, ArgumentError
 # Internal libs
 from hypershell.core.config import config, blame, find_available_ports
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
-from hypershell.core.types import parse_bytes, parse_time
+from hypershell.core.types import parse_bytes, parse_time, parse_delay
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -96,7 +96,7 @@ Options:
       --ssh-group      NAME     SSH nodelist group in config.
   -E, --env                     Send environment variables.
       --remote-exe     PATH     Path to executable on remote hosts.
-  -d, --delay-start    SEC      Delay time for launching clients (default: {DEFAULT_DELAY}).
+  -d, --delay-start    SEC      Client start-up delay; seconds, 30s, 1h30m or [D-]HH:MM:SS; --delay-start=-10m is random up to 10m (default: {DEFAULT_DELAY}).
       --capture                 Capture individual task <stdout> and <stderr>.
       --monitor                 Capture cores and memory used by tasks.
   -c, --cores          NUM      Required cores per task (default: none).
@@ -151,7 +151,7 @@ class ClusterApp(Application):
     interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
 
     delay_start: float = DEFAULT_DELAY
-    interface.add_argument('-d', '--delay-start', type=float, default=delay_start)
+    interface.add_argument('-d', '--delay-start', type=parse_delay, default=delay_start)
 
     zone: Optional[str] = None
     interface.add_argument('--zone', default=None)

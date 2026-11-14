@@ -66,7 +66,7 @@ from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, 
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
-from hypershell.core.types import parse_bytes, parse_time, serialize, deserialize
+from hypershell.core.types import parse_bytes, parse_time, parse_delay, serialize, deserialize
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2, SIGINT
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
@@ -1559,7 +1559,7 @@ Options:
       --tls-key             Path to TLS private key file (default: <auto>).
       --tls-cert            Path to TLS certificate file (default: <auto>).
       --tls-ca              Path to TLS CA certificate file (default: <auto>).
-  -d, --delay-start   SEC   Seconds to wait before start-up (default: {DEFAULT_DELAY}).
+  -d, --delay-start   SEC   Start-up delay; seconds, 30s, 1h30m or [D-]HH:MM:SS; --delay-start=-10m is random up to 10m (default: {DEFAULT_DELAY}).
       --no-confirm          Disable confirmation of task bundle received.
   -o, --output        PATH  Redirect task output (default: <stdout>).
   -e, --errors        PATH  Redirect task errors (default: <stderr>).
@@ -1604,7 +1604,7 @@ class ClientApp(Application):
     interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
 
     delay_start: float = DEFAULT_DELAY
-    interface.add_argument('-d', '--delay-start', type=float, default=delay_start)
+    interface.add_argument('-d', '--delay-start', type=parse_delay, default=delay_start)
 
     zone: Optional[str] = None
     interface.add_argument('--zone', default=None)

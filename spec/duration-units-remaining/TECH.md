@@ -6,12 +6,13 @@ appetite: small
 status: in_progress
 branch: fix/duration-units-remaining
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-14'
 phases:
 - id: P1
-  name: '--delay-start: signed, unrounded parse_delay end to end (options, launch line, docs)'
-  status: pending
+  name: '--delay-start: signed, unrounded parse_delay end to end (options, launch
+    line, docs)'
+  status: done
   satisfies:
   - R2
   - R4
@@ -23,20 +24,18 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    uv run pytest -q tests/test_duration_options.py tests/test_size_duration.py tests/test_cluster_launch.py
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run --python 3.11 pytest -q tests/test_duration_options.py
-    && .agents/factory/bin/temp_site.sh sh -c 'echo "echo a" > t.in
-    && uv run hs cluster t.in -N1 --delay-start=-2s
-    && uv run hs cluster t.in --no-db -N1 -d 0.5s
-    && uv run hs client --help | grep -q -e "--delay-start=-10m"
-    && { uv run hs cluster t.in --no-db -N1 --delay-start=1hr 2> err; test $? -eq 2; }
-    && grep -q "1hr" err && grep -q -e "--delay-start=-10m" err'
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs
-    sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
+  verify: uv run pytest -q tests/test_duration_options.py tests/test_size_duration.py
+    tests/test_cluster_launch.py && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run
+    --python 3.11 pytest -q tests/test_duration_options.py && .agents/factory/bin/temp_site.sh
+    sh -c 'echo "echo a" > t.in && uv run hs cluster t.in -N1 --delay-start=-2s &&
+    uv run hs cluster t.in --no-db -N1 -d 0.5s && uv run hs client --help | grep -q
+    -e "--delay-start=-10m" && { uv run hs cluster t.in --no-db -N1 --delay-start=1hr
+    2> err; test $? -eq 2; } && grep -q "1hr" err && grep -q -e "--delay-start=-10m"
+    err' && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group
+    docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 - id: P2
-  name: 'Whole-second options -w, -S, -P, -Q, -n and their four keys through parse_time
-    (help, docs, completions)'
+  name: Whole-second options -w, -S, -P, -Q, -n and their four keys through parse_time
+    (help, docs, completions)
   status: pending
   satisfies:
   - R1
@@ -51,28 +50,25 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    uv run pytest -q tests/test_duration_options.py tests/test_size_duration.py tests/test_cluster_launch.py
-    tests/test_submit.py
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run --python 3.11 pytest -q tests/test_duration_options.py
-    && .agents/factory/bin/temp_site.sh sh -c 'echo "echo a" > t.in
-    && uv run hs submit -w 1m echo b
-    && uv run hs cluster t.in -N1 -w 30s -S 5s -P 2m -Q 1m --delay-start=-2s
-    && uv run hs wait -n 1s "$(uv run hs list id -f plain | head -1)"
-    && { uv run hs run -n 1s -- echo ran > run.out 2>&1 & p=$!;
-    until uv run hs list args -f plain | grep -q "echo ran"; do sleep 0.2; done;
-    echo "echo c" | uv run hs cluster -N1 --capture; wait $p; }
-    && grep -q ran run.out
-    && HYPERSHELL_AUTOSCALE_PERIOD=5m HYPERSHELL_SUBMIT_BUNDLEWAIT=30s HYPERSHELL_TASK_SIGNALWAIT=5s
-    HYPERSHELL_SERVER_POLL=1m uv run hs cluster t.in --no-db -N1
-    && printf "[autoscale]\nperiod = \"5m\"\n[submit]\nbundlewait = \"30s\"\n[task]\nsignalwait = \"5s\"\n[server]\npoll = \"1m\"\n" > config.toml
-    && uv run hs cluster t.in --no-db -N1 && rm config.toml
-    && { uv run hs cluster t.in --no-db -N1 --period 5MB 2> err; test $? -eq 2; } && grep -q "5MB" err
-    && { uv run hs cluster t.in --no-db -N1 --bundlewait=-5 2> err; test $? -eq 2; }'
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs
-    sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
+  verify: uv run pytest -q tests/test_duration_options.py tests/test_size_duration.py
+    tests/test_cluster_launch.py tests/test_submit.py && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311
+    uv run --python 3.11 pytest -q tests/test_duration_options.py && .agents/factory/bin/temp_site.sh
+    sh -c 'echo "echo a" > t.in && uv run hs submit -w 1m echo b && uv run hs cluster
+    t.in -N1 -w 30s -S 5s -P 2m -Q 1m --delay-start=-2s && uv run hs wait -n 1s "$(uv
+    run hs list id -f plain | head -1)" && { uv run hs run -n 1s -- echo ran > run.out
+    2>&1 & p=$!; until uv run hs list args -f plain | grep -q "echo ran"; do sleep
+    0.2; done; echo "echo c" | uv run hs cluster -N1 --capture; wait $p; } && grep
+    -q ran run.out && HYPERSHELL_AUTOSCALE_PERIOD=5m HYPERSHELL_SUBMIT_BUNDLEWAIT=30s
+    HYPERSHELL_TASK_SIGNALWAIT=5s HYPERSHELL_SERVER_POLL=1m uv run hs cluster t.in
+    --no-db -N1 && printf "[autoscale]\nperiod = \"5m\"\n[submit]\nbundlewait = \"30s\"\n[task]\nsignalwait
+    = \"5s\"\n[server]\npoll = \"1m\"\n" > config.toml && uv run hs cluster t.in --no-db
+    -N1 && rm config.toml && { uv run hs cluster t.in --no-db -N1 --period 5MB 2>
+    err; test $? -eq 2; } && grep -q "5MB" err && { uv run hs cluster t.in --no-db
+    -N1 --bundlewait=-5 2> err; test $? -eq 2; }' && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    $TMPDIR/docs-html
 - id: P3
-  name: 'hs relay reads autoscale.period through parse_time (RelayApp, not at import)'
+  name: hs relay reads autoscale.period through parse_time (RelayApp, not at import)
   status: pending
   satisfies:
   - R3
@@ -84,14 +80,13 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    uv run pytest -q tests/test_duration_options.py tests/test_relay_launch.py tests/test_relay_topology.py
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run --python 3.11 pytest -q tests/test_duration_options.py
-    && .agents/factory/bin/temp_site.sh sh -c '{ HYPERSHELL_AUTOSCALE_PERIOD=5MB uv run hs relay 2> err;
-    test $? -eq 2; } && grep -q "autoscale.period" err && grep -q "5MB" err
-    && HYPERSHELL_AUTOSCALE_PERIOD=5MB uv run hs list > /dev/null'
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs
-    sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
+  verify: uv run pytest -q tests/test_duration_options.py tests/test_relay_launch.py
+    tests/test_relay_topology.py && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run
+    --python 3.11 pytest -q tests/test_duration_options.py && .agents/factory/bin/temp_site.sh
+    sh -c '{ HYPERSHELL_AUTOSCALE_PERIOD=5MB uv run hs relay 2> err; test $? -eq 2;
+    } && grep -q "autoscale.period" err && grep -q "5MB" err && HYPERSHELL_AUTOSCALE_PERIOD=5MB
+    uv run hs list > /dev/null' && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run
+    --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -161,7 +156,7 @@ code+state commit.
 (`30`, `0.5`, `-600`) bit-identical to `float()`, refuse `1hr`/`5MB` with `-W`'s message plus the
 random form, and hand launched clients a plain-decimal delay.
 
-- [ ] `core/types.py`: factor `parse_time`'s pattern loop into a private helper returning the exact
+- [x] `core/types.py`: factor `parse_time`'s pattern loop into a private helper returning the exact
       `Fraction` of seconds (or `None`) for a stripped text; `parse_time` = `ceil` of it, unchanged
       behaviour and message. Add `parse_delay(value) -> float` to `__all__`: strip, one optional
       leading `-`, the helper on the rest, `float(±seconds)` unrounded; on no match (or
@@ -169,21 +164,21 @@ random form, and hand launched clients a plain-decimal delay.
       `; a leading - waits a random time up to that duration (e.g., --delay-start=-10m)`. Per the
       foreman's ruling on PLAN D1, either refuse `+5`/`.5`/`5.`/`1e3`/`inf`/`nan`/`1_000` (recommended)
       or admit `.5`/`5.` in `parse_delay` only.
-- [ ] `client.py` and `cluster/__init__.py`: `-d/--delay-start` `type=float` → `type=parse_delay`;
+- [x] `client.py` and `cluster/__init__.py`: `-d/--delay-start` `type=float` → `type=parse_delay`;
       add `parse_delay` to the existing `core.types` import line.
-- [ ] `cluster/launch.py` `client_options`: write the delay as a plain decimal with no exponent
+- [x] `cluster/launch.py` `client_options`: write the delay as a plain decimal with no exponent
       (`format(Decimal(repr(float(delay_start))), 'f')`, or an equivalent helper); keep the
       two-word `'-d', …` shape and `str()` for every other value.
-- [ ] Help: the `-d` line in `client.py`/`cluster/__init__.py` `APP_HELP`, and the `-d` paragraph in
+- [x] Help: the `-d` line in `client.py`/`cluster/__init__.py` `APP_HELP`, and the `-d` paragraph in
       `docs/_include/{client,cluster}_help.rst`. They state the duration forms (a7's paragraph), that
       fractions are kept, and that a leading `-` waits a random time up to that duration, written
       `--delay-start=-10m` (replacing `--delay-start=-600` in `client_help.rst:64-67`, or keeping it
       alongside). Add `.. versionchanged:: 2.9.0` beside the `.. include::` in
       `docs/cli/{client,cluster}.rst`. `docs/getting_started.rst:101-103`: the sentence says the value
       may carry units.
-- [ ] Completions: zsh `-d` descriptions (`client`, `cluster`) gain the forms and the attached random
+- [x] Completions: zsh `-d` descriptions (`client`, `cluster`) gain the forms and the attached random
       form; zsh and bash `-d` candidates become e.g. `30 60 10m -60 -600` (no signed unit form).
-- [ ] `tests/test_duration_options.py` (new): `@mark.unit` `parse_delay` accept table (`30`→30.0,
+- [x] `tests/test_duration_options.py` (new): `@mark.unit` `parse_delay` accept table (`30`→30.0,
       `0.5`, `-600`, `-0.5`, `30s`, `1.5s`→1.5, `10m`, `-10m`→-600.0, `1:30`, `-1:30`→-90.0, `1-12`,
       `-1h30m`) with each bare number equal to `float(text)`; refusal table (`5MB`, `1hr`, `2hours`,
       `1w`, `30m1h`, `--10m`, `- 10m`, `-`, `''`, plus D1's spellings per the ruling) whose message

@@ -600,7 +600,7 @@ function _hs_client() {
 		-t | --template)    COMPREPLY=(); return ;;
 		-H | --host)        COMPREPLY=($(compgen -W "$(_hs_known_hosts)" -- "${current}")); return ;;
 		-p | --port)        COMPREPLY=($(compgen -W "$(hs config get server.port --raw 2>/dev/null)" -- "${current}")); return ;;
-		-d | --delay-start) COMPREPLY=($(compgen -W "30 60 600 -60 -600" -- "${current}")); return ;;
+		-d | --delay-start) COMPREPLY=($(compgen -W "30 60 600 10m -60 -600" -- "${current}")); return ;;
 		-T | --timeout)     COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}")); return ;;
 		-W | --task-timeout) COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}")); return ;;
 		-S | --signalwait)  COMPREPLY=($(compgen -W "1 5 10" -- "${current}")); return ;;
@@ -737,7 +737,7 @@ function _hs_cluster() {
 		-w | --bundlewait)   COMPREPLY=($(compgen -W "5 10 30 60 600" -- "${current}")); return ;;
 		-r | --max-retries)  COMPREPLY=($(compgen -W "1 2 3 4 5 6" -- "${current}")); return ;;
 		-Q | --poll)         COMPREPLY=($(compgen -W "1 2 5 10" -- "${current}")); return ;;
-		-d | --delay-start)  COMPREPLY=($(compgen -W "30 60 600 -60 -600" -- "${current}")); return ;;
+		-d | --delay-start)  COMPREPLY=($(compgen -W "30 60 600 10m -60 -600" -- "${current}")); return ;;
 		-T | --timeout)      COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}")); return ;;
 		-W | --task-timeout) COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}")); return ;;
 		-S | --signalwait)   COMPREPLY=($(compgen -W "1 5 10" -- "${current}")); return ;;

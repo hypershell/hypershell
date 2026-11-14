@@ -99,8 +99,9 @@ Use the provided launcher on HPC clusters to bring up workers within your job al
 Specify which program to use with the ``--launcher`` option. Achieve higher throughput by
 aggregating tasks in bundles with ``-b``, ``--bundlesize``. Add a database configuration to
 allow for retries with ``-r``, ``--max-retries``. Using a negative value for ``--delay-start``
-causes the remote clients to sleep some random interval in seconds up to that value. In this
-example we stagger the launch process over one minute.
+causes the remote clients to sleep some random interval up to that value, given in seconds or
+with units (e.g., ``--delay-start=-60`` or ``--delay-start=-1m``). In this example we stagger
+the launch process over one minute.
 
 .. admonition:: Distributed Cluster over Slurm
     :class: note

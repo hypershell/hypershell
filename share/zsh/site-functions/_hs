@@ -510,7 +510,7 @@ function _hs_client() {
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
-        '(-d --delay-start)'{-d,--delay-start}'[Seconds to wait before start-up]:seconds:(30 60 600 -60 -600)' \
+        '(-d --delay-start)'{-d,--delay-start}'[Wait before start-up (seconds, 30s, 1h30m, or a Slurm time; --delay-start=-10m is random)]:seconds:(30 60 600 10m -60 -600)' \
         '--no-confirm[Disable confirmation of task bundle received]' \
         '(--capture)'{-o,--output}'[Redirect task output (default <stdout>)]:output file:_files' \
         '(--capture)'{-e,--errors}'[Redirect task errors (default <stderr>)]:error file:_files' \
@@ -613,7 +613,7 @@ function _hs_cluster() {
         '--ssh-group[SSH nodelist group in config]:ssh group:_hs_ssh_groups' \
         '(-E --env)'{-E,--env}'[Send environment variables]' \
         '--remote-exe[Path to executable on remote hosts]:remote exe:_files' \
-        '(-d --delay-start)'{-d,--delay-start}'[Delay time for launching clients]:seconds:(30 60 600 -60 -600)' \
+        '(-d --delay-start)'{-d,--delay-start}'[Delay time for launching clients (seconds, 30s, 1h30m, or a Slurm time; --delay-start=-10m is random)]:seconds:(30 60 600 10m -60 -600)' \
         '(--capture)'{-o,--output}'[File path for task outputs (default <stdout>)]:output file:_files' \
         '(--capture)'{-e,--errors}'[File path for task errors (default <stderr>)]:error file:_files' \
         '(-o --output -e --errors)--capture[Capture individual task <stdout> and <stderr>]' \

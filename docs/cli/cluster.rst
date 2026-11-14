@@ -30,4 +30,8 @@ Description
    options; ``--zone`` names the cluster's own zone, the one ``--init-size`` and ``--min-size``
    apply to.
 
+.. versionchanged:: 2.9.0
+   ``-d``/``--delay-start`` takes a duration with units or a Slurm time, as ``-W`` does; a leading
+   ``-`` still asks for a random delay (e.g., ``--delay-start=-10m``).
+
 .. include:: ../_include/cluster_help.rst

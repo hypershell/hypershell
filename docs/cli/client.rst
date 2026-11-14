@@ -26,4 +26,8 @@ Description
    A key on the command line is refused; the client takes it from the environment or a configuration
    file.
 
+.. versionchanged:: 2.9.0
+   ``-d``/``--delay-start`` takes a duration with units or a Slurm time, as ``-W`` does; a leading
+   ``-`` still asks for a random delay (e.g., ``--delay-start=-10m``).
+
 .. include:: ../_include/client_help.rst
