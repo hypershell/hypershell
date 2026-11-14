@@ -4,7 +4,7 @@ title: A cluster whose clients all fail says so and exits; one advertised addres
   for every launch mode
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/cluster-launch-failures
 base: develop
 current_phase: done
@@ -94,11 +94,11 @@ phases:
     uv run --python 3.11 pytest && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run
     --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 review:
-  last_reviewed_commit: 81c4de6314e8dfdde41988aca4d42da81cca5a30
+  last_reviewed_commit: f41da917eda37be9a7cc0edf5360fade0574f0f1
   verdict: changes-requested
-  blocked_reason: 'review cycle 1: R1 stop exceeds 10 s in scheduler back-off (F1);
-    blocks on idle stdin (F2)'
-  cycle: 1
+  blocked_reason: 'review cycle 2: failure stop hangs on a busy input stream with
+    a database (N1); stream input named as FILE holds the stop (N2)'
+  cycle: 2
 ---
 # TECH.md — A cluster whose clients all fail says so and exits; one advertised address for every launch mode
 
