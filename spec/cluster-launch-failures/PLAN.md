@@ -299,3 +299,23 @@ Checked against [`invariants.md`](../../.agents/factory/invariants.md) before re
   advertised under `--ssh`/autoscaling; `--advertise` unknown), and each check was exercised.
 - **Gate:** the suite under Python 3.14 (`.venv`) and 3.11 (`UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311`),
   the contract test, and the Sphinx `-W` build (sandbox off).
+
+## Plan-gate rulings (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+1. **The `submit.py` bounded-sentinel fix** is in scope. R1 cannot stop a `--no-db` run without
+   it.
+2. **Direct reads** of `receiver.machine.held`, `scheduler.machine.*` and `Client` rows are
+   approved, to keep `data/model.py` clear of #103. Comment each read with the invariant it relies
+   on.
+3. **The `--no-db` gap is accepted.** A client that returned every result but died non-zero in the
+   moment before its FINISHED heartbeat makes R1 fire, which R4 would forbid. It needs a client
+   crash inside a millisecond window, and its exact fix needs a Receiver counter in `server.py`.
+   Record it in TECH and in the code comment. The foreman seeds it after #103 lands.
+4. **The `--no-db` 10 s budget.** Time it in P2. If it misses, trim the settle (to no less than
+   2 s) or the submitter's stop wait. Do not relax R1's bound.
+5. **Man pages** come from the snippets, rebuilt by `hs-release`. 6. **Pinned error wording** is
+   approved. 7. **The four existing tests** change as described. 8. **The pre-existing problems**
+   (cmdkit's underscore split of environment keys; `-P 0` spinning the autoscaler) are noted for the
+   foreman to seed. They are not in this cycle.
