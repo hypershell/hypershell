@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:cluster-launch-failures
 kind: fix
 appetite: small
 lane: public
