@@ -212,3 +212,29 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
 4. **Cluster coverage:** local-mode drives plus the shared-path unit test suffice.
 5. **The WARNING may name the peer address** of the close that triggered it. It must not name
    anything the peer sent.
+
+## Review-cycle-1 rulings (2026-11-14)
+
+The review's human gate was triggered: F1 is in `core/queue.py` and F2 in `server.py`. The
+maintainer signed off in session (2026-11-14) to fix all of the following in this cycle.
+
+1. **F1, a large deadline is not honoured.** Values above one day are refused at start in the
+   shared parser (`core/tls.py` `handshake_seconds`), naming the key, with the same exit as other
+   bad values. That covers the limit where the socket wait wraps, and integers too large to
+   represent. The GOAL clarification records this. Tests: `30d`, `4294968`, a very long integer,
+   and exactly one day accepted.
+2. **F2, a server made plain by configuration rejects a bad key.** `hs server` and `hs cluster`
+   check the key only when the server will actually use TLS, read from the same switch the server
+   uses (`server.tls.enabled` as well as `--no-tls`), as `hs relay` already does. Tests cover both
+   ways of turning TLS off.
+3. **F3, the drive does not prove the deadline.** The `server --handshake 2` drive must fail on a
+   build with no deadline. For example, keep the server running well past the window, and record
+   the close time relative to connect. Fix `--client` mode's handling of `PYTHONPATH`.
+4. **The accept loop keeps running when a handler cannot start.** If starting the handler thread
+   for one accepted connection fails, the server closes that connection, removes it from the live
+   set, logs it (WARNING, rate-limited as R5's close warning is), and keeps accepting. Test: inject
+   a failure on one handler start; a later client must still connect and run.
+5. **Not graded, fixed anyway:** wrap the new `versionadded` in `config_param_ref.rst` in
+   `.. only:: html`, as the rest of that file does.
+
+Public wording stays neutral: robustness, deadlines and resource release.

@@ -93,6 +93,12 @@ completes TLS and authenticates, then is refused as too old, exactly as on `deve
 server refuses a 2.8.x client for its missing work-request protocol, and this cycle does not change
 that.
 
+**Ruled at review cycle 1** (2026-11-14; the maintainer signed off in session): R4's accepted range
+is bounded above. A `[server.tls] handshake` value greater than one day is refused at start, as a
+value of 0 or below is, with an error naming the key. The server does not stop accepting connections
+when starting the handler for one connection fails: that connection is closed and logged, and the
+server keeps accepting.
+
 ## Evidence plan
 
 - **Unit/integration tests** (in the queue TLS or limits suite), each **red on `develop`** and green
