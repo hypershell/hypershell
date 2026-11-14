@@ -38,6 +38,8 @@ from hypershell.core.tls import (TLSConfig, TLSError,
                                  verify_peer_fingerprint,
                                  _select_subject_cn, _default_hostnames,
                                  _X509_CN_MAX_LEN, _FALLBACK_CN)
+import hypershell.core.queue
+from hypershell.core.queue import QueueServer, QueueClient, QueueConfig
 
 
 @fixture(scope='module')
@@ -570,3 +572,244 @@ def test_secure_manager_subprocess_roundtrip(tls_materials) -> None:
         if proc.is_alive():
             proc.terminate()
             proc.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Handshake deadline: a TLS queue server keeps serving others while a connection is slow or silent in
+# its TLS handshake, and closes one that has not completed it within the deadline.
+# ---------------------------------------------------------------------------------------------------
+
+AUTH = 'queue-test-key-0123456789abcdef'
+HANDLER = 'hypershell-queue-handler'
+
+
+@fixture
+def server_tls(tls_materials):
+    """A server TLSConfig; the process-wide client context that connecting clients install is cleared after."""
+    cert, key = tls_materials
+    yield TLSConfig(enabled=True, cert=cert, key=key, cafile=cert)
+    clear_process_context()
+
+
+def queue_config(tls: Optional[TLSConfig], port: int = 0) -> QueueConfig:
+    """Queue configuration on loopback (port 0 binds an ephemeral port)."""
+    return QueueConfig(host='127.0.0.1', port=port, auth=AUTH, size=2, tls=tls)
+
+
+def with_handshake(cfg: TLSConfig, seconds) -> TLSConfig:
+    """`cfg` with its handshake deadline set by assignment."""
+    cfg.handshake = seconds
+    return cfg
+
+
+def closed_after(sock: socket.socket, opened: float, limit: float) -> Optional[float]:
+    """Seconds from `opened` until the server closed `sock` (anything it sends is read and dropped), or
+    None if it is still open `limit` seconds after `opened`."""
+    end = opened + limit
+    while True:
+        left = end - time.monotonic()
+        if left <= 0:
+            return None
+        sock.settimeout(left)
+        try:
+            data = sock.recv(4096)
+        except TimeoutError:
+            return None
+        except OSError:  # Reset: closed with our bytes unread
+            return time.monotonic() - opened
+        if not data:
+            return time.monotonic() - opened
+
+
+def client_hello() -> bytes:
+    """The first flight of a real TLS client: a ClientHello, built in memory."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+    tls = ctx.wrap_bio(incoming, outgoing)
+    try:
+        tls.do_handshake()
+    except ssl.SSLWantReadError:
+        pass
+    return outgoing.read()
+
+
+class Trickle(threading.Thread):
+    """Send `data` on `sock` one byte every `interval` seconds until stopped or the socket fails."""
+
+    def __init__(self: Trickle, sock: socket.socket, data: bytes, interval: float = 0.25) -> None:
+        super().__init__(daemon=True)
+        self.sock, self.data, self.interval = sock, data, interval
+        self.halt = threading.Event()
+        self.start()
+
+    def run(self: Trickle) -> None:
+        for n in range(len(self.data)):
+            if self.halt.wait(self.interval):
+                return
+            try:
+                self.sock.send(self.data[n:n + 1])
+            except OSError:
+                return
+
+    def stop(self: Trickle) -> None:
+        self.halt.set()
+        self.join(5)
+
+
+def handlers() -> int:
+    """Live handler threads of in-process queue servers."""
+    return sum(1 for thread in threading.enumerate() if thread.name == HANDLER)
+
+
+def descriptors() -> int:
+    """Open descriptors of this process."""
+    return len(os.listdir('/dev/fd'))
+
+
+def settles(predicate, limit: float = 1.0) -> bool:
+    """Whether `predicate` holds within `limit` seconds."""
+    end = time.monotonic() + limit
+    while not predicate():
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def first_call(port: int, tls: TLSConfig, result: dict) -> None:
+    """Connect a client and make its first queue call, recording the seconds taken or the error."""
+    start = time.monotonic()
+    try:
+        client = QueueClient(queue_config(tls, port))
+        client.connect()
+        client.completed.qsize()
+        result['seconds'] = time.monotonic() - start
+    except Exception as error:
+        result['error'] = repr(error)
+
+
+@mark.integration
+def test_client_served_while_connections_stall_in_handshake(server_tls) -> None:
+    """With 8 connections open that never send a byte, another client connects and makes its first
+    queue call within 5 s."""
+    with_handshake(server_tls, 300)
+    stalled, caller = [], None
+    with QueueServer(queue_config(server_tls)) as server:
+        port = server.address[1]
+        try:
+            for _ in range(8):
+                stalled.append(socket.create_connection(('127.0.0.1', port), timeout=5))
+            time.sleep(0.25)
+            result = {}
+            caller = threading.Thread(target=first_call, args=(port, server_tls, result), daemon=True)
+            caller.start()
+            caller.join(5)
+            assert 'error' not in result, result
+            assert result.get('seconds') is not None and result['seconds'] <= 5, \
+                f'no connect and first call within 5 s with 8 connections stalled ({result})'
+        finally:
+            for sock in stalled:
+                sock.close()
+            if caller is not None:
+                caller.join(10)
+
+
+@mark.integration
+@mark.skipif(not os.path.isdir('/dev/fd'), reason='needs /dev/fd to count descriptors')
+@mark.parametrize('peer', ['silent', 'slow'])
+def test_handshake_deadline_closes_and_releases(server_tls, peer: str) -> None:
+    """With a 2 s deadline, a connection that sends nothing and one that sends a real ClientHello a byte
+    every 0.25 s are each closed 2 to 5 s after connecting, and their thread and descriptor are released
+    within 1 s of the close. The bytes the slow peer keeps sending do not extend the deadline."""
+    with_handshake(server_tls, 2)
+    with QueueServer(queue_config(server_tls)) as server:
+        port = server.address[1]
+        time.sleep(0.25)
+        threads, fds = handlers(), descriptors()
+        sock = socket.create_connection(('127.0.0.1', port), timeout=5)
+        opened = time.monotonic()
+        hello = client_hello()
+        assert len(hello) > 40  # More than 10 s of bytes at this rate
+        trickle = Trickle(sock, hello) if peer == 'slow' else None
+        try:
+            after = closed_after(sock, opened, 6)
+        finally:
+            if trickle is not None:
+                trickle.stop()
+            sock.close()
+        assert after is not None and 2 <= after <= 5, f'{peer} connection closed after {after} s (expected 2 to 5 s)'
+        assert settles(lambda: handlers() <= threads), f'{handlers()} handler threads, {threads} before'
+        assert settles(lambda: descriptors() <= fds), f'{descriptors()} descriptors, {fds} before'
+
+
+@mark.integration
+def test_stop_releases_a_pending_handshake(server_tls) -> None:
+    """Stopping the server closes a connection still in its handshake and ends its thread within 1 s."""
+    with_handshake(server_tls, 300)
+    server = QueueServer(queue_config(server_tls))
+    server.start()
+    sock = None
+    try:
+        time.sleep(0.25)
+        threads = handlers()
+        sock = socket.create_connection(('127.0.0.1', server.address[1]), timeout=5)
+        time.sleep(0.5)
+        server.shutdown()
+        stopped = time.monotonic()
+        after = closed_after(sock, stopped, 1)
+        assert after is not None, 'connection still open 1 s after the server stopped'
+        assert settles(lambda: handlers() <= threads), f'{handlers()} handler threads, {threads} before'
+    finally:
+        if sock is not None:
+            sock.close()
+        server.shutdown()
+
+
+@mark.integration
+def test_reserve_refuses_a_pending_connection_at_once(server_tls, monkeypatch) -> None:
+    """A connection that would use a reserved descriptor is closed at once, before any handshake."""
+    limit = {'value': None}
+    monkeypatch.setattr(hypershell.core.queue, '_open_file_limit', lambda: limit['value'])
+    with_handshake(server_tls, 300)
+    with QueueServer(queue_config(server_tls)) as server:
+        limit['value'] = 0
+        sock = socket.create_connection(('127.0.0.1', server.address[1]), timeout=5)
+        try:
+            after = closed_after(sock, time.monotonic(), 2)
+        finally:
+            sock.close()
+        assert after is not None and after <= 1, f'refused connection closed after {after} s (expected at once)'
+
+
+@mark.integration
+def test_plain_server_has_no_handshake_deadline(server_tls) -> None:
+    """A server without TLS never applies the deadline: a silent connection is still open after 3 s with
+    a 2 s deadline set on a TLS configuration that is not enabled."""
+    unused = with_handshake(TLSConfig(enabled=False), 2)
+    with QueueServer(queue_config(unused)) as server:
+        sock = socket.create_connection(('127.0.0.1', server.address[1]), timeout=5)
+        try:
+            after = closed_after(sock, time.monotonic(), 3)
+        finally:
+            sock.close()
+        assert after is None, f'plain server closed a silent connection after {after} s'
+
+
+@mark.integration
+def test_burst_of_clients_with_default_deadline(server_tls) -> None:
+    """64 clients connecting at once with the default deadline all connect and complete a queue call."""
+    with QueueServer(queue_config(server_tls)) as server:
+        port = server.address[1]
+        results = [{} for _ in range(64)]
+        callers = [threading.Thread(target=first_call, args=(port, server_tls, result), daemon=True)
+                   for result in results]
+        for caller in callers:
+            caller.start()
+        for caller in callers:
+            caller.join(60)
+        errors = [result['error'] for result in results if 'error' in result]
+        done = [result for result in results if 'seconds' in result]
+        assert not errors, errors[:3]
+        assert len(done) == 64, f'{len(done)} of 64 clients completed a call'

@@ -1,48 +1,82 @@
 ---
 slug: listener-handshake-deadline
-title: "A TLS queue server keeps serving clients while a connection is slow in its handshake"
+title: A TLS queue server keeps serving clients while a connection is slow in its
+  handshake
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/listener-handshake-deadline
 base: develop
-current_phase: P1
-last_updated: "2026-11-14"
+current_phase: P2
+last_updated: '2026-11-14'
 phases:
-  - id: P1
-    name: "Handshake on the handler thread under a deadline from accept"
-    status: pending
-    satisfies: [R1, R2, R3, R6, R7]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -q tests/test_queue_tls.py tests/test_queue_limits.py tests/test_queue_gc.py tests/test_queue.py tests/test_queue_address_family.py tests/test_queue_start.py tests/test_queue_workload.py && git diff --numstat 6da633d -- tests/test_queue_tls.py tests/test_queue_limits.py tests/test_queue_gc.py | awk '$2 != 0 {exit 1}' && test -s spec/listener-handshake-deadline/evidence/red-develop.txt"
-  - id: P2
-    name: "server.tls.handshake refusal at start, and deadline logging"
-    status: pending
-    satisfies: [R4, R5, R6]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -q tests/test_queue_tls.py tests/test_queue_limits.py tests/test_queue_gc.py && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" refuse"
-  - id: P3
-    name: "Docs, CLI drives with current and older clients, latency evidence"
-    status: pending
-    satisfies: [R6, R7, R8, R9]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" server && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" server --handshake 2 && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" cluster && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" cluster --handshake 2 && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" relay && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" relay --handshake 2 && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" server --client \"$TMPDIR/lhd-clients/2.9.0a8/bin/hs\" && .agents/factory/bin/temp_site.sh uv run python \"$PWD/spec/listener-handshake-deadline/research/drive.py\" server --client \"$TMPDIR/lhd-clients/2.8.7/bin/hs\" --expect-too-old && mkdir -p \"$TMPDIR/lhd-develop\" && git archive 6da633d src | tar -x -C \"$TMPDIR/lhd-develop\" && uv run python spec/listener-handshake-deadline/research/latency.py compare \"$TMPDIR/lhd-develop/src\" \"$TMPDIR/lhd-tls\""
+- id: P1
+  name: Handshake on the handler thread under a deadline from accept
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R6
+  - R7
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -q tests/test_queue_tls.py tests/test_queue_limits.py tests/test_queue_gc.py
+    tests/test_queue.py tests/test_queue_address_family.py tests/test_queue_start.py
+    tests/test_queue_workload.py && git diff --numstat 6da633d -- tests/test_queue_tls.py
+    tests/test_queue_limits.py tests/test_queue_gc.py | awk '$2 != 0 {exit 1}' &&
+    test -s spec/listener-handshake-deadline/evidence/red-develop.txt
+- id: P2
+  name: server.tls.handshake refusal at start, and deadline logging
+  status: pending
+  satisfies:
+  - R4
+  - R5
+  - R6
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -q tests/test_queue_tls.py tests/test_queue_limits.py tests/test_queue_gc.py
+    && .agents/factory/bin/temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py"
+    refuse
+- id: P3
+  name: Docs, CLI drives with current and older clients, latency evidence
+  status: pending
+  satisfies:
+  - R6
+  - R7
+  - R8
+  - R9
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs
+    sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html && .agents/factory/bin/temp_site.sh
+    uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py" server
+    && .agents/factory/bin/temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py"
+    server --handshake 2 && .agents/factory/bin/temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py"
+    cluster && .agents/factory/bin/temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py"
+    cluster --handshake 2 && .agents/factory/bin/temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py"
+    relay && .agents/factory/bin/temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py"
+    relay --handshake 2 && .agents/factory/bin/temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py"
+    server --client "$TMPDIR/lhd-clients/2.9.0a8/bin/hs" && .agents/factory/bin/temp_site.sh
+    uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py" server
+    --client "$TMPDIR/lhd-clients/2.8.7/bin/hs" --expect-too-old && mkdir -p "$TMPDIR/lhd-develop"
+    && git archive 6da633d src | tar -x -C "$TMPDIR/lhd-develop" && uv run python
+    spec/listener-handshake-deadline/research/latency.py compare "$TMPDIR/lhd-develop/src"
+    "$TMPDIR/lhd-tls"
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — A TLS queue server keeps serving clients while a connection is slow in its handshake
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -91,18 +125,18 @@ touches `core/*` or its tests, so none is `parallel`, and every phase is `hammer
 **Goal:** the in-process TLS accept loop does only the TCP accept; each connection's handler thread
 completes the handshake within `handshake` seconds of accept or closes it; nothing is left behind.
 
-- [ ] `core/tls.py`: `HANDSHAKE_KEY`, `DEFAULT_HANDSHAKE = 30`, `TLSConfig.handshake` (raw configured
+- [x] `core/tls.py`: `HANDSHAKE_KEY`, `DEFAULT_HANDSHAKE = 30`, `TLSConfig.handshake` (raw configured
       value, default 30), `from_namespace` copies `ns.get('handshake', DEFAULT_HANDSHAKE)` unparsed,
       `handshake_seconds(value) -> int` (PLAN §2.3). `core/config.py`: `'handshake': 30` in
       `[server.tls]`.
-- [ ] `core/queue.py`: `SecureListener.accept_pending()`, `wrap_pending()`, `_complete_handshake()`;
+- [x] `core/queue.py`: `SecureListener.accept_pending()`, `wrap_pending()`, `_complete_handshake()`;
       `accept()` unchanged (PLAN §2.1).
-- [ ] `_InProcessServer`: parse the deadline in `__init__` before binding (`QueueServerError` on a bad
+- [x] `_InProcessServer`: parse the deadline in `__init__` before binding (`QueueServerError` on a bad
       value — the refusal tests are P2's); TLS branch of `serve`; `handle_pending` with the `_live`
       swaps and `_halted` checks; `_cut` handles a plain `socket.socket` (PLAN §2.2). For now a
       deadline close logs the DEBUG line only (the WARNING is P2's).
-- [ ] Docstrings: `secure_client`, `_decref`, the `_server_side` comment, `_InProcessServer`.
-- [ ] Tests (new section in `tests/test_queue_tls.py`): responsiveness (8 silent connections, deadline
+- [x] Docstrings: `secure_client`, `_decref`, the `_server_side` comment, `_InProcessServer`.
+- [x] Tests (new section in `tests/test_queue_tls.py`): responsiveness (8 silent connections, deadline
       300 s, client connect + first call ≤ 5 s); deadline 2 s for a silent peer and for a peer sending
       a real ClientHello (built with `ssl.MemoryBIO`) one byte every 0.25 s, each closed 2–5 s after
       it connected; after the closes, `hypershell-queue-handler` threads and open descriptors
@@ -111,7 +145,7 @@ completes the handshake within `handshake` seconds of accept or closes it; nothi
       `_open_file_limit` monkeypatch pattern of `test_queue_limits.py`); plain server: a silent
       connection is still open after 3 s with `handshake = 2` on a `TLSConfig` it never uses;
       64 clients at once all connect and complete a call.
-- [ ] Red evidence: run the new tests against the base `src/` (Conventions), save the output to
+- [x] Red evidence: run the new tests against the base `src/` (Conventions), save the output to
       `spec/listener-handshake-deadline/evidence/red-develop.txt` (the plain-server and burst tests
       are expected to pass there; say so at the top of the file).
 - **Verify:** the P1 `verify:` — every queue suite, the existing three suites' diff against the base

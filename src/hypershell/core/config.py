@@ -158,6 +158,7 @@ default = Namespace({
             'min_version': 'TLSv1.2',
             'ciphers': PARAM_UNSET,     # OpenSSL cipher string
             'servername': PARAM_UNSET,  # Override SNI / hostname check on client side
+            'handshake': 30,            # Seconds a connection has to complete its TLS handshake (duration forms)
         },
     },
 

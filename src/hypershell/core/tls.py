@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Mapping, Optional, Tuple, Final
+from typing import List, Mapping, Optional, Tuple, Final, Union
 
 # Standard libs
 import os
@@ -25,12 +25,14 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 # Internal libs
 from hypershell.core.logging import Logger
+from hypershell.core.types import parse_time, UnitError, TIME_FORMS
 
 # Public interface
 __all__ = [
     'TLSConfig', 'TLSError',
     'PARAM_AUTO', 'PARAM_NONE',
     'DEFAULT_MIN_VERSION', 'DEFAULT_CERT_VALIDITY_DAYS', 'DEFAULT_CERT_DIRNAME',
+    'HANDSHAKE_KEY', 'DEFAULT_HANDSHAKE', 'handshake_seconds',
     'build_server_context', 'build_client_context',
     'install_process_context', 'clear_process_context',
     'get_server_context', 'get_client_context', 'get_tls_config',
@@ -55,6 +57,11 @@ DEFAULT_CERT_VALIDITY_DAYS: Final[int] = 3650  # ten years
 DEFAULT_CERT_DIRNAME: Final[str] = 'tls'
 DEFAULT_CERT_FILENAME: Final[str] = 'server.crt'
 DEFAULT_KEY_FILENAME: Final[str] = 'server.key'
+
+# Seconds a server gives a connection to complete its TLS handshake, counted from accept, and the
+# configuration key that sets it
+DEFAULT_HANDSHAKE: Final[int] = 30
+HANDSHAKE_KEY: Final[str] = 'server.tls.handshake'
 
 # RFC 5280 caps X.520 ``commonName`` at 64 UTF-8 characters. ``socket.getfqdn()`` can return
 # an IPv6 reverse-DNS PTR (e.g. ``...ip6.arpa``, 72 chars) on hosts without a configured FQDN,
@@ -93,6 +100,7 @@ class TLSConfig:
     ciphers: Optional[str] = None
     servername: Optional[str] = None   # Override SNI / hostname check on client side
     sans: List[str] = field(default_factory=list)  # SANs to embed on auto-generated certs
+    handshake: Union[int, float, str] = DEFAULT_HANDSHAKE  # Server handshake deadline, as configured (see handshake_seconds)
 
     def is_active(self: TLSConfig) -> bool:
         """True when this config should actually wire TLS into the queue transport."""
@@ -146,6 +154,26 @@ def _apply_protocol_floor(ctx: ssl.SSLContext, min_version: str) -> None:
     except KeyError:
         raise TLSError(f'Unsupported min_version {min_version!r}; expected one of '
                        f'{sorted(_MIN_VERSION_MAPPING)}')
+
+
+def handshake_seconds(value: Union[int, float, str]) -> int:
+    """The server handshake deadline in whole seconds from a configured `value` in any duration form
+    (``30``, ``'30s'``, ``'1m'``), rounded up.
+
+    Only servers read it: a client builds its :class:`TLSConfig` from the same section and never
+    parses the value.
+
+    Raises:
+        TLSError: `value` is not a duration or is not greater than zero. The message names
+            ``server.tls.handshake`` and the accepted forms.
+    """
+    try:
+        seconds = parse_time(value)
+    except UnitError as error:
+        raise TLSError(f'{HANDSHAKE_KEY}: {error}') from error
+    if seconds <= 0:
+        raise TLSError(f'{HANDSHAKE_KEY} must be greater than 0 (given {value!r}): expected {TIME_FORMS}')
+    return seconds
 
 
 def build_server_context(cfg: TLSConfig) -> ssl.SSLContext:
@@ -465,5 +493,6 @@ def from_namespace(ns: Optional[Mapping] = None,
         min_version=ns.get('min_version') or DEFAULT_MIN_VERSION,
         ciphers=ns.get('ciphers'),
         servername=ns.get('servername'),
+        handshake=ns.get('handshake', DEFAULT_HANDSHAKE),
     )
     return resolve_auto_paths(cfg, directory if directory is not None else default_directory())

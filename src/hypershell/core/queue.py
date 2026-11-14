@@ -40,9 +40,10 @@ except ImportError:  # Not POSIX: no open-file limit to manage
 from hypershell.core.config import default, config as _config
 from hypershell.core.logging import Logger, close_inherited_slot_locks
 from hypershell.core.types import NoneType, serialize
-from hypershell.core.tls import (TLSConfig, install_process_context, build_server_context,
+from hypershell.core.tls import (TLSConfig, TLSError, install_process_context, build_server_context,
                                  get_server_context, get_client_context, get_tls_config,
-                                 verify_peer_fingerprint, from_namespace as _tls_from_namespace)
+                                 verify_peer_fingerprint, handshake_seconds,
+                                 from_namespace as _tls_from_namespace)
 from hypershell.core.dispatch import Dispatcher, PROTOCOL
 
 # Public interface
@@ -208,6 +209,11 @@ class SecureListener:
     A listener given its own configuration with :meth:`serve_with` builds its server context from
     it and never reads the process-wide one; otherwise it uses the process-wide context. When its own
     context cannot be built, it says so once at ERROR and every connection fails closed.
+
+    :meth:`accept` runs the TLS handshake before it returns, as a stock accept loop expects. An
+    in-process queue server instead takes the TCP connection with :meth:`accept_pending` and runs the
+    handshake on that connection's own thread (:meth:`wrap_pending`, then :func:`_complete_handshake`),
+    so its accept loop never waits on a peer.
     """
 
     def __init__(self: SecureListener,
@@ -232,6 +238,7 @@ class SecureListener:
         self._tls: Optional[TLSConfig] = None
         self._context: Optional[ssl.SSLContext] = None
         self._context_failed = False
+        self._context_lock = threading.Lock()  # Handler threads may build the context at once
         # `authkey` is part of the stock Listener interface but unused here; the manager
         # performs the challenge handshake explicitly after we hand back the connection.
         self._authkey = authkey
@@ -254,16 +261,17 @@ class SecureListener:
         """This listener's own server context when it has a configuration, else the process-wide one."""
         if self._tls is None:
             return get_server_context()
-        if self._context is None:
-            try:
-                self._context = build_server_context(self._tls)
-            except Exception as error:
-                if not self._context_failed:
-                    self._context_failed = True
-                    log.error(f'Queue server cannot set up TLS and refuses every connection '
-                              f'({error.__class__.__name__}: {error})')
-                raise
-        return self._context
+        with self._context_lock:
+            if self._context is None:
+                try:
+                    self._context = build_server_context(self._tls)
+                except Exception as error:
+                    if not self._context_failed:
+                        self._context_failed = True
+                        log.error(f'Queue server cannot set up TLS and refuses every connection '
+                                  f'({error.__class__.__name__}: {error})')
+                    raise
+            return self._context
 
     def accept(self: SecureListener) -> SecureConnection:
         """Block on the listening socket and return a TLS-wrapped connection."""
@@ -276,6 +284,29 @@ class SecureListener:
             raw.close()
             raise
         return SecureConnection(ssl_sock)
+
+    def accept_pending(self: SecureListener) -> Tuple[socket.socket, Tuple[str, int]]:
+        """Block on the listening socket and return the TCP connection and its peer, before any TLS.
+
+        Nothing is read from or written to the peer here.
+        """
+        raw, self._last_accepted = self._socket.accept()
+        try:
+            raw.setblocking(True)
+            _no_delay(raw)
+        except OSError:
+            raw.close()
+            raise
+        return raw, self._last_accepted
+
+    def wrap_pending(self: SecureListener, raw: socket.socket) -> ssl.SSLSocket:
+        """Wrap a connection from :meth:`accept_pending` for the server side of TLS, without starting
+        the handshake. On failure `raw` is closed and the error raised."""
+        try:
+            return self._server_context().wrap_socket(raw, server_side=True, do_handshake_on_connect=False)
+        except Exception:
+            raw.close()
+            raise
 
     def close(self: SecureListener) -> None:
         sock = self._socket
@@ -302,7 +333,8 @@ def secure_client(address, family=None, authkey: Optional[bytes] = None) -> Secu
     then performs the BaseManager challenge/response handshake over the encrypted channel.
 
     Until the TLS handshake ends the calling thread is on the server side (see :func:`_decref`): a
-    queue server runs the handshake on its accept loop, which waits on this thread meanwhile.
+    forked manager's accept loop runs the handshake inline and waits on this thread meanwhile. (An
+    in-process queue server runs it on the connection's own handler thread, under its deadline.)
     """
     cfg = get_tls_config()
     ctx = get_client_context()
@@ -526,19 +558,45 @@ def _listening_socket(listener) -> socket.socket:
 def _cut(conn) -> None:
     """Shut down both directions of a live connection's socket so its handler wakes and exits.
 
-    The TLS socket is shut down at the plain-socket level, leaving its SSL object to the handler
-    thread that owns it. A stock connection is reached through a duplicate of its descriptor.
-    Platforms that offer neither are skipped; their handlers exit when the peer disconnects.
+    A socket still in its TLS handshake (raw, or wrapped but not yet handshaken) and the TLS socket of
+    a connection are shut down at the plain-socket level, leaving any SSL object to the handler thread
+    that owns it. A stock connection is reached through a duplicate of its descriptor. Platforms that
+    offer neither are skipped; their handlers exit when the peer disconnects.
     """
     try:
         ssl_sock = getattr(conn, '_ssl_sock', None)
-        if ssl_sock is not None:
+        if isinstance(conn, socket.socket):
+            socket.socket.shutdown(conn, socket.SHUT_RDWR)
+        elif ssl_sock is not None:
             socket.socket.shutdown(ssl_sock, socket.SHUT_RDWR)
         else:
             with socket.fromfd(conn.fileno(), socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.shutdown(socket.SHUT_RDWR)
     except (OSError, ValueError, AttributeError):
         pass
+
+
+# Largest socket timeout a handshake is given at once (about 31 years); a longer configured deadline
+# is held to it, since some platforms refuse a timeout much past it
+HANDSHAKE_TIMEOUT_CEILING: Final[float] = 1e9
+
+
+def _complete_handshake(ssl_sock: ssl.SSLSocket, deadline_at: float) -> None:
+    """Run the server side of the TLS handshake on `ssl_sock`, ending by `deadline_at` (monotonic).
+
+    The socket timeout is set to what is left before `deadline_at`, and one handshake call measures
+    its timeout once, from its start, so data the peer sends does not extend it. The socket is
+    blocking again afterwards.
+
+    Raises:
+        TimeoutError: the deadline passed first (``errno`` is None).
+    """
+    remaining = deadline_at - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('TLS handshake deadline passed')
+    ssl_sock.settimeout(min(remaining, HANDSHAKE_TIMEOUT_CEILING))
+    ssl_sock.do_handshake()
+    ssl_sock.settimeout(None)
 
 
 class _InProcessServer(Server):
@@ -554,6 +612,11 @@ class _InProcessServer(Server):
     Connections never hold the last :data:`RESERVE` descriptors below the open-file limit: one that
     would is closed at once, so the server's own files keep working. An accept that fails for want of
     descriptors is retried after a pause.
+
+    With TLS the accept loop does only the TCP accept. Each connection's handler thread runs its TLS
+    handshake, which must end within the handshake deadline (``server.tls.handshake``) counted from
+    the accept, or the connection is closed; so a peer slow or silent in its handshake holds only its
+    own thread and descriptor, and only until then.
     """
 
     def __init__(self: _InProcessServer, registry: Dict[str, tuple], address: Tuple[str, int],
@@ -562,7 +625,16 @@ class _InProcessServer(Server):
 
         With `tls`, the listener serves with its own context built from it, so the process-wide
         TLS configuration that clients in this process use plays no part in accepting connections.
+
+        Raises:
+            QueueServerError: the handshake deadline of `tls` is not valid (checked before binding).
         """
+        self._handshake: Optional[int] = None
+        if tls is not None:
+            try:
+                self._handshake = handshake_seconds(tls.handshake)
+            except TLSError as error:
+                raise QueueServerError(str(error)) from error
         super().__init__(registry, address, authkey, serializer)
         if tls is not None:
             self.listener.serve_with(tls)
@@ -575,7 +647,12 @@ class _InProcessServer(Server):
         self._warned_at: Optional[float] = None
 
     def serve(self: _InProcessServer) -> None:
-        """Accept connections until stopped, one daemon handler thread per connection."""
+        """Accept connections until stopped, one daemon handler thread per connection.
+
+        With TLS only the TCP connection is accepted here; its handler thread runs the handshake
+        (:meth:`handle_pending`).
+        """
+        pending = isinstance(self.listener, SecureListener) and self._handshake is not None
         try:
             with selectors.DefaultSelector() as selector:
                 selector.register(_listening_socket(self.listener), selectors.EVENT_READ)
@@ -583,7 +660,11 @@ class _InProcessServer(Server):
                     if not selector.select(timeout=POLL) or self._halted:
                         continue
                     try:
-                        conn = self.listener.accept()
+                        if pending:
+                            conn, peer = self.listener.accept_pending()
+                            accepted = time.monotonic()
+                        else:
+                            conn = self.listener.accept()
                     except Exception as error:
                         # A failed accept (reset, handshake or TLS error, closed listener) drops that peer only.
                         log.debug(f'Queue server dropped a connection: {error!r}')
@@ -594,13 +675,17 @@ class _InProcessServer(Server):
                     if not self._admits(conn):
                         conn.close()
                         continue
-                    peer = getattr(self.listener, 'last_accepted', None)
+                    if pending:
+                        target, args = self.handle_pending, (conn, peer, accepted)
+                    else:
+                        peer = getattr(self.listener, 'last_accepted', None)
+                        target, args = self.handle_request, (conn, peer)
                     with self._lock:
                         if self._halted:
                             conn.close()
                             break
                         self._live.add(conn)
-                    _ServerThread(target=self.handle_request, args=(conn, peer), name='hypershell-queue-handler').start()
+                    _ServerThread(target=target, args=args, name='hypershell-queue-handler').start()
         except Exception as error:
             if not self._halted:
                 log.error(f'Queue server stopped accepting connections: {error!r}')
@@ -619,6 +704,63 @@ class _InProcessServer(Server):
         else:
             log.debug(message)
         return False
+
+    def handle_pending(self: _InProcessServer, raw: socket.socket, peer: Optional[Tuple[str, int]],
+                       accepted: float) -> None:
+        """Run the TLS handshake of a connection accepted at `accepted` (monotonic), then serve it.
+
+        The handshake must end within the handshake deadline counted from `accepted`, or the
+        connection is closed (:meth:`_closed_pending`); any other failure drops it as a failed accept
+        does. Either way its socket is closed and this thread ends at once. The live entry follows the
+        connection from raw socket to TLS socket to connection, so :meth:`stop` cuts it at any stage.
+        """
+        held = raw  # What this thread forgets and closes when it does not go on to serve the connection
+        try:
+            try:
+                ssl_sock = self.listener.wrap_pending(raw)
+            except Exception as error:
+                log.debug(f'Queue server dropped a connection: {error!r}')
+                return
+            held = ssl_sock
+            if not self._replace(raw, ssl_sock):
+                return
+            try:
+                _complete_handshake(ssl_sock, accepted + self._handshake)
+                conn = SecureConnection(ssl_sock)
+            except TimeoutError as error:
+                if error.errno is None:  # The handshake's own timeout, not one the system reported
+                    self._closed_pending(peer)
+                else:
+                    log.debug(f'Queue server dropped a connection: {error!r}')
+                return
+            except Exception as error:
+                log.debug(f'Queue server dropped a connection: {error!r}')
+                return
+            held = conn
+            if not self._replace(ssl_sock, conn):
+                return
+            held = None
+        finally:
+            if held is not None:
+                with self._lock:
+                    self._live.discard(held)
+                held.close()
+        self.handle_request(conn, peer)
+
+    def _replace(self: _InProcessServer, old, new) -> bool:
+        """Put `new` in place of `old` among the live connections, unless the server has stopped."""
+        with self._lock:
+            self._live.discard(old)
+            if self._halted:
+                return False
+            self._live.add(new)
+            return True
+
+    def _closed_pending(self: _InProcessServer, peer: Optional[Tuple[str, int]]) -> None:
+        """Log a connection closed for missing the handshake deadline: its address and the deadline only."""
+        where = f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
+        log.debug(f'Queue server closed a connection from {where} that did not complete its TLS handshake '
+                  f'within {self._handshake} seconds')
 
     def handle_request(self: _InProcessServer, conn, peer: Optional[Tuple[str, int]] = None) -> None:
         """Serve one connection, then forget and close it; log a client refused as too old."""
@@ -669,9 +811,10 @@ class _InProcessServer(Server):
 
 
 # Threads on the server side, by identifier, with the number of marks each holds: every thread an
-# in-process queue server starts, for its whole life; any thread while it is inside a server's start or
-# stop; and any thread while it is in a TLS handshake with a queue server, which the server's accept loop
-# waits on. Each thread changes only its own entry; proxy finalizers read it without a lock.
+# in-process queue server starts, for its whole life (its handler threads run their connections' TLS
+# handshakes); any thread while it is inside a server's start or stop; and any thread while it is in a
+# TLS handshake with a queue server, which a forked manager's accept loop waits on. Each thread changes
+# only its own entry; proxy finalizers read it without a lock.
 _server_side: Dict[int, int] = {}
 
 # Decrefs that proxy finalizers hand off, and the one thread that sends them
@@ -720,8 +863,9 @@ def _decref(*args: Any) -> None:
 
     The cyclic garbage collector runs a proxy's finalizer in whichever thread triggers the collection, and
     the stock decref connects to the proxy's server and waits for its answer. On a thread of an in-process
-    server, a thread inside a server's start or stop, or a thread in a TLS handshake that an accept loop
-    waits on, that answer can depend on the waiting thread itself. There the decref is handed to the decref
+    server (its handler threads run the TLS handshakes too), a thread inside a server's start or stop, or
+    a thread in a TLS handshake that a forked manager's accept loop waits on, that answer can depend on
+    the waiting thread itself. There the decref is handed to the decref
     sender instead: ``SimpleQueue.put`` never blocks and is safe to re-enter. Every other decref is the
     stock one, in the finalizer's thread.
 
