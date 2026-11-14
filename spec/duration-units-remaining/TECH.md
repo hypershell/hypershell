@@ -3,7 +3,7 @@ slug: duration-units-remaining
 title: Every duration option takes the forms the timeouts take
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/duration-units-remaining
 base: develop
 current_phase: done

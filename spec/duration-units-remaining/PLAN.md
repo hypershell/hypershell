@@ -233,3 +233,12 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
   default, the plain-decimal launched delay, bash candidates, the new test file with a 3.11 run, and
   the note's contents.
 - The temp-site drives run one at a time (port 50001).
+
+## Review-cycle-1 ruling (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. On **F1** (underscore-grouped integers such as
+`-w 1_000`): plan-gate D1's "one grammar with `-W`" covers the whole-second options as well as
+`-d`. R4 governs, and F1 is not a defect. The user-facing note names underscore-grouped numbers
+next to signed values. The verdict stands at approved. After review, `develop` (#105) was merged in
+to resolve one `docs/cli/server.rst` conflict, keeping both `versionchanged` blocks. The merge brings
+in only #105's reviewed changes.
