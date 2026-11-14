@@ -84,7 +84,7 @@ is skipped by the parser):
 - **Confidence:** high · **Effort:** small
 
 
-## F6 — The blind reviewer's inputs exclude the drive scripts that the phase `verify:` commands run
+## F6 — The blind reviewer's inputs exclude the drive scripts that the phase `verify:` commands run · seen again
 `origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
 - **What happened:** Step 2 and the rubric deny the reviewer all of `research/`, but this cycle's R6/R8 evidence comes from `research/drive.py` and `research/latency.py`, which the P2/P3 `verify:` commands run. The reviewer saw them only because the foreman added `git diff … -- 'spec/*/research/*.py'` by hand. Grading them turned up a drive that passes against a server with no deadline (REVIEW F3).
 - **Skill cause:** the blindness rule treats `research/` as rationale only. It has no case for executable harness scripts that a `verify:` command depends on, so a weak drive would reach `/hs-publish` as green evidence nobody graded.

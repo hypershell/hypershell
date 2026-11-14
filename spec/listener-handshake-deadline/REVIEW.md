@@ -198,3 +198,116 @@ take the unchanged code path, except for the start-time check in F2.
 ## Optional completeness sub-pass
 
 Not run (not requested).
+
+## Review cycle 2 — changes-requested (2026-11-14)
+
+- **Reviewed commit:** 59543ba  ·  **Base:** develop (`origin/develop` = `6da633d`, re-fetched at the end of the review; the merge-base equals it and `git merge-tree` is clean)
+- **Mode:** a fresh blind pass over the full diff, `git diff origin/develop...HEAD -- . ':(exclude)spec/'`, plus `git diff origin/develop...HEAD -- 'spec/*/research/*.py'` (the drive scripts the phase `verify:` commands run). The reviewer had the same inputs and exclusions as cycle 1, with the GOAL's gate and review-cycle-1 rulings, and was not shown the cycle 1 findings. The orchestrator graded F1–F3 separately, by executed command.
+- **Contract drift:** since cycle 1, one `GOAL.md` commit, `0989ab7`, records the review-cycle-1 rulings the maintainer signed off: values above one day are refused, and accepting goes on when a handler thread does not start. This review grades against it. The foreman also passed the rulings' readings:
+  - the key is checked only when the server uses TLS
+  - the deadline drives must fail on a build with no deadline
+  - the accept-loop change applies to plain servers too
+  - the configuration reference's `versionadded` sits inside `.. only:: html`
+
+### Status of the cycle 1 findings
+
+| Finding | Status | Evidence |
+|---------|--------|----------|
+| F1: deadline above about 24.8 days not honored | **Fixed** | `handshake_seconds` (`core/tls.py:160`) refuses anything above `MAX_HANDSHAKE` (86400 s), naming the key and the accepted forms, with long values cut short. These are refused with `TLSError`: `30d`, `4294968`, `2592000`, `49d17h2m48s`, `1342d4h15m17s`, `1d1s`, `86400.5`, `86401`, `1-00:00:01`, a 401-digit integer (as a string and as an int), `'9'*5000`, `1e300`, `inf`, `nan`, `True` and `-0.0`. These are accepted: `1d`, `24h`, `86400`, `1-00:00:00` → 86400; `23:59:59` → 86399; `0.001` → 1. With the largest accepted deadline (86400 s), `_complete_handshake` against a silent peer was still waiting after 4 s (3.14.6) and ended only when the peer closed. `hs server` with `HYPERSHELL_SERVER_TLS_HANDSHAKE=30d` exits 2, naming the key. |
+| F2: a server made plain by `enabled = false` refuses a bad value | **Fixed** | `server.py:1891` and `cluster/__init__.py:432` now check the value only when `server.tls.enabled` is true. That is the switch `from_namespace` reads, and the same check `relay/__init__.py:1201` makes. In a throwaway site with `HYPERSHELL_SERVER_TLS_ENABLED=false`: `hs server` with `abc` or `30d` was still serving after 4 s; `hs cluster` with `abc` or `30d` exited 0 and ran its task. No log line named the key. |
+| F3: `hs server` deadline drive passes with no deadline | **Fixed for `server` and `cluster`; still open for `relay` (F4 below)** | No client of `server` or `cluster` now runs before the window has passed, and the `server` drive checks that the server is still up then. Against a no-deadline copy of `src` (`settimeout(None)` in `_complete_handshake`, via `PYTHONPATH`): `server --handshake 2` FAILs, with the held connection not closed in the window, and `cluster --handshake 2` FAILs at 9.15 s. The `--client` mode now drops `PYTHONPATH`. |
+| Observation: bare `versionadded` in the man page | **Fixed** | Now inside `.. only:: html`. `sphinx-build -W --keep-going -b man` exits 0, and the man page has no stray "Added in version" line. |
+
+### Verification run
+
+All runs were on macOS (arm64). CLI drives used throwaway sites (`.agents/factory/bin/temp_site.sh`), and probes and mutant copies ran from scratch directories. Every process the review started was stopped by its recorded PID. An unsandboxed `ps` check at the end found only another worktree's processes, which were left alone.
+
+- **Focused suites** (`tests/test_queue_tls.py`, `test_queue_limits.py`, `test_queue_gc.py`, `test_queue.py`):
+  - 3.14.6: 176 passed, 3 skipped (version-gated)
+  - 3.12.13: 179 passed
+  - 3.11.18 (own environment, `hs` on `PATH`): 175 passed, 4 skipped
+- **Full suite**, 3.14.6 (`uv run pytest -q -rs`): 2708 passed, 109 skipped (PostgreSQL and TimescaleDB gated).
+- **Red on develop.** The branch's `tests/test_queue_tls.py`, run against develop's `src` through an import shim, gave 58 failed and 15 passed. Every behaviour test is red there, including the new handler-start tests; develop logs `Queue server stopped accepting connections`.
+- **R1.** 400 pending connections, half of them with a partial ClientHello, with the default deadline: 5 real clients each connected and made their first call in 0.033–0.079 s. The `server`, `cluster` and `relay` drives with the default deadline pass on the branch and fail on develop.
+- **R2 and R3.** Deadline 2 s, against five peer types:
+  - silent
+  - a 20-byte partial hello
+  - a full hello, then a stall
+  - a hello trickled one byte per 0.2 s
+  - the client's Finished trickled one byte per 0.3 s after the server's flight
+
+  Each was closed at 2.0 s on 3.14 and 3.11, with handler threads at 0 and no descriptor left. With `RLIMIT_NOFILE` at 200, 34 connections were refused at once with one WARNING, and none remained after the deadline.
+- **Handler start failure** (ruling). A real start failure was forced with an oversized `threading.stack_size`, on TLS and plain servers, on 3.14 and 3.11:
+  - the peer saw EOF at once
+  - the live set was empty and no descriptor was left
+  - the first failure logged a WARNING, later ones DEBUG
+  - a later client was served in 0.006–0.055 s
+- **Stop races.** 60 rounds of 45–180 mixed pending connections (silent, partial hello, full hello), stopped at random times: no handler thread or descriptor was left over.
+- **R4 at the CLI.**
+  - The `refuse` drive passed 26 of 26: `hs server`, `hs cluster` and `hs relay` each exit 2 naming the key for `0`, `-5`, `abc`, `30d`, `4294968` and a 401-digit integer.
+  - `hs server` and `hs cluster`, made plain by `--no-tls` or `enabled = false`, start with `abc` and `30d`.
+  - `86401`, `1d1s`, `86400.5` and `1:00:00:00` exit 2 as well.
+- **R5.** 5 closes gave 5 DEBUG lines with the peer address and the deadline, and 1 WARNING naming 2 seconds and `server.tls.handshake`. The marker hostname the peer sent appears in no line.
+- **R7.** `research/latency.py compare`, 3 rounds: median connect and first call was 34.69 ms on develop and 34.58 ms on the branch (allowed 39.69 ms), a PASS. The 64-client burst completed 64/64 in all 6 runs.
+- **R8.**
+  - The 2.9.0a8 client from PyPI finished the tasks (exit 0).
+  - The 2.8.7 client connected and authenticated, then was refused as too old (exit 5, `Client too old (no work-request protocol)`) on both develop and the branch.
+  - For a fixed ClientHello, the server's TLS flight had the same structure on develop and the branch.
+- **Docs.** `UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E` with `-b html` and with `-b man` both exited 0.
+- **Forked manager path.** `test_secure_manager_subprocess_roundtrip` passes.
+
+### Requirement → evidence matrix
+
+| R-ID / ruling | Implemented by | Verified how | Status |
+|---------------|----------------|--------------|--------|
+| R1 | `serve()` → `accept_pending`; `handle_pending` runs the handshake on the handler thread | 400-pending probe; drives on branch vs develop; tests red on develop | ✅ |
+| R2 | `_complete_handshake` (one `do_handshake`, timeout = deadline − time since accept) | Five peer types closed at 2.0 s (3.11, 3.14) | ✅ |
+| R3 | `handle_pending`'s `finally`; `_admits` on the raw socket | Threads 0 and descriptor delta 0 after closes; reserve probe at nofile 200; stop races | ✅ |
+| R4 | `handshake_seconds` (`core/tls.py`), `ArgumentError` in `server.py`, `cluster/__init__.py`, `relay/__init__.py`, `QueueServerError` before binding | Value table; boundary values; `refuse` drive 26/26 | ✅ |
+| R5 | `_closed_pending`; other failures keep develop's DEBUG line | Logging probe; caplog tests | ✅ |
+| R6 | All three commands build `QueueServer` with a `TLSConfig` carrying the key; plain servers skip the check | `server`/`cluster`/`relay` drives at default and 2 s; plain-by-config drives; plain silent connection not closed (test) | ✅ (relay drive evidence fragile, F4) |
+| R7 | No existing test edited | Suites; full suite; latency and burst | ✅ |
+| R8 | No client, context or wire change | 2.9.0a8 and 2.8.7 drives; TLS flight comparison | ✅ |
+| R9 | `docs/security.rst` threat item 5, Limitations item 4, monitoring bullet; `config_param_ref.rst` `.handshake` | Read against develop; html and man builds `-W` clean | ✅ |
+| Ruling: refused above one day | `MAX_HANDSHAKE` | As R4 | ✅ |
+| Ruling: key checked only when the server uses TLS | `enabled` check in `server.py`, `cluster/__init__.py`, `relay/__init__.py` | Plain-by-config drives and tests | ✅ |
+| Ruling: deadline drives fail with no deadline | `research/drive.py` | Mutant runs: `server` and `cluster` fail; `relay` does not reliably | ❌ partly (F4) |
+| Ruling: accepting goes on when a handler does not start | `_InProcessServer._unstarted` (`core/queue.py:716`) | Forced start failures, TLS and plain, 3.11 and 3.14; tests red on develop | ✅ |
+| Ruling: `versionadded` inside `.. only:: html` | `config_param_ref.rst` | Man build | ✅ |
+
+Unmapped changes (possible scope creep): none. The handler-start change reaches plain servers through the shared accept loop, which the review-cycle-1 ruling covers.
+
+**TLS posture** is unchanged. `build_server_context`, the verify mode, minimum version, ciphers and the client's fingerprint check are untouched. The only `core/tls.py` additions are the `handshake` field and its parser. Authentication minimums are untouched.
+
+### Findings
+
+#### F4 [MEDIUM/CONFIRMED] The `relay` deadline drive does not reliably fail against a build with no deadline
+- **Where:** `spec/listener-handshake-deadline/research/drive.py:241` (`scenario_relay`), with `DELAY_LAUNCHER` (`:59`, a fixed 3 s wait) and `check_held` (`:151`).
+- **Failure scenario:** the `server` and `cluster` drives hold every client back until the window has passed. The `relay` drive does not: its site client always starts after 3 s, whatever `--handshake` is. When the work is done, the relay stops its local server, which closes the held connection at about 5.5 s whether or not a deadline exists. Nothing checks that the relay's server is still up when the window ends. So the drive passes against a build with no deadline whenever `--handshake` puts 5.5 s inside the window. At the `--handshake 2` its `verify:` uses, it fails such a build by only about 0.5 s, and a faster host could close the gap. This partly misses the review-cycle-1 ruling that the deadline drives fail on a build with no deadline.
+- **Evidence:** a copy of `src` with `ssl_sock.settimeout(None)` in `_complete_handshake`, run via `PYTHONPATH`, with `temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py" relay --handshake N`:
+
+  | `N` | Result against the copy with no deadline | Held connection closed after | Expected window |
+  |-----|------------------------------------------|------------------------------|-----------------|
+  | 3 | exit 0, `PASS` (reviewer twice, orchestrator once) | 5.46 s, 5.45 s, 5.55 s | 3–6 s |
+  | 2 | `FAIL` ×4 | 5.46–5.53 s | 2–5 s |
+
+  On the branch itself the relay's local server closed the held connection at 2.0 s, so the shipped behaviour is correct.
+- **Touches:** the R6 evidence for `hs relay` and the review-cycle-1 drive ruling. R2 on the relay's server is covered by the shared `QueueServer` path and its unit tests, which are red on develop.
+- **Direction:** as for `cluster`, hold the site client back until the window has passed (for example, a launcher delay of `SEC + 5` when `--handshake` is given), and report that the relay is still running when the window ends.
+
+#### F5 [LOW/CONFIRMED] `AGENTS.md` understates when the handshake value is refused
+- **Where:** `AGENTS.md:351` (new hunk): "default 30 s, refused at start unless greater than 0".
+- **Failure scenario:** since the review-cycle-1 rulings, a value above one day is refused too, and only a server that uses TLS checks the value. `AGENTS.md` is the ground truth the factory and contributors read, so this line now misstates the rule the code and `docs/_include/config_param_ref.rst` both follow.
+- **Evidence:**
+  - `HYPERSHELL_SERVER_TLS_HANDSHAKE=86401 uv run hs server t.in` in a throwaway site exits 2: `server.tls.handshake must be greater than 0 and at most one day (86400 seconds)`. So do `1d1s`, `86400.5`, `30d` and `24:00:01`.
+  - With `HYPERSHELL_SERVER_TLS_ENABLED=false`, `abc` and `30d` start.
+- **Direction:** say "greater than 0 and at most one day; checked only when the server uses TLS".
+
+### Observations (not graded)
+- The forked manager path (`SecureListener.accept`, used by `SecureManager.start`) still runs the handshake inline with no deadline. This is a stated non-goal, and its test passes.
+
+## Human-gate triggers (cycle 2)
+
+- **Not triggered by this cycle's findings.** F4 is in the evidence harness (`spec/…/research/drive.py`) and F5 in `AGENTS.md`. Neither is a high-blast-radius file or touches a security or DB-lifecycle invariant.
+- This cycle's changes to the high-blast-radius core were re-reviewed by executed command and no finding was confirmed against them: `core/queue.py` `_unstarted` and `_complete_handshake`, `core/tls.py` `handshake_seconds`, and the `server.py` check. TLS posture is unchanged. The maintainer signed off the cycle 1 gate, including the accept-loop change for plain servers.
+- **Loop bound:** this is cycle 2 of at most 3. Both remaining items are small and outside shipped code paths. If cycle 3 does not converge, escalate to the maintainer.
