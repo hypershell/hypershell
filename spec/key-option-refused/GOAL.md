@@ -112,18 +112,18 @@ example, test or runnable drive shows a key on a command line.
 - **Q:** Which exit status is a usage error? — **A:** cmdkit maps `ArgumentError` to
   `exit_status.bad_argument` = 2, the status of every parser error and of `hs server`'s existing
   key-policy refusals (`server.py:1802-1807`); R1 uses it. (verified on `develop`, 2026-11-13;
-  **needs foreman sign-off**)
+  signed off by the foreman at the GOAL gate)
 - **Q:** Which spec/ files change? — **A:** Executable drives under `spec/*/drive/` that pass a key
   on a command line change, so a re-run on 2.9 still works: today only
   `spec/relay/drive/relay_throughput.py:170`. Markdown records and `research/` prototypes
   (`spec/zone-queue-primitive/research/prototypes/bench/bench.py`) are history and stay.
-  (shaping decision, 2026-11-13; **needs foreman sign-off**)
+  (shaping decision, 2026-11-13; signed off by the foreman at the GOAL gate)
 - **Q:** Does this cycle regenerate the committed man pages under `share/man/`? — **A:** Proposed:
   no. The cycle changes the docs sources and proves R6 by building the man pages into a temporary
   directory; `hs-release` rebuilds `share/man/` at the next release, as it does for every change.
-  (shaping decision, 2026-11-13; **needs foreman sign-off**, as the brief named `share/man`)
+  (shaping decision, 2026-11-13; signed off by the foreman at the GOAL gate)
 - **Q:** Does 2.9 offer `--auth-file PATH` (the seed's open question)? — **A:** Proposed: no; see
-  Non-goals. (shaping decision, 2026-11-13; **needs foreman sign-off**)
+  Non-goals. (shaping decision, 2026-11-13; signed off by the foreman at the GOAL gate)
 - **Q:** Is removing the option from the parser enough? — **A:** No. cmdkit's parser reports an
   unknown option with its value (`unrecognized arguments: -k SECRETVALUE1234567`, probe on
   `develop`'s environment, 2026-11-13), so R1–R2 need the option recognised and refused. How is
@@ -131,6 +131,11 @@ example, test or runnable drive shows a key on a command line.
 - **Q:** Is this a breaking change for users? — **A:** Yes, on the 2.9 line, by the maintainer's
   decision; `hs-publish` drafts the user-facing note in the squash commit body. (resolved
   2026-11-13)
+
+**Ruled at the GOAL gate** (2026-11-13): approved as written by the foreman, gate judge under the
+maintainer's mandate. Exit status 2, the spec/ policy, docs-source man-page proof (with `hs-release`
+rebuilding `share/man/`), and no `--auth-file` are confirmed. The contract is locked; `hs-plan`
+designs against it.
 
 ## Evidence plan
 
