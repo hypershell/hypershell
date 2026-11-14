@@ -340,3 +340,27 @@ off in session (2026-11-14) to fix both in `server.py`.
   shutdown keeps today's behaviour of reading input to its end. Test:
   `(echo 'echo 1'; sleep 60) | hs cluster … --launcher false` exits 5 within the bound, with and
   without a database, red on `81c4de6`.
+
+## Review-cycle-2 rulings (2026-11-14)
+
+The review's human gate was triggered again: N1 (HIGH) sits on R1's and R3's stop paths in
+`server.py` and `cluster/remote.py`. The maintainer signed off in session (2026-11-14) to fix both
+findings in cycle 3, the last review this cycle gets.
+
+- **N1, a failure stop hangs with a busy input stream and a database.** On a failure stop, the
+  submit thread's end-of-input marker gives up once its committer has halted, as
+  `LiveSubmitThread.put_end` already does without a database. The failure stop then completes and
+  raises within R1's bound and R3's expected time. Rows already committed are kept. A normal stop
+  keeps reading its input to the end and committing it, exactly as on `develop`.
+  - **Tests**, each failing on `f41da91`: a fast producer (`yes 'echo 1'` through a FIFO or a pipe)
+    into `hs cluster --launcher false` with a database exits 5 within the bound, for R1. The same
+    with autoscaling, for R3. A healthy run with a fast producer still commits every task.
+- **N2, a stream given as FILE holds the failure exit.** When tasks come from a FIFO or a process
+  substitution given as FILE, the failure exit does not block on closing or reading a stream that an
+  abandoned reader still holds. The exit happens within the same bounds. A normal run's handling of
+  FILE is unchanged.
+  - **Tests**, each failing on `f41da91`: `hs cluster tasks.fifo --launcher false` with a 60 s
+    producer, with and without a database; the same with `<(…)`; and R3 with a FIFO.
+
+If the fix needs a change to the §6 submit-flush order beyond the failure-stop exception approved in
+cycle 1, stop and report rather than build it.
