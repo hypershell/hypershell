@@ -351,18 +351,6 @@ Pre-existing since 2023 (`70bcc63`).
 *Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
 **Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: adopted:server-initdb*
 
-## Sizes and durations written with common units are misread or refused
-
-`parse_bytes` matches only the start of a value, so `16G`, `512M` and `16GiB` are silently read as
-16 or 512 bytes, wherever a memory size is given (submit, cluster, server, client, the inline
-`memory:` tag). Every duration option is a bare integer of seconds, so `1h30m` is an argument
-error, and the inline `timeout:` tag is not converted at all. The unused `parse_time` reads one
-unit only. A cron rotation policy that begins with a digit is read as a size. Pre-existing in
-`develop` and on the 2.8 line.
-
-*Horizon: now, small; ships in 2.8.7 and 2.9.0a7 · Depends on: — · Refs: an out-of-cycle build against the library*
-**Seed:** [`issues/size-and-duration-units.md`](issues/size-and-duration-units.md) · *status: adopted:size-and-duration-units*
-
 ## The remaining duration options still take bare seconds only
 
 `--bundlewait`, `--signalwait`, `--delay-start`, the autoscaling `--period` and the `--interval` on
@@ -370,7 +358,7 @@ unit only. A cron rotation policy that begins with a digit is read as a size. Pr
 while `-W 5m` works. `--delay-start` gives a negative value its own meaning (a random wait), which
 the strict parser refuses.
 
-*Horizon: near-term, small · Depends on: `size-and-duration-units` · Refs: its GOAL's Non-goals*
+*Horizon: near-term, small · Depends on: `size-and-duration-units` (landed, #96) · Refs: its GOAL's Non-goals*
 **Seed:** [`issues/duration-units-remaining-options.md`](issues/duration-units-remaining-options.md) · *status: adopted:duration-units-remaining*
 
 ## Duration settings read only from configuration still take bare seconds only
