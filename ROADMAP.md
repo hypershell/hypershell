@@ -304,19 +304,6 @@ commits partially, or silently skips rows.
 (landed, #103: the dispatch stamp); resilience*
 **Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: unshaped*
 
-## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
-
-The 2.9 line added task columns that a 2.8.3 peer cannot read, and nothing on the wire names a
-version. A 2.8.3 client exits on its first bundle from a 2.9 server with a `TypeError`; a 2.9 client
-against a 2.8.3 server runs its tasks, but the server records no result and the run hangs. Every 2.9
-pre-release is affected. The fix is a clean, prompt version error in both directions, and a line in
-the 2.9.0 release notes; `zone-dispatch`'s version handshake (#78) is meant to be that error and
-should be verified against 2.8.3.
-
-*Horizon: near-term, before 2.9.0 · Depends on: `zone-dispatch`'s version handshake (landed, #78;
-R5 of `spec/zone-dispatch/GOAL.md`) · Refs: release notes*
-**Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
-
 ## `hs cluster --no-db` still initializes a SQLite database it never uses
 
 Under `--no-db` the cluster's server never uses the database, but on SQLite `hs cluster` runs
