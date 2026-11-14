@@ -29,11 +29,12 @@ from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 from hypershell.data.model import Source, Zone, STDIN_SOURCE_ID, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
-from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
+from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, is_file_input
 from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
                                GatedSource, source_fingerprint_and_count, apply_source_gate)
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
+from hypershell.cluster.watch import ClusterLaunchError
 from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster, configured_failed_launches,
                                        DEFAULT_AUTOSCALE_FACTOR, DEFAULT_AUTOSCALE_PERIOD,
                                        DEFAULT_AUTOSCALE_MIN_SIZE, DEFAULT_AUTOSCALE_MAX_SIZE,
@@ -596,9 +597,16 @@ class ClusterApp(Application):
                  exc_type: Optional[Type[Exception]],
                  exc_val: Optional[Exception],
                  exc_tb: Optional[TracebackType]) -> None:
-        """Close IO streams if not standard streams."""
+        """Close IO streams if not standard streams.
+
+        After a failure stop (:class:`~hypershell.cluster.watch.ClusterLaunchError`) an input stream
+        (a FIFO or process substitution) is left open: the submit loader left blocked reading it holds
+        it until its producer writes or closes, and the process exit closes it.
+        """
         if self.input_stream and self.input_stream is not sys.stdin:
-            self.input_stream.close()
+            if not (exc_type is not None and issubclass(exc_type, ClusterLaunchError)
+                    and not is_file_input(self.input_stream)):
+                self.input_stream.close()
         if self.output_stream is not sys.stdout:
             self.output_stream.close()
         if self.errors_stream is not sys.stderr:

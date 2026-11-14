@@ -14,7 +14,7 @@ instead of hanging the suite.
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Final
+from typing import Any, Dict, List, Optional, Tuple, Final
 
 # Standard libs
 import os
@@ -24,8 +24,9 @@ import time
 import signal
 import logging
 import threading
+import subprocess
 from pathlib import Path
-from subprocess import Popen, PIPE, TimeoutExpired
+from subprocess import Popen, PIPE, DEVNULL, TimeoutExpired
 
 # External libs
 import pytest
@@ -566,3 +567,145 @@ def test_cluster_reading_open_input_exits_when_every_client_fails(temp_site: Pat
     assert elapsed <= OPEN_INPUT_BOUND, log_text[-4000:]
     assert 'every launched client has exited with tasks remaining' in log_text
     assert 'Fatal Python error' not in log_text
+
+
+# --- The failure stop is not held by a busy stream, or by a stream given as FILE ---------------------------
+
+
+STREAM_TIMEOUT: Final[float] = 40
+"""Seconds a cluster reading a stream is given before the test fails."""
+
+PRODUCER_STAYS_OPEN: Final[int] = 60
+"""Seconds a stream's producer keeps it open after its one line: longer than any bound here."""
+
+BUSY_PRODUCER: Final[str] = "yes 'echo 1'"
+"""A producer that writes tasks as fast as they are read and never stops."""
+
+IDLE_PRODUCER: Final[str] = f"echo 'echo 1'; sleep {PRODUCER_STAYS_OPEN}"
+"""A producer that writes one task and then keeps its stream open."""
+
+
+def run_cli(site: Path, command: str, producer: Optional[str] = None,
+            timeout: float = STREAM_TIMEOUT) -> Tuple[int, float, str]:
+    """Run the bash `command` in `site` in its own session; return its exit status, seconds to exit, and log.
+
+    The `producer` (a bash command, for a FIFO) is started first, in its own session. Every process
+    either starts is killed at the end, so a stop that never returns fails the test instead of
+    leaving the producer behind.
+    """
+    stderr_path = site / f'stream-{time.monotonic_ns()}.stderr'
+    feeder = None
+    with open(stderr_path, mode='w') as stderr, open(os.devnull, mode='w') as stdout:
+        if producer is not None:
+            feeder = Popen(['bash', '-c', producer], cwd=site, stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
+                           start_new_session=True)
+        started = time.monotonic()
+        proc = Popen(['bash', '-c', command], cwd=site, stdin=DEVNULL, stdout=stdout, stderr=stderr,
+                     start_new_session=True)
+        try:
+            try:
+                proc.wait(timeout=timeout)
+            except TimeoutExpired:
+                pytest.fail(f'Cluster did not exit within {timeout}s:\n' + stderr_path.read_text()[-4000:])
+            elapsed = time.monotonic() - started
+        finally:
+            kill_group(proc)
+            if feeder is not None:
+                kill_group(feeder)
+    return proc.returncode, elapsed, stderr_path.read_text()
+
+
+def cluster_command(*args: str) -> str:
+    """The `hs cluster` command line for a child run, bound to the loopback address on a free port."""
+    return ' '.join([HS, 'cluster', *args, '--no-tls', '-H', ADDRESS, '-p', str(free_port())])
+
+
+def count_tasks(site: Path, *options: str) -> int:
+    """Count the tasks in the site's database (`hs list --count`, with `options`)."""
+    counted = subprocess.run([HS, 'list', '--count', *options], cwd=site, capture_output=True, text=True,
+                             timeout=60)
+    assert counted.returncode == 0, counted.stdout + counted.stderr
+    return int(counted.stdout.strip())
+
+
+@mark.unit
+def test_submit_end_marker_gives_up_once_left_and_its_committer_ended() -> None:
+    """With its loader left and its committer ended, the end marker is not waited on; otherwise it waits for room."""
+    from hypershell.submit import SubmitThread
+    from hypershell.data.model import Task
+    submitter = SubmitThread(source=[])
+    submitter.queue.put(Task.new(args='echo 1'))  # The one slot is taken and no committer runs
+    waiter = threading.Thread(target=submitter.put_end, daemon=True)
+    waiter.start()
+    waiter.join(timeout=1)
+    assert waiter.is_alive()  # Not left: a normal end waits for room, as long as it takes
+    submitter.loader.left.set()
+    waiter.join(timeout=5)
+    assert not waiter.is_alive()
+    started = time.monotonic()
+    submitter.put_end()
+    assert time.monotonic() - started < 1
+
+
+@mark.integration
+@mark.parametrize('stdin', [pytest.param('pipe', id='pipe'), pytest.param('fifo', id='fifo')])
+def test_cluster_reading_a_busy_stream_exits_when_every_client_fails(temp_site: Path, stdin: str) -> None:
+    """A producer that never stops, on standard input, with a database: exits 5 within the bound, tasks kept."""
+    site = Path(temp_site)
+    command = cluster_command('--launcher', 'false')
+    if stdin == 'pipe':
+        status, elapsed, log_text = run_cli(site, f'{BUSY_PRODUCER} | {command}')
+    else:
+        os.mkfifo(site / 'in.fifo')
+        status, elapsed, log_text = run_cli(site, f'{command} < in.fifo', producer=f'{BUSY_PRODUCER} > in.fifo')
+    assert status == 5, log_text[-4000:]
+    assert elapsed <= OPEN_INPUT_BOUND, log_text[-4000:]
+    assert 'every launched client has exited with tasks remaining' in log_text
+    assert 'Fatal Python error' not in log_text
+    assert count_tasks(site) > 0
+
+
+@mark.integration
+def test_cluster_reading_a_busy_stream_whose_clients_work_commits_every_task(temp_site: Path) -> None:
+    """A fast producer that ends, and a client that runs the work: every task is committed and run."""
+    site = Path(temp_site)
+    tasks = 2000
+    status, _, log_text = run_cli(site, f"{BUSY_PRODUCER} | head -n {tasks} | {cluster_command('-N', '8')}",
+                                  timeout=120)
+    assert status == 0, log_text[-4000:]
+    assert count_tasks(site) == tasks
+    assert count_tasks(site, '--completed') == tasks
+
+
+@mark.integration
+@mark.parametrize('options', [pytest.param(['--no-db'], id='no-db'), pytest.param([], id='database')])
+@mark.parametrize('stream', [pytest.param('fifo', id='fifo'), pytest.param('process-substitution', id='procsub')])
+def test_cluster_reading_a_stream_given_as_file_exits_when_every_client_fails(temp_site: Path, options: List[str],
+                                                                              stream: str) -> None:
+    """One task from a FIFO or process substitution named as FILE, its producer still open: exits 5 within the bound."""
+    site = Path(temp_site)
+    if stream == 'fifo':
+        os.mkfifo(site / 'tasks.fifo')
+        status, elapsed, log_text = run_cli(site, cluster_command('tasks.fifo', '--launcher', 'false', *options),
+                                            producer=f'{{ {IDLE_PRODUCER}; }} > tasks.fifo')
+    else:
+        status, elapsed, log_text = run_cli(site, cluster_command(f'<({IDLE_PRODUCER})', '--launcher', 'false',
+                                                                  *options))
+    assert status == 5, log_text[-4000:]
+    assert elapsed <= OPEN_INPUT_BOUND, log_text[-4000:]
+    assert 'every launched client has exited with tasks remaining' in log_text
+    assert 'Fatal Python error' not in log_text
+    if not options:
+        assert count_tasks(site) == 1
+
+
+@mark.integration
+def test_cluster_reading_a_fifo_given_as_file_whose_clients_work_reads_it_to_the_end(temp_site: Path) -> None:
+    """A FIFO named as FILE, its producer ending, and a client that runs the work: every task is run."""
+    site = Path(temp_site)
+    os.mkfifo(site / 'tasks.fifo')
+    producer = 'for n in 1 2 3 4 5 6; do echo "echo $n"; done > tasks.fifo'
+    status, _, log_text = run_cli(site, cluster_command('tasks.fifo', '-N', '2'), producer=producer)
+    assert status == 0, log_text[-4000:]
+    assert count_tasks(site) == 6
+    assert count_tasks(site, '--completed') == 6

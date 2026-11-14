@@ -4,7 +4,7 @@ title: A cluster whose clients all fail says so and exits; one advertised addres
   for every launch mode
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/cluster-launch-failures
 base: develop
 current_phase: done
@@ -271,6 +271,40 @@ is warned about as it happens; a run whose clients do the work ends as today.
       `advertise` ok; zone drives `founding` and `fixed` PASS; Sphinx `-W` clean), and
       `test_cluster_exit.py` with `test_autoscale_failed_launches.py`: 59 passed on 3.14 and on 3.11.
 
+### Review-cycle-2 remediation (reopened; rulings in `PLAN.md`)
+
+- [x] **N1:** `SubmitThread.put_end` offers the end marker, waiting for room until it is placed; once
+      the loader is left (`LoaderThread.left`) it gives up when the committer has ended, as
+      `LiveSubmitThread.put_end` does. The run path uses it in place of its untimed `queue.put(None)`;
+      `stop(leave_input=True)` uses it for its own marker, before halting the committer. A normal stop
+      and a normal run are unchanged: without `left` the marker waits for room as long as it takes
+      (the same blocking put, in 1 s slices), and `stop()` without `leave_input` keeps
+      `loader.stop`, `queue.put(None)`, `committer.stop` (`submit.py`). §6's flush order is unchanged;
+      the failure stop stays inside the cycle-1 exception (tasks still queued when the committer halts
+      are not committed; committed rows are kept).
+- [x] **N2:** `ClusterApp.__exit__` leaves an input stream that is not a whole file (`is_file_input`:
+      a FIFO or process substitution) open when the run ended in `ClusterLaunchError`: the left
+      loader holds its buffer lock in a blocking read, so a close would wait for the producer. The
+      process exit closes it. Every other exit, and a whole file on any exit, closes as before
+      (`cluster/__init__.py`).
+- [x] Tests (`tests/test_cluster_exit.py`): unit — the end marker waits for room while the loader is
+      not left, and gives up once it is left with no committer. Integration — `yes 'echo 1'` on
+      standard input (pipe, FIFO) into `hs cluster --launcher false` with a database: exit 5 within
+      15 s, tasks kept; `tasks.fifo` and `<(…)` named as FILE with a producer open 60 s, with and
+      without a database: exit 5 within 15 s (one task kept with a database). Guards — a fast producer
+      of 2000 tasks into a local cluster commits and runs all 2000; a FIFO named as FILE whose
+      producer ends runs every task. `tests/test_autoscale_failed_launches.py`: R3 (`--autoscaling
+      fixed -P 2s --launcher false`) with `yes` on standard input and with `tasks.fifo` as FILE: exit
+      5 within 15 s, tasks kept.
+- **Red then green** (`git archive f41da91 src`, run with `PYTHONPATH=<base>/src`): all nine new
+  failure-path tests fail there — the unit test on the missing `put_end`; the eight CLI runs still
+  running at the 40 s timeout, the busy-stream ones stalled after "Stopping (committer: database)"
+  and the FIFO/process-substitution ones after the server's stop, in `__exit__`. Head: busy stream
+  6.8 s (pipe) and 6.8 s (FIFO); FILE streams 6.4 s (FIFO, `--no-db`), 4.8 s (FIFO, database), 6.4 s
+  (`<(…)`, `--no-db`), 4.8 s (`<(…)`, database); R3 busy stdin 8.8 s, R3 FIFO 8.8 s (each the test's
+  whole call, `hs list` included). The two guards pass on both trees (they hold the normal path, not
+  the defect).
+
 ## Phase P3 — Autoscaling's failed-launch limit; relay fleets never stop
 **Satisfies:** R2, R3, R5, R8 (key docs) · **Depends on:** P2
 **Goal:** `hs cluster --autoscaling` stops after `autoscale.failed_launches` launched clients in a row
@@ -353,6 +387,13 @@ exit non-zero while no client is or was registered; 0 keeps today's loop; relay 
   as specified); relay smoke PASS (41 checks); suite 3.14: 2747 passed, 109 skipped; 3.11, the
   touched area (`test_cluster_exit`, `test_submit`, `test_cluster`, `test_cluster_launch`,
   `test_restart`, `test_server_fsm`): 289 passed, 1 skipped; Sphinx `-W` build clean (no docs changed).
+- **Gate re-run after the review-cycle-2 remediation (N1, N2):** P2's test files 274 passed, 1 skipped;
+  P3's test files 273 passed; nine drive modes pass, one at a time (`fail` 9 s, `fail-db` 4 s,
+  `ssh-fail` 5 s, `autoscale-fail` 8 s, each to exit 5; `zero` 13 s and `autoscale-off` 31 s still
+  running at their bounds; `healthy`, `ssh-partial`, `advertise` as specified); zone drives `founding`
+  and `fixed` PASS; relay smoke PASS (41 checks); suite 3.14: 2759 passed, 109 skipped; 3.11, the
+  touched area (`test_cluster_exit`, `test_autoscale_failed_launches`, `test_submit`, `test_cluster`):
+  164 passed. No docs changed, so no Sphinx build.
 
 ---
 

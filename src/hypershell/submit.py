@@ -659,7 +659,7 @@ class SubmitThread(Thread):
         self.loader.start()
         self.committer.start()
         self.loader.join_unless_left()
-        self.queue.put(None)
+        self.put_end()
         self.committer.join()
         log.debug('Done')
 
@@ -680,15 +680,34 @@ class SubmitThread(Thread):
 
         With `leave_input`, a loader blocked reading its input (standard input from a producer that stays
         open) is not waited on: what is committed stays committed, and the rest of the input is not read.
+        Tasks still queued when the committer halts are not committed, and the end marker is not waited
+        on once the committer has ended (:meth:`put_end`).
         """
         log.warning('Stopping')
         if leave_input:
             self.loader.leave()
+            self.put_end()
         else:
             self.loader.stop(wait=wait, timeout=timeout)
-        self.queue.put(None)
+            self.queue.put(None)
         self.committer.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
+
+    def put_end(self: SubmitThread) -> None:
+        """Offer the committer the end of tasks, waiting for room until it is placed.
+
+        Once the loader is left to its input (:meth:`LoaderThread.leave`), the wait gives up when the
+        committer has ended: the committer is halted without draining the queue, so a marker that
+        waited for room would never be placed.
+        """
+        while True:
+            may_give_up = self.loader.left.is_set() and not self.committer.is_alive()
+            try:
+                self.queue.put(None, block=not may_give_up, timeout=DEFAULT_LOCAL_TIMEOUT)
+                return
+            except QueueFull:
+                if may_give_up:
+                    return  # Nothing will take it: the committer has ended
 
     @property
     def task_count(self: SubmitThread) -> int:

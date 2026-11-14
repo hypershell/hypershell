@@ -38,7 +38,8 @@ from cmdkit.config import Configuration, Namespace
 from tests.conftest import free_port
 from tests.test_zone_model import task_db  # noqa: fixture
 from tests.test_zone_autoscale import FleetDB, FakeProc, FakeLaunch, run_checks, DEFAULT, CPU
-from tests.test_cluster_exit import run_child, kill_group
+from tests.test_cluster_exit import (run_child, kill_group, run_cli, cluster_command, count_tasks,
+                                     BUSY_PRODUCER, IDLE_PRODUCER)
 from hypershell.core.config import default, reload_env, ConfigurationError
 from hypershell.core.logging import INSTANCE
 from hypershell.data.model import Task, Client
@@ -411,3 +412,25 @@ def test_cluster_reading_open_input_stops_after_three_failed_launches(temp_site:
     assert 'Fatal Python error' not in log_text
     counted = run([HS, 'list', '--count'], cwd=site, capture_output=True, text=True, timeout=60)
     assert counted.returncode == 0 and counted.stdout.strip() == '1', counted.stdout + counted.stderr
+
+
+@mark.integration
+@mark.parametrize('stream', [pytest.param('busy-stdin', id='busy-stdin'), pytest.param('fifo-file', id='fifo-file')])
+def test_cluster_reading_a_stream_stops_after_three_failed_launches(temp_site: Path, stream: str) -> None:
+    """A producer that never stops on standard input, or a FIFO named as FILE and held open: exits 5, tasks kept."""
+    site = Path(temp_site)
+    command = cluster_command('--autoscaling', 'fixed', '-P', '2s', '--launcher', 'false')
+    if stream == 'busy-stdin':
+        status, elapsed, log_text = run_cli(site, f'{BUSY_PRODUCER} | {command}')
+    else:
+        os.mkfifo(site / 'tasks.fifo')
+        command = cluster_command('tasks.fifo', '--autoscaling', 'fixed', '-P', '2s', '--launcher', 'false')
+        status, elapsed, log_text = run_cli(site, command, producer=f'{{ {IDLE_PRODUCER}; }} > tasks.fifo')
+    assert status == exit_status.runtime_error, log_text[-4000:]
+    assert elapsed <= OPEN_INPUT_BOUND, log_text[-4000:]
+    assert '3 launched clients in a row exited non-zero' in log_text
+    assert 'Fatal Python error' not in log_text
+    if stream == 'busy-stdin':
+        assert count_tasks(site) > 0
+    else:
+        assert count_tasks(site) == 1
