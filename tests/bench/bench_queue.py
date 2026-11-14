@@ -164,7 +164,7 @@ class Sampler(threading.Thread):
 
 
 class Site:
-    """A throwaway HyperShell site with its own database, port and key."""
+    """A throwaway HyperShell site with its own database, port and key (in every process's environment)."""
 
     def __init__(self, workdir: Path, label: str, tls: bool, log_level: str = 'INFO') -> None:
         self.path = Path(tempfile.mkdtemp(prefix=f'site-{label}-', dir=workdir))
@@ -175,7 +175,8 @@ class Site:
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('HYPERSHELL_')}
         self.env.pop('VIRTUAL_ENV', None)
         self.env.update(HYPERSHELL_CONFIG_FILE='', HYPERSHELL_SITE=str(self.path),
-                        HYPERSHELL_DATABASE_FILE=str(self.database), HYPERSHELL_LOGGING_LEVEL=log_level)
+                        HYPERSHELL_DATABASE_FILE=str(self.database), HYPERSHELL_LOGGING_LEVEL=log_level,
+                        HYPERSHELL_SERVER_AUTH=self.key)
 
     def tls_args(self) -> List[str]:
         return [] if self.tls else ['--no-tls']
@@ -221,7 +222,7 @@ def serve(site: Site, server_venv: Path, client_venv: Path, server_args: Sequenc
     """Run `hs server --restart` over the site's database with `clients` loopback clients."""
     start = time.monotonic()
     server = site.spawn(server_venv, 'server', 'server', '--restart', '-H', 'localhost', '-p', str(site.port),
-                        '-k', site.key, *server_args, *site.tls_args())
+                        *server_args, *site.tls_args())
     sampler = None
     if sampler_interval:
         sampler = Sampler(server.pid, sampler_interval)
@@ -234,7 +235,7 @@ def serve(site: Site, server_venv: Path, client_venv: Path, server_args: Sequenc
         time.sleep(0.05)
     ready = time.monotonic()
     procs = [site.spawn(client_venv, f'client-{index}', 'client', '-H', 'localhost', '-p', str(site.port),
-                        '-k', site.key, '-T', '60', *client_args, *site.tls_args())
+                        '-T', '60', *client_args, *site.tls_args())
              for index in range(clients)]
     server_rc, client_rcs, _ = wait_all(server, procs, server_timeout, client_timeout)
     end = time.monotonic()
@@ -374,7 +375,7 @@ def wait_bounded(proc: subprocess.Popen, bound: float) -> Tuple[Any, float]:
 def start_server(site: Site, venv: Path, name: str = 'server') -> subprocess.Popen:
     """`hs server --restart` from `venv` on the site, once it listens."""
     server = spawn_group(site, venv, name, 'server', '--restart', '-H', 'localhost', '-p', str(site.port),
-                         '-k', site.key, *site.tls_args())
+                         *site.tls_args())
     deadline = time.monotonic() + WAIT
     while not listening(server.pid, site.port):
         if server.poll() is not None or time.monotonic() > deadline:
@@ -386,7 +387,7 @@ def start_server(site: Site, venv: Path, name: str = 'server') -> subprocess.Pop
 
 def client_args(site: Site) -> List[str]:
     """Connection arguments of a client for the site (no -T: an old client must exit on its own)."""
-    return ['client', '-H', 'localhost', '-p', str(site.port), '-k', site.key, *site.tls_args()]
+    return ['client', '-H', 'localhost', '-p', str(site.port), *site.tls_args()]
 
 
 def old_client_new_server(new: Path, old: Path, label: str, tls: bool, args: argparse.Namespace) -> bool:

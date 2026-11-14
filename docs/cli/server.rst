@@ -19,6 +19,10 @@ Description
    :pr:`78`: clients request their bundles; ``-b``/``--bundlesize`` applies to a client that asks
    for no size of its own, and ``server.bundlemax`` caps every reply.
 
+.. versionchanged:: 2.9.0
+   A key on the command line is refused; the server takes it from the environment or a configuration
+   file.
+
 .. include:: ../_include/server_help.rst
 
 .. _cli_server_sites:

@@ -78,13 +78,13 @@ def task_rows(database: str) -> List[Dict[str, Any]]:
 def test_grouped_workload_with_retry(temp_site: Path) -> None:
     """Every task reaches its final state, no result is lost, and every process exits cleanly."""
     port = os.environ['HYPERSHELL_SERVER_PORT']
-    key = secrets.token_hex(16)
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     lines = workload(temp_site)
     taskfile = create_taskfile(temp_site, lines)
     assert run(hs('submit', str(taskfile)), cwd=temp_site, stdout=DEVNULL, stderr=DEVNULL).returncode == 0
 
     with open(temp_site / 'server.log', 'w') as log:
-        server = Popen(hs('server', '--restart', '-r', '1', '-H', 'localhost', '-p', port, '-k', key),
+        server = Popen(hs('server', '--restart', '-r', '1', '-H', 'localhost', '-p', port),
                        cwd=temp_site, stdout=log, stderr=log)
     clients = []
     try:
@@ -95,7 +95,7 @@ def test_grouped_workload_with_retry(temp_site: Path) -> None:
             time.sleep(0.05)
         for index in range(2):
             with open(temp_site / f'client-{index}.log', 'w') as log:
-                clients.append(Popen(hs('client', '-H', 'localhost', '-p', port, '-k', key, '-T', '30'),
+                clients.append(Popen(hs('client', '-H', 'localhost', '-p', port, '-T', '30'),
                                      cwd=temp_site, stdout=log, stderr=log))
         start = time.monotonic()
         for proc in (server, *clients):

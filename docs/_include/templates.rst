@@ -210,8 +210,12 @@ through a launcher or over SSH, it includes ``HYPERSHELL_SERVER_AUTH``
 (see :doc:`/security`). Under the default local mode, whose client runs inside
 the ``hs cluster`` process, it includes the variable only if the environment
 that starts ``hs cluster`` already sets it: the key that run mints is never put
-in that process's environment. A client started by hand with ``-k`` has it there
-only if its own environment sets it.
+in that process's environment. A client started by hand has it there only if
+its key comes from that variable rather than from ``server.auth``.
+
+.. versionchanged:: 2.9.0
+   A client started by hand takes its key from the environment or a configuration
+   file, never from the command line.
 
 Incoming arguments are intelligently coerced into the expected type.
 E.g., ``2`` will be an integer, ``4.67`` a float, ``null`` and ``none``

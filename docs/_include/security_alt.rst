@@ -9,11 +9,15 @@ with TLS enabled it generates a self-signed certificate and private key under ``
 cluster, and autoscaling launchers each generate a fresh one-time authentication key per
 invocation, which the operator never configures.
 
-Standalone ``hs server`` and ``hs client`` instead require an explicit key, supplied with
-``-k``/``--auth``, the ``HYPERSHELL_SERVER_AUTH`` environment variable, or ``server.auth`` in the
-configuration. The server refuses to start with the built-in placeholder key and requires a key of
-at least 16 characters drawn from ``[A-Za-z0-9._+/=-]``. The key is never transmitted over the
-queue socket; even so, treat every host that holds it as inside the trust boundary.
+Standalone ``hs server`` and ``hs client`` instead require an explicit key, supplied in the
+``HYPERSHELL_SERVER_AUTH`` environment variable or as ``server.auth`` in the configuration, never
+on the command line, where every user on the host could see it; a key given there is refused. The
+server refuses to start with the built-in placeholder key and requires a key of at least 16
+characters drawn from ``[A-Za-z0-9._+/=-]``. The key is never transmitted over the queue socket;
+even so, treat every host that holds it as inside the trust boundary.
+
+.. versionchanged:: 2.9.0
+   A key on the command line is refused.
 
 Disable TLS per invocation with ``--no-tls``, or permanently with ``server.tls.enabled = false``
 (not recommended; a warning is logged). The client verifies the server certificate in one of four

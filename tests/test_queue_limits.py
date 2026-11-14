@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Iterator, List, Optional
 
 # Standard libs
+import os
 import sys
 import time
 import errno
@@ -109,14 +110,14 @@ def test_accept_backs_off_when_out_of_descriptors(code: int, monkeypatch) -> Non
     assert 1 <= len(window) <= 10, f'{len(window)} accept attempts in 1 s'
 
 
-def server_command(taskfile: Path, port: int, key: str) -> List[str]:
-    """Command line for ``hs server`` on loopback without TLS."""
-    return ['hs', 'server', str(taskfile), '-H', '127.0.0.1', '-p', str(port), '-k', key, '--no-tls']
+def server_command(taskfile: Path, port: int) -> List[str]:
+    """Command line for ``hs server`` on loopback without TLS; the key comes from the environment."""
+    return ['hs', 'server', str(taskfile), '-H', '127.0.0.1', '-p', str(port), '--no-tls']
 
 
-def client_command(port: int, key: str) -> List[str]:
-    """Command line for ``hs client`` on loopback without TLS."""
-    return ['hs', 'client', '-H', '127.0.0.1', '-p', str(port), '-k', key, '--no-tls', '-N', '2']
+def client_command(port: int) -> List[str]:
+    """Command line for ``hs client`` on loopback without TLS; the key comes from the environment."""
+    return ['hs', 'client', '-H', '127.0.0.1', '-p', str(port), '--no-tls', '-N', '2']
 
 
 def limit_open_files() -> None:
@@ -179,7 +180,7 @@ def test_server_keeps_its_files_at_the_open_file_limit(temp_site: Path) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
-    key = secrets.token_hex(16)
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     go = site / 'GO'
     # The gated tasks occupy every admitted executor (two clients, two each) until the test opens the gate
     quick, gated = 20, 4
@@ -191,11 +192,11 @@ def test_server_keeps_its_files_at_the_open_file_limit(temp_site: Path) -> None:
         with open(site / f'{name}.log', mode='w') as stream:
             return Popen(command, cwd=site, stdout=stream, stderr=STDOUT, **options)
 
-    server = start(server_command(taskfile, port, key), 'server', preexec_fn=limit_open_files)
+    server = start(server_command(taskfile, port), 'server', preexec_fn=limit_open_files)
     admitted, refused, held = [], [], []
     try:
         assert wait_for(lambda: server.poll() is not None or count(db_path, 'SELECT COUNT(*) FROM task') > 0)
-        admitted = [start(client_command(port, key), f'admitted-{n}') for n in range(2)]
+        admitted = [start(client_command(port), f'admitted-{n}') for n in range(2)]
         # Every admitted client has opened all of its connections once each has completed a task
         assert wait_for(lambda: count(db_path, 'SELECT COUNT(DISTINCT client_id) FROM task '
                                                'WHERE completion_time IS NOT NULL') == 2)
@@ -211,7 +212,7 @@ def test_server_keeps_its_files_at_the_open_file_limit(temp_site: Path) -> None:
             if sock is None:
                 break
             held.append(sock)
-        refused = [start(client_command(port, key), f'refused-{n}') for n in range(6)]
+        refused = [start(client_command(port), f'refused-{n}') for n in range(6)]
         refused_status = finish(refused, DEADLINE)
         go.touch()
         server_status, = finish([server], DEADLINE)

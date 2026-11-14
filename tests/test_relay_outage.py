@@ -150,7 +150,7 @@ def start(group: Group) -> Tuple[Any, Forwarder, str]:
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, time.monotonic() + DEADLINE) == 0, group.text('submit')
     server = group.start('server', 'server', '--restart', '-b', '1', '-Q', '1',
-                         '-H', 'localhost', '-p', str(port), '-k', key)
+                         '-H', 'localhost', '-p', str(port), env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     return server, Forwarder(port), key
 

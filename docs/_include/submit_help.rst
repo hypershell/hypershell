@@ -47,7 +47,9 @@ Options
     The server must be running without a database (``--no-db``). A server with a database
     schedules only from it, so it refuses the submission and the command exits with an error.
 
-    Requires ``-H``, ``-p``, and ``-k`` options to specify the server connection.
+    Uses ``-H`` and ``-p`` to name the server. The key to connect to it is taken from the
+    ``HYPERSHELL_SERVER_AUTH`` environment variable or from ``server.auth`` in a configuration
+    file, and must match the server's.
 
 ``-H``, ``--host`` *ADDR*
     Hostname or IP address for server (default: localhost).
@@ -58,11 +60,6 @@ Options
     Port number for server (default: 50001).
 
     Only used with ``--queue`` mode to specify the server port.
-
-``-k``, ``--auth`` *KEY*
-    Cryptographic authentication key for server.
-
-    Only used with ``--queue`` mode. The key must match the server's authentication key.
 
 ``--template`` *CMD*
     Command-line template pattern (default: "{}").

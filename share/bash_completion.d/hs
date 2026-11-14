@@ -526,7 +526,7 @@ function _hs_task_update() {
 function _hs_submit() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -f --task-file --from-json -q --queue -H --host -p --port -k --auth
+	local all_opts="-h --help -f --task-file --from-json -q --queue -H --host -p --port
 	--no-tls --tls-key --tls-cert --tls-ca --template -t --tag -b --bundlesize -w --bundlewait
 	-c --cores -m --memory -W --timeout -g --group --zone --repeat --update --initdb --"
 
@@ -567,7 +567,6 @@ function _hs_submit() {
 		--template)        COMPREPLY=(); return ;;
 		-H | --host)       COMPREPLY=($(compgen -W "$(_hs_known_hosts)" -- "${current}")); return ;;
 		-p | --port)       COMPREPLY=($(compgen -W "$(hs config get server.port --raw 2>/dev/null)" -- "${current}")); return ;;
-		-k | --auth)       COMPREPLY=($(compgen -W "$(hs config get server.auth --raw 2>/dev/null)" -- "${current}")); return ;;
 	esac
 
 	COMPREPLY=($(compgen -W "${all_opts}" -- "${current}"))
@@ -582,7 +581,7 @@ function _hs_client() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
 	local all_opts="-h --help -N --num-threads -t --template -b --bundlesize -w --bundlewait
-	-H --host -p --port -k --auth --no-tls --tls-key --tls-cert --tls-ca
+	-H --host -p --port --no-tls --tls-key --tls-cert --tls-ca
 	-d --delay-start --no-confirm -o --output -e --errors --capture
 	-C --client-cores -M --client-memory --monitor
 	-T --timeout -W --task-timeout -R --ratelimit -S --signalwait --zone"
@@ -601,7 +600,6 @@ function _hs_client() {
 		-t | --template)    COMPREPLY=(); return ;;
 		-H | --host)        COMPREPLY=($(compgen -W "$(_hs_known_hosts)" -- "${current}")); return ;;
 		-p | --port)        COMPREPLY=($(compgen -W "$(hs config get server.port --raw 2>/dev/null)" -- "${current}")); return ;;
-		-k | --auth)        COMPREPLY=($(compgen -W "$(hs config get server.auth --raw 2>/dev/null)" -- "${current}")); return ;;
 		-d | --delay-start) COMPREPLY=($(compgen -W "30 60 600 -60 -600" -- "${current}")); return ;;
 		-T | --timeout)     COMPREPLY=($(compgen -W "10 30 60 600" -- "${current}")); return ;;
 		-W | --task-timeout) COMPREPLY=($(compgen -W "60 300 600 1800 3600" -- "${current}")); return ;;
@@ -643,7 +641,7 @@ function _hs_relay() {
 function _hs_server() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help --forever --restart -H --bind -p --port -k --auth
+	local all_opts="-h --help --forever --restart -H --bind -p --port
 	--no-tls --tls-key --tls-cert --tls-ca --no-db --no-confirm --initdb
 	-f --failures --print -b --bundlesize -w --bundlewait -r --max-retries --eager
 	-Q --poll -c --task-cores -m --task-memory -W --task-timeout
@@ -665,10 +663,6 @@ function _hs_server() {
 		-w | --bundlewait)   COMPREPLY=($(compgen -W "5 10 30 60 600" -- "${current}")); return ;;
 		-H | --bind)         COMPREPLY=($(compgen -W "localhost 127.0.0.1 0.0.0.0" -- "${current}")); return ;;
 		-p | --port)         COMPREPLY=($(compgen -W "$(hs server --available-ports 2>/dev/null)" -- "${current}")); return ;;
-		-k | --auth)
-			local authkey
-			authkey=$(head -c 1024 /dev/urandom | md5sum | head -c 16 | tr '[:lower:]' '[:upper:]')
-			COMPREPLY=($(compgen -W "${authkey}" -- "${current}")); return ;;
 		-r | --max-retries)  COMPREPLY=($(compgen -W "1 2 3 4 5 6" -- "${current}")); return ;;
 		-Q | --poll)         COMPREPLY=($(compgen -W "1 2 5 10" -- "${current}")); return ;;
 		-c | --task-cores)   COMPREPLY=($(compgen -W "1 2 4 8 16 32" -- "${current}")); return ;;

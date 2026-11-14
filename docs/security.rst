@@ -170,8 +170,16 @@ networks, so the key is exchanged only with the intended server.
 For ``LocalCluster``, ``RemoteCluster``, ``SSHCluster``, and autoscaling invocations,
 *HyperShell* generates a fresh random key for every invocation via ``secrets.token_hex(64)``,
 scoped to that single cluster lifetime; the operator never sees or configures it. For
-standalone ``hs server`` / ``hs client`` deployments, the operator supplies the key via
-configuration, environment, or the ``--auth`` CLI option.
+standalone ``hs server`` / ``hs client`` deployments, the operator supplies the key in the
+``HYPERSHELL_SERVER_AUTH`` environment variable or as ``server.auth`` in the configuration (or its
+``auth_env`` and ``auth_eval`` forms). ``hs server``, ``hs client`` and ``hs submit`` take no key
+on their command lines, which a process listing shows to every user on the host: a key given to one
+of them there is refused with a usage error that does not repeat it, and the command does nothing
+else.
+
+.. versionchanged:: 2.9.0
+   A key on the command line is refused; ``hs server``, ``hs client`` and ``hs submit`` take it
+   from the environment or the configuration.
 
 To keep the shared secret meaningful, ``hs server`` **refuses to start** with the built-in
 placeholder key and enforces a minimum key policy: the key must be at least 16 characters and
@@ -184,7 +192,7 @@ key generators used in the deployment guides below satisfy this policy.
     When ``hs cluster`` starts its clients as separate processes (``--launcher``, ``--mpi``,
     ``--autoscaling`` and ``--ssh``), the per-invocation key is on no command line, either on
     the launching host or on the client hosts. Every client reads its key from the
-    ``HYPERSHELL_SERVER_AUTH`` environment variable when no ``-k`` is given, and the launch
+    ``HYPERSHELL_SERVER_AUTH`` environment variable (or the configuration), and the launch
     delivers it there.
 
     * **Launcher modes** (``--launcher``, ``--mpi`` and ``--autoscaling``). The launcher is
@@ -521,7 +529,7 @@ authentication domains, and each keeps its own key.
 
 * **Upstream.** The relay authenticates to the upstream *server* with the upstream key, read from
   ``[relay.upstream]`` (``auth``, or its ``auth_env`` and ``auth_eval`` forms), never from
-  ``[server]`` and never from the relay's command line: there is no upstream ``-k`` option. The
+  ``[server]`` and never from the relay's command line, which has no key option. The
   connection uses TLS, configured by ``[relay.upstream.tls]`` alone, so the site keeps the relay's
   own ``[server.tls]``. Across a wide-area hop, verify the upstream *server*: give
   ``relay.upstream.tls.cafile`` (a certificate authority, or the upstream *server*'s own

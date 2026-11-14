@@ -93,8 +93,9 @@ def submit_one(*args: str) -> str:
 
 
 def endpoint() -> List[str]:
-    """Address and a fresh key for one server and its clients."""
-    return ['-H', 'localhost', '-p', os.environ['HYPERSHELL_SERVER_PORT'], '-k', secrets.token_hex(16)]
+    """Address for one server and its clients; a fresh key goes in the environment they inherit."""
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
+    return ['-H', 'localhost', '-p', os.environ['HYPERSHELL_SERVER_PORT']]
 
 
 @mark.unit

@@ -80,6 +80,10 @@ Server Usage
 
 .. include:: _include/server_desc.rst
 
+.. versionchanged:: 2.9.0
+   A key on the command line is refused; the server takes it from the environment or a configuration
+   file.
+
 .. include:: _include/server_help.rst
 
 
@@ -89,6 +93,10 @@ Client Usage
 .. include:: _include/client_usage.rst
 
 .. include:: _include/client_desc.rst
+
+.. versionchanged:: 2.9.0
+   A key on the command line is refused; the client takes it from the environment or a configuration
+   file.
 
 .. include:: _include/client_help.rst
 
@@ -109,6 +117,10 @@ Submit Usage
 .. include:: _include/submit_usage.rst
 
 .. include:: _include/submit_desc.rst
+
+.. versionchanged:: 2.9.0
+   A key on the command line is refused; ``--queue`` takes it from the environment or a
+   configuration file.
 
 .. include:: _include/submit_help.rst
 

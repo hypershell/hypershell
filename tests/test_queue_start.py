@@ -148,10 +148,11 @@ def test_unsupported_internals_fail_start(drift: str, monkeypatch) -> None:
 
 
 def server_command(site: Path, port: int, tls_enabled: bool) -> List[str]:
-    """Command line for ``hs server`` on loopback with a one-task file."""
+    """Command line for ``hs server`` on loopback with a one-task file; a fresh key goes in the environment."""
     taskfile = create_taskfile(site, ['echo a'])
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     return ['hs', 'server', str(taskfile), '-H', '127.0.0.1', '-p', str(port),
-            '-k', secrets.token_hex(16), *([] if tls_enabled else ['--no-tls'])]
+            *([] if tls_enabled else ['--no-tls'])]
 
 
 @mark.integration
@@ -200,7 +201,8 @@ def test_server_cli_tls_context_failure_is_logged(temp_site: Path) -> None:
         port = sock.getsockname()[1]
     key = secrets.token_hex(16)
     env = {name: value for name, value in os.environ.items() if name != 'HYPERSHELL_LOGGING_LEVEL'}
-    address = ['-H', '127.0.0.1', '-p', str(port), '-k', key]
+    env['HYPERSHELL_SERVER_AUTH'] = key
+    address = ['-H', '127.0.0.1', '-p', str(port)]
     log_path = site / 'server.log'
     with open(log_path, mode='w') as stream:
         server = Popen(['hs', 'server', str(create_taskfile(site, ['echo a'])), *address, '--tls-cert', '<none>'],

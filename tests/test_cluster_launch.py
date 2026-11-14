@@ -1379,11 +1379,12 @@ SERVER_KEY: Final[str] = 's' * 64
 
 
 def start_server(temp_site: Path) -> Popen:
-    """Start `hs server` with :const:`SERVER_KEY` in its own session, once it accepts connections."""
+    """Start `hs server` keyed by :const:`SERVER_KEY` in its environment, in its own session, once it listens."""
     taskfile = create_taskfile_echo(temp_site, count=1)
     log = open(Path(temp_site) / 'server.log', mode='w')
-    proc = Popen(['hs', 'server', str(taskfile), '--no-db', '--no-tls', '-H', LOOPBACK, '-k', SERVER_KEY],
-                 env=dict(os.environ), stdin=DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    proc = Popen(['hs', 'server', str(taskfile), '--no-db', '--no-tls', '-H', LOOPBACK],
+                 env={**os.environ, AUTH_ENV: SERVER_KEY}, stdin=DEVNULL, stdout=log, stderr=log,
+                 start_new_session=True)
     log.close()
     deadline = time.monotonic() + 60
     port = int(os.environ['HYPERSHELL_SERVER_PORT'])
@@ -1399,17 +1400,14 @@ def start_server(temp_site: Path) -> Popen:
     pytest.fail('Server did not start')
 
 
-@mark.parametrize('client_args, env, config_key, hint', [
-    pytest.param([], {}, None, True, id='no-key'),
-    pytest.param(['-k', DEFAULT_AUTH], {}, None, False, id='explicit-default-key'),
-    pytest.param(['-k', 'w' * 64], {}, None, False, id='explicit-wrong-key'),
-    pytest.param([], {AUTH_ENV: 'w' * 64}, None, False, id='environment-wrong-key'),
-    pytest.param([], {AUTH_ENV: DEFAULT_AUTH}, None, False, id='environment-default-key'),
-    pytest.param([], {}, 'w' * 64, False, id='config-wrong-key'),
+@mark.parametrize('env, config_key, hint', [
+    pytest.param({}, None, True, id='no-key'),
+    pytest.param({AUTH_ENV: 'w' * 64}, None, False, id='environment-wrong-key'),
+    pytest.param({AUTH_ENV: DEFAULT_AUTH}, None, False, id='environment-default-key'),
+    pytest.param({}, 'w' * 64, False, id='config-wrong-key'),
 ])
-def test_client_names_missing_key_only_when_none_given(temp_site: Path, client_args: List[str],
-                                                      env: Dict[str, str], config_key: Optional[str],
-                                                      hint: bool) -> None:
+def test_client_names_missing_key_only_when_none_given(temp_site: Path, env: Dict[str, str],
+                                                      config_key: Optional[str], hint: bool) -> None:
     """A client that fails to authenticate names a missing key only when no key came from any source."""
     if config_key is not None:
         config_file = Path(temp_site) / 'client.toml'
@@ -1417,7 +1415,7 @@ def test_client_names_missing_key_only_when_none_given(temp_site: Path, client_a
         env = {**env, 'HYPERSHELL_CONFIG_FILE': str(config_file)}
     server = start_server(temp_site)
     try:
-        run = run_in_session(['hs', 'client', '-H', LOOPBACK, '--no-tls', '-T', '5', *client_args],
+        run = run_in_session(['hs', 'client', '-H', LOOPBACK, '--no-tls', '-T', '5'],
                              {**os.environ, **env}, Path(temp_site), timeout=60, name='client')
     finally:
         kill_group(server)

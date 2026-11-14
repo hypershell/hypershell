@@ -347,8 +347,8 @@ def test_autoscaling_server_publishes_before_it_listens() -> None:
 @mark.integration
 def test_unknown_distribution_names_its_source(temp_site: Path) -> None:
     """An unknown `[autoscale] distribution` is refused before the server starts, naming where it was set."""
-    env = {**os.environ, 'HYPERSHELL_AUTOSCALE_DISTRIBUTION': 'even'}
-    proc = subprocess.Popen(['hs', 'server', '--autoscaling', '-k', AUTH, '--no-tls', '-H', '127.0.0.1'],
+    env = {**os.environ, 'HYPERSHELL_AUTOSCALE_DISTRIBUTION': 'even', 'HYPERSHELL_SERVER_AUTH': AUTH}
+    proc = subprocess.Popen(['hs', 'server', '--autoscaling', '--no-tls', '-H', '127.0.0.1'],
                             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     try:
         _, stderr = proc.communicate(timeout=60)
