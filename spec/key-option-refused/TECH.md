@@ -3,7 +3,7 @@ slug: key-option-refused
 title: Refuse the queue key on a command line
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/key-option-refused
 base: develop
 current_phase: done
@@ -31,8 +31,8 @@ phases:
     -e "^tests/test_server.py:" -e "^spec/relay/drive/relay_probe.py:" -e KEY_OPTIONS
     -e "-k.: True, .--auth.: True"'
 - id: P2
-  name: Refuse -k/--auth on hs client, server and submit (and hs cluster, hs relay);
-    help, hints, docs, completions; refusal tests and sweep
+  name: Refuse -k/--auth on hs client, server and submit; help, hints, docs, completions;
+    refusal tests and sweep
   status: done
   satisfies:
   - R1
@@ -150,14 +150,9 @@ code+state commit.
 **Satisfies:** R1, R2, R3, R4, R5, R6, R7, R8 · **Depends on:** P1
 **Goal:** `-k`/`--auth` on the three commands is a parse-time usage error (exit 2) that names
 `HYPERSHELL_SERVER_AUTH` and `server.auth` and never the key; the key is read from `resolve_auth`
-alone; nothing in help, hints, docs, man pages or completions offers the option. Per the plan-gate
-ruling 3, `hs cluster` (and `hsx`) and `hs relay` register the same refusal: neither declares `-k`
-or `--auth` for anything else (checked at P1). Side effects of registering there, recorded rather
-than avoided: `--ssh-args '-k …'` (cluster) and `--launcher-args '-k …'` (relay), written as two
-words, now fail as `expected one argument`, as a leading `-o`/`-N` already does on those commands;
-the `--ssh-args='-k …'` form and the `[ssh] args`/`[relay] launcher_args` keys are unaffected. On
-`hs cluster`, `--au`/`--aut` become ambiguous with `--autoscaling`, as they already are on
-`hs server`.
+alone; nothing in help, hints, docs, man pages or completions offers the option. `hs cluster`
+(and `hsx`) and `hs relay` keep `develop`'s parsers, with no key option (review-cycle-1 ruling,
+which withdraws plan-gate ruling 3; see the remediation below).
 
 - [x] `core/config.py`: `KEY_OPTION_STRINGS`, `RefuseKeyOption(argparse.Action)` raising
       `cmdkit.cli.ArgumentError` with a message built from the matched option string (never
@@ -168,11 +163,8 @@ the `--ssh-args='-k …'` form and the `[ssh] args`/`[relay] launcher_args` keys
 - [x] `client.py`, `server.py`, `submit.py`: replace the `-k/--auth` `add_argument` with
       `refuse_key_option(interface)` (`SubmitApp` with the `--` hint); read the key with
       `resolve_auth('server')` unconditionally in `run()`; client `no_key` drops `auth_given`.
-- [x] `cluster/__init__.py` (`ClusterApp`) and `relay/__init__.py` (`RelayApp`): add
-      `refuse_key_option(interface, advice=…)`; no usage or help line (the option is not offered),
-      no other change (plan-gate ruling 3). Each refusal names that command's own key source, since
-      `HYPERSHELL_SERVER_AUTH`/`server.auth` would mislead there: `hs cluster` says it makes a new
-      key for every run; `hs relay` names `relay.upstream.auth` and `HYPERSHELL_RELAY_UPSTREAM_AUTH`.
+- [x] ~~`cluster/__init__.py` and `relay/__init__.py`: register the refusal (plan-gate ruling 3).~~
+      Withdrawn at review cycle 1: both files are `origin/develop`'s again.
 - [x] Usage and help text of the three commands (R5): no `[-k KEY]`, no `-k, --auth` line; the
       submit `-q` line and the client/server help prose say where the key comes from. Client hints
       at `client.py:1149-1160` (and the comment at `:1667`) name `server.auth` instead of `-k`.
@@ -189,13 +181,26 @@ the `--ssh-args='-k …'` form and the `[ssh] args`/`[relay] launcher_args` keys
       the four GOAL forms with a DEVEL log file (exit 2, both sources named, key in no output or
       site file, no database file); R3 for `hs submit -- echo -k X` and a task file; the R5–R8
       sweep with its allow list. The unit and integration refusal tests cover `hs client`,
-      `hs server`, `hs submit`, `hs cluster` (also `hsx`) and `hs relay` (plan-gate ruling 3);
-      `--ssh-args='-k …'` still parses on `hs cluster`.
+      `hs server` and `hs submit`.
+
+**Review-cycle-1 remediation** (REVIEW.md F1, F2, F3, F5; PLAN.md "Review-cycle-1 rulings"):
+
+- [x] F1, F3: `src/hypershell/cluster/__init__.py` and `src/hypershell/relay/__init__.py` restored
+      from `origin/develop` (no `-k`/`--auth`, no refusing action, no advice text). Their refusal
+      cases leave `tests/test_key_option.py`; `docs/security.rst` no longer says that every command,
+      or the relay, refuses the option. A regression test pins that `--launcher-args '-k --exclusive'`
+      (relay), `--ssh-args '-k -i id'`, `-t '-k {}'`, `--launcher '-k srun'` and `--remote-exe '-k x'`
+      (cluster) parse as values and `--aut fixed` is `--autoscaling fixed`.
+- [x] F2: `.. versionchanged:: 2.9.0` beside the changed includes in `docs/cli/{client,server,submit}.rst`,
+      after the hand-started client sentence in `docs/_include/templates.rst`, and after the
+      completion examples in `docs/install.rst`.
+- [x] F5: R3 on `hs server` (a task file whose task carries `-k`) and `hs client` (a template
+      carrying `-k`), end to end, beside the existing `hs submit` tests.
 - **Verify:** the tests above; a `temp_site` drive of `hs server --auth=KEY` with a log file (exit 2,
   both sources named, key nowhere under the site); a `-b man` build into `$TMPDIR` that greps clean;
   the HTML build with `-W` (frontmatter).
 - **Touches:** `src/hypershell/core/config.py`, `client.py`, `server.py`, `submit.py`,
-  `cluster/__init__.py`, `relay/__init__.py`, `docs/_include/…`, `docs/{getting_started,security,install}.rst`, `share/…`, `tests/…`.
+  `docs/_include/…`, `docs/cli/…`, `docs/{getting_started,security,install}.rst`, `share/…`, `tests/…`.
 
 ---
 

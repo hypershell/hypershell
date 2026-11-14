@@ -23,4 +23,8 @@ Description
    ``--repeat`` or ``--update`` is given. :pr:`78`: ``-q``/``--queue`` needs a server started
    with ``--no-db``.
 
+.. versionchanged:: 2.9.0
+   A key on the command line is refused; ``--queue`` takes it from the environment or a
+   configuration file.
+
 .. include:: ../_include/submit_help.rst

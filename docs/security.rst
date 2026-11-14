@@ -172,9 +172,10 @@ For ``LocalCluster``, ``RemoteCluster``, ``SSHCluster``, and autoscaling invocat
 scoped to that single cluster lifetime; the operator never sees or configures it. For
 standalone ``hs server`` / ``hs client`` deployments, the operator supplies the key in the
 ``HYPERSHELL_SERVER_AUTH`` environment variable or as ``server.auth`` in the configuration (or its
-``auth_env`` and ``auth_eval`` forms). No command takes a key on its command line, which a process
-listing shows to every user on the host: a key given there is refused with a usage error that does
-not repeat it, and the command does nothing else.
+``auth_env`` and ``auth_eval`` forms). ``hs server``, ``hs client`` and ``hs submit`` take no key
+on their command lines, which a process listing shows to every user on the host: a key given to one
+of them there is refused with a usage error that does not repeat it, and the command does nothing
+else.
 
 .. versionchanged:: 2.9.0
    A key on the command line is refused; ``hs server``, ``hs client`` and ``hs submit`` take it
@@ -528,7 +529,7 @@ authentication domains, and each keeps its own key.
 
 * **Upstream.** The relay authenticates to the upstream *server* with the upstream key, read from
   ``[relay.upstream]`` (``auth``, or its ``auth_env`` and ``auth_eval`` forms), never from
-  ``[server]`` and never from the relay's command line, where a key is refused. The
+  ``[server]`` and never from the relay's command line, which has no key option. The
   connection uses TLS, configured by ``[relay.upstream.tls]`` alone, so the site keeps the relay's
   own ``[server.tls]``. Across a wide-area hop, verify the upstream *server*: give
   ``relay.upstream.tls.cafile`` (a certificate authority, or the upstream *server*'s own

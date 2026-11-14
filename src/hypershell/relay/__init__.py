@@ -50,7 +50,7 @@ from sqlalchemy import inspect
 
 # Internal libs
 from hypershell.core.config import (config, RELAY_PROCESS, RELAY_MARKER, DEFAULT_RELAY_PORT, DEFAULT_AUTH,
-                                    PARAM_UNSET, relay_database_section, refuse_key_option)
+                                    PARAM_UNSET, relay_database_section)
 from hypershell.core.signal import SIGUSR1, SIGUSR2, SIGTERM
 from hypershell.core.exceptions import get_shared_exception_mapping, handle_exception, handle_disconnect
 from hypershell.core.logging import Logger, INSTANCE
@@ -973,11 +973,6 @@ DEFAULT_UPSTREAM_PORT: Final[int] = config.relay.upstream.port
 """Default port of the upstream server."""
 
 
-RELAY_KEY_ADVICE: Final[str] = ('Give the upstream key as relay.upstream.auth in a configuration file '
-                                'or in the HYPERSHELL_RELAY_UPSTREAM_AUTH environment variable.')
-"""What the relay's refusal of a key option says in place of the key's sources."""
-
-
 APP_NAME = 'hs relay'
 APP_USAGE = f"""\
 Usage:
@@ -1092,9 +1087,6 @@ class RelayApp(Application):
 
     database: Optional[str] = None
     interface.add_argument('--database', default=database)
-
-    # The key option is registered only to be refused, since the upstream key comes from [relay.upstream] only.
-    refuse_key_option(interface, advice=RELAY_KEY_ADVICE)
 
     # Refused: orphan recovery upstream rests on confirmation.
     no_confirm: bool = False

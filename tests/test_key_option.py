@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""A key on a command line is refused, by every command and in every form, without repeating it.
+"""A key on a command line is refused by `hs client`, `hs server` and `hs submit`, in every form,
+without repeating it; `hs cluster` and `hs relay` parse their command lines as before.
 
 This is the one file in the suite that gives a key option to a command, and it does so only to
 see it refused; the key it passes is a dummy. Everywhere else a key comes from the environment
@@ -26,13 +27,14 @@ from cmdkit.app import Application, exit_status
 from cmdkit.cli import ArgumentError
 
 # Internal libs
-from hypershell.core.config import AUTH_ENV
+from hypershell.core.config import AUTH_ENV, KEY_OPTION_STRINGS
 from hypershell.client import ClientApp
 from hypershell.server import ServerApp
 from hypershell.submit import SubmitApp
 from hypershell.cluster import ClusterApp
 from hypershell.relay import RelayApp
 from tests import create_taskfile
+from tests.test_auth_variants import start_server, stop_server, DEADLINE
 
 
 KEY: Final[str] = 'Dummy0Key0For0The0Refusal0Tests'
@@ -48,16 +50,12 @@ APPS: Final[Dict[str, Type[Application]]] = {
     'client': ClientApp,
     'server': ServerApp,
     'submit': SubmitApp,
-    'cluster': ClusterApp,
-    'relay': RelayApp,
 }
 
 NAMED: Final[Dict[str, List[str]]] = {
     'client': SERVER_KEY_SOURCES,
     'server': SERVER_KEY_SOURCES,
     'submit': SERVER_KEY_SOURCES,
-    'cluster': ['new key for every run'],
-    'relay': ['HYPERSHELL_RELAY_UPSTREAM_AUTH', 'relay.upstream.auth'],
 }
 """What each command's refusal names in place of the option."""
 
@@ -79,8 +77,6 @@ EXTRA_FORMS: Final[Dict[str, Dict[str, List[str]]]] = {
     'server': {'with-file': ['-k', KEY, 'tasks.in'], 'file-first': ['tasks.in', f'--auth={KEY}', '--forever']},
     'submit': {'bundled': [f'-qk{KEY}', 'echo', 'hi'], 'after-task-words': ['echo', 'hi', '-k', KEY],
                'long-prefix-equals': [f'--a={KEY}'], 'queue': ['-q', '-k', KEY, 'echo', 'hi']},
-    'cluster': {'with-file': ['tasks.in', '-k', KEY]},
-    'relay': {'long-prefix': ['--au', KEY]},
 }
 """Forms particular to one command (prefixes that are unambiguous there, positionals, bundled flags)."""
 
@@ -142,15 +138,30 @@ def test_submit_task_option_after_separator(argv: List[str]) -> None:
 
 
 @mark.unit
-@mark.parametrize('command, argv, name, value', [
-    ('client', ['--template=-kfoo'], 'template', '-kfoo'),
-    ('cluster', ['--ssh-args=-k -i x'], 'ssh_args', '-k -i x'),
-    ('relay', ['--launcher-args=-k --exclusive'], 'launcher_args', '-k --exclusive'),
-])
-def test_option_value_holding_k_parses(command: str, argv: List[str], name: str, value: str) -> None:
+def test_option_value_holding_k_parses() -> None:
     """An option's value that begins with `-k`, joined to its option with `=`, parses as before."""
-    namespace = APPS[command].interface.parse_args(argv)
-    assert getattr(namespace, name) == value
+    assert ClientApp.interface.parse_args(['--template=-kfoo']).template == '-kfoo'
+
+
+@mark.unit
+@mark.parametrize('app, argv, name, value', [
+    (RelayApp, ['-N', '1', '--launcher', 'srun', '--launcher-args', '-k --exclusive'],
+     'launcher_args', '-k --exclusive'),
+    (RelayApp, ['--launcher-args=-k --exclusive'], 'launcher_args', '-k --exclusive'),
+    (ClusterApp, ['tasks.in', '--ssh', 'host1', '--ssh-args', '-k -i id'], 'ssh_args', '-k -i id'),
+    (ClusterApp, ['tasks.in', '--ssh-args=-k -i id'], 'ssh_args', '-k -i id'),
+    (ClusterApp, ['tasks.in', '-t', '-k {}'], 'template', '-k {}'),
+    (ClusterApp, ['tasks.in', '--launcher', '-k srun'], 'launch_mode', '-k srun'),
+    (ClusterApp, ['tasks.in', '--remote-exe', '-k x'], 'remote_exe', '-k x'),
+    (ClusterApp, ['tasks.in', '--aut', 'fixed'], 'autoscaling_policy', 'fixed'),
+], ids=['relay-launcher-args', 'relay-launcher-args-equals', 'cluster-ssh-args', 'cluster-ssh-args-equals',
+        'cluster-template', 'cluster-launcher', 'cluster-remote-exe', 'cluster-autoscaling-prefix'])
+def test_cluster_and_relay_parse_as_before(app: Type[Application], argv: List[str], name: str, value: str) -> None:
+    """`hs cluster` and `hs relay` register no key option, so a value that begins with `-k`, given as
+    the next word, is still that option's value, and `--aut` is still short for `--autoscaling`.
+    """
+    assert not set(KEY_OPTION_STRINGS) & set(app.interface._option_string_actions)
+    assert getattr(app.interface.parse_args(argv), name) == value
 
 
 @mark.unit
@@ -165,9 +176,6 @@ INVOCATIONS: Final[Dict[str, List[str]]] = {
     'client': ['hs', 'client', '-N', '1', '-T', '5'],
     'server': ['hs', 'server', '--forever'],
     'submit': ['hs', 'submit', '-q', 'echo', 'hi'],
-    'cluster': ['hs', 'cluster', 'tasks.in'],
-    'hsx': ['hsx', 'tasks.in'],
-    'relay': ['hs', 'relay', '-N', '1'],
 }
 """A run of each command that would start work if the option did not stop it."""
 
@@ -199,9 +207,8 @@ def test_command_refuses_key_option(temp_site: Path, invocation: str, form: str)
            'HYPERSHELL_LOGGING_LEVEL': 'devel'}
     argv = INVOCATIONS[invocation]
     result = run([*argv, *GOAL_FORMS[form]], cwd=site, env=env, capture_output=True, text=True, timeout=60)
-    command = 'cluster' if invocation == 'hsx' else invocation
     assert result.returncode == exit_status.bad_argument, result.stderr
-    assert_refusal(command, result.stderr)
+    assert_refusal(invocation, result.stderr)
     assert KEY not in result.stdout
     files = files_under(site)
     assert not [path for path in files if KEY in path.read_text(errors='replace')]
@@ -222,6 +229,31 @@ def test_submit_task_option_reaches_task(temp_site: Path) -> None:
     with sqlite3.connect(os.environ['HYPERSHELL_DATABASE_FILE']) as db:
         stored = sorted(args for args, in db.execute('SELECT args FROM task'))
     assert stored == [f'echo -k {TASK_KEY}', f'echo -k {TASK_KEY}-file']
+
+
+@mark.integration
+@mark.parametrize('task, template', [
+    (f'echo -k {TASK_KEY}', '{}'),
+    (TASK_KEY, 'echo -k {}'),
+], ids=['server-task-file', 'client-template'])
+def test_server_and_client_task_option_reaches_task(temp_site: Path, monkeypatch, task: str, template: str) -> None:
+    """A `-k` in a server's task file, or in a client's template, reaches the task the client runs.
+
+    The key is in the environment of both, as everywhere outside the refusal tests.
+    """
+    site = Path(str(temp_site))
+    monkeypatch.setenv(AUTH_ENV, KEY)
+    server = start_server(site, str(create_taskfile(site, [task])))
+    try:
+        client = run(['hs', 'client', '-N', '1', '-t', template], cwd=site, env=os.environ,
+                     capture_output=True, text=True, timeout=DEADLINE)
+    finally:
+        status = stop_server(server)
+    log = (site / 'server.log').read_text()
+    assert client.returncode == exit_status.success, client.stderr
+    assert status == exit_status.success, log
+    assert client.stdout.splitlines() == [f'-k {TASK_KEY}']
+    assert KEY not in client.stderr and KEY not in log
 
 
 # The sweep: no help text, message, completion, document, test or drive offers the option.
