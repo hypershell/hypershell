@@ -226,3 +226,25 @@ Foreman, gate judge under the maintainer's mandate. Approved with one extension.
 
 Build on a supported Python: the worktree's `.venv` is CPython 3.15; re-sync it with
 `uv sync --python 3.14` before running verify.
+
+## Review-cycle-1 rulings (2026-11-13)
+
+Foreman, gate judge under the maintainer's mandate. All four counted findings are fixed in this
+cycle.
+
+- **F1 and F3: plan-gate ruling 3 is withdrawn.** Registering `-k`/`--auth` on `hs cluster` and
+  `hs relay` breaks option values that begin with `-k ` (`--launcher-args '-k --exclusive'`,
+  `--ssh-args '-k -i id'`, `-t '-k {}'`). It also makes `--a`/`--au`/`--aut` ambiguous with
+  `--autoscaling`. Both are regressions against `develop`, which R4 forbids. `hs cluster` and
+  `hs relay` go back to `develop`'s parsers, with no `-k`/`--auth` and no refusing action. R1 names
+  only `hs client`, `hs server` and `hs submit`. A value-echoing parse error on the other commands
+  is `issues/parser-echoes-option-values.md`'s to fix. The cluster and relay advice texts, their
+  tests and any docs that say those commands refuse the option are removed. A regression test pins
+  that the space-separated `-k …` values above parse on both commands as on `develop`.
+- **F2.** Add `.. versionchanged:: 2.9.0` to every changed passage the review names:
+  `docs/cli/client.rst`, `server.rst` and `submit.rst` (beside the changed includes),
+  `docs/_include/templates.rst`, and `docs/install.rst` where the completion bullet was removed.
+- **F5.** R3's pass-through gets a test on each of the three commands, including an `hs server`
+  task file whose task carries `-k`.
+- **F4** is not counted. It predates this branch and is tracked in
+  `issues/parser-echoes-option-values.md`.
