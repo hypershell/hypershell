@@ -90,8 +90,8 @@ without stealing each other's ports.
 
 ## Notes
 
-- Related: [`relay-abort-races.md`](relay-abort-races.md),
-  [`relay-hardening.md`](relay-hardening.md) (C4-2 and C5-1 come with their own tests),
+- Related: `spec/relay-hardening/` (#103: the relay abort races, C4-2 and C5-1, each landed with
+  its own tests),
   [`integration-test-hang-timeout.md`](integration-test-hang-timeout.md) (a relay test that hangs
   costs the CI job), [`server-db-test-suite.md`](server-db-test-suite.md) (the group check reached
   PostgreSQL CI only by a dedicated test in #82, `tests/test_zone_postgres.py`),

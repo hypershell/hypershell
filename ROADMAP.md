@@ -291,40 +291,18 @@ confirmation then names the already-evicted client. Either way the row waits unt
 *Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
-## Orphan recovery can discard a result that lands while it runs
-
-Reverting an evicted client's tasks reads the in-flight rows, then reverts them by id in a separate,
-unconditional statement. A legitimate result committed in between is wiped and the task runs again,
-with no sign to the operator. Making the revert conditional on the row still being in flight closes
-it.
-
-*Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same shape); resilience*
-**Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md) · *status: adopted:relay-hardening*
-
-## Contended Scheduler and `hs update` writes fail on a TimescaleDB hypertable
+## A contended `retried` mark or `hs update` write fails on a TimescaleDB hypertable
 
 On TimescaleDB 2.29+, a `task`-row UPDATE that waited on another writer's row lock matches 0 rows
-although the row still qualifies. The server's Confirm, revert and result writes now re-run in that
-case; the Scheduler's dispatch stamp and `retried` mark, `Task.cancel_all` and every `hs update`
-write do not. A contended stamp or mark exits the server mid-run (a late confirmation is an
-in-server contender), and an unmarked failed row would be retried twice; `hs update` reports a
-false "not found", commits partially, or silently skips rows.
+although the row still qualifies. The server's Confirm, revert, result and dispatch-stamp writes now
+re-run in that case; the Scheduler's `retried` mark, `Task.cancel_all` and every `hs update` write
+do not. A contended mark exits the server mid-run (a late confirmation is an in-server contender),
+and the unmarked failed row would be retried twice; `hs update` reports a false "not found",
+commits partially, or silently skips rows.
 
-*Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); resilience*
+*Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); `relay-hardening`
+(landed, #103: the dispatch stamp); resilience*
 **Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: unshaped*
-
-## A relay can abort when its own server meets a row the relay removed
-
-A relay deletes rows under its own server: completed rows leave for its outbox, and rows not yet
-scheduled are dropped when the upstream server restarts. Two of that server's writes still raise on
-such a row: the eviction revert, which reads a client's in-flight rows and then reverts them
-unconditionally, and the scheduler's dispatch stamp, an ORM flush. Either ends a thread and the
-relay exits 5; the upstream server puts its tasks back only after its eviction period. No result is
-lost. The eviction half is the same conditional revert that closes the lost-result window above.
-
-*Horizon: near-term, before 2.9.0 · Depends on: — · Refs: orphan revert (one fix for the eviction
-half); contended Scheduler writes (`Task.next` off the ORM flush); `spec/relay/` C7-1, C7-2*
-**Seed:** [`issues/relay-abort-races.md`](issues/relay-abort-races.md) · *status: adopted:relay-hardening*
 
 ## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
 
@@ -428,35 +406,6 @@ downstream address.
 rule)*
 **Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
 
-## Relay rough edges: a TLS mismatch retried forever, idle zones ended early, a slow finish
-
-A relay whose TLS setting differs from its upstream server's retries forever, where a client fails
-at once. In a relay serving several zones, a zone with no site client at the moment upstream
-finishes can end before taking rows still staged for it. Some runs finish 6–9 s late, once about a
-minute, for a reason not yet found. Eviction ages a relay's heartbeat by the relay's own clock, so
-cross-site skew evicts a live relay. And the man page's relay synopsis warns at build and renders a
-stray blank line.
-
-*Horizon: near-term · Depends on: — · Refs: the advertised-host fix above (a relay's own
-downstream address); `spec/relay/` C4-2, C5-1*
-**Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: adopted:relay-hardening*
-
-## A role's first upstream call after a server restart can fail as a remote error
-
-When the upstream server restarts at the same address, a relay's link roles should see the lost
-connection and reconnect. The first call a role makes on a new worker thread, through a client
-created before the restart, can instead fail with a remote `KeyError`: the new thread dials the
-restarted server with a proxy id the old server minted, and the link treats it as a non-transport
-error. In the puller it ends the relay with exit status 5; in the hand-back role it refuses the
-hand-back and leaves the tasks to eviction, although the restarted server has already requeued them.
-The window in a whole relay is narrow, and a small harness reproduces it every time. A stale-proxy
-error on a role's first call after a reconnect should count as a transport loss, or the roles'
-proxies should be re-created on reconnect.
-
-*Horizon: near-term, small · Depends on: — · Refs: `spec/relay-retire/REVIEW.md` (O1); the relay
-abort races and rough edges above*
-**Seed:** [`issues/upstream-link-restart-proxy.md`](issues/upstream-link-restart-proxy.md) · *status: adopted:relay-hardening*
-
 ## A relay run can still end up to about 5 s late
 
 After the relay hardening fixes, a relay run's tail (last completion to upstream exit) is about 1.7 s
@@ -466,8 +415,8 @@ in a site client until it expires: a client should flush when it holds nothing l
 relay should give site clients a shorter wait. Separately, a result landing does not wake the upstream
 scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 6 s to it.
 
-*Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and its laptop evidence;
-the relay rough edges above*
+*Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and its laptop evidence
+(`relay-hardening` landed, #103)*
 **Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
 
 ## `rotatedb` lost-update window
@@ -691,8 +640,8 @@ to a relay that binds it later, so a parallel copy can take it first. Smaller: t
 cancel and `retried` filters are unpinned, and one start-up test resolves a path under the
 developer's own database location. Split out of `relay`'s review.
 
-*Horizon: near-term, small · Depends on: — · Refs: `spec/relay/` C4-3, C4-4; the relay abort races
-and rough edges in Part I*
+*Horizon: near-term, small · Depends on: — · Refs: `spec/relay/` C4-3, C4-4; `relay-hardening`
+(landed, #103: the relay abort races and rough edges, each with its own tests)*
 **Seed:** [`issues/relay-test-strength.md`](issues/relay-test-strength.md) · *status: unshaped*
 
 # Part III — Turso follow-ons

@@ -67,7 +67,7 @@ completion that makes the run finishable without waiting out a back-off.
   defines the tail.
 - `tail_run.py` and `tail_judge.py` are the measuring tools; the cluster script `tail_cluster.sh`
   was rehearsed on the laptop only and has never run on a cluster.
-- Related: [`relay-hardening.md`](relay-hardening.md) (the slow finish this narrows),
+- Related: `spec/relay-hardening/` (#103; its seed's slow finish is what this narrows),
   [`hypertable-contended-scheduler-and-cli-writes.md`](hypertable-contended-scheduler-and-cli-writes.md)
   (also changes the scheduler).
 - Found by: `relay-hardening` R8, 2026-11-14.
