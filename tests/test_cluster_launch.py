@@ -43,7 +43,6 @@ from tests import create_taskfile_echo
 from hypershell import client as client_module
 from hypershell.client import DEFAULT_AUTH, task_env
 from hypershell.cluster.launch import AUTH_ENV, OMPI_ENV_LIST, ZONE_ENV, ClientLaunch, client_launch
-from hypershell.core.logging import HOSTNAME
 from hypershell.cluster.remote import AutoScaler, AutoScalingCluster
 from hypershell.cluster.ssh import SSHCluster, DEFAULT_REMOTE_EXE
 from hypershell.data.model import Task
@@ -96,13 +95,13 @@ keep = ('PATH', 'HOME', 'HYPERSHELL_CONFIG_FILE', 'HYPERSHELL_SITE', 'HYPERSHELL
 os.execve(sys.argv[1], sys.argv[1:], {name: os.environ[name] for name in keep if name in os.environ})
 """
 
-# A launcher for autoscaling runs. The autoscaler advertises the host's own name, which some hosts
-# (sandboxes, laptops) cannot resolve, so after recording what it was given the stand-in points
-# the client at the loopback address the run binds.
+# A launcher for autoscaling runs. Every run binds the loopback address, which the autoscaler
+# advertises to its clients as it is; the stand-in refuses a launch told any other address.
 AUTOSCALE_LAUNCHER_BODY: Final[str] = f"""\
 record('launcher')
 argv = sys.argv[1:]
-argv[argv.index('-H') + 1] = {LOOPBACK!r}
+if argv[argv.index('-H') + 1] != {LOOPBACK!r}:
+    sys.exit('stand-in launcher: expected the bound loopback address as the advertised host')
 os.execv(argv[0], argv)
 """
 
@@ -111,8 +110,8 @@ os.execv(argv[0], argv)
 # then reads /dev/null, and when STAND_IN_SSH_NO_INPUT=1, as with a site wrapper that closes ssh's
 # input. It runs the remote command with `sh -c`, as sshd runs it under a login shell, with that
 # input and without the logging level, which a remote login would not inherit unless --env sends
-# it. The cluster advertises the host's own name, so the stand-in points the client at the loopback
-# address the run binds.
+# it. Every run binds the loopback address, which the cluster advertises to its clients as it is;
+# the stand-in refuses a remote command told any other address.
 SSH_BODY: Final[str] = f"""\
 import subprocess
 NO_INPUT = os.environ.get('STAND_IN_SSH_NO_INPUT') == '1'
@@ -131,13 +130,11 @@ stdin_path = os.path.join(RECORDS, uuid.uuid4().hex + '.stdin')
 with os.fdopen(os.open(stdin_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as stream:
     stream.write(data)
 record('launcher', host=host, flags=sorted(flags), remote=remote, stdin=stdin_path)
-advertised = {' -H ' + shlex.quote(HOSTNAME) + ' '!r}
-if remote.count(advertised) != 1:
-    sys.exit('stand-in ssh: expected the advertised host once in the remote command')
+if remote.count({' -H ' + LOOPBACK + ' '!r}) != 1:
+    sys.exit('stand-in ssh: expected the bound loopback address once in the remote command')
 env = {{name: value for name, value in os.environ.items() if name != 'HYPERSHELL_LOGGING_LEVEL'}}
 with open(stdin_path, 'rb') as stream:
-    status = subprocess.call(['/bin/sh', '-c', remote.replace(advertised, {' -H ' + LOOPBACK + ' '!r})],
-                             stdin=stream, env=env)
+    status = subprocess.call(['/bin/sh', '-c', remote], stdin=stream, env=env)
 record('ssh-exit', status=status)
 sys.exit(status)
 """
@@ -633,7 +630,7 @@ def test_autoscaling_mode_keeps_every_client_option(options: Dict[str, Any]) -> 
                                  bundlesize=2, bundlewait=5, template='echo {} > "$OUT"', delay_start=-1.5,
                                  task_signalwait=10, bind=(LOOPBACK, port), tls=None, **options)
     expected = {name: value for name, value in options.items() if name != 'no_confirm'}  # Never passed on
-    assert cluster.launch.argv == previous_argv('hs', (HOSTNAME, port), ['srun', '-n1'], ['--mpi=pmi2'],
+    assert cluster.launch.argv == previous_argv('hs', (LOOPBACK, port), ['srun', '-n1'], ['--mpi=pmi2'],
                                                 num_threads=4, bundlesize=2, bundlewait=5,
                                                 template='echo {} > "$OUT"', delay_start=-1.5,
                                                 task_signalwait=10, tls_enabled=False, **expected)
@@ -952,7 +949,7 @@ def test_ssh_mode_launches_each_host_with_every_client_option(options: Dict[str,
         before, after, _, command = split_ssh_launch(launch.argv, host)
         assert before == ['ssh', '-o', 'BatchMode=yes', '-T']
         assert after[:-1] == ['sh', '-c']
-        assert command == previous_argv(DEFAULT_REMOTE_EXE, (HOSTNAME, port), [], [], num_threads=4,
+        assert command == previous_argv(DEFAULT_REMOTE_EXE, (LOOPBACK, port), [], [], num_threads=4,
                                         bundlesize=2, bundlewait=5, template=QUOTED_TEMPLATE, delay_start=-1.5,
                                         task_signalwait=10, tls_enabled=False, **options)
         assert not set(launch.argv) & KEY_OPTIONS

@@ -13,6 +13,9 @@ it into :const:`AUTH_ENV` before it starts the client.
 
 An autoscaling cluster starts clients zone by zone through a :class:`LaunchActuator`, which
 builds one launch per zone; a launch built with `expose_zone` names its zone to the launcher.
+
+Every launch mode tells its clients the address :func:`advertised_host` gives: an address the
+user names, else the bind address when the server binds one address, else this host's own name.
 """
 
 
@@ -32,14 +35,14 @@ from subprocess import Popen, PIPE
 
 # Internal libs
 from hypershell.core.config import load_task_env
-from hypershell.core.logging import Logger
+from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
 from hypershell.data.model import DEFAULT_ZONE_NAME
 from hypershell.cluster.demand import ZoneRef
 
 # Public interface
 __all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'ZONE_ENV', 'ZONE_WORD', 'MPI_LAUNCHERS', 'SSH_NO_KEY_MESSAGE',
-           'ClientLaunch', 'LaunchActuator', 'client_launch',
+           'WILDCARD_BINDS', 'ClientLaunch', 'LaunchActuator', 'advertised_host', 'client_launch',
            'is_mpi_launcher', 'ssh_env_exports', 'ssh_launch_args', 'ssh_remote_script', 'redact_secrets']
 
 # Initialize logger
@@ -78,6 +81,30 @@ SSH_NO_INPUT: Final[str] = '-n'
 
 SSH_OPTIONS_WITH_VALUE: Final[str] = 'BbcDEeFIiJLlmOoPpQRSWw'
 """Letters of the ssh options that take a value."""
+
+WILDCARD_BINDS: Final[FrozenSet[str]] = frozenset({'0.0.0.0', ''})
+"""Bind addresses that listen on every interface, which no client can dial as such."""
+
+
+def advertised_host(bind: str, advertise: Optional[str] = None) -> str:
+    """
+    The address launched clients are told to dial, for a server bound to `bind`.
+
+    A non-empty `advertise` is the address, whatever the bind. Otherwise a server bound to one
+    address is dialed there, and a server bound to every interface (:const:`WILDCARD_BINDS`) is
+    dialed by this host's own name (:const:`~hypershell.core.logging.HOSTNAME`).
+
+    Example:
+        >>> advertised_host('10.0.0.5')
+        '10.0.0.5'
+        >>> advertised_host('0.0.0.0') == HOSTNAME
+        True
+        >>> advertised_host('0.0.0.0', advertise='head.cluster')
+        'head.cluster'
+    """
+    if advertise:
+        return advertise
+    return HOSTNAME if bind in WILDCARD_BINDS else bind
 
 
 @dataclass(frozen=True)

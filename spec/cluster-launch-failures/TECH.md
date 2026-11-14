@@ -1,84 +1,104 @@
 ---
 slug: cluster-launch-failures
-title: A cluster whose clients all fail says so and exits; one advertised address for every launch mode
+title: A cluster whose clients all fail says so and exits; one advertised address
+  for every launch mode
 kind: fix
 appetite: big
 status: in_progress
 branch: fix/cluster-launch-failures
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-14'
 phases:
 - id: P1
-  name: 'One advertised address: advertised_host at every launch site, --advertise and server.advertise, their docs'
-  status: pending
-  satisfies: [R6, R7, R8]
+  name: 'One advertised address: advertised_host at every launch site, --advertise
+    and server.advertise, their docs'
+  status: done
+  satisfies:
+  - R6
+  - R7
+  - R8
   depends_on: []
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    uv run pytest -q tests/test_cluster_advertise.py tests/test_cluster_launch.py tests/test_cluster.py
-    tests/test_relay_launch.py tests/test_completions.py
-    && .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh" advertise
-    && .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh" healthy
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going
-    -q -E -b html docs $TMPDIR/docs-html
+  verify: uv run pytest -q tests/test_cluster_advertise.py tests/test_cluster_launch.py
+    tests/test_cluster.py tests/test_relay_launch.py tests/test_completions.py &&
+    .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh"
+    advertise && .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh"
+    healthy && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group
+    docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 - id: P2
-  name: 'Launcher, --mpi and --ssh: watch every launched process, warn at each failure, stop and exit when all are gone with work left'
+  name: 'Launcher, --mpi and --ssh: watch every launched process, warn at each failure,
+    stop and exit when all are gone with work left'
   status: pending
-  satisfies: [R1, R2, R4, R8]
-  depends_on: [P1]
+  satisfies:
+  - R1
+  - R2
+  - R4
+  - R8
+  depends_on:
+  - P1
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    uv run pytest -q tests/test_cluster_exit.py tests/test_cluster_launch.py tests/test_cluster.py
-    tests/test_submit.py tests/test_restart.py
-    && for m in fail fail-db zero healthy ssh-fail ssh-partial; do
-    .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh" $m || exit 1; done
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going
-    -q -E -b html docs $TMPDIR/docs-html
+  verify: uv run pytest -q tests/test_cluster_exit.py tests/test_cluster_launch.py
+    tests/test_cluster.py tests/test_submit.py tests/test_restart.py && for m in fail
+    fail-db zero healthy ssh-fail ssh-partial; do .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh" $m || exit 1; done
+    && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs
+    sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 - id: P3
-  name: 'Autoscaling: autoscale.failed_launches stops a cluster whose launches all fail; relay fleets never stop'
+  name: 'Autoscaling: autoscale.failed_launches stops a cluster whose launches all
+    fail; relay fleets never stop'
   status: pending
-  satisfies: [R2, R3, R5, R8]
-  depends_on: [P2]
+  satisfies:
+  - R2
+  - R3
+  - R5
+  - R8
+  depends_on:
+  - P2
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    uv run pytest -q tests/test_autoscale_failed_launches.py tests/test_autoscale.py tests/test_zone_autoscale.py
-    tests/test_relay_launch.py tests/test_relay_topology.py tests/test_topology_server.py
-    && for m in autoscale-fail autoscale-off advertise; do
-    .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh" $m || exit 1; done
-    && for mode in founding fixed; do
-    .agents/factory/bin/temp_site.sh sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" $mode || exit 1; done
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going
-    -q -E -b html docs $TMPDIR/docs-html
+  verify: uv run pytest -q tests/test_autoscale_failed_launches.py tests/test_autoscale.py
+    tests/test_zone_autoscale.py tests/test_relay_launch.py tests/test_relay_topology.py
+    tests/test_topology_server.py && for m in autoscale-fail autoscale-off advertise;
+    do .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh"
+    $m || exit 1; done && for mode in founding fixed; do .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/zone-autoscale/drive/zone_drive.sh" $mode || exit 1; done && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    $TMPDIR/docs-html
 - id: P4
-  name: 'Gate: agent docs, every drive, the suite under 3.14 and 3.11, the relay smoke, the docs build'
+  name: 'Gate: agent docs, every drive, the suite under 3.14 and 3.11, the relay smoke,
+    the docs build'
   status: pending
-  satisfies: [R1, R2, R3, R4, R5, R6, R7, R8]
-  depends_on: [P3]
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  depends_on:
+  - P3
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    for m in fail fail-db zero healthy ssh-fail ssh-partial autoscale-fail autoscale-off advertise; do
-    .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh" $m || exit 1; done
-    && sh spec/relay/drive/relay_smoke.sh
-    && uv run pytest
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run --python 3.11 pytest
-    && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going
-    -q -E -b html docs $TMPDIR/docs-html
+  verify: for m in fail fail-db zero healthy ssh-fail ssh-partial autoscale-fail autoscale-off
+    advertise; do .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-failures/drive/launch_drive.sh"
+    $m || exit 1; done && sh spec/relay/drive/relay_smoke.sh && uv run pytest && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311
+    uv run --python 3.11 pytest && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run
+    --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 review:
   last_reviewed_commit: ''
   verdict: none
   blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — A cluster whose clients all fail says so and exits; one advertised address for every launch mode
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -136,26 +156,26 @@ one atomic code+state commit.
 **Goal:** every launch mode and a relay's site clients are told the address the one rule gives;
 `--advertise` and `server.advertise` override it in every remote `hs cluster` mode; documented.
 
-- [ ] `cluster/launch.py`: `WILDCARD_BINDS`, `advertised_host(bind, advertise=None)` (exported),
+- [x] `cluster/launch.py`: `WILDCARD_BINDS`, `advertised_host(bind, advertise=None)` (exported),
       importing `HOSTNAME`; doctest-style example in the docstring.
-- [ ] `RemoteCluster`, `AutoScalingCluster`, `SSHCluster`: `advertise: Optional[str] = None`; build
+- [x] `RemoteCluster`, `AutoScalingCluster`, `SSHCluster`: `advertise: Optional[str] = None`; build
       with `advertised_host(bind[0], advertise)`; keep `self.advertised = (host, port)`; docstrings
       (`bind`, new `advertise`). Constructors never read configuration.
-- [ ] `relay/site.py::zone_launch`: `(advertised_host(queue.host), queue.port)`; module and
+- [x] `relay/site.py::zone_launch`: `(advertised_host(queue.host), queue.port)`; module and
       `site_cluster` docstrings say the clients dial the bind, or the host name for a wildcard bind.
-- [ ] `core/config.py`: `server.advertise = PARAM_UNSET`.
-- [ ] `ClusterApp`: `--advertise` (default `None`); refuse it (and an empty value) in `local` mode with
+- [x] `core/config.py`: `server.advertise = PARAM_UNSET`.
+- [x] `ClusterApp`: `--advertise` (default `None`); refuse it (and an empty value) in `local` mode with
       `ArgumentError('Cannot use --advertise with a local cluster (no launched clients)')`;
       `advertise_host` (option > key > None; the key unset for `None`/`''`/`PARAM_UNSET`); pass
       `advertise=` from `run_launch`, `run_mpi`, `run_ssh`, `run_autoscaling`.
-- [ ] Help and docs: `APP_USAGE`/`APP_HELP`; `docs/_include/cluster_usage.rst`, `cluster_help.rst`
+- [x] Help and docs: `APP_USAGE`/`APP_HELP`; `docs/_include/cluster_usage.rst`, `cluster_help.rst`
       (the `-H` rule; `--advertise` with the TLS sentence), `cluster_desc.rst` (the address rule);
       `docs/cli/cluster.rst` (`--advertise` in the `versionadded:: 2.9.0` list; `versionchanged::
       2.9.0` for the rule); `config_param_ref.rst` (`server.advertise` after `.host`, `.bind` text;
       `.. only:: html` + `versionadded`); `docs/security.rst` (Peer Verification Modes sentence);
       `docs/_include/relay_help.rst:42`.
-- [ ] Completions: `share/bash_completion.d/hs` and `hsx` (keep identical), `share/zsh/site-functions/_hs`.
-- [ ] Tests: new `tests/test_cluster_advertise.py` (helper table incl. `''`; each mode's `-H` for a
+- [x] Completions: `share/bash_completion.d/hs` and `hsx` (keep identical), `share/zsh/site-functions/_hs`.
+- [x] Tests: new `tests/test_cluster_advertise.py` (helper table incl. `''`; each mode's `-H` for a
       wildcard bind, a specific bind, the option, the key, option over key; `zone_launch` for a relay
       bound to one address and to `0.0.0.0`; local refusal exit 2 naming the option; the key ignored
       locally). Update the tests that pin the old rule: `tests/test_cluster_launch.py:636` and `:955`

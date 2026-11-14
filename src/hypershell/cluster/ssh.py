@@ -22,12 +22,12 @@ from cmdkit.config import ConfigurationError, Namespace
 from hypershell.core.tls import TLSConfig
 from hypershell.core.config import config, blame
 from hypershell.core.thread import Thread, join_waking
-from hypershell.core.logging import Logger, HOSTNAME
+from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
-from hypershell.cluster.launch import ClientLaunch, client_launch, ssh_env_exports, ssh_launch_args
+from hypershell.cluster.launch import ClientLaunch, advertised_host, client_launch, ssh_env_exports, ssh_launch_args
 
 # Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
@@ -113,6 +113,8 @@ class SSHCluster(Thread):
 
         bind (tuple, optional):
             Bind address for server with port number (default: 0.0.0.0).
+            Clients are told to dial the bind address, or this host's own name when it is 0.0.0.0
+            (see :func:`~hypershell.cluster.launch.advertised_host`), unless `advertise` names one.
             See :const:`~hypershell.server.DEFAULT_PORT`.
 
         launcher (str, optional):
@@ -195,6 +197,9 @@ class SSHCluster(Thread):
             Zone whose tasks the clients run (default: the default zone).
             Tasks this cluster submits are placed in the same zone.
 
+        advertise (str, optional):
+            Address the clients are told to dial, whatever the bind (default: the bind rule above).
+
     Example:
         >>> from hypershell.cluster import SSHCluster
         >>> cluster = SSHCluster.new(
@@ -212,6 +217,7 @@ class SSHCluster(Thread):
     server: ServerThread
     clients: List[Popen]
     launches: List[ClientLaunch]
+    advertised: Tuple[str, int]
 
     def __init__(self: SSHCluster,
                  source: Iterable[str] = None,
@@ -246,7 +252,8 @@ class SSHCluster(Thread):
                  ratelimit: int = None,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
-                 zone: Optional[str] = None) -> None:
+                 zone: Optional[str] = None,
+                 advertise: Optional[str] = None) -> None:
         """Initialize server and client threads."""
         if nodelist is None:
             raise AttributeError('Expected nodelist')
@@ -279,8 +286,9 @@ class SSHCluster(Thread):
             launcher_args = shlex.split(config.ssh.get('args', ''))
         # NOTE: checked once here, so a dropped `-n` is reported once, not once per host
         launcher, launcher_args = launcher[:1], ssh_launch_args([*launcher[1:], *launcher_args])
+        self.advertised = (advertised_host(bind[0], advertise), bind[1])
         self.launches = [
-            client_launch(remote_exe, (HOSTNAME, bind[1]), auth,
+            client_launch(remote_exe, self.advertised, auth,
                           launcher=launcher, launcher_args=launcher_args,
                           ssh_host=host, ssh_exports=launcher_env,
                           num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,

@@ -61,7 +61,23 @@ Options
     Bind address (default: localhost, or 0.0.0.0 for remote clients).
 
     Sets the address the server binds to. When launching clients on remote hosts
-    (``--ssh``, ``--mpi``, or ``--launcher``), bind to *0.0.0.0* so they can connect.
+    (``--ssh``, ``--mpi``, or ``--launcher``, with or without ``--autoscaling``), the default
+    *localhost* becomes *0.0.0.0* so they can connect. The clients are told to dial the bind
+    address when it is one specific address, and this host's own name when it is *0.0.0.0*,
+    unless ``--advertise`` names another.
+
+``--advertise`` *ADDR*
+    Address remote clients dial (default: by ``-H``, as above).
+
+    Tells every launched client to dial *ADDR*, whatever the bind address: a name the clients
+    can reach the server by that differs from it, such as the name on the server's certificate.
+    Also set by ``server.advertise``; this option takes precedence. Not allowed with a local
+    cluster, whose clients are not launched.
+
+    Under TLS the advertised address must be one the client's certificate check accepts: with a
+    certificate from the system's trusted authorities (no ``cafile`` and no ``servername``),
+    clients check it against the address they dial, so advertise a name the certificate carries,
+    or set ``server.tls.servername``.
 
 ``-p``, ``--port`` *PORT*
     Port number (default: 50001).

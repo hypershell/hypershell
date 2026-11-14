@@ -28,6 +28,12 @@ De-dup cost scales with the file's own source lineage rather than the whole data
 fast at scale; for very large workflows, a one-time ``submit`` followed by a bare ``hsx --restart`` (no
 file re-read) is cheaper than re-feeding the *FILE* each run.
 
+Clients launched on other hosts (``--ssh``, ``--mpi``, ``--launcher`` and ``--autoscaling``) are
+told one address to dial in every mode: the bind address (``-H``) when the server binds one
+specific address, and this host's own name when it binds every interface (*0.0.0.0*, the default
+for remote clients). Use ``--advertise`` (or ``server.advertise``) to tell them another, such as
+a name on the server's certificate; it must be reachable from wherever the clients run.
+
 Use ``--autoscaling`` with either *fixed* or *dynamic* to run a persistent, elastically scalable
 cluster using an external ``--launcher`` to bring up clients as needed. Clients are scaled per zone:
 each zone with tasks in the active group gets its own clients, and the launcher is told which zone

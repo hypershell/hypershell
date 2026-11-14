@@ -16,7 +16,8 @@ Description
 |
 
 .. versionadded:: 2.9.0
-   ``--from-json`` (:pr:`48`); ``--repeat`` and ``--update`` (:pr:`50`); ``--zone`` (:pr:`78`).
+   ``--from-json`` (:pr:`48`); ``--repeat`` and ``--update`` (:pr:`50`); ``--zone`` (:pr:`78`);
+   ``--advertise``.
 
 .. versionchanged:: 2.9.0
    :pr:`50`: ``--restart`` with a *FILE* submits only the tasks that never landed, and a file
@@ -35,5 +36,10 @@ Description
    ``-d``/``--delay-start`` take a duration with units or a Slurm time, as ``-W`` does, and a
    signed value is refused except on ``--delay-start``, where a leading ``-`` still asks for a
    random delay (e.g., ``--delay-start=-10m``).
+
+.. versionchanged:: 2.9.0
+   Clients launched with ``--ssh`` or ``--autoscaling`` are told the bind address when ``-H``
+   names one specific address, as with ``--mpi`` and ``--launcher``; only a server bound to
+   *0.0.0.0* is advertised by this host's own name.
 
 .. include:: ../_include/cluster_help.rst

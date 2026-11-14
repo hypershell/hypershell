@@ -23,14 +23,14 @@ from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig
 from hypershell.core.config import default
 from hypershell.core.thread import Thread, join_waking
-from hypershell.core.logging import Logger, HOSTNAME
+from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.data.model import Task, Client
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL,
                                DEFAULT_EVICT)
-from hypershell.cluster.launch import ClientLaunch, LaunchActuator, client_launch, redact_secrets
+from hypershell.cluster.launch import ClientLaunch, LaunchActuator, advertised_host, client_launch, redact_secrets
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ZoneLoad, ScalingKnobs,
                                        read_zone_loads, fleet_demand)
 
@@ -130,6 +130,8 @@ class RemoteCluster(Thread):
 
         bind (tuple, optional):
             Bind address for server with port number (default: 0.0.0.0).
+            Clients are told to dial the bind address, or this host's own name when it is 0.0.0.0
+            (see :func:`~hypershell.cluster.launch.advertised_host`), unless `advertise` names one.
             See :const:`~hypershell.server.DEFAULT_PORT`.
 
         launcher (str, optional):
@@ -208,6 +210,9 @@ class RemoteCluster(Thread):
             Zone whose tasks the clients run (default: the default zone).
             Tasks this cluster submits are placed in the same zone.
 
+        advertise (str, optional):
+            Address the clients are told to dial, whatever the bind (default: the bind rule above).
+
     Example:
         >>> from hypershell.cluster import RemoteCluster
         >>> cluster = RemoteCluster.new(
@@ -224,6 +229,7 @@ class RemoteCluster(Thread):
     server: ServerThread
     clients: Optional[Popen] = None
     launch: ClientLaunch
+    advertised: Tuple[str, int]
 
     def __init__(self: RemoteCluster,
                  source: Iterable[str] = None,
@@ -256,7 +262,8 @@ class RemoteCluster(Thread):
                  ratelimit: int = None,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
-                 zone: Optional[str] = None) -> None:
+                 zone: Optional[str] = None,
+                 advertise: Optional[str] = None) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         # In JSON mode the template is expanded submit-side by the server; remote clients
@@ -285,8 +292,8 @@ class RemoteCluster(Thread):
             launcher_args = []
         else:
             launcher_args = [arg for arg_group in launcher_args for arg in shlex.split(arg_group)]
-        target = HOSTNAME if bind[0] == '0.0.0.0' else bind[0]
-        self.launch = client_launch(remote_exe, (target, bind[1]), auth,
+        self.advertised = (advertised_host(bind[0], advertise), bind[1])
+        self.launch = client_launch(remote_exe, self.advertised, auth,
                                     launcher=shlex.split(launcher), launcher_args=launcher_args,
                                     num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                                     template=client_template, delay_start=delay_start,
@@ -679,6 +686,8 @@ class AutoScalingCluster(Thread):
 
         bind (tuple, optional):
             Bind address for server with port number (default: 0.0.0.0).
+            Clients are told to dial the bind address, or this host's own name when it is 0.0.0.0
+            (see :func:`~hypershell.cluster.launch.advertised_host`), unless `advertise` names one.
             See :const:`~hypershell.server.DEFAULT_PORT`.
 
         launcher (str, optional):
@@ -792,6 +801,9 @@ class AutoScalingCluster(Thread):
             Scale clients zone by zone, each launch naming its zone to the launcher (default: True).
             When disabled, every client is launched exactly as given, in the cluster's own zone.
 
+        advertise (str, optional):
+            Address the clients are told to dial, whatever the bind (default: the bind rule above).
+
     Example:
         >>> from hypershell.cluster import AutoScalingCluster
         >>> cluster = AutoScalingCluster.new(
@@ -809,6 +821,7 @@ class AutoScalingCluster(Thread):
     server: ServerThread
     clients: Dict[str, Popen]
     launch: ClientLaunch
+    advertised: Tuple[str, int]
 
     def __init__(self: AutoScalingCluster,
                  source: Iterable[str] = None,
@@ -850,6 +863,7 @@ class AutoScalingCluster(Thread):
                  zone: Optional[str] = None,
                  evict_after: int = DEFAULT_EVICT,
                  discover_zones: bool = True,
+                 advertise: Optional[str] = None,
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
@@ -878,7 +892,8 @@ class AutoScalingCluster(Thread):
         else:
             launcher_args = [arg for arg_group in launcher_args for arg in shlex.split(arg_group)]
         # Every launch of a zone is built from the same values; only the zone differs.
-        build = partial(client_launch, remote_exe, (HOSTNAME, bind[1]), auth,
+        self.advertised = (advertised_host(bind[0], advertise), bind[1])
+        build = partial(client_launch, remote_exe, self.advertised, auth,
                         launcher=shlex.split(launcher), launcher_args=launcher_args,
                         num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                         template=client_template, delay_start=delay_start,

@@ -171,7 +171,9 @@
         Bind address (default: `localhost`).
 
         When running locally, the default is recommended. To allow remote *clients* to connect
-        over the network, bind the server to *0.0.0.0*.
+        over the network, bind the server to *0.0.0.0*. A `cluster` tells the clients it launches
+        to dial the bind address when it is one specific address, and this host's own name when
+        it is *0.0.0.0*, unless ``.advertise`` names another.
 
     ``.host``
         Host address that clients connect to (default: `localhost`).
@@ -180,6 +182,20 @@
         ``.host`` is the address that `client` instances and queue-direct ``submit --queue``
         dial to reach the server. Set this to the server's reachable hostname or address
         when running clients on other machines.
+
+    ``.advertise``
+        Address the clients a `cluster` launches are told to dial (default: by ``.bind``).
+
+        Overrides the rule under ``.bind`` in every remote `cluster` mode (``--ssh``, ``--mpi``,
+        ``--launcher`` and ``--autoscaling``), for a name the clients must use that differs from
+        the bind address, such as the name on the server's certificate. The ``--advertise``
+        option takes precedence. A local `cluster`, whose clients are not launched, ignores it,
+        and so do a relay's site clients. Its environment form is
+        ``HYPERSHELL_SERVER_ADVERTISE``.
+
+        .. only:: html
+
+            .. versionadded:: 2.9.0
 
     ``.port``
         Port number (default: `50001`).
