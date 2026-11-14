@@ -3,10 +3,10 @@ slug: duration-units-remaining
 title: Every duration option takes the forms the timeouts take
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/duration-units-remaining
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -69,7 +69,7 @@ phases:
     $TMPDIR/docs-html
 - id: P3
   name: hs relay reads autoscale.period through parse_time (RelayApp, not at import)
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -85,8 +85,9 @@ phases:
     --python 3.11 pytest -q tests/test_duration_options.py && .agents/factory/bin/temp_site.sh
     sh -c '{ HYPERSHELL_AUTOSCALE_PERIOD=5MB uv run hs relay 2> err; test $? -eq 2;
     } && grep -q "autoscale.period" err && grep -q "5MB" err && HYPERSHELL_AUTOSCALE_PERIOD=5MB
-    uv run hs list > /dev/null' && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run
-    --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
+    uv run hs list --count > /dev/null' && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    $TMPDIR/docs-html
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -258,24 +259,24 @@ checks every 300 s, as `hs cluster` does. A bad string stops `hs relay` with exi
 `autoscale.period`, the value and the forms, before it touches its database. No other command is
 affected by the value at import.
 
-- [ ] `relay/__init__.py` `RelayApp`: cached property `site_period` — `config.autoscale.period`; a `str`
+- [x] `relay/__init__.py` `RelayApp`: cached property `site_period` — `config.autoscale.period`; a `str`
       through `parse_time`, anything else unchanged; a `UnitError` re-raised as
       `ArgumentError(f'autoscale.period: {error}')`. Read it in `check_args` (after the existing
       checks, before `check_bounds` returns); pass `period=self.site_period` to `RelayThread` in `run`.
-- [ ] `relay/site.py`: `DEFAULT_SITE_PERIOD` reads `default.autoscale.period` (import `default` beside
+- [x] `relay/site.py`: `DEFAULT_SITE_PERIOD` reads `default.autoscale.period` (import `default` beside
       `config`); docstring: the built-in default, the relay passes the configured period.
-- [ ] `docs/_include/config_param_ref.rst` `[autoscale] .period`: one sentence that `hs relay` reads it
+- [x] `docs/_include/config_param_ref.rst` `[autoscale] .period`: one sentence that `hs relay` reads it
       as its site fleet's period, in the same forms (inside P2's `versionchanged` clause, no second
       marker).
-- [ ] `tests/test_duration_options.py` (or `tests/test_relay_launch.py` beside the start-up order
+- [x] `tests/test_duration_options.py` (or `tests/test_relay_launch.py` beside the start-up order
       tests): `@mark.unit` `RelayApp.from_cmdline([])` with `config.autoscale.period` monkeypatched to
       `'5m'` → `site_period == 300`; `'1:30'` → 90; `60` and `0.5` unchanged; `'5MB'`/`'1hr'` →
       `ArgumentError` naming `autoscale.period` and the value. Through the start-up harness, the
       `period` that reaches `RelayThread` is 300. `@mark.integration`:
       `HYPERSHELL_AUTOSCALE_PERIOD=5MB hs relay` exits 2 with the key and value in stderr, and
-      `HYPERSHELL_AUTOSCALE_PERIOD=5MB hs list` still runs (import never parses it).
+      `HYPERSHELL_AUTOSCALE_PERIOD=5MB hs list --count` still runs (import never parses it).
 - **Verify:** see frontmatter. It runs the new and relay tests on 3.14 and the new tests on 3.11, a
-  `temp_site` drive (`hs relay` refuses `5MB` with exit 2 naming the key; `hs list` unaffected), and
+  `temp_site` drive (`hs relay` refuses `5MB` with exit 2 naming the key; `hs list --count` unaffected), and
   the Sphinx `-W` build.
 - **Touches:** `src/hypershell/relay/__init__.py`, `src/hypershell/relay/site.py`,
   `docs/_include/config_param_ref.rst`, `tests/test_duration_options.py` (or

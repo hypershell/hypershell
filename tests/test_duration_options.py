@@ -28,6 +28,8 @@ from hypershell.submit import SubmitApp
 from hypershell.server import ServerApp
 from hypershell.cluster import ClusterApp
 from hypershell.task import TaskWaitApp, TaskRunApp
+from hypershell.relay import RelayApp
+from hypershell.core.config import config
 from hypershell.cluster.launch import client_options
 
 
@@ -349,3 +351,69 @@ def test_cluster_launches_whole_seconds() -> None:
     assert (int(pairs['-w']), int(pairs['-S']), float(pairs['-d'])) == (60, 5, -600.0)
     client = ClientApp.interface.parse_args(words[words.index('-H'):])
     assert (client.bundlewait, client.task_signalwait, client.delay_start) == (60, 5, -600.0)
+
+
+@mark.unit
+@mark.parametrize('period, expected', [('5m', 300), ('1:30', 90), ('90', 90), ('0.5s', 1), (60, 60), (0.5, 0.5)])
+def test_relay_site_period(monkeypatch, period: Any, expected: Any) -> None:
+    """The relay reads a period string in the duration forms and uses a number as given."""
+    monkeypatch.setitem(config['autoscale'], 'period', period)
+    site_period = RelayApp.from_cmdline([]).site_period
+    assert site_period == expected and type(site_period) is type(expected)
+
+
+@mark.unit
+@mark.parametrize('period', ['5MB', '1hr', '-5m', ''])
+def test_relay_site_period_refused(monkeypatch, period: str) -> None:
+    """A bad period stops the relay's argument check, naming the key, the value and the forms."""
+    monkeypatch.setitem(config['autoscale'], 'period', period)
+    with raises(ArgumentError) as exc_info:
+        RelayApp.from_cmdline([]).check_args()
+    message = str(exc_info.value)
+    assert message.startswith('autoscale.period: ') and repr(period) in message and '1h30m' in message
+
+
+class RelayBuilt(Exception):
+    """Raised in place of building the relay, so the run ends there."""
+
+
+@mark.unit
+def test_relay_passes_site_period(monkeypatch, tmp_path: Path) -> None:
+    """The period the relay reads is the one its site fleet is built with."""
+    import hypershell.relay as relay_module
+    built: List[Dict[str, Any]] = []
+
+    def relay_thread(**options) -> None:
+        built.append(options)
+        raise RelayBuilt()
+
+    monkeypatch.setitem(config['autoscale'], 'period', '5m')
+    monkeypatch.setitem(config['database'], 'file', str(tmp_path / 'relay.db'))
+    monkeypatch.setattr(RelayApp, 'bind_database', lambda self: None)
+    for name in ('lock_database', 'store_utc', 'ensuredb', 'ensure_tables',
+                 'install_drain_handlers', 'install_terminate_handler'):
+        monkeypatch.setattr(relay_module, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(relay_module, 'RelayThread', relay_thread)
+    with raises(RelayBuilt):
+        RelayApp.from_cmdline([]).run()
+    assert len(built) == 1 and built[0]['period'] == 300
+
+
+@mark.unit
+def test_relay_site_default_period_is_built_in() -> None:
+    """The site's default period is the built-in one, so importing the relay never parses configuration."""
+    from hypershell.core.config import default
+    from hypershell.relay.site import DEFAULT_SITE_PERIOD
+    assert DEFAULT_SITE_PERIOD == default.autoscale.period
+
+
+@mark.integration
+def test_relay_refuses_bad_period(temp_site: Path, monkeypatch) -> None:
+    """A bad period stops `hs relay` with the key and the value; other commands do not read it."""
+    monkeypatch.setenv('HYPERSHELL_AUTOSCALE_PERIOD', '5MB')
+    rc, _, stderr = main(['hs', 'relay'])
+    assert rc == exit_status.bad_argument
+    assert 'autoscale.period' in stderr and "'5MB'" in stderr and '1h30m' in stderr
+    assert 'Traceback' not in stderr
+    rc, stdout, stderr = main(['hs', 'list', '--count'])
+    assert rc == exit_status.success and stdout == '0', stderr

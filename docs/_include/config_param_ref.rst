@@ -555,7 +555,8 @@
         performance if checks happen too rapidly.
         A string takes the same forms as ``-P``/``--period``: units ``d``, ``h``, ``m`` and ``s``
         (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number is
-        seconds.
+        seconds. ``hs relay`` reads it in the same forms as the period of its site's clients, and
+        stops before it starts if the value is not a duration.
 
         .. only:: html
 

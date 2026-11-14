@@ -60,7 +60,7 @@ import subprocess
 import tomlkit
 
 # Internal libs
-from hypershell.core.config import config, load_task_env
+from hypershell.core.config import config, default, load_task_env
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.tls import TLSConfig
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
@@ -82,8 +82,11 @@ log = Logger.with_name(__name__)
 SITE_POLICY: Final[str] = 'fixed'
 """Autoscaling policy of the site: keep exactly the configured number of clients launched."""
 
-DEFAULT_SITE_PERIOD: Final[int] = config.autoscale.period
-"""Default seconds between checks on the site clients (one that exited is replaced at the next)."""
+DEFAULT_SITE_PERIOD: Final[int] = default.autoscale.period
+"""Built-in seconds between checks on the site clients (one that exited is replaced at the next).
+
+The relay passes the configured period (`autoscale.period`); this default never reads configuration.
+"""
 
 DEFAULT_SITE_EVICT: Final[int] = config.server.evict
 """Default seconds the site server waits on a silent site client before evicting it (`[server] evict`)."""

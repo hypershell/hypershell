@@ -44,3 +44,15 @@
   sign-off):**`, which blocks `/hs-plan` like a marker until the foreman records the ruling, and list
   such answers in the Step 8 report.
 - **Confidence:** med · **Effort:** small
+
+## F3 — A planned verify gate failed on a correct build
+`origin=hs-build:P3 severity=low category=steering status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** P3's `verify:` ended with `HYPERSHELL_AUTOSCALE_PERIOD=5MB uv run hs list > /dev/null`
+  under `&&`. A bare `hs list` prints its usage and exits 1, so the gate was red with the relay fix in
+  place; the build amended it to `hs list --count` with `set_phase.py --verify`.
+- **Skill cause:** `hs-plan` writes each phase's `verify:` without running its CLI pieces against
+  `develop`; a piece whose exit status does not depend on the change can still be wrong on its own.
+- **Recommended fix:** In `hs-plan`, run every drive step of a `verify:` that does not depend on the
+  new behaviour against `develop` in a `temp_site` before writing it, and note that a post-condition
+  must not lean on a command's usage exit.
+- **Confidence:** med · **Effort:** small
