@@ -5,10 +5,10 @@ title: 'Relay hardening for 2.9.0: no aborts on removed rows or a restarted upst
   clock'
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/relay-hardening
 base: develop
-current_phase: P8
+current_phase: done
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -137,7 +137,7 @@ phases:
     tests/test_relay_return.py tests/test_server_fsm.py tests/test_relay_workload.py
 - id: P8
   name: Conditional cluster tail job (foreman submits) and the recorded R8 outcome
-  status: pending
+  status: done
   satisfies:
   - R8
   depends_on:
@@ -146,7 +146,7 @@ phases:
   hammerable: false
   hill: uphill
   verify: uv run pytest -v tests/test_tail_judge.py && uv run python spec/relay-hardening/drive/tail_judge.py
-    --budget 10 --outcome spec/relay-hardening/evidence/laptop spec/relay-hardening/evidence/cluster
+    --budget 10 --outcome spec/relay-hardening/evidence/laptop
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -575,17 +575,48 @@ cause whose fix fits. Design: PLAN §2 R8, §5 item 2–4; research 07.
 **Goal:** R8 closed with outcome (a) or (b), recorded. Split gate: the builder prepares, the foreman
 submits the one cluster job (if triggered), the gate judges.
 
-- [ ] If P7 triggers it: hand the foreman `tail_cluster.sh`, the commit to run, the env contract and
-      the expected wall (~45 s per run, ≤ 10 runs; ask 30 min). The foreman submits with its own
-      batch options and copies the records unchanged into `evidence/cluster/` with a README row
-      (record, commit, wall, judge). The builder never submits.
-- [ ] Record the outcome in `spec/relay-hardening/evidence/OUTCOME.md` and a table here:
-      **(a)** the cause named from logs, the fix, and post-fix runs with no tail over 5 s; or **(b)**
-      every run, its tail and segments, the logs kept, the cause or the hypotheses ruled out, and a
-      narrowed seed in `issues/` (`status: unshaped`) for the remaining work.
+- [x] If P7 triggers it: **not triggered.** The foreman ruled (2026-11-14) that the cluster job does
+      not run: plan-gate ruling 3 rules it out because a segment exceeded its design bound (`laptop-04`
+      s4, the upstream scheduler's back-off) and the post-fix runs still exceed 5 s (`laptop-08` to
+      `laptop-10`). `tail_cluster.sh` stays rehearsed on the laptop only. `evidence/cluster/` was not
+      produced.
+- [x] Record the outcome in `spec/relay-hardening/evidence/OUTCOME.md` and a table here: **outcome
+      (b)**, below; narrowed seed `issues/relay-shutdown-tail.md` (`status: unshaped`), with its
+      ROADMAP entry in Part I.
+
+  **Outcome (b), recorded 2026-11-14.** Ten laptop runs (the whole budget), at the R8 size, scratch
+  kept, scrubbed log windows in `evidence/laptop/`. Tails (seconds), runs `laptop-01` to `laptop-05`
+  diagnostic on `475334c`: 6.71, 13.38, 6.64, 12.51, 6.74; runs `laptop-06` to `laptop-10` post-fix
+  (P7's fixes (i) and (ii)): 1.72, 1.67, 7.00, 6.86, 6.88. The per-segment table is under P7 above and
+  in `evidence/laptop/README.md`.
+
+  - **Named causes.** (1) The designed chain: the relay's result hold (s2, 2.9 to 3.8 s), the upstream
+    heart monitor's and the relay-local server's 2 s heartbeat reads (s5 up to 1.9 s, s7 up to 1.6 s)
+    and the relay's final beat (s8, about 1 s). (2) The site client's result bundle wait (s1, 5.0 s in
+    `laptop-02`, `laptop-08`, `laptop-09`, `laptop-10`): the relay starts site clients with
+    `relay.bundlewait` as their own bundle wait. (3) The upstream scheduler's back-off (`laptop-04`
+    s4, 6.03 s over a 2 s bound): a landed result does not wake it, and the back-off doubles toward
+    `server.poll`.
+  - **Landed in P7.** Fix (i), the returner sends at once when the relay's store holds no unfinished
+    task (removes cause 1's s2); fix (ii), the heart monitor's shutdown signal does not wait out its
+    2 s read (removes s5 and s7; the direct runs' tail falls from about 2.7 s to 0.8 to 1.8 s). After
+    them the tails are 1.7 s when nothing waits (s2 0.07 to 0.12 s, s5 0.00 s, s7 0.07 to 0.50 s).
+  - **Left.** Cause 2 (three of five post-fix runs, 7 s: s1 alone is 5.0 s) and cause 3 (not seen in
+    the post-fix runs, s4 0.61 to 0.84 s; rare, unbounded by the back-off). Both are in the seed
+    `issues/relay-shutdown-tail.md` with the options: a site client flushes when it holds nothing to
+    run, or the relay gives site clients a shorter wait; the scheduler woken by a landed result.
+  - **Why no cluster job.** The cluster job is for a tail seen only on Linux with none over 5 s on the
+    laptop. A segment exceeded its design bound and the post-fix runs exceed 5 s on the laptop
+    itself, so ruling 3 excludes it, and the laptop budget (10 of 10) is spent. `evidence/cluster/` is
+    not produced; R8 closes under (b) and the release does not wait on the remaining work.
+  - **Verify amended.** The frontmatter verify named `evidence/cluster`, which exists only if the job
+    runs; it now names `evidence/laptop` alone. `--outcome` takes `evidence/` as the root of its one
+    evidence directory and reads `evidence/OUTCOME.md` (`outcome: b`, `seed: issues/relay-shutdown-tail.md`,
+    which must exist and be `status: unshaped`).
 - **Verify:** see frontmatter (`--outcome` checks the outcome file against the records: (a) needs the
   post-fix records none over 5 s; (b) needs the seed path to exist; budget ≤ 10 per directory).
-- **Touches:** `spec/relay-hardening/evidence/`, possibly `issues/<narrowed seed>.md`.
+- **Touches:** `spec/relay-hardening/evidence/OUTCOME.md`, `issues/relay-shutdown-tail.md`,
+  `ROADMAP.md`.
 
 ---
 

@@ -469,6 +469,19 @@ proxies should be re-created on reconnect.
 abort races and rough edges above*
 **Seed:** [`issues/upstream-link-restart-proxy.md`](issues/upstream-link-restart-proxy.md) · *status: adopted:relay-hardening*
 
+## A relay run can still end up to about 5 s late
+
+After the relay hardening fixes, a relay run's tail (last completion to upstream exit) is about 1.7 s
+when nothing waits, but three of five runs on the fixed head ended about 7 s late. The relay launches
+its site clients with `relay.bundlewait` as their own result bundle wait, so the last results can sit
+in a site client until it expires: a client should flush when it holds nothing left to run, or the
+relay should give site clients a shorter wait. Separately, a result landing does not wake the upstream
+scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 6 s to it.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and its laptop evidence;
+the relay rough edges above*
+**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
