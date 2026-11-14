@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:contended-writes
 kind: fix
 appetite: small
 lane: public
@@ -9,6 +9,12 @@ lane: public
 
 > **Candidate, not a contract.** `/hs-feature` promotes this into `spec/{slug}/GOAL.md`, where
 > appetite, non-goals and R-IDs get negotiated. Do not copy it verbatim.
+
+> **Narrowed at the `contended-writes` GOAL gate, 2026-11-14.** This seed is adopted for its
+> server half only: the Scheduler's `retried` mark with its retry rows, and `Task.cancel_all` /
+> `Task.cancel` ([`spec/contended-writes/`](../spec/contended-writes/GOAL.md)). Every `hs update`
+> write below (the legacy form, `--limit`, the filtered paths, `--delete`) and R3 moved to
+> [`hs-update-contended-writes`](hs-update-contended-writes.md).
 
 ## Problem
 
@@ -81,7 +87,7 @@ reports and applies exactly the rows its filter selects.
 - **R2** — WHEN the `retried` mark of a failed row is contended, the row SHALL end retried exactly
   once, including when the recovery bound is exhausted: the mark and its retry rows are written
   together or not at all.
-- **R3** — WHEN `hs update` contends with a running server, it SHALL report a missing row only
+- **R3** — *Moved to `hs-update-contended-writes` at the `contended-writes` GOAL gate.* WHEN `hs update` contends with a running server, it SHALL report a missing row only
   when the row is missing, and its "Updated N" SHALL count the rows actually written.
 - **R4** — A test SHALL force each race deterministically on a server database, as
   `tests/test_contended_write.py` does, failing on TimescaleDB 2.29+ before the fix.
