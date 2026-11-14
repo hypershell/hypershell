@@ -122,26 +122,26 @@ today still means what it means today.
 Proposed in shaping on 2026-11-14 by the shaping agent; each is **pending the maintainer's sign-off
 via the foreman** before `/hs-plan`.
 
-- **Q:** Which options are in scope? — **A (proposed):** The seed's list, plus two it missed:
+- **Q:** Which options are in scope? — **A:** The seed's list, plus two it missed:
   `-P`/`--period` is on `hs server` as well as `hs cluster`, and `-Q`/`--poll` on `hs server` and
   `hs cluster` is a duration in seconds that the seed did not name. Both are in, so "every option
   that takes a duration" holds. `hs relay` has no duration option; its duration keys are a non-goal.
-- **Q:** How is `--delay-start`'s negative form kept? — **A (proposed):** A leading `-` on any form R1
+- **Q:** How is `--delay-start`'s negative form kept? — **A:** A leading `-` on any form R1
   names is the random form (`-10m`, `-1:30`, `-0.5`); without it the wait is fixed. A bare number reads
   exactly as today, fraction and sign included. Fractions are kept rather than rounded up, because a
   delay of zero means "no delay" (not "no limit", the reason the timeouts round up) and the option
   takes fractions today. The help and docs write the random form attached (`--delay-start=-10m`), as
   the docs already write `--delay-start=-600`.
 - **Q:** What about a signed value on the other options (`-w -5`, `-P +60`, `-n -1`), which `type=int`
-  accepts today? — **A (proposed):** Refused, as `-W -60` has been since 2.9.0a7. None has a meaning
+  accepts today? — **A:** Refused, as `-W -60` has been since 2.9.0a7. None has a meaning
   anyone relies on; the `size-and-duration-units` review dropped the same case for `-W` (its REVIEW,
   Observations). This is the one exception to R5.
-- **Q:** Do configuration keys and environment variables follow the same parser? — **A (proposed):**
+- **Q:** Do configuration keys and environment variables follow the same parser? — **A:**
   Yes for the four keys behind the options (R3). `size-and-duration-units` showed a string default
   reaches an option's parser (its PLAN, decision 1, verified in its REVIEW with
   `HYPERSHELL_TASK_TIMEOUT=2h`). `autoscale.period` is also read directly by `hs relay`, so R3 names
   it, or a `period = "5m"` that `hs cluster` accepts would break the relay.
-- **Q:** Which release, and which marker? — **A (proposed):** The next 2.9.0 pre-release only, no 2.8
+- **Q:** Which release, and which marker? — **A:** The next 2.9.0 pre-release only, no 2.8
   cherry-pick; the changed help includes and configuration entries carry `.. versionchanged:: 2.9.0`
   (AGENTS.md § Docs: behaviour that differs from the stable line).
 - **Left for `/hs-plan` (not clarification markers):**
@@ -152,6 +152,14 @@ via the foreman** before `/hs-plan`.
   - Whether `-Q`/`--poll` should take fractions below one second (the parser rounds up; `server.poll`
     is a whole number by default and the relay's `poll` is not in scope).
   - The completion example values (the zsh and bash completions offer `-60 -600` for `-d`).
+
+**Ruled at the GOAL gate** (2026-11-14): approved by the foreman, gate judge under the maintainer's
+mandate. All five proposed answers are confirmed: `-P` on `hs server` and `-Q`/`--poll` join the
+scope; the random delay is a leading `-` with fractions kept; signed values are refused as `-W`
+refuses them (the one compatibility break, stated in the user-facing note); `hs relay`'s read of
+`autoscale.period` is in scope; 2.9 only, with `versionchanged:: 2.9.0`. The duration keys that no
+option reads are deferred to `issues/duration-units-config-keys.md`, filed in this commit. The
+contract is locked; `hs-plan` designs against it.
 
 ## Evidence plan
 

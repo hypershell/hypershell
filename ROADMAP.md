@@ -373,6 +373,16 @@ the strict parser refuses.
 *Horizon: near-term, small · Depends on: `size-and-duration-units` · Refs: its GOAL's Non-goals*
 **Seed:** [`issues/duration-units-remaining-options.md`](issues/duration-units-remaining-options.md) · *status: adopted:duration-units-remaining*
 
+## Duration settings read only from configuration still take bare seconds only
+
+`server.evict`, `client.heartrate` and the relay's duration keys (`bundlewait`, `poll`,
+`retention`, `timeout`, and the upstream `heartrate`, `evict_hint`, `deadline` and `backoff`) have no
+command-line option and are read straight from configuration, so `evict = "10m"` is refused or
+misread while `autoscale.period = "5m"` works.
+
+*Horizon: near-term, small · Depends on: `duration-units-remaining` · Refs: its GOAL's Non-goals*
+**Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: unshaped*
+
 ## `auth_env` and `auth_eval` in a config file break every command
 
 `docs/security.rst` recommends `auth_eval` / `auth_env` to keep the authkey out of the config file,
