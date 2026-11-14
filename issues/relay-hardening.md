@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:relay-hardening
 kind: fix
 appetite: small
 lane: public

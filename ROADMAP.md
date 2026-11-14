@@ -324,7 +324,7 @@ lost. The eviction half is the same conditional revert that closes the lost-resu
 
 *Horizon: near-term, before 2.9.0 · Depends on: — · Refs: orphan revert (one fix for the eviction
 half); contended Scheduler writes (`Task.next` off the ORM flush); `spec/relay/` C7-1, C7-2*
-**Seed:** [`issues/relay-abort-races.md`](issues/relay-abort-races.md) · *status: unshaped*
+**Seed:** [`issues/relay-abort-races.md`](issues/relay-abort-races.md) · *status: adopted:relay-hardening*
 
 ## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
 
@@ -451,7 +451,7 @@ stray blank line.
 
 *Horizon: near-term · Depends on: — · Refs: the advertised-host fix above (a relay's own
 downstream address); `spec/relay/` C4-2, C5-1*
-**Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: unshaped*
+**Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: adopted:relay-hardening*
 
 ## A role's first upstream call after a server restart can fail as a remote error
 
@@ -467,7 +467,7 @@ proxies should be re-created on reconnect.
 
 *Horizon: near-term, small · Depends on: — · Refs: `spec/relay-retire/REVIEW.md` (O1); the relay
 abort races and rough edges above*
-**Seed:** [`issues/upstream-link-restart-proxy.md`](issues/upstream-link-restart-proxy.md) · *status: unshaped*
+**Seed:** [`issues/upstream-link-restart-proxy.md`](issues/upstream-link-restart-proxy.md) · *status: adopted:relay-hardening*
 
 ## `rotatedb` lost-update window
 
