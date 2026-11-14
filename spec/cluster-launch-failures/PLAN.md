@@ -364,3 +364,9 @@ findings in cycle 3, the last review this cycle gets.
 
 If the fix needs a change to the §6 submit-flush order beyond the failure-stop exception approved in
 cycle 1, stop and report rather than build it.
+
+## Review-cycle-3 ruling (2026-11-14)
+
+Review cycle 3 approved with no findings. The rubric's pre-publish human approval for the CONFIRMED
+findings on the stop path (F1, F2, N1) was given by the maintainer in session on 2026-11-14:
+"Approve, merge #107".

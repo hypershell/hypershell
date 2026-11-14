@@ -4,7 +4,7 @@ title: A cluster whose clients all fail says so and exits; one advertised addres
   for every launch mode
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/cluster-launch-failures
 base: develop
 current_phase: done
