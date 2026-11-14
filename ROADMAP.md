@@ -339,17 +339,17 @@ should be verified against 2.8.3.
 R5 of `spec/zone-dispatch/GOAL.md`) · Refs: release notes*
 **Seed:** [`issues/wire-compat-2-8.md`](issues/wire-compat-2-8.md)
 
-## `hs server --initdb` never initializes the database
+## `hs cluster --no-db` still initializes a SQLite database it never uses
 
-`hs server` accepts `--initdb`, but `ServerApp.run` calls `ensuredb()` without it
-(`src/hypershell/server.py:1664`; the flag is defined at `:1626-1629` and never read), so on
-PostgreSQL and TimescaleDB the server only checks the schema and refuses a database that was never
-initialized; under the `timescale` provider the hypertable pass never runs from it. `hs submit` and
-`hs cluster` honour the same flag. The docs and the server's own help still promise it.
-Pre-existing since 2023 (`70bcc63`).
+Under `--no-db` the cluster's server never uses the database, but on SQLite `hs cluster` runs
+`initdb()` at start-up before it looks at `--no-db` (`src/hypershell/cluster/__init__.py:559-562`),
+so it creates or upgrades the user's site database for a run that never touches it. Since
+`server-initdb` (#105), `hs server --no-db` no longer does; that cycle left the cluster half as
+deferred work.
 
-*Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
-**Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: adopted:server-initdb*
+*Horizon: near-term, small · Depends on: — · Refs: `spec/server-initdb/` (Non-goals; R5 for the
+server half)*
+**Seed:** [`issues/cluster-no-db-initializes-sqlite.md`](issues/cluster-no-db-initializes-sqlite.md) · *status: unshaped*
 
 ## Duration settings read only from configuration still take bare seconds only
 
