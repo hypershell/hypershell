@@ -405,3 +405,28 @@ as a fix, not a seed.
 - **Foreman's note (not a review finding).** `PLAIN_CHECK_WAIT` drops from 5 s to 1 s. A cleartext
   upstream sends its challenge as soon as it accepts (about 1 ms measured), so a 1 s wait loses
   nothing. It keeps R4's probe from holding a connection to an upstream longer than it needs.
+
+## Review-cycle-2 rulings (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. Both findings are fixed this cycle. Cycle 3 is
+the last review this cycle gets.
+
+- **RV5, an idle zone keeps a task it asked for after its target drops to 0.** A zone holding only
+  rows it took through R5's one-task request re-checks `launches()` at the gate. Once no launch is
+  coming, it hands those rows back upstream through the existing hand-back path (the `handback`
+  call from `relay-retire`) and ends. Against a server without the call, it falls back as retire
+  does: the rows are left to eviction, with one WARNING. A row a site client has received is never
+  handed back. Pin it with a puller-level test that fails on `ff0973a`, using the review's probe
+  shape (target 1, ask, target 0).
+- **RV6, the cleartext check gave up after 1 s.** A TLS-on relay recognises a cleartext upstream
+  from its own failed handshake, by the error the TLS layer reports when the peer's first bytes are
+  not a TLS record. It opens no second connection and waits on no timer. The check must:
+  - raise `TLSMismatchError` within the deadline whatever the upstream's latency;
+  - still retry an upstream that cannot be reached;
+  - leave certificate, EOF and zero-return errors unchanged;
+  - never class a TLS upstream as cleartext.
+
+  `speaks_plain` and `PLAIN_CHECK_WAIT` go if nothing else needs them. Test it with the review's
+  delayed-proxy shape (cleartext server behind a proxy adding 1.1 s per chunk), plus a TLS upstream
+  answering slowly that must not be misclassified. The public reason is simplicity and independence
+  from timing.
