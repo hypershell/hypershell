@@ -24,6 +24,10 @@ Description
    file.
 
 .. versionchanged:: 2.9.0
+   ``--initdb`` initializes the database at launch, as for ``hs submit`` and ``hs cluster``, and
+   ``--no-db`` leaves the configured database alone.
+
+.. versionchanged:: 2.9.0
    ``-w``/``--bundlewait``, ``-Q``/``--poll`` and ``-P``/``--period`` take a duration with units or
    a Slurm time, as ``-W`` does, and a signed value is refused.
 

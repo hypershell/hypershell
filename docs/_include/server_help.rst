@@ -115,14 +115,17 @@ Options
 
     By default, a scheduler thread selects tasks from a database that were previously submitted.
     With ``--no-db`` enabled, there is no scheduler and instead the `submit` thread publishes
-    bundles directly to the queue.
+    bundles directly to the queue. The configured database is not opened at all, so it need not
+    exist or be initialized.
 
 ``--initdb``
     Auto-initialize database.
 
-    If a database is configured for use with the workflow (e.g., PostgreSQL), auto-initialize
-    tables if they don't already exist. This is a short-hand for pre-creating tables with the
-    ``hs initdb`` command. This happens by default with SQLite databases.
+    Initialize the configured database at launch as the ``hs initdb`` command does, without
+    asking for confirmation: create the tables if they don't already exist, upgrade existing ones
+    in place, and with the ``timescale`` provider check the server and give the ``task`` table its
+    hypertable shape. This happens by default with SQLite databases. Without ``--initdb``, a
+    PostgreSQL database that was never initialized stops the server.
 
     Mutually exclusive to ``--no-db``. See ``hs initdb`` command.
 

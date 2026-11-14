@@ -349,7 +349,7 @@ initialized; under the `timescale` provider the hypertable pass never runs from 
 Pre-existing since 2023 (`70bcc63`).
 
 *Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
-**Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: unshaped*
+**Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: adopted:server-initdb*
 
 ## Sizes and durations written with common units are misread or refused
 

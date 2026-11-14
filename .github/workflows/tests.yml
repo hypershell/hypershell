@@ -58,9 +58,11 @@ jobs:
   # fails the scenarios rather than skipping them. The plain entries run tests/test_timescale.py
   # too: its unit tests and the three integration tests that need a server but not TimescaleDB
   # (test_server_matches_entry, test_absent_fails_before_schema and test_invalid_setting_exits);
-  # its TimescaleDB scenarios skip there. Images are pinned by tag and index digest (Docker Hub
-  # tag API, https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/<tag>, read
-  # 2026-11-02).
+  # its TimescaleDB scenarios skip there. tests/test_server_initdb.py launches the real `hs server`
+  # with --initdb and --no-db on fresh databases: its `postgres`-provider cases run on every entry,
+  # its `timescale`-provider cases on the TimescaleDB entries only. Images are pinned by tag and
+  # index digest (Docker Hub tag API,
+  # https://hub.docker.com/v2/repositories/timescale/timescaledb/tags/<tag>, read 2026-11-02).
   postgres:
     name: PostgreSQL (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -114,7 +116,7 @@ jobs:
           PG_CONTAINER: ${{ job.services.postgres.id }}
 
       - name: Run PostgreSQL tests
-        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py tests/test_contended_write.py tests/test_zone_postgres.py
+        run: uv run --python 3.14 --extra postgres pytest -v -rs tests/test_upgrade_postgres.py tests/test_writeback_postgres.py tests/test_timescale.py tests/test_contended_write.py tests/test_zone_postgres.py tests/test_server_initdb.py
 
   # Guards zero-conflict installability: a full install of the default extras must succeed using
   # ONLY pre-built wheels (no compiler). This catches stale/native pins (e.g., greenlet, pyyaml) that
