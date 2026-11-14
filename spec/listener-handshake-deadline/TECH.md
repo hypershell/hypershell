@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/listener-handshake-deadline
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -30,7 +30,7 @@ phases:
     test -s spec/listener-handshake-deadline/evidence/red-develop.txt
 - id: P2
   name: server.tls.handshake refusal at start, and deadline logging
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -158,14 +158,14 @@ completes the handshake within `handshake` seconds of accept or closes it; nothi
 **Goal:** every TLS server command refuses a bad deadline before doing anything else, naming the key;
 deadline closes are logged per R5.
 
-- [ ] Early refusal: `ServerApp.enable_tls` (`server.py`), `ClusterApp.enable_tls`
+- [x] Early refusal: `ServerApp.enable_tls` (`server.py`), `ClusterApp.enable_tls`
       (`cluster/__init__.py`), `RelayApp.check_args` (`relay/__init__.py`, when the site server's
       TLS is enabled) call `handshake_seconds` and raise `ArgumentError(str(error))`.
-- [ ] `_InProcessServer._closed_pending(peer)`: DEBUG per close (peer, deadline); WARNING naming the
+- [x] `_InProcessServer._closed_pending(peer)`: DEBUG per close (peer, deadline); WARNING naming the
       deadline and `server.tls.handshake` for the first close and at most once per
       `REFUSAL_WARNING_INTERVAL`, from `_handshake_warned_at` under a lock; nothing read from the peer
       is formatted (PLAN §2.2).
-- [ ] Tests: `handshake_seconds` accepts `30`, `'30s'`, `'1m'`, `2.5` (→ 3), default 30; refuses `0`,
+- [x] Tests: `handshake_seconds` accepts `30`, `'30s'`, `'1m'`, `2.5` (→ 3), default 30; refuses `0`,
       `-5`, `'abc'`, `True` with a message naming `server.tls.handshake` and the forms; a TLS
       `QueueServer` with each refused value raises `QueueServerError` and leaves nothing bound; a
       plain one starts; `HYPERSHELL_SERVER_TLS_HANDSHAKE=1m` reaches `config.server.tls.handshake` and

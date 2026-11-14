@@ -57,7 +57,8 @@ from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.queue import QueueClient, QueueConfig
 from hypershell.core.reconnect import UpstreamLink, LinkDown, TLSMismatchError
 from hypershell.core.thread import Thread, join_waking
-from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
+from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
+                                 from_namespace as tls_from_namespace)
 from hypershell.core.types import parse_time, UnitError
 from hypershell.data import ensuredb
 from hypershell.data.core import engine
@@ -1192,6 +1193,16 @@ class RelayApp(Application):
         self.zone_settings  # noqa: checked when first read
         self.site_period  # noqa: checked when first read
         self.check_bounds()
+        self.check_handshake()
+
+    @staticmethod
+    def check_handshake() -> None:
+        """Refuse a handshake deadline that is not valid for the relay-local server, when it uses TLS."""
+        if bool(config.server.tls.get('enabled', False)):
+            try:
+                handshake_seconds(config.server.tls.get('handshake', DEFAULT_HANDSHAKE))
+            except TLSError as error:
+                raise ArgumentError(str(error)) from error
 
     @functools.cached_property
     def site_period(self: RelayApp) -> int | float:

@@ -42,7 +42,7 @@ from hypershell.core.logging import Logger, close_inherited_slot_locks
 from hypershell.core.types import NoneType, serialize
 from hypershell.core.tls import (TLSConfig, TLSError, install_process_context, build_server_context,
                                  get_server_context, get_client_context, get_tls_config,
-                                 verify_peer_fingerprint, handshake_seconds,
+                                 verify_peer_fingerprint, handshake_seconds, HANDSHAKE_KEY,
                                  from_namespace as _tls_from_namespace)
 from hypershell.core.dispatch import Dispatcher, PROTOCOL
 
@@ -645,6 +645,8 @@ class _InProcessServer(Server):
         self._live = set()
         self._lock = threading.Lock()
         self._warned_at: Optional[float] = None
+        self._handshake_warned_at: Optional[float] = None
+        self._handshake_warned_lock = threading.Lock()
 
     def serve(self: _InProcessServer) -> None:
         """Accept connections until stopped, one daemon handler thread per connection.
@@ -757,10 +759,24 @@ class _InProcessServer(Server):
             return True
 
     def _closed_pending(self: _InProcessServer, peer: Optional[Tuple[str, int]]) -> None:
-        """Log a connection closed for missing the handshake deadline: its address and the deadline only."""
+        """Log a connection closed for missing the handshake deadline: its address and the deadline only.
+
+        Each close is logged at DEBUG. The first also warns, naming the deadline and its key, and so
+        does the first after each :data:`REFUSAL_WARNING_INTERVAL` since the last warning.
+        """
         where = f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
         log.debug(f'Queue server closed a connection from {where} that did not complete its TLS handshake '
                   f'within {self._handshake} seconds')
+        now = time.monotonic()
+        with self._handshake_warned_lock:
+            warn = (self._handshake_warned_at is None
+                    or now - self._handshake_warned_at >= REFUSAL_WARNING_INTERVAL)
+            if warn:
+                self._handshake_warned_at = now
+        if warn:
+            log.warning(f'Closing queue connections that do not complete their TLS handshake within '
+                        f'{self._handshake} seconds ({HANDSHAKE_KEY}), from {where}; more within '
+                        f'{REFUSAL_WARNING_INTERVAL:g} seconds are logged at DEBUG')
 
     def handle_request(self: _InProcessServer, conn, peer: Optional[Tuple[str, int]] = None) -> None:
         """Serve one connection, then forget and close it; log a client refused as too old."""

@@ -12,6 +12,8 @@ from typing import Optional, Tuple
 # Standard libs
 import io
 import os
+import sys
+import subprocess
 import ssl
 import socket
 import struct
@@ -39,7 +41,10 @@ from hypershell.core.tls import (TLSConfig, TLSError,
                                  _select_subject_cn, _default_hostnames,
                                  _X509_CN_MAX_LEN, _FALLBACK_CN)
 import hypershell.core.queue
-from hypershell.core.queue import QueueServer, QueueClient, QueueConfig
+from hypershell.core.queue import QueueServer, QueueClient, QueueConfig, QueueServerError
+from hypershell.core.tls import handshake_seconds, DEFAULT_HANDSHAKE, HANDSHAKE_KEY
+from hypershell.core.types import TIME_FORMS
+from hypershell.core.config import config as hypershell_config
 
 
 @fixture(scope='module')
@@ -813,3 +818,191 @@ def test_burst_of_clients_with_default_deadline(server_tls) -> None:
         done = [result for result in results if 'seconds' in result]
         assert not errors, errors[:3]
         assert len(done) == 64, f'{len(done)} of 64 clients completed a call'
+
+
+# Handshake deadline configuration and logging
+
+@mark.unit
+@mark.parametrize('value, seconds', [(30, 30), ('30', 30), ('30s', 30), ('1m', 60), (2.5, 3), ('1:30', 90)])
+def test_handshake_seconds_accepts_duration_forms(value, seconds: int) -> None:
+    """The deadline takes any duration form, rounded up to whole seconds."""
+    assert handshake_seconds(value) == seconds
+
+
+@mark.unit
+def test_handshake_default() -> None:
+    """The deadline defaults to 30 seconds, in the configuration and on a TLSConfig."""
+    assert DEFAULT_HANDSHAKE == 30
+    assert TLSConfig().handshake == 30
+    assert hypershell_config.server.tls.handshake == 30
+    assert handshake_seconds(hypershell_config.server.tls.handshake) == 30
+
+
+@mark.unit
+@mark.parametrize('value', [0, '0', -5, '-5', 'abc', True, ''])
+def test_handshake_seconds_refuses(value) -> None:
+    """Zero, a negative or anything not a duration is refused, naming the key and the accepted forms."""
+    with raises(TLSError) as exc_info:
+        handshake_seconds(value)
+    message = str(exc_info.value)
+    assert message.startswith(HANDSHAKE_KEY) and TIME_FORMS in message
+
+
+@mark.unit
+def test_from_namespace_keeps_the_configured_value() -> None:
+    """A TLSConfig built from a section carries the configured value unparsed, so a client never refuses
+    a key only servers read."""
+    section = {'enabled': True, 'cert': '<none>', 'key': '<none>', 'cafile': '<none>'}
+    assert from_namespace({**section, 'handshake': '1m'}).handshake == '1m'
+    assert from_namespace({**section, 'handshake': 'abc'}).handshake == 'abc'
+    assert from_namespace(section).handshake == DEFAULT_HANDSHAKE
+
+
+@mark.unit
+@mark.parametrize('value', [0, -5, 'abc'])
+def test_tls_server_refuses_bad_handshake_before_binding(server_tls, value) -> None:
+    """A TLS queue server with a bad deadline does not start and leaves its port free."""
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    server = QueueServer(queue_config(with_handshake(server_tls, value), port))
+    with raises(QueueServerError) as exc_info:
+        server.start()
+    assert HANDSHAKE_KEY in str(exc_info.value) and TIME_FORMS in str(exc_info.value)
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', port))  # Nothing was left listening there
+
+
+@mark.unit
+@mark.parametrize('value', [0, 'abc'])
+def test_plain_server_ignores_handshake(value) -> None:
+    """A server without TLS never reads the deadline, so any value lets it start."""
+    with QueueServer(queue_config(with_handshake(TLSConfig(enabled=False), value))) as server:
+        assert server.address[1] > 0
+
+
+@mark.integration
+def test_handshake_environment_variable(tmp_path: Path) -> None:
+    """HYPERSHELL_SERVER_TLS_HANDSHAKE reaches the key and a TLSConfig built from its section."""
+    code = ('from hypershell.core.config import config\n'
+            'from hypershell.core.tls import from_namespace, handshake_seconds\n'
+            "section = {**config.server.tls, 'cert': '<none>', 'key': '<none>', 'cafile': '<none>'}\n"
+            'value = from_namespace(section).handshake\n'
+            'print(repr(config.server.tls.handshake), repr(value), handshake_seconds(value))\n')
+    env = {**os.environ, 'HYPERSHELL_SERVER_TLS_HANDSHAKE': '1m', 'HYPERSHELL_SITE': str(tmp_path)}
+    out = subprocess.run([sys.executable, '-c', code], env=env, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.split() == ["'1m'", "'1m'", '60']
+
+
+@mark.unit
+@mark.parametrize('app', ['server', 'cluster'])
+def test_commands_carry_handshake_onto_tls(app: str, monkeypatch, tmp_path: Path) -> None:
+    """hs server and hs cluster put the configured deadline on the TLSConfig their server starts with."""
+    from hypershell.server import ServerApp
+    from hypershell.cluster import ClusterApp
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', '2m')
+    cert, key = ensure_default_materials(str(tmp_path), hostnames=['localhost', '127.0.0.1'])
+    command = (ServerApp if app == 'server' else ClusterApp).from_cmdline(
+        ['--tls-cert', cert, '--tls-key', key, '--tls-ca', cert])
+    command.enable_tls()
+    assert command.tls.handshake == '2m'
+
+
+@mark.unit
+@mark.parametrize('app', ['server', 'cluster', 'relay'])
+@mark.parametrize('value', [0, -5, 'abc'])
+def test_commands_refuse_bad_handshake(app: str, value, monkeypatch) -> None:
+    """hs server, hs cluster and hs relay refuse a bad deadline as an argument error naming the key."""
+    from cmdkit.cli import ArgumentError
+    from hypershell.server import ServerApp
+    from hypershell.cluster import ClusterApp
+    from hypershell.relay import RelayApp
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', value)
+    with raises(ArgumentError) as exc_info:
+        if app == 'relay':
+            RelayApp.from_cmdline([]).check_args()
+        else:
+            (ServerApp if app == 'server' else ClusterApp).from_cmdline([]).enable_tls()
+    assert str(exc_info.value).startswith(HANDSHAKE_KEY)
+
+
+@mark.unit
+@mark.parametrize('app', ['server', 'cluster'])
+def test_commands_without_tls_ignore_handshake(app: str, monkeypatch) -> None:
+    """With --no-tls, hs server and hs cluster never read the deadline."""
+    from hypershell.server import ServerApp
+    from hypershell.cluster import ClusterApp
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', 'abc')
+    command = (ServerApp if app == 'server' else ClusterApp).from_cmdline(['--no-tls'])
+    command.enable_tls()
+    assert command.tls is None
+
+
+MARKER = 'handshake-peer-marker.example'
+
+
+@mark.integration
+def test_deadline_closes_are_logged_without_peer_data(server_tls, monkeypatch, caplog) -> None:
+    """Each close at the deadline is logged at DEBUG with the peer address and the deadline; one WARNING
+    names the key for several closes inside the interval; nothing the peers sent is logged."""
+    monkeypatch.setattr(hypershell.core.queue, 'REFUSAL_WARNING_INTERVAL', 3600.0)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+    tls = ctx.wrap_bio(incoming, outgoing, server_hostname=MARKER)
+    try:
+        tls.do_handshake()
+    except ssl.SSLWantReadError:
+        pass
+    hello = outgoing.read()
+    assert MARKER.encode() in hello
+    with_handshake(server_tls, 1)
+    socks, trickle = [], None
+    with caplog.at_level('DEBUG', logger='hypershell.core.queue'):
+        with QueueServer(queue_config(server_tls)) as server:
+            port = server.address[1]
+            try:
+                for _ in range(3):
+                    socks.append(socket.create_connection(('127.0.0.1', port), timeout=5))
+                opened = time.monotonic()
+                socks[1].sendall(hello[:-1])  # All but the last byte: the name is sent, the hello never ends
+                trickle = Trickle(socks[2], hello)
+                closes = [closed_after(sock, opened, 4) for sock in socks]
+            finally:
+                if trickle is not None:
+                    trickle.stop()
+                for sock in socks:
+                    sock.close()
+            assert all(after is not None for after in closes), closes
+            assert settles(lambda: sum('did not complete its TLS handshake' in r.getMessage()
+                                       for r in caplog.records) >= 3)
+    records = [r for r in caplog.records if r.name == 'hypershell.core.queue']
+    debug = [r.getMessage() for r in records
+             if r.levelname == 'DEBUG' and 'did not complete its TLS handshake within 1 seconds' in r.getMessage()]
+    warning = [r.getMessage() for r in records if r.levelname == 'WARNING']
+    assert len(debug) == 3, debug
+    assert all('127.0.0.1:' in line for line in debug), debug
+    assert len(warning) == 1 and HANDSHAKE_KEY in warning[0] and '1 seconds' in warning[0], warning
+    text = ' '.join(r.getMessage() for r in caplog.records)
+    for fragment in (MARKER, hello[:8].hex(), repr(hello[:8])[2:-1]):
+        assert fragment not in text
+
+
+@mark.integration
+def test_other_handshake_failures_logged_as_before(server_tls, caplog) -> None:
+    """A peer that sends something other than TLS and closes is dropped with the usual DEBUG line and
+    no deadline warning."""
+    with_handshake(server_tls, 300)
+    with caplog.at_level('DEBUG', logger='hypershell.core.queue'):
+        with QueueServer(queue_config(server_tls)) as server:
+            with socket.create_connection(('127.0.0.1', server.address[1]), timeout=5) as sock:
+                sock.sendall(b'GET / HTTP/1.0\r\n\r\n')
+                closed_after(sock, time.monotonic(), 2)
+            assert settles(lambda: any('Queue server dropped a connection' in r.getMessage()
+                                       for r in caplog.records), 2)
+    records = [r for r in caplog.records if r.name == 'hypershell.core.queue']
+    assert any(r.levelname == 'DEBUG' and 'Queue server dropped a connection' in r.getMessage() for r in records)
+    assert not [r for r in records if r.levelname == 'WARNING'], [r.getMessage() for r in records]
+    assert not any('did not complete its TLS handshake' in r.getMessage() for r in records)
