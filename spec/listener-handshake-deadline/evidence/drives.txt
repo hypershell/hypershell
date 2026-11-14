@@ -438,3 +438,37 @@ PASS: cluster made plain by --no-tls starts with handshake = '30d' (exit 0)
 PASS: server made plain by enabled = false starts with handshake = '30d' (still serving after 5 s)
 PASS: cluster made plain by enabled = false starts with handshake = '30d' (exit 0)
 (exit 0; 26 started pids, 26 stopped)
+
+# Review cycle 2 remediation (2026-11-14), P3 verify on the branch (all exit 0)
+PASS: hs server listening
+PASS: client hs finished the tasks in 2.5 s (exit 0, bound 25 s)
+PASS: hs server exited 0
+PASS: hs server: held connection open until the work finished (closed only once the work was done and the server stopped)
+PASS: hs server listening
+PASS: hs server: server closed the held connection 2.0 s after it connected (expected 2 to 5 s)
+PASS: hs server still running when the window ended (no client has run yet)
+PASS: client hs finished the tasks in 2.5 s (exit 0, bound 25 s)
+PASS: hs server exited 0
+PASS: hs cluster server listening
+PASS: hs cluster finished the tasks in 5.8 s (exit 0)
+PASS: hs cluster: held connection open until the work finished (closed only once the work was done and the server stopped)
+PASS: hs cluster server listening
+PASS: hs cluster finished the tasks in 9.8 s (exit 0)
+PASS: hs cluster: server closed the held connection 2.0 s after it connected (expected 2 to 5 s)
+PASS: upstream hs server listening
+PASS: relay-local server listening
+PASS: upstream finished the tasks through the relay in 6.9 s (exit 0)
+PASS: hs relay site-local server: held connection open until the work finished (closed only once the work was done and the server stopped)
+PASS: upstream hs server listening
+PASS: relay-local server listening
+PASS: hs relay site-local server: server closed the held connection 2.0 s after it connected (expected 2 to 5 s)
+PASS: hs relay still running when the window ended (no site client has run yet)
+PASS: upstream finished the tasks through the relay in 11.0 s (exit 0)
+PASS: hs server listening
+PASS: client $TMPDIR/lhd-clients/2.9.0a8/bin/hs finished the tasks in 4.9 s (exit 0, bound 25 s)
+PASS: hs server exited 0
+PASS: hs server: held connection open until the work finished (closed only once the work was done and the server stopped)
+PASS: hs server listening
+PASS: client $TMPDIR/lhd-clients/2.8.7/bin/hs connected, authenticated and was refused as too old in 2.0 s (exit 5)
+PASS: hs server: held connection open until the work finished (still open)
+PASS: median develop 36.38 ms, branch 36.04 ms (allowed up to 41.38 ms); every 64-client burst completed: True

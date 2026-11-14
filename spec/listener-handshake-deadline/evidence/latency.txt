@@ -23,3 +23,11 @@ branch {"python": "3.14.6", "sequential": 100, "median_ms": 35.18, "p10_ms": 33.
 develop {"python": "3.14.6", "sequential": 100, "median_ms": 36.33, "p10_ms": 35.34, "p90_ms": 37.54, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.79}
 branch {"python": "3.14.6", "sequential": 100, "median_ms": 36.0, "p10_ms": 35.35, "p90_ms": 36.92, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.57}
 PASS: median develop 34.97 ms, branch 35.18 ms (allowed up to 39.97 ms); every 64-client burst completed: True
+
+# Review cycle 2 remediation (2026-11-14)
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 35.3, "p10_ms": 33.95, "p90_ms": 36.7, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.77}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 36.05, "p10_ms": 35.18, "p90_ms": 36.84, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.57}
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 36.38, "p10_ms": 35.76, "p90_ms": 37.3, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.79}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 35.93, "p10_ms": 35.31, "p90_ms": 36.87, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.56}
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 36.53, "p10_ms": 35.32, "p90_ms": 37.85, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.79}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 36.04, "p10_ms": 35.36, "p90_ms": 37.76, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.57}

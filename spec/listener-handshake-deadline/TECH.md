@@ -4,7 +4,7 @@ title: A TLS queue server keeps serving clients while a connection is slow in it
   handshake
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/listener-handshake-deadline
 base: develop
 current_phase: done
@@ -237,6 +237,12 @@ apply the configured deadline; older clients behave as on develop; latency is wi
 - [x] *Review cycle 1, ruling 5:* the `.handshake` `versionadded` in `config_param_ref.rst` sits inside
       `.. only:: html` (the man page no longer prints it). The entry also states the one-day limit
       and that a server made plain by `--no-tls` or `.enabled = false` ignores the key (F1, F2).
+- [x] *Review cycle 2, F4:* `research/drive.py` — `relay --handshake SEC` delays the site launcher by
+      SEC + 5 s (as `cluster` does), judges the held connection before any site client runs, and
+      checks that the relay and its upstream are still running when the window ends; the drive now
+      fails against the branch's `src` with `settimeout(None)` in `_complete_handshake`.
+- [x] *Review cycle 2, F5:* `AGENTS.md` states the rule as the config reference does: refused at start
+      unless greater than 0 and at most one day, and checked only by a server that uses TLS.
 - **Verify:** the P3 `verify:` — `-W` docs build (sandbox off); `server`, `cluster`, `relay` drives
   with the default deadline (served while a connection is held, which stays open) and with
   `--handshake 2` (closed in 2–5 s); a 2.9.0a8 client runs the tasks; a 2.8.7 client connects,
@@ -263,6 +269,18 @@ reopened (`set_phase.py --phase-status in_progress`) and each closes again with 
 
 Each new test is red against the reviewed commit's `src` (f75d5e6), recorded in
 `evidence/red-review-1.txt`; the reworked drive is shown failing against develop's `src`.
+
+---
+
+## Review cycle 2 remediation
+
+Cycle 2 found no fault in shipped code. P3 was reopened for both findings (the P3 `verify:` is
+unchanged; it already runs `relay --handshake 2`):
+
+| Finding | Fix |
+|---------|-----|
+| F4 | `relay --handshake SEC` holds the site launcher back SEC + 5 s and checks the relay is still running at the window's end; red against a no-deadline copy of `src` at 2 s and 3 s, green on the branch |
+| F5 | `AGENTS.md` handshake sentence says: greater than 0 and at most one day, checked only by a TLS server |
 
 ---
 

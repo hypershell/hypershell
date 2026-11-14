@@ -18,6 +18,7 @@ Scenarios (each prints PASS or FAIL lines and exits non-zero on any FAIL):
     cluster  [--handshake SEC]                 hs cluster (local), clients start 3 s after the server
                                                (SEC + 5 s with --handshake)
     relay    [--handshake SEC]                 hs server upstream, hs relay with its site client delayed 3 s
+                                               (SEC + 5 s with --handshake)
     refuse                                     hs server, hs cluster and hs relay refuse handshake = 0, -5, abc,
                                                30d, 4294968 and a 401-digit integer; hs server and hs cluster
                                                made plain (--no-tls, or server.tls.enabled = false) start
@@ -27,7 +28,7 @@ Without --handshake the default deadline applies and the held connection must st
 work is done (the server served others while it was pending); a close when the server stops,
 after the work, is that stop, not the deadline. With --handshake SEC the held connection
 must be closed by the server between SEC and SEC + 3 seconds after it connected, while the server is
-still up: no client of `server` or `cluster` runs before the window has passed, so a server without the
+still up: no client of `server`, `cluster` or `relay` runs before the window has passed, so a server without the
 deadline fails. --client names another
 `hs` executable (e.g., an older release installed in a scratch environment) to run as the client,
 without this environment's PYTHONPATH;
@@ -58,7 +59,7 @@ started: List[subprocess.Popen] = []
 
 DELAY_LAUNCHER = """#!{python}
 import os, sys, time
-time.sleep(3)
+time.sleep({delay:g})
 argv = sys.argv[1:]
 for i, word in enumerate(argv):
     if word in ('-H', '--host') and i + 1 < len(argv):
@@ -241,11 +242,13 @@ def scenario_cluster(args) -> None:
 def scenario_relay(args) -> None:
     up_port, site_port = free_port(), free_port()
     hs = shutil.which('hs')
-    # The site client's launcher: wait 3 s, then run the client against loopback (the relay names its
-    # host, which may not resolve in a sandbox).
+    # The site client's launcher: wait, then run the client against loopback (the relay names its host,
+    # which may not resolve in a sandbox). The wait is 3 s; with a deadline it is SEC + 5 s, so no client
+    # runs before the window has passed and the relay's server is still up when it ends.
+    wait_launch = 3 if args.handshake is None else args.handshake + 5
     delay = os.path.join(os.getcwd(), 'delay.py')
     with open(delay, 'w') as stream:
-        stream.write(DELAY_LAUNCHER.format(python=sys.executable))
+        stream.write(DELAY_LAUNCHER.format(python=sys.executable, delay=wait_launch))
     os.chmod(delay, 0o755)
     upstream = start([hs, 'server', taskfile(), '-H', '127.0.0.1', '-p', str(up_port)],
                      env={'HYPERSHELL_SERVER_AUTH': KEY})
@@ -269,11 +272,18 @@ def scenario_relay(args) -> None:
     threading.Thread(target=echo, daemon=True).start()
     report(wait_port(site_port), 'relay-local server listening')
     held = None if args.no_hold else Held(site_port)
+    if held is not None and args.handshake is not None:
+        # The upstream tasks wait for the delayed site client, so the relay is still up and only the
+        # deadline can close the held connection.
+        check_held(held, args.handshake, 'hs relay site-local server')
+        report(relay.poll() is None and upstream.poll() is None,
+               'hs relay still running when the window ended (no site client has run yet)')
     code = wait(upstream, BOUND)
     finished = upstream_done[0] if upstream_done else time.monotonic()
     report(code == 0, f'upstream finished the tasks through the relay in {time.monotonic() - began:.1f} s (exit {code})')
     if held is not None:
-        check_held(held, args.handshake, 'hs relay site-local server', finished)
+        if args.handshake is None:
+            check_held(held, None, 'hs relay site-local server', finished)
         held.release()
     relay.terminate()
     wait(relay, 10)

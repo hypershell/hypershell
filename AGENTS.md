@@ -349,7 +349,8 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   logged once at ERROR and connections fail closed. With TLS the in-process accept loop only
   accepts the TCP connection: its handler thread runs the TLS handshake and closes the connection
   unless it completes within `server.tls.handshake` (default 30 s, refused at start unless greater
-  than 0) of the accept (`core/queue.py` `handle_pending`). A queue client's proxy finalizer (its decref)
+  than 0 and at most one day, and checked only by a server that uses TLS) of the accept
+  (`core/queue.py` `handle_pending`). A queue client's proxy finalizer (its decref)
   can run on any thread the cyclic GC picks, server threads included. So once `QueueClient.connect`
   has made a proxy, a decref finalized on the server side goes to the `hypershell-queue-decref`
   thread, which the process's first server starts (`core/queue.py` `_decref`). The server side is
