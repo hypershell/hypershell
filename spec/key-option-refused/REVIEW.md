@@ -170,3 +170,119 @@ Unmapped changes:
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Review cycle 2 — approved (2026-11-13)
+
+- **Reviewed commit:** 27668a1b978132f6258897b5f407f25788e03357  ·  **Base:** origin/develop (e507f5b; merge base 2ffb5cc)  ·  **Date:** 2026-11-13
+- **Verdict:** approved
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`
+- **Mode:** a fresh blind pass over the full spec-excluded diff, plus a re-run of F1, F2, F3 and F5
+  against this head. No `debate`, no `completeness` sub-pass. The correctness pass was a fresh
+  subagent given `GOAL.md`, `git diff origin/develop...HEAD -- . ':(exclude)spec/'`,
+  `git diff origin/develop...HEAD -- 'spec/*/drive/*'` (R8 grades the drives), `AGENTS.md`,
+  `invariants.md`, the rubric, and the failure scenarios of this file's cycle-1 findings. It was told
+  not to read `PLAN.md`, `TECH.md`, `META.md`, this file, or `research/`. It was also given the
+  review-cycle-1 ruling, stated as a reading of the contract: R1's list of commands (`hs client`,
+  `hs server`, `hs submit`) is exhaustive, and `hs cluster`/`hsx` and `hs relay` keep
+  `origin/develop`'s parsers. That ruling is recorded in `PLAN.md` (a981df1), not in `GOAL.md`.
+
+### Pre-flight
+
+- `TECH.md`: `status: in_review`, P1 and P2 `done`, `review.cycle: 1`.
+- Contract drift: `GOAL.md` is unchanged since the GOAL-gate lock (f81842c). The cycle-1 ruling is in
+  `PLAN.md` only and was graded as binding.
+- The branch does not touch `AGENTS.md` or `.agents/`. `git merge-tree --write-tree origin/develop
+  HEAD` is clean. No `src/` file changes between the merge base and `origin/develop`.
+- `src/hypershell/cluster/__init__.py` and `src/hypershell/relay/__init__.py` have no diff against
+  `origin/develop`.
+
+### Verification run
+
+- `uv run pytest tests/test_key_option.py tests/test_completions.py tests/test_auth_variants.py
+  tests/test_server.py` → 151 passed.
+- `uv run pytest tests/test_cluster_launch.py tests/test_relay_launch.py` → 200 passed, 1 skipped
+  (fish not installed).
+- `uv run pytest` over the converted files (`test_dispatch_staged`, `test_dispatch_version`,
+  `test_dispatch_workload`, `test_queue_limits`, `test_queue_start`, `test_queue_workload`,
+  `test_relay_outage`, `test_relay_workload`, `test_topology_server`, `test_upgrade_cli`,
+  `test_zone_workload`) and `test_client`, `test_submit`, `test_logging`, `test_main` → 257 passed.
+- `uv run pytest -m unit` → 1482 passed, 3 skipped.
+- `pytest -m unit tests/test_key_option.py` on CPython 3.11, 3.12 and 3.13 (temporary environments)
+  → 54 passed on each.
+- Orchestrator re-run: `uv run pytest -q tests/test_key_option.py` → 69 passed.
+- Parser comparison against a `git archive` of `origin/develop` (`PYTHONPATH`): every action on
+  `ClusterApp` and `RelayApp` is identical (option strings, dest, nargs, default, type, action class,
+  const, choices). On `ClientApp`, `ServerApp` and `SubmitApp` the only difference is the key action
+  (`RefuseKeyOption`, `nargs='?'`, `dest=key_option`, default `SUPPRESS`).
+- CLI refusal probe in a `temp_site`, log file set, console and file levels DEVEL: `hs client -N 1
+  -T 5`, `hs server --forever` and `hs submit -q echo hi` × `-k KEY`, `-kKEY`, `--auth KEY`,
+  `--auth=KEY` → 12 of 12 exit 2.
+  - Each refusal names `HYPERSHELL_SERVER_AUTH` and `server.auth`; `submit` adds that a task's own
+    `-k` goes after `--`.
+  - The key appears on neither stdout nor stderr, and in no file under the site. No database file is
+    created.
+  - `hyper-shell client -k …` also exits 2.
+- R3 and R4 drives in `temp_site`s, all exit 0:
+  - R3: a server task file `echo -k …`, `hs submit -q … -- echo -k …`, `hs submit … -- echo -k …`
+    into the database, and a client template `echo -k {}`. Each task printed its `-k` unchanged.
+  - R4: the key from the environment, `server.auth`, `auth_env` and `auth_eval`, across server,
+    client, `submit -q` and database submit. Every task ran.
+  - Key policy, `hs server --print` on HEAD and on `origin/develop`, with no key, a short key, the
+    placeholder, bad characters and a good key → identical messages.
+  - `hsx tasks.in -t 'echo -k {}' -N 2` → printed `-k one`, `-k two`.
+  - The reviewer's `hsx --launcher env` drive could not resolve the laptop's own hostname under the
+    Bash sandbox. This is environmental. The launcher, ssh and autoscale joins rest on
+    `test_cluster_launch` and `test_relay_launch` above.
+- Docs:
+  - `UV_PROJECT_ENVIRONMENT=$TMPDIR/rv2-docs-venv uv run --python 3.12 --group docs sphinx-build -W
+    --keep-going -q -E -b html docs $TMPDIR/rv2-docs-html` (sandbox off) → exit 0.
+  - The same with `-b man` → exit 0. With roff backslashes stripped, `hs.1` and `hyper-shell.1` have no
+    `-k` or `--auth`. The committed `share/man/man1/hs.1` still has them, and the GOAL leaves it to
+    `hs-release`.
+  - Orchestrator grep of the built HTML: the 2.9.0 key marker is present in `cli/client.html`,
+    `cli/server.html`, `cli/submit.html`, `templates.html`, `install.html` and `manual.html`.
+- Completions: `bash -n` and `zsh -n` pass. Bash `_hs_client`, `_hs_server` and `_hs_submit` offer
+  40, 39 and 35 options, none of them `-k` or `--auth`.
+- Tree left clean (`git status --porcelain` empty). The worktree `.venv` is still CPython 3.14.
+  - The reviewer's one stuck drive (`hsx --launcher env`) was stopped by its task handle, and no
+    hs, hsx or hyper-shell process from this worktree remained.
+  - The orchestrator's probes were parse-only (`-h`) or pytest runs that exited.
+
+### Cycle-1 findings
+
+| ID | Status | Evidence |
+|----|--------|----------|
+| F1 | ✅ fixed | Cluster and relay parsers are byte-for-byte `origin/develop`'s. Each value below parses as that option's value, and the same CLI line with `-h` exits 0 on HEAD and on develop: relay `--launcher-args '-k --exclusive'`, cluster `--ssh-args '-k -i id'`, hsx `-t '-k {}'`, `--launcher '-k srun'` and `--remote-exe '-k x'`. Control: `hs client -t '-k {}' -h` exits 2, as on develop. Pinned by `test_cluster_and_relay_parse_as_before`. |
+| F2 | ✅ fixed | `.. versionchanged:: 2.9.0` sits beside the changed includes in `docs/cli/client.rst`, `server.rst` and `submit.rst`, after the hand-started client sentence in `docs/_include/templates.rst`, and after the completion examples in `docs/install.rst`. It is already in `manual.rst`, `security.rst`, `getting_started.rst` and `security_alt.rst`. The HTML `-W` build passes. |
+| F3 | ✅ fixed | `ClusterApp.interface.parse_args(['tasks.in', '--aut', 'fixed'])` gives `autoscaling_policy='fixed'` on HEAD and on develop. `hs cluster tasks.in --aut fixed -h` exits 0. Pinned by the `cluster-autoscaling-prefix` case. |
+| F5 | ✅ fixed | `test_server_and_client_task_option_reaches_task` covers a server task file and a client template, beside the `hs submit` `--` and task-file tests. All pass, and the reviewer's drives agree. |
+| F4 | unchanged (predates; not counted) | `hs server --forever --au=KEY` and `--aut=KEY`, and `hs client --a=KEY`, echo the same as on develop. The space-separated forms echo nothing. Still tracked in `issues/parser-echoes-option-values.md`. |
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `core/config.py:394-436` (`RefuseKeyOption`, `refuse_key_option`). Registered at `client.py:1595`, `server.py:1703` and `submit.py:1313` (`SUBMIT_KEY_ADVICE`, `submit.py:1203`). | 12-case CLI probe; `test_key_option.py`; parser comparison | ✅ |
+| R2 | same | probe: no key on stdout, stderr or any site file at DEVEL | ✅ |
+| R3 | the parser leaves `-k` after `--` and in task files alone | drives A–E; `test_submit_task_option_*`, `test_server_and_client_task_option_reaches_task` | ✅ |
+| R4 | `resolve_auth('server')` unchanged, called at `client.py:1665`, `server.py:1742` and `submit.py:1361`; cluster and relay parsers are develop's | per-source drives; key-policy parity; `test_auth_variants`; cluster and relay launch suites; the converted workload suites | ✅ |
+| R5 | usage and help of the three commands; hints at `client.py:1147-1159` | `--help` greps; `submit -q` line names both sources | ✅ |
+| R6 | `docs/_include/*`, `docs/cli/*`, `getting_started.rst`, `security.rst`, `install.rst`, `manual.rst`, `templates.rst`, `security_alt.rst` | docs and README grep; markers as under F2; HTML `-W` and man builds | ✅ |
+| R7 | `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs` | completion run, syntax checks, `test_completions` | ✅ |
+| R8 | `tests/*`, `tests/bench/bench_queue.py`, `spec/relay/drive/relay_throughput.py`; `test_key_option.py` | `test_sweep_finds_no_key_option`; reviewer grep (only the refusal tests and the Non-goal negative assertions); every new test tagged | ✅ |
+
+Unmapped changes: none beyond those cycle 1 recorded. The `AUTH_ENV` move to `core/config.py`
+(still importable from `hypershell.client`) supports R1 and R5. The status bookkeeping in
+`ROADMAP.md` and `issues/key-option-on-command-line.md` follows the usual convention. The cluster and
+relay refusal that cycle 1 recorded here is gone.
+
+### Findings
+
+None. One candidate was dropped: the `hsx --launcher env` drive failure was the sandbox's
+hostname resolution, not the branch.
+
+### Human-gate triggers
+
+- **Not triggered.** There is no CONFIRMED finding.
+- The key-policy checks (§9) match develop's, and the key stays out of every launched argv (§11);
+  `test_cluster_launch` and `test_relay_launch` pass.

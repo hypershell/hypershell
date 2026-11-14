@@ -61,11 +61,10 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     $TMPDIR/docs-html
 review:
-  last_reviewed_commit: fcd3ba759d1f5bc998ae916f27b9d58c41969685
-  verdict: changes-requested
-  blocked_reason: F2 versionchanged gaps (R6); F1 -k registration breaks cluster/relay
-    option values (R4); F3, F5
-  cycle: 1
+  last_reviewed_commit: 27668a1b978132f6258897b5f407f25788e03357
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
 ---
 # TECH.md — Refuse the queue key on a command line
 

@@ -61,9 +61,16 @@ is skipped by the parser):
 - **Recommended fix:** Add a docs-build `verify:` example to the TECH template (separate `UV_PROJECT_ENVIRONMENT` under `$TMPDIR`, output under `$TMPDIR`, a note that `sphinx_sitemap` needs the sandbox off), and a man-page grep recipe for cycles that prove a docs change through `-b man` (roff writes `\-k` and `\fB…\fP`, so a plain grep misses).
 - **Confidence:** high · **Effort:** small
 
-## F4 — The reviewer's `spec/` exclusion hides the executable drives a GOAL can grade
+## F4 — The reviewer's `spec/` exclusion hides the executable drives a GOAL can grade · seen again
 `origin=hs-review:step2 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
 - **What happened:** R8 grades `spec/*/drive/*` (here `spec/relay/drive/relay_throughput.py`), but the only diff Step 2 lets the reviewer see is `git diff {base}...HEAD -- . ':(exclude)spec/'`, which drops it; the orchestrator had to add `git diff {base}...HEAD -- 'spec/*/drive/*'` to the reviewer's inputs by hand.
 - **Skill cause:** Step 2 and the rubric's "What the reviewer sees" treat everything under `spec/` as author artifacts, but executable drives are code a GOAL can hold to a requirement.
 - **Recommended fix:** Add the drives to the reviewer's inputs in Step 2 and the rubric (`git diff {base}...HEAD -- 'spec/*/drive/*'`), keeping `{slug}`'s own PLAN/TECH/research/META excluded.
+- **Confidence:** high · **Effort:** small
+
+## F5 — A later review cycle has no way to give the blind reviewer the rulings that bind it
+`origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** The review-cycle-1 ruling narrows how the contract reads: R1's three commands are exhaustive, though `GOAL.md`'s Outcome says "any command". It was recorded in `PLAN.md`, which the reviewer may not read. A blind reviewer that is not told would grade the absent cluster/relay refusal as a gap. The orchestrator restated the ruling in the reviewer's prompt as a reading of the contract, and passed the cycle-1 findings' failure scenarios so the remediation could be graded. Step 2 allows neither input.
+- **Skill cause:** Step 2 lists the reviewer's inputs for every cycle alike, and Step 3 says a later cycle "defaults to a fresh blind pass" without saying whether the earlier findings go in. No skill says where a gate ruling that changes the contract's reading must live for the next blind pass to see it. The ruling here went to `PLAN.md`, so the contract-drift check in Step 1 cannot surface it.
+- **Recommended fix:** Have review-gate rulings that touch an R-ID's reading recorded in `GOAL.md` Clarifications, where Step 1's drift check surfaces them and the reviewer reads them. Have Step 2 pass, on cycle 2 and later, the previous cycle's findings (id, where, failure scenario) from `REVIEW.md`, but not its matrix or dispositions.
 - **Confidence:** high · **Effort:** small
