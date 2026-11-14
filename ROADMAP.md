@@ -351,16 +351,6 @@ Pre-existing since 2023 (`70bcc63`).
 *Horizon: near-term, small · Depends on: — · Refs: `timescale` review cycle 2 (F8)*
 **Seed:** [`issues/server-initdb-ignored.md`](issues/server-initdb-ignored.md) · *status: adopted:server-initdb*
 
-## The remaining duration options still take bare seconds only
-
-`--bundlewait`, `--signalwait`, `--delay-start`, the autoscaling `--period` and the `--interval` on
-`hs wait` and `hs run` still take a bare number of seconds, so `--period 5m` is an argument error
-while `-W 5m` works. `--delay-start` gives a negative value its own meaning (a random wait), which
-the strict parser refuses.
-
-*Horizon: near-term, small · Depends on: `size-and-duration-units` (landed, #96) · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/duration-units-remaining-options.md`](issues/duration-units-remaining-options.md) · *status: adopted:duration-units-remaining*
-
 ## Duration settings read only from configuration still take bare seconds only
 
 `server.evict`, `client.heartrate` and the relay's duration keys (`bundlewait`, `poll`,
@@ -368,7 +358,7 @@ the strict parser refuses.
 command-line option and are read straight from configuration, so `evict = "10m"` is refused or
 misread while `autoscale.period = "5m"` works.
 
-*Horizon: near-term, small · Depends on: `duration-units-remaining` · Refs: its GOAL's Non-goals*
+*Horizon: near-term, small · Depends on: `duration-units-remaining` (landed, #106) · Refs: its GOAL's Non-goals*
 **Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: unshaped*
 
 ## `auth_env` and `auth_eval` in a config file break every command

@@ -13,10 +13,10 @@ lane: public
 ## Problem
 
 Since 2.9.0a7 (`size-and-duration-units`) a task timeout takes units (`-W 5m`), and
-`duration-units-remaining` extends that to every duration option and the configuration keys behind
-them. Several duration settings have no option at all and are read straight from configuration or
-the environment, and those still take a bare number of seconds only: `server.evict`,
-`client.heartrate`, and the relay's `bundlewait`, `poll`, `retention`, `timeout`,
+`duration-units-remaining` (#106) extended that to every duration option and the configuration keys
+behind them. Several duration settings have no option at all and are read straight from
+configuration or the environment, and those still take a bare number of seconds only:
+`server.evict`, `client.heartrate`, and the relay's `bundlewait`, `poll`, `retention`, `timeout`,
 `upstream.heartrate`, `upstream.evict_hint`, `upstream.deadline` and `upstream.backoff`. A user who
 writes `evict = "10m"` in a configuration file, as they now can for `autoscale.period`, gets an
 error or a misread value instead.
