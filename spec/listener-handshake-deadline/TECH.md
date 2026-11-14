@@ -73,12 +73,10 @@ phases:
     spec/listener-handshake-deadline/research/latency.py compare "$TMPDIR/lhd-develop/src"
     "$TMPDIR/lhd-tls"
 review:
-  last_reviewed_commit: 59543ba
-  verdict: changes-requested
-  blocked_reason: 'Review cycle 2: relay deadline drive does not reliably fail without
-    a deadline (F4); AGENTS.md understates when the handshake value is refused (F5).
-    No finding in shipped code.'
-  cycle: 2
+  last_reviewed_commit: 338aa2c
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — A TLS queue server keeps serving clients while a connection is slow in its handshake
 

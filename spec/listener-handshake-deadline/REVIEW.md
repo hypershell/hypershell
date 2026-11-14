@@ -311,3 +311,90 @@ Unmapped changes (possible scope creep): none. The handler-start change reaches 
 - **Not triggered by this cycle's findings.** F4 is in the evidence harness (`spec/…/research/drive.py`) and F5 in `AGENTS.md`. Neither is a high-blast-radius file or touches a security or DB-lifecycle invariant.
 - This cycle's changes to the high-blast-radius core were re-reviewed by executed command and no finding was confirmed against them: `core/queue.py` `_unstarted` and `_complete_handshake`, `core/tls.py` `handshake_seconds`, and the `server.py` check. TLS posture is unchanged. The maintainer signed off the cycle 1 gate, including the accept-loop change for plain servers.
 - **Loop bound:** this is cycle 2 of at most 3. Both remaining items are small and outside shipped code paths. If cycle 3 does not converge, escalate to the maintainer.
+
+## Review cycle 3 — approved (2026-11-14)
+
+- **Reviewed commit:** 338aa2c  ·  **Base:** develop (`origin/develop` = `6da633d`, re-fetched at the end of the review; it is an ancestor of the branch and `git merge-tree` is clean, so no merged-tree run was needed)
+- **Mode:** a fresh blind pass over the full diff, `git diff origin/develop...HEAD -- . ':(exclude)spec/'`, plus `git diff origin/develop...HEAD -- 'spec/*/research/*.py'` (the drive scripts the phase `verify:` commands run). The reviewer had the same inputs and exclusions as cycles 1 and 2, with the GOAL's gate and review-cycle-1 rulings and the foreman's readings of them, and was not shown earlier findings. The orchestrator graded F1–F5 separately, by executed command.
+- **Contract drift:** none since cycle 2. The `GOAL.md` commits after shaping are `e77edc5` (plan-gate rulings) and `0989ab7` (review-cycle-1 rulings), both graded in earlier cycles.
+- **Since cycle 2:** `src/`, `tests/` and `docs/` are unchanged. The build commit `338aa2c` touches `AGENTS.md` (F5) and `research/drive.py` (F4), plus spec artifacts.
+
+### Status of earlier findings
+
+| Finding | Status | Evidence |
+|---------|--------|----------|
+| F1: deadline above about 24.8 days not honored | **Fixed (holds)** | The `refuse` drive passes 26 of 26. `hs server`, `hs cluster` and `hs relay` each exit 2, naming the key, for `30d`, `4294968` and a 401-digit integer. In a throwaway site, `hs server` with `HYPERSHELL_SERVER_TLS_HANDSHAKE=86400` was still serving after 4 s, while `86401` and `24:00:01` exited 2 with `server.tls.handshake must be greater than 0 and at most one day (86400 seconds)`. |
+| F2: a server made plain by `enabled = false` refuses a bad value | **Fixed (holds)** | With `HYPERSHELL_SERVER_TLS_ENABLED=false`, `hs server` with `86401` or `abc` was still serving after 4 s. The `refuse` drive's plain-start checks pass. |
+| F3: `hs server` deadline drive passes with no deadline | **Fixed (holds)** | Against a copy of `src` with `ssl_sock.settimeout(None)` in `_complete_handshake` (run via `PYTHONPATH`), `server --handshake 2` fails (the held connection was never closed) and `cluster --handshake 2` fails (closed at 9.11 s, expected 2–5 s). Both pass on the branch. |
+| F4: `relay` deadline drive does not reliably fail with no deadline | **Fixed** | `relay --handshake N` now delays the site client's launcher by `N + 5` s (`drive.py:248`). It checks the deadline close inside the window, and then that the relay and upstream are still running when the window ends (`:280`). Against the same no-deadline copy, `--handshake` 1, 2, 3 and 6 each exit 1: the held connection was not closed in the window, and the relay was still running when it ended. So the drive passes only if the deadline closes the connection. On the branch, `--handshake 2` closed it at 2.0 s and `--handshake 3` at 3.0 s, both exit 0, and the default-deadline `relay` drive passes. The blind reviewer reproduced the mutant failure for `server`, `cluster` and `relay` independently. |
+| F5: `AGENTS.md` understates when the value is refused | **Fixed** | `AGENTS.md:351–352` now reads "refused at start unless greater than 0 and at most one day, and checked only by a server that uses TLS". That matches `handshake_seconds` (`core/tls.py:178`), the `enabled` checks in `server.py`, `cluster/__init__.py` and `relay/__init__.py`, the configuration reference, and the CLI runs in the F1 and F2 rows. |
+
+### Verification run
+
+All runs were on macOS (arm64). CLI drives used throwaway sites (`.agents/factory/bin/temp_site.sh`), and probes and mutant copies ran from scratch directories. Every process the review started was stopped by its recorded PID. Unsandboxed `ps` checks found no process of this review's left. The only other `hs`-related processes belonged to another worktree's review and were left alone.
+
+- **Focused suites** (`tests/test_queue_tls.py`, `test_queue_limits.py`, `test_queue_gc.py`, `test_queue.py`):
+  - 3.14.6: 176 passed, 3 skipped (platform skips)
+  - 3.11.18, 3.12.13 and 3.13.16 (scratch environments): pass, with `hs` on `PATH` for `test_server_keeps_its_files_at_the_open_file_limit`, which needs it
+- **Full suite**, 3.14.6: 2708 passed, 109 skipped.
+- **Red runs.**
+  - The new tests against develop's `src`: every behaviour test fails.
+  - Against the no-deadline copy: the deadline (silent and slow) and logging tests fail.
+- **R1.** 200 silent peers with the default deadline: a client's first call took 0.043 s. The `server`, `cluster` and `relay` drives with the default deadline pass. Develop's `server --handshake 2` drive fails with its client held for 25 s.
+- **R2 and R3.**
+  - 200 peers at a 2 s deadline: all closed at 2.00 s, with handler threads and descriptors back at their baseline.
+  - A peer that stalls after a full ClientHello: closed at 2.0 s.
+  - With a real open-file limit of 64, 34 connections were refused at once, 26 were closed at a 3 s deadline, and a client was then served in 0.078 s.
+  - Stopping the server with 50 handshakes pending left no handler or socket.
+- **R4.** The unit tests for forms, default, refusals and the environment variable pass, and so does the `refuse` drive (26/26). The CLI messages name the key and the accepted forms.
+- **R5.** The logging test (3 DEBUG lines, 1 WARNING, no peer bytes) and the rate test pass. A handshake that fails for another reason is logged as on develop.
+- **R6.** `server`, `cluster` (local) and `relay` drives pass with the default deadline and `--handshake 2`. The plain-server and forked-manager tests pass (`test_secure_manager_subprocess_roundtrip`).
+- **R7.** No existing test was edited (the tests diff removes no line). `research/latency.py compare` gave a median connect and first call of 35.77 ms on develop and 35.48 ms on the branch (allowed 40.77 ms), a PASS. The 64-client burst completed 64/64 in all six runs.
+- **R8.** The 2.9.0a8 client finished the tasks (exit 0). The 2.8.7 client was refused as too old (exit 5) on the branch, and the same way on develop.
+- **Docs.** `UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html` exited 0.
+
+### Requirement → evidence matrix
+
+| R-ID / ruling | Implemented by | Verified how | Status |
+|---------------|----------------|--------------|--------|
+| R1 | `serve()` → `accept_pending`; `handle_pending` runs the handshake on the handler thread | 200-peer probe; drives on branch vs develop; tests red on develop | ✅ |
+| R2 | `_complete_handshake` (one `do_handshake`, timeout = deadline − time since accept) | 200 peers and a post-ClientHello stall closed at 2.0 s; drives at `--handshake 2` | ✅ |
+| R3 | `handle_pending`'s `finally` and live-set hand-over; `_admits` on the raw socket | Baseline counts; reserve probe at a limit of 64; stop with 50 pending | ✅ |
+| R4 | `handshake_seconds`, `MAX_HANDSHAKE`, `ArgumentError` in the three commands, `QueueServerError` before binding | Unit tests; `refuse` drive 26/26; CLI boundary 86400/86401 | ✅ |
+| R5 | `_closed_pending` | Logging and rate tests; logging probe | ✅ |
+| R6 | All three commands build `QueueServer` with a `TLSConfig` carrying the key; plain servers skip the check | Drives at default and 2 s; plain-by-config runs; plain tests | ✅ |
+| R7 | No existing test edited | Suites; full suite; latency and burst | ✅ |
+| R8 | No client, context or wire change | 2.9.0a8 and 2.8.7 drives, branch and develop | ✅ |
+| R9 | `docs/security.rst` threat item 5, Limitations item 4, monitoring bullet; `config_param_ref.rst` `.handshake` | Read against develop; `-W` build clean | ✅ (see Observations) |
+| Ruling: refused above one day | `MAX_HANDSHAKE` | As R4 | ✅ |
+| Ruling: key checked only when the server uses TLS | `enabled` checks in `server.py`, `cluster/__init__.py`, `relay/__init__.py` | Plain-by-config runs; tests | ✅ |
+| Ruling: deadline drives fail with no deadline | `research/drive.py` | No-deadline copy: `server`, `cluster` and `relay` fail (relay at 1, 2, 3 and 6 s) | ✅ |
+| Ruling: accepting goes on when a handler does not start | `_InProcessServer._unstarted` | TLS and plain tests pass, red on develop | ✅ |
+| Ruling: `versionadded` inside `.. only:: html` | `config_param_ref.rst` | Read; `-W` build | ✅ |
+
+Unmapped changes (possible scope creep): none.
+
+**TLS posture** is unchanged. The reviewer compared develop and the branch with docstrings stripped, and these are identical:
+- the server and client context builders, the protocol floor and its mapping, the fingerprint check, and `TLSConfig.is_active`
+- `secure_client`, `SecureConnection`, `SecureListener.accept` and the request handler
+- the authentication minimums and `resolve_auth`
+
+The only server-side change is `wrap_socket(..., do_handshake_on_connect=False)` followed by an explicit timed `do_handshake()`, on the same context.
+
+### Findings
+
+None CONFIRMED.
+
+### Observations (not graded)
+- **`docs/security.rst:404–406`, Limitations item 4.** The item still says failed authentication and handshake attempts are "handled by the underlying multiprocessing layer without surfacing in *HyperShell*'s logs". A connection closed at the deadline is logged by *HyperShell*: a WARNING, then DEBUG lines (the logging test asserts it).
+  - The blind reviewer reported this as LOW. The orchestrator did not grade it as a finding, for three reasons:
+    - the sentence describes attempts the multiprocessing layer handles, and a deadline close is not one of them;
+    - the same page's monitoring bullet (`:994–997`) states the exception;
+    - R9 asks that the item's other statements stay as they are.
+  - A clause such as "except a connection closed at the handshake deadline" would remove the ambiguity, if the maintainer wants it at publish.
+
+## Human-gate triggers (cycle 3)
+
+- **No new trigger.** No finding was confirmed this cycle. The code under review (`core/queue.py`, `core/tls.py`, `server.py`) is unchanged since cycle 2, where executed review confirmed no finding against it. TLS posture is unchanged.
+- **The cycle 1 gate still applies to publication.** F1 (`core/queue.py`, `core/tls.py`) and F2 (`server.py`) were CONFIRMED in high-blast-radius core. Their fixes are in core files. The maintainer signed off the cycle 1 gate and the rulings that set the remediation, but the remediated core has not had a human read. Explicit maintainer sign-off is required before `/hs-publish`.
+- **Loop bound:** this is cycle 3 of at most 3, and it converged with no CONFIRMED finding.

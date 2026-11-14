@@ -90,3 +90,10 @@ is skipped by the parser):
 - **Skill cause:** the blindness rule treats `research/` as rationale only. It has no case for executable harness scripts that a `verify:` command depends on, so a weak drive would reach `/hs-publish` as green evidence nobody graded.
 - **Recommended fix:** in Step 2 and in `review-rubric.md` ("What the reviewer sees"), admit the scripts that any phase `verify:` names, as the diff `git diff {base}...HEAD -- 'spec/{slug}/research/*.py'`. Keep `research/*.md`, PLAN, TECH and META excluded. Have the reviewer check that each drive fails against a no-fix mutant.
 - **Confidence:** high · **Effort:** small
+
+## F7 — The approved route leaves the previous cycle's `blocked_reason` in `TECH.md`
+`origin=hs-review:step4 severity=low category=tooling status=open target=.agents/factory/bin/set_phase.py`
+- **What happened:** after cycle 3 approved the branch, `set_phase.py --verdict approved --reviewed-commit … --touch` left cycle 2's `blocked_reason` (the F4 and F5 text) under `verdict: approved`. A second call, `--blocked-reason ''`, cleared it.
+- **Skill cause:** Step 4's clean route names only `--verdict approved --reviewed-commit --touch`. `set_phase.py` changes `blocked_reason` only when it is passed. So every approval after a changes-requested cycle carries a stale blocker into `/hs-publish` unless the orchestrator notices.
+- **Recommended fix:** have `set_phase.py --verdict approved` clear `review.blocked_reason`, or add `--blocked-reason ''` to Step 4's clean-route command.
+- **Confidence:** high · **Effort:** small
