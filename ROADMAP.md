@@ -398,6 +398,18 @@ all show it. Nothing needs the option: each command already reads `HYPERSHELL_SE
 *Horizon: near-term, small · Depends on: — · Refs: the key hand-off hardening (#80, #81)*
 **Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: unshaped*
 
+## A mistyped option can print its value, a key included, to stderr and the log
+
+The parser's error for an unknown or ambiguous option repeats the arguments it could not place, and
+every command logs that error at CRITICAL after logging is set up, so a value given to a mistyped
+option reaches stderr and any log file. `-k`/`--auth` itself is refused without an echo since
+`key-option-refused`; other forms, such as `hs server --au=KEY`, still echo. The general fix belongs
+in cmdkit's argument-error path.
+
+*Horizon: near-term, small · Depends on: `key-option-refused` · Refs: its plan's refusal-mechanism
+probes; cmdkit*
+**Seed:** [`issues/parser-echoes-option-values.md`](issues/parser-echoes-option-values.md) · *status: unshaped*
+
 ## Environment variables cannot reach every configuration key
 
 The guide says every option can be set by a `HYPERSHELL_*` variable, but every underscore in the
