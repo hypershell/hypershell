@@ -4,7 +4,7 @@ title: A TLS queue server keeps serving clients while a connection is slow in it
   handshake
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/listener-handshake-deadline
 base: develop
 current_phase: done
@@ -73,10 +73,12 @@ phases:
     spec/listener-handshake-deadline/research/latency.py compare "$TMPDIR/lhd-develop/src"
     "$TMPDIR/lhd-tls"
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: f75d5e6
+  verdict: changes-requested
+  blocked_reason: 'Review cycle 1: deadline above ~24.8 days not honored (F1); plain-by-config
+    server refuses a bad handshake value (F2); hs server deadline drive not discriminating
+    (F3). Human sign-off required (core/queue.py, server.py).'
+  cycle: 1
 ---
 # TECH.md — A TLS queue server keeps serving clients while a connection is slow in its handshake
 
