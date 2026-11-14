@@ -62,3 +62,53 @@ lines skipped). Then, with the local PostgreSQL 18 and TimescaleDB 2.32 (sandbox
 with `HS_TEST_POSTGRES` and `HS_TEST_TIMESCALE=community` (30 of 30 red), and P1's PostgreSQL legs
 (`test_contended_write.py`, `test_writeback_postgres.py`, `test_zone_postgres.py`): 47 passed with
 TimescaleDB, 47 passed on plain PostgreSQL.
+
+## The end-of-run tail (R8) — P7
+
+Ten runs of `spec/relay-hardening/drive/tail_run.py` (through `tail_laptop.sh`), the R8 budget, each
+at the R8 size: `spec/relay/drive/relay_throughput.py` unedited, 2000 tasks of 0.2 s, direct `hs
+cluster -N 32` then the relay (4 site clients of 8 threads), every process at TRACE in the system
+style, UTC. `laptop-NN.json` is each run's record; `laptop-NN-server.txt` and `laptop-NN-relay.txt`
+are the upstream server's and the relay's log windows from 10 s before the last task's completion to
+the end (per-task lines of other tasks left out; the full logs stay in the scratch sites). Host, user,
+home and scratch paths and the run key are replaced (`scrubbed: 0` in every record).
+
+Runs 01–05 are diagnostic, on the P6 head (`475334c`). Runs 06–10 are on the fixed head: `475334c`
+with P7's fixes (i) and (ii) in the working tree (`src_changed: true`), committed with them in the P7
+commit. The tail runs from the last task's `completion_time` to the upstream server's last log line.
+The segments (seconds; `tail_judge.py` holds each design bound):
+
+- s1 the site client returns the result to the relay-local server (its result bundle wait,
+  `relay.bundlewait`, 5 s); s2 the relay returns it upstream (`relay.bundlewait`, 5 s); s3 the
+  upstream server stores it; s4 the upstream scheduler finishes; s5 the upstream server signals; s6
+  the relay hears the shutdown; s7 the relay-local server signals the site; s8 the relay's final
+  heartbeat; s9 the upstream server's last line.
+
+| Run | Label | Tail | Direct tail | s1 | s2 | s3 | s4 | s5 | s6 | s7 | s8 | s9 | Relay / direct wall |
+|-----|-------|------|-------------|----|----|----|----|----|----|----|----|----|---------------------|
+| `laptop-01` | diagnostic | 6.71 | 2.67 | 0.01 | 3.00 | 0.03 | 0.77 | 0.30 | 0.00 | 1.55 | 1.04 | 0.01 | 25.8 / 21.7 |
+| `laptop-02` | diagnostic | 13.38 | 2.73 | 5.03 | 3.56 | 0.00 | 1.15 | 1.94 | 0.00 | 1.64 | 0.05 | 0.01 | 35.9 / 21.3 |
+| `laptop-03` | diagnostic | 6.64 | 2.73 | 0.00 | 2.91 | 0.03 | 0.92 | 0.12 | 0.00 | 1.64 | 1.01 | 0.00 | 24.8 / 21.2 |
+| `laptop-04` | diagnostic | 12.51 | 2.75 | 0.01 | 3.75 | 0.02 | **6.03** | 0.04 | 0.00 | 1.62 | 1.02 | 0.01 | 34.5 / 20.8 |
+| `laptop-05` | diagnostic | 6.74 | 2.65 | 0.01 | 3.00 | 0.03 | 0.78 | 0.31 | 0.00 | 1.59 | 1.02 | 0.01 | 24.8 / 21.3 |
+| `laptop-06` | post-fix | 1.72 | 0.81 | 0.01 | 0.12 | 0.03 | 0.61 | 0.00 | 0.00 | 0.48 | 0.46 | 0.01 | 20.7 / 19.2 |
+| `laptop-07` | post-fix | 1.67 | 1.75 | 0.01 | 0.12 | 0.03 | 0.67 | 0.00 | 0.00 | 0.40 | 0.43 | 0.01 | 19.8 / 20.2 |
+| `laptop-08` | post-fix | 7.00 | 1.76 | 5.04 | 0.08 | 0.00 | 0.65 | 0.00 | 0.00 | 0.27 | 0.95 | 0.01 | 29.4 / 20.3 |
+| `laptop-09` | post-fix | 6.86 | 1.66 | 5.03 | 0.07 | 0.00 | 0.84 | 0.00 | 0.00 | 0.50 | 0.41 | 0.01 | 29.4 / 20.3 |
+| `laptop-10` | post-fix | 6.88 | 1.65 | 5.04 | 0.07 | 0.00 | 0.77 | 0.00 | 0.00 | 0.07 | 0.92 | 0.01 | 29.4 / 20.3 |
+
+What the logs name (TECH.md P7 records the decision):
+
+- **The designed chain** (H0), with one wait research 07 had folded into the relay's: every run's
+  tail is the sum of designed waits. Before the fixes, s2 (the relay's result bundle, ≤ 5 s), s5 (the
+  upstream heart monitor's 2 s heartbeat read before it signals) and s7 (the relay-local server's
+  same read) make the 6.6–6.7 s tails; s1 (the site client's own result bundle, ≤ 5 s:
+  `relay.bundlewait` is also the site clients' bundle wait, and their bundle is 8 results, one per
+  executor) adds 5 s in `laptop-02` (13.4 s). After fixes (i) and (ii), s2, s5 and s7 fall to
+  0.1, 0.0 and ≤ 0.5 s (and the direct runs' tail, which has the same heart-monitor read, from about
+  2.7 to 0.8–1.8 s); what is left over 5 s is s1 alone (5.0 s in `laptop-08`–`10`).
+- **The upstream scheduler's back-off** (H1): in `laptop-04` the scheduler looked 4 ms after the last
+  results landed, saw 8 still incomplete, and backed off 4 s, then 4 s again (a result landing does
+  not wake it; only a cut or new demand does), so s4 was 6.0 s, over its 2 s bound. The back-off
+  doubles up to `server.poll` (30 s), so with the relay's result waits it can reach far longer tails,
+  as the review's one 60 s run may have.

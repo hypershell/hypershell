@@ -981,7 +981,14 @@ class HeartMonitorThread(Thread):
         self.machine.run()
 
     def signal_clients(self: HeartMonitorThread) -> None:
-        """Set signal flag to tell clients to shut down."""
+        """Tell clients to shut down once they have drained what is staged for them.
+
+        Dispatch finishes at once, so a request is told to shut down without waiting for the heart
+        monitor's next turn (which can wait out a heartbeat read); the heart monitor then logs the
+        signal and the clients it was sent to.
+        """
+        log.debug('Finishing dispatch - clients drain what is staged, then are told to shut down')
+        self.machine.queue.dispatcher.finish()
         self.machine.should_signal = True
 
     def signal_scheduler_done(self: HeartMonitorThread) -> None:

@@ -363,6 +363,29 @@ def test_returner_finals_on_flush_once_drained(relay_db: Engine) -> None:
 
 
 @mark.unit
+def test_returner_sends_at_once_when_the_site_holds_no_unfinished_task(relay_db: Engine) -> None:
+    """Told how to see that the site holds no unfinished task, the returner sends what it holds without the bundle wait.
+
+    While a task is still unfinished at the site, a partial bundle waits for the bundle wait as before.
+    """
+    task_id = complete_one(relay_db)
+    record, = dispatched('echo still running')
+    store.insert_received(relay_db, [record], identity=upstream_identity(None))
+    machine = UpstreamReturner(queue=SimpleNamespace(completed=Queue()), engine=relay_db, bundlesize=100,
+                               bundlewait=3600, poll=POLL, retention=300,
+                               idle=lambda: store.site_idle(relay_db))
+    assert machine.collect() is ReturnerState.COLLECT  # One unfinished task: the bundle waits.
+    with relay_db.begin() as conn:
+        conn.execute(Task.__table__.update().where(Task.__table__.c.id == record['id']).values(
+            completion_time=datetime.now().astimezone(), exit_status=0, client_id=str(uuid()), client_host='site-node'))
+    assert machine.collect() is ReturnerState.SEND  # Nothing left to run: at once, though the bundle wait is an hour.
+    assert machine.send() is ReturnerState.MARK
+    assert machine.mark() is ReturnerState.COLLECT
+    returned = [task['id'] for task in json.loads(machine.queue.completed.get_nowait())]
+    assert sorted(returned) == sorted([task_id, record['id']])
+
+
+@mark.unit
 def test_returner_thread_stops_within_deadline(relay_db: Engine) -> None:
     """A running returner, waiting for results, ends promptly once stopped."""
     thread = UpstreamReturnerThread(queue=SimpleNamespace(completed=Queue()), engine=relay_db, bundlesize=100,

@@ -653,9 +653,11 @@ class UpstreamReturner(StateMachine):
 
     Each cycle moves completed rows into the outbox in one transaction, then sends the oldest pending
     results as one bundle once there are `bundlesize` of them or `bundlewait` seconds have passed since
-    the last send. A bundle is marked returned only after its put returns; a put that does not return
-    leaves it pending, to be sent again. Returned results are pruned after `retention` seconds. Told to
-    flush, it sends whatever it holds at once and ends once nothing is left.
+    the last send, or at once when `idle` says the site holds no unfinished task (nothing more is coming
+    to fill the bundle, as at the end of a run). A bundle is marked returned only after its put
+    returns; a put that does not return leaves it pending, to be sent again. Returned results are
+    pruned after `retention` seconds. Told to flush, it sends whatever it holds at once and ends once
+    nothing is left.
 
     While the upstream link is down, completed rows still move into the outbox, which keeps them
     durable, and nothing is sent (WAIT_LINK). Once the link is back and has carried a heartbeat, the
@@ -670,6 +672,7 @@ class UpstreamReturner(StateMachine):
     bundlewait: float
     poll: float
     retention: float
+    idle: Callable[[], bool]
 
     sent: List[Tuple[str, str]]
     previous_send: float
@@ -681,8 +684,11 @@ class UpstreamReturner(StateMachine):
 
     def __init__(self: UpstreamReturner, queue: Any, engine: Engine,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, bundlewait: float = DEFAULT_RETURN_BUNDLEWAIT,
-                 poll: float = 1, retention: float = DEFAULT_RETENTION) -> None:
-        """Initialize with the upstream link (or a connected client) and the relay database."""
+                 poll: float = 1, retention: float = DEFAULT_RETENTION, idle: Callable[[], bool] = never) -> None:
+        """Initialize with the upstream link (or a connected client) and the relay database.
+
+        `idle`, if given, says whether the site holds no unfinished task; pending results then go at once.
+        """
         self.queue = queue
         self.link = as_link(queue)
         self.engine = engine
@@ -690,6 +696,7 @@ class UpstreamReturner(StateMachine):
         self.bundlewait = bundlewait
         self.poll = poll
         self.retention = retention
+        self.idle = idle
         self.sent = []
         self.previous_send = time.monotonic()
         self.previous_prune = time.monotonic()
@@ -735,11 +742,20 @@ class UpstreamReturner(StateMachine):
             return ReturnerState.WAIT_LINK
         waited = time.monotonic() - self.previous_send
         catching_up = not self.link.is_passed(STAGE_DRAIN)
-        if flushing or catching_up or len(pending) >= self.bundlesize or waited >= self.bundlewait:
+        if (flushing or catching_up or len(pending) >= self.bundlesize or waited >= self.bundlewait
+                or self.site_idle()):
             self.sent = pending
             return ReturnerState.SEND
         self.wake.wait(min(self.poll, self.bundlewait - waited))
         return ReturnerState.COLLECT
+
+    def site_idle(self: UpstreamReturner) -> bool:
+        """Whether the site holds no unfinished task (a failed read counts as not idle: the bundle waits)."""
+        try:
+            return bool(self.idle())
+        except SQLAlchemyError as error:
+            log.debug(f'Could not count unfinished tasks - results wait for the bundle ({error})')
+            return False
 
     def wait_link(self: UpstreamReturner) -> ReturnerState:
         """Wait for the link to carry results again, then collect (completed rows keep moving to the outbox)."""
@@ -805,11 +821,11 @@ class UpstreamReturnerThread(Thread):
 
     def __init__(self: UpstreamReturnerThread, queue: Any, engine: Engine,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, bundlewait: float = DEFAULT_RETURN_BUNDLEWAIT,
-                 poll: float = 1, retention: float = DEFAULT_RETENTION) -> None:
+                 poll: float = 1, retention: float = DEFAULT_RETENTION, idle: Callable[[], bool] = never) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-returner')
         self.machine = UpstreamReturner(queue=queue, engine=engine, bundlesize=bundlesize, bundlewait=bundlewait,
-                                        poll=poll, retention=retention)
+                                        poll=poll, retention=retention, idle=idle)
 
     def run_with_exceptions(self: UpstreamReturnerThread) -> None:
         """Run machine."""

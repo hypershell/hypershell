@@ -646,7 +646,8 @@
 
     ``.bundlewait``
         Seconds the relay waits before returning finished tasks upstream regardless of
-        `bundlesize` (default: `5`).
+        `bundlesize` (default: `5`). Once nothing is left to run at the site, it returns what it
+        holds at once.
 
     ``.poll``
         Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).

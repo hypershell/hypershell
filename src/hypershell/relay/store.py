@@ -77,8 +77,8 @@ from hypershell.data.upgrade import upgrade_schema
 # Public interface
 __all__ = ['RelayBase', 'RelayTask', 'RelayResult', 'RESULT_PENDING', 'RESULT_RETURNED', 'ensure_tables',
            'UTCDateTime', 'store_utc',
-           'LOCAL_STAMP_COLUMNS', 'local_row', 'insert_received', 'count_backlog', 'count_connected', 'count_held',
-           'roster',
+           'LOCAL_STAMP_COLUMNS', 'local_row', 'insert_received', 'count_backlog', 'site_idle', 'count_connected',
+           'count_held', 'roster',
            'result_record', 'collect_results', 'pending_results', 'mark_returned', 'prune_returned',
            'COLLECT_BATCH', 'PRUNE_BATCH', 'drop_superseded', 'unstarted', 'drop_handed_back']
 
@@ -305,6 +305,11 @@ def count_backlog(engine: Engine, zone: Optional[str] = None) -> int:
         query = query.where(table.c.zone.is_(None) if zone == DEFAULT_ZONE_ID else table.c.zone == zone)
     with engine.connect() as conn:
         return conn.execute(query).scalar()
+
+
+def site_idle(engine: Engine) -> bool:
+    """Whether the relay database holds no task not yet complete, in any zone (nothing left to run at the site)."""
+    return count_backlog(engine) == 0
 
 
 def count_connected(engine: Engine, server_id: str) -> int:

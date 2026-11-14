@@ -39,3 +39,8 @@ tests/test_relay_workload.py::test_relay_exits_at_once_when_its_tls_setting_is_n
 # P5: a zone with no site client takes what is still staged for it at an upstream shutdown (R5).
 tests/test_relay_connector.py::test_a_zone_without_site_clients_takes_what_is_staged_for_it_at_a_shutdown[database]
 tests/test_relay_connector.py::test_a_zone_without_site_clients_takes_what_is_staged_for_it_at_a_shutdown[no-database]
+
+# P7: the end-of-run tail (R8): the relay returns at once when its site has nothing left to run (fix i), and the
+# server's shutdown signal finishes dispatch without waiting out a heartbeat read (fix ii).
+tests/test_relay_fsm.py::test_returner_sends_at_once_when_the_site_holds_no_unfinished_task
+tests/test_server_fsm.py::TestHeartMonitor::test_signal_from_the_server_finishes_dispatch_at_once

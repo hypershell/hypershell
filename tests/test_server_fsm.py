@@ -222,6 +222,16 @@ class TestHeartMonitor:
         assert request(queues.dispatcher)['shutdown'] is True
         assert queues.scheduled.empty()
 
+    def test_signal_from_the_server_finishes_dispatch_at_once(self, queues) -> None:
+        """The server's signal finishes dispatch itself: a request hears the shutdown before the heart monitor's
+        next turn, which can wait out a heartbeat read."""
+        queues.dispatcher = Dispatcher()
+        thread = HeartMonitorThread(queue=queues, evict_after=10, in_memory=True)
+        assert request(queues.dispatcher)['shutdown'] is False
+        thread.signal_clients()  # The heart monitor is not running, so it takes no turn.
+        assert request(queues.dispatcher)['shutdown'] is True
+        assert thread.machine.should_signal  # Its next turn logs the signal.
+
     def test_halts_on_sentinel(self, queues) -> None:
         monitor = HeartMonitor(queue=queues, evict_after=10, in_memory=True)
         queues.heartbeat.put(make_sentinel())

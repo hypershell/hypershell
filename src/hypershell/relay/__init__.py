@@ -602,7 +602,8 @@ class RelayThread(Thread):
                                                retired=self.superseded)
             self.returner = UpstreamReturnerThread(queue=self.link, engine=engine,
                                                    bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
-                                                   poll=self.poll, retention=self.retention)
+                                                   poll=self.poll, retention=self.retention,
+                                                   idle=functools.partial(store.site_idle, engine))
             # Read the topology first, so a relay a topology sizes never launches its local fleet first.
             self.heartbeat.machine.fetch()
             self.cluster.start()

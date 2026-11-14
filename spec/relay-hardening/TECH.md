@@ -8,7 +8,7 @@ appetite: big
 status: in_progress
 branch: fix/relay-hardening
 base: develop
-current_phase: P7
+current_phase: P8
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -124,7 +124,7 @@ phases:
 - id: P7
   name: 'Tail investigation on the laptop: tooling, diagnostic runs, the fix if the
     logs name one, post-fix runs'
-  status: pending
+  status: done
   satisfies:
   - R8
   depends_on:
@@ -467,7 +467,7 @@ unchanged. Design: PLAN §6.
 **Goal:** the tail measured and attributed on the head within the budget; fixed if the logs name a
 cause whose fix fits. Design: PLAN §2 R8, §5 item 2–4; research 07.
 
-- [ ] Tooling in `spec/relay-hardening/drive/`: `tail_run.py` (loads
+- [x] Tooling in `spec/relay-hardening/drive/`: `tail_run.py` (loads
       `spec/relay/drive/relay_throughput.py` by path, unedited; TRACE, system style, `TZ=UTC`;
       records the exit time; one JSON record per run with commit, sizes, walls, tail, direct-run
       tail, segments s1–s8, last task id, WARNING/ERROR counts, kept site paths); `tail_laptop.sh N`
@@ -479,13 +479,13 @@ cause whose fix fits. Design: PLAN §2 R8, §5 item 2–4; research 07.
       tail, segments, `TAIL>5`, `OVER` per segment past its bound; `--budget N` fails on more than N
       records per directory or on an incomplete run; `--require-none-over S`; `--outcome` prints and
       checks the recorded outcome, P8). `tests/test_tail_judge.py` over synthetic records.
-- [ ] Rehearse `tail_cluster.sh` on the laptop at a reduced size (`HSD_RUNS=1`, ≤ 200 × 0.05 s via a
+- [x] Rehearse `tail_cluster.sh` on the laptop at a reduced size (`HSD_RUNS=1`, ≤ 200 × 0.05 s via a
       size override that the budget runs never set). Not a budget run; its record is kept under
       `evidence/rehearsal/`, never `laptop/`.
-- [ ] **Diagnostic runs**, at most 5, at the R8 size (2000 × 0.2 s, 32 executors) on the head; every
+- [x] **Diagnostic runs**, at most 5, at the R8 size (2000 × 0.2 s, 32 executors) on the head; every
       started run counts; records and scrubbed log windows (`T_last − 10 s` to exit) in
       `evidence/laptop/`.
-- [ ] Decide from the segments (record the decision here):
+- [x] Decide from the segments (record the decision here):
   - **H0** (every segment within its design bound; the tail tracks s1 + s4 + s6): apply fix (i) —
     the returner sends at once when the relay's store holds no unfinished task (`relay/upstream.py`),
     with a unit test; and fix (ii) — the heart monitor's shutdown signal does not wait out its 2 s
@@ -493,14 +493,82 @@ cause whose fix fits. Design: PLAN §2 R8, §5 item 2–4; research 07.
     Then the remaining laptop runs (≤ 10 in all) on the fixed head.
   - **An anomaly** (a segment `OVER` its bound): name the cause from the logs; fix it if it fits the
     appetite, else record it for outcome (b). No cluster job.
-- [ ] Record each run's tail and segments in a table here and in `evidence/laptop/README.md`. If the
+- [x] Record each run's tail and segments in a table here and in `evidence/laptop/README.md`. If the
       post-fix runs (or, with no fix, all runs) show none over 5 s, P8 asks the foreman for the
       cluster job; otherwise P8 records the outcome directly.
+
+  *As built (amended):*
+  - **Nine segments, not eight.** The relay launches its site clients with `relay.bundlewait` as their
+    own result bundle wait and a bundle of `max(relay.bundlesize, relay.num_threads)` (8 here), so the
+    last result can sit up to 5 s in a site client before the relay-local server has it; research 07's
+    s1 ran from `T_last` to the relay's next return and folded that wait in, and in `laptop-02` it read
+    as an anomaly in the return (s2 4.99 s, the next return after one that did not carry the last
+    result). `tail_run.py` takes a stamp at the relay-local server's `Completed task (<last>)`: s1 site
+    client hold, s2 relay hold, s3 land, s4 scheduler, s5 signal, s6 heard, s7 site stop, s8 final
+    beat, s9 exit; `tail_judge.py` bounds them 5.1, 5.1, 2, 2, 2, 2.1, 3, 2 and 2.5 s (+0.25 s slack).
+    Runs 01–05 were measured again from their kept scratch logs (`tail_run.py --remeasure`, marked
+    `remeasured`; no run added). The signal stamps also take the `Finishing dispatch` line fix (ii) adds.
+  - Log windows leave out the per-task lines of every task but the last (the first line counts them),
+    so a window is about 0.3 MB, not several; the full logs stay in the scratch sites. Records carry
+    `src_changed` (product source differs from the recorded commit: the post-fix runs, made before the
+    P7 commit). `tail_cluster.sh` takes `HSD_MIN_CORES` (36) and a rehearsal-only size.
+  - Rehearsal: `tail_cluster.sh` with `HSD_RUNS=1`, 200 tasks of 0.05 s on 2 clients of 4 threads,
+    `HSD_MIN_CORES=1`: complete, judged (`SIZE TAIL>5`, tail 5.11 s, no segment over), scratch copied;
+    record and windows in `evidence/rehearsal/`.
+
+  **Decision (2026-11-14).** The five diagnostic runs (tails 6.71, 13.38, 6.64, 12.51, 6.74 s) name
+  the designed chain (H0): every segment within its bound but one, and the tail the sum of the waits
+  the chain was designed with: s2 relay hold (2.9–3.8 s), s5 and s7 heart-monitor reads (to 1.9 and
+  1.6 s), s8 about 1 s, and in `laptop-02` s1 site client hold (5.0 s). One segment exceeded its bound:
+  `laptop-04` s4 6.03 s, the upstream scheduler's back-off (H1): it saw the last 8 results not yet
+  landed 4 ms before they did, backed off 4 s, and is woken only by a cut or new demand, never by a
+  landed result, so it looked again only after 6 s. Under plan-gate ruling 3 both apply: the chain is
+  fixed with the pre-authorised fixes and the remaining runs run on the fixed head; the anomaly is
+  chased from the logs (its cause named above), and **no cluster job runs**.
+  - **Fix (i)** (`relay/upstream.py`, `relay/store.py`, `relay/__init__.py`): `UpstreamReturner` takes
+    `idle`, a check that the site holds no unfinished task; the relay passes `store.site_idle` (no row
+    of its database without a completion), and pending results then go at once instead of at the
+    bundle wait. The default (never idle) keeps the returner's own tests as they were.
+    `test_returner_sends_at_once_when_the_site_holds_no_unfinished_task` (red on `2ffb5cc`).
+  - **Fix (ii)** (`server.py`, every server): `HeartMonitorThread.signal_clients` finishes dispatch
+    itself (logging `Finishing dispatch`) before it sets the heart monitor's flag, so a request hears
+    the shutdown without waiting out the heart monitor's 2 s heartbeat read; the heart monitor still
+    logs the signal on its next turn. Order kept (scheduler, then dispatch finish, then heart monitor
+    join, staged revert, sentinels). `TestHeartMonitor::test_signal_from_the_server_finishes_dispatch_at_once`
+    (red on `2ffb5cc`). `relay.bundlewait` in `docs/_include/config_param_ref.rst` says that a relay
+    with nothing left to run returns at once.
+  - The five post-fix runs: tails 1.72, 1.67, 7.00, 6.86, 6.88 s. s2 0.07–0.12 s, s5 0.00, s7
+    0.07–0.50 s; the direct runs' tail fell from about 2.7 s to 0.8–1.8 s (fix ii). Three runs are over
+    5 s, each by s1 alone (5.0 s: the site client's result bundle wait, which neither pre-authorised fix
+    touches). H1 did not recur in these five (s4 0.61–0.84 s) and is not fixed.
+  - The runs (seconds; `evidence/laptop/README.md`):
+
+  | Run | Label | Tail | Direct tail | s1 | s2 | s3 | s4 | s5 | s6 | s7 | s8 | s9 | Relay / direct wall |
+  |-----|-------|------|-------------|----|----|----|----|----|----|----|----|----|---------------------|
+  | `laptop-01` | diagnostic | 6.71 | 2.67 | 0.01 | 3.00 | 0.03 | 0.77 | 0.30 | 0.00 | 1.55 | 1.04 | 0.01 | 25.8 / 21.7 |
+  | `laptop-02` | diagnostic | 13.38 | 2.73 | 5.03 | 3.56 | 0.00 | 1.15 | 1.94 | 0.00 | 1.64 | 0.05 | 0.01 | 35.9 / 21.3 |
+  | `laptop-03` | diagnostic | 6.64 | 2.73 | 0.00 | 2.91 | 0.03 | 0.92 | 0.12 | 0.00 | 1.64 | 1.01 | 0.00 | 24.8 / 21.2 |
+  | `laptop-04` | diagnostic | 12.51 | 2.75 | 0.01 | 3.75 | 0.02 | **6.03** | 0.04 | 0.00 | 1.62 | 1.02 | 0.01 | 34.5 / 20.8 |
+  | `laptop-05` | diagnostic | 6.74 | 2.65 | 0.01 | 3.00 | 0.03 | 0.78 | 0.31 | 0.00 | 1.59 | 1.02 | 0.01 | 24.8 / 21.3 |
+  | `laptop-06` | post-fix | 1.72 | 0.81 | 0.01 | 0.12 | 0.03 | 0.61 | 0.00 | 0.00 | 0.48 | 0.46 | 0.01 | 20.7 / 19.2 |
+  | `laptop-07` | post-fix | 1.67 | 1.75 | 0.01 | 0.12 | 0.03 | 0.67 | 0.00 | 0.00 | 0.40 | 0.43 | 0.01 | 19.8 / 20.2 |
+  | `laptop-08` | post-fix | 7.00 | 1.76 | 5.04 | 0.08 | 0.00 | 0.65 | 0.00 | 0.00 | 0.27 | 0.95 | 0.01 | 29.4 / 20.3 |
+  | `laptop-09` | post-fix | 6.86 | 1.66 | 5.03 | 0.07 | 0.00 | 0.84 | 0.00 | 0.00 | 0.50 | 0.41 | 0.01 | 29.4 / 20.3 |
+  | `laptop-10` | post-fix | 6.88 | 1.65 | 5.04 | 0.07 | 0.00 | 0.77 | 0.00 | 0.00 | 0.07 | 0.92 | 0.01 | 29.4 / 20.3 |
+
+  - So R8's outcome (a) is not reached on the laptop and the budget (10 of 10) is spent: no cluster
+    job (ruling 3, twice over: a segment exceeded its bound, and post-fix runs exceed 5 s). P8 records
+    outcome (b), with a narrowed seed for the two named causes left: the site client's result bundle
+    wait at the end of a run (`relay.bundlewait` doubling as the site clients' bundle wait; a client
+    flushing when it runs nothing, or the relay giving its site clients a shorter wait), and the
+    upstream scheduler not woken by a landed result (its back-off doubling to `server.poll`).
 - **Verify:** see frontmatter (judge tests, the budget check over the laptop records, the suites a
   fix would touch).
 - **Touches:** `spec/relay-hardening/drive/tail_*.{py,sh}`, `tests/test_tail_judge.py`,
   `spec/relay-hardening/evidence/`, and only if a fix is taken, `src/hypershell/relay/upstream.py`
-  (i) / `src/hypershell/server.py` (ii) with their tests.
+  (i) / `src/hypershell/server.py` (ii) with their tests. *As built:* also `relay/store.py`,
+  `relay/__init__.py`, `tests/test_relay_fsm.py`, `tests/test_server_fsm.py`,
+  `docs/_include/config_param_ref.rst`, `drive/red.txt`.
 
 ## Phase P8 — Conditional cluster job and the R8 outcome
 **Satisfies:** R8 · **Depends on:** P7
