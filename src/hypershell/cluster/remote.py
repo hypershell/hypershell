@@ -1020,13 +1020,17 @@ class AutoScalingCluster(Thread):
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: AutoScalingCluster) -> None:
-        """Start child threads, wait; stop the server and raise if the autoscaler ended on failed launches."""
+        """Start child threads, wait; stop the server and raise if the autoscaler ended on failed launches.
+
+        That stop does not wait on input still being read: no client is left to run it, and a producer
+        that stays open would hold the stop forever. Tasks already committed are kept.
+        """
         self.server.start()
         self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         self.autoscaler.start()
         self.autoscaler.join()
         if self.autoscaler.machine.exhausted:
-            self.server.stop(wait=True)
+            self.server.stop(wait=True, leave_input=True)
             failures = self.autoscaler.machine.failures
             exits = ', '.join(f'{pid} (zone: {zone}) {exit_text(status)}' for pid, zone, status in failures)
             host, port = self.advertised

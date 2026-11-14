@@ -23,9 +23,10 @@ import os
 import sys
 import json
 import re
+import time
 from pathlib import Path
 from datetime import datetime
-from subprocess import run
+from subprocess import run, Popen, PIPE, TimeoutExpired
 
 # External libs
 import pytest
@@ -37,7 +38,7 @@ from cmdkit.config import Configuration, Namespace
 from tests.conftest import free_port
 from tests.test_zone_model import task_db  # noqa: fixture
 from tests.test_zone_autoscale import FleetDB, FakeProc, FakeLaunch, run_checks, DEFAULT, CPU
-from tests.test_cluster_exit import run_child
+from tests.test_cluster_exit import run_child, kill_group
 from hypershell.core.config import default, reload_env, ConfigurationError
 from hypershell.core.logging import INSTANCE
 from hypershell.data.model import Task, Client
@@ -373,3 +374,40 @@ def test_cluster_with_the_limit_off_keeps_relaunching(temp_site: Path) -> None:
     seen = run_scaling(Path(temp_site), wait=12, failed_launches=0)
     assert seen['waiting'] and seen['error'] is None, seen
     assert sum('exited with status 1' in text for text in seen['warnings']) >= 4, seen['warnings']
+
+
+OPEN_INPUT_TIMEOUT: Final[float] = 30
+"""Seconds an autoscaling cluster reading input that stays open is given before the test fails."""
+
+OPEN_INPUT_BOUND: Final[float] = 15
+"""Seconds from the start within which that cluster must have exited: three launches, two seconds apart, fail."""
+
+
+@mark.integration
+def test_cluster_reading_open_input_stops_after_three_failed_launches(temp_site: Path) -> None:
+    """Tasks on standard input from a producer that stays open: the cluster still exits 5, keeping the committed task."""
+    site = Path(temp_site)
+    argv = [HS, 'cluster', '--no-tls', '-H', ADDRESS, '-p', str(free_port()),
+            '--autoscaling', 'fixed', '-P', '2s', '--launcher', 'false']
+    stderr_path = site / 'open-input.stderr'
+    with open(stderr_path, mode='w') as stderr, open(os.devnull, mode='w') as stdout:
+        started = time.monotonic()
+        proc = Popen(argv, cwd=site, stdin=PIPE, stdout=stdout, stderr=stderr, start_new_session=True, text=True)
+        try:
+            proc.stdin.write('echo 1\n')
+            proc.stdin.flush()
+            try:
+                proc.wait(timeout=OPEN_INPUT_TIMEOUT)
+            except TimeoutExpired:
+                pytest.fail(f'Cluster did not exit within {OPEN_INPUT_TIMEOUT}s:\n' + stderr_path.read_text()[-4000:])
+            elapsed = time.monotonic() - started
+        finally:
+            kill_group(proc)
+            proc.stdin.close()
+    log_text = stderr_path.read_text()
+    assert proc.returncode == exit_status.runtime_error, log_text[-4000:]
+    assert elapsed <= OPEN_INPUT_BOUND, log_text[-4000:]
+    assert '3 launched clients in a row exited non-zero' in log_text
+    assert 'Fatal Python error' not in log_text
+    counted = run([HS, 'list', '--count'], cwd=site, capture_output=True, text=True, timeout=60)
+    assert counted.returncode == 0 and counted.stdout.strip() == '1', counted.stdout + counted.stderr

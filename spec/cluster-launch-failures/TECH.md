@@ -245,8 +245,8 @@ is warned about as it happens; a run whose clients do the work ends as today.
       `SubmitThread.stop` and `LiveSubmitThread.stop` then call `LoaderThread.leave()` (halt, no
       join) instead of `stop`, and both `run` paths wait with `LoaderThread.join_unless_left()`, which
       returns once the loader ends or is left. Committed rows stay committed. Only `watch_launched`
-      (R1's failure stop) passes `leave_input=True`; every other stop and a normal run read the input
-      to its end as before (`submit.py`, `server.py`, `cluster/watch.py`).
+      (R1's failure stop) and R3's failure stop (below) pass `leave_input=True`; every other stop and
+      a normal run read the input to its end as before (`submit.py`, `server.py`, `cluster/watch.py`).
 - [x] Tests (`tests/test_cluster_exit.py`): unit — a halt ends the scheduler's 30 s wait (during and
       before it); a left loader is not waited on and enqueues nothing more; a loader not left is
       waited on to the end of its input; the stand-in server records `leave_input`. Integration
@@ -259,12 +259,17 @@ is warned about as it happens; a run whose clients do the work ends as today.
   15.0 s after the exit (head 2.9 s); killed client 16.4 s (head 2.4 s); late `--forever` task 15.1 s
   after the submit (head 3.0 s); open input, `--no-db` and database, still running at 30 s (head:
   exit 5 after 6.5 s and 4.4 s).
-- **Not changed (outside the ruling; for the foreman):** R3's stop in
-  `AutoScalingCluster.run_with_exceptions` still calls `server.stop(wait=True)`. The F1 fix speeds
-  it up, but with tasks on standard input from a producer that stays open it still waits on the
-  loader: `hs cluster --autoscaling fixed -P 2s --launcher false` (database) given one line was still
-  running at 30 s, its log ending at "Stopping (loader)" after three failed launches. Passing
-  `leave_input=True` there is the same one-word change, if ruled in.
+- [x] **R3's stop, the same way (foreman ruling after `fcdc985`):** `AutoScalingCluster.run_with_exceptions`
+      stops the server with `leave_input=True` when the autoscaler is exhausted on failed launches
+      (`cluster/remote.py`); every other autoscaling stop reads its input as before. Test
+      (`tests/test_autoscale_failed_launches.py`): `hs cluster --autoscaling fixed -P 2s --launcher
+      false` with a database, one line on standard input from a producer that stays open, exits 5
+      within 15 s naming the three launches, with the committed task kept (`hs list --count` → 1).
+      Red on `fcdc985` (its src exported): still running at 30 s, its log ending at "Stopping
+      (loader)"; head: exit 5 after 8.5 s, one row kept. Re-verified: the P3 verify (its six test
+      files 271 passed; `autoscale-fail` 5 after 8 s, `autoscale-off` still running at 30 s,
+      `advertise` ok; zone drives `founding` and `fixed` PASS; Sphinx `-W` clean), and
+      `test_cluster_exit.py` with `test_autoscale_failed_launches.py`: 59 passed on 3.14 and on 3.11.
 
 ## Phase P3 — Autoscaling's failed-launch limit; relay fleets never stop
 **Satisfies:** R2, R3, R5, R8 (key docs) · **Depends on:** P2
