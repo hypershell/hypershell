@@ -198,3 +198,17 @@ and again after this design. Touched: §9, §10, §12, and the high-blast-radius
 - **Measurement**: `research/latency.py compare` against the base `src/`, three interleaved rounds,
   results saved to `evidence/`.
 - **Docs**: the `-W` Sphinx build.
+
+## Plan-gate rulings (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+1. **R8 for 2.8.7** reads as connect, TLS, authenticate, then refused as too old, as on `develop`
+   (recorded in GOAL above its Evidence plan).
+2. **A bad `server.tls.handshake`** raises `ArgumentError` (exit 2) in `hs server`, `hs cluster`
+   and `hs relay`, following the relay's `autoscale.period` precedent.
+3. **The `docs/security.rst` monitoring bullet** gains one neutral clause: a handshake closed at the
+   deadline is logged.
+4. **Cluster coverage:** local-mode drives plus the shared-path unit test suffice.
+5. **The WARNING may name the peer address** of the close that triggered it. It must not name
+   anything the peer sent.

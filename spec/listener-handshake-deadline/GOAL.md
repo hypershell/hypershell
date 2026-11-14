@@ -88,6 +88,11 @@ thread and descriptor bound through the existing open-file reserve, with a conne
 non-goal; the test numbers as floors; appetite small. The contract is locked; `hs-plan` designs
 against it.
 
+**Ruled at the plan gate** (2026-11-14, foreman): R8 for a 2.8.7 client reads as "connects,
+completes TLS and authenticates, then is refused as too old, exactly as on `develop`". Every 2.9
+server refuses a 2.8.x client for its missing work-request protocol, and this cycle does not change
+that.
+
 ## Evidence plan
 
 - **Unit/integration tests** (in the queue TLS or limits suite), each **red on `develop`** and green
