@@ -6,8 +6,8 @@ However, some capabilities are only possible when a database is active
 Connection details must to be specified by your configuration.
 This can be entirely through environment variables or within files.
 SQLite is automatically initialized upon opening the connection but
-Postgres must be explicitly initialized via ``hs initdb`` or at launch with
-the ``--initdb`` command-line option.
+Postgres must be explicitly initialized via ``hs initdb``, or by launching ``hs server``,
+``hs submit``, or ``hs cluster`` with the ``--initdb`` command-line option.
 An existing database created by an earlier release is upgraded in place on first use,
 for both SQLite and Postgres. The upgrade only adds missing tables, columns, and indexes and never
 rewrites existing tasks; on Postgres it also drops the ``UNIQUE`` constraints on the retry-chain

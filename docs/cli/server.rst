@@ -23,6 +23,10 @@ Description
    A key on the command line is refused; the server takes it from the environment or a configuration
    file.
 
+.. versionchanged:: 2.9.0
+   ``--initdb`` initializes the database at launch, as for ``hs submit`` and ``hs cluster``, and
+   ``--no-db`` leaves the configured database alone.
+
 .. include:: ../_include/server_help.rst
 
 .. _cli_server_sites:

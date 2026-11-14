@@ -1742,7 +1742,7 @@ class ServerApp(Application):
         self.auth = resolve_auth('server')
         self.check_args()
         self.enable_tls()
-        ensuredb()
+        self.check_database()
         if self.autoscaling_policy is not None:
             # Imported here: the cluster package imports this module.
             from hypershell.cluster.topology import serve_with_sites
@@ -1824,6 +1824,11 @@ class ServerApp(Application):
         if self.no_confirm:
             raise ArgumentError('Cannot use --autoscaling with --no-confirm')
         self.forever_mode = True
+
+    def check_database(self: ServerApp) -> None:
+        """Initialize the database with --initdb, else check (and upgrade) it; never open it with --no-db."""
+        if not self.in_memory:
+            ensuredb(auto_init=self.auto_initdb)
 
     def special_options(self: ServerApp) -> bool:
         """Special terminating options print information lazily (not import time)."""

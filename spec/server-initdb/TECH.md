@@ -1,39 +1,63 @@
 ---
 slug: server-initdb
-title: "hs server --initdb initializes the database"
+title: hs server --initdb initializes the database
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/server-initdb
 base: develop
-current_phase: P1
-last_updated: "2026-11-14"
+current_phase: P2
+last_updated: '2026-11-14'
 phases:
-  - id: P1
-    name: "Server start-up honours --initdb and --no-db; unit matrix, SQLite drive, docs"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R7]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: 'uv run pytest -q -m unit tests/test_server_initdb.py tests/test_server.py tests/test_key_option.py && env -u HS_TEST_POSTGRES uv run pytest -q -rs tests/test_server_initdb.py && git diff --quiet 6c46cbd -- src/hypershell/data src/hypershell/submit.py src/hypershell/cluster src/hypershell/task.py src/hypershell/relay share && ! grep -q "or launching with" docs/_include/database.rst && ! grep -q "does not initialize the database, even with" docs/_include/database.rst && grep -A3 "versionchanged:: 2.9.0" docs/cli/server.rst | grep -q -e "--initdb" && UV_PROJECT_ENVIRONMENT="$TMPDIR/docs-venv" uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs "$TMPDIR/docs-html"'
-  - id: P2
-    name: "Real-CLI regression on PostgreSQL and TimescaleDB; CI runs it"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R7]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: 'l="$TMPDIR/hs-server-initdb-p2.log"; HS_TEST_POSTGRES=postgresql+psycopg://postgres:postgres@localhost:5432/postgres HS_TEST_TIMESCALE=community uv run --extra postgres pytest -v -rs tests/test_server_initdb.py tests/test_timescale.py > "$l" 2>&1; r=$?; tail -n 8 "$l"; test $r -eq 0 && ! grep -q "SKIPPED.*test_server_initdb" "$l" && grep -q "passed" "$l" && grep -q "tests/test_server_initdb.py" .github/workflows/tests.yml'
+- id: P1
+  name: Server start-up honours --initdb and --no-db; unit matrix, SQLite drive, docs
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: 'uv run pytest -q -m unit tests/test_server_initdb.py tests/test_server.py
+    tests/test_key_option.py && env -u HS_TEST_POSTGRES uv run pytest -q -rs tests/test_server_initdb.py
+    && git diff --quiet 6c46cbd -- src/hypershell/data src/hypershell/submit.py src/hypershell/cluster
+    src/hypershell/task.py src/hypershell/relay share && ! grep -q "or launching with"
+    docs/_include/database.rst && ! grep -q "does not initialize the database, even
+    with" docs/_include/database.rst && grep -A3 "versionchanged:: 2.9.0" docs/cli/server.rst
+    | grep -q -e "--initdb" && UV_PROJECT_ENVIRONMENT="$TMPDIR/docs-venv" uv run --python
+    3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs "$TMPDIR/docs-html"'
+- id: P2
+  name: Real-CLI regression on PostgreSQL and TimescaleDB; CI runs it
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R7
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: l="$TMPDIR/hs-server-initdb-p2.log"; HS_TEST_POSTGRES=postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+    HS_TEST_TIMESCALE=community uv run --extra postgres pytest -v -rs tests/test_server_initdb.py
+    tests/test_timescale.py > "$l" 2>&1; r=$?; tail -n 8 "$l"; test $r -eq 0 && !
+    grep -q "SKIPPED.*test_server_initdb" "$l" && grep -q "passed" "$l" && grep -q
+    "tests/test_server_initdb.py" .github/workflows/tests.yml
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — `hs server --initdb` initializes the database
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above
@@ -82,7 +106,7 @@ code+state commit.
 behaves as today otherwise, proven per scheduling mode without a database server, with the docs
 corrected in the same commit.
 
-- [ ] Write `tests/test_server_initdb.py` (module docstring naming the `HS_TEST_POSTGRES` /
+- [x] Write `tests/test_server_initdb.py` (module docstring naming the `HS_TEST_POSTGRES` /
       `HS_TEST_TIMESCALE` conventions, as `tests/test_timescale.py` does) with the unit matrix of
       PLAN §2.3: in-process `ServerApp.main(argv)`; `monkeypatch` recorders for
       `hypershell.data.checkdb`, `.upgradedb`, `hypershell.data.timescale.prepare`/`.converge`,
@@ -94,22 +118,22 @@ corrected in the same commit.
       (`--autoscaling fixed --no-db` → exit 2, nothing recorded). If the import-time configuration
       has no SQLite file, give the SQLite rows one through `monkeypatch` so `ensuredb`'s
       missing-configuration refusal does not fire. All `@mark.unit`.
-- [ ] Add the refusal unit case: `prepare` raising `TimescaleError('…')` under `timescale` with
+- [x] Add the refusal unit case: `prepare` raising `TimescaleError('…')` under `timescale` with
       `--initdb` → return `exit_status.runtime_error`, message logged, neither `upgradedb` nor
       `serve` recorded.
-- [ ] Add the SQLite real-CLI case (`@mark.integration`, `temp_site`): a two-line task file,
+- [x] Add the SQLite real-CLI case (`@mark.integration`, `temp_site`): a two-line task file,
       `hs server --no-db -p PORT FILE` and `hs client -p PORT -T 10` as subprocesses with
       `HYPERSHELL_SERVER_AUTH` set; both exit 0, the client's output holds both tasks' output, and
       the configured database file does not exist. Write the launch helper (free port via
       `find_available_ports` or a bound socket; wait until the port accepts, bounded; client;
       terminate/kill the server in `finally`) so P2 reuses it.
-- [ ] **Red check:** run the new module before touching `server.py`; record in the commit body
+- [x] **Red check:** run the new module before touching `server.py`; record in the commit body
       which rows fail (expected: every `--initdb` row under postgres/timescale, every `--no-db` row,
       the refusal case, the SQLite drive).
-- [ ] `src/hypershell/server.py`: replace the bare `ensuredb()` in `ServerApp.run` with
+- [x] `src/hypershell/server.py`: replace the bare `ensuredb()` in `ServerApp.run` with
       `self.check_database()`; add `ServerApp.check_database()` per PLAN §2.1 (skip under
       `in_memory`, else `ensuredb(auto_init=self.auto_initdb)`). Nothing else in the file changes.
-- [ ] Docs per PLAN §2.4: `docs/_include/server_help.rst` (`--initdb`, `--no-db`);
+- [x] Docs per PLAN §2.4: `docs/_include/server_help.rst` (`--initdb`, `--no-db`);
       `docs/_include/database.rst` (SQLite note, Initialization, TimescaleDB section's three
       passages); `docs/_include/database_alt.rst`; `docs/cli/server.rst` third
       `.. versionchanged:: 2.9.0` with one clause. Read each against the behaviour.
