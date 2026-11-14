@@ -371,7 +371,7 @@ while `-W 5m` works. `--delay-start` gives a negative value its own meaning (a r
 the strict parser refuses.
 
 *Horizon: near-term, small · Depends on: `size-and-duration-units` · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/duration-units-remaining-options.md`](issues/duration-units-remaining-options.md) · *status: unshaped*
+**Seed:** [`issues/duration-units-remaining-options.md`](issues/duration-units-remaining-options.md) · *status: adopted:duration-units-remaining*
 
 ## `auth_env` and `auth_eval` in a config file break every command
 
