@@ -46,3 +46,17 @@
 - **Skill cause:** Step 6 asks for a real `verify:` per phase but gives no pattern for the red half of a fails-before/passes-after criterion, which `hs-feature` GOALs routinely state.
 - **Recommended fix:** Ship a generic `.agents/factory/bin/red_check.sh <base-rev> <list>` and reference it from Step 6 and the TECH template whenever a GOAL's R-IDs say "fails on <rev>".
 - **Confidence:** med · **Effort:** small
+
+## F6 — The blind diff's `spec/` exclusion also hides the drives a GOAL grades
+`origin=hs-review:step2 severity=low category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** R9 grades `spec/relay-hardening/drive/red_check.sh`, `red.txt` and the drives, and RV3/RV4 were found in them; the skill's only diff command, `git diff {base}...HEAD -- . ':(exclude)spec/'`, leaves them out. The reviewer saw them only because the brief added `git diff {base}...HEAD -- 'spec/*/drive/*'`.
+- **Skill cause:** Step 2 and the rubric treat everything under `spec/` as author rationale, but `spec/{slug}/drive/` holds the evidence tooling a GOAL routinely names as a requirement's proof.
+- **Recommended fix:** In Step 2 and the rubric's "What the reviewer sees", add the drive pathspec as a second diff the reviewer gets, while PLAN/TECH/research/META/evidence stay excluded. Blind-review integrity is kept only if drive scripts carry no design rationale; say so in the hs-plan drive guidance.
+- **Confidence:** high · **Effort:** small
+
+## F7 — No rule for grading a criterion whose record the GOAL puts in `TECH.md`
+`origin=hs-review:step3 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** R8's outcome (b) is met only if `TECH.md` records the runs, tails, logs and causes. The blind reviewer may not read `TECH.md`, and the skill lets the orchestrator read it for `base`/`slug`/`kind` only; I graded the R8 record myself and kept its content out of the reviewer's inputs.
+- **Skill cause:** The skill assumes every R-ID is graded from the diff, so a GOAL that names `TECH.md` as its record has no grader.
+- **Recommended fix:** Say in Step 3 that the orchestrator grades any criterion whose record the GOAL places in `TECH.md`, by reading only that record, and notes it in REVIEW.md; the reviewer's matrix marks such a row "orchestrator's". Do not pass the record to the reviewer: that would weaken blind review.
+- **Confidence:** high · **Effort:** small

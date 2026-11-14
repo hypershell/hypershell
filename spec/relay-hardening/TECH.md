@@ -5,11 +5,11 @@ title: 'Relay hardening for 2.9.0: no aborts on removed rows or a restarted upst
   clock'
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/relay-hardening
 base: develop
 current_phase: done
-last_updated: '2026-11-13'
+last_updated: '2026-11-14'
 phases:
 - id: P1
   name: 'Shared conditional task writes: the eviction revert and the dispatch stamp,
@@ -148,10 +148,11 @@ phases:
   verify: uv run pytest -v tests/test_tail_judge.py && uv run python spec/relay-hardening/drive/tail_judge.py
     --budget 10 --outcome spec/relay-hardening/evidence/laptop
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: a7413400fe513991a0fb414f8b007474dfc3b824
+  verdict: changes-requested
+  blocked_reason: 'Review cycle 1: RV2-RV4 LOW confirmed (invariants.md §1 sentence,
+    red.txt harness-red entries, pair judge path); RV1 plausible, maintainer triage'
+  cycle: 1
 ---
 # TECH.md — Relay hardening for 2.9.0
 
