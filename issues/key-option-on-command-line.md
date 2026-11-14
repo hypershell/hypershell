@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:key-option-refused
 kind: fix
 appetite: small
 lane: public

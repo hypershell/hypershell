@@ -396,7 +396,7 @@ all show it. Nothing needs the option: each command already reads `HYPERSHELL_SE
 `develop` and on the 2.8 line.
 
 *Horizon: near-term, small · Depends on: — · Refs: the key hand-off hardening (#80, #81)*
-**Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: unshaped*
+**Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: adopted:key-option-refused*
 
 ## Environment variables cannot reach every configuration key
 
