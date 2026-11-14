@@ -8,7 +8,7 @@ appetite: big
 status: in_progress
 branch: fix/relay-hardening
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -51,7 +51,7 @@ phases:
     $TMPDIR/docs-html
 - id: P3
   name: A restarted upstream's stale proxy id counts as a lost link, all four roles
-  status: pending
+  status: done
   satisfies:
   - R3
   - R9
@@ -297,11 +297,11 @@ on; a contended row that still qualifies lands. Design: PLAN §2 R1, R2; researc
 reconnects and carries on; never exit 5, never a refused hand-back on that account. Design: PLAN §2
 R3; research 03.
 
-- [ ] `core/reconnect.py`: `is_stale_proxy(error)` (a `RemoteError` whose text's last non-blank line
+- [x] `core/reconnect.py`: `is_stale_proxy(error)` (a `RemoteError` whose text's last non-blank line
       matches `KeyError: '[0-9a-f]+'`), OR-ed into `is_transport` (`:101`); `call` logs a short
       reason ("upstream server restarted (unknown proxy id …)"), not the remote traceback; the module
       docstring's error classes updated. No change to `core/queue.py`.
-- [ ] R9 tests in `tests/test_relay_link.py` (`@mark.integration`): parametrised over
+- [x] R9 tests in `tests/test_relay_link.py` (`@mark.integration`): parametrised over
       `puller`/`heartbeat`/`returner`/`handback` with each role's real call shape; `QueueServer` on
       port 0, link with deadline 5 and backoff 0.01–0.02, warm up through another role, shut the old
       server down **keeping it referenced**, start a new one on the same port; the first call raises
@@ -309,6 +309,11 @@ R3; research 03.
       advanced (red, ×4). A unit test of the predicate: true for the real text; false for another
       `RemoteError` text, a bare `KeyError`, `RemoteError('Unserializable message: …')`. Optional
       role-level check (`RelayThread.hand_back` keeps `handback_due`, logs no "Could not hand back").
+      *As built:* the short reason comes from `describe` beside `is_stale_proxy` (`stale_proxy_id`
+      gives the id); the restart test also asserts that the one "Lost connection" WARNING names the
+      restart and carries no traceback. The optional role-level check is not taken: each role's
+      `LinkDown` handling is unchanged and already covered, and P6's `restart` drive runs the roles
+      end to end.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/core/reconnect.py`, `tests/test_relay_link.py`, `drive/red.txt`.
 

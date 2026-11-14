@@ -5,7 +5,8 @@
 
 The link is driven with a fake client factory, an injected clock and random source, and a sleep that
 records each backoff wait and advances the clock instead of waiting. Calls run on real worker threads
-(the deadline is real time, kept short here).
+(the deadline is real time, kept short here). A restart of the upstream server is driven for real: a
+link on a queue server that is shut down and started again on the same port.
 """
 
 
@@ -20,17 +21,22 @@ import logging
 import threading
 from queue import Full as QueueFull
 from multiprocessing import AuthenticationError
-from multiprocessing.managers import State as ManagerState
+from multiprocessing.managers import RemoteError, State as ManagerState
 
 # External libs
 import pytest
 from pytest import mark
 
 # Internal libs
-from hypershell.core.queue import QueueVersionError
+from hypershell.core import reconnect
+from hypershell.core.queue import QueueVersionError, QueueServer, QueueClient, QueueConfig
 from hypershell.core.tls import TLSError
+from hypershell.core.heartbeat import Heartbeat
+from hypershell.core.topology import handback_text
 from hypershell.core.reconnect import (UpstreamLink, FixedLink, LinkDown, LinkState, as_link, backoff_delay,
                                        is_fatal, is_transport, REPORT_INTERVAL)
+from hypershell.data.model import serialize_tasks
+from hypershell.relay.upstream import request_text
 
 
 DEADLINE = 10.0  # Seconds a test waits on the link's own threads.
@@ -388,3 +394,80 @@ def test_fixed_link_calls_in_place() -> None:
     assert isinstance(link, FixedLink) and as_link(link) is link
     assert link.call('r', lambda c: (c, threading.current_thread())) == (client, threading.current_thread())
     assert link.ready(('beat', )) and link.wait_up() and link.outage == 0
+
+
+# --- A restarted upstream server -----------------------------------------------------------------
+
+AUTH = 'relay-link-restart-key-0123456789'
+IDENTITY = 'relay-1'
+
+STALE_TRACEBACK = ('Traceback (most recent call last):\n'
+                   '  File "/usr/lib/python3.14/multiprocessing/managers.py", line 211, in serve_client\n'
+                   '    obj, exposed, gettypeid = id_to_obj[ident]\n'
+                   '                              ~~~~~~~~~^^^^^^^\n'
+                   "KeyError: '10a2cf820'\n")
+
+ROLE_CALLS = {
+    'puller': lambda client: client.dispatcher.request(request_text(IDENTITY, None, 1, 0)),
+    'heartbeat': lambda client: client.heartbeat.put(Heartbeat.new(uuid=IDENTITY, host='relay-host').pack(),
+                                                     timeout=2),
+    'returner': lambda client: client.completed.put(serialize_tasks([]), timeout=2),
+    'handback': lambda client: client.dispatcher.handback(handback_text(IDENTITY, [])),
+}
+
+
+def loopback(port: int = 0) -> QueueConfig:
+    """Loopback queue configuration without TLS."""
+    return QueueConfig(host='127.0.0.1', port=port, auth=AUTH, size=2)
+
+
+@mark.unit
+def test_stale_proxy_is_a_transport_error() -> None:
+    """A server's answer to a proxy id it does not hold is a lost link; other remote errors are not."""
+    stale = RemoteError(STALE_TRACEBACK)
+    assert reconnect.is_stale_proxy(stale) and is_transport(stale) and not is_fatal(stale)
+    assert reconnect.describe(stale) == 'upstream server restarted (unknown proxy id 10a2cf820)'
+    exposed = RemoteError('Traceback (most recent call last):\n'
+                          '  File "/usr/lib/python3.14/multiprocessing/managers.py", line 215, in serve_client\n'
+                          "AttributeError: method 'shutdown' of <class 'queue.Queue'> object "
+                          "is not in exposed=('put',)\n")
+    for error in (exposed, KeyError('a1b2c3'), RemoteError('Unserializable message: <object>'), RemoteError()):
+        assert not reconnect.is_stale_proxy(error) and not is_transport(error)
+
+
+@mark.integration
+@mark.parametrize('role', list(ROLE_CALLS))
+def test_first_call_after_an_upstream_restart_is_a_lost_link(role: str, caplog) -> None:
+    """A role's first call through proxies the server before a restart minted counts as a lost link.
+
+    The link connects and mints the dispatcher through another role; the server is shut down and a new
+    one is started on its port. The role's first call raises `LinkDown` naming the restart, the link
+    reconnects, and the same call then succeeds on the new connection.
+    """
+    old = QueueServer(loopback())
+    old.start()
+    port = old.address[1]
+    link = UpstreamLink(lambda: QueueClient(loopback(port)), name=f'127.0.0.1:{port}',
+                        deadline=5, backoff_base=0.01, backoff_cap=0.02)
+    new = None
+    try:
+        link.start()
+        assert link.wait_up(DEADLINE)
+        link.call('warm-up', lambda client: client.dispatcher)
+        epoch = link.epoch
+        old.shutdown()  # Kept referenced, so the new server cannot mint an id the old one did.
+        new = QueueServer(loopback(port))
+        new.start()
+        with caplog.at_level(logging.WARNING, logger='hypershell.core.reconnect'):
+            with pytest.raises(LinkDown, match='upstream server restarted') as raised:
+                link.call(role, ROLE_CALLS[role])
+        lost, = [record.getMessage() for record in caplog.records if 'Lost connection' in record.getMessage()]
+        assert lost.startswith(f'Lost connection to 127.0.0.1:{port} (upstream server restarted (unknown proxy id ')
+        assert 'Traceback' not in lost and 'Traceback' not in str(raised.value)
+        assert link.wait_up(DEADLINE)
+        link.call(role, ROLE_CALLS[role])
+        assert link.epoch == epoch + 1
+    finally:
+        link.stop(DEADLINE)
+        if new is not None:
+            new.shutdown()

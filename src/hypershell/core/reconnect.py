@@ -10,7 +10,9 @@ bound of their own: against a peer that stops answering (a half-open connection,
 call would wait forever, and a connection whose answer timed out still holds that answer, so it can
 never be used again. A call that fails on the transport, or overruns its deadline, takes the link
 down for that connection and raises `LinkDown`; its worker is retired (one stuck in a call is
-abandoned, and ends when its socket does). An error that reconnecting cannot cure (another
+abandoned, and ends when its socket does). A call answered by a server that does not know the
+proxy it was made through is a transport failure too: the server restarted at the same address,
+and the proxy was minted by the one before it. An error that reconnecting cannot cure (another
 work-request protocol, a wrong key, a certificate that does not verify) fails the link: it is
 raised to every caller from then on, unchanged, so the program exits as a client would. Any other
 error (a full queue, say) is the caller's to handle and leaves the link as it was.
@@ -46,6 +48,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Iterable, Optional, Set, Final
 
 # Standard libs
+import re
 import ssl
 import time
 import random
@@ -55,7 +58,7 @@ from queue import SimpleQueue
 
 # External libs
 from multiprocessing import AuthenticationError
-from multiprocessing.managers import State as ManagerState
+from multiprocessing.managers import RemoteError, State as ManagerState
 
 # Internal libs
 from hypershell.core.logging import Logger
@@ -64,7 +67,7 @@ from hypershell.core.tls import TLSError
 
 # Public interface
 __all__ = ['UpstreamLink', 'FixedLink', 'LinkDown', 'LinkState', 'as_link', 'is_fatal', 'is_transport',
-           'backoff_delay', 'DEFAULT_DEADLINE', 'DEFAULT_BACKOFF_BASE', 'DEFAULT_BACKOFF_CAP',
+           'is_stale_proxy', 'backoff_delay', 'DEFAULT_DEADLINE', 'DEFAULT_BACKOFF_BASE', 'DEFAULT_BACKOFF_CAP',
            'DEFAULT_EVICT_HINT', 'REPORT_INTERVAL']
 
 # Initialize logger
@@ -92,15 +95,45 @@ FATAL_ERRORS: Final[tuple] = (QueueVersionError, AuthenticationError, TLSError, 
 TRANSPORT_ERRORS: Final[tuple] = (EOFError, OSError)
 """Errors of the connection itself (`OSError` covers resets, refusals, timeouts and other socket and TLS errors)."""
 
+UNKNOWN_PROXY: Final[re.Pattern] = re.compile(r"KeyError: '([0-9a-f]+)'")
+"""Last line of the traceback a manager server returns for a proxy id it does not hold."""
+
 
 def is_fatal(error: BaseException) -> bool:
     """Whether `error` ends the link for good (see `FATAL_ERRORS`)."""
     return isinstance(error, FATAL_ERRORS)
 
 
+def stale_proxy_id(error: BaseException) -> Optional[str]:
+    """The proxy id a server did not know, if `error` is its answer to a call through that proxy.
+
+    A manager server looks up a call's proxy id before it runs the method, and on a miss returns its
+    traceback, which the proxy raises as a `RemoteError`; a restarted server holds none of the ids its
+    predecessor minted. An error a method raises itself arrives as that error, never as this one.
+    """
+    if not isinstance(error, RemoteError) or not error.args:
+        return None
+    lines = [line.strip() for line in str(error.args[0]).splitlines() if line.strip()]
+    match = UNKNOWN_PROXY.fullmatch(lines[-1]) if lines else None
+    return None if match is None else match.group(1)
+
+
+def is_stale_proxy(error: BaseException) -> bool:
+    """Whether `error` is a restarted server's answer to a proxy its predecessor minted."""
+    return stale_proxy_id(error) is not None
+
+
 def is_transport(error: BaseException) -> bool:
     """Whether `error` is a failure of the connection, which a new connection may cure."""
-    return isinstance(error, TRANSPORT_ERRORS) and not is_fatal(error)
+    return (isinstance(error, TRANSPORT_ERRORS) and not is_fatal(error)) or is_stale_proxy(error)
+
+
+def describe(error: BaseException) -> str:
+    """A transport error in a log line; a stale proxy id is named as a restart, without the server's traceback."""
+    proxy = stale_proxy_id(error)
+    if proxy is not None:
+        return f'upstream server restarted (unknown proxy id {proxy})'
+    return f'{error.__class__.__name__}: {error}'
 
 
 def backoff_delay(attempt: int, fraction: float, base: float = DEFAULT_BACKOFF_BASE,
@@ -286,8 +319,9 @@ class UpstreamLink:
             self.fail(error)
             raise error
         if is_transport(error):
-            self.mark_down(epoch, f'{error.__class__.__name__}: {error}')
-            raise LinkDown(f'Upstream link down ({error.__class__.__name__}: {error})') from error
+            reason = describe(error)
+            self.mark_down(epoch, reason)
+            raise LinkDown(f'Upstream link down ({reason})') from error
         raise error
 
     # --- State -----------------------------------------------------------------------------------
