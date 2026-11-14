@@ -3,7 +3,7 @@ slug: key-option-refused
 title: Refuse the queue key on a command line
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/key-option-refused
 base: develop
 current_phase: done
