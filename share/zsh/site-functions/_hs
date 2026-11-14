@@ -375,7 +375,7 @@ function _hs_info() {
 function _hs_wait() {
     _arguments -s \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
-        '(-n --interval)'{-n,--interval}'[Seconds between polling (default: 5)]:seconds:(5 10 30 60)' \
+        '(-n --interval)'{-n,--interval}'[Time between polling; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 5)]:seconds:(5 10 30 60 1m)' \
         '(-i --info -s --status -r --return)'{-i,--info}'[Print info on task]' \
         '(-i --info -s --status -r --return)'{-s,--status}'[Print exit status for task]' \
         '(-i --info -s --status -r --return)'{-r,--return}'[Use exit status from task]' \
@@ -392,7 +392,7 @@ function _hs_wait() {
 function _hs_run() {
     _arguments -s -S \
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
-        '(-n --interval)'{-n,--interval}'[Seconds between polling (default: 5)]:seconds:(5 10 30 60)' \
+        '(-n --interval)'{-n,--interval}'[Time between polling; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 5)]:seconds:(5 10 30 60 1m)' \
         '*'{-t,--tag}'[Assign tags as key:value]:tag:_hs_tags' \
         '(-)--[End of options; task command follows]' \
         '*::task command:_normal'
@@ -483,7 +483,7 @@ function _hs_submit() {
         '(-g --group)'{-g,--group}'[Task group for dependency management]:group:' \
         '--zone[Zone of the submitted tasks]:zone:' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Number of lines to buffer]:size:(1 10 100 1000)' \
-        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
         '(--update)--repeat[Re-submit a known file again as a new source]' \
         '(--repeat)--update[Submit only tasks not already present from a known file]' \
         '--initdb[Auto-initialize database]' \
@@ -503,14 +503,14 @@ function _hs_client() {
         '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Bundle size to request and return (default: from server)]:size:(1 10 100 1000)' \
         '--zone[Run only tasks of this zone]:zone:' \
-        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
         '(-H --host)'{-H,--host}'[Hostname for server (default: localhost)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (default: 50001)]:port:_hs_ports' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
-        '(-d --delay-start)'{-d,--delay-start}'[Seconds to wait before start-up]:seconds:(30 60 600 -60 -600)' \
+        '(-d --delay-start)'{-d,--delay-start}'[Wait before start-up (seconds, 30s, 1h30m, or a Slurm time; --delay-start=-10m is random)]:seconds:(30 60 600 10m -60 -600)' \
         '--no-confirm[Disable confirmation of task bundle received]' \
         '(--capture)'{-o,--output}'[Redirect task output (default <stdout>)]:output file:_files' \
         '(--capture)'{-e,--errors}'[Redirect task errors (default <stderr>)]:error file:_files' \
@@ -521,7 +521,7 @@ function _hs_client() {
         '(-T --timeout)'{-T,--timeout}'[Shutdown if no tasks received (default: never)]:seconds:(10 30 60 600)' \
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
         '(-R --ratelimit)'{-R,--ratelimit}'[Maximum allowed tasks per second]:rate:' \
-        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait (default: 10)]:seconds:(1 5 10)'
+        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 10)]:seconds:(1 5 10 30s)'
 }
 
 # ---------------------------------------------------------------------------
@@ -560,13 +560,13 @@ function _hs_server() {
         '--restart[Start scheduling from last completed task]' \
         '(-A --autoscaling)'{-A,--autoscaling}'[Publish client targets for relay sites (implies --forever)]::mode:(fixed dynamic)' \
         '(-F --factor)'{-F,--factor}'[Scaling factor (default: 1)]:factor:(1 2 3 4 5)' \
-        '(-P --period)'{-P,--period}'[Scaling period in seconds (default: 60)]:seconds:(30 60 300 600)' \
+        '(-P --period)'{-P,--period}'[Scaling period; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 60)]:seconds:(30 60 300 600 5m 10m)' \
         '(-c --task-cores)'{-c,--task-cores}'[Number of cores to assign each task]:cores:(1 2 4 8 16 32)' \
         '(-m --task-memory)'{-m,--task-memory}'[Memory to assign each task (K/M/G/T are powers of 1024)]:memory:(1GB 2GB 4GB 8GB 16GB 32GB)' \
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit (seconds, 1h30m, or 1.5h)]:seconds:(60 300 600 1800 3600)' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
-        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
-        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries]:seconds:(1 2 5 10)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
+        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(1 2 5 10 1m)' \
         '(-r --max-retries)'{-r,--max-retries}'[Auto-retry failed tasks (default: 0)]:retries:(1 2 3 4 5 6)' \
         '--eager[Schedule failed tasks before new tasks]' \
         '(--no-db --initdb)--no-db[Disable database (submit directly to clients)]' \
@@ -594,11 +594,11 @@ function _hs_cluster() {
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
         '(--no-tls)--tls-ca[Path to TLS CA certificate file]:ca file:_files' \
         '(-b --bundlesize)'{-b,--bundlesize}'[Size of task bundle]:size:(1 10 100 1000)' \
-        '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
+        '(-w --bundlewait)'{-w,--bundlewait}'[Time to wait before flushing tasks; seconds, 30s, 5m, 1h30m, or a Slurm time]:seconds:(5 10 30 60 600 30s 1m 10m)' \
         '--zone[Zone of the submitted tasks and of every client (own zone with --autoscaling)]:zone:' \
         '(-r --max-retries)'{-r,--max-retries}'[Auto-retry failed tasks (default: 0)]:retries:(1 2 3 4 5 6)' \
         '--eager[Schedule failed tasks before new tasks]' \
-        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries (default: 30)]:seconds:(1 2 5 10 30)' \
+        '(-Q --poll)'{-Q,--poll}'[Polling interval between database queries; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 30)]:seconds:(1 2 5 10 30 1m)' \
         '(--no-db --initdb)--no-db[Disable database (submit directly to clients)]' \
         '(--no-db --initdb)--initdb[Auto-initialize database]' \
         '--no-confirm[Disable client confirmation of task bundle received]' \
@@ -613,7 +613,7 @@ function _hs_cluster() {
         '--ssh-group[SSH nodelist group in config]:ssh group:_hs_ssh_groups' \
         '(-E --env)'{-E,--env}'[Send environment variables]' \
         '--remote-exe[Path to executable on remote hosts]:remote exe:_files' \
-        '(-d --delay-start)'{-d,--delay-start}'[Delay time for launching clients]:seconds:(30 60 600 -60 -600)' \
+        '(-d --delay-start)'{-d,--delay-start}'[Delay time for launching clients (seconds, 30s, 1h30m, or a Slurm time; --delay-start=-10m is random)]:seconds:(30 60 600 10m -60 -600)' \
         '(--capture)'{-o,--output}'[File path for task outputs (default <stdout>)]:output file:_files' \
         '(--capture)'{-e,--errors}'[File path for task errors (default <stderr>)]:error file:_files' \
         '(-o --output -e --errors)--capture[Capture individual task <stdout> and <stderr>]' \
@@ -626,10 +626,10 @@ function _hs_cluster() {
         '(-T --timeout)'{-T,--timeout}'[Shutdown clients if no tasks received (default: never)]:seconds:(10 30 60 600)' \
         '(-W --task-timeout)'{-W,--task-timeout}'[Task-level walltime limit]:seconds:(60 300 600 1800 3600)' \
         '(-R --ratelimit)'{-R,--ratelimit}'[Maximum allowed tasks per second per client]:rate:' \
-        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait (default: 10)]:seconds:(1 5 10)' \
+        '(-S --signalwait)'{-S,--signalwait}'[Task-level signal escalation wait; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 10)]:seconds:(1 5 10 30s)' \
         '(-A --autoscaling)'{-A,--autoscaling}'[Enable autoscaling per zone (used with --launcher)]::mode:(fixed dynamic)' \
         '(-F --factor)'{-F,--factor}'[Scaling factor (default: 1)]:factor:(1 2 3 4 5)' \
-        '(-P --period)'{-P,--period}'[Scaling period in seconds (default: 60)]:seconds:(30 60 300 600)' \
+        '(-P --period)'{-P,--period}'[Scaling period; seconds, 30s, 5m, 1h30m, or a Slurm time (default: 60)]:seconds:(30 60 300 600 5m 10m)' \
         '(-I --init-size)'{-I,--init-size}'[Initial size of cluster (default: 1)]:size:(0 1 2 5)' \
         '(-X --min-size)'{-X,--min-size}'[Minimum size of cluster (default: 0)]:size:(0 1)' \
         '(-Y --max-size)'{-Y,--max-size}'[Maximum size of cluster (default: 1)]:size:(1 2 5 10 20)' \

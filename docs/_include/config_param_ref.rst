@@ -263,8 +263,16 @@
         The scheduler backs off exponentially from a small floor, doubling the wait after
         each empty query up to this ceiling. This waiting only occurs when no tasks are
         returned by the query.
+        A string takes the same forms as ``-Q``/``--poll``: units ``d``, ``h``, ``m`` and ``s``
+        (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number is
+        seconds.
 
         See also ``-Q``/``--poll`` command-line option.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
     ``.evict``
         Eviction period in seconds for clients (default: `600`).
@@ -422,8 +430,16 @@
 
         If this period of time expires since the previous bundle was pushed to the database,
         the current bundle will be pushed regardless of how many tasks have been accumulated.
+        A string takes the same forms as ``-w``/``--bundlewait``: units ``d``, ``h``, ``m`` and
+        ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number
+        is seconds.
 
         See also ``-w``/``--bundlewait`` command-line option.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
 
 ``[task]``
@@ -462,7 +478,16 @@
     ``.signalwait``
         Wait period in seconds between signal escalation on task cancellation (default: 10).
 
+        A string takes the same forms as ``-S``/``--signalwait``: units ``d``, ``h``, ``m`` and
+        ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number
+        is seconds.
+
         See also ``-S``, ``--signalwait`` command-line option.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
 ``[ssh]``
     SSH configuration section.
@@ -528,6 +553,15 @@
         The autoscaler waits for this period of time in between checks and scaling events.
         A shorter period makes the scaling behavior more responsive but can effect database
         performance if checks happen too rapidly.
+        A string takes the same forms as ``-P``/``--period``: units ``d``, ``h``, ``m`` and ``s``
+        (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number is
+        seconds. ``hs relay`` reads it in the same forms as the period of its site's clients, and
+        stops before it starts if the value is not a duration.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
     ``.launcher``
         Command prefix used to launch each client as a scaling unit (default: none).

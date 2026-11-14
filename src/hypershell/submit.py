@@ -1249,7 +1249,7 @@ Options:
   -g, --group        NUM     Task group for dependency management (default: {DEFAULT_TASK_GROUP}).
       --zone         NAME    Zone of the tasks; only clients of this zone run them (default: none).
   -b, --bundlesize   NUM     Number of lines to buffer (default: {DEFAULT_BUNDLESIZE}).
-  -w, --bundlewait   SEC     Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+  -w, --bundlewait   SEC     Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --initdb               Auto-initialize database.
   -t, --tag          TAG...  Assign tags as `key:value`.
   -h, --help                 Show this message and exit.\
@@ -1277,7 +1277,7 @@ class SubmitApp(Application):
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
+    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
 
     template: str = DEFAULT_TEMPLATE
     interface.add_argument('--template', default=template)

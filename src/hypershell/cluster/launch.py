@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import shlex
+from decimal import Decimal
 from dataclasses import dataclass, field
 from subprocess import Popen, PIPE
 
@@ -429,6 +430,20 @@ def ssh_remote_script(remote_exe: str, options: List[str]) -> str:
             f'exec {remote_exe} client {shlex.join(options)}')
 
 
+def plain_seconds(value: float) -> str:
+    """
+    Seconds written as a plain decimal, never with an exponent.
+
+    A client of an earlier release reads the word with float(), and a client of this release with
+    the duration forms, which take no exponent. A value str() writes without one is written the same.
+
+    Example:
+        >>> plain_seconds(-600.0), plain_seconds(0), plain_seconds(1e-05)
+        ('-600.0', '0', '0.00001')
+    """
+    return format(Decimal(repr(value)), 'f')
+
+
 def client_options(address: Tuple[str, int],
                    *,
                    num_threads: int,
@@ -450,7 +465,7 @@ def client_options(address: Tuple[str, int],
     """The `hs client` options shared by every launch mode (never the key)."""
     host, port = address
     options = ['-H', host, '-p', str(port), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-               '-t', template, '-d', str(delay_start), '-S', str(task_signalwait)]
+               '-t', template, '-d', plain_seconds(delay_start), '-S', str(task_signalwait)]
     if no_confirm:
         options.append('--no-confirm')
     if capture:

@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Final, List, Dict, overload, Union, TypeAlias
+from typing import Final, List, Dict, Optional, overload, Union, TypeAlias
 
 # Standard libs
 import re
@@ -20,7 +20,7 @@ from datetime import datetime
 __all__ = [
     'smart_coerce', 'NoneType', 'JSONData', 'ExtendedValue',
     'to_json_type', 'from_json_type', 'serialize', 'deserialize',
-    'parse_bytes', 'parse_time', 'UnitError',
+    'parse_bytes', 'parse_time', 'parse_delay', 'UnitError',
 ]
 
 
@@ -136,12 +136,38 @@ TIME_FORMS: Final[str] = ('a number of seconds, units d, h, m and s in that orde
                           '(e.g., 90, 45s, 90m, 1h30m, 1.5h, 1d12h), or a Slurm time MM:SS, HH:MM:SS, D-HH, '
                           'D-HH:MM or D-HH:MM:SS (e.g., 90:00, 1:30:00, 1-12)')
 
+# The forms are tried in this order; the first to match the whole text gives the duration.
+TIME_PATTERNS: Final[tuple[re.Pattern, ...]] = (TIME_SECONDS_PATTERN, TIME_UNITS_PATTERN,
+                                                  TIME_CLOCK_PATTERN, TIME_DAYS_PATTERN)
+
+# A start-up delay takes the duration forms, and one leading '-' for a random wait up to that duration.
+DELAY_RANDOM_FORM: Final[str] = 'a leading - waits a random time up to that duration (e.g., --delay-start=-10m)'
+
+
+def _match_seconds(text: str) -> Optional[Fraction]:
+    """The exact number of seconds in a duration written in full, or None if it is not one."""
+    for pattern in TIME_PATTERNS:
+        if text and (match := pattern.fullmatch(text)):
+            return sum(Fraction(num) * TIME_SCALES[unit] for unit, num in match.groupdict().items() if num is not None)
+    return None
+
 
 def parse_time(value: str) -> int:
     """Parse duration string to integer seconds, rounded up (e.g., '1h30m', '1.5h', '1:30:00' -> 5400)."""
+    seconds = _match_seconds(str(value).strip())
+    if seconds is None:
+        raise UnitError(f'Duration {value!r} is not valid: expected {TIME_FORMS}')
+    return math.ceil(seconds)
+
+
+def parse_delay(value: str) -> float:
+    """Parse start-up delay to seconds, unrounded; a leading '-' marks the random form ('-10m' -> -600.0)."""
     text = str(value).strip()
-    for pattern in (TIME_SECONDS_PATTERN, TIME_UNITS_PATTERN, TIME_CLOCK_PATTERN, TIME_DAYS_PATTERN):
-        if text and (match := pattern.fullmatch(text)):
-            return math.ceil(sum(Fraction(num) * TIME_SCALES[unit]
-                                 for unit, num in match.groupdict().items() if num is not None))
-    raise UnitError(f'Duration {value!r} is not valid: expected {TIME_FORMS}')
+    random_form = text.startswith('-')
+    seconds = _match_seconds(text[1:] if random_form else text)
+    try:
+        if seconds is not None:
+            return -float(seconds) if random_form else float(seconds)
+    except OverflowError:
+        pass
+    raise UnitError(f'Duration {value!r} is not valid: expected {TIME_FORMS}; {DELAY_RANDOM_FORM}')
