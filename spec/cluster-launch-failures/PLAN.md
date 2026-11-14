@@ -319,3 +319,24 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
    approved. 7. **The four existing tests** change as described. 8. **The pre-existing problems**
    (cmdkit's underscore split of environment keys; `-P 0` spinning the autoscaler) are noted for the
    foreman to seed. They are not in this cycle.
+
+## Review-cycle-1 rulings (2026-11-14)
+
+The review's human gate was triggered: both findings are CONFIRMED on R1's stop path in
+`cluster/remote.py` and `cluster/ssh.py`, and their fixes are in `server.py`. The maintainer signed
+off in session (2026-11-14) to fix both in `server.py`.
+
+- **F1, the scheduler's poll back-off delays the stop.** `SchedulerThread.stop` wakes the
+  dispatcher wait it may be sleeping in, so a halt is seen at once instead of after up to
+  `server.poll`. This makes every server stop faster. It must keep the shutdown order (§6), touch
+  nothing #103 relies on (the stop-time staged and handed-back reverts run after the scheduler has
+  stopped, as now), and pass the existing suites. Test: a run whose remaining tasks are all staged
+  or in flight when the last client fails. That covers one task with a launcher that fails late, a
+  client killed while holding tasks, and `--forever` with a late `hs submit`. Each must exit 5
+  within R1's 10 s bound with default `server.poll`, and fail that bound on `81c4de6`.
+- **F2, a submit loader blocked on stdin delays the stop.** On R1's failure stop, the server does
+  not wait for a submit loader that is blocked reading its input (stdin from a producer that stays
+  open). The rows already committed are kept, and the error is raised within R1's bound. A normal
+  shutdown keeps today's behaviour of reading input to its end. Test:
+  `(echo 'echo 1'; sleep 60) | hs cluster … --launcher false` exits 5 within the bound, with and
+  without a database, red on `81c4de6`.
