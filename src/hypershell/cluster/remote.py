@@ -33,6 +33,7 @@ from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, D
 from hypershell.cluster.launch import ClientLaunch, LaunchActuator, advertised_host, client_launch, redact_secrets
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ZoneLoad, ScalingKnobs,
                                        read_zone_loads, fleet_demand)
+from hypershell.cluster.watch import watch_launched
 
 # Public interface
 __all__ = ['run_cluster', 'RemoteCluster', 'AutoScalingCluster',
@@ -91,6 +92,10 @@ def run_cluster(*args, autoscaling: bool = False, **kwargs) -> None:
 class RemoteCluster(Thread):
     """
     Run server with remote clients via external launcher (e.g., `mpirun`).
+
+    The launcher's exit is watched while the server runs (see :func:`~hypershell.cluster.watch.watch_launched`):
+    a non-zero exit is warned about, and if it leaves the server with work it would otherwise wait
+    on forever, the server is stopped and :class:`~hypershell.cluster.watch.ClusterLaunchError` is raised.
 
     Args:
         source (Iterable[str], optional):
@@ -310,17 +315,18 @@ class RemoteCluster(Thread):
         return self.launch.argv
 
     def run_with_exceptions(self: RemoteCluster) -> None:
-        """Start child threads, wait."""
+        """Start child threads, watch the launched clients until the server ends."""
         self.server.start()
         self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         log.debug('Launching clients: ' + self.launch.describe())
         self.clients = self.launch.start(stdout=sys.stdout, stderr=sys.stderr)
-        self.clients.wait()
+        watch_launched(self.server, [(self.launch.describe(), self.clients)], self.advertised)
         self.server.join()
 
     def stop(self: RemoteCluster, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
-        self.server.stop(wait=wait, timeout=timeout)
+        """Stop child threads before main thread (a server that has already ended is not stopped again)."""
+        if self.server.is_alive():
+            self.server.stop(wait=wait, timeout=timeout)
         if self.clients is not None:
             self.clients.terminate()
         super().stop(wait=wait, timeout=timeout)

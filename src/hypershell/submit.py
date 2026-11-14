@@ -689,6 +689,7 @@ class QueueCommitter(StateMachine):
     bundlesize: int
     bundlewait: int
     previous_submit: datetime
+    halted: bool = False
 
     state = QueueCommitterState.START
     states = QueueCommitterState
@@ -760,10 +761,17 @@ class QueueCommitter(StateMachine):
     def finalize(self) -> QueueCommitterState:
         """Force final commit of tasks and halt."""
         self.pack_bundle()
-        while self.tasks:  # Force retry if queue is busy (since v2.8.0)
+        while self.tasks and not self.halted:  # Force retry if queue is busy (since v2.8.0)
             self.commit()
+        if self.tasks:
+            log.warning(f'Stopped with {len(self.tasks)} tasks not committed (committer: no database)')
         log.debug('Done (committer: no database)')
         return QueueCommitterState.HALT
+
+    def halt(self: QueueCommitter) -> None:
+        """Halt, including a final commit still waiting for room on the server's queue."""
+        self.halted = True
+        super().halt()
 
 
 class QueueCommitterThread(Thread):
@@ -878,7 +886,7 @@ class LiveSubmitThread(Thread):
             self.committer.start()
             log.trace('Waiting (loader)')
             self.loader.join()
-            self.local.put(None)
+            self.put_end()
             log.trace('Waiting (committer)')
             self.committer.join()
         log.debug('Done')
@@ -903,12 +911,28 @@ class LiveSubmitThread(Thread):
             return '<iterable>'
 
     def stop(self: LiveSubmitThread, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
+        """Stop child threads before main thread.
+
+        The committer is halted before its end marker is offered: with no client taking tasks from the
+        server, the committer cannot drain the local queue, and a marker that waited for room would
+        never be placed.
+        """
         log.warning('Stopping')
         self.loader.stop(wait=wait, timeout=timeout)
-        self.local.put(None)
         self.committer.stop(wait=wait, timeout=timeout)
+        self.put_end()
         super().stop(wait=wait, timeout=timeout)
+
+    def put_end(self: LiveSubmitThread) -> None:
+        """Offer the committer the end of tasks, waiting for room only while the committer runs to make it."""
+        while True:
+            committer_running = self.committer.is_alive()
+            try:
+                self.local.put(None, block=committer_running, timeout=DEFAULT_LOCAL_TIMEOUT)
+                return
+            except QueueFull:
+                if not committer_running:
+                    return  # Nothing will take it: the committer has ended
 
     @property
     def task_count(self: LiveSubmitThread) -> int:

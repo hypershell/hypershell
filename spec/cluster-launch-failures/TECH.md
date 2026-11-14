@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/cluster-launch-failures
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -31,7 +31,7 @@ phases:
 - id: P2
   name: 'Launcher, --mpi and --ssh: watch every launched process, warn at each failure,
     stop and exit when all are gone with work left'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -191,24 +191,24 @@ one atomic code+state commit.
 server would otherwise wait on forever, stops its server and exits 5 after one error; each failure
 is warned about as it happens; a run whose clients do the work ends as today.
 
-- [ ] `submit.py`: `LiveSubmitThread.stop()` halts loader and committer first; one `put_end()` offers
+- [x] `submit.py`: `LiveSubmitThread.stop()` halts loader and committer first; one `put_end()` offers
       the sentinel with a timeout, retried only while the committer lives; used by `stop()` and the
       run path (`:881`, `:909`). Unit test: stopping a `ServerThread(in_memory=True)` with more tasks
       than its queue holds returns within a bound.
-- [ ] New `cluster/watch.py`: `ClusterLaunchError(RuntimeError)`, `exit_text(code)`,
+- [x] New `cluster/watch.py`: `ClusterLaunchError(RuntimeError)`, `exit_text(code)`,
       `work_remains(server)` (barrier with `serialize_tasks([])` on `queue.completed` until taken and
       `receiver.machine.held` empty, skipped if the Receiver has ended; database: scheduler alive and
       `count_remaining`, else `count_retryable(attempts, group=current_group, eager)`, on two reads
       ~2 s apart; no database: server alive ~3 s after the barrier and the `LiveSubmitThread` alive or
       has submitted a task), `watch_launched(server, launched, advertised, interval=1.0)`.
-- [ ] `RemoteCluster.run_with_exceptions` and `SSHCluster.run_with_exceptions` use
+- [x] `RemoteCluster.run_with_exceptions` and `SSHCluster.run_with_exceptions` use
       `watch_launched`; both `stop()`s skip a server no longer alive.
-- [ ] `ClusterApp`: confirm `ClusterLaunchError` maps to one CRITICAL line and exit 5 through the
+- [x] `ClusterApp`: confirm `ClusterLaunchError` maps to one CRITICAL line and exit 5 through the
       shared mapping (no new mapping entry unless needed).
-- [ ] Docs: `cluster_desc.rst` and `docs/cli/cluster.rst` (`versionchanged:: 2.9.0`): a cluster whose
+- [x] Docs: `cluster_desc.rst` and `docs/cli/cluster.rst` (`versionchanged:: 2.9.0`): a cluster whose
       launched clients are all gone with work remaining exits non-zero, naming them; a launcher that
       exits 0 leaves the cluster waiting.
-- [ ] Tests: new `tests/test_cluster_exit.py` — `exit_text`; `watch_launched` with `sh -c 'exit N'`
+- [x] Tests: new `tests/test_cluster_exit.py` — `exit_text`; `watch_launched` with `sh -c 'exit N'`
       launches and a real temp-site server (`--no-db` and database): all fail → server stopped, one
       error naming every process, status and address, raised ≤ 10 s after the last exit (timed); all
       zero → still waiting at a bound; one failing while another runs → its warning before the other
@@ -218,6 +218,15 @@ is warned about as it happens; a run whose clients do the work ends as today.
       `test_ssh_mode_without_key_names_the_cause` to expect exit 5 (no `until=`).
 - **Verify:** see frontmatter (unit tests, six drives, docs build). If the `--no-db` exit misses
   10 s, trim the settle (≥ 2 s) or the submitter's stop wait and note it.
+- **Built (amendments):** the `--no-db` R1 path measured 7.9 s from the launcher's exit to the
+  cluster's exit (1 s poll, 3 s settle, ~4 s stop), so neither the settle nor the stop wait was
+  trimmed. `QueueCommitter.halt()` now also ends a final commit still waiting for room (a halted
+  committer left that loop only once a client drained the server's queue, so `stop` hung with
+  `-b` above 1 and a partial last bundle); its uncommitted tasks are named in one warning.
+- **Known gap (plan-gate ruling 3, accepted):** without a database, a client that returned every
+  result but exited non-zero in the moment before its FINISHED heartbeat makes R1 fire where today
+  the run would end 0 after eviction; the exact fix is a result counter in the Receiver
+  (`server.py`), deferred. Stated in `cluster/watch.py::work_remains`.
 - **Touches:** `src/hypershell/submit.py`, `src/hypershell/cluster/{watch,remote,ssh}.py`, `docs/…`,
   `tests/…`.
 

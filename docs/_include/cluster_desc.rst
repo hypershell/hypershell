@@ -34,6 +34,14 @@ specific address, and this host's own name when it binds every interface (*0.0.0
 for remote clients). Use ``--advertise`` (or ``server.advertise``) to tell them another, such as
 a name on the server's certificate; it must be reachable from wherever the clients run.
 
+A client process the cluster launched that exits with a non-zero status is warned about when it
+exits, naming it (its host under ``--ssh``). When every process launched with ``--ssh``, ``--mpi``
+or ``--launcher`` has exited, at least one of them non-zero, while tasks remain that no client is
+left to run, the cluster stops its server and exits non-zero with one error naming each process,
+how it exited, and the address the clients were told to dial. A launcher that exits 0 with tasks
+remaining (one that hands its clients to a scheduler and returns, say) leaves the cluster waiting
+for them to connect.
+
 Use ``--autoscaling`` with either *fixed* or *dynamic* to run a persistent, elastically scalable
 cluster using an external ``--launcher`` to bring up clients as needed. Clients are scaled per zone:
 each zone with tasks in the active group gets its own clients, and the launcher is told which zone

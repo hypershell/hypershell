@@ -42,4 +42,9 @@ Description
    names one specific address, as with ``--mpi`` and ``--launcher``; only a server bound to
    *0.0.0.0* is advertised by this host's own name.
 
+.. versionchanged:: 2.9.0
+   With ``--ssh``, ``--mpi`` or ``--launcher``, a cluster whose launched processes have all exited,
+   at least one non-zero, with tasks remaining, exits non-zero naming them, instead of waiting
+   forever; each non-zero exit is warned about as it happens.
+
 .. include:: ../_include/cluster_help.rst

@@ -461,13 +461,17 @@ def test_launcher_mode_logs_never_hold_key(stand_ins: StandIns, temp_site: Path)
 
 
 def test_launcher_mode_without_environment_names_the_cause(stand_ins: StandIns, temp_site: Path) -> None:
-    """A launched client that receives no key exits with an error naming the launcher's environment."""
-    run = run_cluster(stand_ins, [f'--launcher={stand_ins.launcher_drop_env}'], temp_site, True, None,
-                      until=lambda: bool(stand_ins.exits()))
+    """A launched client that receives no key exits with an error naming the launcher's environment.
+
+    The cluster, its only client gone with every task left, then exits with an error of its own.
+    """
+    run = run_cluster(stand_ins, [f'--launcher={stand_ins.launcher_drop_env}'], temp_site, True, None)
     exits = stand_ins.exits()
     assert [record['status'] for record in exits] == [exit_status.runtime_error], run.stderr[-4000:]
     assert 'CRITICAL [hypershell.client] AuthenticationError' in run.stderr
     assert 'the launcher most likely did not pass the environment to the client' in run.stderr
+    assert run.status == exit_status.runtime_error
+    assert 'CRITICAL [hypershell.cluster] ClusterLaunchError: every launched client has exited' in run.stderr
 
 
 def previous_argv(remote_exe: str, address: tuple, launcher: List[str], launcher_args: List[str],
@@ -769,13 +773,18 @@ def test_ssh_mode_logs_never_hold_key(stand_ins: StandIns, temp_site: Path) -> N
 
 
 def test_ssh_mode_without_key_names_the_cause(stand_ins: StandIns, temp_site: Path) -> None:
-    """A client launch whose ssh passes no input exits before the client starts, naming the cause."""
+    """A client launch whose ssh passes no input exits before the client starts, naming the cause.
+
+    The cluster, its only host's client gone with every task left, then exits naming that host.
+    """
     run = run_cluster(stand_ins, ['--ssh', SSH_HOSTS[0]], temp_site, True, None,
-                      until=ssh_failed(stand_ins), env={'STAND_IN_SSH_NO_INPUT': '1'})
+                      env={'STAND_IN_SSH_NO_INPUT': '1'})
     records = stand_ins.read()
     assert [record['status'] for record in records if record['role'] == 'ssh-exit'] == [1], run.stderr[-4000:]
     assert not [record for record in records if record['role'] == 'client']
     assert f'no authentication key arrived on standard input for {AUTH_ENV}' in run.stderr
+    assert run.status == exit_status.runtime_error
+    assert f'{SSH_HOSTS[0]} exited with status 1; clients were told to dial {LOOPBACK}:' in run.stderr
 
 
 def no_input_warnings(stderr: str) -> List[str]:
