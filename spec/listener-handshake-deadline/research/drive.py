@@ -14,7 +14,9 @@ Scenarios (each prints PASS or FAIL lines and exits non-zero on any FAIL):
 
     server   [--client HS [--expect-too-old]] [--handshake SEC]
                                                hs server with a task file; a client finishes the tasks
+                                               (with --handshake, only once the window has passed)
     cluster  [--handshake SEC]                 hs cluster (local), clients start 3 s after the server
+                                               (SEC + 5 s with --handshake)
     relay    [--handshake SEC]                 hs server upstream, hs relay with its site client delayed 3 s
     refuse                                     hs server, hs cluster and hs relay refuse handshake = 0, -5, abc,
                                                30d, 4294968 and a 401-digit integer; hs server and hs cluster
@@ -24,8 +26,11 @@ Scenarios (each prints PASS or FAIL lines and exits non-zero on any FAIL):
 Without --handshake the default deadline applies and the held connection must still be open when the
 work is done (the server served others while it was pending); a close when the server stops,
 after the work, is that stop, not the deadline. With --handshake SEC the held connection
-must be closed by the server between SEC and SEC + 3 seconds after it connected. --client names another
-`hs` executable (e.g., an older release installed in a scratch environment) to run as the client;
+must be closed by the server between SEC and SEC + 3 seconds after it connected, while the server is
+still up: no client of `server` or `cluster` runs before the window has passed, so a server without the
+deadline fails. --client names another
+`hs` executable (e.g., an older release installed in a scratch environment) to run as the client,
+without this environment's PYTHONPATH;
 --expect-too-old instead expects that client to connect and authenticate and then be refused as too old
 (the work-request protocol) exactly as on develop, which is what a 2.8.x client gets from any 2.9 server.
 --no-hold runs a scenario with no connection held (a baseline of the drive itself).
@@ -88,8 +93,10 @@ def wait_port(port: int, timeout: float = 20.0) -> bool:
     return False
 
 
-def start(argv: List[str], env: Optional[dict] = None, **kwargs) -> subprocess.Popen:
-    proc = subprocess.Popen(argv, env={**os.environ, **(env or {})}, **kwargs)
+def start(argv: List[str], env: Optional[dict] = None, drop: tuple = (), **kwargs) -> subprocess.Popen:
+    """Start `argv` with this environment plus `env`, less the variables named in `drop`."""
+    merged = {name: value for name, value in {**os.environ, **(env or {})}.items() if name not in drop}
+    proc = subprocess.Popen(argv, env=merged, **kwargs)
     started.append(proc)
     print(f'started pid {proc.pid}: {" ".join(argv)}', flush=True)
     return proc
@@ -180,11 +187,19 @@ def scenario_server(args) -> None:
     server = start([hs, 'server', taskfile(), '-H', '127.0.0.1', '-p', str(port)], env=server_env(args.handshake))
     report(wait_port(port), 'hs server listening')
     held = None if args.no_hold else Held(port)
+    if held is not None and args.handshake is not None:
+        # No client runs until the window has passed, and the server waits for its tasks to be done, so
+        # it is still up and only the deadline can close the held connection.
+        check_held(held, args.handshake, 'hs server')
+        report(server.poll() is None, 'hs server still running when the window ended (no client has run yet)')
     time.sleep(0.5)
     began = time.monotonic()
     with tempfile.TemporaryFile('w+') as output:
+        # Another client runs its own installed code: PYTHONPATH (set to run the server from other
+        # sources) is not passed on to it.
         client = start([args.client or hs, 'client', '-H', '127.0.0.1', '-p', str(port)],
-                       env={'HYPERSHELL_SERVER_AUTH': KEY}, stdout=output, stderr=subprocess.STDOUT)
+                       env={'HYPERSHELL_SERVER_AUTH': KEY}, drop=('PYTHONPATH',) if args.client else (),
+                       stdout=output, stderr=subprocess.STDOUT)
         code = wait(client, BOUND)
         finished = time.monotonic()
         output.seek(0)
@@ -200,7 +215,8 @@ def scenario_server(args) -> None:
     if failures:
         print(text[-1500:], flush=True)
     if held is not None:
-        check_held(held, args.handshake, 'hs server', finished)
+        if args.handshake is None:
+            check_held(held, None, 'hs server', finished)
         held.release()
 
 
@@ -208,7 +224,9 @@ def scenario_cluster(args) -> None:
     port = free_port()
     hs = shutil.which('hs')
     began = time.monotonic()
-    cluster = start([hs, 'cluster', taskfile(), '-H', '127.0.0.1', '-p', str(port), '--delay-start', '3'],
+    # With a deadline, the clients start only after the window has passed, so the server is still up then
+    delay = 3 if args.handshake is None else args.handshake + 5
+    cluster = start([hs, 'cluster', taskfile(), '-H', '127.0.0.1', '-p', str(port), '--delay-start', f'{delay:g}'],
                     env=server_env(args.handshake))
     report(wait_port(port), 'hs cluster server listening')
     held = None if args.no_hold else Held(port)

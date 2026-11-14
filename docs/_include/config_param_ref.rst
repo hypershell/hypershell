@@ -354,11 +354,13 @@
             does not extend it. A connection that misses it is closed, and the server keeps
             accepting other clients while handshakes are pending. Takes a number of seconds or
             any duration form (e.g., ``30``, ``"30s"``, ``"1m"``), rounded up to whole seconds;
-            it must be greater than 0, or a TLS server refuses to start. Also set with
-            ``HYPERSHELL_SERVER_TLS_HANDSHAKE``. Servers started with ``--no-tls`` ignore it;
-            clients never read it.
+            it must be greater than 0 and at most one day (``1d``), or a TLS server refuses to
+            start. Also set with ``HYPERSHELL_SERVER_TLS_HANDSHAKE``. A server without TLS, by
+            ``--no-tls`` or ``.enabled`` set to `false`, ignores it; clients never read it.
 
-            .. versionadded:: 2.9.0
+            .. only:: html
+
+                .. versionadded:: 2.9.0
 
 ``[client]``
     Section for `client` workflow parameters.

@@ -4,10 +4,10 @@ title: A TLS queue server keeps serving clients while a connection is slow in it
   handshake
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/listener-handshake-deadline
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -45,7 +45,7 @@ phases:
     refuse
 - id: P3
   name: Docs, CLI drives with current and older clients, latency evidence
-  status: in_progress
+  status: done
   satisfies:
   - R6
   - R7
@@ -228,6 +228,15 @@ apply the configured deadline; older clients behave as on develop; latency is wi
       is shutting down" line for `relay`): a server that stops once the work is done closes it, and
       the planning dry runs (on develop) had never reached that passing branch. The clients
       installed during planning were linked into `$TMPDIR/lhd-clients/`.
+- [x] *Review cycle 1, ruling 3 (F3):* `research/drive.py` — `server --handshake SEC` judges the held
+      connection before any client starts (the server waits for its tasks, so it is still up; the drive
+      also checks that), and `cluster --handshake SEC` delays its clients by SEC + 5 s; both now fail
+      on develop's `src` and on the branch with the handshake timeout removed. `--client` runs the
+      other `hs` without `PYTHONPATH`. Evidence in `evidence/red-review-1.txt`; the re-run drives and
+      latency are appended to `evidence/drives.txt` and `evidence/latency.txt`.
+- [x] *Review cycle 1, ruling 5:* the `.handshake` `versionadded` in `config_param_ref.rst` sits inside
+      `.. only:: html` (the man page no longer prints it). The entry also states the one-day limit
+      and that a server made plain by `--no-tls` or `.enabled = false` ignores the key (F1, F2).
 - **Verify:** the P3 `verify:` — `-W` docs build (sandbox off); `server`, `cluster`, `relay` drives
   with the default deadline (served while a connection is held, which stays open) and with
   `--handshake 2` (closed in 2–5 s); a 2.9.0a8 client runs the tasks; a 2.8.7 client connects,

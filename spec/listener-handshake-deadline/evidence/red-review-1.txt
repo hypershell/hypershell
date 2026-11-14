@@ -62,3 +62,41 @@ PASS: cluster made plain by --no-tls starts with handshake = '30d' (exit 0)
 PASS: server made plain by enabled = false starts with handshake = '30d' (still serving after 5 s)
 PASS: cluster made plain by enabled = false starts with handshake = '30d' (exit 0)
 (exit 1; on the branch the same drive passes all 26 checks)
+
+## P3: the server and cluster deadline drives fail on a build without the deadline
+develop's src (6da633d, exported to $TMPDIR/lhd-develop):
+$ PYTHONPATH="$TMPDIR/lhd-develop/src" temp_site.sh uv run python drive.py server --handshake 2
+PASS: hs server listening
+FAIL: hs server: server closed the held connection None s after it connected (expected 2 to 5 s)
+PASS: hs server still running when the window ended (no client has run yet)
+FAIL: client hs finished the tasks in 25.0 s (exit None, bound 25 s)
+FAIL: hs server exited 0
+(exit 1)
+$ PYTHONPATH="$TMPDIR/lhd-develop/src" temp_site.sh uv run python drive.py cluster --handshake 2
+PASS: hs cluster server listening
+FAIL: hs cluster finished the tasks in 25.4 s (exit None)
+FAIL: hs cluster: server closed the held connection None s after it connected (expected 2 to 5 s)
+(exit 1)
+
+The branch's src with the handshake's socket timeout removed (settimeout(None)), $TMPDIR/lhd-nodeadline:
+$ PYTHONPATH="$TMPDIR/lhd-nodeadline/src" temp_site.sh uv run python drive.py server --handshake 2
+PASS: hs server listening
+FAIL: hs server: server closed the held connection None s after it connected (expected 2 to 5 s)
+PASS: hs server still running when the window ended (no client has run yet)
+PASS: client hs finished the tasks in 2.5 s (exit 0, bound 25 s)
+PASS: hs server exited 0
+(exit 1)
+$ PYTHONPATH="$TMPDIR/lhd-nodeadline/src" temp_site.sh uv run python drive.py cluster --handshake 2
+PASS: hs cluster server listening
+PASS: hs cluster finished the tasks in 9.9 s (exit 0)
+FAIL: hs cluster: server closed the held connection 9.13 s after it connected (expected 2 to 5 s)
+(exit 1)
+
+--client no longer passes PYTHONPATH on: with PYTHONPATH set to the branch's src, the drive before the fix
+ran the 2.8.7 client on the branch's code; after it, the 2.8.7 client runs its own and is refused as too old.
+$ PYTHONPATH="$PWD/src" temp_site.sh uv run python <drive.py at 4971433> server --client "$TMPDIR/lhd-clients/2.8.7/bin/hs" --expect-too-old
+FAIL: client $TMPDIR/lhd-clients/2.8.7/bin/hs connected, authenticated and was refused as too old in 2.5 s (exit 0)
+(exit 1)
+$ PYTHONPATH="$PWD/src" temp_site.sh uv run python drive.py server --client "$TMPDIR/lhd-clients/2.8.7/bin/hs" --expect-too-old
+PASS: client $TMPDIR/lhd-clients/2.8.7/bin/hs connected, authenticated and was refused as too old in 0.4 s (exit 5)
+(exit 0)

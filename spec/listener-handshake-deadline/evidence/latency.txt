@@ -14,3 +14,12 @@ develop {"python": "3.14.6", "sequential": 100, "median_ms": 35.02, "p10_ms": 34
 branch {"python": "3.14.6", "sequential": 100, "median_ms": 34.8, "p10_ms": 34.24, "p90_ms": 36.0, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.56}
 PASS: median develop 35.02 ms, branch 34.80 ms (allowed up to 40.02 ms); every 64-client burst completed: True
 latency exit 0
+
+# Review cycle 1 remediation (2026-11-14), uv run python spec/listener-handshake-deadline/research/latency.py compare "$TMPDIR/lhd-develop/src" "$TMPDIR/lhd-tls"
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 34.59, "p10_ms": 33.76, "p90_ms": 36.7, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.74}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 34.33, "p10_ms": 33.52, "p90_ms": 36.65, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.54}
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 34.97, "p10_ms": 33.8, "p90_ms": 36.85, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.77}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 35.18, "p10_ms": 33.85, "p90_ms": 36.27, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.55}
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 36.33, "p10_ms": 35.34, "p90_ms": 37.54, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.79}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 36.0, "p10_ms": 35.35, "p90_ms": 36.92, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.57}
+PASS: median develop 34.97 ms, branch 35.18 ms (allowed up to 39.97 ms); every 64-client burst completed: True
