@@ -28,7 +28,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "HYPER-SHELL" "1" "Nov 11, 2026" "2.9.0a7" "hypershell"
+.TH "HYPER-SHELL" "1" "Nov 13, 2026" "2.9.0a8" "hypershell"
 .SH NAME
 hyper-shell \- Process shell commands over a distributed, asynchronous queue
 .SH SYNOPSIS
@@ -132,7 +132,9 @@ fast at scale; for very large workflows, a one\-time \fBsubmit\fP followed by a 
 file re\-read) is cheaper than re\-feeding the \fIFILE\fP each run.
 .sp
 Use \fB\-\-autoscaling\fP with either \fIfixed\fP or \fIdynamic\fP to run a persistent, elastically scalable
-cluster using an external \fB\-\-launcher\fP to bring up clients as needed.
+cluster using an external \fB\-\-launcher\fP to bring up clients as needed. Clients are scaled per zone:
+each zone with tasks in the active group gets its own clients, and the launcher is told which zone
+each one is for.
 .sp
 Use \fBhsx\fP in place of \fBhs cluster\fP\&.
 .SS Arguments
@@ -158,6 +160,11 @@ Use specific launch interface. This can be any program that handles process mana
 distributed system. For example, on a \fISLURM\fP cluster one might want to use \fBsrun\fP\&. In this
 case you would specify \fB\-\-launcher=srun\fP; however, the \fIARGS\fP are not merely the executable
 but the full listing, e.g., \fB\-\-launcher=\(aqsrun \-\-mpi=pmi2\(aq\fP\&.
+.sp
+With \fB\-\-autoscaling\fP, each launch names the zone of the client it starts: \fB{zone}\fP in
+\fIARGS\fP is replaced by the zone\(aqs name (\fBdefault\fP for the default zone), and the launched
+process has the name in its \fBHYPERSHELL_ZONE\fP environment variable. The client\(aqs own
+\fB\-\-template\fP is never changed. See \fB\-\-autoscaling\fP for an example.
 .UNINDENT
 .SS Options
 .INDENT 0.0
@@ -254,11 +261,16 @@ With \fB\-\-no\-db\fP enabled, there is no scheduler and instead the \fIsubmit\f
 bundles directly to the queue.
 .TP
 .B \fB\-\-zone\fP \fINAME\fP
-Zone of the submitted tasks and of every client the cluster launches (default: none).
+Zone of the submitted tasks and of every client the cluster launches; the own zone with
+\fB\-\-autoscaling\fP (default: none).
 .sp
 The tasks read from \fIFILE\fP (or \fB\-\-from\-json\fP) are placed in this zone, and each client is
 launched with the same \fB\-\-zone\fP, so it runs them. Zones are recorded in the database, so
 \fB\-\-zone\fP cannot be used with \fB\-\-no\-db\fP\&.
+.sp
+With \fB\-\-autoscaling\fP, this is the cluster\(aqs own zone: the one that \fB\-\-init\-size\fP and
+\fB\-\-min\-size\fP apply to. Any other zone with tasks in the active \fItask group\fP gets clients
+of its own, each launched with \fB\-\-zone\fP set to that zone.
 .TP
 .B \fB\-\-initdb\fP
 Auto\-initialize database.
@@ -461,7 +473,7 @@ this interval in seconds before escalating to the next level of interrupt.
 See also \fB\-\-task\-timeout\fP\&.
 .TP
 .B \fB\-A\fP, \fB\-\-autoscaling\fP [\fIMODE\fP]
-Enable autoscaling (default: disabled). Used with \fB\-\-launcher\fP\&.
+Enable autoscaling per zone (default: disabled). Used with \fB\-\-launcher\fP\&.
 .sp
 Specifying this option on its own triggers the use of the autoscaler, with the default
 \fIpolicy\fP or the configured policy. The \fIpolicy\fP can be specified directly here
@@ -478,6 +490,35 @@ event that clients halt for some reason (e.g., due to expected faults or timeout
 A \fIdynamic\fP policy maintains a \fB\-\-min\-size\fP (default: 0) and grows up to some
 \fB\-\-max\-size\fP depending on the observed \fItask pressure\fP given the specified scaling
 \fB\-\-factor\fP\&.
+.sp
+Clients are scaled per zone. Each zone with tasks in the active \fItask group\fP has a fleet of
+its own, sized by the same policy and the same values of \fB\-\-factor\fP and \fB\-\-max\-size\fP,
+with its own task pressure. \fB\-\-init\-size\fP and \fB\-\-min\-size\fP apply only to the cluster\(aqs
+own zone (\fB\-\-zone\fP, else the default zone); every other zone gets clients only while it
+has work in the active group, so a zone whose tasks wait in a later group gets none yet.
+Each \fB\-\-period\fP, at most one client is added per zone, so several zones can each add one
+at once. Clients of a zone whose work is done leave by \fB\-\-timeout\fP as usual.
+.sp
+Each launch names its zone to the launcher, as \fB{zone}\fP in the \fB\-\-launcher\fP arguments
+and as \fBHYPERSHELL_ZONE\fP in its environment, so one launcher can send the clients of each
+zone to the resource that serves it. When partitions are named after zones, the launcher
+alone can do it (\fB\-\-launcher=\(aqsrun \-p {zone} \-n1\(aq\fP). Otherwise a small script given as
+\fB\-\-launcher=\(aqsh launch.sh\(aq\fP can choose, for example:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.EX
+#!/bin/sh
+# Start one client on the partition that serves its zone.
+case \(dq$HYPERSHELL_ZONE\(dq in
+    gpu)   partition=gpu ;;
+    himem) partition=himem ;;
+    *)     partition=cpu ;;
+esac
+exec srun \-p \(dq$partition\(dq \-n1 \(dq$@\(dq
+.EE
+.UNINDENT
+.UNINDENT
 .sp
 See also \fB\-\-factor\fP, \fB\-\-period\fP, \fB\-\-init\-size\fP, \fB\-\-min\-size\fP, and \fB\-\-max\-size\fP\&.
 .TP
@@ -579,6 +620,7 @@ See the \fIsecurity\fP section for peer verification modes.
 \fB[\-b NUM]\fP \fB[\-w SEC]\fP \fB[\-r NUM [\-\-eager]]\fP \fB[\-c NUM]\fP \fB[\-m MEM]\fP \fB[\-W SEC]\fP
 \fB[\-H ADDR]\fP \fB[\-p PORT]\fP \fB[\-k KEY]\fP \fB[\-Q NUM]\fP \fB[\-\-no\-db [\-\-no\-confirm] | \-\-initdb]\fP \fB[\-\-print | \-f PATH]\fP
 \fB[\-\-no\-tls | [\-\-tls\-ca PATH] [\-\-tls\-cert PATH] [\-\-tls\-key PATH]]\fP
+\fB[\-\-autoscaling [MODE] [\-F VALUE] [\-P SEC]]\fP
 .UNINDENT
 .sp
 Launch server, schedule directly or asynchronously from database.
@@ -595,6 +637,11 @@ for tasks and re\-submit them if their previous number of attempts is less.
 Tasks are bundled for each client at the size it asks for, or at the server\(aqs \fB\-b\fP/\fB\-\-bundlesize\fP
 when it asks for none. By default the bundle size is one, meaning that at small scales there is
 greater concurrency.
+.sp
+With \fB\-\-autoscaling\fP, the server schedules forever and launches nothing. Relays connected with its
+key advertise the zones they serve and each zone\(aqs \fBmin\fP, \fBmax\fP and \fBinit\fP clients, and the server
+publishes how many clients each relay should run in each zone, for the relay to launch with its own
+launcher (see \fI\%autoscaling with relay sites\fP).
 .SS Arguments
 .INDENT 0.0
 .TP
@@ -747,6 +794,37 @@ populate the database, and then to use \fB\-\-restart\fP so that if the \fIclust
 it can easily continue where it left off, halting if nothing to be done.
 .sp
 Conflicts with \fB\-\-no\-db\fP and mutually exclusive to \fB\-\-forever\fP\&.
+.TP
+.B \fB\-A\fP, \fB\-\-autoscaling\fP [\fIMODE\fP]
+Publish client targets for relay sites (default: disabled).
+.sp
+The server schedules forever (as with \fB\-\-forever\fP) and launches nothing itself. Each relay
+connected with the server\(aqs key advertises the zones it serves and, for each, its \fBmin\fP,
+\fBmax\fP and \fBinit\fP clients. Each \fB\-\-period\fP the server computes each zone\(aqs demand from
+its tasks in the active \fItask group\fP, splits it over the live sites that serve the zone by
+\fBautoscale.distribution\fP (\fIspread\fP or \fIfill\fP), and publishes the result, which each relay
+fetches and launches with its own launcher.
+.sp
+The \fIpolicy\fP can be specified directly here as either \fIfixed\fP or \fIdynamic\fP (e.g.,
+\fB\-\-autoscaling=dynamic\fP); the default is the configured \fBautoscale.policy\fP\&. Under \fIfixed\fP,
+a zone with work gets one client when none runs, and otherwise keeps the floor its relays
+advertise. Under \fIdynamic\fP, a zone grows by one client per check while its task pressure is
+high, up to the sum of its sites\(aq \fBmax\fP\&. Clients leave only by their idle timeout.
+.sp
+Conflicts with \fIFILE\fP, \fB\-\-restart\fP, \fB\-\-no\-db\fP and \fB\-\-no\-confirm\fP\&.
+.sp
+See also \fB\-\-factor\fP and \fB\-\-period\fP\&.
+.TP
+.B \fB\-F\fP, \fB\-\-factor\fP \fIVALUE\fP
+Scaling factor (default: 1).
+.sp
+The dimensionless multiple of the average task duration that \fB\-\-autoscaling=dynamic\fP compares
+each zone\(aqs estimated time to completion against (its \fItask pressure\fP), as for the \fIcluster\fP\&.
+.TP
+.B \fB\-P\fP, \fB\-\-period\fP \fISEC\fP
+Scaling period in seconds (default: 60).
+.sp
+The server waits this long between checks and publishes a new topology only when it changes.
 .TP
 .B \fB\-\-print\fP
 Print failed task args to <stdout>.
@@ -1059,7 +1137,14 @@ one \fB[relay.zone.NAME]\fP table per zone). Upstream it is then one \fIclient\f
 own identity, all over the same connection: it takes the zones in turn, and asks for each only as
 much as that zone\(aqs own \fIclients\fP at the site have room for. At the site it keeps one fleet of
 \fIclients\fP per zone, launched alike but each serving its own zone, with that zone\(aqs own launcher,
-launcher arguments and size if its table gives them; the one relay\-local \fIserver\fP serves them all.
+launcher arguments, size and client bounds if its table gives them; the one relay\-local \fIserver\fP
+serves them all. Every launch names its zone to the launcher: \fB{zone}\fP in the launcher or its
+arguments is replaced by the zone\(aqs name (\fBdefault\fP for the default zone), and the launched process
+has it in \fBHYPERSHELL_ZONE\fP\&. Each zone advertises its client bounds upstream; against an upstream
+\fIserver\fP autoscaling with relay sites, each fleet follows the topology it publishes (see
+\fI\%Topology\fP). A relay that a newer relay at its site supersedes asks for no
+more work, launches no \fIclient\fP, hands back the tasks no \fIclient\fP has started, lets its \fIclients\fP
+finish, and exits.
 The first zone\(aqs identity lists every \fIclient\fP at the site upstream. Each identity sends its own
 heartbeat, so if the relay fails, the upstream \fIserver\fP evicts each one and puts back what each
 held, in every zone.
@@ -1122,14 +1207,17 @@ settings from \fB[relay.zone.NAME]\fP\&. See also \fBrelay.zone\fP\&.
 Number of \fIclients\fP the relay keeps launched at its site (default: 1).
 .sp
 A \fIclient\fP that exits is launched again. The size must be at least 1: with no \fIclient\fP at the
-site the relay would never ask upstream for work. See also \fBrelay.size\fP\&.
+site the relay would never ask upstream for work. Against an upstream \fIserver\fP autoscaling with
+relay sites, the size is instead the default \fBmax\fP each zone advertises (see \fBrelay.max\fP),
+and \fIclients\fP are launched as the published topology asks. See also \fBrelay.size\fP\&.
 .TP
 .B \fB\-\-launcher\fP \fICMD\fP
 Command prefix used to launch each \fIclient\fP at the site (default: none).
 .sp
 With none, \fIclients\fP run directly on the relay\(aqs host. Otherwise each is launched as
-\fBCMD [ARGS...] hyper\-shell client ...\fP (e.g., \fBsrun\fP). The \fIclients\fP connect back to the
-relay by its host name. The launcher must pass the environment through: each \fIclient\fP
+\fBCMD [ARGS...] hyper\-shell client ...\fP (e.g., \fBsrun\fP). A \fB{zone}\fP in the launcher or
+its arguments is replaced by the zone the \fIclient\fP serves, and the launched process has it in
+\fBHYPERSHELL_ZONE\fP\&. The \fIclients\fP connect back to the relay by its host name. The launcher must pass the environment through: each \fIclient\fP
 receives the site key there (\fBHYPERSHELL_SERVER_AUTH\fP), never on its command line.
 See also \fBrelay.launcher\fP\&.
 .TP
@@ -2820,6 +2908,12 @@ A \fIdynamic\fP policy maintains a minimum size and grows up to some maximum siz
 depending on the observed \fItask pressure\fP given the specified scaling factor.
 .sp
 See also \fB\&.factor\fP, \fB\&.period\fP, \fB\&.size.init\fP, \fB\&.size.min\fP, and \fB\&.size.max\fP\&.
+.sp
+A server autoscaling with relay sites (\fBhs server \-\-autoscaling\fP) applies the policy to
+each zone\(aqs demand alone: under \fIfixed\fP, a zone with work gets one client when none runs,
+and its size otherwise comes from the relays\(aq \fBmin\fP and \fBinit\fP; under \fIdynamic\fP, a zone
+grows by one client per check while its pressure is high, up to the sum of its live sites\(aq
+\fBmax\fP\&.
 .TP
 .B \fB\&.factor\fP
 Scaling factor (default: 1).
@@ -2852,6 +2946,34 @@ Command prefix used to launch each client as a scaling unit (default: none).
 An empty value launches clients directly as \fBhs client ...\fP\&. Set a launcher such as
 an MPI or SLURM command (e.g., \fBsrun\fP) to bring up each client through your resource
 manager. Counterpart to the cluster \fB\-\-launcher\fP option used with \fB\-\-autoscaling\fP\&.
+.sp
+Each launch names the zone of its client: \fB{zone}\fP in the launcher is replaced by the
+zone\(aqs name (\fBdefault\fP for the default zone), and the launched process has the name
+in its \fBHYPERSHELL_ZONE\fP environment variable.
+.sp
+A server autoscaling with relay sites launches nothing and ignores this setting: each
+relay launches its own site clients with its own launcher.
+.TP
+.B \fB\&.distribution\fP
+How a zone\(aqs clients are split over the relay sites that serve it (default: \fIspread\fP).
+.sp
+Only a server autoscaling with relay sites (\fBhs server \-\-autoscaling\fP) reads it. With
+\fIspread\fP, each new client of a zone goes to the live site serving it that runs the
+fewest, as peers. With \fIfill\fP, each new client goes to the first site in preference
+order that has room below its \fBmax\fP, so a site is saturated before the next one gets
+any: use it to prefer the cheaper site. Every site stays within the \fBmin\fP/\fBmax\fP its
+relay advertises for the zone.
+.sp
+Its environment form is \fBHYPERSHELL_AUTOSCALE_DISTRIBUTION\fP\&.
+.TP
+.B \fB\&.sites\fP
+Preferred site order for the \fIfill\fP distribution (default: none).
+.sp
+A list of site names, or one comma\-separated string (the environment form,
+\fBHYPERSHELL_AUTOSCALE_SITES=east,west\fP). Under \fIfill\fP, the listed live sites come first in
+the listed order, and live sites not listed follow in the order they first registered.
+Any relay connected with the server\(aqs key takes part whether or not it is listed, and
+\fIspread\fP ignores the list.
 .TP
 .B \fB[size]\fP
 .INDENT 7.0
@@ -2876,6 +2998,9 @@ Maximum size of cluster (default: 1).
 For a \fIdynamic\fP autoscaling policy, this sets an upper limit on the number of launched
 clients. When this number is reached, scaling stops regardless of task pressure.
 .UNINDENT
+.sp
+A server autoscaling with relay sites ignores \fB[size]\fP: each relay advertises the
+\fBmin\fP, \fBmax\fP and \fBinit\fP of each zone it serves, and the server plans within those.
 .UNINDENT
 .TP
 .B \fB[relay]\fP
@@ -2925,8 +3050,9 @@ Seconds a result is kept in the relay database after it has been returned upstre
 Zone or zones the relay serves (default: none, the default zone).
 .sp
 One zone name, a list of names, or one table per zone, \fB[relay.zone.NAME]\fP, which may
-give that zone\(aqs own \fBlauncher\fP, \fBlauncher_args\fP and \fBsize\fP (each in place of the
-relay\(aqs, for that zone\(aqs \fIclients\fP only); an empty table serves the zone with the relay\(aqs.
+give that zone\(aqs own \fBlauncher\fP, \fBlauncher_args\fP, \fBsize\fP, \fBmin\fP, \fBmax\fP and
+\fBinit\fP (each in place of the relay\(aqs, for that zone\(aqs \fIclients\fP only); an empty table
+serves the zone with the relay\(aqs.
 Upstream the relay is one \fIclient\fP per zone, each with its own identity; at the site it
 keeps one fleet of \fIclients\fP per zone, all served by the relay\-local \fIserver\fP\&. The first
 zone\(aqs identity lists the site\(aqs \fIclients\fP upstream.
@@ -2938,6 +3064,7 @@ zone\(aqs identity lists the site\(aqs \fIclients\fP upstream.
 
 [relay.zone.gpu]
 size = 2
+max = 4
 launcher = \(dqsrun\(dq
 launcher_args = \(dq\-\-gres=gpu:1\(dq
 .EE
@@ -2954,7 +3081,29 @@ The upstream \fIserver\fP records the relay, and the \fIclients\fP at its site, 
 .B \fB\&.size\fP
 Number of \fIclients\fP the relay keeps launched at its site (default: \fI1\fP, at least \fI1\fP).
 .sp
+Against an upstream \fIserver\fP autoscaling with relay sites it is the default \fB\&.max\fP\&.
 See also \fB\-N\fP, \fB\-\-size\fP command\-line option.
+.TP
+.B \fB\&.min\fP
+Fewest \fIclients\fP of each zone an upstream topology assigns this site (default: \fI0\fP).
+.sp
+Held even while the zone\(aqs tasks wait in a later \fItask group\fP\&. A zone\(aqs own
+\fB[relay.zone.NAME]\fP table may set its own. Without a topology, a zone\(aqs fleet keeps at
+least this many \fIclients\fP launched (at least \fI1\fP, by default the size). Each zone
+advertises its bounds upstream; see \fI\%Topology\fP\&.
+.TP
+.B \fB\&.max\fP
+Most \fIclients\fP of each zone an upstream topology assigns this site (default: the size).
+.sp
+Lowering it never ends a running \fIclient\fP: the zone launches no more, and its \fIclients\fP
+exit when idle. A zone\(aqs own \fB[relay.zone.NAME]\fP table may set its own.
+.TP
+.B \fB\&.init\fP
+\fIClients\fP of each zone an upstream topology assigns this site when the relay starts
+(default: \fB\&.min\fP).
+.sp
+Without a topology, the \fIclients\fP each zone\(aqs fleet starts with (by default the size).
+Bounds must satisfy \fBmin <= init <= max\fP, with \fBmax\fP at least \fI1\fP\&.
 .TP
 .B \fB\&.launcher\fP
 Command prefix used to launch each \fIclient\fP at the site (default: none).

@@ -616,7 +616,7 @@ wheels = [
 
 [[package]]
 name = "hypershell"
-version = "2.9.0a7"
+version = "2.9.0a8"
 source = { editable = "." }
 default-groups = ["dev", "docs"]
 dependencies = [
