@@ -346,13 +346,17 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   every connection's descriptor lives in the server process, the accept loop refuses a connection
   that would use the last `RESERVE` descriptors below the soft open-file limit (one WARNING per
   interval), so the database and logs keep working; a server TLS context that cannot be built is
-  logged once at ERROR and connections fail closed. A queue client's proxy finalizer (its decref)
+  logged once at ERROR and connections fail closed. With TLS the in-process accept loop only
+  accepts the TCP connection: its handler thread runs the TLS handshake and closes the connection
+  unless it completes within `server.tls.handshake` (default 30 s, refused at start unless greater
+  than 0) of the accept (`core/queue.py` `handle_pending`). A queue client's proxy finalizer (its decref)
   can run on any thread the cyclic GC picks, server threads included. So once `QueueClient.connect`
   has made a proxy, a decref finalized on the server side goes to the `hypershell-queue-decref`
   thread, which the process's first server starts (`core/queue.py` `_decref`). The server side is
   decided by thread, never by address: every thread an in-process server starts (accept loop,
   handlers, stop, the sender), any thread inside a server's start or stop, any thread in a TLS
-  handshake with a queue server (the accept loop runs it inline), and any thread that `threading`
+  handshake with a queue server (a forked manager's accept loop runs it inline; an in-process server
+  runs it on the connection's handler thread), and any thread that `threading`
   has not registered as started: a new thread before its mark, one past its unregistration, or one
   that `threading` did not start (an entry left under a reused identifier by an ended thread does not
   count). Every other decref is the stock one, on the finalizing thread. A forked child drops the marks and waiting decrefs it inherits.

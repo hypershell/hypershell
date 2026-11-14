@@ -1,0 +1,211 @@
+# CLI drives on the branch (P3 verify), 2026-11-14
+
+Each drive runs in a throwaway site via `.agents/factory/bin/temp_site.sh uv run python
+"<worktree>/spec/listener-handshake-deadline/research/drive.py" SCENARIO ...`, holds one TCP connection
+that never sends a byte to the server's queue port, and stops every process it started by PID
+("stopped pid ..."). Older clients come from PyPI in scratch environments: 2.9.0a8 and 2.8.7
+(CPython 3.14.6). Paths and the host name are replaced by placeholders.
+
+Summary: all 8 drives pass. Default deadline: the held connection stays open while hs server,
+hs cluster (local) and the hs relay site-local server serve the work. --handshake 2: each closes it
+2.0 s after it connected, with one WARNING naming server.tls.handshake. A 2.9.0a8 client runs the
+tasks; a 2.8.7 client connects, completes TLS, authenticates and is refused as too old (exit 5), as
+on develop.
+
+
+=== drive.py server ===
+started pid 15840: <worktree>/.venv/bin/hs server $TMPDIR/hypershell-temp-site.fDeisj/tasks.in -H 127.0.0.1 -p 62181
+    INFO [hypershell.core.tls] Generated self-signed TLS certificate ($TMPDIR/hypershell-temp-site.fDeisj/Library/tls/server.crt)
+    INFO [hypershell.core.tls] Certificate fingerprint: SHA256:<fingerprint of a throwaway certificate>
+    INFO [hypershell.server] Waiting for task file to be submitted before scheduling
+PASS: hs server listening
+    INFO [hypershell.server] Found 4 unfinished tasks
+    INFO [hypershell.server] Reverted 0 previously interrupted tasks
+    INFO [hypershell.server] Server listening on 127.0.0.1:62181
+started pid 15846: <worktree>/.venv/bin/hs client -H 127.0.0.1 -p 62181
+PASS: client hs finished the tasks in 2.5 s (exit 0, bound 25 s)
+PASS: hs server exited 0
+PASS: hs server: held connection open until the work finished (closed only once the work was done and the server stopped)
+stopped pid 15840 (exit 0)
+stopped pid 15846 (exit 0)
+=== exit 0 ===
+
+=== drive.py server --handshake 2 ===
+started pid 15868: <worktree>/.venv/bin/hs server $TMPDIR/hypershell-temp-site.HnrA2b/tasks.in -H 127.0.0.1 -p 62280
+    INFO [hypershell.core.tls] Generated self-signed TLS certificate ($TMPDIR/hypershell-temp-site.HnrA2b/Library/tls/server.crt)
+    INFO [hypershell.core.tls] Certificate fingerprint: SHA256:<fingerprint of a throwaway certificate>
+    INFO [hypershell.server] Waiting for task file to be submitted before scheduling
+    INFO [hypershell.server] Found 4 unfinished tasks
+    INFO [hypershell.server] Reverted 0 previously interrupted tasks
+PASS: hs server listening
+    INFO [hypershell.server] Server listening on 127.0.0.1:62280
+started pid 15870: <worktree>/.venv/bin/hs client -H 127.0.0.1 -p 62280
+ WARNING [hypershell.core.queue] Closing queue connections that do not complete their TLS handshake within 2 seconds (server.tls.handshake), from 127.0.0.1:62287; more within 60 seconds are logged at DEBUG
+PASS: client hs finished the tasks in 2.5 s (exit 0, bound 25 s)
+PASS: hs server exited 0
+PASS: hs server: server closed the held connection 2.0 s after it connected (expected 2 to 5 s)
+stopped pid 15868 (exit 0)
+stopped pid 15870 (exit 0)
+=== exit 0 ===
+
+=== drive.py cluster ===
+started pid 15893: <worktree>/.venv/bin/hs cluster $TMPDIR/hypershell-temp-site.NBtYNz/tasks.in -H 127.0.0.1 -p 62378 --delay-start 3
+    INFO [hypershell.core.tls] Generated self-signed TLS certificate ($TMPDIR/hypershell-temp-site.NBtYNz/Library/tls/server.crt)
+    INFO [hypershell.core.tls] Certificate fingerprint: SHA256:<fingerprint of a throwaway certificate>
+    INFO [hypershell.cluster] Found 4 tasks in $TMPDIR/hypershell-temp-site.NBtYNz/tasks.in (md5=dcc435b6a737dadaf805a5cdadfdf110)
+    INFO [hypershell.submit] Submitting all 4 tasks from $TMPDIR/hypershell-temp-site.NBtYNz/tasks.in as a new source
+    INFO [hypershell.server] Waiting for task file to be submitted before scheduling
+    INFO [hypershell.server] Found 4 unfinished tasks
+    INFO [hypershell.server] Reverted 0 previously interrupted tasks
+PASS: hs cluster server listening
+    INFO [hypershell.server] Server listening on localhost:62378
+    INFO [hypershell.client] Running task (01a1dac2-409f-7823-8505-1ddcfb786b52)
+0
+    INFO [hypershell.client] Running task (01a1dac2-409f-7823-8505-1dea467ab38c)
+1
+    INFO [hypershell.client] Running task (01a1dac2-409f-7823-8505-1df685ea4e5a)
+2
+    INFO [hypershell.client] Running task (01a1dac2-40a1-7c21-b7d3-bc83310a1e34)
+3
+PASS: hs cluster finished the tasks in 5.6 s (exit 0)
+PASS: hs cluster: held connection open until the work finished (closed only once the work was done and the server stopped)
+stopped pid 15893 (exit 0)
+=== exit 0 ===
+
+=== drive.py cluster --handshake 2 ===
+started pid 15920: <worktree>/.venv/bin/hs cluster $TMPDIR/hypershell-temp-site.CdZOWV/tasks.in -H 127.0.0.1 -p 62485 --delay-start 3
+    INFO [hypershell.core.tls] Generated self-signed TLS certificate ($TMPDIR/hypershell-temp-site.CdZOWV/Library/tls/server.crt)
+    INFO [hypershell.core.tls] Certificate fingerprint: SHA256:<fingerprint of a throwaway certificate>
+    INFO [hypershell.cluster] Found 4 tasks in $TMPDIR/hypershell-temp-site.CdZOWV/tasks.in (md5=dcc435b6a737dadaf805a5cdadfdf110)
+    INFO [hypershell.submit] Submitting all 4 tasks from $TMPDIR/hypershell-temp-site.CdZOWV/tasks.in as a new source
+    INFO [hypershell.server] Waiting for task file to be submitted before scheduling
+    INFO [hypershell.server] Found 4 unfinished tasks
+    INFO [hypershell.server] Reverted 0 previously interrupted tasks
+PASS: hs cluster server listening
+    INFO [hypershell.server] Server listening on localhost:62485
+ WARNING [hypershell.core.queue] Closing queue connections that do not complete their TLS handshake within 2 seconds (server.tls.handshake), from 127.0.0.1:62510; more within 60 seconds are logged at DEBUG
+    INFO [hypershell.client] Running task (01a1dac2-5710-75e3-882e-2bc6e5cffd27)
+0
+    INFO [hypershell.client] Running task (01a1dac2-5710-75e3-882e-2bdd82607b40)
+1
+    INFO [hypershell.client] Running task (01a1dac2-5711-7462-a729-51b6ec767fce)
+2
+    INFO [hypershell.client] Running task (01a1dac2-5712-7b83-8ee0-9a1eae861b6d)
+3
+PASS: hs cluster finished the tasks in 5.7 s (exit 0)
+PASS: hs cluster: server closed the held connection 2.0 s after it connected (expected 2 to 5 s)
+stopped pid 15920 (exit 0)
+=== exit 0 ===
+
+=== drive.py relay ===
+started pid 15975: <worktree>/.venv/bin/hs server $TMPDIR/hypershell-temp-site.LTBRqP/tasks.in -H 127.0.0.1 -p 62611
+    INFO [hypershell.core.tls] Generated self-signed TLS certificate ($TMPDIR/hypershell-temp-site.LTBRqP/Library/tls/server.crt)
+    INFO [hypershell.core.tls] Certificate fingerprint: SHA256:<fingerprint of a throwaway certificate>
+    INFO [hypershell.server] Waiting for task file to be submitted before scheduling
+    INFO [hypershell.server] Found 4 unfinished tasks
+    INFO [hypershell.server] Reverted 0 previously interrupted tasks
+PASS: upstream hs server listening
+started pid 15980: <worktree>/.venv/bin/hs relay -H 127.0.0.1 -p 62611 --bind 127.0.0.1 --port 62612 --launcher $TMPDIR/hypershell-temp-site.LTBRqP/delay.py --database $TMPDIR/hypershell-temp-site.LTBRqP/relay.db
+    INFO [hypershell.server] Server listening on 127.0.0.1:62611
+    INFO [hypershell.relay] Relay database $TMPDIR/hypershell-temp-site.LTBRqP/relay.db
+    INFO [hypershell.relay] Upstream identity 57f71077-861d-58af-8f2b-6a9c72f78892 for zone default at site <host>
+    INFO [hypershell.core.reconnect] Connected to upstream server 127.0.0.1:62611
+    INFO [hypershell.relay.upstream] Upstream server publishes no topology (not autoscaling with relay sites) - site clients kept by local size
+    INFO [hypershell.server] Scheduler will run forever
+    INFO [hypershell.server] Empty database - waiting for initial tasks
+PASS: relay-local server listening
+    INFO [hypershell.relay] Relay-local server ready on 127.0.0.1:62612
+    INFO [hypershell.server] Server listening on 127.0.0.1:62612
+    INFO [hypershell.cluster] Autoscale start (policy: fixed, init-size: 1)
+    INFO [hypershell.cluster] Autoscale adding client (15983, zone: default)
+    INFO [hypershell.client] Running task (01a1dac2-6df2-7dc0-b91c-9f6ef1850afb)
+0
+    INFO [hypershell.client] Running task (01a1dac2-6df4-76e0-9778-9268e738c155)
+1
+    INFO [hypershell.client] Running task (01a1dac2-6df5-7a91-8139-f833289c42f4)
+2
+    INFO [hypershell.client] Running task (01a1dac2-6df6-7ca2-8c7d-b5b2537e1f98)
+3
+    INFO [hypershell.relay.upstream] Upstream server is shutting down - no more upstream requests
+ WARNING [hypershell.cluster] Stopping (autoscaler)
+ WARNING [hypershell.server] Stopping (scheduler)
+PASS: upstream finished the tasks through the relay in 6.4 s (exit 0)
+PASS: hs relay site-local server: held connection open until the work finished (closed only once the work was done and the server stopped)
+ WARNING [hypershell.relay] Stopping
+ WARNING [hypershell.cluster] Stopping (autoscaler)
+stopped pid 15975 (exit 0)
+stopped pid 15980 (exit -15)
+=== exit 0 ===
+
+=== drive.py relay --handshake 2 ===
+started pid 16007: <worktree>/.venv/bin/hs server $TMPDIR/hypershell-temp-site.KBxKM1/tasks.in -H 127.0.0.1 -p 62725
+    INFO [hypershell.core.tls] Generated self-signed TLS certificate ($TMPDIR/hypershell-temp-site.KBxKM1/Library/tls/server.crt)
+    INFO [hypershell.core.tls] Certificate fingerprint: SHA256:<fingerprint of a throwaway certificate>
+    INFO [hypershell.server] Waiting for task file to be submitted before scheduling
+    INFO [hypershell.server] Found 4 unfinished tasks
+    INFO [hypershell.server] Reverted 0 previously interrupted tasks
+PASS: upstream hs server listening
+    INFO [hypershell.server] Server listening on 127.0.0.1:62725
+started pid 16008: <worktree>/.venv/bin/hs relay -H 127.0.0.1 -p 62725 --bind 127.0.0.1 --port 62726 --launcher $TMPDIR/hypershell-temp-site.KBxKM1/delay.py --database $TMPDIR/hypershell-temp-site.KBxKM1/relay.db
+    INFO [hypershell.relay] Relay database $TMPDIR/hypershell-temp-site.KBxKM1/relay.db
+    INFO [hypershell.relay] Upstream identity 6ee890ea-40ba-5781-aed7-fff7a4ce88df for zone default at site <host>
+    INFO [hypershell.core.reconnect] Connected to upstream server 127.0.0.1:62725
+    INFO [hypershell.relay.upstream] Upstream server publishes no topology (not autoscaling with relay sites) - site clients kept by local size
+    INFO [hypershell.server] Scheduler will run forever
+    INFO [hypershell.server] Empty database - waiting for initial tasks
+PASS: relay-local server listening
+    INFO [hypershell.relay] Relay-local server ready on 127.0.0.1:62726
+    INFO [hypershell.server] Server listening on 127.0.0.1:62726
+    INFO [hypershell.cluster] Autoscale start (policy: fixed, init-size: 1)
+    INFO [hypershell.cluster] Autoscale adding client (16011, zone: default)
+ WARNING [hypershell.core.queue] Closing queue connections that do not complete their TLS handshake within 2 seconds (server.tls.handshake), from 127.0.0.1:62758; more within 60 seconds are logged at DEBUG
+    INFO [hypershell.client] Running task (01a1dac2-8968-7b52-8d91-213dbba01c4c)
+0
+    INFO [hypershell.client] Running task (01a1dac2-8969-7e02-ba17-bc105e579b53)
+1
+    INFO [hypershell.client] Running task (01a1dac2-896b-7821-a12f-968eee473efd)
+2
+    INFO [hypershell.client] Running task (01a1dac2-896c-79f1-8f10-b1abc50e97b8)
+3
+    INFO [hypershell.relay.upstream] Upstream server is shutting down - no more upstream requests
+ WARNING [hypershell.cluster] Stopping (autoscaler)
+ WARNING [hypershell.server] Stopping (scheduler)
+PASS: upstream finished the tasks through the relay in 6.9 s (exit 0)
+PASS: hs relay site-local server: server closed the held connection 2.0 s after it connected (expected 2 to 5 s)
+stopped pid 16007 (exit 0)
+stopped pid 16008 (exit 0)
+=== exit 0 ===
+
+=== drive.py server --client $TMPDIR/lhd-clients/2.9.0a8/bin/hs ===
+started pid 16040: <worktree>/.venv/bin/hs server $TMPDIR/hypershell-temp-site.IkNkhI/tasks.in -H 127.0.0.1 -p 62786
+    INFO [hypershell.core.tls] Generated self-signed TLS certificate ($TMPDIR/hypershell-temp-site.IkNkhI/Library/tls/server.crt)
+    INFO [hypershell.core.tls] Certificate fingerprint: SHA256:<fingerprint of a throwaway certificate>
+    INFO [hypershell.server] Waiting for task file to be submitted before scheduling
+    INFO [hypershell.server] Found 4 unfinished tasks
+    INFO [hypershell.server] Reverted 0 previously interrupted tasks
+PASS: hs server listening
+    INFO [hypershell.server] Server listening on 127.0.0.1:62786
+started pid 16041: $TMPDIR/lhd-clients/2.9.0a8/bin/hs client -H 127.0.0.1 -p 62786
+PASS: client $TMPDIR/lhd-clients/2.9.0a8/bin/hs finished the tasks in 2.6 s (exit 0, bound 25 s)
+PASS: hs server exited 0
+PASS: hs server: held connection open until the work finished (closed only once the work was done and the server stopped)
+stopped pid 16040 (exit 0)
+stopped pid 16041 (exit 0)
+=== exit 0 ===
+
+=== drive.py server --client $TMPDIR/lhd-clients/2.8.7/bin/hs --expect-too-old ===
+started pid 16057: <worktree>/.venv/bin/hs server $TMPDIR/hypershell-temp-site.g7I78D/tasks.in -H 127.0.0.1 -p 62818
+    INFO [hypershell.core.tls] Generated self-signed TLS certificate ($TMPDIR/hypershell-temp-site.g7I78D/Library/tls/server.crt)
+    INFO [hypershell.core.tls] Certificate fingerprint: SHA256:<fingerprint of a throwaway certificate>
+    INFO [hypershell.server] Waiting for task file to be submitted before scheduling
+    INFO [hypershell.server] Found 4 unfinished tasks
+    INFO [hypershell.server] Reverted 0 previously interrupted tasks
+PASS: hs server listening
+    INFO [hypershell.server] Server listening on 127.0.0.1:62818
+started pid 16058: $TMPDIR/lhd-clients/2.8.7/bin/hs client -H 127.0.0.1 -p 62818
+ WARNING [hypershell.core.queue] Client too old (no work-request protocol) from 127.0.0.1:62826
+PASS: client $TMPDIR/lhd-clients/2.8.7/bin/hs connected, authenticated and was refused as too old in 0.4 s (exit 5)
+PASS: hs server: held connection open until the work finished (still open)
+stopped pid 16057 (exit -15)
+stopped pid 16058 (exit 5)
+=== exit 0 ===

@@ -75,3 +75,11 @@ is skipped by the parser):
 - **Skill cause:** Step 4/6 and the TECH template show only one-line `uv run hs …` drives; nothing says where a drive script lives or that paths given to `temp_site.sh` must be absolute.
 - **Recommended fix:** In Step 6 (and the TECH template's `verify` note), say that a drive too long for one line goes in `spec/{slug}/research/` as a script, is invoked as `temp_site.sh uv run python "$PWD/spec/{slug}/research/<script>"`, and is dry-run on the base before the plan is committed.
 - **Confidence:** high · **Effort:** small
+
+## F5 — Drives dry-run only on the base leave their passing branch unexercised until build
+`origin=hs-build:P3 severity=medium category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The P3 verify failed on its first run although the server behaved correctly: `drive.py` required the held connection to be open after `hs server`/`hs cluster` had exited (process exit closes it) and after the relay had stopped its local server. hs-plan dry-ran every drive on develop, where they fail earlier for the intended reason, so the pass path was first run here; the harness had to be fixed mid-build and an attempt recorded.
+- **Skill cause:** hs-plan asks for drives to be dry-run on the base (red), with no step that runs them against the prototype or otherwise exercises the assertions that must hold on a correct build, so a harness bug in the green path reaches hs-build as a misleading red gate.
+- **Recommended fix:** In hs-plan's drive/verify guidance, require each drive (and any verify script) to be dry-run both on the base (expected red, for the right reason) and against the scratch prototype when one exists (expected green), and record both outcomes in the research brief.
+- **Confidence:** high · **Effort:** small
+

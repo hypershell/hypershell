@@ -19,7 +19,8 @@ Scenarios (each prints PASS or FAIL lines and exits non-zero on any FAIL):
     refuse                                     hs server, hs cluster and hs relay refuse handshake = 0, -5, abc
 
 Without --handshake the default deadline applies and the held connection must still be open when the
-work is done (the server served others while it was pending). With --handshake SEC the held connection
+work is done (the server served others while it was pending); a close when the server stops,
+after the work, is that stop, not the deadline. With --handshake SEC the held connection
 must be closed by the server between SEC and SEC + 3 seconds after it connected. --client names another
 `hs` executable (e.g., an older release installed in a scratch environment) to run as the client;
 --expect-too-old instead expects that client to connect and authenticate and then be refused as too old
@@ -136,9 +137,15 @@ def taskfile() -> str:
     return path
 
 
-def check_held(held: Held, handshake: Optional[float], label: str) -> None:
+def check_held(held: Held, handshake: Optional[float], label: str, finished: Optional[float] = None) -> None:
+    """Judge the held connection: open when the work finished (monotonic `finished`), or closed by the
+    server between `handshake` and `handshake` + 3 seconds after it connected."""
     if handshake is None:
-        report(held.closed_after is None, f'{label}: held connection still open after the work finished')
+        closed_at = None if held.closed_after is None else held.opened + held.closed_after
+        # Closed no earlier than half a second before the work was seen to finish: the server stopping
+        ok = closed_at is None or (finished is not None and closed_at >= finished - 0.5)
+        how = 'still open' if closed_at is None else 'closed only once the work was done and the server stopped'
+        report(ok, f'{label}: held connection open until the work finished ({how})')
     else:
         end = held.opened + handshake + 4
         while held.closed_after is None and time.monotonic() < end:
@@ -175,6 +182,7 @@ def scenario_server(args) -> None:
         client = start([args.client or hs, 'client', '-H', '127.0.0.1', '-p', str(port)],
                        env={'HYPERSHELL_SERVER_AUTH': KEY}, stdout=output, stderr=subprocess.STDOUT)
         code = wait(client, BOUND)
+        finished = time.monotonic()
         output.seek(0)
         text = output.read()
     if args.expect_too_old:
@@ -188,7 +196,7 @@ def scenario_server(args) -> None:
     if failures:
         print(text[-1500:], flush=True)
     if held is not None:
-        check_held(held, args.handshake, 'hs server')
+        check_held(held, args.handshake, 'hs server', finished)
         held.release()
 
 
@@ -201,9 +209,10 @@ def scenario_cluster(args) -> None:
     report(wait_port(port), 'hs cluster server listening')
     held = None if args.no_hold else Held(port)
     code = wait(cluster, BOUND)
+    finished = time.monotonic()
     report(code == 0, f'hs cluster finished the tasks in {time.monotonic() - began:.1f} s (exit {code})')
     if held is not None:
-        check_held(held, args.handshake, 'hs cluster')
+        check_held(held, args.handshake, 'hs cluster', finished)
         held.release()
 
 
@@ -224,13 +233,25 @@ def scenario_relay(args) -> None:
     env.pop('HYPERSHELL_SERVER_AUTH')
     relay = start([hs, 'relay', '-H', '127.0.0.1', '-p', str(up_port), '--bind', '127.0.0.1',
                    '--port', str(site_port), '--launcher', delay, '--database', os.path.join(os.getcwd(), 'relay.db')],
-                  env=env)
+                  env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    # The relay stops its local server (cutting the held connection) once upstream says it is shutting
+    # down, which it does only when the work is done, so that line marks the end of the work here.
+    upstream_done: List[float] = []
+
+    def echo() -> None:
+        for line in relay.stdout:
+            if not upstream_done and 'Upstream server is shutting down' in line:
+                upstream_done.append(time.monotonic())
+            print(line, end='', flush=True)
+
+    threading.Thread(target=echo, daemon=True).start()
     report(wait_port(site_port), 'relay-local server listening')
     held = None if args.no_hold else Held(site_port)
     code = wait(upstream, BOUND)
+    finished = upstream_done[0] if upstream_done else time.monotonic()
     report(code == 0, f'upstream finished the tasks through the relay in {time.monotonic() - began:.1f} s (exit {code})')
     if held is not None:
-        check_held(held, args.handshake, 'hs relay site-local server')
+        check_held(held, args.handshake, 'hs relay site-local server', finished)
         held.release()
     relay.terminate()
     wait(relay, 10)

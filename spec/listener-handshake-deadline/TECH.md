@@ -4,10 +4,10 @@ title: A TLS queue server keeps serving clients while a connection is slow in it
   handshake
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/listener-handshake-deadline
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -45,7 +45,7 @@ phases:
     refuse
 - id: P3
   name: Docs, CLI drives with current and older clients, latency evidence
-  status: pending
+  status: done
   satisfies:
   - R6
   - R7
@@ -56,6 +56,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs
     sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html && .agents/factory/bin/temp_site.sh
     uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py" server
@@ -185,18 +186,23 @@ deadline closes are logged per R5.
 **Goal:** the docs say the deadline exists; every TLS server command is shown to keep serving and to
 apply the configured deadline; older clients behave as on develop; latency is within R7.
 
-- [ ] `docs/_include/config_param_ref.rst`: `[server.tls] .handshake` entry with `versionadded`
+- [x] `docs/_include/config_param_ref.rst`: `[server.tls] .handshake` entry with `versionadded`
       (PLAN §2.4). `docs/security.rst`: threat-model item 5 and *Limitations* item 4 state the
       deadline, `versionchanged`; every other limitation sentence word for word. Apply the
       "Monitor connection patterns" clause only if the foreman signs it off (PLAN §5).
-- [ ] `AGENTS.md` § Queue transport & security: the decref paragraph's handshake wording (PLAN §2.4).
-- [ ] Older clients (network to PyPI): `uv venv -q --python 3.14 "$TMPDIR/lhd-clients/2.9.0a8" &&
+- [x] `AGENTS.md` § Queue transport & security: the decref paragraph's handshake wording (PLAN §2.4).
+- [x] Older clients (network to PyPI): `uv venv -q --python 3.14 "$TMPDIR/lhd-clients/2.9.0a8" &&
       VIRTUAL_ENV="$TMPDIR/lhd-clients/2.9.0a8" uv pip install -q hypershell==2.9.0a8`, and the same
       for `2.8.7`.
-- [ ] Run the P3 `verify:`; save its drive and latency output to
+- [x] Run the P3 `verify:`; save its drive and latency output to
       `spec/listener-handshake-deadline/evidence/drives.txt` and `evidence/latency.txt`. Before the
       verify, dry-run one drive by hand and confirm it stops every process it started (it prints
       `stopped pid …` for each).
+- [x] *Amended in build:* `research/drive.py` judges the held connection at the end of the work
+      (the client's exit for `server`, the process exit for `cluster`, the relay's "Upstream server
+      is shutting down" line for `relay`): a server that stops once the work is done closes it, and
+      the planning dry runs (on develop) had never reached that passing branch. The clients
+      installed during planning were linked into `$TMPDIR/lhd-clients/`.
 - **Verify:** the P3 `verify:` — `-W` docs build (sandbox off); `server`, `cluster`, `relay` drives
   with the default deadline (served while a connection is held, which stays open) and with
   `--handshake 2` (closed in 2–5 s); a 2.9.0a8 client runs the tasks; a 2.8.7 client connects,

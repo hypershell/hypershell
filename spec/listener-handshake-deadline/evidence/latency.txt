@@ -1,0 +1,16 @@
+# Connect-and-first-call latency and 64-client burst, branch against develop 6da633d (P3 verify), 2026-11-14
+
+    uv run python spec/listener-handshake-deadline/research/latency.py compare "$TMPDIR/lhd-develop/src" "$TMPDIR/lhd-tls"
+
+Three interleaved rounds on one host (Darwin arm64, loopback), each: 100 sequential connects after 5
+warm-ups (median, p10, p90 of connect + first queue call), then 64 clients at once. develop's src
+exported with git archive and put first on PYTHONPATH. R7 allows the larger of 10 % or 5 ms.
+
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 34.39, "p10_ms": 33.58, "p90_ms": 35.59, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.78}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 34.35, "p10_ms": 33.64, "p90_ms": 36.13, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.53}
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 35.12, "p10_ms": 34.2, "p90_ms": 36.19, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.78}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 34.87, "p10_ms": 34.13, "p90_ms": 35.85, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.55}
+develop {"python": "3.14.6", "sequential": 100, "median_ms": 35.02, "p10_ms": 34.22, "p90_ms": 36.52, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 1.77}
+branch {"python": "3.14.6", "sequential": 100, "median_ms": 34.8, "p10_ms": 34.24, "p90_ms": 36.0, "burst": 64, "burst_ok": 64, "burst_errors": [], "burst_seconds": 0.56}
+PASS: median develop 35.02 ms, branch 34.80 ms (allowed up to 40.02 ms); every 64-client burst completed: True
+latency exit 0
