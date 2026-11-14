@@ -27,7 +27,9 @@ Description
    file.
 
 .. versionchanged:: 2.9.0
-   ``-d``/``--delay-start`` takes a duration with units or a Slurm time, as ``-W`` does; a leading
-   ``-`` still asks for a random delay (e.g., ``--delay-start=-10m``).
+   ``-w``/``--bundlewait``, ``-S``/``--signalwait`` and ``-d``/``--delay-start`` take a duration
+   with units or a Slurm time, as ``-W`` does, and a signed value is refused except on
+   ``--delay-start``, where a leading ``-`` still asks for a random delay (e.g.,
+   ``--delay-start=-10m``).
 
 .. include:: ../_include/client_help.rst

@@ -83,7 +83,12 @@ Options
     See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
-    Seconds to wait before flushing tasks (default: 5).
+    Time to wait before flushing tasks (default: 5).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     This is used by both the `submit` thread and forwarded to each `client`. The `client` collector
     thread that accumulates finished task bundles to return to the `server` will push out a bundle
@@ -91,8 +96,13 @@ Options
 
     See also ``--bundlesize``.
 
-``-Q``, ``--poll`` *NUM*
-    Polling interval in seconds between database queries if no tasks are available (default: 5).
+``-Q``, ``--poll`` *SEC*
+    Polling interval between database queries if no tasks are available (default: 5).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     This controls how frequently the scheduler checks the database for new tasks when idle.
     Lower values (e.g., 1-2 seconds) provide faster responsiveness but may increase database
@@ -333,7 +343,12 @@ Options
     Individual tasks are throttled if exceeding this average limit.
 
 ``-S``, ``--signalwait`` *SEC*
-    Task-level signal escalation wait period in seconds (default: 10).
+    Task-level signal escalation wait period (default: 10).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     When tasks fail to halt following an initial SIGINT, the program waits
     this interval in seconds before escalating to the next level of interrupt.
@@ -408,7 +423,12 @@ Options
     See also ``--period``.  Only valid with ``--autoscaling``.
 
 ``-P``, ``--period`` *SEC*
-    Scaling period in seconds (default: 60).
+    Scaling period (default: 60).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     The autoscaler waits for this period of time in between checks and scaling events.
     A shorter period makes the scaling behavior more responsive but can effect database

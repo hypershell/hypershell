@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/duration-units-remaining
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -36,7 +36,7 @@ phases:
 - id: P2
   name: Whole-second options -w, -S, -P, -Q, -n and their four keys through parse_time
     (help, docs, completions)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R3
@@ -210,24 +210,24 @@ form. So do the keys `submit.bundlewait`, `task.signalwait`, `autoscale.period` 
 Signed values and non-durations are refused, a bare integer stays seconds, and a launched client gets
 bare whole seconds.
 
-- [ ] `type=int` → `type=parse_time` on: `submit.py` `-w`; `server.py` `-w`, `-P`, `-Q`; `client.py`
+- [x] `type=int` → `type=parse_time` on: `submit.py` `-w`; `server.py` `-w`, `-P`, `-Q`; `client.py`
       `-w`, `-S`; `cluster/__init__.py` `-w`, `-S`, `-P`, `-Q`; `task.py` `-n` (both declarations; add
       `parse_time` to `task.py`'s `core.types` import). Defaults, dests and metavars unchanged.
-- [ ] Help: the `-w`, `-S`, `-P`, `-Q`, `-n` lines of each `APP_HELP` (`submit.py`, `server.py`,
+- [x] Help: the `-w`, `-S`, `-P`, `-Q`, `-n` lines of each `APP_HELP` (`submit.py`, `server.py`,
       `client.py`, `cluster/__init__.py`, `task.py` for `hs wait` and `hs run`) state the forms in a7's
       short style; `-Q`'s `NUM` becomes `SEC`. The same options' paragraphs in
       `docs/_include/{submit,server,client,cluster,task_wait,task_run}_help.rst` get a7's forms
       paragraph. `.. versionchanged:: 2.9.0` beside the `.. include::` in
       `docs/cli/{submit,server,task_wait,task_run}.rst` (`client`/`cluster` already marked in P1 —
       extend that clause rather than add a second marker).
-- [ ] `docs/_include/config_param_ref.rst`: `[submit] .bundlewait`, `[task] .signalwait`,
+- [x] `docs/_include/config_param_ref.rst`: `[submit] .bundlewait`, `[task] .signalwait`,
       `[server] .poll`, `[autoscale] .period` — "A string takes the same forms as `-w`/`--bundlewait`
       …" (a7's `client.timeout` wording) and `.. versionchanged:: 2.9.0`. Leave `[client] .bundlewait`,
       `.heartrate`, `server.evict` and every `[relay]` key alone (non-goals).
-- [ ] Completions: zsh descriptions of `-w`, `-S`, `-P`, `-Q`, `-n` on every command state the forms;
+- [x] Completions: zsh descriptions of `-w`, `-S`, `-P`, `-Q`, `-n` on every command state the forms;
       zsh and bash candidates add unit forms (e.g. `-w`: `5 30s 1m 10m`; `-S`: `1 5 10 30s`;
       `-P`: `30 60 5m 10m`; `-Q`: `1 5 30 1m`; `-n`: `5 10 30 1m`).
-- [ ] `tests/test_duration_options.py`: `@mark.unit` table over every (app, option, dest) of R1
+- [x] `tests/test_duration_options.py`: `@mark.unit` table over every (app, option, dest) of R1
       (13 entries counting `hs wait` and `hs run` separately) × (`30s`→30, `5m`→300, `1h30m`→5400,
       `1.5h`→5400, `1:30`→90, `1:30:00`→5400, `1-12`→129600, `90`→90, `0.5`→1). Refusals: `5MB`,
       `1hr`, `2hours`, `1w`, `30m1h`, plus signed `-5` (two words) and `+60` / `--opt=-5m` (attached),

@@ -32,7 +32,12 @@ Options
     See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
-    Seconds to wait before flushing tasks (default: 5).
+    Time to wait before flushing tasks (default: 5).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     The `client` collector thread that accumulates finished task bundles to return to
     the `server` will push out a bundle after this period of time regardless of whether
@@ -152,7 +157,12 @@ Options
     Individual tasks are throttled if exceeding this average limit.
 
 ``-S``, ``--signalwait`` *SEC*
-    Task-level signal escalation wait period in seconds (default: 10).
+    Task-level signal escalation wait period (default: 10).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     When tasks fail to halt following an initial SIGINT, the program waits
     this interval in seconds before escalating to the next level of interrupt.

@@ -1551,7 +1551,7 @@ Options:
   -N, --num-threads   NUM   Number executor threads, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template      CMD   Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
   -b, --bundlesize    SIZE  Bundle size to request and return (default: server's).
-  -w, --bundlewait    SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+  -w, --bundlewait    SEC   Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --zone          NAME  Run only tasks of this zone (default: tasks without a zone).
   -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
@@ -1570,7 +1570,7 @@ Options:
   -T, --timeout       SEC   Shutdown if no tasks received; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: never).
   -W, --task-timeout  SEC   Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
   -R, --ratelimit     NUM   Maximum allowed tasks per second (default: none).
-  -S, --signalwait    SEC   Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
+  -S, --signalwait    SEC   Task-level signal escalation wait period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SIGNALWAIT}).
   -h, --help                Show this message and exit.\
 """
 
@@ -1601,7 +1601,7 @@ class ClientApp(Application):
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
+    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
 
     delay_start: float = DEFAULT_DELAY
     interface.add_argument('-d', '--delay-start', type=parse_delay, default=delay_start)
@@ -1617,7 +1617,7 @@ class ClientApp(Application):
     interface.add_argument('-R', '--ratelimit', type=int, default=ratelimit)
 
     task_signalwait: int = config.task.signalwait
-    interface.add_argument('-S', '--signalwait', type=int, default=task_signalwait, dest='task_signalwait')
+    interface.add_argument('-S', '--signalwait', type=parse_time, default=task_signalwait, dest='task_signalwait')
 
     no_confirm: bool = False
     interface.add_argument('--no-confirm', action='store_true')

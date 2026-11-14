@@ -1586,7 +1586,7 @@ APP_NAME = 'hs server'
 APP_USAGE = f"""\
 Usage:
   hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]]
-            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-Q NUM]
+            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-Q SEC]
             [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
             [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
             [--autoscaling [MODE] [-F VALUE] [-P SEC]]
@@ -1631,13 +1631,13 @@ Options:
       --restart               Start scheduling from last completed task.
   -A, --autoscaling   [MODE]  Publish client targets for relay sites (fixed or dynamic; implies --forever).
   -F, --factor        VALUE   Scaling factor (default: {default.autoscale.factor}).
-  -P, --period        SEC     Scaling period in seconds (default: {default.autoscale.period}).
+  -P, --period        SEC     Scaling period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {default.autoscale.period}).
   -c, --task-cores      NUM   Number of cores to assign each task (default: none).
   -m, --task-memory     MEM   Memory to assign each task; K/M/G/T[B|iB] are powers of 1024 (default: none).
   -W, --task-timeout    SEC   Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
   -b, --bundlesize      NUM   Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
-  -w, --bundlewait      SEC   Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
-  -Q, --poll            NUM   Polling interval between database queries if no tasks available.
+  -w, --bundlewait      SEC   Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
+  -Q, --poll            SEC   Polling interval between database queries if no tasks available; seconds, 30s, 5m or [D-]HH:MM:SS.
   -r, --max-retries     NUM   Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
       --eager                 Schedule failed tasks before new tasks.
       --no-db                 Disable database (submit directly to clients).
@@ -1662,7 +1662,7 @@ class ServerApp(Application):
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
+    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
 
     task_cores: Optional[int] = config.task.cores or None
     task_memory: Optional[int] = config.task.memory or None
@@ -1688,10 +1688,10 @@ class ServerApp(Application):
     interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
                            const=config.autoscale.policy, dest='autoscaling_policy')
     interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
-    interface.add_argument('-P', '--period', type=int, default=autoscaling_period, dest='autoscaling_period')
+    interface.add_argument('-P', '--period', type=parse_time, default=autoscaling_period, dest='autoscaling_period')
 
     poll: int = config.server.poll
-    interface.add_argument('-Q', '--poll', type=int, default=poll)
+    interface.add_argument('-Q', '--poll', type=parse_time, default=poll)
 
     host: str = config.server.bind
     interface.add_argument('-H', '--bind', default=host, dest='host')

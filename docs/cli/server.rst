@@ -23,6 +23,10 @@ Description
    A key on the command line is refused; the server takes it from the environment or a configuration
    file.
 
+.. versionchanged:: 2.9.0
+   ``-w``/``--bundlewait``, ``-Q``/``--poll`` and ``-P``/``--period`` take a duration with units or
+   a Slurm time, as ``-W`` does, and a signed value is refused.
+
 .. include:: ../_include/server_help.rst
 
 .. _cli_server_sites:

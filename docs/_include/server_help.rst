@@ -34,7 +34,12 @@ Options
     See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
-    Seconds to wait before flushing tasks (default: 5).
+    Time to wait before flushing tasks (default: 5).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     This is used by both the `submit` thread and forwarded to each `client`. The `client` collector
     thread that accumulates finished task bundles to return to the `server` will push out a bundle
@@ -42,8 +47,13 @@ Options
 
     See also ``--bundlesize``.
 
-``-Q``, ``--poll`` *NUM*
-    Polling interval in seconds between database queries if no tasks are available (default: 5).
+``-Q``, ``--poll`` *SEC*
+    Polling interval between database queries if no tasks are available (default: 5).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     This controls how frequently the scheduler checks the database for new tasks when idle.
     Lower values (e.g., 1-2 seconds) provide faster responsiveness but may increase database
@@ -171,7 +181,12 @@ Options
     each zone's estimated time to completion against (its *task pressure*), as for the `cluster`.
 
 ``-P``, ``--period`` *SEC*
-    Scaling period in seconds (default: 60).
+    Scaling period (default: 60).
+
+    Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
+    fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
+    ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
+    second is rounded up to the next whole second.
 
     The server waits this long between checks and publishes a new topology only when it changes.
 

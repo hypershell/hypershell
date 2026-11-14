@@ -54,7 +54,7 @@ APP_NAME = 'hs cluster'
 APP_USAGE = """\
 Usage:
   hs cluster [-h] [FILE | --from-json SPEC | --restart | --forever] [--repeat | --update] [-N NUM] [-t CMD] [-b SIZE] [-w SEC]
-             [-c NUM] [-m MEM] [-W SEC] [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q NUM]
+             [-c NUM] [-m MEM] [-W SEC] [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q SEC]
              [-H ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor] [--zone NAME]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
              [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]
@@ -81,7 +81,7 @@ Options:
   -H, --bind           ADDR     Special bind address (default: "localhost" or "0.0.0.0" remote).
   -p, --port           PORT     Port number (default: {DEFAULT_PORT}).
   -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
-  -w, --bundlewait     SEC      Seconds to wait before flushing tasks (default: {DEFAULT_BUNDLEWAIT}).
+  -w, --bundlewait     SEC      Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --zone           NAME     Zone of the submitted tasks and every client; own zone if autoscaling (default: none).
   -r, --max-retries    NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
       --eager                   Schedule failed tasks before new tasks.
@@ -109,11 +109,11 @@ Options:
   -T, --timeout        SEC      Shutdown clients if no tasks received; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: never).
   -W, --task-timeout   SEC      Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
   -R, --ratelimit      NUM      Maximum allowed tasks per second per client (default: none).
-  -S, --signalwait     SEC      Task-level signal escalation wait period (default: {DEFAULT_SIGNALWAIT}).
-  -Q, --poll           NUM      Polling interval between database queries if no tasks (default: {DEFAULT_SERVER_POLL}).
+  -S, --signalwait     SEC      Task-level signal escalation wait period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SIGNALWAIT}).
+  -Q, --poll           SEC      Polling interval between database queries if no tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SERVER_POLL}).
   -A, --autoscaling   [MODE]    Enable autoscaling per zone (default: disabled). Used with --launcher.
   -F, --factor         VALUE    Scaling factor (default: 1).
-  -P, --period         SEC      Scaling period in seconds (default: {DEFAULT_AUTOSCALE_PERIOD}).
+  -P, --period         SEC      Scaling period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_AUTOSCALE_PERIOD}).
   -I, --init-size      SIZE     Initial size of cluster (default: {DEFAULT_AUTOSCALE_INIT_SIZE}).
   -X, --min-size       SIZE     Minimum size of cluster (default: {DEFAULT_AUTOSCALE_MIN_SIZE}).
   -Y, --max-size       SIZE     Maximum size of cluster (default: {DEFAULT_AUTOSCALE_MAX_SIZE}).
@@ -148,7 +148,7 @@ class ClusterApp(Application):
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
 
     bundlewait: int = config.submit.bundlewait
-    interface.add_argument('-w', '--bundlewait', type=int, default=bundlewait)
+    interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
 
     delay_start: float = DEFAULT_DELAY
     interface.add_argument('-d', '--delay-start', type=parse_delay, default=delay_start)
@@ -171,7 +171,7 @@ class ClusterApp(Application):
     interface.add_argument('--no-confirm', action='store_true')
 
     poll: int = config.server.poll
-    interface.add_argument('-Q', '--poll', type=int, default=poll)
+    interface.add_argument('-Q', '--poll', type=parse_time, default=poll)
 
     forever_mode: bool = False
     interface.add_argument('--forever', action='store_true', dest='forever_mode')
@@ -243,7 +243,7 @@ class ClusterApp(Application):
     interface.add_argument('-T', '--timeout', type=parse_time, default=client_timeout, dest='client_timeout')
 
     task_signalwait: int = config.task.signalwait
-    interface.add_argument('-S', '--signalwait', type=int, default=task_signalwait, dest='task_signalwait')
+    interface.add_argument('-S', '--signalwait', type=parse_time, default=task_signalwait, dest='task_signalwait')
 
     autoscaling_policy: str = None
     autoscaling_factor: float = config.autoscale.factor
@@ -254,7 +254,7 @@ class ClusterApp(Application):
     interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
                            const=config.autoscale.policy, dest='autoscaling_policy',)
     interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
-    interface.add_argument('-P', '--period', type=int, default=autoscaling_period, dest='autoscaling_period')
+    interface.add_argument('-P', '--period', type=parse_time, default=autoscaling_period, dest='autoscaling_period')
     interface.add_argument('-X', '--min-size', type=int, default=autoscaling_minimum, dest='autoscaling_minimum')
     interface.add_argument('-Y', '--max-size', type=int, default=autoscaling_maximum, dest='autoscaling_maximum')
     interface.add_argument('-I', '--init-size', type=int, default=autoscaling_initial, dest='autoscaling_initial')

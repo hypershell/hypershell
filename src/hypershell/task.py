@@ -46,7 +46,7 @@ from hypershell.core.exceptions import (handle_exception, handle_exception_silen
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.core.remote import SSHConnection
 from hypershell.core.signal import exit_status_for_signal
-from hypershell.core.types import smart_coerce, JSONData, to_json_type
+from hypershell.core.types import smart_coerce, JSONData, to_json_type, parse_time
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
@@ -325,7 +325,7 @@ Arguments:
   ID                      Unique UUID.
 
 Options:
-  -n, --interval  SEC     Time to wait between polling (default: {DEFAULT_INTERVAL}).
+  -n, --interval  SEC     Time to wait between polling; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_INTERVAL}).
   -i, --info              Print info on task.
   -f, --format    FORMAT  Format task info ([normal], card, json, yaml).
       --json              Format info as JSON.
@@ -345,7 +345,7 @@ class TaskWaitApp(Application):
     interface.add_argument('uuid')
 
     interval: int = DEFAULT_INTERVAL
-    interface.add_argument('-n', '--interval', type=int, default=interval)
+    interface.add_argument('-n', '--interval', type=parse_time, default=interval)
 
     print_info: bool = False
     print_status: bool = False
@@ -415,7 +415,7 @@ Arguments:
   ARGS                    Command-line arguments.
 
 Options:
-  -n, --interval  SEC     Time to wait between polling (default: {DEFAULT_INTERVAL}).
+  -n, --interval  SEC     Time to wait between polling; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_INTERVAL}).
   -t, --tag       TAG...  Assign tags as `key:value`.
   -h, --help              Show this message and exit.\
 """
@@ -430,7 +430,7 @@ class TaskRunApp(Application):
     interface.add_argument('argv', nargs='+')
 
     interval: int = DEFAULT_INTERVAL
-    interface.add_argument('-n', '--interval', type=int, default=interval)
+    interface.add_argument('-n', '--interval', type=parse_time, default=interval)
 
     taglist: List[str] = []
     interface.add_argument('-t', '--tag', nargs='+', dest='taglist')
