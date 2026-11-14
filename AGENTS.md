@@ -284,7 +284,9 @@ Long-running work runs in **daemon threads** (`core/thread.py`) driving **state 
 submitter → scheduler → `dispatcher.finish()` (where per-client sentinels on `scheduled` used to
 be posted: clients drain their zone's staged tasks, then are told to shut down) → heartbeat join →
 staged revert (`ServerThread.revert_staged`: rows still staged, never delivered, go back to
-unscheduled) → sentinels to receiver/confirm) and the submit flush
+unscheduled) → late hand-back revert (`ServerThread.revert_handed_back`: what relays handed back
+once scheduling had ended goes back to unscheduled, each only while still that relay's) → sentinels
+to receiver/confirm) and the submit flush
 (`loader.join()` then `queue.put(None)`). Reordering drops the last results or hangs a join.
 **A staged revert never touches a completed or cancelled row.** Both staged reverts, at shutdown and
 when a zone's last client leaves (`Scheduler.revert_unstaged`), go through `Task.revert_staged`: a

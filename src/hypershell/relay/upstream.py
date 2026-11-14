@@ -40,7 +40,6 @@ import ssl
 import json
 import time
 import socket
-import struct
 import functools
 import threading
 from enum import Enum
@@ -56,7 +55,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from hypershell.core.config import config, PARAM_UNSET, resolve_auth
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
-from hypershell.core.topology import Bounds, request_text as topology_request, read_topology
+from hypershell.core.topology import (Bounds, request_text as topology_request, read_topology, MAX_HANDBACK_TASKS,
+                                      handback_text, read_handback_reply)
 from hypershell.cluster.demand import ZoneRef
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.queue import QueueConfig, QueueVersionError, PROTOCOL, DEFAULT_REMOTE_TIMEOUT
@@ -71,8 +71,8 @@ from hypershell.relay import store
 
 # Public interface
 __all__ = ['upstream_identity', 'served_zones', 'upstream_config', 'upstream_key', 'relay_site', 'request_text', 'read_reply',
-           'speaks_tls', 'speaks_plain', 'first_connect',
-           'RelayInsertError', 'drain_signalled', 'log_drain', 'never',
+           'speaks_tls', 'first_connect',
+           'RelayInsertError', 'drain_signalled', 'log_drain', 'never', 'nothing_staged',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
            'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
            'HeartbeatState', 'UpstreamHeartbeat', 'UpstreamHeartbeatThread',
@@ -138,13 +138,11 @@ RETURN_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, )
 PULL_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, STAGE_DRAIN)
 """Stages passed before work is requested (held results go back first)."""
 
-CHALLENGE: Final[bytes] = b'#CHALLENGE#'
-"""What an authenticating multiprocessing server sends first on a connection, after a 4-byte length."""
+CLEARTEXT_REASON: Final[str] = 'WRONG_VERSION_NUMBER'
+"""The reason of the TLS error raised when a peer's first bytes are not a TLS record (a cleartext server).
 
-PLAIN_CHECK_WAIT: Final[float] = 1.0
-"""Longest wait in seconds for a cleartext server's challenge, when checking for one.
-
-A cleartext server sends its challenge as soon as it accepts a connection, so a second loses nothing.
+Every TLS record begins with a version whose first byte is 3; a cleartext queue server opens with
+the 4-byte length of its challenge, whose first byte is 0, so the handshake fails on that record.
 """
 
 
@@ -195,52 +193,22 @@ def speaks_tls(address: Tuple[str, int], timeout: float) -> bool:
             return False
 
 
-def speaks_plain(address: Tuple[str, int], timeout: float) -> bool:
-    """Whether the server at `address` opens a connection with a cleartext challenge within `timeout` seconds.
-
-    An authenticating multiprocessing server sends its challenge as soon as it accepts a connection:
-    a 4-byte big-endian length, then `CHALLENGE`. Nothing is sent to it. Any failure is false.
-    """
-    if timeout <= 0:
-        return False
-    expected = 4 + len(CHALLENGE)
-    end = time.monotonic() + timeout
-    data = b''
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw:
-            raw.settimeout(timeout)
-            raw.connect(address)
-            while len(data) < expected:
-                remaining = end - time.monotonic()
-                if remaining <= 0:
-                    return False
-                raw.settimeout(remaining)
-                chunk = raw.recv(expected - len(data))
-                if not chunk:
-                    return False
-                data += chunk
-    except OSError:
-        return False
-    length, = struct.unpack('!i', data[:4])
-    return length > len(CHALLENGE) and data[4:] == CHALLENGE
-
-
 def first_connect(upstream: QueueConfig) -> Callable[[Any, float], None]:
     """Connect a client to the `upstream` server for the first time, failing at once on a TLS mismatch.
 
     Given to the upstream link, which calls it with a new client and the seconds left of the
     attempt's deadline until the link first connects. With TLS off, the relay first checks whether
-    the upstream server completes a TLS handshake; with TLS on, a TLS error on connecting (other
-    than a certificate that does not verify, or a closed connection) is checked for a cleartext
-    server's challenge. Either finding raises `TLSMismatchError`, naming the relay's own setting.
-    Anything else connects, or fails, as the client's own `connect` does.
+    the upstream server completes a TLS handshake. With TLS on, the handshake itself tells: one that
+    fails because the server's first bytes are not a TLS record (`CLEARTEXT_REASON`) reached a
+    cleartext server, whatever the time those bytes took to arrive; every other error is the
+    client's own. Either finding raises `TLSMismatchError`, naming the relay's own setting. Anything
+    else connects, or fails, as the client's own `connect` does.
     """
     address = (upstream.host, int(upstream.port))
     name = f'{upstream.host}:{upstream.port}'
     tls = upstream.tls is not None and upstream.tls.is_active()
 
     def connect(client: Any, timeout: float) -> None:
-        end = time.monotonic() + timeout
         if not tls:
             if speaks_tls(address, timeout):
                 raise TLSMismatchError(f'Upstream server {name} uses TLS, and this relay has TLS off '
@@ -250,10 +218,8 @@ def first_connect(upstream: QueueConfig) -> Callable[[Any, float], None]:
             return
         try:
             client.connect()
-        except (ssl.SSLCertVerificationError, ssl.SSLEOFError, ssl.SSLZeroReturnError):
-            raise
         except ssl.SSLError as error:
-            if speaks_plain(address, min(PLAIN_CHECK_WAIT, end - time.monotonic())):
+            if getattr(error, 'reason', None) == CLEARTEXT_REASON:
                 raise TLSMismatchError(f'Upstream server {name} does not use TLS, and this relay has TLS on '
                                        f'([relay.upstream.tls] enabled, the default): the relay and its '
                                        f'upstream server must agree on TLS (--no-tls on both, or on neither)'
@@ -292,6 +258,11 @@ _DRAIN_LOCK: Final[threading.Lock] = threading.Lock()
 def never() -> bool:
     """False: the default of a condition that never holds (a puller never retired)."""
     return False
+
+
+def nothing_staged(zone: Optional[str], ids: List[str]) -> List[str]:  # noqa: unused arguments
+    """None of `ids`: the default when no relay-local server stages a zone's tasks (see `UpstreamPuller`)."""
+    return []
 
 
 def log_drain() -> None:
@@ -338,6 +309,7 @@ class PullerState(State, Enum):
     WAIT_LINK = 5
     FINAL = 6
     HALT = 7
+    HAND_BACK = 8
 
 
 class UpstreamPuller(StateMachine):
@@ -366,8 +338,14 @@ class UpstreamPuller(StateMachine):
     until a site client in the zone runs it, and the zone then asks as usual; an empty reply
     (another request was served first) has it ask again. A zone the topology gives no client here
     does not ask: it ends with the others, and what is staged for it stays upstream for a relay
-    the topology gives clients in that zone. A relay with no site client in any zone never asks at
-    all, so it never hears a shutdown, and pulling ends only on a drain or halt.
+    the topology gives clients in that zone. A zone still holding only what it took this way, with
+    no site client yet, asks `launches` again at each pass: once a newer topology gives it no client
+    here, it hands those tasks back upstream (HAND_BACK) and ends. Only a task no site client can
+    have received goes back (`unstage` takes it out of the relay-local server's staging pool first,
+    if it is staged there); the rest stay held. An upstream server without the hand-back call, or one
+    that refuses it (one without a database), leaves them to its eviction of the relay, with one
+    warning. A relay with no site client in any zone never asks at all, so it never hears a
+    shutdown, and pulling ends only on a drain or halt.
 
     Every upstream call goes through the link (see `hypershell.core.reconnect`). While the link is down
     the puller waits for it (WAIT_LINK); pulling resumes once the link is back, has carried a heartbeat
@@ -401,7 +379,10 @@ class UpstreamPuller(StateMachine):
     drain: Callable[[], bool]
     retired: Callable[[], bool]
     view: Any
+    unstage: Callable[[Optional[str], List[str]], List[str]]
     stopping: bool
+    asked: Dict[str, set]
+    giving: Dict[str, Tuple[Optional[str], List[Tuple[str, Optional[str]]]]]
 
     size: int
     idle: bool
@@ -419,13 +400,15 @@ class UpstreamPuller(StateMachine):
                  drain: Callable[[], bool] = drain_signalled,
                  zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
                  connected: Optional[Callable[[Optional[str]], int]] = None,
-                 retired: Callable[[], bool] = never, view: Any = None) -> None:
+                 retired: Callable[[], bool] = never, view: Any = None,
+                 unstage: Optional[Callable[[Optional[str], List[str]], List[str]]] = None) -> None:
         """Initialize with the upstream link (or a connected client), the relay database and the zone identity.
 
         `zones`, if given, are every (identity, zone) served, in place of `identity` and `zone`; with
         more than one, `connected` must count the site clients serving a zone. `view`, if given, is the
         site topology the relay reads upstream (`hypershell.relay.site.TopologyView`), which its fleets
-        follow.
+        follow. `unstage`, if given, takes the named tasks of a zone out of the relay-local server's
+        staging pool and returns those it took (by default, none are staged).
         """
         self.queue = queue
         self.link = as_link(queue)
@@ -445,7 +428,10 @@ class UpstreamPuller(StateMachine):
         self.drain = drain
         self.retired = retired
         self.view = view
+        self.unstage = unstage or nothing_staged
         self.stopping = False
+        self.asked = {}
+        self.giving = {}
         self.size = 0
         self.idle = False
         self.bundle = []
@@ -464,6 +450,7 @@ class UpstreamPuller(StateMachine):
             PullerState.INSERT: self.insert,
             PullerState.CONFIRM: self.confirm,
             PullerState.WAIT_LINK: self.wait_link,
+            PullerState.HAND_BACK: self.hand_back,
             PullerState.FINAL: self.finalize,
         }
 
@@ -505,7 +492,8 @@ class UpstreamPuller(StateMachine):
 
         Zones are taken in turn, from the one after the zone last asked for: the first with room is asked.
         Once some zone has had a shutdown reply, a zone with no site client and nothing held has room for
-        one task if its fleet would launch a client for it, and otherwise ends.
+        one task if its fleet would launch a client for it, and otherwise ends; one holding only what it
+        took that way hands it back once its fleet would launch no client for it (see `take_back`).
         """
         if self.stopping:  # atomic
             return PullerState.FINAL
@@ -517,6 +505,8 @@ class UpstreamPuller(StateMachine):
             return PullerState.FINAL
         if not self.link.ready(PULL_STAGES):
             return PullerState.WAIT_LINK
+        if self.giving:
+            return PullerState.HAND_BACK
         count = len(self.zones)
         for step in range(count):
             index = (self.turn + step) % count
@@ -526,7 +516,11 @@ class UpstreamPuller(StateMachine):
             bound = self.bound(zone)
             backlog = self.backlog(zone)
             if bound == 0:
-                if not self.finished or backlog:
+                if not self.finished:
+                    continue
+                if backlog:
+                    if not self.launches(zone) and self.take_back(identity, zone, backlog):
+                        return PullerState.HAND_BACK
                     continue
                 if not self.launches(zone):
                     self.finished.add(identity)
@@ -591,6 +585,8 @@ class UpstreamPuller(StateMachine):
             return PullerState.INSERT
         self.insert_failures = 0
         self.bundle = []
+        if self.idle:
+            self.asked.setdefault(self.identity, set()).update(self.task_ids)
         return PullerState.CONFIRM
 
     def confirm(self: UpstreamPuller) -> PullerState:
@@ -629,6 +625,73 @@ class UpstreamPuller(StateMachine):
         self.task_ids = []
         return PullerState.GATE
 
+    def take_back(self: UpstreamPuller, identity: str, zone: Optional[str], backlog: int) -> bool:
+        """Take back, to hand back upstream, what `zone` holds when all of it was taken for the zone at a shutdown.
+
+        Only while every task of the zone's `backlog` is one it took for itself (with no site client)
+        is anything taken; then each that no site client can have received leaves the relay-local
+        server (see `hypershell.relay.store.take_back`), and true is returned if any did. A task
+        scheduled here and not in the staging pool is left, to be looked at again on the next pass.
+        """
+        held = store.incomplete(self.engine, self.asked.get(identity, ()))
+        self.asked[identity] = set(held)
+        if not held or len(held) < backlog:
+            return False
+        tasks = store.take_back(self.engine, held, staged=self.unstage(zone, held))
+        if not tasks:
+            return False
+        self.asked[identity].difference_update(task_id for task_id, _ in tasks)
+        self.giving[identity] = (zone, tasks)
+        return True
+
+    def hand_back(self: UpstreamPuller) -> PullerState:
+        """Hand back upstream what a zone took back, at most `MAX_HANDBACK_TASKS` at once; then return to the gate.
+
+        Each acknowledged chunk's stamps are dropped, so the relay holds those tasks no more. A hand-back
+        the link loses is sent again once it is back. One the upstream server refuses, or cannot take
+        (a task with no stamp, from a server without a database), leaves the rest to the server's
+        eviction of the relay: their stamps stay, so the relay does not finish its registration.
+        """
+        identity, (zone, tasks) = next(iter(self.giving.items()))
+        name = zone or DEFAULT_ZONE_NAME
+        reason = None
+        if any(stamp is None for _, stamp in tasks):
+            reason = 'the upstream server has no database'
+        while tasks and reason is None:
+            chunk = tasks[:MAX_HANDBACK_TASKS]
+            text = handback_text(identity, chunk)
+
+            def call(client: Any, text: str = text) -> Optional[str]:
+                method = getattr(getattr(client, 'dispatcher', None), 'handback', None)
+                return None if method is None else method(text)
+
+            try:
+                reply = self.link.call('puller', call)
+            except LinkDown:
+                log.debug(f'Hand-back of {len(chunk)} tasks for zone {name} lost with the link ({identity})')
+                return PullerState.WAIT_LINK
+            except Exception as error:
+                reason = f'{error.__class__.__name__}: {error}'
+                break
+            if reply is None:
+                reason = 'the upstream server takes none'
+                break
+            try:
+                read_handback_reply(reply)
+            except ValueError as error:
+                reason = str(error)
+                break
+            store.drop_stamps(self.engine, [task_id for task_id, _ in chunk])
+            tasks = tasks[len(chunk):]
+            self.giving[identity] = (zone, tasks)
+            log.info(f'Handed back {len(chunk)} tasks for zone {name}, which has no site client and none '
+                     f'planned here ({identity})')
+        if reason is not None:
+            log.warning(f'Could not hand back {len(tasks)} tasks for zone {name}, which has no site client and none '
+                        f"planned here ({reason}) - they are left to the upstream server's eviction of this relay")
+        del self.giving[identity]
+        return PullerState.GATE
+
     def finalize(self: UpstreamPuller) -> PullerState:
         """Stop pulling."""
         log.debug(f'Done (puller: {self.identity})')
@@ -649,13 +712,14 @@ class UpstreamPullerThread(Thread):
                  drain: Callable[[], bool] = drain_signalled,
                  zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
                  connected: Optional[Callable[[Optional[str]], int]] = None,
-                 retired: Callable[[], bool] = never, view: Any = None) -> None:
+                 retired: Callable[[], bool] = never, view: Any = None,
+                 unstage: Optional[Callable[[Optional[str], List[str]], List[str]]] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-puller')
         self.machine = UpstreamPuller(queue=queue, engine=engine, identity=identity, zone=zone,
                                       bundlesize=bundlesize, local_bundlesize=local_bundlesize, poll=poll,
                                       wait=wait, server_id=server_id, drain=drain, zones=zones,
-                                      connected=connected, retired=retired, view=view)
+                                      connected=connected, retired=retired, view=view, unstage=unstage)
 
     def run_with_exceptions(self: UpstreamPullerThread) -> None:
         """Run machine."""

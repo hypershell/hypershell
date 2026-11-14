@@ -22,7 +22,7 @@ Description
 .. versionchanged:: 2.9.0
    at an upstream shutdown, a zone with no *client* at the site asks once more, and takes what is
    still staged for it, unless an upstream *server* autoscaling with relay sites plans no *client*
-   for it at this relay.
+   for it at this relay, and hands it back if that *server* stops planning one before a *client* starts.
 
 |
 

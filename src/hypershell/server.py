@@ -1241,6 +1241,7 @@ class ServerThread(Thread):
         self.heartmonitor.signal_clients()
         self.heartmonitor.join()
         self.revert_staged()
+        self.revert_handed_back()
 
     def revert_staged(self: ServerThread) -> None:
         """Revert rows still staged once no client is left to take them.
@@ -1252,6 +1253,20 @@ class ServerThread(Thread):
             reverted = Task.revert_staged(ids)
             kept = f' ({len(ids) - reverted} left as completed, cancelled or deleted)' if reverted < len(ids) else ''
             log.info(f'Reverted {reverted} staged tasks never delivered{kept}')
+
+    def revert_handed_back(self: ServerThread) -> None:
+        """Requeue what relays handed back after scheduling ended, each only while it is still that relay's.
+
+        The scheduler requeues a hand-back on its next pass; one that arrives once scheduling is over
+        (a relay handing back what it took at the shutdown) is requeued here as the server stops, as
+        staged rows are, so it waits for the next run rather than staying assigned to the relay.
+        """
+        if self.in_memory:
+            return
+        for identity, assignments in self.queue.dispatcher.take_handbacks():
+            reverted = len(Task.revert_handed_back(identity, assignments))
+            kept = f'; {len(assignments) - reverted} already settled' if reverted < len(assignments) else ''
+            log.info(f'Requeued {reverted} tasks handed back by relay ({identity}{kept})')
 
     def wait_receiver(self: ServerThread) -> None:
         """Wait for receiver to stop."""

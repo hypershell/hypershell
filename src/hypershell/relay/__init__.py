@@ -599,7 +599,7 @@ class RelayThread(Thread):
                                                local_bundlesize=self.bundlesize, poll=self.poll, drain=draining,
                                                zones=self.served,
                                                connected=self.zone_clients if len(self.zones) > 1 else None,
-                                               retired=self.superseded, view=self.view)
+                                               retired=self.superseded, view=self.view, unstage=self.unstage)
             self.returner = UpstreamReturnerThread(queue=self.link, engine=engine,
                                                    bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
                                                    poll=self.poll, retention=self.retention,
@@ -637,6 +637,10 @@ class RelayThread(Thread):
     def zone_clients(self: RelayThread, zone: Optional[str]) -> int:
         """Site clients now serving `zone` (asking the relay-local server for its tasks, not yet gone)."""
         return self.server.queue.dispatcher.clients(zone_id(zone))
+
+    def unstage(self: RelayThread, zone: Optional[str], ids: List[str]) -> List[str]:
+        """Take the tasks `ids` of `zone` out of the relay-local server's staging pool; return those taken."""
+        return self.server.queue.dispatcher.withdraw(zone_id(zone), ids)
 
     def zone_launched(self: RelayThread, name: str) -> int:
         """Site clients launched for the zone called `name` and still running, as advertised upstream."""

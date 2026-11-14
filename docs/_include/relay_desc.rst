@@ -60,7 +60,10 @@ for itself too, for one task: it ends with the others if nothing is left for it 
 otherwise holds what it is sent until its own *clients* at the site run it, then asks for the rest as
 usual. Under an upstream *server* autoscaling with relay sites, a zone it gives no *client* at this
 relay does not ask: it ends with the others, and what is staged for it stays upstream for a relay
-that has *clients* planned in that zone. A relay with no *client* at the site in any zone never asks
+that has *clients* planned in that zone. If that *server* stops planning a *client* for the zone at
+this relay before one starts, the zone hands back what it took and ends; an upstream *server* that
+cannot take it back (an earlier release, or one without a database) is left to put it back when it
+evicts the relay. A relay with no *client* at the site in any zone never asks
 for work, so it never hears an upstream shutdown: it waits until it is drained or stopped, and a
 non-forever upstream *server* waits for it too, until the relay is drained or stopped.
 SIGUSR1 or SIGUSR2, sent to the relay process, drain it the same way: the relay stops asking for work, its site finishes every task the relay holds (those not yet started

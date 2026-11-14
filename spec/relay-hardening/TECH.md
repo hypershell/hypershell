@@ -5,7 +5,7 @@ title: 'Relay hardening for 2.9.0: no aborts on removed rows or a restarted upst
   clock'
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/relay-hardening
 base: develop
 current_phase: done
@@ -76,7 +76,8 @@ phases:
   hammerable: false
   hill: uphill
   verify: uv run pytest -v tests/test_relay_link.py tests/test_relay_workload.py tests/test_queue_tls.py
-    && sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    && sh spec/relay-hardening/drive/red_check.sh && RED_BASE_REV=ff0973a RED_LIST="$PWD/spec/relay-hardening/drive/red-ff0973a.txt"
+    sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     $TMPDIR/docs-html
 - id: P5
@@ -94,7 +95,8 @@ phases:
   hill: uphill
   verify: uv run pytest -v tests/test_relay_connector.py tests/test_relay_workload.py
     tests/test_relay_retire.py tests/test_dispatch.py tests/test_dispatch_staged.py
-    && sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    && sh spec/relay-hardening/drive/red_check.sh && RED_BASE_REV=ff0973a RED_LIST="$PWD/spec/relay-hardening/drive/red-ff0973a.txt"
+    sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     $TMPDIR/docs-html
 - id: P6
@@ -403,9 +405,34 @@ research 04.
       cleartext upstream sends its challenge as soon as it accepts (about 1 ms measured), so a 1 s
       wait loses nothing. The R4 tests and the `tls-on` / `tls-off` drives re-run on the head (P6).
       RV3 took the two TLS link tests out of `red.txt` (P1).
+- [x] **Review-cycle-2 remediation (RV6).** A relay with TLS on recognises a cleartext upstream from
+      its own failed handshake, which is simpler and independent of timing: no second connection and
+      no wait. `first_connect` raises `TLSMismatchError` only on an `ssl.SSLError` whose `reason` is
+      `WRONG_VERSION_NUMBER` (`upstream.CLEARTEXT_REASON`), the error the TLS layer reports when the
+      peer's first record does not begin with a TLS version (major byte 3); a cleartext queue server
+      opens with the 4-byte length of its challenge (first byte 0). Every TLS record a TLS server
+      sends begins with a content type and a 3.x version, so a TLS upstream cannot produce it,
+      however slowly it answers. A certificate failure (`CERTIFICATE_VERIFY_FAILED`), `SSLEOFError`,
+      `SSLZeroReturnError`, an alert from a TLS server and a refused connection are re-raised as they
+      are, so the link treats each as before. `speaks_plain`, `PLAIN_CHECK_WAIT` and `CHALLENGE` are
+      gone (nothing else used them); `speaks_tls` stays for the TLS-off direction. Measured: Python
+      3.14.6 with OpenSSL 3.5.7 reports `[SSL: WRONG_VERSION_NUMBER]` against a cleartext
+      `QueueServer`, directly and through the review's 1.1 s-per-chunk proxy (after 1.11 s).
+  - Tests (`tests/test_relay_link.py`): a cleartext `QueueServer` behind `SlowPath` (a loopback proxy
+    holding each chunk 1.1 s): `TLSError` naming the setting within 1.1 s + 2, no retry attempt
+    counted, **red on `ff0973a` by assertion** (`DID NOT RAISE`: the check gave up after 1 s and the
+    `SSLError` was retried), listed in the new `drive/red-ff0973a.txt`; a TLS `QueueServer` behind
+    the same path completes a handshake of more than a second and connects, never classed as
+    cleartext (a `Handshake` client stand-in makes the TLS handshake with the queue client's context
+    and nothing else: a whole queue-client connection over that path takes minutes, one round trip
+    per proxy); the classification itself, parametrised (certificate, EOF, zero-return, alert,
+    refused → re-raised as is; `WRONG_VERSION_NUMBER` → the mismatch from that error). The R4 tests
+    already there are unchanged and green; the `tls-on` / `tls-off` drives re-run on the head, PASS
+    (`evidence/review-2/`).
 - **Touches:** `src/hypershell/core/reconnect.py`, `src/hypershell/relay/upstream.py`,
   `src/hypershell/relay/__init__.py`, `tests/test_relay_link.py`, `tests/test_relay_workload.py`,
-  `docs/_include/relay_desc.rst`, `docs/cli/relay.rst`, `drive/red.txt`.
+  `docs/_include/relay_desc.rst`, `docs/cli/relay.rst`, `drive/red.txt`. *Review cycle 2:* also
+  `drive/red-ff0973a.txt`.
 
 ## Phase P5 — Idle zones and the relay docs
 **Satisfies:** R5, R6, R9, R10 · **Depends on:** P4
@@ -473,9 +500,62 @@ client anywhere does. Design: PLAN §2 R5, R6; research 05.
     remaining link, the relay's one `TopologyView` read after every beat and shared with the fleets,
     is the object `SiteScaler` already follows in the topology drives, and the puller is given that
     same object.
+- [x] **Review-cycle-2 remediation (RV5).** A zone holding only rows it took through the one-task
+      request, with no site client, asks `launches()` again at every gate pass; once no launch is
+      coming it hands those rows back upstream with the `handback` call (relay-retire's) and ends.
+  - **Puller.** The rows an idle request inserted are remembered per identity (`asked`). At the
+    gate, a zone with bound 0, a backlog and no launch to come, whose backlog is all `asked` rows,
+    takes them back (`take_back`) and goes to a new state, `HAND_BACK`: chunks of at most
+    `MAX_HANDBACK_TASKS`, on the puller's own link role; each acknowledged chunk's stamps are dropped;
+    a chunk the link loses is sent again after `WAIT_LINK` (the gate goes to `HAND_BACK` while one is
+    pending). Then the gate ends the zone as before ("no site client … and none planned here").
+  - **Never a row a site client has received.** `store.take_back` deletes each row, by one
+    conditional DELETE, only while it is incomplete and either unscheduled at the relay or just taken
+    out of the relay-local staging pool, then returns it with its stamp as received. The relay passes
+    `unstage` (`RelayThread.unstage` → the relay-local `Dispatcher.withdraw(zone, ids)`, a new method
+    that removes named rows still in a zone's pool under the dispatcher's lock); a row already cut for a
+    site client is in no pool and keeps its local schedule time, so it stays held, and runs. The
+    default zone is the case this matters for: the relay-local scheduler stages default-zone rows with
+    no client, other zones only while a client serves them.
+  - **Fallback.** The stamps of rows taken back stay until the hand-back is acknowledged, so
+    `count_held` still counts them and `finish_upstream` sends no final heartbeat. An upstream server
+    without the call (reply `None`, or a remote error), one that refuses it (no database), or rows with
+    no stamp (from a server without a database: nothing to name them by) end the zone with one
+    WARNING ("Could not hand back N tasks for zone Z … - they are left to the upstream server's
+    eviction of this relay"), as retire falls back. Taking the rows out of the relay-local server is
+    what lets the relay finish at all: its local server runs forever, and a row it held would keep
+    the site waiting.
+  - **Upstream side (deviation, server.py).** An upstream server answers a zone with a shutdown only
+    once its scheduler has ended (a drain, in practice, with rows still staged), so the scheduler's
+    `revert_handed_back` pass never runs for such a hand-back: the dispatcher queued it and the rows
+    stayed assigned to the relay after its clean final heartbeat. `ServerThread.revert_handed_back`
+    now requeues what is still queued as the server stops, after the staged revert, each only while
+    still that relay's (the same conditional `Task.revert_handed_back`). The same gap closes for a
+    relay retired during a drain. `AGENTS.md` and `invariants.md` §6 list the step in the shutdown
+    order.
+  - Tests (`tests/test_relay_connector.py`, the review's shape: real finishing `Dispatcher`, target 1
+    → ask → target 0): `…_hands_it_back_once_no_client_is_planned_here` (handed back under the zone
+    identity with the stamp as sent, FINAL, nothing held, the INFO line); `…_cannot_hand_back_…`
+    `[no-call|no-database]` (one WARNING, FINAL, the stamp still held); `…_hands_back_only_what_no_site_client_has_received`
+    `[staged|received]` (a row in the relay-local pool goes back; a row cut for a client stays held
+    until it completes, and nothing is handed back); `…_keeps_it_while_a_client_is_still_planned_here`.
+    `tests/test_dispatch.py`: `withdraw`. `tests/test_relay_retire.py`: `take_back` / `drop_stamps`,
+    and the stop-time requeue on a real queue server. **Red on `ff0973a` by assertion** (the puller
+    stays at `GATE`): the first, both fallback cases and `[staged]`, in `drive/red-ff0973a.txt` (on
+    `2ffb5cc` the zone took nothing, so they belong to no `red.txt` line). The reviewer's probe
+    reaches `FINAL` with nothing held on the head.
+  - Docs: `relay_desc.rst` (the zone hands back what it took if the upstream server stops planning a
+    client for it here before one starts; an upstream server that cannot take it back leaves it to
+    eviction) and the `versionchanged` clause in `relay.rst`.
+  - Re-run on the head: the `zones`, `zones-nodb`, `restart`, `pair-relay` and `pair-server` drives,
+    all PASS (`evidence/review-2/`); `red_check.sh` 24 of 24 red with the PostgreSQL lines, and
+    `drive/red-ff0973a.txt` 5 of 5 red against `ff0973a`; the full suite, 2132 passed, 101 skipped.
 - **Touches:** `src/hypershell/relay/upstream.py`, `tests/test_relay_connector.py`,
   `docs/_include/relay_desc.rst`, `docs/cli/relay.rst`, `drive/red.txt`. *Review cycle 1:* also
-  `src/hypershell/relay/__init__.py`, `drive/red-a741340.txt`.
+  `src/hypershell/relay/__init__.py`, `drive/red-a741340.txt`. *Review cycle 2:* also
+  `src/hypershell/relay/store.py`, `src/hypershell/core/dispatch.py`, `src/hypershell/server.py`,
+  `AGENTS.md`, `.agents/factory/invariants.md`, `tests/test_dispatch.py`, `tests/test_relay_retire.py`,
+  `drive/red-ff0973a.txt`.
 
 ## Phase P6 — End-to-end laptop evidence
 **Satisfies:** R1, R2, R3, R4, R5, R9, R10 · **Depends on:** P5
