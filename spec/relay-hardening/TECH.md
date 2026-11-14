@@ -8,7 +8,7 @@ appetite: big
 status: in_progress
 branch: fix/relay-hardening
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -81,7 +81,7 @@ phases:
     $TMPDIR/docs-html
 - id: P5
   name: An idle zone asks once for itself after a shutdown reply; relay docs
-  status: pending
+  status: done
   satisfies:
   - R5
   - R6
@@ -369,23 +369,32 @@ research 04.
 the zone has a client, with or without an upstream database; the docs say what a relay with no
 client anywhere does. Design: PLAN §2 R5, R6; research 05.
 
-- [ ] `relay/upstream.py`: in `UpstreamPuller.gate` (`:365-398`), once `self.finished` is non-empty a
+- [x] `relay/upstream.py`: in `UpstreamPuller.gate` (`:365-398`), once `self.finished` is non-empty a
       zone with bound 0, nothing held and not finished is gated in with size 1; remove `finish_idle`
       (`:400-411`) and its call (`:378`); an INFO line when an idle zone takes tasks at a finish and
       waits for a client. Restate the comment at `:247-249` (research 05 §Corrected texts).
-- [ ] `tests/test_relay_connector.py`: restate the docstring at `:557-561` (and rename the test to
+- [x] `tests/test_relay_connector.py`: restate the docstring at `:557-561` (and rename the test to
       `…_asks_once_and_ends_on_its_own_shutdown`); the request lists at `:566` / `:607` become
       `['cpu', 'gpu']`; every other assertion unchanged (PLAN §3 deviation row 2).
-- [ ] R9 tests (`tests/test_relay_connector.py`, `@mark.unit`, no threads, the real `Dispatcher`,
+- [x] R9 tests (`tests/test_relay_connector.py`, `@mark.unit`, no threads, the real `Dispatcher`,
       `zoned_puller` / `drive` / `complete_all`), parametrised over an upstream with and without a
       database: rows staged for the idle zone after `finish()` → the puller does not reach FINAL, the
       zone holds 1 and the rest stay staged; a client arrives → the zone takes the rest; then FINAL
       with every staged id run (red ×2). Nothing staged → FINAL at once, both zones finished.
-- [ ] Docs: `docs/_include/relay_desc.rst:56-59` per research 05 §R6 (R5's rule; R6: no client in
+- [x] Docs: `docs/_include/relay_desc.rst:56-59` per research 05 §R6 (R5's rule; R6: no client in
       any zone → never asks, never hears an upstream shutdown, and a non-forever upstream server
       waits for it too until it is drained or stopped); `.. versionchanged:: 2.9.0` after the
       `.. include::` in `docs/cli/relay.rst` (one clause: an idle zone asks once more at an upstream
       shutdown and takes what is still staged for it).
+      *As built:* the gate marks such a request `idle` (size 1); its INFO line, when the reply carries
+      tasks, names the zone and the count held until a site client runs them. The restated comment
+      is the class docstring of `UpstreamPuller` (the comment the plan cites moved there in P4's line
+      shift); it also says an empty reply has the zone ask again. The R9 test is
+      `test_a_zone_without_site_clients_takes_what_is_staged_for_it_at_a_shutdown[database|no-database]`
+      (red ×2 by behaviour: on `2ffb5cc` the puller reaches FINAL with rows staged); the nothing-staged
+      case is `test_a_zone_without_site_clients_ends_at_once_with_nothing_staged_for_it`, which also
+      asserts that both identities asked. No `share/` change (no CLI change); the man page picks up
+      the text at the next `hs-release`.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/relay/upstream.py`, `tests/test_relay_connector.py`,
   `docs/_include/relay_desc.rst`, `docs/cli/relay.rst`, `drive/red.txt`.

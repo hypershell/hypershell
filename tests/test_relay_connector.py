@@ -5,7 +5,9 @@
 
 The puller is driven one action at a time against a fake upstream (a scripted dispatcher and plain
 queues) and a throwaway relay database, with no threads and no sleeps. One test serves the relay's
-request from a real queue server's dispatcher, to show the request is an ordinary client's.
+request from a real queue server's dispatcher, to show the request is an ordinary client's. A relay
+serving several zones is also driven against a real dispatcher that is finishing, with and without an
+upstream database, to show a zone with no site client takes what is still staged for it.
 """
 
 
@@ -15,6 +17,7 @@ from typing import Any, Dict, Iterator, List, Optional
 
 # Standard libs
 import json
+import logging
 import sqlite3
 from uuid import UUID, uuid5
 from pathlib import Path
@@ -553,17 +556,18 @@ def complete_all(engine: Engine) -> None:
 
 @mark.unit
 @mark.parametrize('zones', [('cpu', 'gpu'), ('gpu', 'cpu')])
-def test_a_zone_without_site_clients_ends_once_the_upstream_server_shuts_down(relay_db: Engine, zones) -> None:
-    """A zone with no site client never asks, so never hears the shutdown itself: it ends once another zone has.
+def test_a_zone_without_site_clients_asks_once_and_ends_on_its_own_shutdown(relay_db: Engine, zones) -> None:
+    """A zone with no site client never asks for work, so once another zone has heard the shutdown it asks once
+    for itself and ends on its own reply.
 
-    The upstream server finishes for every zone at once, so one zone's shutdown reply is the whole
-    relay's. A zone with no site client and nothing held ends with it, and pulling ends; otherwise the
-    relay would never send its final heartbeats and a non-forever upstream server would never exit.
+    The upstream server finishes for every zone at once, but serves each zone what is still staged for
+    it first. A zone with nothing staged, no site client and nothing held is told at once and ends;
+    pulling ends, so the relay sends its final heartbeats and a non-forever upstream server exits.
     """
     fake = ShuttingDown()
     machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 0}, zones=zones)
     assert drive(machine) is PullerState.FINAL
-    assert [request['zone'] for request in fake.requests] == ['cpu']
+    assert [request['zone'] for request in fake.requests] == ['cpu', 'gpu']
     assert machine.finished == {upstream_identity('cpu'), upstream_identity('gpu')}
 
 
@@ -604,7 +608,7 @@ def test_a_zone_without_site_clients_that_holds_tasks_ends_only_once_they_are_do
     assert machine.finished == {upstream_identity('cpu')}
     complete_all(relay_db)
     assert drive(machine) is PullerState.FINAL
-    assert [request['zone'] for request in fake.requests] == ['cpu']
+    assert [request['zone'] for request in fake.requests] == ['cpu', 'gpu']
 
 
 @mark.unit
@@ -614,6 +618,81 @@ def test_a_zone_without_site_clients_is_not_ended_before_any_shutdown(relay_db: 
     machine = zoned_puller(relay_db, upstream(fake), {'cpu': 1, 'gpu': 0})
     assert drive(machine) is PullerState.GATE
     assert machine.finished == set() and {request['zone'] for request in fake.requests} == {'cpu'}
+
+
+def finishing_upstream(upstream_db: bool) -> tuple:
+    """A real dispatcher that is finishing with three tasks still staged for a zone; that zone, the other, the ids.
+
+    With an upstream database the rows are staged (stamped) for the gpu zone, and the cpu zone has
+    none. Without one, a submitted bundle of four default-zone tasks waits in the inbound queue; one
+    earlier request takes one of them, which stages the other three; the gpu zone has none.
+    """
+    if upstream_db:
+        dispatcher = Dispatcher(bundlesize=1, queuesize=1)
+        records = dispatched(*[f'echo gpu-{n}' for n in range(3)], zone='gpu')
+        dispatcher.stage(zone_id('gpu'), [(record['id'], json.dumps(record)) for record in records])
+        dispatcher.finish()
+        return dispatcher, 'gpu', 'cpu', [record['id'] for record in records]
+    dispatcher = Dispatcher(inbound=Queue())
+    records = dispatched(*[f'echo default-{n}' for n in range(4)])
+    dispatcher.inbound.put(json.dumps(records).encode('utf-8'))
+    taken, = json.loads(dispatcher.request(json.dumps({'protocol': PROTOCOL, 'client': 'gone', 'size': 1,
+                                                       'wait': 0})))['tasks']
+    dispatcher.finish()
+    return dispatcher, None, 'gpu', [record['id'] for record in records if record['id'] != taken['id']]
+
+
+@mark.unit
+@mark.parametrize('upstream_db', [True, False], ids=['database', 'no-database'])
+def test_a_zone_without_site_clients_takes_what_is_staged_for_it_at_a_shutdown(relay_db: Engine, upstream_db: bool,
+                                                                               caplog) -> None:
+    """Once another zone has heard the shutdown, a zone with no site client takes one task still staged for it,
+    holds it for a site client, then takes the rest once one is connected, and pulling ends only once every task
+    has run at the site.
+
+    The upstream server is a real dispatcher that is finishing, with and without an upstream database.
+    """
+    dispatcher, idle, busy, staged = finishing_upstream(upstream_db)
+    clients = {busy: 1, idle: 0}
+    machine = zoned_puller(relay_db, upstream(dispatcher), clients, zones=(busy, idle))
+    with caplog.at_level(logging.INFO, logger='hypershell.relay.upstream'):
+        assert drive(machine) is PullerState.GATE
+    assert machine.finished == {upstream_identity(busy)}
+    assert store.count_backlog(relay_db, zone=zone_id(idle)) == 1
+    assert dispatcher.staged(zone_id(idle)) == 2
+    held, = [record.getMessage() for record in caplog.records if 'no site client' in record.getMessage()]
+    assert f'zone {idle or "default"}' in held and 'holding 1 task' in held
+
+    clients[idle] = 1
+    complete_all(relay_db)
+    assert drive(machine) is PullerState.GATE
+    assert dispatcher.staged(zone_id(idle)) == 0
+    assert machine.finished == {upstream_identity(busy)}
+
+    complete_all(relay_db)
+    assert drive(machine) is PullerState.FINAL
+    assert machine.finished == {upstream_identity(busy), upstream_identity(idle)}
+    assert set(staged) <= {id for id, in rows(relay_db, 'SELECT id FROM relay_task')}
+    assert rows(relay_db, 'SELECT COUNT(*) FROM task WHERE completion_time IS NULL') == [(0, )]
+    if not upstream_db:
+        assert dispatcher.inbound.empty()
+
+
+@mark.unit
+@mark.parametrize('upstream_db', [True, False], ids=['database', 'no-database'])
+def test_a_zone_without_site_clients_ends_at_once_with_nothing_staged_for_it(relay_db: Engine,
+                                                                             upstream_db: bool) -> None:
+    """With nothing staged anywhere, a finishing upstream server answers the idle zone's one request with a
+    shutdown, and pulling ends at once with every zone finished."""
+    dispatcher = Dispatcher(bundlesize=1, queuesize=1) if upstream_db else Dispatcher(inbound=Queue())
+    dispatcher.finish()
+    busy, idle = ('cpu', 'gpu') if upstream_db else ('gpu', None)
+    machine = zoned_puller(relay_db, upstream(dispatcher), {busy: 1}, zones=(busy, idle))
+    assert drive(machine) is PullerState.FINAL
+    assert machine.finished == {upstream_identity(busy), upstream_identity(idle)}
+    assert dispatcher.demand == {upstream_identity(busy): (zone_id(busy), 2),
+                                 upstream_identity(idle): (zone_id(idle), 1)}
+    assert rows(relay_db, 'SELECT COUNT(*) FROM relay_task') == [(0, )]
 
 
 @mark.unit

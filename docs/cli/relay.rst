@@ -19,6 +19,10 @@ Description
 .. versionchanged:: 2.9.0
    a relay whose TLS setting differs from its upstream *server*'s exits at once, with an error.
 
+.. versionchanged:: 2.9.0
+   at an upstream shutdown, a zone with no *client* at the site asks once more, and takes what is
+   still staged for it.
+
 |
 
 .. include:: ../_include/relay_help.rst

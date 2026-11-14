@@ -353,9 +353,13 @@ class UpstreamPuller(StateMachine):
     confirmation that follow are that identity's too. Its requests wait upstream at most
     `ZONE_REQUEST_WAIT`, so one zone with nothing staged never holds up the others. A zone the
     upstream server answers with a shutdown is asked no more; pulling ends once every zone has been.
-    The upstream server finishes for every zone at once, so once one zone has had a shutdown reply, a
-    zone with no site client and nothing held ends too: it never asks, so it would never hear one. A
-    relay with no site client in any zone never asks at all, and pulling ends only on a drain or halt.
+    The upstream server finishes for every zone at once, but serves each zone what is still staged for
+    it before it answers that zone's requests with a shutdown. So once one zone has had a shutdown
+    reply, a zone with no site client and nothing held, which otherwise never asks, asks for itself,
+    for one task. A shutdown ends it with the others; a task it takes is held until a site client in
+    the zone runs it, and the zone then asks as usual; an empty reply (another request was served
+    first) has it ask again. A relay with no site client in any zone never asks at all, so it never
+    hears a shutdown, and pulling ends only on a drain or halt.
 
     Every upstream call goes through the link (see `hypershell.core.reconnect`). While the link is down
     the puller waits for it (WAIT_LINK); pulling resumes once the link is back, has carried a heartbeat
@@ -391,6 +395,7 @@ class UpstreamPuller(StateMachine):
     stopping: bool
 
     size: int
+    idle: bool
     bundle: List[Dict[str, Any]]
     task_ids: List[str]
     insert_failures: int
@@ -430,6 +435,7 @@ class UpstreamPuller(StateMachine):
         self.retired = retired
         self.stopping = False
         self.size = 0
+        self.idle = False
         self.bundle = []
         self.task_ids = []
         self.insert_failures = 0
@@ -475,6 +481,8 @@ class UpstreamPuller(StateMachine):
         """Ask for work only at or below the low-water mark, on a ready link; end on a drain, retirement or halt.
 
         Zones are taken in turn, from the one after the zone last asked for: the first with room is asked.
+        Once some zone has had a shutdown reply, a zone with no site client and nothing held has room for
+        one task.
         """
         if self.stopping:  # atomic
             return PullerState.FINAL
@@ -483,9 +491,6 @@ class UpstreamPuller(StateMachine):
             return PullerState.FINAL
         if self.retired():
             log.debug(f'Retired - no more upstream requests (puller: {self.identity})')
-            return PullerState.FINAL
-        if self.finished and self.finish_idle():
-            log.info('Upstream server is shutting down - no more upstream requests')
             return PullerState.FINAL
         if not self.link.ready(PULL_STAGES):
             return PullerState.WAIT_LINK
@@ -497,27 +502,18 @@ class UpstreamPuller(StateMachine):
                 continue
             bound = self.bound(zone)
             backlog = self.backlog(zone)
-            if bound == 0 or backlog > bound // 2:
+            if bound == 0:
+                if not self.finished or backlog:
+                    continue
+            elif backlog > bound // 2:
                 continue
             self.turn = (index + 1) % count
             self.identity, self.zone = identity, zone
-            self.size = min(bound - backlog, self.bundlesize)
+            self.idle = bound == 0
+            self.size = 1 if self.idle else min(bound - backlog, self.bundlesize)
             return PullerState.REQUEST
         self.wake.wait(min(self.poll, GATE_WAIT))
         return PullerState.GATE
-
-    def finish_idle(self: UpstreamPuller) -> bool:
-        """End every zone with no site client and nothing held, the upstream server being finished; true once all are.
-
-        Only called once some zone has had a shutdown reply. A zone with site clients, or with tasks
-        still held, asks for itself and ends on its own reply.
-        """
-        for identity, zone in self.zones:
-            if identity not in self.finished and self.bound(zone) == 0 and self.backlog(zone) == 0:
-                self.finished.add(identity)
-                log.info(f'Upstream server is shutting down - no site client for zone '
-                         f'{zone or DEFAULT_ZONE_NAME}, no more requests for it ({identity})')
-        return len(self.finished) == len(self.zones)
 
     def request(self: UpstreamPuller) -> PullerState:
         """Request up to `size` tasks under the zone identity (the upstream server bounds the wait), unless retired."""
@@ -533,6 +529,11 @@ class UpstreamPuller(StateMachine):
         if reply['tasks']:
             self.bundle = reply['tasks']
             log.debug(f'Received {len(self.bundle)} tasks ({self.identity})')
+            if self.idle:
+                count = len(self.bundle)
+                log.info(f'Upstream server is shutting down - holding {count} task{"s" if count != 1 else ""} '
+                         f'for zone {self.zone or DEFAULT_ZONE_NAME}, which has no site client, until one '
+                         f'runs them ({self.identity})')
             return PullerState.INSERT
         if reply.get('shutdown'):
             self.finished.add(self.identity)
