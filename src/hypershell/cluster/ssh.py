@@ -22,12 +22,13 @@ from cmdkit.config import ConfigurationError, Namespace
 from hypershell.core.tls import TLSConfig
 from hypershell.core.config import config, blame
 from hypershell.core.thread import Thread, join_waking
-from hypershell.core.logging import Logger, HOSTNAME
+from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
-from hypershell.cluster.launch import ClientLaunch, client_launch, ssh_env_exports, ssh_launch_args
+from hypershell.cluster.launch import ClientLaunch, advertised_host, client_launch, ssh_env_exports, ssh_launch_args
+from hypershell.cluster.watch import watch_launched
 
 # Public interface
 __all__ = ['run_ssh', 'SSHCluster', 'NodeList', 'DEFAULT_REMOTE_EXE']
@@ -71,6 +72,11 @@ class SSHCluster(Thread):
     """
     Run server with individual external ssh clients.
 
+    Every host's `ssh` is watched while the server runs (see :func:`~hypershell.cluster.watch.watch_launched`):
+    a non-zero exit is warned about, naming the host, while the others still run, and if every host's
+    has exited, leaving the server with work it would otherwise wait on forever, the server is stopped
+    and :class:`~hypershell.cluster.watch.ClusterLaunchError` is raised.
+
     Args:
         source (Iterable[str], optional):
             Any iterable of command-line tasks.
@@ -113,6 +119,8 @@ class SSHCluster(Thread):
 
         bind (tuple, optional):
             Bind address for server with port number (default: 0.0.0.0).
+            Clients are told to dial the bind address, or this host's own name when it is 0.0.0.0
+            (see :func:`~hypershell.cluster.launch.advertised_host`), unless `advertise` names one.
             See :const:`~hypershell.server.DEFAULT_PORT`.
 
         launcher (str, optional):
@@ -195,6 +203,9 @@ class SSHCluster(Thread):
             Zone whose tasks the clients run (default: the default zone).
             Tasks this cluster submits are placed in the same zone.
 
+        advertise (str, optional):
+            Address the clients are told to dial, whatever the bind (default: the bind rule above).
+
     Example:
         >>> from hypershell.cluster import SSHCluster
         >>> cluster = SSHCluster.new(
@@ -211,7 +222,9 @@ class SSHCluster(Thread):
 
     server: ServerThread
     clients: List[Popen]
+    hosts: List[str]
     launches: List[ClientLaunch]
+    advertised: Tuple[str, int]
 
     def __init__(self: SSHCluster,
                  source: Iterable[str] = None,
@@ -246,7 +259,8 @@ class SSHCluster(Thread):
                  ratelimit: int = None,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
-                 zone: Optional[str] = None) -> None:
+                 zone: Optional[str] = None,
+                 advertise: Optional[str] = None) -> None:
         """Initialize server and client threads."""
         if nodelist is None:
             raise AttributeError('Expected nodelist')
@@ -279,8 +293,10 @@ class SSHCluster(Thread):
             launcher_args = shlex.split(config.ssh.get('args', ''))
         # NOTE: checked once here, so a dropped `-n` is reported once, not once per host
         launcher, launcher_args = launcher[:1], ssh_launch_args([*launcher[1:], *launcher_args])
+        self.advertised = (advertised_host(bind[0], advertise), bind[1])
+        self.hosts = list(nodelist)
         self.launches = [
-            client_launch(remote_exe, (HOSTNAME, bind[1]), auth,
+            client_launch(remote_exe, self.advertised, auth,
                           launcher=launcher, launcher_args=launcher_args,
                           ssh_host=host, ssh_exports=launcher_env,
                           num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
@@ -290,7 +306,7 @@ class SSHCluster(Thread):
                           client_cores=client_cores, client_memory=client_memory,
                           client_timeout=client_timeout, task_timeout=task_timeout,
                           ratelimit=ratelimit, tls_enabled=tls is not None, zone=zone)
-            for host in nodelist
+            for host in self.hosts
         ]
         super().__init__(name='hypershell-cluster')
 
@@ -300,20 +316,20 @@ class SSHCluster(Thread):
         return [launch.argv for launch in self.launches]
 
     def run_with_exceptions(self: SSHCluster) -> None:
-        """Start child threads, wait."""
+        """Start child threads, watch the client on every host until the server ends."""
         self.clients = []  # NOTE: empty for stop() until the clients are launched
         self.server.start()
         self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         for launch in self.launches:
             log.debug('Launching client: ' + launch.describe())
             self.clients.append(launch.start(stdout=sys.stdout, stderr=sys.stderr))
-        for client in self.clients:
-            client.wait()
+        watch_launched(self.server, list(zip(self.hosts, self.clients)), self.advertised)
         self.server.join()
 
     def stop(self: SSHCluster, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
-        self.server.stop(wait=wait, timeout=timeout)
+        """Stop child threads before main thread (a server that has already ended is not stopped again)."""
+        if self.server.is_alive():
+            self.server.stop(wait=wait, timeout=timeout)
         for client in self.clients:
             client.terminate()
         super().stop(wait=wait, timeout=timeout)

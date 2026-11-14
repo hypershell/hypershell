@@ -21,26 +21,27 @@ from subprocess import Popen
 # Internal libs
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig
-from hypershell.core.config import default
+from hypershell.core.config import default, config, blame, ConfigurationError
 from hypershell.core.thread import Thread, join_waking
-from hypershell.core.logging import Logger, HOSTNAME
+from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.data.model import Task, Client
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
 from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL,
                                DEFAULT_EVICT)
-from hypershell.cluster.launch import ClientLaunch, LaunchActuator, client_launch, redact_secrets
+from hypershell.cluster.launch import ClientLaunch, LaunchActuator, advertised_host, client_launch, redact_secrets
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ZoneLoad, ScalingKnobs,
                                        read_zone_loads, fleet_demand)
+from hypershell.cluster.watch import ClusterLaunchError, exit_text, watch_launched
 
 # Public interface
 __all__ = ['run_cluster', 'RemoteCluster', 'AutoScalingCluster',
            'DEFAULT_REMOTE_EXE', 'DEFAULT_LAUNCHER',
            'DEFAULT_AUTOSCALE_POLICY', 'DEFAULT_AUTOSCALE_PERIOD', 'DEFAULT_AUTOSCALE_FACTOR',
            'DEFAULT_AUTOSCALE_INIT_SIZE', 'DEFAULT_AUTOSCALE_MIN_SIZE', 'DEFAULT_AUTOSCALE_MAX_SIZE',
-           'DEFAULT_AUTOSCALE_LAUNCHER', 'AutoScalerPolicy',
-           'redact_secrets']
+           'DEFAULT_AUTOSCALE_LAUNCHER', 'DEFAULT_AUTOSCALE_FAILED_LAUNCHES', 'AutoScalerPolicy',
+           'configured_failed_launches', 'client_registrations', 'redact_secrets']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
@@ -92,6 +93,10 @@ class RemoteCluster(Thread):
     """
     Run server with remote clients via external launcher (e.g., `mpirun`).
 
+    The launcher's exit is watched while the server runs (see :func:`~hypershell.cluster.watch.watch_launched`):
+    a non-zero exit is warned about, and if it leaves the server with work it would otherwise wait
+    on forever, the server is stopped and :class:`~hypershell.cluster.watch.ClusterLaunchError` is raised.
+
     Args:
         source (Iterable[str], optional):
             Any iterable of command-line tasks.
@@ -130,6 +135,8 @@ class RemoteCluster(Thread):
 
         bind (tuple, optional):
             Bind address for server with port number (default: 0.0.0.0).
+            Clients are told to dial the bind address, or this host's own name when it is 0.0.0.0
+            (see :func:`~hypershell.cluster.launch.advertised_host`), unless `advertise` names one.
             See :const:`~hypershell.server.DEFAULT_PORT`.
 
         launcher (str, optional):
@@ -208,6 +215,9 @@ class RemoteCluster(Thread):
             Zone whose tasks the clients run (default: the default zone).
             Tasks this cluster submits are placed in the same zone.
 
+        advertise (str, optional):
+            Address the clients are told to dial, whatever the bind (default: the bind rule above).
+
     Example:
         >>> from hypershell.cluster import RemoteCluster
         >>> cluster = RemoteCluster.new(
@@ -224,6 +234,7 @@ class RemoteCluster(Thread):
     server: ServerThread
     clients: Optional[Popen] = None
     launch: ClientLaunch
+    advertised: Tuple[str, int]
 
     def __init__(self: RemoteCluster,
                  source: Iterable[str] = None,
@@ -256,7 +267,8 @@ class RemoteCluster(Thread):
                  ratelimit: int = None,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
-                 zone: Optional[str] = None) -> None:
+                 zone: Optional[str] = None,
+                 advertise: Optional[str] = None) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         # In JSON mode the template is expanded submit-side by the server; remote clients
@@ -285,8 +297,8 @@ class RemoteCluster(Thread):
             launcher_args = []
         else:
             launcher_args = [arg for arg_group in launcher_args for arg in shlex.split(arg_group)]
-        target = HOSTNAME if bind[0] == '0.0.0.0' else bind[0]
-        self.launch = client_launch(remote_exe, (target, bind[1]), auth,
+        self.advertised = (advertised_host(bind[0], advertise), bind[1])
+        self.launch = client_launch(remote_exe, self.advertised, auth,
                                     launcher=shlex.split(launcher), launcher_args=launcher_args,
                                     num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                                     template=client_template, delay_start=delay_start,
@@ -303,17 +315,18 @@ class RemoteCluster(Thread):
         return self.launch.argv
 
     def run_with_exceptions(self: RemoteCluster) -> None:
-        """Start child threads, wait."""
+        """Start child threads, watch the launched clients until the server ends."""
         self.server.start()
         self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         log.debug('Launching clients: ' + self.launch.describe())
         self.clients = self.launch.start(stdout=sys.stdout, stderr=sys.stderr)
-        self.clients.wait()
+        watch_launched(self.server, [(self.launch.describe(), self.clients)], self.advertised)
         self.server.join()
 
     def stop(self: RemoteCluster, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
-        self.server.stop(wait=wait, timeout=timeout)
+        """Stop child threads before main thread (a server that has already ended is not stopped again)."""
+        if self.server.is_alive():
+            self.server.stop(wait=wait, timeout=timeout)
         if self.clients is not None:
             self.clients.terminate()
         super().stop(wait=wait, timeout=timeout)
@@ -339,6 +352,46 @@ DEFAULT_AUTOSCALE_MAX_SIZE: Final[int] = default.autoscale.size.max
 
 DEFAULT_AUTOSCALE_LAUNCHER: Final[str] = default.autoscale.launcher
 """Default launcher program for scaling clients."""
+
+DEFAULT_AUTOSCALE_FAILED_LAUNCHES: Final[int] = default.autoscale.failed_launches
+"""Default number of launched clients in a row that may exit non-zero, with no client registered, before an autoscaling cluster stops."""
+
+
+def configured_failed_launches() -> int:
+    """
+    The `[autoscale] failed_launches` setting, refused naming its source unless a non-negative integer.
+
+    Its environment form, ``HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES``, is split at every underscore when
+    read, and so lands at `autoscale.failed.launches`; from there it takes precedence, as the
+    environment does over every file.
+    """
+    varpath = ('autoscale', 'failed_launches')
+    try:
+        if config.which('autoscale', 'failed', 'launches') == 'env':
+            varpath = ('autoscale', 'failed', 'launches')
+    except KeyError:
+        pass
+    value = config
+    for name in varpath:
+        value = value[name]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigurationError(f'Expected a non-negative integer for `autoscale.failed_launches`, '
+                                 f'given {value!r} ({blame(config, *varpath)})')
+    return value
+
+
+def client_registrations() -> Tuple[int, int]:
+    """
+    Clients registered with this process's server: every one since it started, and those still connected.
+
+    The server stamps its process's :const:`~hypershell.core.logging.INSTANCE` on a client's row at
+    every registration and re-registration, and never deletes a row, so the first count only rises
+    and counts a client that registered and left between two reads. Rows written by any earlier
+    server carry that server's own id and are never counted.
+    """
+    ever = Client.query().filter_by(server_id=INSTANCE).count()
+    now = Client.query().filter_by(server_id=INSTANCE, disconnected_at=None).count()
+    return ever, now
 
 
 class AutoScalerState(State, Enum):
@@ -375,6 +428,13 @@ class AutoScaler(StateMachine):
     called with a zone id. `scheduler_group`, when given, reports the task group the scheduler loads
     from now (None while it is not known); otherwise, and while it reports None, the group is the
     one the scheduler would start from (:meth:`~hypershell.data.model.Task.starting_group`).
+
+    With `failed_launches` above 0, each check counts the launched clients that exited non-zero in a
+    row, in launch order, while no client is registered: `registrations` reports how many clients
+    have registered with the server since it started and how many are connected now. A client that
+    exits 0, a client connected now, or a registration since the last check ends the run of failures.
+    Once the run reaches `failed_launches`, nothing more is launched, `exhausted` is set and the
+    machine ends. With 0 (the default) launches are never counted and `registrations` is never called.
     """
 
     policy: AutoScalerPolicy
@@ -388,11 +448,16 @@ class AutoScaler(StateMachine):
     eager: bool
     registered: Optional[Callable[[str], int]]
     scheduler_group: Optional[Callable[[], Optional[int]]]
+    failed_launches: int
+    registrations: Optional[Callable[[], Tuple[int, int]]]
 
     actuator: LaunchActuator
     pending: Dict[ZoneRef, int]
     last_check: datetime
     wait_check: timedelta
+    seen: int
+    failures: List[Tuple[int, str, int]]
+    exhausted: bool = False
 
     phase: AutoScalerPhase = AutoScalerPhase.INIT
     state: AutoScalerState = AutoScalerState.START
@@ -412,6 +477,8 @@ class AutoScaler(StateMachine):
                  eager: bool = False,
                  registered: Optional[Callable[[str], int]] = None,
                  scheduler_group: Optional[Callable[[], Optional[int]]] = None,
+                 failed_launches: int = 0,
+                 registrations: Optional[Callable[[], Tuple[int, int]]] = None,
                  ) -> None:
         """Initialize with scaling parameters."""
         self.policy = AutoScalerPolicy.from_name(policy)
@@ -425,6 +492,10 @@ class AutoScaler(StateMachine):
         self.eager = eager
         self.registered = registered
         self.scheduler_group = scheduler_group
+        self.failed_launches = failed_launches
+        self.registrations = registrations
+        self.seen = 0
+        self.failures = []
         self.actuator = LaunchActuator(launch, own=self.own_zone, launch_for=launch_for)
         self.last_check = datetime.now()
         self.wait_check = timedelta(seconds=period)
@@ -503,9 +574,11 @@ class AutoScaler(StateMachine):
             return AutoScalerState.FINAL
 
     def check(self: AutoScaler) -> AutoScalerState:
-        """Check if we need to scale up."""
-        self.clean()
+        """Check if we need to scale up (end once too many launched clients in a row have failed)."""
+        exited = self.clean()
         self.last_check = datetime.now()
+        if self.count_failures(exited):
+            return AutoScalerState.FINAL
         if self.policy is AutoScalerPolicy.FIXED:
             return AutoScalerState.CHECK_FIXED
         else:
@@ -590,9 +663,32 @@ class AutoScaler(StateMachine):
         else:
             return AutoScalerState.WAIT
 
-    def clean(self: AutoScaler) -> None:
-        """Remove clients that have exited."""
-        self.actuator.clean()
+    def count_failures(self: AutoScaler, exited: List[Tuple[Popen, ZoneRef]]) -> bool:
+        """Count the `exited` clients into the run of failures; True once it reaches `failed_launches` (see the class)."""
+        if self.failed_launches <= 0:
+            return False
+        ever, now = (0, 0) if self.registrations is None else self.registrations()
+        if now > 0 or ever > self.seen:
+            # A client registered: the launches work, whatever this check's exits were.
+            self.seen = ever
+            self.failures = []
+            return False
+        for proc, zone in exited:
+            status = proc.poll()
+            if status == 0:
+                self.failures = []
+            else:
+                self.failures.append((proc.pid, zone.name, status))
+        if len(self.failures) < self.failed_launches:
+            return False
+        self.exhausted = True
+        log.debug(f'Autoscale stop ({len(self.failures)} launched clients in a row exited non-zero)')
+        return True
+
+    def clean(self: AutoScaler) -> List[Tuple[Popen, ZoneRef]]:
+        """Remove clients that have exited, and return them in launch order, each with its zone."""
+        zones = {id(proc): self.actuator.zone_of(proc) for proc in self.actuator.clients}
+        return [(proc, zones[id(proc)]) for proc in self.actuator.clean()]
 
     @staticmethod
     def finalize() -> AutoScalerState:
@@ -602,7 +698,7 @@ class AutoScaler(StateMachine):
 
 
 class AutoScalerThread(Thread):
-    """Run AutoScaler within dedicated thread."""
+    """Run AutoScaler within dedicated thread; it ends without raising when the machine is exhausted."""
 
     def __init__(self: AutoScalerThread,
                  launch: ClientLaunch,
@@ -618,13 +714,16 @@ class AutoScalerThread(Thread):
                  eager: bool = False,
                  registered: Optional[Callable[[str], int]] = None,
                  scheduler_group: Optional[Callable[[], Optional[int]]] = None,
+                 failed_launches: int = 0,
+                 registrations: Optional[Callable[[], Tuple[int, int]]] = None,
                  ) -> None:
         """Initialize task executor."""
         super().__init__(name=f'hypershell-autoscaler')
         self.machine = AutoScaler(launch, policy=policy, factor=factor, period=period,
                                   init_size=init_size, min_size=min_size, max_size=max_size,
                                   own_zone=own_zone, launch_for=launch_for, attempts=attempts, eager=eager,
-                                  registered=registered, scheduler_group=scheduler_group)
+                                  registered=registered, scheduler_group=scheduler_group,
+                                  failed_launches=failed_launches, registrations=registrations)
 
     def run_with_exceptions(self: AutoScalerThread) -> None:
         """Run machine."""
@@ -679,6 +778,8 @@ class AutoScalingCluster(Thread):
 
         bind (tuple, optional):
             Bind address for server with port number (default: 0.0.0.0).
+            Clients are told to dial the bind address, or this host's own name when it is 0.0.0.0
+            (see :func:`~hypershell.cluster.launch.advertised_host`), unless `advertise` names one.
             See :const:`~hypershell.server.DEFAULT_PORT`.
 
         launcher (str, optional):
@@ -792,6 +893,16 @@ class AutoScalingCluster(Thread):
             Scale clients zone by zone, each launch naming its zone to the launcher (default: True).
             When disabled, every client is launched exactly as given, in the cluster's own zone.
 
+        advertise (str, optional):
+            Address the clients are told to dial, whatever the bind (default: the bind rule above).
+
+        failed_launches (int, optional):
+            Launched clients in a row that may exit non-zero while no client is registered (default: 3).
+            When that many have, nothing more is launched, the server is stopped, and
+            :class:`~hypershell.cluster.watch.ClusterLaunchError` is raised naming them and the address
+            the clients were told. With 0, failed launches are relaunched without end.
+            See :const:`~hypershell.cluster.remote.DEFAULT_AUTOSCALE_FAILED_LAUNCHES`.
+
     Example:
         >>> from hypershell.cluster import AutoScalingCluster
         >>> cluster = AutoScalingCluster.new(
@@ -809,6 +920,7 @@ class AutoScalingCluster(Thread):
     server: ServerThread
     clients: Dict[str, Popen]
     launch: ClientLaunch
+    advertised: Tuple[str, int]
 
     def __init__(self: AutoScalingCluster,
                  source: Iterable[str] = None,
@@ -850,6 +962,8 @@ class AutoScalingCluster(Thread):
                  zone: Optional[str] = None,
                  evict_after: int = DEFAULT_EVICT,
                  discover_zones: bool = True,
+                 advertise: Optional[str] = None,
+                 failed_launches: int = DEFAULT_AUTOSCALE_FAILED_LAUNCHES,
                  ) -> None:
         """Initialize server and autoscaler."""
         auth = secrets.token_hex(64)
@@ -878,7 +992,8 @@ class AutoScalingCluster(Thread):
         else:
             launcher_args = [arg for arg_group in launcher_args for arg in shlex.split(arg_group)]
         # Every launch of a zone is built from the same values; only the zone differs.
-        build = partial(client_launch, remote_exe, (HOSTNAME, bind[1]), auth,
+        self.advertised = (advertised_host(bind[0], advertise), bind[1])
+        build = partial(client_launch, remote_exe, self.advertised, auth,
                         launcher=shlex.split(launcher), launcher_args=launcher_args,
                         num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                         template=client_template, delay_start=delay_start,
@@ -900,19 +1015,33 @@ class AutoScalingCluster(Thread):
         self.autoscaler = AutoScalerThread(self.launch, policy=policy, factor=factor, period=period,
                                            init_size=init_size, min_size=min_size, max_size=max_size,
                                            own_zone=own, launch_for=launch_for, attempts=max_retries + 1,
-                                           eager=eager, registered=registered, scheduler_group=scheduler_group)
+                                           eager=eager, registered=registered, scheduler_group=scheduler_group,
+                                           failed_launches=failed_launches, registrations=client_registrations)
         super().__init__(name='hypershell-cluster')
 
     def run_with_exceptions(self: AutoScalingCluster) -> None:
-        """Start child threads, wait."""
+        """Start child threads, wait; stop the server and raise if the autoscaler ended on failed launches.
+
+        That stop does not wait on input still being read: no client is left to run it, and a producer
+        that stays open would hold the stop forever. Tasks already committed are kept.
+        """
         self.server.start()
         self.server.wait_scheduling()  # NOTE: clients never idle while a task file is read
         self.autoscaler.start()
         self.autoscaler.join()
+        if self.autoscaler.machine.exhausted:
+            self.server.stop(wait=True, leave_input=True)
+            failures = self.autoscaler.machine.failures
+            exits = ', '.join(f'{pid} (zone: {zone}) {exit_text(status)}' for pid, zone, status in failures)
+            host, port = self.advertised
+            raise ClusterLaunchError(f'{len(failures)} launched clients in a row exited non-zero with no client '
+                                     f'registered ({exits}); clients were told to dial {host}:{port}')
         self.server.join()
 
     def stop(self: AutoScalingCluster, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
-        self.server.stop(wait=wait, timeout=timeout)
-        self.autoscaler.stop(wait=wait, timeout=timeout)
+        """Stop child threads before main thread (a server that has already ended is not stopped again)."""
+        if self.server.is_alive():
+            self.server.stop(wait=wait, timeout=timeout)
+        if not self.autoscaler.machine.exhausted:
+            self.autoscaler.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)

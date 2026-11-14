@@ -378,7 +378,7 @@ client has gone and work remains. Pre-existing since 2.8.0.
 
 *Horizon: near-term · Depends on: — · Refs: the advertised-host fix below (one way every client
 fails); failure-budget halt policy (the autoscaling bound)*
-**Seed:** [`issues/cluster-waits-when-every-client-fails.md`](issues/cluster-waits-when-every-client-fails.md) · *status: unshaped*
+**Seed:** [`issues/cluster-waits-when-every-client-fails.md`](issues/cluster-waits-when-every-client-fails.md) · *status: adopted:cluster-launch-failures*
 
 ## `--ssh` and autoscaling tell clients the host's own name, whatever `-H` binds
 
@@ -392,7 +392,7 @@ downstream address.
 
 *Horizon: near-term, small · Depends on: — · Refs: relay (its downstream listener needs the same
 rule)*
-**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
+**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: adopted:cluster-launch-failures*
 
 ## A relay run can still end up to about 5 s late
 

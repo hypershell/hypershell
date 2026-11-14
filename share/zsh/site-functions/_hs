@@ -588,6 +588,7 @@ function _hs_cluster() {
         '(-t --template)'{-t,--template}'[Command-line template pattern (default "{}")]:template:' \
         '(1)--from-json[Read tasks from a JSON file ("FILE\[@path\]")]:json spec:_files' \
         '(-H --bind)'{-H,--bind}'[Special bind address (default localhost/0.0.0.0)]:address:(localhost 127.0.0.1 0.0.0.0)' \
+        '--advertise[Address remote clients dial (default: by -H)]:address:_hosts' \
         '(-p --port)'{-p,--port}'[Port number (default: 50001)]:port:_hs_ports' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \

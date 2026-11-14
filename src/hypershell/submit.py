@@ -50,6 +50,7 @@ import sys
 import json
 import hashlib
 import functools
+import threading
 from enum import Enum
 from datetime import datetime
 from queue import Queue, Empty as QueueEmpty, Full as QueueFull
@@ -423,6 +424,10 @@ class Loader(StateMachine):
         return LoaderState.HALT
 
 
+LOADER_JOIN_INTERVAL: Final[float] = 0.1
+"""Seconds between checks, while waiting on a loader, that it has not been left to its input."""
+
+
 class LoaderThread(Thread):
     """Run loader within dedicated thread."""
 
@@ -439,6 +444,7 @@ class LoaderThread(Thread):
         super().__init__(name='hypershell-submit-loader')
         self.machine = Loader(source=source, queue=queue, cores=cores, memory=memory, timeout=timeout,
                               template=template, group=group, tags=tags)
+        self.left = threading.Event()
 
     def run_with_exceptions(self: LoaderThread) -> None:
         """Run machine."""
@@ -449,6 +455,22 @@ class LoaderThread(Thread):
         log.warning('Stopping (loader)')
         self.machine.halt()
         super().stop(wait=wait, timeout=timeout)
+
+    def leave(self: LoaderThread) -> None:
+        """Stop machine without waiting on its source: a read already blocked on its input is left to end alone.
+
+        Nothing read after this is enqueued. :meth:`join_unless_left` returns at once.
+        """
+        log.warning('Stopping (loader: input left unread)')
+        self.machine.halt()
+        self.left.set()
+
+    def join_unless_left(self: LoaderThread) -> None:
+        """Wait for the loader to read its source to the end, or until it is left (:meth:`leave`)."""
+        while self.is_alive() and not self.left.is_set():
+            self.join(timeout=LOADER_JOIN_INTERVAL)
+        if not self.is_alive():
+            self.join()  # Re-raises the failure that ended the loader, if any
 
 
 class DatabaseCommitterState(State, Enum):
@@ -636,7 +658,7 @@ class SubmitThread(Thread):
         log.debug(f'Started ({self.source_name})')
         self.loader.start()
         self.committer.start()
-        self.loader.join()
+        self.loader.join_unless_left()
         self.queue.put(None)
         self.committer.join()
         log.debug('Done')
@@ -653,10 +675,17 @@ class SubmitThread(Thread):
         else:
             return '<iterable>'
 
-    def stop(self: SubmitThread, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
+    def stop(self: SubmitThread, wait: bool = False, timeout: int = None, leave_input: bool = False) -> None:
+        """Stop child threads before main thread.
+
+        With `leave_input`, a loader blocked reading its input (standard input from a producer that stays
+        open) is not waited on: what is committed stays committed, and the rest of the input is not read.
+        """
         log.warning('Stopping')
-        self.loader.stop(wait=wait, timeout=timeout)
+        if leave_input:
+            self.loader.leave()
+        else:
+            self.loader.stop(wait=wait, timeout=timeout)
         self.queue.put(None)
         self.committer.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
@@ -689,6 +718,7 @@ class QueueCommitter(StateMachine):
     bundlesize: int
     bundlewait: int
     previous_submit: datetime
+    halted: bool = False
 
     state = QueueCommitterState.START
     states = QueueCommitterState
@@ -760,10 +790,17 @@ class QueueCommitter(StateMachine):
     def finalize(self) -> QueueCommitterState:
         """Force final commit of tasks and halt."""
         self.pack_bundle()
-        while self.tasks:  # Force retry if queue is busy (since v2.8.0)
+        while self.tasks and not self.halted:  # Force retry if queue is busy (since v2.8.0)
             self.commit()
+        if self.tasks:
+            log.warning(f'Stopped with {len(self.tasks)} tasks not committed (committer: no database)')
         log.debug('Done (committer: no database)')
         return QueueCommitterState.HALT
+
+    def halt(self: QueueCommitter) -> None:
+        """Halt, including a final commit still waiting for room on the server's queue."""
+        self.halted = True
+        super().halt()
 
 
 class QueueCommitterThread(Thread):
@@ -877,8 +914,8 @@ class LiveSubmitThread(Thread):
             self.loader.start()
             self.committer.start()
             log.trace('Waiting (loader)')
-            self.loader.join()
-            self.local.put(None)
+            self.loader.join_unless_left()
+            self.put_end()
             log.trace('Waiting (committer)')
             self.committer.join()
         log.debug('Done')
@@ -902,13 +939,33 @@ class LiveSubmitThread(Thread):
         else:
             return '<iterable>'
 
-    def stop(self: LiveSubmitThread, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
+    def stop(self: LiveSubmitThread, wait: bool = False, timeout: int = None, leave_input: bool = False) -> None:
+        """Stop child threads before main thread.
+
+        The committer is halted before its end marker is offered: with no client taking tasks from the
+        server, the committer cannot drain the local queue, and a marker that waited for room would
+        never be placed. With `leave_input`, a loader blocked reading its input (standard input from a
+        producer that stays open) is not waited on, and the rest of the input is not read.
+        """
         log.warning('Stopping')
-        self.loader.stop(wait=wait, timeout=timeout)
-        self.local.put(None)
+        if leave_input:
+            self.loader.leave()
+        else:
+            self.loader.stop(wait=wait, timeout=timeout)
         self.committer.stop(wait=wait, timeout=timeout)
+        self.put_end()
         super().stop(wait=wait, timeout=timeout)
+
+    def put_end(self: LiveSubmitThread) -> None:
+        """Offer the committer the end of tasks, waiting for room only while the committer runs to make it."""
+        while True:
+            committer_running = self.committer.is_alive()
+            try:
+                self.local.put(None, block=committer_running, timeout=DEFAULT_LOCAL_TIMEOUT)
+                return
+            except QueueFull:
+                if not committer_running:
+                    return  # Nothing will take it: the committer has ended
 
     @property
     def task_count(self: LiveSubmitThread) -> int:

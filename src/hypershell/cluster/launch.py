@@ -13,6 +13,9 @@ it into :const:`AUTH_ENV` before it starts the client.
 
 An autoscaling cluster starts clients zone by zone through a :class:`LaunchActuator`, which
 builds one launch per zone; a launch built with `expose_zone` names its zone to the launcher.
+
+Every launch mode tells its clients the address :func:`advertised_host` gives: an address the
+user names, else the bind address when the server binds one address, else this host's own name.
 """
 
 
@@ -32,14 +35,14 @@ from subprocess import Popen, PIPE
 
 # Internal libs
 from hypershell.core.config import load_task_env
-from hypershell.core.logging import Logger
+from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
 from hypershell.data.model import DEFAULT_ZONE_NAME
 from hypershell.cluster.demand import ZoneRef
 
 # Public interface
 __all__ = ['AUTH_ENV', 'OMPI_ENV_LIST', 'ZONE_ENV', 'ZONE_WORD', 'MPI_LAUNCHERS', 'SSH_NO_KEY_MESSAGE',
-           'ClientLaunch', 'LaunchActuator', 'client_launch',
+           'WILDCARD_BINDS', 'ClientLaunch', 'LaunchActuator', 'advertised_host', 'client_launch',
            'is_mpi_launcher', 'ssh_env_exports', 'ssh_launch_args', 'ssh_remote_script', 'redact_secrets']
 
 # Initialize logger
@@ -78,6 +81,30 @@ SSH_NO_INPUT: Final[str] = '-n'
 
 SSH_OPTIONS_WITH_VALUE: Final[str] = 'BbcDEeFIiJLlmOoPpQRSWw'
 """Letters of the ssh options that take a value."""
+
+WILDCARD_BINDS: Final[FrozenSet[str]] = frozenset({'0.0.0.0', ''})
+"""Bind addresses that listen on every interface, which no client can dial as such."""
+
+
+def advertised_host(bind: str, advertise: Optional[str] = None) -> str:
+    """
+    The address launched clients are told to dial, for a server bound to `bind`.
+
+    A non-empty `advertise` is the address, whatever the bind. Otherwise a server bound to one
+    address is dialed there, and a server bound to every interface (:const:`WILDCARD_BINDS`) is
+    dialed by this host's own name (:const:`~hypershell.core.logging.HOSTNAME`).
+
+    Example:
+        >>> advertised_host('10.0.0.5')
+        '10.0.0.5'
+        >>> advertised_host('0.0.0.0') == HOSTNAME
+        True
+        >>> advertised_host('0.0.0.0', advertise='head.cluster')
+        'head.cluster'
+    """
+    if advertise:
+        return advertise
+    return HOSTNAME if bind in WILDCARD_BINDS else bind
 
 
 @dataclass(frozen=True)
@@ -253,6 +280,7 @@ class LaunchActuator:
         self.described: Set[str] = set()
         self._clients: List[Popen] = []
         self.zones: Dict[int, str] = {}
+        self.names: Dict[str, str] = {self.own.id: self.own.name}
 
     @property
     def clients(self: LaunchActuator) -> List[Popen]:
@@ -273,6 +301,11 @@ class LaunchActuator:
             zone = self.zones.get(id(proc), self.own.id)
             counts[zone] = counts.get(zone, 0) + 1
         return counts
+
+    def zone_of(self: LaunchActuator, proc: Popen) -> ZoneRef:
+        """The zone `proc` was started in (the own zone for a process the actuator did not start), while not cleaned."""
+        zone = self.zones.get(id(proc), self.own.id)
+        return ZoneRef(zone, self.names.get(zone, self.own.name))
 
     def launch_of(self: LaunchActuator, zone: ZoneRef) -> ClientLaunch:
         """The launch of `zone`, built at its first use and kept."""
@@ -295,6 +328,7 @@ class LaunchActuator:
         log.info(f'Autoscale adding client ({proc.pid}, zone: {zone.name})')
         self._clients.append(proc)
         self.zones[id(proc)] = zone.id
+        self.names[zone.id] = zone.name
         return proc
 
     def apply(self: LaunchActuator, desired: Mapping[ZoneRef, int]) -> int:
@@ -308,7 +342,7 @@ class LaunchActuator:
         return started
 
     def clean(self: LaunchActuator) -> List[Popen]:
-        """Drop the processes that have exited, and return them."""
+        """Drop the processes that have exited, and return them; each non-zero exit is warned about, naming its pid and zone."""
         exited = []
         for i, client in enumerate(self._clients):
             log.trace(f'Autoscale clean ({i+1}: {client.pid})')
@@ -316,7 +350,8 @@ class LaunchActuator:
             if status is not None:
                 exited.append(client)
                 if status != 0:
-                    log.warning(f'Autoscale client ({i+1}) exited with status {status}')
+                    zone = self.zone_of(client)
+                    log.warning(f'Autoscale client ({client.pid}, zone: {zone.name}) exited with status {status}')
                 else:
                     log.info(f'Autoscale client disconnected ({client.pid})')
         if exited:

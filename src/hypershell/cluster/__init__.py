@@ -20,7 +20,7 @@ from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
-from hypershell.core.config import config, blame, find_available_ports
+from hypershell.core.config import config, blame, find_available_ports, PARAM_UNSET
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes, parse_time, parse_delay
 from hypershell.core.logging import Logger
@@ -34,7 +34,7 @@ from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source
                                GatedSource, source_fingerprint_and_count, apply_source_gate)
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
-from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster,
+from hypershell.cluster.remote import (run_cluster, RemoteCluster, AutoScalingCluster, configured_failed_launches,
                                        DEFAULT_AUTOSCALE_FACTOR, DEFAULT_AUTOSCALE_PERIOD,
                                        DEFAULT_AUTOSCALE_MIN_SIZE, DEFAULT_AUTOSCALE_MAX_SIZE,
                                        DEFAULT_AUTOSCALE_INIT_SIZE)
@@ -55,7 +55,7 @@ APP_USAGE = """\
 Usage:
   hs cluster [-h] [FILE | --from-json SPEC | --restart | --forever] [--repeat | --update] [-N NUM] [-t CMD] [-b SIZE] [-w SEC]
              [-c NUM] [-m MEM] [-W SEC] [--initdb | --no-db [--no-confirm]] [-d SEC] [-T SEC] [-C NUM] [-M MEM] [-S SEC] [-R NUM] [-Q SEC]
-             [-H ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor] [--zone NAME]
+             [-H ADDR] [--advertise ADDR] [-p PORT] [-r NUM [--eager]] [-f PATH] [--capture | [-o PATH] [-e PATH]] [--monitor] [--zone NAME]
              [--ssh [HOST... | --ssh-group NAME] [--env] | --mpi | --launcher=ARGS...]
              [--autoscaling [MODE] [-P SEC] [-F VALUE] [-I NUM] [-X NUM] [-Y NUM]]
              [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
@@ -78,7 +78,8 @@ Options:
   -N, --num-threads    NUM      Number of executor threads per client, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template       CMD      Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
       --from-json      SPEC     Read tasks from a JSON file ("FILE[@path]").
-  -H, --bind           ADDR     Special bind address (default: "localhost" or "0.0.0.0" remote).
+  -H, --bind           ADDR     Bind address; remote clients dial it, or this host by name for 0.0.0.0 (default: "localhost" or "0.0.0.0" remote).
+      --advertise      ADDR     Address remote clients dial instead (default: by -H).
   -p, --port           PORT     Port number (default: {DEFAULT_PORT}).
   -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
   -w, --bundlewait     SEC      Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
@@ -208,6 +209,9 @@ class ClusterApp(Application):
     host: str = config.server.bind
     interface.add_argument('-H', '--bind', default=host, dest='host')
 
+    advertise: Optional[str] = None
+    interface.add_argument('--advertise', default=None)
+
     port: int = config.server.port
     interface.add_argument('-p', '--port', default=port, type=int)
 
@@ -298,13 +302,14 @@ class ClusterApp(Application):
     def run_launch(self: ClusterApp, **options) -> None:
         """Run remote cluster with custom launcher."""
         bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
-        run_cluster(**options,  launcher=self.launch_mode, remote_exe=self.remote_exe, bind=(bind, self.port))
+        run_cluster(**options,  launcher=self.launch_mode, remote_exe=self.remote_exe, bind=(bind, self.port),
+                    advertise=self.advertise_host)
 
     def run_mpi(self: ClusterApp, **options) -> None:
         """Run remote cluster with 'mpirun'."""
         bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
         run_cluster(**options, launcher='mpirun',
-                    remote_exe=self.remote_exe, bind=(bind, self.port))
+                    remote_exe=self.remote_exe, bind=(bind, self.port), advertise=self.advertise_host)
 
     def run_ssh(self: ClusterApp, **options) -> None:
         """Run remote cluster with SSH."""
@@ -314,7 +319,8 @@ class ClusterApp(Application):
             nodelist = NodeList.from_cmdline(self.ssh_mode if self.ssh_mode != '<default>' else None)
         bind = self.host if self.host not in ('0.0.0.0', 'localhost') else '0.0.0.0'
         run_ssh(**options, launcher='ssh', launcher_args=shlex.split(self.ssh_args), nodelist=nodelist,
-                remote_exe=self.remote_exe, bind=(bind, self.port), export_env=self.export_env)
+                remote_exe=self.remote_exe, bind=(bind, self.port), export_env=self.export_env,
+                advertise=self.advertise_host)
 
     def run_autoscaling(self: ClusterApp, **options) -> None:
         """Run remote cluster with custom launcher and autoscaling."""
@@ -323,7 +329,23 @@ class ClusterApp(Application):
                     policy=self.autoscaling_policy, factor=self.autoscaling_factor,
                     period=self.autoscaling_period, init_size=self.autoscaling_initial,
                     min_size=self.autoscaling_minimum, max_size=self.autoscaling_maximum,
-                    remote_exe=self.remote_exe, bind=(bind, self.port))
+                    remote_exe=self.remote_exe, bind=(bind, self.port), advertise=self.advertise_host,
+                    failed_launches=self.failed_launches)
+
+    @cached_property
+    def failed_launches(self: ClusterApp) -> int:
+        """Launched clients in a row that may fail with none registered before autoscaling stops (`autoscale.failed_launches`)."""
+        return configured_failed_launches()
+
+    @cached_property
+    def advertise_host(self: ClusterApp) -> Optional[str]:
+        """Address remote clients are told to dial: --advertise, else server.advertise, else None (the bind rule)."""
+        if self.advertise is not None:
+            return self.advertise
+        value = config.server.get('advertise', None)
+        if value is None or value == '' or value == PARAM_UNSET:
+            return None
+        return str(value)
 
     @cached_property
     def launchers(self: ClusterApp) -> Dict[str, Callable]:
@@ -365,6 +387,10 @@ class ClusterApp(Application):
                 self.zone = zone_name(self.zone)
             except ValueError as error:
                 raise ArgumentError(str(error)) from error
+        if self.advertise is not None and self.mode == 'local':
+            raise ArgumentError('Cannot use --advertise with a local cluster (no launched clients)')
+        if self.advertise is not None and not self.advertise.strip():
+            raise ArgumentError('Expected an address for --advertise (given an empty value)')
         if self.output_path and self.mode != 'local':
             raise ArgumentError('Cannot specify -o/--output PATH with remote clients')
         if self.errors_path and self.mode != 'local':
@@ -397,6 +423,8 @@ class ClusterApp(Application):
             raise ArgumentError('Cannot use --autoscaling with --mpi mode')
         if self.autoscaling_policy is not None and self.in_memory:
             raise ArgumentError('Cannot use --autoscaling without database (given --no-db)')
+        if self.autoscaling_policy is not None:
+            _ = self.failed_launches  # NOTE: a bad setting is refused before anything starts
         if self.autoscaling_policy is not None and self.restart_mode:
             log.warning('Using --restart is redundant with --autoscaling (implies --forever)')
         if self.autoscaling_policy is not None and self.forever_mode:
