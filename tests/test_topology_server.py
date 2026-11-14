@@ -27,7 +27,7 @@ import signal
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from datetime import datetime, timedelta
+from datetime import datetime
 from dataclasses import replace
 
 # External libs
@@ -101,7 +101,8 @@ def test_eviction_and_finish_drop_the_record(queues, task_db) -> None:
     registry = SiteRegistry()
     machine = monitor(queues, registry)
     stale, done, live = str(uuid()), str(uuid()), str(uuid())
-    deliver(machine, site_beat(stale, time=datetime.now().astimezone() - timedelta(seconds=3 * EVICT)))
+    deliver(machine, site_beat(stale))
+    machine.received[stale] -= 3 * EVICT  # Its last beat arrived three eviction periods ago.
     deliver(machine, site_beat(done))
     deliver(machine, site_beat(live))
     deliver(machine, site_beat(done, state=ClientState.FINISHED))
@@ -432,8 +433,8 @@ def test_a_retiring_relay_evicted_and_registered_again_never_retires_the_holder(
     run_check(pub)
     assert dispatcher.published.retired == frozenset({old})
     deliver(machine, relay_beat(old, 'old', retiring=True))
-    stale = datetime.now().astimezone() - timedelta(seconds=3 * EVICT)
-    deliver(machine, relay_beat(old, 'old', retiring=True, time=stale))
+    deliver(machine, relay_beat(old, 'old', retiring=True))
+    machine.received[old] -= 3 * EVICT  # Its last beat arrived three eviction periods ago.
     machine.last_check = datetime.now().astimezone()
     machine.check_clients()
     assert old not in registry

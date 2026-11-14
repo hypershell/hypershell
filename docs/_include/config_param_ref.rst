@@ -269,10 +269,17 @@
     ``.evict``
         Eviction period in seconds for clients (default: `600`).
 
-        If a client fails to register a heartbeat after this period of time it is considered
-        defunct and is evicted. When there are no more tasks to schedule the server sends a
+        If the server receives no heartbeat from a client for this period of time, by its own
+        clock, the client is considered defunct and is evicted. The time a client stamps on its
+        heartbeat plays no part, so a client whose clock differs from the server's is not evicted
+        while it keeps sending them. When there are no more tasks to schedule the server sends a
         disconnect request to all registered clients, and waits until a confirmation is
         returned for each. If a client is defunct, this will hang the shutdown process.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A heartbeat is aged from when the server received it, not by the client's clock.
 
     ``[tls]``
         Transport-layer security for queue connections. Enabled by default; every key below

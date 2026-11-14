@@ -18,3 +18,8 @@ pg:tests/test_contended_write.py::test_contended_orphan_revert_keeps_cancel
 pg:tests/test_contended_write.py::test_contended_orphan_revert_skips_deleted_row
 pg:tests/test_contended_write.py::test_contended_dispatch_skips_cancelled_row
 pg:tests/test_contended_write.py::test_contended_dispatch_skips_deleted_row
+
+# P2: eviction aged by the server's receive time (R7).
+tests/test_server_fsm.py::TestHeartMonitor::test_beat_from_a_clock_behind_is_not_evicted
+tests/test_server_fsm.py::TestHeartMonitor::test_silent_client_with_a_clock_ahead_is_evicted
+tests/test_relay_roster.py::test_relay_with_a_clock_behind_is_not_evicted

@@ -8,7 +8,7 @@ appetite: big
 status: in_progress
 branch: fix/relay-hardening
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -34,7 +34,7 @@ phases:
     HS_TEST_TIMESCALE=community sh spec/relay-hardening/drive/red_check.sh
 - id: P2
   name: Eviction aged by the server's monotonic receive time, every client
-  status: pending
+  status: done
   satisfies:
   - R7
   - R9
@@ -267,20 +267,23 @@ on; a contended row that still qualifies lands. Design: PLAN §2 R1, R2; researc
 **Goal:** no client that keeps beating is evicted, whatever its clock; a silent one is evicted
 `server.evict` after its last beat arrived. Design: PLAN §2 R7; research 06.
 
-- [ ] `HeartMonitor` (`server.py:698`): `received: Dict[str, float]` beside `beats` (init `:737`);
+- [x] `HeartMonitor` (`server.py:698`): `received: Dict[str, float]` beside `beats` (init `:737`);
       `time.monotonic()` taken right after the `get` in `get_next` (`:770`), stored with the beat at
       `:801`, popped wherever `beats` pops (`:810`, `:921`). `check_clients` (`:913`): one monotonic
       `now` per check, `age = timedelta(seconds=now - received[uuid])`, strict `> evict_after`; a
       missing stamp never evicts. `hb.time`, `connected_at`, `last_check` and the wire untouched.
-- [ ] Adapt the four tests that make a client stale through its sender time
+- [x] Adapt the four tests that make a client stale through its sender time
       (`test_relay_roster.py:223`, `:500`; `test_topology_server.py:104`, `:435`) to back-date
       `machine.received[uuid]` instead; **assertions unchanged** (PLAN §3 deviation row 1).
-- [ ] R9 tests (`tests/test_server_fsm.py`, `TestHeartMonitor` style, `in_memory=True`, no sleeps):
+- [x] R9 tests (`tests/test_server_fsm.py`, `TestHeartMonitor` style, `in_memory=True`, no sleeps):
       a beat stamped `now − 3×evict` survives `check_clients` (red); a beat stamped `now + 1 h` whose
       receive stamp is back-dated past evict is evicted (red); exactly evict kept, past it evicted.
       One DB-backed case (`test_relay_roster.py` style): a relay beat skewed 3×evict is not evicted,
-      its roster stays, its tasks are not reverted (red).
-- [ ] Docs: remove the clock-skew bullet `docs/cli/relay.rst:116-118`; restate `server.evict` in
+      its roster stays, its tasks are not reverted (red). *As built:* the two clock-dependent cases
+      move a stand-in for the `time` module that `hypershell.server` sees (`FakeClock`) instead of
+      editing `received`, so on `2ffb5cc` they fail on their assertions rather than on a missing
+      attribute.
+- [x] Docs: remove the clock-skew bullet `docs/cli/relay.rst:116-118`; restate `server.evict` in
       `docs/_include/config_param_ref.rst:269-274` (by the server's clock, from the last heartbeat
       received) with `.. versionchanged:: 2.9.0` inside its `.. only:: html` as at `:222-225`.
 - **Verify:** see frontmatter.

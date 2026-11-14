@@ -708,12 +708,17 @@ class HeartMonitor(StateMachine):
     that advertises its zone is recorded there, overwriting that identity's previous record, and
     the record is dropped when the identity is evicted or finishes. A relay identity that
     advertises no zone (a relay of an earlier release) takes no part in the topology.
+
+    A client is aged by the server's own monotonic clock, from when its last heartbeat was received,
+    never by the time the client stamped on it, so a client that keeps beating is never evicted
+    however far its clock is from the server's.
     """
 
     in_memory: bool
     no_confirm: bool
     queue: QueueServer
     beats: Dict[str, Heartbeat]
+    received: Dict[str, float]
     rosters: Dict[str, Dict[str, RosterEntry]]
     sites: Optional[SiteRegistry]
     ignored_sites: set
@@ -725,6 +730,7 @@ class HeartMonitor(StateMachine):
     scheduler_done: bool = False  # set by parent thread when scheduling is over
     should_signal: bool = False  # set by parent thread to signal clients
     latest_heartbeat: Heartbeat = None
+    latest_received: float = None
 
     state = HeartbeatState.START
     states = HeartbeatState
@@ -735,6 +741,7 @@ class HeartMonitor(StateMachine):
         self.queue = queue
         self.last_check = datetime.now().astimezone()
         self.beats = {}
+        self.received = {}
         self.rosters = {}
         self.sites = sites
         self.ignored_sites = set()
@@ -768,6 +775,7 @@ class HeartMonitor(StateMachine):
         """Get and stash heartbeat from clients."""
         try:
             hb_data = self.queue.heartbeat.get(timeout=DEFAULT_REMOTE_TIMEOUT)
+            received = time.monotonic()
             self.queue.heartbeat.task_done()
             self.startup_phase = False
             hb = Heartbeat.unpack_or_none(hb_data)
@@ -775,6 +783,7 @@ class HeartMonitor(StateMachine):
                 return HeartbeatState.FINAL
             else:
                 self.latest_heartbeat = hb
+                self.latest_received = received
                 return HeartbeatState.UPDATE
         except QueueEmpty:
             return HeartbeatState.SWITCH
@@ -799,6 +808,7 @@ class HeartMonitor(StateMachine):
                     except Client.NotFound:
                         Client.add(new_client)
             self.beats[hb.uuid] = hb
+            self.received[hb.uuid] = self.latest_received
             if hb.roster is not None:
                 self.update_roster(hb)
             if self.sites is not None and hb.site is not None:
@@ -808,6 +818,7 @@ class HeartMonitor(StateMachine):
             log.trace(f'Client disconnected ({hb.host}: {hb.uuid})')
             if hb.uuid in self.beats:
                 self.beats.pop(hb.uuid)
+                self.received.pop(hb.uuid, None)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone())
             if hb.site is not None or hb.uuid in self.rosters:
@@ -911,14 +922,23 @@ class HeartMonitor(StateMachine):
             return HeartbeatState.NEXT
 
     def check_clients(self: HeartMonitor) -> HeartbeatState:
-        """Check last heartbeat on all clients and evict if necessary."""
+        """Evict every client whose last heartbeat arrived more than the eviction period ago.
+
+        Ages are taken by the server's monotonic clock against when each last heartbeat was received.
+        A client with no receive time is never evicted.
+        """
         log.debug(f'Checking clients ({len(self.beats)} connected)')
+        now = time.monotonic()
         for uuid in list(self.beats):
             hb = self.beats.get(uuid)
-            age = self.last_check - hb.time
+            received = self.received.get(uuid)
+            if received is None:
+                continue
+            age = timedelta(seconds=now - received)
             if age > self.evict_after:
                 log.warning(f'Evicting client ({hb.host}: {uuid})')
                 self.beats.pop(uuid)
+                self.received.pop(uuid, None)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone(), evicted=True)
                 if not self.in_memory and not self.no_confirm:

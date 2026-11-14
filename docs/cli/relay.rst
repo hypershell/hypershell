@@ -113,9 +113,6 @@ keeps it running when that hop fails. It is not meant for, and does not provide:
 - **Cancellation or output retrieval across sites.** ``hs update`` on the upstream *server* does not
   reach a task the relay already holds, and ``hs info --stdout`` / ``--stderr`` reads captured output
   from the host that ran the task, which upstream may have no route to.
-- **Tolerance of clock skew.** The upstream *server* ages a relay's heartbeats by the relay's own
-  clock, so a relay host whose clock is far off the upstream *server*'s is evicted while alive (and
-  its tasks put back). Keep every relay host's clock synchronised with the upstream *server*'s.
 
 A task cut for the relay upstream but not yet confirmed when the relay dies (or when its connection
 drops) stays assigned upstream with no *client*; this window exists for every *client*, and is larger

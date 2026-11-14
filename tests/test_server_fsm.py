@@ -19,6 +19,7 @@ import json
 import time
 from queue import Queue
 from types import SimpleNamespace
+from datetime import datetime, timedelta
 
 # External libs
 from pytest import fixture, mark
@@ -92,6 +93,29 @@ def request(dispatcher, wait: float = 0.0, size: int = 1) -> dict:
     """One work request from client c1 (local dispatcher or remote proxy), decoded."""
     return json.loads(dispatcher.request(json.dumps({'protocol': PROTOCOL, 'client': 'c1', 'host': 'h1',
                                                      'zone': None, 'size': size, 'wait': wait})))
+
+
+class FakeClock:
+    """The `time` module as the server sees it, with a monotonic clock moved only by the test."""
+
+    def __init__(self, now: float = 1000.0) -> None:
+        self.now = now
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+
+def beat(monitor: HeartMonitor, queues: SimpleNamespace, **fields) -> None:
+    """Put one heartbeat on the queue and step the monitor through it."""
+    queues.heartbeat.put(Heartbeat.new(**fields).pack())
+    assert monitor.get_next() is HeartbeatState.UPDATE
+    assert monitor.update_client() is HeartbeatState.SWITCH
 
 
 def assert_halts(thread, timeout: float = WAIT) -> None:
@@ -202,6 +226,43 @@ class TestHeartMonitor:
         monitor = HeartMonitor(queue=queues, evict_after=10, in_memory=True)
         queues.heartbeat.put(make_sentinel())
         assert monitor.get_next() is HeartbeatState.FINAL
+
+    def test_beat_from_a_clock_behind_is_not_evicted(self, queues) -> None:
+        """A beat stamped three eviction periods ago by the client's clock has just arrived: it is kept."""
+        queues.dispatcher = Dispatcher()
+        monitor = HeartMonitor(queue=queues, evict_after=10, in_memory=True)
+        beat(monitor, queues, uuid='c1', host='h1', time=datetime.now().astimezone() - timedelta(seconds=30))
+        monitor.last_check = datetime.now().astimezone()
+        assert monitor.check_clients() is HeartbeatState.SWITCH
+        assert list(monitor.beats) == ['c1']
+
+    def test_silent_client_with_a_clock_ahead_is_evicted(self, queues, monkeypatch) -> None:
+        """A client whose clock is an hour ahead is evicted once the period has passed, by the server's clock."""
+        clock = FakeClock()
+        monkeypatch.setattr(hypershell.server, 'time', clock)
+        queues.dispatcher = Dispatcher()
+        monitor = HeartMonitor(queue=queues, evict_after=10, in_memory=True)
+        beat(monitor, queues, uuid='c1', host='h1', time=datetime.now().astimezone() + timedelta(hours=1))
+        clock.advance(11)
+        monitor.last_check = datetime.now().astimezone()
+        assert monitor.check_clients() is HeartbeatState.SWITCH
+        assert not monitor.beats and not monitor.received
+
+    def test_evicted_only_past_the_period(self, queues, monkeypatch) -> None:
+        """A client is kept while exactly the period has passed since its last beat arrived, evicted past it."""
+        clock = FakeClock()
+        monkeypatch.setattr(hypershell.server, 'time', clock)
+        queues.dispatcher = Dispatcher()
+        monitor = HeartMonitor(queue=queues, evict_after=10, in_memory=True)
+        beat(monitor, queues, uuid='c1', host='h1')
+        clock.advance(5)
+        beat(monitor, queues, uuid='c1', host='h1')
+        clock.advance(10)
+        monitor.check_clients()
+        assert list(monitor.beats) == ['c1']
+        clock.advance(0.5)
+        monitor.check_clients()
+        assert not monitor.beats and not monitor.received
 
     def test_thread_halts_on_sentinel(self, queues) -> None:
         thread = HeartMonitorThread(queue=queues, evict_after=10, in_memory=True)
