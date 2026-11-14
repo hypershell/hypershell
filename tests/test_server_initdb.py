@@ -28,6 +28,7 @@ import os
 import socket
 import secrets
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from signal import SIGINT
@@ -38,6 +39,8 @@ import pytest
 from pytest import mark, fixture
 from cmdkit.app import exit_status
 from cmdkit.config import Namespace
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Engine
 
 # Internal libs
 import hypershell.data
@@ -47,8 +50,10 @@ from hypershell.core.config import AUTH_ENV
 from hypershell.data import timescale
 from hypershell.data.timescale import TimescaleError
 from hypershell.server import ServerApp
-from tests import create_taskfile
+from tests import main_lines, create_taskfile
 from tests.conftest import free_port
+from tests.test_timescale import (admin, ts_database, ts_site, needs_server, with_timescale,  # noqa: F401 (fixtures)
+                                  assert_converged, shape, pass_lines, extension_installed)
 
 
 KEY: Final[str] = secrets.token_hex(32)
@@ -296,3 +301,194 @@ def test_no_db_leaves_sqlite_file_alone(temp_site, monkeypatch) -> None:
     assert served.client.returncode == exit_status.success, served.client.stderr
     assert sorted(served.client.stdout.split()) == ['first', 'second']
     assert not database.exists()
+
+
+# --------------------------------------------------------------------------------------------------
+# Integration: the real command line on PostgreSQL and TimescaleDB
+
+
+TABLES: Final[List[str]] = ['client', 'source', 'task', 'zone']
+"""The tables an initialized database holds."""
+
+
+@fixture
+def pg_site(ts_database, ts_site, tmp_path: Path, monkeypatch):
+    """Point the command line, keyed by the environment, at a fresh database under a provider."""
+
+    def use(provider: str = 'postgres', template: Optional[str] = None) -> Engine:
+        engine = ts_site(ts_database(template), provider=provider)
+        monkeypatch.setenv(AUTH_ENV, KEY)
+        return engine
+
+    return use
+
+
+def tables(engine: Engine) -> List[str]:
+    """The tables in the database's `public` schema."""
+    return sorted(inspect(engine).get_table_names())
+
+
+def rows(engine: Engine) -> Dict[str, tuple]:
+    """Every task row, whole, by id."""
+    with engine.connect() as conn:
+        return {str(row.id): tuple(row) for row in conn.execute(text('SELECT * FROM task'))}
+
+
+def completed(engine: Engine) -> List[str]:
+    """The args of every task that ran to completion and succeeded."""
+    with engine.connect() as conn:
+        return sorted(conn.execute(text('SELECT args FROM task WHERE completion_time IS NOT NULL '
+                                        'AND exit_status = 0')).scalars().all())
+
+
+def log_lines(served: Served) -> List[str]:
+    """The server's log, one stripped line each."""
+    return [line.strip() for line in served.log.splitlines()]
+
+
+def assert_served(served: Served, outputs: List[str]) -> None:
+    """The server exited cleanly and its client ran exactly the tasks printing `outputs`."""
+    assert served.status == exit_status.success, served.log
+    assert served.client is not None, served.log
+    assert served.client.returncode == exit_status.success, served.client.stderr
+    assert sorted(served.client.stdout.split()) == sorted(outputs)
+
+
+def assert_refused(served: Served, engine: Engine) -> None:
+    """The server stopped on a database that was never initialized, before listening, and created nothing."""
+    assert served.status == exit_status.runtime_error, served.log
+    assert served.client is None
+    assert 'DatabaseUninitialized' in served.log
+    assert 'Server listening' not in served.log
+    assert tables(engine) == []
+
+
+def error_text(lines: List[str]) -> List[str]:
+    """The text of each logged TimescaleError, after the level and logger name."""
+    return [line.split('] ', 1)[1] for line in lines if 'TimescaleError:' in line]
+
+
+@mark.integration
+@needs_server
+def test_postgres_initdb_file(pg_site, tmp_path: Path) -> None:
+    """With --initdb a task file initializes a fresh database and runs; a re-launch keeps every earlier row."""
+    engine = pg_site()
+    served = serve(tmp_path, '--initdb', str(create_taskfile(tmp_path, ['echo first', 'echo second'])))
+    assert_served(served, ['first', 'second'])
+    assert tables(engine) == TABLES
+    assert completed(engine) == ['echo first', 'echo second']
+    earlier = rows(engine)
+    served = serve(tmp_path, '--initdb', str(create_taskfile(tmp_path, ['echo third'], filename='more.in')))
+    assert_served(served, ['third'])
+    later = rows(engine)
+    assert {key: later[key] for key in earlier} == earlier
+    assert completed(engine) == ['echo first', 'echo second', 'echo third']
+
+
+@mark.integration
+@needs_server
+def test_postgres_initdb_forever(pg_site, tmp_path: Path) -> None:
+    """With --initdb a --forever server initializes a fresh database and runs a task submitted to it."""
+    engine = pg_site()
+
+    def submit(port: int) -> None:
+        rc, _, stderr = main_lines(['hs', 'submit', 'echo', 'forever'])
+        assert rc == exit_status.success, stderr
+
+    served = serve(tmp_path, '--initdb', '--forever', forever=True, before_client=submit)
+    assert served.status == exit_status.keyboard_interrupt, served.log  # Still serving when interrupted.
+    assert served.client is not None, served.log
+    assert served.client.returncode == exit_status.success, served.client.stderr
+    assert served.client.stdout.split() == ['forever']
+    assert tables(engine) == TABLES
+    assert completed(engine) == ['echo forever']
+
+
+@mark.integration
+@needs_server
+def test_postgres_without_flag_refused(pg_site, tmp_path: Path) -> None:
+    """Without --initdb a fresh database still stops the server, as before."""
+    engine = pg_site()
+    assert_refused(serve(tmp_path, str(create_taskfile(tmp_path, ['echo first']))), engine)
+
+
+@mark.integration
+@needs_server
+def test_postgres_no_db(pg_site, tmp_path: Path) -> None:
+    """With --no-db a fresh database neither stops the server nor gains a table."""
+    engine = pg_site()
+    served = serve(tmp_path, '--no-db', str(create_taskfile(tmp_path, ['echo first', 'echo second'])))
+    assert_served(served, ['first', 'second'])
+    assert tables(engine) == []
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_timescale_initdb_file(pg_site, tmp_path: Path) -> None:
+    """With --initdb a fresh database takes the TimescaleDB shape and runs; a re-launch changes nothing."""
+    engine = pg_site('timescale')
+    served = serve(tmp_path, '--initdb', str(create_taskfile(tmp_path, ['echo first', 'echo second'])))
+    assert_served(served, ['first', 'second'])
+    assert tables(engine) == TABLES
+    state = assert_converged(engine)
+    assert any(line.endswith('Converted table task to a hypertable partitioned by id (1 week chunks)')
+               for line in pass_lines(log_lines(served), 'INFO')), served.log
+    assert completed(engine) == ['echo first', 'echo second']
+    earlier = rows(engine)
+    served = serve(tmp_path, '--initdb', str(create_taskfile(tmp_path, ['echo third'], filename='more.in')))
+    assert_served(served, ['third'])
+    assert pass_lines(log_lines(served), 'INFO') == [], served.log
+    assert shape(engine) == state
+    later = rows(engine)
+    assert {key: later[key] for key in earlier} == earlier
+    assert completed(engine) == ['echo first', 'echo second', 'echo third']
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_timescale_without_flag_refused(pg_site, tmp_path: Path) -> None:
+    """Without --initdb a fresh database still stops the server, and no TimescaleDB pass runs."""
+    engine = pg_site('timescale', template='template0')
+    assert_refused(serve(tmp_path, str(create_taskfile(tmp_path, ['echo first']))), engine)
+    assert extension_installed(engine) is None
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_timescale_no_db(pg_site, tmp_path: Path) -> None:
+    """With --no-db a fresh database gains neither a table nor the extension."""
+    engine = pg_site('timescale', template='template0')
+    served = serve(tmp_path, '--no-db', str(create_taskfile(tmp_path, ['echo first', 'echo second'])))
+    assert_served(served, ['first', 'second'])
+    assert tables(engine) == []
+    assert extension_installed(engine) is None
+
+
+@mark.integration
+@needs_server
+@with_timescale
+def test_timescale_refusal_matches_initdb(admin: Engine, pg_site, tmp_path: Path, monkeypatch) -> None:
+    """A role that may not create the extension stops the server with hs initdb's error, before it listens."""
+    engine = pg_site('timescale', template='template0')
+    role, password = f'r_{uuid.uuid4().hex[:16]}', secrets.token_hex(16)
+    with admin.connect() as conn:
+        conn.execute(text(f'CREATE ROLE {role} LOGIN PASSWORD \'{password}\''))
+    try:
+        monkeypatch.setenv('HYPERSHELL_DATABASE_USER', role)
+        monkeypatch.setenv('HYPERSHELL_DATABASE_PASSWORD', password)
+        served = serve(tmp_path, '--initdb', str(create_taskfile(tmp_path, ['echo first'])))
+        rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    finally:
+        with admin.connect() as conn:
+            conn.execute(text(f'DROP ROLE IF EXISTS {role}'))
+    assert served.status == exit_status.runtime_error, served.log
+    assert served.client is None
+    assert 'Server listening' not in served.log
+    assert rc == exit_status.runtime_error, stderr
+    assert error_text(stderr), stderr
+    assert error_text(log_lines(served)) == error_text(stderr)
+    assert tables(engine) == []
+    assert extension_installed(engine) is None

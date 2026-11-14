@@ -3,10 +3,10 @@ slug: server-initdb
 title: hs server --initdb initializes the database
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/server-initdb
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -34,7 +34,7 @@ phases:
     3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs "$TMPDIR/docs-html"'
 - id: P2
   name: Real-CLI regression on PostgreSQL and TimescaleDB; CI runs it
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -147,29 +147,35 @@ corrected in the same commit.
 **Goal:** the regression R7 names: the real `hs server` against fresh PostgreSQL and TimescaleDB
 databases, skipped without `HS_TEST_POSTGRES`, and run by CI.
 
-- [ ] In `tests/test_server_initdb.py`, import by name from `tests.test_timescale` the fixtures
+- [x] In `tests/test_server_initdb.py`, import by name from `tests.test_timescale` the fixtures
       `admin`, `ts_database`, `ts_site` and the helpers it needs (`needs_server`, `with_timescale`,
       `assert_converged`, `shape`, `pass_lines`, `task_rows`, `is_hypertable`, `database_engine`);
       never `import *` (it would collect that module's tests twice). Set `HYPERSHELL_SERVER_AUTH`
       in the environment the fixtures prepare.
-- [ ] `postgres` provider (`@mark.integration @needs_server`): fresh `--initdb FILE` (tables
+- [x] `postgres` provider (`@mark.integration @needs_server`): fresh `--initdb FILE` (tables
       `client source task zone`, tasks completed); fresh `--initdb --forever` (port accepts,
       `hs submit` a task, client completes it, server stopped); re-launch `--initdb FILE` on the
       first database (earlier rows unchanged, new tasks completed); fresh, no flag (exit 5,
       `DatabaseUninitialized` on stderr, no table); fresh `--no-db FILE` (exit 0, no table).
-- [ ] `timescale` provider (`+ @with_timescale`): fresh `--initdb FILE` (`assert_converged`, tasks
+- [x] `timescale` provider (`+ @with_timescale`): fresh `--initdb FILE` (`assert_converged`, tasks
       completed); re-launch (`shape()` unchanged, no `hypershell.data.timescale` INFO line);
       `--no-db FILE` on a `template0` database (no table, no extension); refusal: a non-superuser
       LOGIN role (created and dropped by the test) on a `template0` database it does not own →
       server exit 5, the `TimescaleError` message text equal to `hs initdb --yes`'s on the same
       database (compare text after the logger name), no table, no `Server listening` line.
-- [ ] **Red check:** `git checkout 6c46cbd -- src/hypershell/server.py`, run the database cases,
+- [x] **Red check:** `git checkout 6c46cbd -- src/hypershell/server.py`, run the database cases,
       record the failures (every `--initdb` and `--no-db` case) in the commit body, then
       `git checkout HEAD -- src/hypershell/server.py` and confirm the tree is clean.
-- [ ] `.github/workflows/tests.yml`: add `tests/test_server_initdb.py` to the PostgreSQL job's
+- [x] `.github/workflows/tests.yml`: add `tests/test_server_initdb.py` to the PostgreSQL job's
       pytest line and to its comment (the `postgres`-provider cases also run on the plain entries).
 - **Verify:** see frontmatter (sandbox off; the new module's cases all ran, none skipped;
   `tests/test_timescale.py` still green; CI line present).
+- **Host note (build, 2026-11-14):** `test_timescale.py::test_legacy_database_upgraded_not_converted`
+  needs the `hs283` template that `tests/fixtures/make-legacy-postgres.sh` builds through Docker,
+  which the build host lacks; it fails in its `ts_database` fixture ("Template hs283 not listed in
+  HS_TEST_POSTGRES_TEMPLATES") before any HyperShell code runs, and the file is unchanged since
+  `6c46cbd`. The gate was run with that one test deselected; CI's PostgreSQL job builds the
+  templates and runs it.
 - **Touches:** `tests/test_server_initdb.py`, `.github/workflows/tests.yml`.
 
 ---

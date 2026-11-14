@@ -60,3 +60,10 @@ is skipped by the parser):
 - **Skill cause:** As `tls-client-address-family` F1 and `group-advance-strands-lower-group` F4: the exception has no depth scale and no in-session path when the root cause is known and the questions are few.
 - **Recommended fix:** Let a `small`, diagnosed fix satisfy the exception with in-session briefs (one per touched contract) when it has at most two or three questions, keeping `research/` and the digest mandatory.
 - **Confidence:** med · **Effort:** small
+
+## F4 — A phase verify gate that cannot pass on the build host
+`origin=hs-build:P2 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** P2's verify runs all of `tests/test_timescale.py`, whose `test_legacy_database_upgraded_not_converted` needs the Docker-built `hs283` template; the build host has no Docker, so the gate was red on an untouched test failing in its fixture, and the build ran it with that test deselected and recorded why.
+- **Skill cause:** `hs-plan` writes the verify command without asking what the build host can provide, and `hs-build` treats every red gate alike, with no path for a host prerequisite the phase does not touch.
+- **Recommended fix:** In `hs-plan`, have a verify that pulls in a neighbouring module name its host prerequisites (here `HS_TEST_POSTGRES_TEMPLATES`) or select only the tests that bear on the change; in `hs-build`, allow a documented deselection of a test that fails before any project code runs, recorded in TECH and the commit body. This does not weaken the gate for the code under change.
+- **Confidence:** med · **Effort:** small
