@@ -1,0 +1,13 @@
+# Regression tests that must fail on a741340, this branch's head before review cycle 1: a zone with
+# no site client that the published topology gives no client at the relay took a task at an upstream
+# shutdown that it could never run. Run with
+#   RED_BASE_REV=a741340 RED_LIST="$PWD/spec/relay-hardening/drive/red-a741340.txt" sh spec/relay-hardening/drive/red_check.sh
+# (the tests pass on 2ffb5cc, which ended such a zone, as it ended every zone without a site client).
+tests/test_relay_connector.py::test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream[b-running-spread-fixed]
+tests/test_relay_connector.py::test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream[b-running-spread-dynamic]
+tests/test_relay_connector.py::test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream[b-running-fill-fixed]
+tests/test_relay_connector.py::test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream[b-running-fill-dynamic]
+tests/test_relay_connector.py::test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream[b-exited-spread-fixed]
+tests/test_relay_connector.py::test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream[b-exited-spread-dynamic]
+tests/test_relay_connector.py::test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream[b-exited-fill-fixed]
+tests/test_relay_connector.py::test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream[b-exited-fill-dynamic]

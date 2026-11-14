@@ -1,0 +1,59 @@
+# retire_drive idle: launches (epoch, launcher label, pid, {zone} word, HYPERSHELL_ZONE, client --zone)
+launch t=1794635754 site=B pid=64861 word=cpu env=cpu client=cpu
+launch t=1794635754 site=A pid=64862 word=cpu env=cpu client=cpu
+launch t=1794635754 site=B pid=64863 word=cpu env=cpu client=cpu
+launch t=1794635754 site=A pid=64864 word=cpu env=cpu client=cpu
+# retire_drive idle: site clients running at A and A2 (epoch A A2), every second
+# server: registrations, duplicates, retirements, hand-backs, departures, evictions
+2026-11-14 05:55:52.780 <host>     INFO [01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88] [hypershell.server] Relay site registered (site: B, zone: cpu, min: 0, init: 2, max: 2, clients: 0) (<host>: 5e9babad-9f3f-5335-8f9e-a1586207db26)
+2026-11-14 05:55:52.784 <host>     INFO [01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88] [hypershell.server] Relay site registered (site: A, zone: cpu, min: 0, init: 2, max: 2, clients: 0) (<host>: e57e7fff-3720-5f05-9a76-f6c87068639d)
+2026-11-14 05:56:08.188 <host>     INFO [01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88] [hypershell.server] Relay site left (site: A, zone: cpu) (<host>: e57e7fff-3720-5f05-9a76-f6c87068639d)
+2026-11-14 05:56:08.885 <host>  WARNING [01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88] [hypershell.cluster] Site A left the topology (no live relay) - its share is planned over the remaining sites
+2026-11-14 05:56:08.895 <host>     INFO [01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88] [hypershell.server] Relay site left (site: B, zone: cpu) (<host>: 5e9babad-9f3f-5335-8f9e-a1586207db26)
+2026-11-14 05:56:09.894 <host>  WARNING [01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88] [hypershell.cluster] Site B left the topology (no live relay) - its share is planned over the remaining sites
+# relay-A: identity, topology, retirement, hand-back, staged revert, final beat, exit
+2026-11-14 05:55:52.660 <host>     INFO [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay] Upstream identity e57e7fff-3720-5f05-9a76-f6c87068639d for zone cpu at site A
+2026-11-14 05:55:52.671 <host>     INFO [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+2026-11-14 05:55:52.782 <host>     INFO [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:0 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-14 05:55:53.787 <host>     INFO [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:1 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-14 05:55:54.798 <host>     INFO [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:2 (zone: cpu, target: 2, seen: 0, launched: 0) - launching 2
+2026-11-14 05:55:57.825 <host>     INFO [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:3 (zone: cpu, target: 2, seen: 2, launched: 2) - launching 0
+2026-11-14 05:56:02.865 <host>     INFO [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:4 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-14 05:56:07.063 <host>  WARNING [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay.upstream] Drain requested - no more upstream requests
+2026-11-14 05:56:08.181 <host>    DEBUG [01a1d8a0-63fd-7aa2-b80c-f0face46fc2c] [hypershell.relay.upstream] Upstream heartbeat - final (e57e7fff-3720-5f05-9a76-f6c87068639d)
+# relay-B: identity, topology, retirement, hand-back, staged revert, final beat, exit
+2026-11-14 05:55:52.658 <host>     INFO [01a1d8a0-63fc-7770-9a01-c0b2b51e31f0] [hypershell.relay] Upstream identity 5e9babad-9f3f-5335-8f9e-a1586207db26 for zone cpu at site B
+2026-11-14 05:55:52.670 <host>     INFO [01a1d8a0-63fc-7770-9a01-c0b2b51e31f0] [hypershell.relay.upstream] Upstream server publishes a topology - site clients follow it
+2026-11-14 05:55:52.780 <host>     INFO [01a1d8a0-63fc-7770-9a01-c0b2b51e31f0] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:1 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-14 05:55:54.795 <host>     INFO [01a1d8a0-63fc-7770-9a01-c0b2b51e31f0] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:2 (zone: cpu, target: 2, seen: 0, launched: 0) - launching 2
+2026-11-14 05:55:57.817 <host>     INFO [01a1d8a0-63fc-7770-9a01-c0b2b51e31f0] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:3 (zone: cpu, target: 2, seen: 2, launched: 2) - launching 0
+2026-11-14 05:56:02.850 <host>     INFO [01a1d8a0-63fc-7770-9a01-c0b2b51e31f0] [hypershell.relay.site] Topology 01a1d8a0-63c5-7cc3-8e95-dab1ab42ce88:4 (zone: cpu, target: 0, seen: 0, launched: 0) - launching 0
+2026-11-14 05:56:07.030 <host>  WARNING [01a1d8a0-63fc-7770-9a01-c0b2b51e31f0] [hypershell.relay.upstream] Drain requested - no more upstream requests
+2026-11-14 05:56:08.890 <host>    DEBUG [01a1d8a0-63fc-7770-9a01-c0b2b51e31f0] [hypershell.relay.upstream] Upstream heartbeat - final (5e9babad-9f3f-5335-8f9e-a1586207db26)
+# retire_drive idle: facts
+source_server=<repo>/src/hypershell
+source_A=<repo>/src/hypershell
+source_A2=<repo>/src/hypershell
+source_B=<repo>/src/hypershell
+total=6
+heartrate=1
+clients_left=1
+relays_running=1
+drained_at=1794635766
+drained=0
+completed=6
+failed=0
+# retire_drive idle: judgment
+PASS every task completed (6 of 6)
+PASS no task failed
+PASS every task ran exactly once (6 runs of 6 tasks)
+PASS no relay terminated a site client
+  A: hypershell from <repo>/src/hypershell
+  B: hypershell from <repo>/src/hypershell
+  server: hypershell from <repo>/src/hypershell
+PASS every site client exited by itself
+PASS both relays still ran with no client after the work
+PASS no relay identity left or was evicted before the drain
+PASS no relay retired
+PASS every relay drained and exited 0
+PASS

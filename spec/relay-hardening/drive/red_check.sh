@@ -10,14 +10,24 @@
 # The base build's `src` (RED_BASE_REV, default 2ffb5cc) is exported with `git archive` into a new
 # directory under $TMPDIR, unless RED_BASE_SRC names an exported `src` to use instead. Each listed
 # test then runs on its own, from this tree's tests, with that `src` first on PYTHONPATH, ahead of
-# the editable install; `hs` subprocesses inherit it. A test is RED when pytest reports it failed
-# (exit status 1); anything else (passed, skipped, not collected, an error) is NOT RED.
+# the editable install; `hs` subprocesses inherit it.
+#
+# A test is RED only when it fails for what it checks: pytest reports it failed (exit status 1), and
+# its first failure (recorded by red_outcome.py, loaded as a pytest plugin) is in the test's call,
+# not in collection, setup or teardown, and is an assertion (`assert` or `pytest.fail`), or else the
+# exception its line names. Anything else is NOT RED: a test that passed, was skipped or was not
+# collected, and one that failed on an import, a missing attribute, a wrong argument or any other
+# error, as on a base build without the API the test calls. A test that fails on the base build in
+# its call by an assertion is RED whatever made the assertion fail, so what each test asserts must
+# be about the defect; the printed line names the failure's kind for a reader to check.
 #
 # red.txt holds one pytest node id per line; blank lines and lines starting with `#` are ignored.
-# A line prefixed `pg:` needs a server database: it runs only when HS_TEST_POSTGRES is set, with
-# HS_TEST_TIMESCALE as the caller has it, and is otherwise skipped with a note. One line is printed
-# per test. The exit status is 0 only when every test that ran is RED (and when there is nothing to
-# check). The tree is never edited; the export is left in place, and its path printed.
+# A line may end in ` raises=NAME`: the test is then RED when it fails by an exception of class
+# NAME (or a subclass), the defect's own error, rather than by an assertion. A line prefixed `pg:`
+# needs a server database: it runs only when HS_TEST_POSTGRES is set, with HS_TEST_TIMESCALE as the
+# caller has it, and is otherwise skipped with a note. One line is printed per test. The exit status
+# is 0 only when every test that ran is RED (and when there is nothing to check). The tree is never
+# edited; the export is left in place, and its path printed.
 
 set -u
 
@@ -44,6 +54,7 @@ if [ -z "$src" ]; then
     src=$work/src
 fi
 echo "red_check: base $rev, source $src"
+outcome=$(mktemp "${TMPDIR:-/tmp}/red_outcome.XXXXXX") || exit 2
 
 cd "$root" || exit 2
 
@@ -69,14 +80,36 @@ while IFS= read -r line; do
             ;;
         *) node=$line ;;
     esac
+    expect=
+    case $node in
+        *' raises='*) expect=${node##* raises=}; node=${node% raises=*} ;;
+    esac
     ran=$((ran + 1))
-    PYTHONPATH="$src" uv run --quiet pytest -q -p no:cacheprovider "$node" </dev/null >/dev/null 2>&1
+    : > "$outcome"
+    RED_OUTCOME="$outcome" PYTHONPATH="$src:$here" \
+        uv run --quiet pytest -q -p no:cacheprovider -p red_outcome "$node" </dev/null >/dev/null 2>&1
     status=$?
-    if [ "$status" -eq 1 ]; then
-        echo "RED      $node"
+    first=$(head -n 1 "$outcome")
+    phase=$(printf '%s' "$first" | cut -f 1)
+    kind=$(printf '%s' "$first" | cut -f 2)
+    names=$(printf '%s' "$first" | cut -f 3)
+    error=$(printf '%s' "$names" | cut -d , -f 2)
+    if [ "$status" -ne 1 ]; then
+        echo "NOT RED  $node (pytest exit $status)"
+    elif [ -z "$first" ]; then
+        echo "NOT RED  $node (no failure recorded)"
+    elif [ "$phase" != call ]; then
+        echo "NOT RED  $node (failed in $phase: $error)"
+    elif [ -n "$expect" ]; then
+        case $names in
+            *",$expect,"*) echo "RED      $node ($error)"; red=$((red + 1)) ;;
+            *) echo "NOT RED  $node ($error, not $expect)" ;;
+        esac
+    elif [ "$kind" = assertion ]; then
+        echo "RED      $node ($error)"
         red=$((red + 1))
     else
-        echo "NOT RED  $node (pytest exit $status)"
+        echo "NOT RED  $node ($error, not an assertion)"
     fi
 done <<EOF
 $tests

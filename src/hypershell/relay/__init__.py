@@ -599,7 +599,7 @@ class RelayThread(Thread):
                                                local_bundlesize=self.bundlesize, poll=self.poll, drain=draining,
                                                zones=self.served,
                                                connected=self.zone_clients if len(self.zones) > 1 else None,
-                                               retired=self.superseded)
+                                               retired=self.superseded, view=self.view)
             self.returner = UpstreamReturnerThread(queue=self.link, engine=engine,
                                                    bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
                                                    poll=self.poll, retention=self.retention,

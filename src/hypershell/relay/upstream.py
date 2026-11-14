@@ -57,6 +57,7 @@ from hypershell.core.config import config, PARAM_UNSET, resolve_auth
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
 from hypershell.core.topology import Bounds, request_text as topology_request, read_topology
+from hypershell.cluster.demand import ZoneRef
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.queue import QueueConfig, QueueVersionError, PROTOCOL, DEFAULT_REMOTE_TIMEOUT
 from hypershell.core.signal import check_signal, SIGUSR1, SIGUSR2
@@ -140,8 +141,11 @@ PULL_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, STAGE_DRAIN)
 CHALLENGE: Final[bytes] = b'#CHALLENGE#'
 """What an authenticating multiprocessing server sends first on a connection, after a 4-byte length."""
 
-PLAIN_CHECK_WAIT: Final[float] = 5.0
-"""Longest wait in seconds for a cleartext server's challenge, when checking for one."""
+PLAIN_CHECK_WAIT: Final[float] = 1.0
+"""Longest wait in seconds for a cleartext server's challenge, when checking for one.
+
+A cleartext server sends its challenge as soon as it accepts a connection, so a second loses nothing.
+"""
 
 
 def upstream_identity(zone: Optional[str], instance: str = INSTANCE) -> str:
@@ -356,10 +360,14 @@ class UpstreamPuller(StateMachine):
     The upstream server finishes for every zone at once, but serves each zone what is still staged for
     it before it answers that zone's requests with a shutdown. So once one zone has had a shutdown
     reply, a zone with no site client and nothing held, which otherwise never asks, asks for itself,
-    for one task. A shutdown ends it with the others; a task it takes is held until a site client in
-    the zone runs it, and the zone then asks as usual; an empty reply (another request was served
-    first) has it ask again. A relay with no site client in any zone never asks at all, so it never
-    hears a shutdown, and pulling ends only on a drain or halt.
+    for one task, if its fleet would launch a site client for it: the site topology the relay last
+    read (`view`) gives the zone a target above zero at this relay, or none is published, when the
+    fleet keeps at least one client. A shutdown ends it with the others; a task it takes is held
+    until a site client in the zone runs it, and the zone then asks as usual; an empty reply
+    (another request was served first) has it ask again. A zone the topology gives no client here
+    does not ask: it ends with the others, and what is staged for it stays upstream for a relay
+    the topology gives clients in that zone. A relay with no site client in any zone never asks at
+    all, so it never hears a shutdown, and pulling ends only on a drain or halt.
 
     Every upstream call goes through the link (see `hypershell.core.reconnect`). While the link is down
     the puller waits for it (WAIT_LINK); pulling resumes once the link is back, has carried a heartbeat
@@ -392,6 +400,7 @@ class UpstreamPuller(StateMachine):
     server_id: str
     drain: Callable[[], bool]
     retired: Callable[[], bool]
+    view: Any
     stopping: bool
 
     size: int
@@ -410,11 +419,13 @@ class UpstreamPuller(StateMachine):
                  drain: Callable[[], bool] = drain_signalled,
                  zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
                  connected: Optional[Callable[[Optional[str]], int]] = None,
-                 retired: Callable[[], bool] = never) -> None:
+                 retired: Callable[[], bool] = never, view: Any = None) -> None:
         """Initialize with the upstream link (or a connected client), the relay database and the zone identity.
 
         `zones`, if given, are every (identity, zone) served, in place of `identity` and `zone`; with
-        more than one, `connected` must count the site clients serving a zone.
+        more than one, `connected` must count the site clients serving a zone. `view`, if given, is the
+        site topology the relay reads upstream (`hypershell.relay.site.TopologyView`), which its fleets
+        follow.
         """
         self.queue = queue
         self.link = as_link(queue)
@@ -433,6 +444,7 @@ class UpstreamPuller(StateMachine):
         self.server_id = server_id
         self.drain = drain
         self.retired = retired
+        self.view = view
         self.stopping = False
         self.size = 0
         self.idle = False
@@ -477,12 +489,23 @@ class UpstreamPuller(StateMachine):
             return store.count_backlog(self.engine)
         return store.count_backlog(self.engine, zone=zone_id(zone))
 
+    def launches(self: UpstreamPuller, zone: Optional[str] = None) -> bool:
+        """Whether the fleet of `zone` would launch a site client for it.
+
+        Under a published topology, only while it gives the zone a target above zero at this relay;
+        without one, always (the fleet then keeps at least one client).
+        """
+        reply = None if self.view is None else self.view.reply
+        if reply is None:
+            return True
+        return reply.assignment(ZoneRef.from_name(zone).name).target > 0
+
     def gate(self: UpstreamPuller) -> PullerState:
         """Ask for work only at or below the low-water mark, on a ready link; end on a drain, retirement or halt.
 
         Zones are taken in turn, from the one after the zone last asked for: the first with room is asked.
         Once some zone has had a shutdown reply, a zone with no site client and nothing held has room for
-        one task.
+        one task if its fleet would launch a client for it, and otherwise ends.
         """
         if self.stopping:  # atomic
             return PullerState.FINAL
@@ -504,6 +527,15 @@ class UpstreamPuller(StateMachine):
             backlog = self.backlog(zone)
             if bound == 0:
                 if not self.finished or backlog:
+                    continue
+                if not self.launches(zone):
+                    self.finished.add(identity)
+                    log.info(f'Upstream server is shutting down - no site client for zone '
+                             f'{zone or DEFAULT_ZONE_NAME} and none planned here, no more requests for it '
+                             f'({identity})')
+                    if len(self.finished) == count:
+                        log.info('Upstream server is shutting down - no more upstream requests')
+                        return PullerState.FINAL
                     continue
             elif backlog > bound // 2:
                 continue
@@ -617,13 +649,13 @@ class UpstreamPullerThread(Thread):
                  drain: Callable[[], bool] = drain_signalled,
                  zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
                  connected: Optional[Callable[[Optional[str]], int]] = None,
-                 retired: Callable[[], bool] = never) -> None:
+                 retired: Callable[[], bool] = never, view: Any = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-puller')
         self.machine = UpstreamPuller(queue=queue, engine=engine, identity=identity, zone=zone,
                                       bundlesize=bundlesize, local_bundlesize=local_bundlesize, poll=poll,
                                       wait=wait, server_id=server_id, drain=drain, zones=zones,
-                                      connected=connected, retired=retired)
+                                      connected=connected, retired=retired, view=view)
 
     def run_with_exceptions(self: UpstreamPullerThread) -> None:
         """Run machine."""

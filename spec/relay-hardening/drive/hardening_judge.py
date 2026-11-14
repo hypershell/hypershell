@@ -234,13 +234,21 @@ def judge_zones_nodb(run, fact, verdict):
     verdict.note(f'gpu launches held for the whole run; {len(released)} released (at the relay`s end)')
 
 
+def on_base(fact, role):
+    """Whether `role` ran from the earlier build's source the drive recorded (exported, or DRIVE_BASE_SRC)."""
+    base, source = fact.get('base_src', ''), fact.get(f'source_{role}', '')
+    if not base or not source:
+        return False
+    return os.path.realpath(source).startswith(os.path.realpath(base) + os.sep)
+
+
 def judge_pair(run, fact, verdict, mode):
     """A relay and a server of different builds: a plain run completes as today."""
     relay = lines(os.path.join(run, 'relay', 'relay.log'))
     role = 'relay' if mode == 'pair-relay' else 'server'
     other = 'server' if role == 'relay' else 'relay'
-    verdict.check(f'the {role} ran the earlier build', '/base/src/' in fact.get(f'source_{role}', ''))
-    verdict.check(f'the {other} ran this build', '/base/src/' not in fact.get(f'source_{other}', '/base/src/'))
+    verdict.check(f'the {role} ran the earlier build', on_base(fact, role))
+    verdict.check(f'the {other} ran this build', bool(fact.get(f'source_{other}')) and not on_base(fact, other))
     exits(fact, verdict, 'relay', 'server')
     no_trouble(relay, verdict)
     completed_once(run, fact, verdict)

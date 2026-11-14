@@ -45,8 +45,10 @@ subsystems.
   `Task.confirm_all`/`revert_all`, `Task.revert_staged` (re-check on `completion_time IS NULL`, not
   mere existence), the eviction revert `Task.revert_orphaned` (only while still in flight with the
   evicted client), the dispatch stamp in `Task.next` (only while `schedule_time IS NULL`),
-  `Task.apply_results` (`ResultOutcome.DEFERRED`). A row gone or no longer qualifying is skipped,
-  never raised on. Never `bulk_update_mappings` or an ORM flush for such a write.
+  `Task.apply_results` (`ResultOutcome.DEFERRED`). The conditional writes (`revert_staged`, the
+  eviction revert, the dispatch stamp) skip a row gone or no longer qualifying, never raise on it;
+  `confirm_all` (strict, the default) and `revert_all` still raise `StaleDataError` on a gone row,
+  by design. Never `bulk_update_mappings` or an ORM flush for such a write.
 
 ## 2. `exit_status` overloading
 

@@ -42,6 +42,10 @@ from hypershell.relay.store import ensure_tables
 from hypershell.core.dispatch import Dispatcher
 from hypershell.relay.upstream import (UpstreamPuller, PullerState, RelayInsertError, upstream_identity,
                                        served_zones, INSERT_ATTEMPTS, ZONE_REQUEST_WAIT, DEFAULT_REQUEST_WAIT)
+from hypershell.relay.site import TopologyView
+from hypershell.core.topology import Bounds, Entry, TopologyReply
+from hypershell.cluster.demand import AutoScalerPolicy, ScalingKnobs, ZoneLoad, ZoneRef
+from hypershell.cluster.topology import SiteView, SiteZone, parse_distribution, plan_sites
 
 
 # The upstream server's identity and an offset unlike the relay's, so a stamp's text is not the relay's.
@@ -693,6 +697,71 @@ def test_a_zone_without_site_clients_ends_at_once_with_nothing_staged_for_it(rel
     assert dispatcher.demand == {upstream_identity(busy): (zone_id(busy), 2),
                                  upstream_identity(idle): (zone_id(idle), 1)}
     assert rows(relay_db, 'SELECT COUNT(*) FROM relay_task') == [(0, )]
+
+
+def site_plan(policy: str, distribution: str, b_running: int) -> Dict[str, Dict[str, int]]:
+    """The plan of a server autoscaling with relay sites, with one gpu task left: site -> zone name -> target.
+
+    Relay B (first registered) serves gpu and runs `b_running` gpu clients; relay A serves cpu and
+    gpu and runs one cpu client. Each zone at each site has min 0, init 0 and max 2. The gpu task's
+    pressure is 1 while a gpu client runs, else 2. The server plans with `plan_sites`, as it publishes.
+    """
+    cpu, gpu = ZoneRef.from_name('cpu'), ZoneRef.from_name('gpu')
+    bounds = Bounds(min=0, max=2, init=0)
+    sites = [SiteView('B', 0, {gpu.id: SiteZone(gpu, bounds, running=b_running, starting=False)}),
+             SiteView('A', 1, {cpu.id: SiteZone(cpu, bounds, running=1, starting=False),
+                               gpu.id: SiteZone(gpu, bounds, running=0, starting=False)})]
+    pressure = None if policy == 'fixed' else 1.0 if b_running else 2.0
+    loads = {gpu.id: ZoneLoad(gpu, remaining=1, retryable=0, pressure=pressure)}
+    knobs = ScalingKnobs(AutoScalerPolicy.from_name(policy), 1.0, init_size=0, min_size=0, max_size=2)
+    targets = plan_sites(loads, knobs, sites, distribution=parse_distribution(distribution))
+    names = {cpu.id: cpu.name, gpu.id: gpu.name}
+    return {site: {names[zone]: target for zone, target in zones.items()} for site, zones in targets.items()}
+
+
+@mark.unit
+@mark.parametrize('policy', ['fixed', 'dynamic'])
+@mark.parametrize('distribution', ['spread', 'fill'])
+@mark.parametrize('b_running', [1, 0], ids=['b-running', 'b-exited'])
+def test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream(
+        relay_db: Engine, policy: str, distribution: str, b_running: int, caplog) -> None:
+    """Once another zone has heard the shutdown, a zone with no site client that the topology gives no client at
+    this relay does not ask for itself: it ends with the others, and what is staged for it stays upstream.
+
+    Relay A serves cpu and gpu, relay B gpu; the plan puts the gpu zone's one client at B, so A's gpu
+    target is zero. A's fleet launches nothing at that target, so a task A took for gpu would never
+    run, and A would never end its gpu requests. The rows stay staged for B's gpu client.
+    """
+    plan = site_plan(policy, distribution, b_running)
+    assert plan == {'A': {'cpu': 1, 'gpu': 0}, 'B': {'gpu': 1}}
+    reply = TopologyReply('upstream:1', {name: Entry(name, target, 0) for name, target in plan['A'].items()})
+    dispatcher, idle, busy, staged = finishing_upstream(True)
+    machine = zoned_puller(relay_db, upstream(dispatcher), {busy: 1, idle: 0}, zones=(busy, idle))
+    machine.view = TopologyView(reply)
+    with caplog.at_level(logging.INFO, logger='hypershell.relay.upstream'):
+        assert drive(machine) is PullerState.FINAL
+    assert machine.finished == {upstream_identity(busy), upstream_identity(idle)}
+    assert upstream_identity(idle) not in dispatcher.demand
+    assert dispatcher.staged(zone_id(idle)) == len(staged)
+    assert rows(relay_db, 'SELECT COUNT(*) FROM relay_task') == [(0, )]
+    ended, = [record.getMessage() for record in caplog.records if 'none planned here' in record.getMessage()]
+    assert f'zone {idle}' in ended
+
+
+@mark.unit
+@mark.parametrize('reply', [TopologyReply('upstream:1', {'cpu': Entry('cpu', 1, 1), 'gpu': Entry('gpu', 1, 0)}),
+                            None], ids=['gpu-target-1', 'no-topology'])
+def test_a_zone_its_fleet_would_launch_for_takes_what_is_staged_for_it_at_a_shutdown(
+        relay_db: Engine, reply: Optional[TopologyReply]) -> None:
+    """A zone with no site client still asks once at a shutdown when its fleet would launch a client for it: the
+    topology gives it a target above zero here, or none is published (the fleet then keeps at least one)."""
+    dispatcher, idle, busy, staged = finishing_upstream(True)
+    machine = zoned_puller(relay_db, upstream(dispatcher), {busy: 1, idle: 0}, zones=(busy, idle))
+    machine.view = TopologyView(reply)
+    assert drive(machine) is PullerState.GATE
+    assert machine.finished == {upstream_identity(busy)}
+    assert store.count_backlog(relay_db, zone=zone_id(idle)) == 1
+    assert dispatcher.staged(zone_id(idle)) == len(staged) - 1
 
 
 @mark.unit

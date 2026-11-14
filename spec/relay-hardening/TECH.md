@@ -5,7 +5,7 @@ title: 'Relay hardening for 2.9.0: no aborts on removed rows or a restarted upst
   clock'
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/relay-hardening
 base: develop
 current_phase: done
@@ -118,7 +118,7 @@ phases:
     do .agents/factory/bin/temp_site.sh sh "$PWD/spec/relay-hardening/drive/hardening_drive.sh"
     $mode || exit 1; done && sh spec/relay/drive/relay_smoke.sh && for mode in retire
     idle; do .agents/factory/bin/temp_site.sh sh "$PWD/spec/relay-retire/drive/retire_drive.sh"
-    $mode || exit 1; done && for mode in spread kill; do .agents/factory/bin/temp_site.sh
+    $mode || exit 1; done && for mode in spread fill kill; do .agents/factory/bin/temp_site.sh
     sh "$PWD/spec/relay-topology/drive/topology_drive.sh" $mode || exit 1; done &&
     uv run pytest && sh spec/relay-hardening/drive/red_check.sh
 - id: P7
@@ -208,7 +208,13 @@ code+state commit.
   fails there; `pg:` lines run only when `HS_TEST_POSTGRES` is set and are skipped with a note
   otherwise. It prints one line per test (`RED`/`NOT RED`) and never edits the tree. A test that
   fails on `2ffb5cc` only on TimescaleDB 2.29–2.31 (not reproducible on the local 2.32) is **not**
-  listed; it is named in the phase's commit body as CI-only red.
+  listed; it is named in the phase's commit body as CI-only red. *Since review cycle 1:* a test is
+  `RED` only when its first failure is in the test's call and is an assertion (`assert`,
+  `pytest.fail`) or the exception its line names (` raises=NAME`), as recorded by
+  `drive/red_outcome.py`, a pytest plugin the check loads; a failure in collection, setup or
+  teardown, or on an import, attribute, type or other error, is `NOT RED`. A test that could fail on
+  `2ffb5cc` only on a missing API, or through a harness that cannot see that build's write, is not
+  listed; P1's remediation names where the red for its defect lives.
 - Line numbers below are `develop` at `2ffb5cc`.
 
 ---
@@ -257,11 +263,43 @@ on; a contended row that still qualifies lands. Design: PLAN §2 R1, R2; researc
   - `tests/test_contended_write.py` (`pg:`): `contend()` holders that write a result, `DELETE` the
     row, or cancel it, for the revert and for the stamp → kept / skipped / skipped. Holder `UPDATE
     client_host` for the stamp → lands (CI-only red: TimescaleDB 2.31).
+- [x] **Review-cycle-1 remediation (RV2, RV3).**
+  - RV2: the §1 sentence added to `.agents/factory/invariants.md` is scoped to the conditional
+    writes (`revert_staged`, the eviction revert, the dispatch stamp): they skip a row gone or no
+    longer qualifying; `confirm_all` (strict, the default) and `revert_all` still raise
+    `StaleDataError` on a gone row, by design. `AGENTS.md` carries the same sentence.
+  - RV3, the check: `red_check.sh` requires each failure to be an assertion or the defect's own
+    error, named on the line (see Conventions). Shown on `2ffb5cc` with a control list: the two
+    TLS link tests read `NOT RED (AttributeError, not an assertion)`, the returner test `NOT RED
+    (TypeError, not an assertion)`, an R2 test whose `StaleDataError` is not named `NOT RED`, a
+    passing test `NOT RED (pytest exit 0)` and a missing file `NOT RED (pytest exit 4)`. **Limit:**
+    an assertion that fails because the harness cannot see the base build's write still reads
+    `RED` (the contended dispatch tests below do), so each entry's failure on `2ffb5cc` was read:
+    the check prints its kind.
+  - RV3, the list: 24 entries, every one red on `2ffb5cc` for its defect. ` raises=StaleDataError`
+    on the three whose defect is that error (the revert of a row collected meanwhile, the stamp of
+    a row deleted meanwhile, the contended revert of a deleted row); ` raises=RemoteError` on R3's
+    four restart tests. Dropped, kept in the suite as tests of the head: the five
+    `test_contended_recovery.py` dispatch tests (the injection, keyed on the stamp's `d_id` bind,
+    never meets `2ffb5cc`'s ORM flush, which runs on the connection and not through the session's
+    `execute` the harness wraps; the uncontended cost test pins the fix's cost, no defect), the two
+    `test_relay_link.py` TLS tests (no `first_connect` on `2ffb5cc`) and P7's returner test (no
+    `idle` on `2ffb5cc`).
+  - Where the red for those defects lives: the stamp of a row deleted or cancelled meanwhile,
+    `test_relay_return.py` (SQLite) and `test_contended_write.py::test_contended_dispatch_skips_*`
+    (PostgreSQL, TimescaleDB 2.32); the contended stamp of a row that still qualifies, which lands
+    on a re-run, CI's TimescaleDB 2.31 jobs only (`test_contended_write.py::test_contended_dispatch_lands`),
+    per plan-gate ruling 7, with no red on any local backend; R4, the two `test_relay_workload.py`
+    CLI tests (by behaviour: the relay still runs at 12 s); P7's fix (i), no unit red on `2ffb5cc`,
+    its effect the post-fix runs' s2 (0.07–0.12 s against 2.9–3.8 s). Keying the SQLite injection
+    on the statement was not taken: reaching an ORM flush needs a second, cursor-level harness, for
+    a case CI's 2.31 jobs already show.
 - **Verify:** see frontmatter — the SQLite model, writeback, recovery, scheduler, group, zone and
   cancel suites; the PostgreSQL and TimescaleDB legs; the red check (sandbox off).
 - **Touches:** `src/hypershell/data/model.py`, `tests/test_relay_return.py`,
   `tests/test_contended_recovery.py`, `tests/test_contended_write.py`, `AGENTS.md`,
   `.agents/factory/invariants.md`, `spec/relay-hardening/drive/red_check.sh`, `drive/red.txt`.
+  *Review cycle 1:* also `drive/red_outcome.py`.
 
 ## Phase P2 — Eviction by the server's receive time
 **Satisfies:** R7, R9, R10 · **Depends on:** P1
@@ -353,13 +391,17 @@ research 04.
       `relay.upstream.first_connect(upstream)`. The error is `reconnect.TLSMismatchError`. A TLS
       relay checks for a cleartext challenge only on a plain `ssl.SSLError`: a certificate failure,
       `SSLEOFError` and `SSLZeroReturnError` are re-raised as they are. `speaks_plain` is capped at
-      `PLAIN_CHECK_WAIT` (5 s). The docs sentence is in `docs/_include/relay_desc.rst` (beside the
+      `PLAIN_CHECK_WAIT` (1 s since review cycle 1, below). The docs sentence is in `docs/_include/relay_desc.rst` (beside the
       relay that waits for an unreachable upstream, so the man page carries it too), with the
       `versionchanged` after its `.. include::` in `docs/cli/relay.rst`. The cleartext → TLS link
       test serves its TLS upstream from an `hs server` process, killed with the test, so every wait
       is bounded. The two link tests are red on `2ffb5cc` because the relay's hook does not exist
       there; the two CLI tests are red by behaviour (the relay is still running at the 12 s bound).
 - **Verify:** see frontmatter.
+- [x] **Review-cycle-1 remediation (foreman's note).** `PLAIN_CHECK_WAIT` is 1 s, not 5 s: a
+      cleartext upstream sends its challenge as soon as it accepts (about 1 ms measured), so a 1 s
+      wait loses nothing. The R4 tests and the `tls-on` / `tls-off` drives re-run on the head (P6).
+      RV3 took the two TLS link tests out of `red.txt` (P1).
 - **Touches:** `src/hypershell/core/reconnect.py`, `src/hypershell/relay/upstream.py`,
   `src/hypershell/relay/__init__.py`, `tests/test_relay_link.py`, `tests/test_relay_workload.py`,
   `docs/_include/relay_desc.rst`, `docs/cli/relay.rst`, `drive/red.txt`.
@@ -397,8 +439,42 @@ client anywhere does. Design: PLAN §2 R5, R6; research 05.
       asserts that both identities asked. No `share/` change (no CLI change); the man page picks up
       the text at the next `hs-release`.
 - **Verify:** see frontmatter.
+- [x] **Review-cycle-1 remediation (RV1).** The one-task request is made only by a zone whose fleet
+      would launch a client for it. `UpstreamPuller` takes `view`, the relay's `TopologyView` (the one
+      its fleets follow; `RelayThread` passes it), and `launches(zone)` is true without a published
+      topology (the fallback fleet keeps at least one client) and otherwise only while the zone's
+      entry at this relay has a target above 0. At the gate, once some zone has heard the shutdown, a
+      zone with no site client, nothing held and no launch to come ends at once, as `finish_idle` ended
+      it before, with an INFO line ("no site client for zone Z and none planned here"); what is staged
+      for it stays upstream for the relay that serves it. Docs: `relay_desc.rst` adds the rule under
+      an upstream server autoscaling with relay sites; the `versionchanged` clause in `relay.rst` says
+      so too.
+  - Test `test_a_zone_the_topology_gives_no_client_here_ends_at_a_shutdown_and_leaves_its_tasks_upstream`
+    (×8: FIXED and DYNAMIC, SPREAD and FILL, B's gpu client running or exited): the review's shape,
+    planned by the real `plan_sites` (B first, serving gpu; A serving cpu and gpu; min 0, init 0,
+    max 2; one gpu task left), A's entries read into a `TopologyView`, the real finishing
+    `Dispatcher` with three gpu rows staged. Asserted: the plan gives A cpu 1, gpu 0 and B gpu 1; the
+    puller reaches FINAL with both zones finished, gpu never asked, all three rows still staged, the
+    relay database empty. **Red on `a741340`, 8 of 8, by assertion** (the puller holds one gpu task
+    and stays at GATE: "holding 1 task for zone gpu, which has no site client"); green on the head.
+    It passes on `2ffb5cc` (which ended every such zone), so it is listed in `drive/red-a741340.txt`
+    (run with `RED_BASE_REV=a741340 RED_LIST=…`), not in `red.txt`. The view is set on the machine
+    after construction, so on `a741340` the test fails on what the puller does, not on its
+    signature. Its complement, `test_a_zone_its_fleet_would_launch_for_takes_what_is_staged_for_it_at_a_shutdown`
+    (gpu target 1; no topology published), keeps R5's ask.
+  - **No two-relay drive mode.** The `relay-topology` fill harness runs a server that ends only when
+    the drive stops it, after every task completes and every client idles out; RV1 needs rows
+    still staged for a zone at an upstream shutdown, which a server with a database reaches only by
+    a drain while they are staged (P6 `zones`), with a second relay holding that zone's plan. That is
+    a new drive flow, not a mode of the fill harness, and its timing (a drain landing while the
+    other relay's client still has rows staged) would be the drive's own uncertainty. The unit test
+    covers the decision itself with the planner's real output and the real `Dispatcher`; the
+    remaining link, the relay's one `TopologyView` read after every beat and shared with the fleets,
+    is the object `SiteScaler` already follows in the topology drives, and the puller is given that
+    same object.
 - **Touches:** `src/hypershell/relay/upstream.py`, `tests/test_relay_connector.py`,
-  `docs/_include/relay_desc.rst`, `docs/cli/relay.rst`, `drive/red.txt`.
+  `docs/_include/relay_desc.rst`, `docs/cli/relay.rst`, `drive/red.txt`. *Review cycle 1:* also
+  `src/hypershell/relay/__init__.py`, `drive/red-a741340.txt`.
 
 ## Phase P6 — End-to-end laptop evidence
 **Satisfies:** R1, R2, R3, R4, R5, R9, R10 · **Depends on:** P5
@@ -458,10 +534,21 @@ unchanged. Design: PLAN §6.
       Their scrubbed files are not kept here: the names collide with this drive's, and their cycles'
       evidence holds the record of each mode.
 - [x] The full suite (`uv run pytest`) on SQLite; the PostgreSQL/TimescaleDB legs of P1 once more.
-- **Verify:** see frontmatter (the seven new modes, the relay smoke, two retire and two topology
-  modes as the R10 guard, the full suite, the red check). Expect ~30 min.
+- [x] **Review-cycle-1 remediation (RV4, re-runs).** `hardening_drive.sh` records the earlier
+      build's source it used as the fact `base_src` (the export, or `DRIVE_BASE_SRC`), and
+      `hardening_judge.py` judges each pair role against it (`on_base`, by real path), not against a
+      fixed `/base/src/` segment. `pair-relay` with `DRIVE_BASE_SRC` set to an export outside the site:
+      PASS, both source checks included (`evidence/review-1/base-src/`). The verify now runs the
+      topology `fill` mode too (RV1's harness), and was re-run whole on the remediation build with the
+      evidence in `evidence/review-1/` (`README.md` there): every hardening mode, the relay smoke, the
+      retire `retire` and `idle` modes and the topology `spread`, `fill` and `kill` modes PASS; the full
+      SQLite suite 2116 passed, 101 skipped; the red check 19 of 19 red, 5 `pg:` skipped (24 of 24
+      with `HS_TEST_POSTGRES`, P1).
+- **Verify:** see frontmatter (the seven new modes, the relay smoke, two retire and three topology
+  modes as the R10 guard, the full suite, the red check). Expect ~40 min.
 - **Touches:** `spec/relay-hardening/drive/hardening_drive.sh`, `drive/hardening_shim.sh`,
-  `drive/hardening_judge.py`, `spec/relay-hardening/evidence/laptop/`.
+  `drive/hardening_judge.py`, `spec/relay-hardening/evidence/laptop/`. *Review cycle 1:* also
+  `spec/relay-hardening/evidence/review-1/`.
 
 ## Phase P7 — Tail investigation on the laptop
 **Satisfies:** R8 · **Depends on:** P6

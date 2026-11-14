@@ -497,7 +497,10 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   `Task.next` (conditional on `schedule_time IS NULL`: a row removed, cancelled or scheduled
   meanwhile is skipped, one never stamped stays unscheduled for a later round) and
   `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
-  held by the Receiver) are the pattern. Never use `bulk_update_mappings` or an ORM flush for such a
+  held by the Receiver) are the pattern. The conditional writes (`revert_staged`, the eviction
+  revert, the dispatch stamp) skip a row gone or no longer qualifying and never raise on it;
+  `Task.confirm_all` (strict, the default) and `Task.revert_all` still raise `StaleDataError` on a
+  gone row, by design. Never use `bulk_update_mappings` or an ORM flush for such a
   write: they assert the total and raise `StaleDataError`. The Scheduler's `retried` mark,
   `Task.cancel_all` and `hs update` do not follow it yet
   (`issues/hypertable-contended-scheduler-and-cli-writes.md`).

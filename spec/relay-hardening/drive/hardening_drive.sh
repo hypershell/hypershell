@@ -52,9 +52,11 @@
 # directory: when set, the launches, the server's and relay's relevant lines, the facts and the
 # judgment are written to MODE.txt there, with host, user, paths and the run key replaced.
 # DRIVE_BASE_REV, the earlier build (default 2ffb5cc); DRIVE_BASE_SRC, an exported `src` of it to
-# use instead of exporting one; DRIVE_BASE_ROLES, the roles (relay, server or both) to run on it in
-# place of the mode's own, to show a mode failing on the earlier build. The script deletes nothing; it prints its scratch path and stops
-# every process it started, by its recorded pid, on failure too.
+# use instead of exporting one (the facts record the source used, `base_src`, which the pair judge
+# checks each role's source against); DRIVE_BASE_ROLES, the roles (relay, server or both) to run on
+# it in place of the mode's own, to show a mode failing on the earlier build. The script deletes
+# nothing; it prints its scratch path and stops every process it started, by its recorded pid, on
+# failure too.
 set -eu
 
 mode=${1:-restart}
@@ -102,6 +104,8 @@ if [ -n "$base_roles" ]; then
         git -C "$root" archive "${DRIVE_BASE_REV:-2ffb5cc}" src | tar -x -C "$work/base"
         base_src=$work/base/src
     fi
+    base_src=$(cd "$base_src" && pwd)
+    fact base_src "$base_src"
 fi
 pythonpath() {  # ROLE: the PYTHONPATH that role runs with (empty: this build)
     for role in $base_roles; do
