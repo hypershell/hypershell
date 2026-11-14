@@ -25,3 +25,10 @@
 - **Skill cause:** Same as `spec/relay-retire/META.md` F2: the steps predate the worktree practice.
 - **Recommended fix:** As there.
 - **Confidence:** high · **Effort:** small
+
+## F3 — REVIEW template's human-gate list omits `core/tls.py` and `cluster/remote|ssh.py`
+`origin=hs-review:step3 severity=low category=template status=open target=.agents/factory/templates/REVIEW.md`
+- **What happened:** This cycle's CONFIRMED findings run through `cluster/remote.py`/`cluster/ssh.py`. The template's "Human-gate triggers" section lists only `data/model.py`, `server.py`, `client.py`, `core/queue|fsm|thread|signal.py`, so filling it in from the template alone would have missed the gate; I took the list from the rubric and SKILL.md instead.
+- **Skill cause:** The template drifted from `review-rubric.md` § Mandatory human sign-off gate and `invariants.md` (both include `core/tls.py` and `cluster/remote|ssh.py`).
+- **Recommended fix:** Make the template name the rubric's list, or point to it rather than repeat it.
+- **Confidence:** high · **Effort:** small
