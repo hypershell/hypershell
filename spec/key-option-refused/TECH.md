@@ -1,39 +1,70 @@
 ---
 slug: key-option-refused
-title: "Refuse the queue key on a command line"
+title: Refuse the queue key on a command line
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/key-option-refused
 base: develop
-current_phase: P1
-last_updated: "2026-11-13"
+current_phase: P2
+last_updated: '2026-11-13'
 phases:
-  - id: P1
-    name: "Tests, bench and drives give the key in the environment; submit -q per key source"
-    status: pending
-    satisfies: [R4, R8]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: 'uv run pytest -v tests/test_auth_variants.py tests/test_cluster_launch.py tests/test_dispatch_workload.py tests/test_dispatch_staged.py tests/test_dispatch_version.py tests/test_queue_start.py tests/test_queue_workload.py tests/test_queue_limits.py tests/test_relay_workload.py tests/test_relay_outage.py tests/test_topology_server.py tests/test_upgrade_cli.py tests/test_zone_workload.py && uv run python -m py_compile tests/bench/bench_queue.py spec/relay/drive/relay_throughput.py && ! git grep -n -E -e "(^|[^[:alnum:]_-])-k([^[:alnum:]_-]|$)" -e "--auth([^[:alnum:]_-]|$)" -- tests "spec/*/drive/*" | grep -v -e "^tests/test_relay_launch.py:" -e "^tests/test_factory_fsm.py:" -e "^tests/test_server.py:" -e "^spec/relay/drive/relay_probe.py:" -e KEY_OPTIONS -e "-k.: True, .--auth.: True"'
-  - id: P2
-    name: "Refuse -k/--auth on hs client, server and submit; help, hints, docs, completions; refusal tests and sweep"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R7, R8]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: 'uv run pytest -v tests/test_key_option.py tests/test_server.py tests/test_client.py tests/test_submit.py tests/test_auth_variants.py tests/test_completions.py tests/test_cluster_launch.py tests/test_relay_launch.py && .agents/factory/bin/temp_site.sh sh -c "HYPERSHELL_LOGGING_FILE=enabled uv run hs server --forever --auth=abcdefghijklmnop0123 2> e.txt; test \$? -eq 2 && grep -q HYPERSHELL_SERVER_AUTH e.txt && grep -q server.auth e.txt && ! grep -rq abcdefghijklmnop0123 ." && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -q -E -b man docs $TMPDIR/key-option-man && ! cat $TMPDIR/key-option-man/*.1 | tr -d "\\134" | grep -n -E -e "(^|[^[:alnum:]-]|f[BIPR])-k([^[:alnum:]-]|f[BIPR]|$)" -e "--auth([^[:alnum:]_-]|f[BIPR]|$)" && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html'
+- id: P1
+  name: Tests, bench and drives give the key in the environment; submit -q per key
+    source
+  status: done
+  satisfies:
+  - R4
+  - R8
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: downhill
+  verify: 'uv run pytest -v tests/test_auth_variants.py tests/test_cluster_launch.py
+    tests/test_dispatch_workload.py tests/test_dispatch_staged.py tests/test_dispatch_version.py
+    tests/test_queue_start.py tests/test_queue_workload.py tests/test_queue_limits.py
+    tests/test_relay_workload.py tests/test_relay_outage.py tests/test_topology_server.py
+    tests/test_upgrade_cli.py tests/test_zone_workload.py && uv run python -m py_compile
+    tests/bench/bench_queue.py spec/relay/drive/relay_throughput.py && ! git grep
+    -n -E -e "(^|[^[:alnum:]_-])-k([^[:alnum:]_-]|$)" -e "--auth([^[:alnum:]_-]|$)"
+    -- tests "spec/*/drive/*" | grep -v -e "^tests/test_relay_launch.py:" -e "^tests/test_factory_fsm.py:"
+    -e "^tests/test_server.py:" -e "^spec/relay/drive/relay_probe.py:" -e KEY_OPTIONS
+    -e "-k.: True, .--auth.: True"'
+- id: P2
+  name: Refuse -k/--auth on hs client, server and submit (and hs cluster, hs relay);
+    help, hints, docs, completions; refusal tests and sweep
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_key_option.py tests/test_server.py tests/test_client.py
+    tests/test_submit.py tests/test_auth_variants.py tests/test_completions.py tests/test_cluster_launch.py
+    tests/test_relay_launch.py && .agents/factory/bin/temp_site.sh sh -c "HYPERSHELL_LOGGING_FILE=enabled
+    uv run hs server --forever --auth=abcdefghijklmnop0123 2> e.txt; test \$? -eq
+    2 && grep -q HYPERSHELL_SERVER_AUTH e.txt && grep -q server.auth e.txt && ! grep
+    -rq abcdefghijklmnop0123 ." && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run
+    --python 3.12 --group docs sphinx-build -q -E -b man docs $TMPDIR/key-option-man
+    && ! cat $TMPDIR/key-option-man/*.1 | tr -d "\\134" | grep -n -E -e "(^|[^[:alnum:]-]|f[BIPR])-k([^[:alnum:]-]|f[BIPR]|$)"
+    -e "--auth([^[:alnum:]_-]|f[BIPR]|$)" && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    $TMPDIR/docs-html
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Refuse the queue key on a command line
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -91,7 +122,7 @@ code+state commit.
 `HYPERSHELL_SERVER_AUTH`, green on today's code, so the option can go without breaking the suite;
 `hs submit -q` gains a test per key source.
 
-- [ ] Convert each `'-k', key` (or `'-k', AUTH`, `site.key`, `SERVER_KEY`, `secrets.token_hex(16)`) to
+- [x] Convert each `'-k', key` (or `'-k', AUTH`, `site.key`, `SERVER_KEY`, `secrets.token_hex(16)`) to
       the same key in `HYPERSHELL_SERVER_AUTH` in the process environment, through the helper's
       existing `env` argument where it has one (`group.start(..., env=…)`, `Popen(..., env=…)`), or
       by adding one: `test_dispatch_workload.py`, `test_dispatch_staged.py` (the shared address
@@ -101,12 +132,12 @@ code+state commit.
       `test_zone_workload.py`, `test_cluster_launch.py` (`start_server`), `tests/bench/bench_queue.py`,
       `spec/relay/drive/relay_throughput.py:170`. Where a server and its clients share one key, set it
       once for the group.
-- [ ] `test_cluster_launch.py::test_client_names_missing_key_only_when_none_given`: drop the
+- [x] `test_cluster_launch.py::test_client_names_missing_key_only_when_none_given`: drop the
       `explicit-default-key` and `explicit-wrong-key` cases; their `environment-*` and `config-*`
       twins stay.
-- [ ] `test_auth_variants.py::test_command_submit_queue`: parametrise over `RESOLVED_FORMS`
+- [x] `test_auth_variants.py::test_command_submit_queue`: parametrise over `RESOLVED_FORMS`
       (`auth`, `auth_env`, `auth_eval`, environment), server and submit sharing the form.
-- [ ] Leave untouched: `KEY_OPTIONS` checks, the `CONTRACT_CLIENT_OPTIONS` row,
+- [x] Leave untouched: `KEY_OPTIONS` checks, the `CONTRACT_CLIENT_OPTIONS` row,
       `tests/test_relay_launch.py`, `spec/relay/drive/relay_probe.py`, `tests/test_factory_fsm.py`,
       and `tests/test_server.py` (its `-k` rows change with the behaviour, in P2).
 - **Verify:** the converted files pass, the bench and drive compile, and a grep of `tests/` and
@@ -117,7 +148,14 @@ code+state commit.
 **Satisfies:** R1, R2, R3, R4, R5, R6, R7, R8 · **Depends on:** P1
 **Goal:** `-k`/`--auth` on the three commands is a parse-time usage error (exit 2) that names
 `HYPERSHELL_SERVER_AUTH` and `server.auth` and never the key; the key is read from `resolve_auth`
-alone; nothing in help, hints, docs, man pages or completions offers the option.
+alone; nothing in help, hints, docs, man pages or completions offers the option. Per the plan-gate
+ruling 3, `hs cluster` (and `hsx`) and `hs relay` register the same refusal: neither declares `-k`
+or `--auth` for anything else (checked at P1). Side effects of registering there, recorded rather
+than avoided: `--ssh-args '-k …'` (cluster) and `--launcher-args '-k …'` (relay), written as two
+words, now fail as `expected one argument`, as a leading `-o`/`-N` already does on those commands;
+the `--ssh-args='-k …'` form and the `[ssh] args`/`[relay] launcher_args` keys are unaffected. On
+`hs cluster`, `--au`/`--aut` become ambiguous with `--autoscaling`, as they already are on
+`hs server`.
 
 - [ ] `core/config.py`: `KEY_OPTION_STRINGS`, `RefuseKeyOption(argparse.Action)` raising
       `cmdkit.cli.ArgumentError` with a message built from the matched option string (never
@@ -128,6 +166,9 @@ alone; nothing in help, hints, docs, man pages or completions offers the option.
 - [ ] `client.py`, `server.py`, `submit.py`: replace the `-k/--auth` `add_argument` with
       `refuse_key_option(interface)` (`SubmitApp` with the `--` hint); read the key with
       `resolve_auth('server')` unconditionally in `run()`; client `no_key` drops `auth_given`.
+- [ ] `cluster/__init__.py` (`ClusterApp`) and `relay/__init__.py` (`RelayApp`): add
+      `refuse_key_option(interface)`; no usage or help line (the option is not offered), no other
+      change (plan-gate ruling 3).
 - [ ] Usage and help text of the three commands (R5): no `[-k KEY]`, no `-k, --auth` line; the
       submit `-q` line and the client/server help prose say where the key comes from. Client hints
       at `client.py:1149-1160` (and the comment at `:1667`) name `server.auth` instead of `-k`.
@@ -143,12 +184,14 @@ alone; nothing in help, hints, docs, man pages or completions offers the option.
       research 01, plus `--` and `--template=-kfoo` parsing as before); integration per command ×
       the four GOAL forms with a DEVEL log file (exit 2, both sources named, key in no output or
       site file, no database file); R3 for `hs submit -- echo -k X` and a task file; the R5–R8
-      sweep with its allow list.
+      sweep with its allow list. The unit and integration refusal tests cover `hs client`,
+      `hs server`, `hs submit`, `hs cluster` (also `hsx`) and `hs relay` (plan-gate ruling 3);
+      `--ssh-args='-k …'` still parses on `hs cluster`.
 - **Verify:** the tests above; a `temp_site` drive of `hs server --auth=KEY` with a log file (exit 2,
   both sources named, key nowhere under the site); a `-b man` build into `$TMPDIR` that greps clean;
   the HTML build with `-W` (frontmatter).
 - **Touches:** `src/hypershell/core/config.py`, `client.py`, `server.py`, `submit.py`,
-  `docs/_include/…`, `docs/{getting_started,security,install}.rst`, `share/…`, `tests/…`.
+  `cluster/__init__.py`, `relay/__init__.py`, `docs/_include/…`, `docs/{getting_started,security,install}.rst`, `share/…`, `tests/…`.
 
 ---
 

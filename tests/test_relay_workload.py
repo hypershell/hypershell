@@ -129,7 +129,7 @@ def test_one_relay_end_to_end(group: Group) -> None:
     assert group.wait(submit, deadline) == 0, group.text('submit')
 
     server = group.start('server', 'server', '--restart', '-r', '1', '-b', '4', '-Q', '1',
-                         '-H', 'localhost', '-p', str(port), '-k', key)
+                         '-H', 'localhost', '-p', str(port), env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     relay = start_relay(group, 'relay', port, key, size=2)
 
@@ -358,7 +358,7 @@ def start_upstream(group: Group, port: int, key: str, deadline: float, barrier: 
     submit = group.start('submit', 'submit', '--zone', ZONE, str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
     server = group.start('server', 'server', '--restart', '-r', '1', '-b', '4', '-Q', '1',
-                         '-H', 'localhost', '-p', str(port), '-k', key, env=env)
+                         '-H', 'localhost', '-p', str(port), env={**env, 'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     return server
 
@@ -674,7 +674,8 @@ def test_relay_against_a_server_without_a_database(group: Group) -> None:
     deadline = time.monotonic() + DEADLINE
     names = [f'nodb-{n}' for n in range(8)]
     taskfile = create_taskfile(group.site, [f'echo {name}' for name in names])
-    server = group.start('server', 'server', '--no-db', '-H', 'localhost', '-p', str(port), '-k', key, str(taskfile))
+    server = group.start('server', 'server', '--no-db', '-H', 'localhost', '-p', str(port), str(taskfile),
+                         env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     relay = start_relay(group, 'relay', port, key, size=2)
 
@@ -706,7 +707,8 @@ def test_relay_rides_through_its_upstream_server_dying_and_restarting(group: Gro
     taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 4))
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     relay = start_relay(group, 'relay', port, key, size=2, HYPERSHELL_RELAY_UPSTREAM_HEARTRATE='1',
                         HYPERSHELL_RELAY_UPSTREAM_DEADLINE='3', HYPERSHELL_RELAY_UPSTREAM_BACKOFF='2')
@@ -727,7 +729,7 @@ def test_relay_rides_through_its_upstream_server_dying_and_restarting(group: Gro
         assert alive(relay.pid) and all(alive(pid) for pid in clients), 'the site did not keep running'
 
         restarted = group.start('server-again', 'server', '--restart', '-b', '1',
-                                '-H', 'localhost', '-p', str(port), '-k', key)
+                                '-H', 'localhost', '-p', str(port), env={'HYPERSHELL_SERVER_AUTH': key})
         assert group.wait(restarted, deadline) == 0, group.text('server-again')
         assert group.wait(relay, deadline) == 0, group.text('relay')
     finally:
@@ -752,7 +754,8 @@ def test_relay_exits_and_ends_its_site_when_its_upstream_server_comes_back_unusa
     taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 4))
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     relay = start_relay(group, 'relay', port, key, size=2, HYPERSHELL_RELAY_UPSTREAM_HEARTRATE='1',
                         HYPERSHELL_RELAY_UPSTREAM_DEADLINE='3', HYPERSHELL_RELAY_UPSTREAM_BACKOFF='2')
@@ -766,7 +769,7 @@ def test_relay_exits_and_ends_its_site_when_its_upstream_server_comes_back_unusa
         assert alive(relay.pid)
 
         other = group.start('server-other', 'server', '--forever', '-H', 'localhost', '-p', str(port),
-                            '-k', secrets.token_hex(16))
+                            env={'HYPERSHELL_SERVER_AUTH': secrets.token_hex(16)})
         wait_listening(other, port, group, 'server-other')
         try:
             status = relay.wait(timeout=EXIT_BOUND)
@@ -794,8 +797,8 @@ def test_relay_exits_and_ends_its_site_when_its_receiver_dies(group: Group) -> N
     taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 4))
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key,
-                         env={'HYPERSHELL_SERVER_EVICT': '10'})
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_EVICT': '10', 'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     relay = start_faulty_relay(group, port, key, size=2)
     upstream = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
@@ -846,7 +849,8 @@ def test_drain_signal_finishes_everything_the_relay_holds(group: Group) -> None:
     taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 24))
     submit = group.start('submit', 'submit', '--zone', ZONE, str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    server = group.start('server', 'server', '--forever', '-b', '10', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--forever', '-b', '10', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     launcher = wrapped_launcher(group.site, 'one-at-a-time-launcher', ONE_AT_A_TIME_LAUNCHER)
     relay = start_relay(group, 'relay', port, key, 2, '--zone', ZONE, '--launcher', str(launcher),
@@ -891,8 +895,8 @@ def test_leaf_times_land_upstream_as_the_instants_they_were(group: Group) -> Non
     taskfile = create_taskfile(group.site, [f'echo zone-{n}' for n in range(6)])
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    server = group.start('server', 'server', '--restart', '-b', '2', '-H', 'localhost', '-p', str(port), '-k', key,
-                         env=relay_zone)
+    server = group.start('server', 'server', '--restart', '-b', '2', '-H', 'localhost', '-p', str(port),
+                         env={**relay_zone, 'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     launcher = wrapped_launcher(group.site, 'zoned-launcher', ZONED_LAUNCHER, zone=site_zone)
     relay = start_relay(group, 'relay', port, key, 2, '--launcher', str(launcher), **relay_zone)
@@ -950,7 +954,8 @@ def test_relay_ended_by_a_signal_removes_the_site_config_copy(group: Group, sign
     taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 4))
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     with interruptible():
         relay = start_relay(group, 'relay', port, key, 2, HYPERSHELL_CONFIG_FILE=str(config))
@@ -997,7 +1002,8 @@ def test_site_clients_keep_the_relay_config_file_without_relay_settings(group: G
     taskfile = create_taskfile(group.site, waiting_tasks(group.site, barrier, 4))
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    server = group.start('server', 'server', '--restart', '--no-tls', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--restart', '--no-tls', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     relay = start_relay(group, 'relay', port, key, 1, '--no-tls', HYPERSHELL_CONFIG_FILE=str(config))
     try:
@@ -1059,7 +1065,8 @@ def test_multizone_relay_takes_only_its_zones(group: Group) -> None:
     deadline = time.monotonic() + DEADLINE
     upstream = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
     submit_zones(group, deadline, lambda zone: [f'echo {zone}-{n}' for n in range(PER_ZONE)], (*SERVED, 'other'))
-    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     relay = start_relay(group, 'relay', port, key, 1, '--zone', SERVED[0], '--zone', SERVED[1],
                         HYPERSHELL_RELAY_SITE='site-z')
@@ -1119,8 +1126,8 @@ def test_multizone_relay_failover_reverts_and_unstages_both_zones(group: Group) 
     upstream = Path(os.environ['HYPERSHELL_DATABASE_FILE'])
     barrier = group.site / 'barrier'
     submit_zones(group, deadline, lambda zone: waiting_tasks(group.site, barrier, 2 * PER_ZONE), SERVED)
-    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port), '-k', key,
-                         env={'HYPERSHELL_SERVER_EVICT': '10'})
+    server = group.start('server', 'server', '--forever', '-b', '1', '-H', 'localhost', '-p', str(port),
+                         env={'HYPERSHELL_SERVER_EVICT': '10', 'HYPERSHELL_SERVER_AUTH': key})
     wait_listening(server, port, group, 'server')
     relay = start_relay(group, 'relay', port, key, 1, '--zone', SERVED[0], '--zone', SERVED[1],
                         HYPERSHELL_RELAY_UPSTREAM_HEARTRATE='1')

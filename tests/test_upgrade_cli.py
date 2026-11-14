@@ -159,13 +159,13 @@ def wait_for_port(port: int, server: Popen, timeout: float = 30) -> None:
 @mark.integration
 def test_first_command_server(legacy_db: Path) -> None:
     """A standalone server opens the database, completes pending tasks, and retries the failure."""
-    key = secrets.token_hex(16)
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     port = int(os.environ['HYPERSHELL_SERVER_PORT'])
-    server = Popen(['hs', 'server', '--restart', '-r', '2', '-b', '1', '-w', '1', '--no-tls', '-k', key],
+    server = Popen(['hs', 'server', '--restart', '-r', '2', '-b', '1', '-w', '1', '--no-tls'],
                    stdout=PIPE, stderr=PIPE, env=os.environ)
     try:
         wait_for_port(port, server)
-        client = run(['hs', 'client', '--no-tls', '-k', key, '-N', '2', '-T', '10'],
+        client = run(['hs', 'client', '--no-tls', '-N', '2', '-T', '10'],
                      stdout=PIPE, stderr=PIPE, env=os.environ, timeout=120)
         _, server_stderr = server.communicate(timeout=120)
     except TimeoutExpired:

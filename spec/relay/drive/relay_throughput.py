@@ -167,7 +167,8 @@ def relay(args: argparse.Namespace) -> tuple:
     port, key = free_port(), secrets.token_hex(16)
     say(f'relay: starting ({site})')
     begin = time.monotonic()
-    server = start(site, env, 'server', 'server', '--restart', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = start(site, env, 'server', 'server', '--restart', '-H', 'localhost', '-p', str(port),
+                   HYPERSHELL_SERVER_AUTH=key)
     relay_proc = start(site, env, 'relay', 'relay', '-H', 'localhost', '-p', str(port), '--bind', '127.0.0.1',
                        '--port', str(free_port()), '-N', str(args.clients), '--launcher', str(launcher),
                        HYPERSHELL_RELAY_UPSTREAM_AUTH=key, HYPERSHELL_RELAY_DATABASE=str(site / 'relay.db'))

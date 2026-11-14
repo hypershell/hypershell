@@ -61,7 +61,8 @@ def task_rows() -> List[Dict[str, Any]]:
 @mark.integration
 def test_mixed_zone_workload(group: Group) -> None:
     """Every task completes, only on a client of its zone; retries keep their zone; groups run in order."""
-    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     deadline = time.monotonic() + DEADLINE
     for zone in ZONES:
         taskfile = create_taskfile(group.site, lines_for(zone), filename=f'{zone}.in')
@@ -70,12 +71,12 @@ def test_mixed_zone_workload(group: Group) -> None:
         assert group.wait(submit, deadline) == 0, group.text(f'submit-{zone}')
 
     server = group.start('server', 'server', '--restart', '-r', '1', '-b', '4',
-                         '-H', 'localhost', '-p', str(port), '-k', key)
+                         '-H', 'localhost', '-p', str(port))
     wait_listening(server, port, group, 'server')
     clients = {}
     for name, zone, size in CLIENTS:
         options = (['--zone', zone] if zone else []) + (['-b', str(size)] if size else [])
-        clients[name] = group.start(name, 'client', '-N2', '-H', 'localhost', '-p', str(port), '-k', key,
+        clients[name] = group.start(name, 'client', '-N2', '-H', 'localhost', '-p', str(port),
                                     '-T', '60', *options, env={'ZONE_MARK': zone or 'default'})
     assert group.wait(server, deadline) == 0, group.text('server')
     for name, proc in clients.items():

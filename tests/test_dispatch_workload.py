@@ -148,14 +148,15 @@ def grouped(count: int) -> List[str]:
 @mark.integration
 def test_server_bundlesize_serves_plain_clients(group: Group) -> None:
     """Clients that advertise nothing get bundles of the server's size; every task runs once, in group order."""
-    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     taskfile = create_taskfile(group.site, grouped(200))
     submit = group.start('submit', 'submit', str(taskfile), '-b', '1000')
     assert group.wait(submit, time.monotonic() + DEADLINE) == 0, group.text('submit')
     deadline = time.monotonic() + DEADLINE
-    server = group.start('server', 'server', '--restart', '-b', '100', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--restart', '-b', '100', '-H', 'localhost', '-p', str(port))
     wait_listening(server, port, group, 'server')
-    clients = [group.start(f'client-{n}', 'client', '-N4', '-H', 'localhost', '-p', str(port), '-k', key, '-T', '30')
+    clients = [group.start(f'client-{n}', 'client', '-N4', '-H', 'localhost', '-p', str(port), '-T', '30')
                for n in range(2)]
     assert group.wait(server, deadline) == 0, group.text('server')
     for n, client in enumerate(clients):
@@ -175,14 +176,15 @@ def test_server_bundlesize_serves_plain_clients(group: Group) -> None:
 @mark.integration
 def test_configured_bundlesize_is_advertised(group: Group) -> None:
     """A client whose size comes from the environment advertises it, so the server cuts to that size."""
-    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     taskfile = create_taskfile(group.site, [f'echo {n}' for n in range(300)])
     submit = group.start('submit', 'submit', str(taskfile), '-b', '1000')
     assert group.wait(submit, time.monotonic() + DEADLINE) == 0, group.text('submit')
     deadline = time.monotonic() + DEADLINE
-    server = group.start('server', 'server', '--restart', '-b', '100', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--restart', '-b', '100', '-H', 'localhost', '-p', str(port))
     wait_listening(server, port, group, 'server')
-    client = group.start('client', 'client', '-N4', '-H', 'localhost', '-p', str(port), '-k', key, '-T', '30',
+    client = group.start('client', 'client', '-N4', '-H', 'localhost', '-p', str(port), '-T', '30',
                          env={'HYPERSHELL_SUBMIT_BUNDLESIZE': '3'})
     assert group.wait(server, deadline) == 0, group.text('server')
     assert group.wait(client, deadline) == 0, group.text('client')
@@ -197,16 +199,17 @@ def test_queue_submit_to_in_memory_server(group: Group) -> None:
     An in-memory server with no source of its own tells its clients to stop once its queue is
     drained, so the queue is deep enough to take every submitted bundle before the client starts.
     """
-    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     deadline = time.monotonic() + DEADLINE
-    server = group.start('server', 'server', '--no-db', '-b', '5', '-H', 'localhost', '-p', str(port), '-k', key,
+    server = group.start('server', 'server', '--no-db', '-b', '5', '-H', 'localhost', '-p', str(port),
                          env={'HYPERSHELL_SERVER_QUEUESIZE': '100'})
     wait_listening(server, port, group, 'server')
     taskfile = create_taskfile(group.site, [f'echo q{n}' for n in range(50)])
     submit = group.start('submit', 'submit', '-q', str(taskfile), '-b', '7', '-w', '1',
-                         '-H', 'localhost', '-p', str(port), '-k', key)
+                         '-H', 'localhost', '-p', str(port))
     assert group.wait(submit, deadline) == 0, group.text('submit')
-    client = group.start('client', 'client', '-N4', '-b', '3', '-H', 'localhost', '-p', str(port), '-k', key,
+    client = group.start('client', 'client', '-N4', '-b', '3', '-H', 'localhost', '-p', str(port),
                          '-T', '20')
     assert group.wait(client, deadline) == 0, group.text('client')
     assert group.wait(server, deadline) == 0, group.text('server')
@@ -230,7 +233,8 @@ def test_retry_and_group_advance_latency(group: Group) -> None:
     schedules each next step about 1 s (its first back-off sleep) after the result that unblocks
     it; a wake that finds nothing must not push the scheduler into its next, 2 s, step.
     """
-    port, key = int(os.environ['HYPERSHELL_SERVER_PORT']), secrets.token_hex(16)
+    port = int(os.environ['HYPERSHELL_SERVER_PORT'])
+    os.environ['HYPERSHELL_SERVER_AUTH'] = secrets.token_hex(16)
     marker = group.site / 'retry.marker'
     lines = ['echo a0  #HYPERSHELL: group:0', 'echo a1  #HYPERSHELL: group:0', 'echo a2  #HYPERSHELL: group:0',
              f'test -f {marker} || {{ touch {marker}; exit 3; }}  #HYPERSHELL: group:0',
@@ -240,9 +244,9 @@ def test_retry_and_group_advance_latency(group: Group) -> None:
     submit = group.start('submit', 'submit', str(taskfile))
     assert group.wait(submit, time.monotonic() + DEADLINE) == 0, group.text('submit')
     deadline = time.monotonic() + DEADLINE
-    server = group.start('server', 'server', '--restart', '-r', '1', '-H', 'localhost', '-p', str(port), '-k', key)
+    server = group.start('server', 'server', '--restart', '-r', '1', '-H', 'localhost', '-p', str(port))
     wait_listening(server, port, group, 'server')
-    clients = [group.start(f'client-{n}', 'client', '-H', 'localhost', '-p', str(port), '-k', key, '-T', '30')
+    clients = [group.start(f'client-{n}', 'client', '-H', 'localhost', '-p', str(port), '-T', '30')
                for n in range(2)]
     assert group.wait(server, deadline) == 0, group.text('server')
     for n, client in enumerate(clients):

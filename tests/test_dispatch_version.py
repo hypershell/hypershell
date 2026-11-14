@@ -186,8 +186,9 @@ def test_client_command_against_old_server_exits_with_one_error(tmp_path: Path) 
     manager, _ = stock_server()
     proc = None
     try:
-        env = {**os.environ, 'HYPERSHELL_SITE': str(tmp_path), 'HYPERSHELL_LOGGING_LEVEL': 'INFO'}
-        proc = subprocess.Popen(['hs', 'client', '-H', '127.0.0.1', '-p', str(manager.address[1]), '-k', AUTH,
+        env = {**os.environ, 'HYPERSHELL_SITE': str(tmp_path), 'HYPERSHELL_LOGGING_LEVEL': 'INFO',
+               'HYPERSHELL_SERVER_AUTH': AUTH}
+        proc = subprocess.Popen(['hs', 'client', '-H', '127.0.0.1', '-p', str(manager.address[1]),
                                  '--no-tls'], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 start_new_session=True)
         start = time.monotonic()

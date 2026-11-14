@@ -320,15 +320,19 @@ def test_command_server_and_client(temp_site: Path, monkeypatch, form: str) -> N
 
 
 @mark.integration
-def test_command_submit_queue(temp_site: Path, monkeypatch) -> None:
-    """`hs submit -q` takes the key from `auth_env` and reaches a server that does too.
+@mark.parametrize('form', list(RESOLVED_FORMS))
+def test_command_submit_queue(temp_site: Path, monkeypatch, form: str) -> None:
+    """`hs submit -q` takes the configured key, in any form, and reaches a server that does too.
 
     An in-memory server with no source of its own stops its clients once its queue drains, so the
     queue is deep enough to take every submitted bundle before the client starts.
     """
     site = Path(str(temp_site))
-    write_config(site, RESOLVED_FORMS['auth_env'])
+    write_config(site, RESOLVED_FORMS[form])
     monkeypatch.setenv(VAR, KEY)
+    monkeypatch.delenv(f'UNSET_{VAR}', raising=False)
+    if form == 'environment':
+        monkeypatch.setenv('HYPERSHELL_SERVER_AUTH', KEY)
     monkeypatch.setenv('HYPERSHELL_SERVER_QUEUESIZE', '100')
     server = start_server(site, '--no-db')
     try:
