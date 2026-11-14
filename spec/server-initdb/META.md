@@ -53,3 +53,10 @@ is skipped by the parser):
 - **Skill cause:** "Promoting an issue" tells a `shaped` seed to "re-confirm the scope still holds against current `develop`", but for `unshaped` it says only "carry the evidence (`file:line`, mechanism …) into Problem", which reads as copy-forward. Shaping-only guidance ("no big code reads") pushes the same way.
 - **Recommended fix:** For both statuses, say: re-check each cited `file:line` and the seed's stated mechanism against current `develop` (a targeted read, not research), cite the current locations in Problem, and list drift in a Clarification.
 - **Confidence:** med · **Effort:** small
+
+## F3 — High-blast-radius exception asks for a parallel subagent fan-out on a diagnosed small fix · seen again
+`origin=hs-plan:step3 severity=low category=steering status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The change touches only `ServerApp` in `server.py`, so the high-blast-radius exception required "the full fan-out" with parallel subagents. Both questions needed live database probes run with the sandbox off, so the research ran in-session as two briefs, against the letter of Step 3 (the sequential fallback is written only for harnesses without subagents).
+- **Skill cause:** As `tls-client-address-family` F1 and `group-advance-strands-lower-group` F4: the exception has no depth scale and no in-session path when the root cause is known and the questions are few.
+- **Recommended fix:** Let a `small`, diagnosed fix satisfy the exception with in-session briefs (one per touched contract) when it has at most two or three questions, keeping `research/` and the digest mandatory.
+- **Confidence:** med · **Effort:** small
