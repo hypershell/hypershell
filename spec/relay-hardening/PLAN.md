@@ -377,3 +377,31 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned, with th
 
 Build on a supported Python: the worktree's `.venv` is CPython 3.15; re-sync it with
 `uv sync --python 3.14` before verify.
+
+## Review-cycle-1 rulings (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. Every finding is fixed this cycle; RV1 is triaged
+as a fix, not a seed.
+
+- **RV1, a zone with no client whose topology target is 0 takes a task it cannot run.** R5's
+  one-task request is made only by a zone whose fleet would launch a client for it: under a
+  published topology, a zone whose target at this relay is above 0; without one, a zone whose local
+  fleet can launch (as today's fallback, `min` ≥ 1 or launches on demand). A zone whose target is 0
+  ends as before. Rows staged for the zone stay with the upstream server for the relay that serves
+  it. Pin it with a test that fails on `a741340`: the `plan_sites` probe shape (A gpu at 0, B
+  holding gpu) at the puller level. Add a two-relay drive mode on the `relay-topology` fill harness
+  if one fits the appetite. Otherwise record why the unit-level test suffices.
+- **RV2.** Scope the added §1 sentence in `.agents/factory/invariants.md` to the conditional writes
+  (the eviction revert and the dispatch stamp). `confirm_all` (strict) and `revert_all` still raise
+  by design. Keep `AGENTS.md` and the invariants in lockstep.
+- **RV3.** Each `red.txt` entry must fail on `2ffb5cc` for the defect itself, not for a missing API
+  or a harness that cannot observe the base. Rework or drop the eight entries the review names.
+  - Where a defect has no such red on any local backend, keep the entry out of `red.txt`, and say in
+    TECH which test shows the defect and where. The contended stamp is shown on CI's TimescaleDB
+    2.31 jobs only, per plan-gate ruling 7.
+  - Make `red_check.sh` require the failure to come from an assertion, not a collection, import,
+    attribute or type error, if that can be done reliably. Otherwise document the limit.
+- **RV4.** `hardening_judge.py` must accept the documented `DRIVE_BASE_SRC` override.
+- **Foreman's note (not a review finding).** `PLAIN_CHECK_WAIT` drops from 5 s to 1 s. A cleartext
+  upstream sends its challenge as soon as it accepts (about 1 ms measured), so a 1 s wait loses
+  nothing. It keeps R4's probe from holding a connection to an upstream longer than it needs.
