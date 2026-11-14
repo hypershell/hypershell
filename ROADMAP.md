@@ -406,6 +406,19 @@ scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 
 (`relay-hardening` landed, #103)*
 **Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
 
+## A zero autoscaling period makes the autoscaler loop without waiting
+
+`-P 0` or `autoscale.period = 0` is accepted, and the autoscaler sleeps only while less than a period
+has passed since its last check, which with 0 is never: it goes from its wait to its check and back
+without sleeping (`src/hypershell/cluster/remote.py:430`, `:492-503`), cleaning up clients and reading the
+database on every pass. A probe logged 654 checks in 4 s, against one with `-P 2`. A relay's site
+autoscaler reads the same key. Refuse a period below a floor, or treat 0 as the smallest wait.
+Pre-existing in `develop` and on the 2.8 line.
+
+*Horizon: near-term, small · Depends on: — · Refs: `duration-units-remaining` (the parser behind
+`-P`); `cluster-launch-failures` planning*
+**Seed:** [`issues/autoscale-zero-period-spins.md`](issues/autoscale-zero-period-spins.md) · *status: unshaped*
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
