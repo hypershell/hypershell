@@ -328,3 +328,197 @@ Candidates dropped under refutation:
 - N2's fix is in `cluster/__init__.py`, outside the core, but it shares N1's input-leaving design.
 - No security or DB-lifecycle invariant is touched, and committed rows are kept.
 - This is cycle 2 of ≤3. If cycle 3 does not converge, escalate to the maintainer.
+
+## Review cycle 3 — approved (2026-11-14)
+
+> Mode: a fresh blind pass over the full spec-excluded diff, plus a check of the remediation of N1
+> and N2 and a recheck of F1 and F2. One fresh reviewer saw `GOAL.md` (inline), the base copies of
+> `invariants.md` and `AGENTS.md`, `review-rubric.md`, `git diff origin/develop...HEAD -- .
+> ':(exclude)spec/'`, the drive script (`git diff origin/develop...HEAD -- 'spec/*/drive/*'`), the
+> remediation diff (`git diff f41da91..HEAD -- src/ tests/`), F1, F2, N1 and N2 as written above,
+> and the runnable repo. It did not see `PLAN.md`, `TECH.md`, `research/`, `META.md`, this file, or
+> commit message bodies. The gate rulings were passed as in cycle 2, plus the review-cycle-2
+> ruling: on failure stops the submit end marker gives up once its committer has halted (as
+> `LiveSubmitThread.put_end` does); the failure exit does not block on a stream given as FILE that
+> an abandoned reader holds; normal paths unchanged; no further §6 change. The orchestrator
+> reproduced the N1 and N2 runs independently.
+
+- **Reviewed commit:** 33d2692  ·  **Base:** develop (`origin/develop` at `6da633d`, re-fetched; the
+  branch sits on it and fast-forwards cleanly)  ·  **Date:** 2026-11-14
+- **Verdict:** approved
+- **Cycle:** 3 of ≤3. The loop converged.
+- **Contract drift:** none since cycle 1.
+
+### Verification run
+
+All runs used throwaway sites (`.agents/factory/bin/temp_site.sh`) bound to `127.0.0.1`, one at a
+time. Every started process was stopped by PID, and an out-of-sandbox `ps` confirmed none remained.
+The tree was left clean.
+
+- **Full suite, Python 3.14:** `uv run pytest -q` → **2759 passed, 109 skipped**, exit 0 (1360 s).
+- **Touched and related tests:** `test_cluster_exit`, `test_autoscale_failed_launches`,
+  `test_cluster_advertise`, `test_cluster_launch`, `test_zone_autoscale`, `test_submit`,
+  `test_server`, `test_server_fsm`, `test_cluster`, `test_relay_launch`, `test_autoscale`.
+  - Python 3.14: **558 passed, 1 skipped**, in 493 s.
+  - Python 3.11.18, in a separate environment: **558 passed, 1 skipped**, in 484 s.
+- **Drives:** all nine `launch_drive.sh` modes pass.
+  - `fail`: exit 5 in 9 s.
+  - `fail-db`: exit 5 in 4 s.
+  - `zero`: still running at 12 s.
+  - `healthy`: exit 0, with and without a database.
+  - `ssh-fail`: exit 5 in 5 s.
+  - `ssh-partial`: exit 0, with one warning naming hostB and status 255.
+  - `autoscale-fail`: exit 5 in 9 s.
+  - `autoscale-off`: still relaunching at 30 s.
+  - `advertise`: ok. `--advertise` on a local cluster exits 2.
+- **Docs:** the Sphinx `-W` build exits 0.
+- **Test strength:** the cycle-3 tests were run against `f41da91`'s `src`, extracted with
+  `git archive` and put on `PYTHONPATH`.
+  - 9 of them fail there, as they should:
+    - The eight stream runs do not exit within 40 s: busy pipe and busy FIFO on standard input;
+      FIFO and `<(…)` given as FILE, with and without a database; and the two autoscaling stream
+      variants.
+    - The unit test fails on the missing `put_end`.
+  - The two normal-path guard tests pass on both commits, as they should: a busy stream whose
+    clients work commits every task, and a FIFO given as FILE is read to its end.
+- **R1 bound, from the last exit** (a marker file touched by the launcher):
+  - Database: 4.00–4.07 s over 3 runs.
+  - `--no-db`: 8.06–8.09 s over 3 runs. This is within the 10 s bound, with about 2 s of margin.
+
+### Status of earlier findings
+
+All times are measured on the `hs` process, and every run exits with status 5.
+
+- **N1: fixed.** Database mode, launcher `false`, never-ending `yes 'echo 1'` producer:
+
+  | Input | Result |
+  |---|---|
+  | FIFO on standard input, `-b 1`, 3 runs | 6.45–6.49 s; 5.8k–6.1k tasks committed |
+  | FIFO on standard input, `-b 10` | 4.44 s |
+  | FIFO on standard input, `-b 100` | 4.45 s |
+  | Pipe on standard input | 6.4 s |
+  | `seq 1 300000 \| sed` producer | 6.48 s |
+  | R3 (`--autoscaling fixed -P 2s`), pipe or FIFO | 8.4–8.5 s |
+  | `--no-db`, pipe or FIFO | 8.4–8.5 s |
+
+  The orchestrator's rerun of the FIFO on standard input at `-b 1` exited 5 in 6.37 s with 5764
+  tasks committed.
+
+- **N2: fixed.** The producer writes one task and then stays open.
+
+  | Input | Database | `--no-db` |
+  |---|---|---|
+  | FIFO given as FILE, 30 s and 60 s producers | 4.4 s | 6.4 s |
+  | `<(…; sleep 30)` | 4.4 s | 6.4 s |
+  | Busy FIFO or `<(yes …)` given as FILE | 4.4–6.4 s | 8.4–8.5 s |
+
+  Under R3 the same inputs exit in 8.4–8.5 s. The orchestrator's rerun of a FIFO given as FILE
+  with a 60 s producer exited 5 in 4.41 s.
+
+  No failure-stop run printed "Fatal Python error", `_enter_buffered_busy`, "Exception ignored", a
+  traceback or a `ResourceWarning`. None exited 134 or hung at interpreter shutdown, on 3.14 or
+  3.11.
+
+- **F1: still fixed.** Times are from the triggering event.
+
+  | Reproduction | Exit after |
+  |---|---|
+  | Launcher `sleep 40; exit 1`, database | 4.17 s |
+  | Real client on two `sleep 300` tasks, killed at 45 s, launcher exits 1 | 3.7 s; 2 tasks remaining |
+  | `--forever --launcher false`, `hs submit 'echo late'` at 40 s | 4.59 s after the submit |
+
+- **F2: still fixed.** With an idle producer on standard input:
+  - Database: 4.36–4.44 s.
+  - `--no-db`: 6.42–6.44 s.
+  - R3: 8.43 s.
+
+### What cycle 3 introduced
+
+- **`SubmitThread.put_end`** (`src/hypershell/submit.py:696-710`):
+  - The normal stop is the same as on develop: `loader.stop`, an untimed `queue.put(None)`, then
+    `committer.stop`.
+  - On the normal run path, `left` is never set. So `join_unless_left` plus `put_end` act as
+    `loader.join` plus a blocking put.
+  - Normal runs read and commit all their input, and every one exits 0:
+    - Whole file, 2000 tasks, at `-b 1` and `-b 50`: 2000 of 2000.
+    - Fast stream, 20000 tasks, at `-b 100`, with a database and with `--no-db`: 20000 of 20000.
+    - 5000 tasks at `-b 1`, with a database and with `--no-db`: 5000 of 5000.
+    - FIFO given as FILE, 3000 tasks: 3000 of 3000.
+    - `<(…)`, 3000 tasks, `--no-db`: 3000 of 3000.
+    - Pausing standard input, `--no-db`: 40 of 40.
+  - A race probe ran 24 random `stop(wait=True, leave_input=True)` calls against busy and idle
+    pipes at `-b` 1, 2, 10 and 100. There was no hang, and the slowest stop took 1.01 s. The
+    committed count never exceeded the loaded count. The run thread and the committer were both
+    ended after every stop.
+  - A committer that raises makes `stop` return at once and re-raise the committer's error.
+- **`ClusterApp.__exit__`** (`src/hypershell/cluster/__init__.py:606-609`): checked in process with
+  file, FIFO and `/dev/fd` inputs, against no exception, `ClusterLaunchError`, `RuntimeError`,
+  `KeyboardInterrupt` and `ValueError`.
+  - The input is left open only for `ClusterLaunchError` with a FIFO or `/dev/fd` input.
+  - A regular file is always closed.
+  - The `-o`, `-e` and `-f` streams are always closed. A run writing to those files wrote all
+    50 output lines, the error text and the failed task.
+
+### Requirement → evidence matrix (cycle 3)
+
+| R-ID | Status | Note |
+|------|--------|------|
+| R1 | ✅ | N1, N2 fixed; F1, F2 hold. The bound from the last exit is 4.0 s with a database and 8.1 s with `--no-db`. The `zero` drive still waits. |
+| R2 | ✅ | `ssh-partial` gives one hostB/255 warning. Status-3 warnings appear in R4 runs. `autoscale-off` warns at each relaunch. |
+| R3 | ✅ | `autoscale-fail` exits 5 in 9 s, and the stream variants in 8.4 s. `autoscale-off` keeps relaunching. Bad `HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES` values exit 3, naming the source. |
+| R4 | ✅ | Every normal-path run above. A launcher that exits 3 after the work gives exit 0 with a warning and no error. `--forever` with clients leaving and nothing pending is still running at 20 s. |
+| R5 | ✅ | `test_relay_fleets_are_off` and `test_site_scaler_on_a_failing_launch_never_stops` pass on 3.11 and 3.14. |
+| R6 | ✅ | Unchanged since cycle 1. The `advertise` drive passes. |
+| R7 | ✅ | `adv-option`, `adv-key`, `adv-both` (the option wins), and `adv-local` (exit 2). `--advertise ""` exits 2. |
+| R8 | ✅ | `--help` lists `--advertise` after `-H`. The `-W` build is clean, and the built pages carry the 2.9.0 markers. Man page: rebuilt at release, not graded. |
+
+Unmapped changes: none. Each cycle-3 change maps to the cycle-2 rulings on N1 and N2.
+
+**Invariants (base copy):**
+- **§5:** holds.
+  - `Scheduler.wait_need` waits on `Condition(dispatcher.lock)`, which is the dispatcher's own
+    wait, so the normal path is unchanged.
+  - `put_end` loops on 1 s timeouts.
+- **§6:** holds.
+  - The `ServerThread.stop` order is unchanged, and so is the normal-path submit flush (loader
+    join, then the end marker).
+  - The failure stops stay inside the exception the cycle-1 and cycle-2 rulings allow, and
+    committed rows are kept.
+- **§11:** holds. `client_launch()` is still the one builder, and the launch contract tests pass.
+- **§12:** holds. Docs and completions are in the CLI change's commit, the markers are present,
+  every new test is tagged, and exit 5 comes from the `RuntimeError` mapping.
+- **The branch's AGENTS.md and `invariants.md` §11 edits:** still match the code.
+
+### Findings (cycle 3)
+
+None.
+
+Candidates dropped under refutation:
+- **A partial bundle at `-b` > 1 left uncommitted on a failure stop:** within the cycle-2 ruling.
+  Nothing committed is lost.
+- **A committer that raises during a failure stop:** its error replaces the R1 error. A committer
+  that dies holds a later normal-path end marker forever, the same as on develop, so this is
+  pre-existing.
+- **Ctrl-C or another exception with an idle FIFO given as FILE:** `__exit__` still closes the
+  input, and so waits on the blocked reader. This is unchanged from develop. Only the failure
+  stop is in scope.
+- **The new `security.rst` paragraph ("checked against `servername`"):** it reads together with
+  the existing paragraph above it, which already says `servername` is required for a name check.
+  It is not false.
+- **A healthy cluster on a pausing standard-input stream exiting 0 with tasks never run:** cycle 2
+  saw the same thing on develop. It comes from the scheduler's existing rule of stopping once
+  nothing remains, not from this diff, so it is not graded here. It may deserve its own seed.
+
+### Human-gate triggers (cycle 3)
+
+- **Not re-triggered.** Cycle 3 has no CONFIRMED finding.
+- **The gate from cycles 1 and 2 still stands.**
+  - F1, F2 and N1 were CONFIRMED on the high-blast-radius core: `server.py`'s stop, and the R1
+    and R3 stops in `cluster/remote.py` and `cluster/ssh.py`.
+  - The maintainer's sign-offs approved the remediation designs. Those fixes are now built in
+    `server.py` (`Scheduler.wait_need`/`halt`, `ServerThread.stop(leave_input=)`), `submit.py`
+    and `cluster/__init__.py`.
+  - The rubric requires a human to approve before `hs-publish`.
+- **What this review verified:** the built fixes match the signed rulings, and normal paths are
+  unchanged.
+- No security or DB-lifecycle invariant is touched.

@@ -94,11 +94,10 @@ phases:
     uv run --python 3.11 pytest && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run
     --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 review:
-  last_reviewed_commit: f41da917eda37be9a7cc0edf5360fade0574f0f1
-  verdict: changes-requested
-  blocked_reason: 'review cycle 2: failure stop hangs on a busy input stream with
-    a database (N1); stream input named as FILE holds the stop (N2)'
-  cycle: 2
+  last_reviewed_commit: 33d2692adf3ac85fa5aa065aab23e2fdfd79d3ef
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — A cluster whose clients all fail says so and exits; one advertised address for every launch mode
 

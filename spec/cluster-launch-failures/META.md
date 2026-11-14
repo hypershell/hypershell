@@ -32,3 +32,10 @@
 - **Skill cause:** The template drifted from `review-rubric.md` § Mandatory human sign-off gate and `invariants.md` (both include `core/tls.py` and `cluster/remote|ssh.py`).
 - **Recommended fix:** Make the template name the rubric's list, or point to it rather than repeat it.
 - **Confidence:** high · **Effort:** small
+
+## F4 — The clean route's `set_phase.py` call leaves the earlier cycle's `blocked_reason` beside `verdict: approved`
+`origin=hs-review:step4 severity=low category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** Cycle 3 approved after two changes-requested cycles. The Step 4 clean-route command (`--verdict approved --reviewed-commit {sha} --touch`) left cycle 2's `blocked_reason` in `TECH.md`. Every other approved spec has `blocked_reason: ''`, so I cleared it with a second call (`--blocked-reason ""`).
+- **Skill cause:** The clean route doesn't say to clear the reason, and `set_phase.py --verdict approved` doesn't clear it either.
+- **Recommended fix:** Add `--blocked-reason ""` to the clean-route command in SKILL.md, or have `set_phase.py` clear `blocked_reason` when `--verdict approved` is set.
+- **Confidence:** high · **Effort:** small
