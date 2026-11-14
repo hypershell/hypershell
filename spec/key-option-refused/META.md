@@ -53,3 +53,10 @@ is skipped by the parser):
 - **Skill cause:** Promotion is all-or-nothing; there is no step to split off or re-seed the unpromoted part.
 - **Recommended fix:** When a promotion leaves part of a seed out, have the skill write that part as its own `issues/` seed (or a ROADMAP line) in the same commit.
 - **Confidence:** med · **Effort:** small
+
+## F3 — No guidance for a docs build in a `verify:` that leaves the worktree's environment alone
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** The docs `-W` build and the man-page proof needed their own environment (`UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs …`) and the sandbox off; the foreman had to supply that command in the brief. Earlier TECH files (e.g. `server-auth-variant-collision`) use `uv run --python 3.12 --group docs sphinx-build …`, which re-creates the worktree's `.venv` under 3.12 in the middle of a build.
+- **Skill cause:** Step 6 and the TECH template show only pytest and CLI-drive verify examples; nothing says how a docs build in `verify:` should run, so a planner copies the last TECH that did one.
+- **Recommended fix:** Add a docs-build `verify:` example to the TECH template (separate `UV_PROJECT_ENVIRONMENT` under `$TMPDIR`, output under `$TMPDIR`, a note that `sphinx_sitemap` needs the sandbox off), and a man-page grep recipe for cycles that prove a docs change through `-b man` (roff writes `\-k` and `\fB…\fP`, so a plain grep misses).
+- **Confidence:** high · **Effort:** small
