@@ -61,7 +61,8 @@ from cmdkit.config import Namespace, Configuration
 from hypershell.data.model import Task, serialize_tasks, deserialize_tasks, zone_name
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
-from hypershell.core.config import default, config, load_task_env, SSH_GROUPS, resolve_auth
+from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, resolve_auth, refuse_key_option,
+                                    AUTH_ENV)
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
@@ -1140,21 +1141,19 @@ DEFAULT_PORT: Final[int] = QueueConfig.port
 DEFAULT_AUTH: Final[str] = QueueConfig.auth
 """Default authentication key for server (**DO NOT USE THIS**)."""
 
-AUTH_ENV: Final[str] = 'HYPERSHELL_SERVER_AUTH'
-"""Environment variable read as the key default; `hs cluster` launchers hand the key over in it."""
-
 OMPI_ENV_LIST: Final[str] = 'OMPI_MCA_mca_base_env_list'
 """Open MPI parameter naming the environment variables `mpirun` forwards to remote ranks."""
 
 LAUNCH_ENV_HINT: Final[str] = (f'No key reached this client: {AUTH_ENV} is not set in its environment and '
-                               f'no -k was given. A client that \'hs cluster\' starts through a launcher '
-                               f'receives its key in {AUTH_ENV}, so the launcher most likely did not pass '
-                               f'the environment to the client (e.g., srun --export=NONE).')
+                               f'no server.auth is configured. A client that \'hs cluster\' starts through a '
+                               f'launcher receives its key in {AUTH_ENV}, so the launcher most likely did not '
+                               f'pass the environment to the client (e.g., srun --export=NONE).')
 """Likely cause named when a client without a key of its own fails to authenticate."""
 
 LAUNCH_ENV_TLS_HINT: Final[str] = (f'No key reached this client either: {AUTH_ENV} is not set in its environment '
-                                   f'and no -k was given. A client that \'hs cluster\' starts through a launcher '
-                                   f'receives its key in {AUTH_ENV} and may take its TLS settings from the '
+                                   f'and no server.auth is configured. A client that \'hs cluster\' starts '
+                                   f'through a launcher receives its key in {AUTH_ENV} and may take its TLS '
+                                   f'settings from the '
                                    f'environment too, so the launcher most likely did not pass the environment to '
                                    f'the client (e.g., srun --export=NONE), and the client got neither its key nor '
                                    f'the TLS settings that let it trust the server.')
@@ -1524,7 +1523,7 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
 APP_NAME = 'hs client'
 APP_USAGE = f"""\
 Usage:
-  hs client [-h] [-H ADDR] [-p PORT] [-k KEY] [-N THREADS] [-C CORES] [-M MEMORY]   
+  hs client [-h] [-H ADDR] [-p PORT] [-N THREADS] [-C CORES] [-M MEMORY]   
             [--template CMD] [-d DELAY] [-T TIMEOUT] [-W TIMEOUT] [-b SIZE] [-S WAIT] [-w WAIT]
             [--capture | [-o PATH] [-e PATH]] [--no-confirm] [--monitor] [--zone NAME]
             [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
@@ -1544,6 +1543,9 @@ APP_HELP = f"""\
   The number of executor threads (-N) represents parallel execution slots.
   Use -N0 for auto-detection (sets threads equal to available cores).
   With resource management, actual parallelism depends on task requirements.
+
+  The key to connect to the server is taken from the {AUTH_ENV} environment
+  variable or from server.auth in a configuration file, never from the command line.
   
 Options:
   -N, --num-threads   NUM   Number executor threads, 0=auto (default: {DEFAULT_NUM_THREADS}).
@@ -1553,7 +1555,6 @@ Options:
       --zone          NAME  Run only tasks of this zone (default: tasks without a zone).
   -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
-  -k, --auth          KEY   Cryptographic key to connect to server.
       --no-tls              Disable TLS for queue interface (not recommended).
       --tls-key             Path to TLS private key file (default: <auto>).
       --tls-cert            Path to TLS certificate file (default: <auto>).
@@ -1590,8 +1591,8 @@ class ClientApp(Application):
     port: int = config.server.port
     interface.add_argument('-p', '--port', type=int, default=port)
 
-    auth: Optional[str] = None  # Without -k, the key is config.server.auth (see run)
-    interface.add_argument('-k', '--auth', default=auth)
+    auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
+    refuse_key_option(interface)
 
     template: str = DEFAULT_TEMPLATE
     interface.add_argument('-t', '--template', default=template)
@@ -1661,11 +1662,9 @@ class ClientApp(Application):
 
     def run(self: ClientApp) -> None:
         """Run client."""
-        auth_given = self.auth is not None
-        if not auth_given:
-            self.auth = resolve_auth('server')
-        # The hints below name a missing key only when none came from -k, the environment or a configuration file.
-        no_key = not auth_given and AUTH_ENV not in os.environ and self.auth == DEFAULT_AUTH
+        self.auth = resolve_auth('server')
+        # The hints below name a missing key only when none came from the environment or a configuration file.
+        no_key = AUTH_ENV not in os.environ and self.auth == DEFAULT_AUTH
         try:
             self.check_args()
             self.enable_tls()

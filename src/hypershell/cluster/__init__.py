@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, IO, Optional, Iterable, Callable, Type, Tuple
+from typing import Dict, IO, Optional, Iterable, Callable, Type, Tuple, Final
 from types import TracebackType
 
 # Standard libs
@@ -20,7 +20,7 @@ from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
-from hypershell.core.config import config, blame, find_available_ports
+from hypershell.core.config import config, blame, find_available_ports, refuse_key_option
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes, parse_time
 from hypershell.core.logging import Logger
@@ -48,6 +48,10 @@ __all__ = ['run_local', 'run_cluster', 'run_ssh',
 
 # Initialize logger
 log = Logger.with_name(__name__)
+
+
+CLUSTER_KEY_ADVICE: Final[str] = 'hs cluster makes a new key for every run and hands it to its clients itself.'
+"""What the cluster's refusal of a key option says in place of the key's sources."""
 
 
 APP_NAME = 'hs cluster'
@@ -210,6 +214,9 @@ class ClusterApp(Application):
 
     port: int = config.server.port
     interface.add_argument('-p', '--port', default=port, type=int)
+
+    # The key option is registered only to be refused, since the cluster makes its own key for every run.
+    refuse_key_option(interface, advice=CLUSTER_KEY_ADVICE)
 
     capture: bool = False
     output_path: str = None

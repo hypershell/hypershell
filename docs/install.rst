@@ -470,7 +470,6 @@ subcommand accepts, e.g. ``--bind <tab>`` offering ``localhost`` or ``0.0.0.0``)
 * ``hs config get <tab>`` completes configuration keys.
 * ``hs config set OPT <tab>`` suggests the current value for ``OPT``.
 * ``hs client ... --host <tab>`` parses your host files for known hosts.
-* ``hs server ... --auth <tab>`` generates a secure random key.
 * ``hs server ... --port <tab>`` selects an available port on your machine.
 * ``hs list <tab>`` completes known task fields.
 * ``hs list ... -t <tab>`` completes tag keys present in the database.

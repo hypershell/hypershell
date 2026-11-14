@@ -83,7 +83,6 @@ def test_server_multiple_arguments() -> None:
 OPTION_PAIR: Final[Dict[str, str]] = {
     '-H': '-H/--bind', '--bind': '-H/--bind',
     '-p': '-p/--port', '--port': '-p/--port',
-    '-k': '-k/--auth', '--auth': '-k/--auth',
     '-b': '-b/--bundlesize', '--bundlesize': '-b/--bundlesize',
     '-w': '-w/--bundlewait', '--bundlewait': '-w/--bundlewait',
     '-Q': '-Q/--poll', '--poll': '-Q/--poll',

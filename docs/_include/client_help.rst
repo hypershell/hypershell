@@ -53,13 +53,6 @@ Options
 ``-p``, ``--port`` *NUM*
     Port number to connect with server (default: 50001).
 
-``-k``, ``--auth`` *KEY*
-    Cryptographic authentication key to connect with server (default: <not secure>).
-
-    The default *KEY* used by the server and client is not secure and only a place holder.
-    It is expected that the user choose a secure *KEY*. The `cluster` automatically generates
-    a secure one-time *KEY*.
-
 ``-d``, ``--delay-start`` *SEC*
     Delay time in seconds before connecting to server (default: 0).
 

@@ -62,7 +62,7 @@ from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.logging import Logger
-from hypershell.core.config import config, default, resolve_auth
+from hypershell.core.config import config, default, resolve_auth, refuse_key_option, AUTH_ENV, SERVER_KEY_SOURCES
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
@@ -1200,11 +1200,15 @@ DEFAULT_AUTH: Final[str] = QueueConfig.auth
 """Default authentication key for server (**DO NOT USE THIS**)."""
 
 
+SUBMIT_KEY_ADVICE: Final[str] = f'{SERVER_KEY_SOURCES} A task\'s own {{option}} goes after "--".'
+"""The submit refusal also says where an option meant for the task goes."""
+
+
 APP_NAME: Final[str] = 'hs submit'
 PAD_NAME: Final[str] = ' ' * len(APP_NAME)
 APP_USAGE: Final[str] = f"""\
 Usage:
-  {APP_NAME} [-h] [ARGS... | -f FILE | --from-json SPEC] [-q [-H ADDR] [-p NUM] [-k KEY] | --initdb]
+  {APP_NAME} [-h] [ARGS... | -f FILE | --from-json SPEC] [-q [-H ADDR] [-p NUM] | --initdb]
   {PAD_NAME} [-b NUM] [-w SEC] [-c NUM] [-m MEM] [-W SEC] [-g NUM] [--repeat | --update]
   {PAD_NAME} [--template CMD] [-t TAG...] [--zone NAME]
   {PAD_NAME} [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
@@ -1219,7 +1223,9 @@ APP_HELP: Final[str] = f"""\
   If a filepath is provided, read many tasks from the file instead.
   With --from-json, read tasks from a JSON file and expand named "{{key}}"
   fields in the template from each task object (keys also become tags).
-  Submit directly to a live queue with --queue.
+  Submit directly to a live queue with --queue. The key to connect to the server is
+  taken from the {AUTH_ENV} environment variable or from server.auth in a
+  configuration file, never from the command line.
 
 Arguments:
   ARGS...                    Command-line task arguments.
@@ -1229,10 +1235,9 @@ Options:
       --from-json    SPEC    Read tasks from a JSON file ("FILE[@path]").
       --repeat               Re-submit a known file's tasks again as a new source.
       --update               Submit only tasks not already present from a known file.
-  -q, --queue                Submit to live queue instead of database.
+  -q, --queue                Submit to live queue instead of database (key from {AUTH_ENV} or server.auth).
   -H, --host         ADDR    Hostname for server (default: {DEFAULT_HOST}). Used with --queue.
   -p, --port         NUM     Port number for server (default: {DEFAULT_PORT}). Used with --queue.
-  -k, --auth         KEY     Cryptographic key to connect to server. Used with --queue.
       --no-tls               Disable TLS for queue interface (not recommended).
       --tls-key              Path to TLS private key file (default: <auto>).
       --tls-cert             Path to TLS certificate file (default: <auto>).
@@ -1301,11 +1306,11 @@ class SubmitApp(Application):
     queue_mode: bool = False
     queue_server: str = config.server.host
     queue_port: int = config.server.port
-    queue_auth: Optional[str] = None  # Without -k, the key is resolve_auth('server') (see run)
+    queue_auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
     interface.add_argument('-q', '--queue', action='store_true', dest='queue_mode')
     interface.add_argument('-H', '--host', default=queue_server, dest='queue_server')
     interface.add_argument('-p', '--port', type=int, default=queue_port, dest='queue_port')
-    interface.add_argument('-k', '--auth', default=queue_auth, dest='queue_auth')
+    refuse_key_option(interface, advice=SUBMIT_KEY_ADVICE)
 
     tls: Optional[TLSConfig] = None
     tls_enabled: bool = True
@@ -1353,8 +1358,7 @@ class SubmitApp(Application):
         self.queue = None
         if self.queue_mode:
             self.enable_tls()
-            if self.queue_auth is None:
-                self.queue_auth = resolve_auth('server')
+            self.queue_auth = resolve_auth('server')
             self.queue = QueueConfig(host=self.queue_server, port=self.queue_port, auth=self.queue_auth, tls=self.tls)
             if self.queue_auth == DEFAULT_AUTH:
                 log.warning('Using default authentication key - do not use this in production!')

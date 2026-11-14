@@ -472,7 +472,6 @@ function _hs_submit() {
         '(-q --queue)'{-q,--queue}'[Submit to live queue instead of database]' \
         '(-H --host)'{-H,--host}'[Hostname for server (used with --queue)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (used with --queue)]:port:_hs_ports' \
-        '(-k --auth)'{-k,--auth}'[Cryptographic key to connect to server]:auth key:_hs_authkey' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
@@ -507,7 +506,6 @@ function _hs_client() {
         '(-w --bundlewait)'{-w,--bundlewait}'[Seconds to wait before flushing tasks]:seconds:(5 10 30 60 600)' \
         '(-H --host)'{-H,--host}'[Hostname for server (default: localhost)]:host:_hs_known_hosts' \
         '(-p --port)'{-p,--port}'[Port number for server (default: 50001)]:port:_hs_ports' \
-        '(-k --auth)'{-k,--auth}'[Cryptographic key to connect to server]:auth key:_hs_authkey' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \
@@ -554,7 +552,6 @@ function _hs_server() {
         '(-h --help)'{-h,--help}'[Show this message and exit]' \
         '(-H --bind)'{-H,--bind}'[Bind address (default: localhost)]:address:(localhost 127.0.0.1 0.0.0.0)' \
         '(-p --port)'{-p,--port}'[Port number (default: 50001)]:port:_hs_ports' \
-        '(-k --auth)'{-k,--auth}'[Cryptographic key to secure server]:auth key:_hs_authkey' \
         '(--no-tls)--no-tls[Disable TLS for queue interface (not recommended)]' \
         '(--no-tls)--tls-key[Path to TLS private key file]:key file:_files' \
         '(--no-tls)--tls-cert[Path to TLS certificate file]:cert file:_files' \

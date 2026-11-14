@@ -19,13 +19,6 @@ Options
     This is an arbitrary choice and simply must be an available port. The default option chosen
     here is typically available on most platforms and is not expected by any known major software.
 
-``-k``, ``--auth`` *KEY*
-    Cryptographic authentication key to connect with server (default: <not secure>).
-
-    The default *KEY* used by the server and client is not secure and only a place holder.
-    It is expected that the user choose a secure *KEY*. The `cluster` automatically generates
-    a secure one-time *KEY*.
-
 ``-b``, ``--bundlesize`` *NUM*
     Size of task bundle (default: 1).
 

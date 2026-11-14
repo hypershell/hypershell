@@ -17,3 +17,8 @@ With ``--autoscaling``, the server schedules forever and launches nothing. Relay
 key advertise the zones they serve and each zone's ``min``, ``max`` and ``init`` clients, and the server
 publishes how many clients each relay should run in each zone, for the relay to launch with its own
 launcher (see :ref:`autoscaling with relay sites <cli_server_sites>`).
+
+The server takes its key from the ``HYPERSHELL_SERVER_AUTH`` environment variable or from
+``server.auth`` in a configuration file (or its ``auth_env`` and ``auth_eval`` forms), never from
+the command line. It refuses to start with the built-in placeholder key, or with a key shorter
+than 16 characters or outside ``[A-Za-z0-9._+/=-]``.

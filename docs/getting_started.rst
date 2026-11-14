@@ -129,15 +129,22 @@ stand up the *server* on one machine and then connect to that server using a *cl
 a different environment.
 
 Start the server with a bind address of ``0.0.0.0`` to allow remote connections.
-The server schedules tasks on a distributed queue. It is recommended that you protect your instance
-with a private *key* (``-k/--auth``).
+The server schedules tasks on a distributed queue, protected by a private *key* that every client
+must hold. Give the key in the ``HYPERSHELL_SERVER_AUTH`` environment variable, as below, or as
+``server.auth`` in a configuration file. ``export`` is a shell builtin, so the key is on no process's
+command line, where every user on the host could see it.
+
+.. versionchanged:: 2.9.0
+   A key on the command line is refused; the server and its clients take it from the environment
+   or a configuration file.
 
 .. admonition:: Server
     :class: note
 
     .. code-block:: shell
 
-        hs server --forever --bind '0.0.0.0' --auth '<AUTHKEY>'
+        export HYPERSHELL_SERVER_AUTH='<AUTHKEY>'
+        hs server --forever --bind '0.0.0.0'
 
 
 Connect to the running server from a different host (even from a different platform, e.g., Windows).
@@ -149,7 +156,8 @@ will each pull tasks off the queue asynchronously, balancing the load.
 
     .. code-block:: shell
 
-        hs client --host '<HOSTNAME>' --auth '<AUTHKEY>' --capture
+        export HYPERSHELL_SERVER_AUTH='<AUTHKEY>'
+        hs client --host '<HOSTNAME>' --capture
 
 |
 

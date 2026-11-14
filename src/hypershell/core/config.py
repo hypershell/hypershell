@@ -12,6 +12,7 @@ from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Di
 import os
 import re
 import sys
+import argparse
 import shutil
 import tomlkit
 import logging
@@ -24,6 +25,7 @@ from datetime import datetime
 # External libs
 from cmdkit.config import Namespace, Configuration, Environ, ConfigurationError
 from cmdkit.app import exit_status
+from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.platform import path, home, default_path
@@ -33,7 +35,8 @@ from hypershell.core.sys import PATH_SEP
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
-    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS',
+    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV',
+    'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
     'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
     'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
@@ -386,6 +389,51 @@ def resolve_auth(*section: str, base: Configuration = None) -> str:
     if value is None:
         raise ConfigurationError(f'"{key}" not found in configuration')
     return str(value)
+
+
+AUTH_ENV: Final[str] = 'HYPERSHELL_SERVER_AUTH'
+"""Environment variable that gives `server.auth`; `hs cluster` launchers hand the key over in it."""
+
+KEY_OPTION_STRINGS: Final[tuple[str, ...]] = ('-k', '--auth')
+"""Option strings registered on the commands only to be refused (see :func:`refuse_key_option`)."""
+
+KEY_OPTION_REFUSAL: Final[str] = ('{option} is not accepted: '
+                                   'a key on a command line is visible to every user on the host.')
+"""First sentence of the refusal, naming only the option string the parser matched."""
+
+SERVER_KEY_SOURCES: Final[str] = (f'Give the key in the {AUTH_ENV} environment variable '
+                                  f'or as server.auth in a configuration file.')
+"""Where the commands that read `server.auth` take their key from instead."""
+
+
+class RefuseKeyOption(argparse.Action):
+    """Refuse a key option the moment the parser meets it, saying where the key goes instead.
+
+    The message is built from the matched option string and fixed text only. The value is never
+    read, so no message, and no log record of it, can hold the key. Since the parser stops at
+    the refusal, nothing else on the command line is reported either.
+    """
+
+    def __init__(self: RefuseKeyOption, option_strings: List[str], dest: str, advice: str = SERVER_KEY_SOURCES,
+                 **options) -> None:
+        super().__init__(option_strings, dest, **options)
+        self.advice = advice
+
+    def __call__(self: RefuseKeyOption, parser: argparse.ArgumentParser, namespace: argparse.Namespace,
+                 values: Optional[str], option_string: Optional[str] = None) -> None:
+        option = option_string or self.option_strings[0]
+        raise ArgumentError(' '.join([KEY_OPTION_REFUSAL.format(option=option), self.advice.format(option=option)]))
+
+
+def refuse_key_option(interface: Interface, advice: str = SERVER_KEY_SOURCES) -> None:
+    """Register :const:`KEY_OPTION_STRINGS` on `interface`, refused with `advice` (see :class:`RefuseKeyOption`).
+
+    The option takes an optional value, so that a bare option, or one followed by another option,
+    meets the same refusal; and it leaves nothing on the parsed namespace. An `{option}` field in
+    `advice` is the option string given.
+    """
+    interface.add_argument(*KEY_OPTION_STRINGS, action=RefuseKeyOption, advice=advice, nargs='?',
+                           default=argparse.SUPPRESS, dest='key_option')
 
 
 DEFAULT_DATABASE_NAME: Final[str] = 'Main.db' if platform.system() in ['Windows', 'Darwin'] else 'main.db'

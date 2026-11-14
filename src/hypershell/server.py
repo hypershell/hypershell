@@ -64,7 +64,8 @@ from sqlalchemy import func
 
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH, resolve_auth
+from hypershell.core.config import (config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH,
+                                    AUTH_ENV, resolve_auth, refuse_key_option)
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_bytes, parse_time
 from hypershell.core.logging import Logger
@@ -1585,7 +1586,7 @@ APP_NAME = 'hs server'
 APP_USAGE = f"""\
 Usage:
   hs server [-h] [FILE | --forever | --restart] [-b NUM] [-w SEC] [-r NUM [--eager]]
-            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-k KEY] [-Q NUM]
+            [-c NUM] [-m MEM] [-W SEC] [-H ADDR] [-p PORT] [-Q NUM]
             [--no-db | --initdb] [--print | -f PATH] [--no-confirm]
             [--no-tls | [--tls-ca PATH] [--tls-cert PATH] [--tls-key PATH]]
             [--autoscaling [MODE] [-F VALUE] [-P SEC]]
@@ -1608,6 +1609,9 @@ APP_HELP = f"""\
   Tasks are bundled and clients pull them in these bundles. However, by default the bundle
   size is one, meaning that at small scales there is greater responsiveness.
 
+  The key that secures the server is taken from the {AUTH_ENV} environment
+  variable or from server.auth in a configuration file, never from the command line.
+
   With --autoscaling the server schedules forever and launches nothing. Relays connected with
   its key advertise the zones they serve and each zone's min/max/init clients; the server plans
   each zone's clients over the live relay sites (autoscale.distribution: spread or fill) and
@@ -1619,7 +1623,6 @@ Arguments:
 Options:
   -H, --bind            ADDR  Bind address (default: {DEFAULT_BIND}).
   -p, --port            NUM   Port number (default: {DEFAULT_PORT}).
-  -k, --auth            KEY   Cryptographic key to secure server.
       --no-tls                Disable TLS for queue interface (not recommended).
       --tls-key               Path to TLS private key file (default: <auto>).
       --tls-cert              Path to TLS certificate file (default: <auto>).
@@ -1696,8 +1699,8 @@ class ServerApp(Application):
     port: int = config.server.port
     interface.add_argument('-p', '--port', type=int, default=port)
 
-    auth: Optional[str] = None  # Without -k, the key is resolve_auth('server') (see run)
-    interface.add_argument('-k', '--auth', default=auth)
+    auth: Optional[str] = None  # The key is resolve_auth('server') (see run)
+    refuse_key_option(interface)
 
     in_memory: bool = False
     auto_initdb: bool = False
@@ -1736,8 +1739,7 @@ class ServerApp(Application):
         """Run server."""
         if self.special_options():
             return
-        if self.auth is None:
-            self.auth = resolve_auth('server')
+        self.auth = resolve_auth('server')
         self.check_args()
         self.enable_tls()
         ensuredb()

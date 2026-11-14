@@ -3,10 +3,10 @@ slug: key-option-refused
 title: Refuse the queue key on a command line
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/key-option-refused
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -33,7 +33,7 @@ phases:
 - id: P2
   name: Refuse -k/--auth on hs client, server and submit (and hs cluster, hs relay);
     help, hints, docs, completions; refusal tests and sweep
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -47,7 +47,8 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
+  attempts: 1
   verify: uv run pytest -v tests/test_key_option.py tests/test_server.py tests/test_client.py
     tests/test_submit.py tests/test_auth_variants.py tests/test_completions.py tests/test_cluster_launch.py
     tests/test_relay_launch.py && .agents/factory/bin/temp_site.sh sh -c "HYPERSHELL_LOGGING_FILE=enabled
@@ -157,30 +158,32 @@ the `--ssh-args='-k …'` form and the `[ssh] args`/`[relay] launcher_args` keys
 `hs cluster`, `--au`/`--aut` become ambiguous with `--autoscaling`, as they already are on
 `hs server`.
 
-- [ ] `core/config.py`: `KEY_OPTION_STRINGS`, `RefuseKeyOption(argparse.Action)` raising
+- [x] `core/config.py`: `KEY_OPTION_STRINGS`, `RefuseKeyOption(argparse.Action)` raising
       `cmdkit.cli.ArgumentError` with a message built from the matched option string (never
       `values`), and `refuse_key_option(interface, hint='')` registering it with `nargs='?'`,
       `default=argparse.SUPPRESS` (PLAN §2.1). One name for the variable: reuse the existing
       `AUTH_ENV` value without an import cycle (move the constant to `core/config.py` and keep
       `hypershell.client.AUTH_ENV` importable, or spell it once there).
-- [ ] `client.py`, `server.py`, `submit.py`: replace the `-k/--auth` `add_argument` with
+- [x] `client.py`, `server.py`, `submit.py`: replace the `-k/--auth` `add_argument` with
       `refuse_key_option(interface)` (`SubmitApp` with the `--` hint); read the key with
       `resolve_auth('server')` unconditionally in `run()`; client `no_key` drops `auth_given`.
-- [ ] `cluster/__init__.py` (`ClusterApp`) and `relay/__init__.py` (`RelayApp`): add
-      `refuse_key_option(interface)`; no usage or help line (the option is not offered), no other
-      change (plan-gate ruling 3).
-- [ ] Usage and help text of the three commands (R5): no `[-k KEY]`, no `-k, --auth` line; the
+- [x] `cluster/__init__.py` (`ClusterApp`) and `relay/__init__.py` (`RelayApp`): add
+      `refuse_key_option(interface, advice=…)`; no usage or help line (the option is not offered),
+      no other change (plan-gate ruling 3). Each refusal names that command's own key source, since
+      `HYPERSHELL_SERVER_AUTH`/`server.auth` would mislead there: `hs cluster` says it makes a new
+      key for every run; `hs relay` names `relay.upstream.auth` and `HYPERSHELL_RELAY_UPSTREAM_AUTH`.
+- [x] Usage and help text of the three commands (R5): no `[-k KEY]`, no `-k, --auth` line; the
       submit `-q` line and the client/server help prose say where the key comes from. Client hints
       at `client.py:1149-1160` (and the comment at `:1667`) name `server.auth` instead of `-k`.
-- [ ] Docs (R6): `docs/_include/{client,server,submit}_{usage,help}.rst`; `getting_started.rst`
+- [x] Docs (R6): `docs/_include/{client,server,submit}_{usage,help}.rst`; `getting_started.rst`
       (key from the environment or a configuration file; never on a command line), `security.rst`
       (:174, :187, :524), `install.rst` (:473 bullet goes), `_include/templates.rst:213`,
       `_include/security_alt.rst:13`. Each behavioural passage gets `.. versionchanged:: 2.9.0`,
       worded without the option's spelling (the man page must not hold it).
-- [ ] Completions (R7): Bash `share/bash_completion.d/hs` (submit, client, server blocks) and zsh
+- [x] Completions (R7): Bash `share/bash_completion.d/hs` (submit, client, server blocks) and zsh
       `share/zsh/site-functions/_hs` (:475, :510, :557); keep `_hs_authkey` for `config set`.
-- [ ] `tests/test_server.py` `OPTION_PAIR`: drop the `-k`/`--auth` rows.
-- [ ] New `tests/test_key_option.py` (PLAN §2.4): unit refusal table per app (every form from
+- [x] `tests/test_server.py` `OPTION_PAIR`: drop the `-k`/`--auth` rows.
+- [x] New `tests/test_key_option.py` (PLAN §2.4): unit refusal table per app (every form from
       research 01, plus `--` and `--template=-kfoo` parsing as before); integration per command ×
       the four GOAL forms with a DEVEL log file (exit 2, both sources named, key in no output or
       site file, no database file); R3 for `hs submit -- echo -k X` and a task file; the R5–R8
