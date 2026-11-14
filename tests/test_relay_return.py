@@ -714,3 +714,151 @@ def test_group_check_example_renders_for_postgresql(site_session: Engine) -> Non
     example, = [sql for sql in rendered if 'attempt >=' in sql]
     assert 'min(task.id)' not in example
     assert 'min(CAST(task.id AS TEXT))' in example
+
+
+# --- Rows that change between the read and the write of an eviction revert or a dispatch stamp ----
+
+
+class Interleaved:
+    """Runs `action` once, just before the first UPDATE of `task` an engine executes; records that it ran.
+
+    The action uses its own connections. On SQLite the write's transaction begins only at that UPDATE,
+    so the action's commit lands between the write's read and its write, as another thread's would.
+    """
+
+    def __init__(self, engine: Engine, action: Any) -> None:
+        self.engine = engine
+        self.action = action
+        self.fired = False
+
+    def before(self, conn, cursor, statement, parameters, context, executemany) -> None:  # noqa: unused
+        if not self.fired and statement.lstrip().upper().startswith('UPDATE TASK'):
+            self.fired = True
+            self.action()
+
+    def __enter__(self) -> Interleaved:
+        from sqlalchemy import event
+        event.listen(self.engine, 'before_cursor_execute', self.before)
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        from sqlalchemy import event
+        event.remove(self.engine, 'before_cursor_execute', self.before)
+
+
+def committed(engine: Engine, statement: Any) -> None:
+    """Commit one change to the task table on its own connection; it must match the one row."""
+    with engine.begin() as conn:
+        if conn.execute(statement).rowcount != 1:
+            pytest.fail(f'The other writer matched no row: {statement}')
+
+
+def result_written(engine: Engine, task_id: str, client: Tuple[str, str] = LEAF) -> Any:
+    """The Receiver's write of a successful result for an in-flight task, as one statement."""
+    table = Task.__table__
+    now = datetime.now().astimezone()
+    return lambda: committed(engine, table.update()
+                             .where(table.c.id == task_id, table.c.completion_time.is_(None))
+                             .values(client_id=client[0], client_host=client[1], command=f'run {task_id}',
+                                     start_time=now, completion_time=now, exit_status=0, waited=0, duration=0))
+
+
+def cancelled_now(engine: Engine, task_id: str) -> Any:
+    """A cancel of the task, as `hs update --cancel` writes it."""
+    from hypershell.data.model import CANCEL_STATUS
+    table = Task.__table__
+    now = datetime.now().astimezone()
+    return lambda: committed(engine, table.update().where(table.c.id == task_id)
+                             .values(schedule_time=now, completion_time=now, exit_status=CANCEL_STATUS))
+
+
+def deleted_now(engine: Engine, task_id: str) -> Any:
+    """A delete of the task's row."""
+    table = Task.__table__
+    return lambda: committed(engine, table.delete().where(table.c.id == task_id))
+
+
+def received_in_order(engine: Engine, *args: str) -> List[str]:
+    """Insert upstream records into the relay database with increasing submit times; return their ids."""
+    start = datetime.now().astimezone()
+    records = [upstream_record(arg) for arg in args]
+    for n, record in enumerate(records):
+        record['submit_time'] = (start + timedelta(seconds=n)).isoformat()
+    return store.insert_received(engine, records, identity=IDENTITY)
+
+
+@mark.unit
+def test_eviction_revert_skips_a_row_collected_meanwhile(site_session: Engine) -> None:
+    """A relay-local server evicts a site client as one of its tasks completes and leaves for the outbox.
+
+    The completed row is gone by the time the revert writes it: the revert must skip it, revert the
+    client's other task, and return (on a relay, raising here ends the heart monitor and the relay).
+    """
+    done, running = received_in_order(site_session, 'echo done', 'echo running')
+    assert [task.id for task in Task.next(limit=2, group=0)] == [done, running]  # The relay-local scheduler.
+    assert Task.confirm_all([done, running], LEAF[0], LEAF[1], strict=False) == [done, running]
+
+    def completed_and_collected() -> None:
+        result_written(site_session, done)()
+        assert store.collect_results(site_session) == 1
+
+    with Interleaved(site_session, completed_and_collected) as interleaved:
+        Task.revert_orphaned(LEAF[0])
+    assert interleaved.fired
+    assert rows(site_session, 'SELECT id, schedule_time, client_id FROM task') == [(running, None, None)]
+    assert rows(site_session, 'SELECT id, state FROM relay_result') == [(done, RESULT_PENDING)]
+
+
+@mark.unit
+def test_eviction_revert_keeps_a_result_committed_meanwhile(upstream_db: Engine) -> None:
+    """A server evicts a client while the Receiver commits the result of one of its tasks.
+
+    The result must be kept and the task not run again; the client's other task is reverted.
+    """
+    client = (str(uuid()), 'client-host')
+    done, running = (record['id'] for record in dispatch_upstream('echo done', 'echo running'))
+    confirm_upstream([done, running], client=client)
+
+    with Interleaved(upstream_db, result_written(upstream_db, done, client=client)) as interleaved:
+        Task.revert_orphaned(client[0])
+    assert interleaved.fired
+    kept = upstream_row(done)
+    assert kept['completion_time'] is not None and kept['exit_status'] == 0
+    assert kept['client_id'] == client[0]
+    assert upstream_row(running)['schedule_time'] is None
+    assert [task.id for task in Task.next(limit=2, group=0)] == [running]
+
+
+@mark.unit
+def test_dispatch_skips_a_row_deleted_meanwhile(site_session: Engine) -> None:
+    """A row the scheduler selected is deleted before its dispatch stamp is written.
+
+    The scheduler must skip it and dispatch the other rows it selected, stamped, in order.
+    """
+    first, second, third = received_in_order(site_session, 'echo 1', 'echo 2', 'echo 3')
+
+    with Interleaved(site_session, deleted_now(site_session, second)) as interleaved:
+        sent = Task.next(limit=3, group=0)
+    assert interleaved.fired
+    assert [task.id for task in sent] == [first, third]
+    assert all(task.schedule_time is not None for task in sent)
+    stamped = rows(site_session, 'SELECT id FROM task WHERE schedule_time IS NOT NULL AND server_id IS NOT NULL '
+                                 'ORDER BY submit_time')
+    assert stamped == [(first, ), (third, )]
+
+
+@mark.unit
+def test_dispatch_skips_a_row_cancelled_meanwhile(site_session: Engine) -> None:
+    """A row the scheduler selected is cancelled before its dispatch stamp is written.
+
+    The scheduler must not dispatch it, and the row must stay cancelled, with no server stamped on it.
+    """
+    from hypershell.data.model import CANCEL_STATUS
+    first, second, third = received_in_order(site_session, 'echo 1', 'echo 2', 'echo 3')
+
+    with Interleaved(site_session, cancelled_now(site_session, second)) as interleaved:
+        sent = Task.next(limit=3, group=0)
+    assert interleaved.fired
+    assert [task.id for task in sent] == [first, third]
+    assert rows(site_session, f"SELECT exit_status, server_id FROM task WHERE id = '{second}'") == \
+        [(CANCEL_STATUS, None)]

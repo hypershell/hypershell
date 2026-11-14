@@ -1,0 +1,42 @@
+# Regression tests that must fail on 2ffb5cc (see red_check.sh). `pg:` needs HS_TEST_POSTGRES.
+# Each fails there for the defect: by an assertion, or by the defect's own error (` raises=NAME`).
+# A test that could fail there only on a missing API, or through a harness that cannot see the base
+# build's write, is not listed; spec/relay-hardening/TECH.md (P1, remediation) names where the red
+# for its defect lives.
+
+# P1: the eviction revert (R1) and the dispatch stamp (R2).
+tests/test_relay_return.py::test_eviction_revert_skips_a_row_collected_meanwhile raises=StaleDataError
+tests/test_relay_return.py::test_eviction_revert_keeps_a_result_committed_meanwhile
+tests/test_relay_return.py::test_dispatch_skips_a_row_deleted_meanwhile raises=StaleDataError
+tests/test_relay_return.py::test_dispatch_skips_a_row_cancelled_meanwhile
+tests/test_contended_recovery.py::test_contended_revert_keeps_a_result_landed_meanwhile
+tests/test_contended_recovery.py::test_contended_revert_leaves_a_row_confirmed_to_another_client
+tests/test_contended_recovery.py::test_contended_revert_skips_a_row_deleted_meanwhile raises=StaleDataError
+pg:tests/test_contended_write.py::test_contended_orphan_revert_keeps_result
+pg:tests/test_contended_write.py::test_contended_orphan_revert_keeps_cancel
+pg:tests/test_contended_write.py::test_contended_orphan_revert_skips_deleted_row
+pg:tests/test_contended_write.py::test_contended_dispatch_skips_cancelled_row
+pg:tests/test_contended_write.py::test_contended_dispatch_skips_deleted_row
+
+# P2: eviction aged by the server's receive time (R7).
+tests/test_server_fsm.py::TestHeartMonitor::test_beat_from_a_clock_behind_is_not_evicted
+tests/test_server_fsm.py::TestHeartMonitor::test_silent_client_with_a_clock_ahead_is_evicted
+tests/test_relay_roster.py::test_relay_with_a_clock_behind_is_not_evicted
+
+# P3: a restarted upstream's stale proxy id is a lost link (R3).
+tests/test_relay_link.py::test_first_call_after_an_upstream_restart_is_a_lost_link[puller] raises=RemoteError
+tests/test_relay_link.py::test_first_call_after_an_upstream_restart_is_a_lost_link[heartbeat] raises=RemoteError
+tests/test_relay_link.py::test_first_call_after_an_upstream_restart_is_a_lost_link[returner] raises=RemoteError
+tests/test_relay_link.py::test_first_call_after_an_upstream_restart_is_a_lost_link[handback] raises=RemoteError
+
+# P4: a TLS mismatch with the upstream server fails fast at first connection, both directions (R4).
+tests/test_relay_workload.py::test_relay_exits_at_once_when_its_tls_setting_is_not_its_upstream_servers[tls-relay-cleartext-upstream]
+tests/test_relay_workload.py::test_relay_exits_at_once_when_its_tls_setting_is_not_its_upstream_servers[cleartext-relay-tls-upstream]
+
+# P5: a zone with no site client takes what is still staged for it at an upstream shutdown (R5).
+tests/test_relay_connector.py::test_a_zone_without_site_clients_takes_what_is_staged_for_it_at_a_shutdown[database]
+tests/test_relay_connector.py::test_a_zone_without_site_clients_takes_what_is_staged_for_it_at_a_shutdown[no-database]
+
+# P7: the end-of-run tail (R8): the server's shutdown signal finishes dispatch without waiting out a heartbeat
+# read (fix ii).
+tests/test_server_fsm.py::TestHeartMonitor::test_signal_from_the_server_finishes_dispatch_at_once

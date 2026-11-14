@@ -1,0 +1,91 @@
+# hardening_drive restart: launches (epoch, label, pid, zone, launch number, HYPERSHELL_ZONE, client --zone)
+launch t=1794635513 site=relay pid=61445 word=default n=1 env=default client=-
+launch t=1794635513 site=relay pid=61446 word=default n=2 env=default client=-
+launch t=1794635513 site=relay pid=61448 word=default n=3 env=default client=-
+launch t=1794635523 site=relay pid=61628 word=default n=4 env=default client=-
+launch t=1794635524 site=relay pid=61641 word=default n=5 env=default client=-
+launch t=1794635525 site=relay pid=61659 word=default n=6 env=default client=-
+launch t=1794635535 site=relay pid=61806 word=default n=7 env=default client=-
+launch t=1794635536 site=relay pid=61812 word=default n=8 env=default client=-
+launch t=1794635537 site=relay pid=61825 word=default n=9 env=default client=-
+launch t=1794635538 site=relay pid=61841 word=default n=10 env=default client=-
+launch t=1794635548 site=relay pid=61969 word=default n=11 env=default client=-
+# server-1.log: start, restarts seen, shutdown, exit
+2026-11-14 05:51:52.188 <host>    DEBUG [01a1d89c-b8bb-7341-a9e1-7f09feb5e8c1] [hypershell.server] Started
+2026-11-14 05:51:52.188 <host>    DEBUG [01a1d89c-b8bb-7341-a9e1-7f09feb5e8c1] [hypershell.server] Started (confirm)
+2026-11-14 05:51:52.188 <host>    DEBUG [01a1d89c-b8bb-7341-a9e1-7f09feb5e8c1] [hypershell.server] Started (receiver)
+2026-11-14 05:51:52.188 <host>    DEBUG [01a1d89c-b8bb-7341-a9e1-7f09feb5e8c1] [hypershell.server] Started (heartbeat)
+2026-11-14 05:51:52.188 <host>    DEBUG [01a1d89c-b8bb-7341-a9e1-7f09feb5e8c1] [hypershell.server] Started (scheduler)
+2026-11-14 05:51:52.197 <host>     INFO [01a1d89c-b8bb-7341-a9e1-7f09feb5e8c1] [hypershell.server] Reverted 0 previously interrupted tasks
+# server-2.log: start, restarts seen, shutdown, exit
+2026-11-14 05:52:02.109 <host>    DEBUG [01a1d89c-df71-7342-993b-fa4d3032f1e7] [hypershell.server] Started
+2026-11-14 05:52:02.109 <host>    DEBUG [01a1d89c-df71-7342-993b-fa4d3032f1e7] [hypershell.server] Started (confirm)
+2026-11-14 05:52:02.110 <host>    DEBUG [01a1d89c-df71-7342-993b-fa4d3032f1e7] [hypershell.server] Started (receiver)
+2026-11-14 05:52:02.110 <host>    DEBUG [01a1d89c-df71-7342-993b-fa4d3032f1e7] [hypershell.server] Started (scheduler)
+2026-11-14 05:52:02.109 <host>    DEBUG [01a1d89c-df71-7342-993b-fa4d3032f1e7] [hypershell.server] Started (heartbeat)
+2026-11-14 05:52:02.120 <host>     INFO [01a1d89c-df71-7342-993b-fa4d3032f1e7] [hypershell.server] Reverted 11 previously interrupted tasks
+# server-3.log: start, restarts seen, shutdown, exit
+2026-11-14 05:52:17.669 <host>    DEBUG [01a1d89d-1c45-76d0-8853-9d129ec6b865] [hypershell.server] Started
+2026-11-14 05:52:17.670 <host>    DEBUG [01a1d89d-1c45-76d0-8853-9d129ec6b865] [hypershell.server] Started (confirm)
+2026-11-14 05:52:17.670 <host>    DEBUG [01a1d89d-1c45-76d0-8853-9d129ec6b865] [hypershell.server] Started (receiver)
+2026-11-14 05:52:17.670 <host>    DEBUG [01a1d89d-1c45-76d0-8853-9d129ec6b865] [hypershell.server] Started (heartbeat)
+2026-11-14 05:52:17.670 <host>    DEBUG [01a1d89d-1c45-76d0-8853-9d129ec6b865] [hypershell.server] Started (scheduler)
+2026-11-14 05:52:17.680 <host>     INFO [01a1d89d-1c45-76d0-8853-9d129ec6b865] [hypershell.server] Reverted 15 previously interrupted tasks
+2026-11-14 05:52:29.323 <host>    DEBUG [01a1d89d-1c45-76d0-8853-9d129ec6b865] [hypershell.server] Signaling clients (1 connected)
+2026-11-14 05:52:29.372 <host>    DEBUG [01a1d89d-1c45-76d0-8853-9d129ec6b865] [hypershell.server] Done
+# relay: identity, link, TLS, zones at the shutdown, site clients, final beat, exit
+2026-11-14 05:51:53.458 <host>  WARNING [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.relay] TLS to upstream server is disabled - this is not recommended for production!
+2026-11-14 05:51:53.466 <host>     INFO [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.relay] Upstream identity 1f9fa5fd-e9da-5a96-ad99-3b7ab3aa1aca for zone default at site drive
+2026-11-14 05:51:53.477 <host>     INFO [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.core.reconnect] Connected to upstream server 127.0.0.1:52059
+2026-11-14 05:51:53.580 <host>     INFO [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.relay] Relay-local server ready on 127.0.0.1:52062
+2026-11-14 05:51:53.891 <host>  WARNING [01a1d89c-bf52-7c23-92ae-13194d32d285] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:51:53.891 <host>  WARNING [01a1d89c-bf52-7181-96f0-95f60a58fdb0] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:51:53.891 <host>  WARNING [01a1d89c-bf54-78d3-ba24-b5a6013111ee] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:01.354 <host>  WARNING [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.core.reconnect] Lost connection to upstream server 127.0.0.1:52059 (EOFError: ) - reconnecting (the site keeps running)
+2026-11-14 05:52:03.281 <host>  WARNING [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.core.reconnect] Reconnected to upstream server 127.0.0.1:52059 after 3 seconds (2 attempts)
+2026-11-14 05:52:04.008 <host>  WARNING [01a1d89c-e6eb-79d2-82aa-929b50f73f40] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:04.990 <host>  WARNING [01a1d89c-eac1-77d3-a835-69c8818f2293] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:06.056 <host>  WARNING [01a1d89c-eee5-72a2-96bc-4551445371f3] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:13.377 <host>  WARNING [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.core.reconnect] Lost connection to upstream server 127.0.0.1:52059 (EOFError: ) - reconnecting (the site keeps running)
+2026-11-14 05:52:16.163 <host>  WARNING [01a1d89d-1668-7742-9acd-96054543c42d] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:17.194 <host>  WARNING [01a1d89d-1a6b-7361-a371-b04d7e6ac6a3] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:18.205 <host>  WARNING [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.core.reconnect] Reconnected to upstream server 127.0.0.1:52059 after 6 seconds (3 attempts)
+2026-11-14 05:52:18.233 <host>  WARNING [01a1d89d-1e73-7db2-9c0b-b0a225b1bb68] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:19.255 <host>  WARNING [01a1d89d-2277-79b3-872e-67ededfdc1d5] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:28.346 <host>  WARNING [01a1d89d-45e9-7560-8f96-af3258c8e03e] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:52:28.659 <host>     INFO [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.relay.upstream] Upstream server is shutting down - no more upstream requests
+2026-11-14 05:52:29.368 <host>    DEBUG [01a1d89c-bda5-7773-b4cd-b441e56a07e9] [hypershell.relay.upstream] Upstream heartbeat - final (1f9fa5fd-e9da-5a96-ad99-3b7ab3aa1aca)
+# hardening_drive restart: facts
+mode=restart
+source_server=<repo>/src/hypershell
+source_relay=<repo>/src/hypershell
+total=60
+server_1_started_at=1794635511
+relay_started_at=1794635513.123
+restart_1_at=1794635520
+restart_1_completed=18
+server_2_started_at=1794635521
+restart_2_at=1794635533
+restart_2_completed=36
+server_3_started_at=1794635537
+server_exit=0
+server_exited_at=1794635549.740
+relay_exit=0
+relay_exited_at=1794635549.780
+servers=3
+# hardening_drive restart: judgment
+PASS         three upstream server starts (3)
+PASS         restart 1 came mid-run (18 of 60 complete)
+PASS         restart 2 came mid-run (36 of 60 complete)
+PASS         relay exited 0 by itself (exit 0)
+PASS         server exited 0 by itself (exit 0)
+PASS         the relay never exited 5 (exit 0)
+PASS         the relay logged no traceback
+PASS         the relay logged no CRITICAL line
+PASS         the relay lost its link and carried on (2 lost-link warnings)
+NOTE         0 lost-link lines name a restarted upstream (unknown proxy id)
+PASS         60 tasks submitted
+PASS         every task completed upstream with exit status 0
+PASS         every task ran at the site
+NOTE         15 tasks ran more than once (an upstream restart puts back what was in flight)
+PASS

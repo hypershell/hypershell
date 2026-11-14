@@ -85,8 +85,9 @@ class Lost:
 class Contention:
     """Wraps the session's `execute`: records each statement and makes chosen UPDATEs match nothing."""
 
-    def __init__(self, execute: Any) -> None:
+    def __init__(self, execute: Any, keys: Tuple[str, ...] = ('r_id', )) -> None:
         self.execute = execute
+        self.keys = keys
         self.losing: Dict[str, int] = {}
         self.meanwhile: Dict[str, Callable[[], None]] = {}
         self.executed: List[Tuple[str, Optional[str], bool]] = []
@@ -104,7 +105,7 @@ class Contention:
     def __call__(self, statement: Any, params: Any = None, *args: Any, **kwargs: Any) -> Any:
         kind = 'UPDATE' if getattr(statement, 'is_update', False) else (
                'SELECT' if getattr(statement, 'is_select', False) else 'OTHER')
-        task_id = params.get('r_id') if isinstance(params, dict) else None
+        task_id = next((params[key] for key in self.keys if key in params), None) if isinstance(params, dict) else None
         lost = kind == 'UPDATE' and self.losing.get(task_id, 0) > 0
         self.executed.append((kind, task_id, lost))
         if lost:
@@ -126,6 +127,14 @@ class Contention:
 def contention(task_db, monkeypatch) -> Contention:
     """Route the session's direct `execute` calls through a `Contention`."""
     wrapper = Contention(Session.execute)
+    monkeypatch.setitem(vars(Session), 'execute', wrapper)
+    return wrapper
+
+
+@fixture
+def stamp_contention(task_db, monkeypatch) -> Contention:
+    """As `contention`, also keyed on the dispatch stamp's id bind, so the stamp can be made to miss."""
+    wrapper = Contention(Session.execute, keys=('r_id', 'd_id'))
     monkeypatch.setitem(vars(Session), 'execute', wrapper)
     return wrapper
 
@@ -628,4 +637,165 @@ def test_uncontended_staged_revert_costs_one_update_per_row(contention, logs) ->
     assert contention.kinds() == ['UPDATE', 'UPDATE', 'UPDATE', 'SELECT']
     assert [task_id for _, task_id, _ in contention.executed] == [ids[0], ids[1], ids[2], ids[2]]
     assert row(ids[2])['exit_status'] == CANCEL_STATUS
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+
+
+# --- The eviction revert: a row that changes while the revert waits ---------------------------------
+
+
+CLIENT_B = (uuid(), 'client-b')
+
+
+def completed_as(engine: Engine, task_id: str, client: Tuple[str, str] = CLIENT_A) -> Callable[[], None]:
+    """The Receiver's write of a result for the task, committed from another connection."""
+    now = datetime.now().astimezone()
+    table = Task.__table__
+    return committed(engine, update(table).where(table.c.id == task_id, table.c.completion_time.is_(None))
+                     .values(client_id=client[0], client_host=client[1], command='echo contended',
+                             start_time=now, completion_time=now, exit_status=0, waited=0, duration=0))
+
+
+def confirmed_to(engine: Engine, task_id: str, client: Tuple[str, str]) -> Callable[[], None]:
+    """A confirmation of the task to another client, committed from another connection."""
+    table = Task.__table__
+    return committed(engine, update(table).where(table.c.id == task_id)
+                     .values(client_id=client[0], client_host=client[1]))
+
+
+@mark.unit
+def test_contended_revert_keeps_a_result_landed_meanwhile(task_db, contention, logs) -> None:
+    """An eviction revert that waited on the result of its row keeps the result and settles the row."""
+    first, second = (copy.id for copy in dispatched_and_confirmed(2))
+    contention.clear()
+    contention.lose(first, 1, meanwhile=completed_as(task_db, first))
+
+    Task.revert_orphaned(CLIENT_A[0])
+
+    data = row(first)
+    assert data['completion_time'] is not None and data['exit_status'] == 0
+    assert data['client_id'] == CLIENT_A[0]
+    assert row(second)['schedule_time'] is None
+    assert contention.kinds(first) == ['UPDATE', 'SELECT']
+    settled = [message for message in messages(logs, logging.DEBUG, 'already complete') if f'({first})' in message]
+    assert len(settled) == 1, settled
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_contended_revert_leaves_a_row_confirmed_to_another_client(task_db, contention, logs) -> None:
+    """An eviction revert that waited on a confirmation of its row to another client leaves it with that client."""
+    first, second = (copy.id for copy in dispatched_and_confirmed(2))
+    contention.clear()
+    contention.lose(first, 1, meanwhile=confirmed_to(task_db, first, CLIENT_B))
+
+    Task.revert_orphaned(CLIENT_A[0])
+
+    data = row(first)
+    assert in_flight(data) and (data['client_id'], data['client_host']) == CLIENT_B
+    assert row(second)['schedule_time'] is None
+    assert contention.kinds(first) == ['UPDATE', 'SELECT']
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_contended_revert_skips_a_row_deleted_meanwhile(task_db, contention, logs) -> None:
+    """An eviction revert that waited on a delete of its row skips it, without an error, and reverts the rest."""
+    first, second = (copy.id for copy in dispatched_and_confirmed(2))
+    contention.clear()
+    contention.lose(first, 1, meanwhile=deleted(task_db, first))
+
+    Task.revert_orphaned(CLIENT_A[0])
+
+    with task_db.connect() as conn:
+        assert conn.execute(text('SELECT count(*) FROM task')).scalar() == 1
+    assert row(second)['schedule_time'] is None
+    assert contention.kinds(first) == ['UPDATE', 'SELECT']
+    assert messages(logs, logging.WARNING) == []
+
+
+# --- The dispatch stamp ------------------------------------------------------------------------------
+
+
+def stamped(data: Dict[str, Any]) -> bool:
+    """The row carries this server's dispatch stamp."""
+    return data['schedule_time'] is not None and data['server_id'] is not None
+
+
+@mark.unit
+def test_contended_dispatch_lands_on_rerun(stamp_contention, logs) -> None:
+    """A dispatch stamp that missed a row the first time re-runs and stamps it, in the same chunk."""
+    ids = [submit(f'echo {n}') for n in range(3)]
+    stamp_contention.lose(ids[1], 1)
+
+    assert [task.id for task in Task.next(limit=3)] == ids
+
+    assert all(stamped(row(task_id)) for task_id in ids)
+    assert stamp_contention.kinds(ids[1]) == ['UPDATE', 'SELECT', 'UPDATE']
+    assert len(reruns(logs, 'dispatch', ids[1])) == 1
+    assert reruns(logs, 'dispatch', ids[1])[0].endswith(f'(attempt 2 of {attempts()})')
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_contended_dispatch_exhausted_leaves_row_unscheduled(stamp_contention, logs) -> None:
+    """At the bound, the row is left unscheduled and reported, the rest is dispatched, and the next round takes it."""
+    ids = [submit(f'echo {n}') for n in range(3)]
+    stamp_contention.lose(ids[1], ALWAYS)
+
+    assert [task.id for task in Task.next(limit=3)] == [ids[0], ids[2]]
+
+    assert row(ids[1])['schedule_time'] is None and row(ids[1])['server_id'] is None
+    assert stamp_contention.kinds(ids[1]) == ['UPDATE', 'SELECT'] * attempts()
+    warnings = messages(logs, logging.WARNING)
+    assert len(warnings) == 1, warnings
+    assert f'({ids[1]})' in warnings[0] and 'dispatch' in warnings[0] and 'left unscheduled' in warnings[0]
+
+    stamp_contention.losing.clear()
+    assert [task.id for task in Task.next(limit=3)] == [ids[1]]
+    assert stamped(row(ids[1]))
+
+
+@mark.unit
+def test_contended_dispatch_skips_a_row_cancelled_meanwhile(task_db, stamp_contention, logs) -> None:
+    """A dispatch stamp that waited on a cancel of its row skips it, and the row stays cancelled."""
+    ids = [submit(f'echo {n}') for n in range(2)]
+    stamp_contention.lose(ids[0], 1, meanwhile=cancelled(task_db, ids[0]))
+
+    assert [task.id for task in Task.next(limit=2)] == [ids[1]]
+
+    data = row(ids[0])
+    assert data['exit_status'] == CANCEL_STATUS and data['completion_time'] is not None
+    assert data['server_id'] is None
+    assert stamp_contention.kinds(ids[0]) == ['UPDATE', 'SELECT']
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_contended_dispatch_skips_a_row_deleted_meanwhile(task_db, stamp_contention, logs) -> None:
+    """A dispatch stamp that waited on a delete of its row skips it without an error."""
+    ids = [submit(f'echo {n}') for n in range(2)]
+    stamp_contention.lose(ids[0], 1, meanwhile=deleted(task_db, ids[0]))
+
+    assert [task.id for task in Task.next(limit=2)] == [ids[1]]
+
+    with task_db.connect() as conn:
+        assert conn.execute(text('SELECT count(*) FROM task')).scalar() == 1
+    assert stamped(row(ids[1]))
+    assert stamp_contention.kinds(ids[0]) == ['UPDATE', 'SELECT']
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_uncontended_dispatch_costs_one_update_per_row(stamp_contention, logs) -> None:
+    """A dispatch stamp that matches first time is one UPDATE per row, with no re-check and no re-run."""
+    ids = [submit(f'echo {n}') for n in range(3)]
+
+    assert [task.id for task in Task.next(limit=3)] == ids
+
+    assert stamp_contention.kinds() == ['UPDATE'] * len(ids)
+    assert [task_id for _, task_id, _ in stamp_contention.executed] == ids
+    assert all(stamped(row(task_id)) for task_id in ids)
     assert messages(logs, logging.DEBUG, 'Re-running contended') == []

@@ -709,12 +709,17 @@ class HeartMonitor(StateMachine):
     that advertises its zone is recorded there, overwriting that identity's previous record, and
     the record is dropped when the identity is evicted or finishes. A relay identity that
     advertises no zone (a relay of an earlier release) takes no part in the topology.
+
+    A client is aged by the server's own monotonic clock, from when its last heartbeat was received,
+    never by the time the client stamped on it, so a client that keeps beating is never evicted
+    however far its clock is from the server's.
     """
 
     in_memory: bool
     no_confirm: bool
     queue: QueueServer
     beats: Dict[str, Heartbeat]
+    received: Dict[str, float]
     rosters: Dict[str, Dict[str, RosterEntry]]
     sites: Optional[SiteRegistry]
     ignored_sites: set
@@ -726,6 +731,7 @@ class HeartMonitor(StateMachine):
     scheduler_done: bool = False  # set by parent thread when scheduling is over
     should_signal: bool = False  # set by parent thread to signal clients
     latest_heartbeat: Heartbeat = None
+    latest_received: float = None
 
     state = HeartbeatState.START
     states = HeartbeatState
@@ -736,6 +742,7 @@ class HeartMonitor(StateMachine):
         self.queue = queue
         self.last_check = datetime.now().astimezone()
         self.beats = {}
+        self.received = {}
         self.rosters = {}
         self.sites = sites
         self.ignored_sites = set()
@@ -769,6 +776,7 @@ class HeartMonitor(StateMachine):
         """Get and stash heartbeat from clients."""
         try:
             hb_data = self.queue.heartbeat.get(timeout=DEFAULT_REMOTE_TIMEOUT)
+            received = time.monotonic()
             self.queue.heartbeat.task_done()
             self.startup_phase = False
             hb = Heartbeat.unpack_or_none(hb_data)
@@ -776,6 +784,7 @@ class HeartMonitor(StateMachine):
                 return HeartbeatState.FINAL
             else:
                 self.latest_heartbeat = hb
+                self.latest_received = received
                 return HeartbeatState.UPDATE
         except QueueEmpty:
             return HeartbeatState.SWITCH
@@ -800,6 +809,7 @@ class HeartMonitor(StateMachine):
                     except Client.NotFound:
                         Client.add(new_client)
             self.beats[hb.uuid] = hb
+            self.received[hb.uuid] = self.latest_received
             if hb.roster is not None:
                 self.update_roster(hb)
             if self.sites is not None and hb.site is not None:
@@ -809,6 +819,7 @@ class HeartMonitor(StateMachine):
             log.trace(f'Client disconnected ({hb.host}: {hb.uuid})')
             if hb.uuid in self.beats:
                 self.beats.pop(hb.uuid)
+                self.received.pop(hb.uuid, None)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone())
             if hb.site is not None or hb.uuid in self.rosters:
@@ -912,14 +923,23 @@ class HeartMonitor(StateMachine):
             return HeartbeatState.NEXT
 
     def check_clients(self: HeartMonitor) -> HeartbeatState:
-        """Check last heartbeat on all clients and evict if necessary."""
+        """Evict every client whose last heartbeat arrived more than the eviction period ago.
+
+        Ages are taken by the server's monotonic clock against when each last heartbeat was received.
+        A client with no receive time is never evicted.
+        """
         log.debug(f'Checking clients ({len(self.beats)} connected)')
+        now = time.monotonic()
         for uuid in list(self.beats):
             hb = self.beats.get(uuid)
-            age = self.last_check - hb.time
+            received = self.received.get(uuid)
+            if received is None:
+                continue
+            age = timedelta(seconds=now - received)
             if age > self.evict_after:
                 log.warning(f'Evicting client ({hb.host}: {uuid})')
                 self.beats.pop(uuid)
+                self.received.pop(uuid, None)
                 if not self.in_memory:
                     Client.update(hb.uuid, disconnected_at=datetime.now().astimezone(), evicted=True)
                 if not self.in_memory and not self.no_confirm:
@@ -962,7 +982,14 @@ class HeartMonitorThread(Thread):
         self.machine.run()
 
     def signal_clients(self: HeartMonitorThread) -> None:
-        """Set signal flag to tell clients to shut down."""
+        """Tell clients to shut down once they have drained what is staged for them.
+
+        Dispatch finishes at once, so a request is told to shut down without waiting for the heart
+        monitor's next turn (which can wait out a heartbeat read); the heart monitor then logs the
+        signal and the clients it was sent to.
+        """
+        log.debug('Finishing dispatch - clients drain what is staged, then are told to shut down')
+        self.machine.queue.dispatcher.finish()
         self.machine.should_signal = True
 
     def signal_scheduler_done(self: HeartMonitorThread) -> None:
@@ -1215,6 +1242,7 @@ class ServerThread(Thread):
         self.heartmonitor.signal_clients()
         self.heartmonitor.join()
         self.revert_staged()
+        self.revert_handed_back()
 
     def revert_staged(self: ServerThread) -> None:
         """Revert rows still staged once no client is left to take them.
@@ -1226,6 +1254,20 @@ class ServerThread(Thread):
             reverted = Task.revert_staged(ids)
             kept = f' ({len(ids) - reverted} left as completed, cancelled or deleted)' if reverted < len(ids) else ''
             log.info(f'Reverted {reverted} staged tasks never delivered{kept}')
+
+    def revert_handed_back(self: ServerThread) -> None:
+        """Requeue what relays handed back after scheduling ended, each only while it is still that relay's.
+
+        The scheduler requeues a hand-back on its next pass; one that arrives once scheduling is over
+        (a relay handing back what it took at the shutdown) is requeued here as the server stops, as
+        staged rows are, so it waits for the next run rather than staying assigned to the relay.
+        """
+        if self.in_memory:
+            return
+        for identity, assignments in self.queue.dispatcher.take_handbacks():
+            reverted = len(Task.revert_handed_back(identity, assignments))
+            kept = f'; {len(assignments) - reverted} already settled' if reverted < len(assignments) else ''
+            log.info(f'Requeued {reverted} tasks handed back by relay ({identity}{kept})')
 
     def wait_receiver(self: ServerThread) -> None:
         """Wait for receiver to stop."""

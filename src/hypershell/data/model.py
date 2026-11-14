@@ -19,7 +19,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, select, bindparam, or_, cast
+from sqlalchemy import Column, Index, func, text, update, select, bindparam, or_, cast, inspect
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
@@ -796,18 +796,30 @@ class Task(Entity):
              attempts: int = 1,
              eager: bool = False,
              zone: str = None) -> List[Task]:
-        """Select tasks for scheduling including failed tasks for re-scheduling (in one `zone` if given)."""
+        """Select tasks for scheduling including failed tasks for re-scheduling (in one `zone` if given).
+
+        The selected rows are stamped for dispatch (server and schedule time), each by its own
+        UPDATE that matches only while the row is still unscheduled, so a row removed, cancelled or
+        otherwise scheduled since it was selected is skipped, never raised on; one that still
+        qualifies but was missed under contention is re-run as for any task-row write, and left
+        unscheduled for a later round if it never lands. Returns the rows stamped, in the order
+        selected; they read their stamp back from the database.
+        """
         group = group if group is not None else cls.current_group().value
         if eager:
             tasks = cls.__next_eager(attempts=attempts, limit=limit, group=group, zone=zone)
         else:
             tasks = cls.__next_not_eager(attempts, limit, group=group, zone=zone)
-        for task in tasks:
-            task.server_id = INSTANCE
-            task.server_host = HOSTNAME
-            task.schedule_time = datetime.now().astimezone()
-        Session.commit()
-        return tasks
+        if not tasks:
+            Session.commit()
+            return tasks
+        # NOTE: the identity, not `task.id`: a commit on the retry path expires the objects, and
+        # loading one whose row has gone would raise.
+        ids = [inspect(task).identity[0] for task in tasks]
+        stamp = {'server_id': INSTANCE, 'server_host': HOSTNAME, 'schedule_time': datetime.now().astimezone()}
+        landed = set(cls.__write_rows(ids, stamp, 'dispatch', 'task left unscheduled',
+                                      unscheduled=True, prefix='d_'))
+        return [task for task, id in zip(tasks, ids) if id in landed]
 
     @classmethod
     def __next_eager(cls: Type[Task], attempts: int, limit: int, group: int = None, zone: str = None) -> List[Task]:
@@ -913,29 +925,51 @@ class Task(Entity):
 
     @classmethod
     @cache
-    def __row_statements(cls: Type[Task], names: Tuple[str, ...], pending: bool = False) -> Tuple[Any, Any]:
+    def __row_statements(cls: Type[Task], names: Tuple[str, ...], condition: Optional[str] = None,
+                         prefix: str = 'r_') -> Tuple[Any, Any]:
         """The UPDATE of one row by `id` for a set of columns, and the SELECT that looks the row up.
 
-        With `pending`, the UPDATE matches the row only while it has no `completion_time`, and the
-        SELECT reads that `completion_time`, so a write that matched nothing can tell a row that is
-        gone from one that is complete from one that is still pending (missed under contention);
-        otherwise the SELECT reads the row's `id`. Built once per column set and condition, with
-        binds typed from the table and prefixed names, as for the result statements.
+        The `condition` says which rows the UPDATE may still match, and what the SELECT reads:
+
+        - None: any row with that `id`; the SELECT reads the row's `id`.
+        - 'pending': a row with no `completion_time`; the SELECT reads that `completion_time`, so a
+          write that matched nothing can tell a row that is gone from one that is complete from one
+          that is still pending (missed under contention).
+        - 'held': a row in flight with one client (the `held_by` bind): scheduled, with no
+          `completion_time` and that `client_id`; the SELECT reads the `completion_time` of a row
+          scheduled with that client, so a row gone or held by another client reads as nothing.
+        - 'unscheduled': a row with no `schedule_time`; the SELECT reads that `schedule_time`.
+
+        Built once per column set, condition and prefix, with binds typed from the table and named
+        with `prefix`, as for the result statements.
         """
         table = cls.__table__
-        by_id = table.c.id == bindparam('r_id', type_=table.c.id.type)
-        match = (by_id, table.c.completion_time.is_(None)) if pending else (by_id, )
+        by_id = table.c.id == bindparam(f'{prefix}id', type_=table.c.id.type)
+        if condition is None:
+            match, lookup, read = (by_id, ), (by_id, ), table.c.id
+        elif condition == 'pending':
+            match, lookup, read = (by_id, table.c.completion_time.is_(None)), (by_id, ), table.c.completion_time
+        elif condition == 'held':
+            held = (table.c.client_id == bindparam(f'{prefix}held_by', type_=table.c.client_id.type),
+                    table.c.schedule_time.isnot(None))
+            match, lookup, read = (by_id, *held, table.c.completion_time.is_(None)), (by_id, *held), \
+                table.c.completion_time
+        elif condition == 'unscheduled':
+            match, lookup, read = (by_id, table.c.schedule_time.is_(None)), (by_id, ), table.c.schedule_time
+        else:
+            raise ValueError(f'Unknown task row condition: {condition!r}')
         write = (
             update(table)
             .where(*match)
-            .values({name: bindparam(f'r_{name}', type_=table.c[name].type) for name in names})
+            .values({name: bindparam(f'{prefix}{name}', type_=table.c[name].type) for name in names})
         )
-        exists = select(table.c.completion_time if pending else table.c.id).where(by_id)
+        exists = select(read).where(*lookup)
         return write, exists
 
     @classmethod
     def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any], path: str, consequence: str,
-                     pending: bool = False, strict: bool = False) -> List[str]:
+                     pending: bool = False, strict: bool = False, held_by: Optional[str] = None,
+                     unscheduled: bool = False, prefix: str = 'r_') -> List[str]:
         """Write the same `values` onto each task in `ids` by `id`, committing once; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
@@ -950,26 +984,47 @@ class Task(Entity):
         error, whether it was so before the write or became so in the transaction the write waited
         on. A row that is gone is skipped the same way, unless `strict` is given, when it raises
         `StaleDataError` as for an unconditional write.
+
+        With `held_by`, the write requires that the row is still in flight with that client
+        (scheduled, not complete, that `client_id`). A row that has completed is settled as for
+        `pending`; a row that is gone, no longer scheduled or held by another client is skipped.
+        With `unscheduled`, the write requires that the row has no `schedule_time`; a row that is
+        gone or already scheduled (or cancelled, which stamps one) is skipped. Neither raises on a
+        row that no longer qualifies, and both re-run only a row that still does.
+
+        The binds are named with `prefix`, so statements of different paths can be told apart.
         """
-        write, exists = cls.__row_statements(tuple(values), pending)
-        params = {f'r_{name}': value for name, value in values.items()}
+        condition = 'held' if held_by is not None else 'unscheduled' if unscheduled else 'pending' if pending else None
+        write, exists = cls.__row_statements(tuple(values), condition, prefix)
+        key = f'{prefix}id'
+        params = {f'{prefix}{name}': value for name, value in values.items()}
+        lookup = {f'{prefix}held_by': held_by} if held_by is not None else {}
         attempts = 1 + CONTENDED_RERUNS
         landed = []
         try:
             for id in ids:
                 for attempt in range(1, attempts + 1):
                     # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per row.
-                    if Session.execute(write, {**params, 'r_id': id}).rowcount == 1:
+                    if Session.execute(write, {**params, **lookup, key: id}).rowcount == 1:
                         landed.append(id)
                         break
-                    found = Session.execute(exists, {'r_id': id}).first()
+                    found = Session.execute(exists, {**lookup, key: id}).first()
                     if found is None:
-                        if pending and not strict:
+                        if condition == 'held':
+                            log.debug(f'Ignored {path} for task ({id}) - task gone or no longer held by client')
+                            break
+                        if condition == 'unscheduled':
+                            log.debug(f'Ignored {path} for task ({id}) - task gone')
+                            break
+                        if condition == 'pending' and not strict:
                             break
                         raise StaleDataError(f'UPDATE statement on table \'{cls.__table__.name}\' expected to '
                                              f'update 1 row(s); 0 were matched (task {id})')
-                    if pending and found[0] is not None:
+                    if condition in ('pending', 'held') and found[0] is not None:
                         log.debug(f'Ignored {path} for task ({id}) - task already complete')
+                        break
+                    if condition == 'unscheduled' and found[0] is not None:
+                        log.debug(f'Ignored {path} for task ({id}) - task already scheduled')
                         break
                     if attempt < attempts:
                         log.debug(f'Re-running contended {path} write for task ({id}) '
@@ -1209,7 +1264,7 @@ class Task(Entity):
 
     @classmethod
     def select_orphaned(cls: Type[Task], client_id: str, limit: int) -> List[Task]:
-        """Select tasks that were orphaned from an evicted client."""
+        """Select tasks that were orphaned from an evicted client (in flight with that client)."""
         return (
             cls.query()
             .order_by(cls.schedule_time)
@@ -1222,11 +1277,27 @@ class Task(Entity):
 
     @classmethod
     def revert_orphaned(cls: Type[Task], client_id: str) -> None:
-        """Revert orphaned tasks from an evicted client to unscheduled state."""
-        # A pass that reverts nothing ends the loop, so a row left in flight cannot be selected forever.
+        """Revert orphaned tasks from an evicted client to unscheduled state.
+
+        Each row is one conditional UPDATE by `id` that matches only while the row is still in
+        flight with that client (as `select_orphaned` reads it), so the check and the write are one
+        atomic statement: a result that landed since the read is kept and the task is not run
+        again, and a row removed since the read (a relay-local server's completed rows leave for
+        the relay's outbox) is skipped, never raised on. A row that matched nothing is re-run only
+        while a fresh read finds it still in flight with that client, at most `CONTENDED_RERUNS`
+        times, and is otherwise left in flight with a warning.
+        """
+        # Each row is tried once: a row left in flight at the bound would be selected again forever.
+        tried = set()
         while tasks := cls.select_orphaned(client_id, 100):
-            if not cls.revert_all([task.id for task in tasks]):
+            ids = [task.id for task in tasks if task.id not in tried]
+            if not ids:
                 break
+            tried.update(ids)
+            reverted = cls.__write_rows(ids, dict.fromkeys(cls.revert_columns), 'revert', 'task left in flight',
+                                        held_by=client_id)
+            for id in reverted:
+                log.trace(f'Reverted previous task ({id})')
 
     @classmethod
     def latest_server(cls: Type[Task]) -> Optional[str]:

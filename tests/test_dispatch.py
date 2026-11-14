@@ -28,7 +28,7 @@ from pytest import mark, fixture
 from hypershell.core import dispatch
 from hypershell.core.dispatch import Dispatcher, PROTOCOL
 from hypershell.core.topology import TOPOLOGY_PROTOCOL, MAX_HANDBACK_TASKS, handback_text, read_handback_reply
-from hypershell.data.model import Task, DEFAULT_ZONE_ID, serialize_tasks
+from hypershell.data.model import Task, DEFAULT_ZONE_ID, serialize_tasks, zone_id
 
 
 def ask(dispatcher: Dispatcher, client: str = 'c1', size: Optional[int] = None,
@@ -331,6 +331,29 @@ STAMP = '2026-11-13 10:15:42.123456-05:00'
 def held(count: int) -> List[tuple]:
     """`count` (task id, schedule time) assignments a relay holds."""
     return [(str(uuid.uuid4()), STAMP) for _ in range(count)]
+
+
+@mark.unit
+def test_withdraw_takes_only_the_named_rows_still_staged_in_the_zone() -> None:
+    """Named rows still staged leave the pool, in order for the rest; a row already cut for a client, one in
+    another zone and one never staged are not returned, and a zone with no pool returns nothing."""
+    dispatcher = Dispatcher()
+    gpu = zone_id('gpu')
+    rows = [(str(uuid.uuid4()), '{}') for _ in range(4)]
+    dispatcher.stage(gpu, rows)
+    other = str(uuid.uuid4())
+    dispatcher.stage(DEFAULT_ZONE_ID, [(other, '{}')])
+    cut = json.loads(dispatcher.request(json.dumps({'protocol': PROTOCOL, 'client': 'a', 'zone': 'gpu',
+                                                    'size': 1, 'wait': 0})))['tasks']
+    assert len(cut) == 1
+    named = [rows[0][0], rows[2][0], other, str(uuid.uuid4())]
+    assert dispatcher.withdraw(gpu, named) == [rows[2][0]]
+    assert dispatcher.withdraw(gpu, named) == []
+    assert dispatcher.staged(gpu) == 2 and dispatcher.staged(DEFAULT_ZONE_ID) == 1
+    assert dispatcher.withdraw(str(uuid.uuid4()), named) == []
+    remaining = json.loads(dispatcher.request(json.dumps({'protocol': PROTOCOL, 'client': 'a', 'zone': 'gpu',
+                                                          'size': 5, 'wait': 0})))['tasks']
+    assert len(remaining) == 2
 
 
 @mark.unit

@@ -1,0 +1,54 @@
+# hardening_drive zones-nodb: launches (epoch, label, pid, zone, launch number, HYPERSHELL_ZONE, client --zone)
+launch t=1794635600 site=relay pid=62640 word=default n=2 env=default client=-
+launch t=1794635600 site=relay pid=62641 word=default n=2 env=default client=-
+launch t=1794635600 site=relay pid=62642 word=gpu n=1 env=gpu client=gpu
+hold t=1794635600 word=gpu n=1
+# server-1.log: start, restarts seen, shutdown, exit
+2026-11-14 05:53:19.532 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.server] Started
+2026-11-14 05:53:19.532 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.submit] Started (tasks.in)
+2026-11-14 05:53:19.532 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.server] Started (heartbeat)
+2026-11-14 05:53:19.532 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.server] Started (receiver)
+2026-11-14 05:53:19.532 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.server] Started (confirm)
+2026-11-14 05:53:19.540 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.submit] Started (loader)
+2026-11-14 05:53:19.540 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.submit] Started (committer: no database)
+2026-11-14 05:53:20.906 <host>    ERROR [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.server] Relay registered (<host>: 1f016785-4e10-5630-8c38-718d7c081f0c, site drive) with a server running without a database: tasks it holds are not put back if it fails
+2026-11-14 05:53:20.907 <host>    ERROR [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.server] Relay registered (<host>: 5c2fb22e-5b08-5fe0-a502-d883a336abde, site drive) with a server running without a database: tasks it holds are not put back if it fails
+2026-11-14 05:53:23.640 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.submit] Done
+2026-11-14 05:53:23.946 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.server] Signaling clients (2 connected)
+2026-11-14 05:53:26.256 <host>    DEBUG [01a1d89e-0deb-79c1-9d4f-8c4e8e74bb54] [hypershell.server] Done
+# relay: identity, link, TLS, zones at the shutdown, site clients, final beat, exit
+2026-11-14 05:53:20.770 <host>  WARNING [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.relay] TLS to upstream server is disabled - this is not recommended for production!
+2026-11-14 05:53:20.777 <host>     INFO [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.relay] Upstream identity 1f016785-4e10-5630-8c38-718d7c081f0c for zone default at site drive
+2026-11-14 05:53:20.777 <host>     INFO [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.relay] Upstream identity 5c2fb22e-5b08-5fe0-a502-d883a336abde for zone gpu at site drive
+2026-11-14 05:53:20.786 <host>     INFO [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.core.reconnect] Connected to upstream server 127.0.0.1:53045
+2026-11-14 05:53:20.895 <host>     INFO [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.relay] Relay-local server ready on 127.0.0.1:53066
+2026-11-14 05:53:21.181 <host>  WARNING [01a1d89e-1455-7b53-bef6-2ce58b0096f6] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:53:21.181 <host>  WARNING [01a1d89e-1455-74f2-a607-0bab9ad1e3bf] [hypershell.client] TLS is disabled - this is not recommended for production!
+2026-11-14 05:53:24.619 <host>    DEBUG [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.relay.upstream] Upstream server is shutting down - no more requests for zone default (1f016785-4e10-5630-8c38-718d7c081f0c)
+2026-11-14 05:53:24.620 <host>     INFO [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.relay.upstream] Upstream server is shutting down - no more upstream requests
+2026-11-14 05:53:26.255 <host>    DEBUG [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.relay.upstream] Upstream heartbeat - final (1f016785-4e10-5630-8c38-718d7c081f0c, 5c2fb22e-5b08-5fe0-a502-d883a336abde)
+2026-11-14 05:53:31.260 <host>  WARNING [01a1d89e-12c7-78f1-8a93-6e364e83c50c] [hypershell.relay] Ended 1 site clients still running after the site finished
+# hardening_drive zones-nodb: facts
+mode=zones-nodb
+source_server=<repo>/src/hypershell
+source_relay=<repo>/src/hypershell
+total=8
+server_1_started_at=1794635599
+relay_started_at=1794635600.462
+server_exit=0
+server_exited_at=1794635606.572
+relay_exit=0
+relay_exited_at=1794635611.735
+servers=1
+# hardening_drive zones-nodb: judgment
+PASS         relay exited 0 by itself (exit 0)
+PASS         server exited 0 by itself (exit 0)
+PASS         the relay logged no traceback
+PASS         the relay logged no CRITICAL line
+PASS         8 tasks ran at the site (8)
+PASS         each ran once
+PASS         none ran in the gpu zone
+PASS         the default zone heard the shutdown, then the relay ended pulling for every zone
+PASS         the gpu zone held nothing
+NOTE         gpu launches held for the whole run; 0 released (at the relay`s end)
+PASS

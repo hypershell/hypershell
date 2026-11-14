@@ -10,7 +10,8 @@ chunks; the upstream scheduler requeues them for another client. An upstream ser
 or one that refuses it, leaves them held (the server's eviction of the relay puts them back, as
 before); a hand-back lost with the link stays due and goes through once the link is back. A chunk the
 relay-local scheduler had loaded but not yet staged when retirement stopped it is handed back too, and
-nothing is handed back until the scheduler has stopped.
+nothing is handed back until the scheduler has stopped. A hand-back that reaches the upstream server once
+its scheduler has ended is requeued as the server stops.
 
 End to end, an upstream server autoscaling with relay sites and two relays at one site, each a
 process: the older relay, holding a task its site client stopped asking for, reads that the newer one
@@ -49,7 +50,7 @@ import hypershell.relay as relay_module
 from hypershell.core import queue as queue_module
 from hypershell.core.queue import QueueServer, QueueClient
 from hypershell.core.reconnect import LinkDown, as_link
-from hypershell.core.topology import handback_reply, read_handback
+from hypershell.core.topology import handback_reply, read_handback, handback_text, read_handback_reply
 from hypershell.core.uuid import uuid
 from hypershell.data.model import Task
 from hypershell.relay import RelayThread, store
@@ -124,6 +125,26 @@ def test_drop_handed_back_deletes_only_unstarted_tasks_and_their_stamps(relay_db
         stamps = set(conn.execute(RelayTask.__table__.select().with_only_columns(RelayTask.__table__.c.id)).scalars())
     assert tasks == stamps == {ids[1], ids[2]}
     assert store.count_held(relay_db) == 2 and store.unstarted(relay_db) == []
+
+
+@mark.unit
+def test_take_back_deletes_only_what_no_site_client_can_have_received_and_keeps_the_stamps(relay_db: Engine) -> None:
+    """An unscheduled task, and a scheduled one taken out of the staging pool (named as staged), go, each returned
+    with its stamp as received; a delivered one not named as staged, a completed one and one not held stay. The
+    stamps of the tasks taken stay, so they are still held, until `drop_stamps` deletes them."""
+    records = dispatched('echo a', 'echo b', 'echo c', 'echo d')
+    ids = store.insert_received(relay_db, records, identity=RELAY)
+    deliver(relay_db, ids[1:3])
+    complete(relay_db, [ids[3]])
+    stamps = {record['id']: record['schedule_time'] for record in records}
+    taken = store.take_back(relay_db, [ids[0], ids[1], ids[2], ids[3], str(uuid())], staged=[ids[2]])
+    assert taken == [(ids[0], stamps[ids[0]]), (ids[2], stamps[ids[2]])]
+    assert store.take_back(relay_db, ids, staged=ids) == [(ids[1], stamps[ids[1]])]
+    assert store.count_backlog(relay_db) == 0 and store.count_held(relay_db) == 4
+    assert store.drop_stamps(relay_db, ids) == 3
+    with relay_db.connect() as conn:
+        held = set(conn.execute(RelayTask.__table__.select().with_only_columns(RelayTask.__table__.c.id)).scalars())
+    assert held == {ids[3]}
 
 
 # --- The hand-back --------------------------------------------------------------------------------------
@@ -220,6 +241,22 @@ def test_hand_back_refused_leaves_the_tasks_to_eviction(held, caplog) -> None:
     assert refused.startswith('Could not hand back 3 tasks no site client started (Hand-back refused (')
     assert len(store.unstarted(held.relay_db)) == 3 and store.count_held(held.relay_db) == 5
     assert held.server.dispatcher.take_handbacks() == []
+
+
+@mark.integration
+def test_a_hand_back_after_scheduling_ended_is_requeued_as_the_server_stops(held, caplog) -> None:
+    """A hand-back that arrives once the server's scheduler has ended (a zone handing back what it took at the
+    shutdown) has no scheduler pass to requeue it: the server requeues it as it stops, as it reverts staged
+    rows, each only while it is still the relay's. The tasks the relay's site clients took stay its own."""
+    unstarted = held.ids[2:]
+    assert read_handback_reply(held.client.dispatcher.handback(
+        handback_text(RELAY, [(task_id, held.stamps[task_id]) for task_id in unstarted]))) == 3
+    with caplog.at_level('INFO'):
+        ServerThread.revert_handed_back(SimpleNamespace(queue=held.server, in_memory=False))
+    assert messages(caplog, 'Requeued') == [f'Requeued 3 tasks handed back by relay ({RELAY})']
+    assert held.server.dispatcher.take_handbacks() == []
+    assert all(row(task_id).schedule_time is None for task_id in unstarted)
+    assert all(row(task_id).client_id == RELAY and row(task_id).schedule_time is not None for task_id in held.ids[:2])
 
 
 class Flaky:

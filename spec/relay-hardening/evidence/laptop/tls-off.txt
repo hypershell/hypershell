@@ -1,0 +1,33 @@
+# hardening_drive tls-off: launches (epoch, label, pid, zone, launch number, HYPERSHELL_ZONE, client --zone)
+# server-1.log: start, restarts seen, shutdown, exit
+2026-11-14 03:49:22.815 <host>    DEBUG [01a1d82c-9369-7323-97bc-74e8d8d2fd1d] [hypershell.server] Started
+2026-11-14 03:49:22.816 <host>    DEBUG [01a1d82c-9369-7323-97bc-74e8d8d2fd1d] [hypershell.server] Started (confirm)
+2026-11-14 03:49:22.816 <host>    DEBUG [01a1d82c-9369-7323-97bc-74e8d8d2fd1d] [hypershell.server] Started (heartbeat)
+2026-11-14 03:49:22.816 <host>    DEBUG [01a1d82c-9369-7323-97bc-74e8d8d2fd1d] [hypershell.server] Started (receiver)
+2026-11-14 03:49:22.816 <host>    DEBUG [01a1d82c-9369-7323-97bc-74e8d8d2fd1d] [hypershell.server] Started (scheduler)
+# relay: identity, link, TLS, zones at the shutdown, site clients, final beat, exit
+2026-11-14 03:49:23.840 <host>  WARNING [01a1d82c-9840-7443-bfec-8b94977e7ca9] [hypershell.relay] TLS to upstream server is disabled - this is not recommended for production!
+2026-11-14 03:49:23.847 <host>     INFO [01a1d82c-9840-7443-bfec-8b94977e7ca9] [hypershell.relay] Upstream identity 08b2237c-51d7-5bb4-a63d-4dd6bace8555 for zone default at site drive
+2026-11-14 03:49:23.852 <host>    DEBUG [01a1d82c-9840-7443-bfec-8b94977e7ca9] [hypershell.core.reconnect] Cannot use upstream server 127.0.0.1:61405 (TLSMismatchError: Upstream server 127.0.0.1:61405 uses TLS, and this relay has TLS off (--no-tls, or [relay.upstream.tls] enabled = false): the relay and its upstream server must agree on TLS)
+2026-11-14 03:49:23.852 <host> CRITICAL [01a1d82c-9840-7443-bfec-8b94977e7ca9] [hypershell.relay] TLSMismatchError: Upstream server 127.0.0.1:61405 uses TLS, and this relay has TLS off (--no-tls, or [relay.upstream.tls] enabled = false): the relay and its upstream server must agree on TLS
+# hardening_drive tls-off: facts
+mode=tls-off
+source_server=<repo>/src/hypershell
+source_relay=<repo>/src/hypershell
+server_1_started_at=1794628162
+relay_started_at=1794628163.528
+relay_exit=5
+relay_exited_at=1794628164.607
+server_running=1
+servers=1
+# hardening_drive tls-off: judgment
+PASS         the relay exited 5 (exit 5)
+PASS         within relay.upstream.deadline (30 s) of its start (1.1 s, by the drive`s 1 s poll)
+NOTE         first to last relay log line: 0.012 s
+PASS         one CRITICAL line (1)
+PASS         it names the relay`s own setting (--no-tls) and says the two ends must agree on TLS
+PASS         the relay logged no traceback
+PASS         no relay-local server started
+PASS         no site client launched (0)
+PASS         the upstream server was still running
+PASS

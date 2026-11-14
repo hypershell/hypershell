@@ -520,6 +520,22 @@ class Dispatcher:
                 ids.extend(self._take(pool))
             return ids
 
+    def withdraw(self: Dispatcher, zone: str, ids: Iterable[str]) -> List[str]:
+        """Remove the rows of `ids` still staged in `zone`'s pool and return their ids: no client can take them now.
+
+        A row already cut for a client, or never staged, is not there and is not returned.
+        """
+        with self.lock:
+            pool = self.pools.get(zone)
+            wanted = set(ids) & pool.ids if pool is not None else set()
+            if not wanted:
+                return []
+            kept = [row for row in pool.rows if row[0] not in wanted]
+            pool.rows.clear()
+            pool.rows.extend(kept)
+            pool.ids -= wanted
+            return sorted(wanted)
+
     @staticmethod
     def _take(pool: Pool) -> List[str]:
         """Empty `pool`, returning the ids of its stamped rows (lock held)."""

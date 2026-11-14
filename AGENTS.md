@@ -284,7 +284,9 @@ Long-running work runs in **daemon threads** (`core/thread.py`) driving **state 
 submitter → scheduler → `dispatcher.finish()` (where per-client sentinels on `scheduled` used to
 be posted: clients drain their zone's staged tasks, then are told to shut down) → heartbeat join →
 staged revert (`ServerThread.revert_staged`: rows still staged, never delivered, go back to
-unscheduled) → sentinels to receiver/confirm) and the submit flush
+unscheduled) → late hand-back revert (`ServerThread.revert_handed_back`: what relays handed back
+once scheduling had ended goes back to unscheduled, each only while still that relay's) → sentinels
+to receiver/confirm) and the submit flush
 (`loader.join()` then `queue.put(None)`). Reordering drops the last results or hangs a join.
 **A staged revert never touches a completed or cancelled row.** Both staged reverts, at shutdown and
 when a zone's last client leaves (`Scheduler.revert_unstaged`), go through `Task.revert_staged`: a
@@ -491,11 +493,18 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   stranded task, or a write that lands without its condition). A write that matches first time is
   neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id),
   `Task.revert_staged` (the same, conditional on `completion_time IS NULL`, and its re-check asks
-  the same: a row completed, cancelled or deleted meanwhile is skipped, never reverted) and
+  the same: a row completed, cancelled or deleted meanwhile is skipped, never reverted), the
+  eviction revert `Task.revert_orphaned` (conditional on the row still being in flight with the
+  evicted client: a result landed meanwhile is kept, a removed row skipped), the dispatch stamp in
+  `Task.next` (conditional on `schedule_time IS NULL`: a row removed, cancelled or scheduled
+  meanwhile is skipped, one never stamped stays unscheduled for a later round) and
   `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
-  held by the Receiver) are the pattern. Never use `bulk_update_mappings` or an ORM flush for such a
-  write: they assert the total and raise `StaleDataError`. The Scheduler's `Task.next` stamp and
-  `retried` mark, `Task.cancel_all` and `hs update` do not follow it yet
+  held by the Receiver) are the pattern. The conditional writes (`revert_staged`, the eviction
+  revert, the dispatch stamp) skip a row gone or no longer qualifying and never raise on it;
+  `Task.confirm_all` (strict, the default) and `Task.revert_all` still raise `StaleDataError` on a
+  gone row, by design. Never use `bulk_update_mappings` or an ORM flush for such a
+  write: they assert the total and raise `StaleDataError`. The Scheduler's `retried` mark,
+  `Task.cancel_all` and `hs update` do not follow it yet
   (`issues/hypertable-contended-scheduler-and-cli-writes.md`).
 
 ## Testing

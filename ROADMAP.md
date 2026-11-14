@@ -299,7 +299,7 @@ with no sign to the operator. Making the revert conditional on the row still bei
 it.
 
 *Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same shape); resilience*
-**Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md)
+**Seed:** [`issues/orphan-revert-loses-result.md`](issues/orphan-revert-loses-result.md) · *status: adopted:relay-hardening*
 
 ## Contended Scheduler and `hs update` writes fail on a TimescaleDB hypertable
 
@@ -324,7 +324,7 @@ lost. The eviction half is the same conditional revert that closes the lost-resu
 
 *Horizon: near-term, before 2.9.0 · Depends on: — · Refs: orphan revert (one fix for the eviction
 half); contended Scheduler writes (`Task.next` off the ORM flush); `spec/relay/` C7-1, C7-2*
-**Seed:** [`issues/relay-abort-races.md`](issues/relay-abort-races.md) · *status: unshaped*
+**Seed:** [`issues/relay-abort-races.md`](issues/relay-abort-races.md) · *status: adopted:relay-hardening*
 
 ## 2.8 and 2.9 clients and servers cannot work together, and fail unclearly
 
@@ -473,7 +473,7 @@ stray blank line.
 
 *Horizon: near-term · Depends on: — · Refs: the advertised-host fix above (a relay's own
 downstream address); `spec/relay/` C4-2, C5-1*
-**Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: unshaped*
+**Seed:** [`issues/relay-hardening.md`](issues/relay-hardening.md) · *status: adopted:relay-hardening*
 
 ## A role's first upstream call after a server restart can fail as a remote error
 
@@ -489,7 +489,20 @@ proxies should be re-created on reconnect.
 
 *Horizon: near-term, small · Depends on: — · Refs: `spec/relay-retire/REVIEW.md` (O1); the relay
 abort races and rough edges above*
-**Seed:** [`issues/upstream-link-restart-proxy.md`](issues/upstream-link-restart-proxy.md) · *status: unshaped*
+**Seed:** [`issues/upstream-link-restart-proxy.md`](issues/upstream-link-restart-proxy.md) · *status: adopted:relay-hardening*
+
+## A relay run can still end up to about 5 s late
+
+After the relay hardening fixes, a relay run's tail (last completion to upstream exit) is about 1.7 s
+when nothing waits, but three of five runs on the fixed head ended about 7 s late. The relay launches
+its site clients with `relay.bundlewait` as their own result bundle wait, so the last results can sit
+in a site client until it expires: a client should flush when it holds nothing left to run, or the
+relay should give site clients a shorter wait. Separately, a result landing does not wake the upstream
+scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 6 s to it.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and its laptop evidence;
+the relay rough edges above*
+**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
 
 ## `rotatedb` lost-update window
 

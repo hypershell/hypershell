@@ -54,9 +54,18 @@ The first zone's identity lists every *client* at the site upstream. Each identi
 heartbeat, so if the relay fails, the upstream *server* evicts each one and puts back what each
 held, in every zone.
 When the upstream *server* shuts down, the relay finishes the tasks it holds, returns every result,
-and ends its upstream registration. It hears of the shutdown in reply to a request for work, in any of
-its zones; a zone with no *client* at the site and no task held then ends with the others. A relay
-with no *client* at the site in any zone never asks, so it waits until it is drained or stopped.
+and ends its upstream registration. It hears of the shutdown in reply to a request for work, in each
+of its zones. Once one zone has heard it, a zone with no *client* at the site and no task held asks
+for itself too, for one task: it ends with the others if nothing is left for it upstream, and
+otherwise holds what it is sent until its own *clients* at the site run it, then asks for the rest as
+usual. Under an upstream *server* autoscaling with relay sites, a zone it gives no *client* at this
+relay does not ask: it ends with the others, and what is staged for it stays upstream for a relay
+that has *clients* planned in that zone. If that *server* stops planning a *client* for the zone at
+this relay before one starts, the zone hands back what it took and ends; an upstream *server* that
+cannot take it back (one without a database, or a release before 2.9.0a8) is left to put it back
+when it evicts the relay, and a 2.9.0a8 upstream *server* puts it back the next time it starts. A relay with no *client* at the site in any zone never asks
+for work, so it never hears an upstream shutdown: it waits until it is drained or stopped, and a
+non-forever upstream *server* waits for it too, until the relay is drained or stopped.
 SIGUSR1 or SIGUSR2, sent to the relay process, drain it the same way: the relay stops asking for work, its site finishes every task the relay holds (those not yet started
 too), and the results go back before the registration ends. SIGINT and SIGTERM end the relay at
 once, without draining: it ends the *clients* it launched and exits (on SIGTERM, by that signal; a
@@ -76,7 +85,10 @@ costs nothing: the results land. After a longer one, or after the upstream *serv
 upstream *server* has put those tasks back for other *clients*, so their results are refused as
 stale and the tasks run again. A relay that is started while its upstream *server* cannot be reached
 waits for it before it starts its site, and a relay restarted on the same relay database returns the
-results its earlier run still held.
+results its earlier run still held. A relay and an upstream *server* that differ on TLS (on at one
+end, ``--no-tls`` at the other) would each wait for the other, so the relay checks for this when it
+first connects: it exits at once with a non-zero status, before it starts its site, with an error
+that names its own TLS setting.
 
 The relay database is always a private SQLite file, whatever database is configured, and the
 configured database is never opened. One relay runs per process, and a second relay refuses to

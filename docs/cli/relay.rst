@@ -16,6 +16,14 @@ Description
 
 .. include:: ../_include/relay_desc.rst
 
+.. versionchanged:: 2.9.0
+   a relay whose TLS setting differs from its upstream *server*'s exits at once, with an error.
+
+.. versionchanged:: 2.9.0
+   at an upstream shutdown, a zone with no *client* at the site asks once more, and takes what is
+   still staged for it, unless an upstream *server* autoscaling with relay sites plans no *client*
+   for it at this relay, and hands it back if that *server* stops planning one before a *client* starts.
+
 |
 
 .. include:: ../_include/relay_help.rst
@@ -113,9 +121,6 @@ keeps it running when that hop fails. It is not meant for, and does not provide:
 - **Cancellation or output retrieval across sites.** ``hs update`` on the upstream *server* does not
   reach a task the relay already holds, and ``hs info --stdout`` / ``--stderr`` reads captured output
   from the host that ran the task, which upstream may have no route to.
-- **Tolerance of clock skew.** The upstream *server* ages a relay's heartbeats by the relay's own
-  clock, so a relay host whose clock is far off the upstream *server*'s is evicted while alive (and
-  its tasks put back). Keep every relay host's clock synchronised with the upstream *server*'s.
 
 A task cut for the relay upstream but not yet confirmed when the relay dies (or when its connection
 drops) stays assigned upstream with no *client*; this window exists for every *client*, and is larger

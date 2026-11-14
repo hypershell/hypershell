@@ -220,8 +220,8 @@ def test_relay_eviction_disconnects_roster(queues, task_db) -> None:
     """A relay evicted for missed beats takes its whole roster with it; other clients are untouched."""
     machine = monitor(queues)
     relay, other, leaves = str(uuid()), str(uuid()), [leaf(), leaf()]
-    stale = datetime.now().astimezone() - timedelta(seconds=3 * EVICT)
-    deliver(machine, relay_beat(relay, leaves, time=stale))
+    deliver(machine, relay_beat(relay, leaves))
+    machine.received[relay] -= 3 * EVICT  # Its last beat arrived three eviction periods ago.
     deliver(machine, Heartbeat.new(uuid=other, host='plain-host'))
     machine.last_check = datetime.now().astimezone()
     assert machine.check_clients() is MonitorState.SWITCH
@@ -258,6 +258,30 @@ def test_leaf_never_evicted_on_its_own(queues, task_db) -> None:
     machine.check_clients()
     assert connected(clients()) == {relay} | {entry.uuid for entry in leaves}
     assert list(machine.beats) == [relay]
+
+
+@mark.unit
+def test_relay_with_a_clock_behind_is_not_evicted(queues, task_db) -> None:
+    """A relay whose clock is three eviction periods behind the server's is aged from when its beat arrived.
+
+    It is not evicted, its roster stays connected, and the task it holds is not put back.
+    """
+    machine = monitor(queues)
+    relay, leaves = str(uuid()), [leaf(), leaf()]
+    task = Task.new(args='echo held')
+    task.schedule_time = datetime.now().astimezone()
+    task.server_id, task.server_host, task.client_id, task.client_host = INSTANCE, HOSTNAME, relay, 'relay-host'
+    Task.add(task)
+    behind = datetime.now().astimezone() - timedelta(seconds=3 * EVICT)
+    deliver(machine, relay_beat(relay, leaves, time=behind))
+    machine.last_check = datetime.now().astimezone()
+    assert machine.check_clients() is MonitorState.SWITCH
+    rows = clients()
+    assert connected(rows) == {relay} | {entry.uuid for entry in leaves}
+    assert rows[relay]['evicted'] is False
+    assert list(machine.beats) == [relay] and set(machine.rosters[relay]) == {entry.uuid for entry in leaves}
+    held = Task.from_id(task.id, caching=False)
+    assert str(held.client_id) == relay and held.schedule_time is not None
 
 
 @mark.unit
@@ -497,11 +521,11 @@ def test_failover_of_a_two_zone_relay_reverts_and_unstages_both_zones(queues, ta
     held = {zone: stamp_upstream(upstream_identity(zone), zone) for zone in ZONES}
 
     beater = zoned_heartbeat(relay_db, SimpleNamespace(heartbeat=Queue()))
-    stale = datetime.now().astimezone() - timedelta(seconds=3 * EVICT)
     beater.submit()
-    for beat in sent(beater):  # The relay's last beats, as old as the eviction period three times over.
+    for beat in sent(beater):  # The relay's last beats, received three eviction periods ago.
         deliver(machine, Heartbeat.new(uuid=beat.uuid, host=beat.host, state=beat.state, site=beat.site,
-                                       roster=beat.roster, time=stale))
+                                       roster=beat.roster))
+        machine.received[beat.uuid] -= 3 * EVICT
     rows = clients()
     for zone in ZONES:
         identity = upstream_identity(zone)

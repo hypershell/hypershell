@@ -34,6 +34,12 @@ back) and an upstream stamp, with the identity it was confirmed under and the st
 the upstream server has acknowledged a hand-back, `drop_handed_back` deletes those tasks and their
 stamps in one transaction, each only while it is still unstarted here.
 
+A zone that took tasks for itself at an upstream shutdown, with no site client to run them, gives
+them back the other way round, while the rest of the site runs on: `take_back` first deletes each
+task that no site client can have received (unscheduled here, or taken out of the relay-local
+server's staging pool), keeping its stamp, so the task still counts as held; once the upstream
+server has acknowledged the hand-back, `drop_stamps` deletes the stamps.
+
 Completed rows leave the task table for the outbox in one transaction (`collect_results`), each as
 the record that goes upstream: the leaf's result with the upstream stamp restored. Moving them out
 keeps a failed row (the relay-local server never retries) from holding its task group. A result is
@@ -53,7 +59,7 @@ one of them in a single statement (`Task.increment_group`).
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 from datetime import datetime, timezone
 
 # Standard libs
@@ -77,10 +83,11 @@ from hypershell.data.upgrade import upgrade_schema
 # Public interface
 __all__ = ['RelayBase', 'RelayTask', 'RelayResult', 'RESULT_PENDING', 'RESULT_RETURNED', 'ensure_tables',
            'UTCDateTime', 'store_utc',
-           'LOCAL_STAMP_COLUMNS', 'local_row', 'insert_received', 'count_backlog', 'count_connected', 'count_held',
-           'roster',
+           'LOCAL_STAMP_COLUMNS', 'local_row', 'insert_received', 'count_backlog', 'site_idle', 'count_connected',
+           'count_held', 'roster',
            'result_record', 'collect_results', 'pending_results', 'mark_returned', 'prune_returned',
-           'COLLECT_BATCH', 'PRUNE_BATCH', 'drop_superseded', 'unstarted', 'drop_handed_back']
+           'COLLECT_BATCH', 'PRUNE_BATCH', 'drop_superseded', 'unstarted', 'drop_handed_back',
+           'incomplete', 'take_back', 'drop_stamps']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -297,6 +304,53 @@ def drop_handed_back(engine: Engine, ids: List[str]) -> int:
     return dropped
 
 
+def incomplete(engine: Engine, ids: Iterable[str]) -> List[str]:
+    """The tasks of `ids` the relay database holds not yet complete."""
+    ids = list(ids)
+    if not ids:
+        return []
+    table = Task.__table__
+    query = select(table.c.id).where(table.c.id.in_(ids), table.c.completion_time.is_(None))
+    with engine.connect() as conn:
+        return list(conn.execute(query).scalars())
+
+
+def take_back(engine: Engine, ids: Iterable[str], staged: Iterable[str] = ()) -> List[Tuple[str, Optional[str]]]:
+    """Delete the tasks of `ids` no site client can have received, keeping their stamps; return (id, schedule time).
+
+    A task goes only while it is incomplete and either unscheduled here (no local `schedule_time`)
+    or named in `staged`: taken out of the relay-local server's staging pool, so no site client can
+    take it. Each is one conditional DELETE, so a task scheduled here meanwhile stays. Its upstream
+    stamp stays too, so the task still counts as held (see `count_held`) until `drop_stamps`. The
+    schedule time is the stamp's text as received (None from an upstream server without a database).
+    """
+    table, stamps = Task.__table__, RelayTask.__table__
+    staged = set(staged)
+    taken = []
+    with _WRITE_LOCK, engine.begin() as conn:
+        for id in dict.fromkeys(ids):
+            condition = [table.c.id == id, table.c.completion_time.is_(None)]
+            if id not in staged:
+                condition.append(table.c.schedule_time.is_(None))
+            if conn.execute(delete(table).where(*condition)).rowcount:
+                taken.append(id)
+        if not taken:
+            return []
+        found = dict(conn.execute(select(stamps.c.id, stamps.c.schedule_time).where(stamps.c.id.in_(taken))).all())
+    return [(id, found.get(id)) for id in taken]
+
+
+def drop_stamps(engine: Engine, ids: Iterable[str]) -> int:
+    """Delete the upstream stamps of `ids` whose tasks the relay database no longer holds; return how many."""
+    ids = list(ids)
+    if not ids:
+        return 0
+    table, stamps = Task.__table__, RelayTask.__table__
+    with _WRITE_LOCK, engine.begin() as conn:
+        return conn.execute(delete(stamps).where(stamps.c.id.in_(ids),
+                                                 ~exists().where(table.c.id == stamps.c.id))).rowcount
+
+
 def count_backlog(engine: Engine, zone: Optional[str] = None) -> int:
     """Number of tasks in the relay database not yet complete (in one `zone` if given, by id)."""
     table = Task.__table__
@@ -305,6 +359,11 @@ def count_backlog(engine: Engine, zone: Optional[str] = None) -> int:
         query = query.where(table.c.zone.is_(None) if zone == DEFAULT_ZONE_ID else table.c.zone == zone)
     with engine.connect() as conn:
         return conn.execute(query).scalar()
+
+
+def site_idle(engine: Engine) -> bool:
+    """Whether the relay database holds no task not yet complete, in any zone (nothing left to run at the site)."""
+    return count_backlog(engine) == 0
 
 
 def count_connected(engine: Engine, server_id: str) -> int:

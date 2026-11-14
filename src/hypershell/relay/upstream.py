@@ -21,6 +21,10 @@ publishes, if any, for the relay's fleets to follow. A topology that says a newe
 superseded this one retires the relay: the heartbeat records it once, for good, and says so on
 every beat from then on, under every identity; the puller asks for nothing more.
 
+The relay's first connection upstream checks that the upstream server's TLS setting is its own (see
+`first_connect`), so a relay with TLS on and an upstream server with it off, or the other way around,
+fails at once instead of trying again.
+
 Example:
     >>> from hypershell.relay.upstream import upstream_identity
     >>> identity = upstream_identity('gpu')
@@ -32,8 +36,10 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Final
 
 # Standard libs
+import ssl
 import json
 import time
+import socket
 import functools
 import threading
 from enum import Enum
@@ -49,21 +55,24 @@ from sqlalchemy.exc import SQLAlchemyError
 from hypershell.core.config import config, PARAM_UNSET, resolve_auth
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
-from hypershell.core.topology import Bounds, request_text as topology_request, read_topology
+from hypershell.core.topology import (Bounds, request_text as topology_request, read_topology, MAX_HANDBACK_TASKS,
+                                      handback_text, read_handback_reply)
+from hypershell.cluster.demand import ZoneRef
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
 from hypershell.core.queue import QueueConfig, QueueVersionError, PROTOCOL, DEFAULT_REMOTE_TIMEOUT
 from hypershell.core.signal import check_signal, SIGUSR1, SIGUSR2
 from hypershell.core.thread import Thread
 from hypershell.core.tls import from_namespace as tls_from_namespace
 from hypershell.core.dispatch import build_version
-from hypershell.core.reconnect import LinkDown, as_link
+from hypershell.core.reconnect import LinkDown, TLSMismatchError, as_link
 from hypershell.client import ClientInfo
 from hypershell.data.model import DEFAULT_ZONE_NAME, zone_id
 from hypershell.relay import store
 
 # Public interface
 __all__ = ['upstream_identity', 'served_zones', 'upstream_config', 'upstream_key', 'relay_site', 'request_text', 'read_reply',
-           'RelayInsertError', 'drain_signalled', 'log_drain', 'never',
+           'speaks_tls', 'first_connect',
+           'RelayInsertError', 'drain_signalled', 'log_drain', 'never', 'nothing_staged',
            'PullerState', 'UpstreamPuller', 'UpstreamPullerThread',
            'ReturnerState', 'UpstreamReturner', 'UpstreamReturnerThread',
            'HeartbeatState', 'UpstreamHeartbeat', 'UpstreamHeartbeatThread',
@@ -129,6 +138,13 @@ RETURN_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, )
 PULL_STAGES: Final[Tuple[str, ...]] = (STAGE_BEAT, STAGE_DRAIN)
 """Stages passed before work is requested (held results go back first)."""
 
+CLEARTEXT_REASON: Final[str] = 'WRONG_VERSION_NUMBER'
+"""The reason of the TLS error raised when a peer's first bytes are not a TLS record (a cleartext server).
+
+Every TLS record begins with a version whose first byte is 3; a cleartext queue server opens with
+the 4-byte length of its challenge, whose first byte is 0, so the handshake fails on that record.
+"""
+
 
 def upstream_identity(zone: Optional[str], instance: str = INSTANCE) -> str:
     """The upstream client id of a relay `instance` for the zone named `zone` (None is the default zone)."""
@@ -148,6 +164,69 @@ def upstream_config(host: Optional[str] = None, port: Optional[int] = None, no_t
     section = config.relay.upstream
     tls = None if no_tls else tls_from_namespace(section.get('tls'))
     return QueueConfig(host=host or section.host, port=int(port or section.port), auth=upstream_key(), tls=tls)
+
+
+def speaks_tls(address: Tuple[str, int], timeout: float) -> bool:
+    """Whether the server at `address` completes a TLS handshake within `timeout` seconds.
+
+    The handshake verifies nothing and is all that is sent: no key, and no data after it. A refused
+    or unreachable address raises, as a connection attempt would; any other failure is false.
+    """
+    if timeout <= 0:
+        return False
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    end = time.monotonic() + timeout
+    # Dial IPv4 only, as the queue clients do.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw:
+        raw.settimeout(timeout)
+        raw.connect(address)
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return False
+        raw.settimeout(remaining)
+        try:
+            with context.wrap_socket(raw):
+                return True
+        except OSError:  # Covers TLS errors, resets and the timeout.
+            return False
+
+
+def first_connect(upstream: QueueConfig) -> Callable[[Any, float], None]:
+    """Connect a client to the `upstream` server for the first time, failing at once on a TLS mismatch.
+
+    Given to the upstream link, which calls it with a new client and the seconds left of the
+    attempt's deadline until the link first connects. With TLS off, the relay first checks whether
+    the upstream server completes a TLS handshake. With TLS on, the handshake itself tells: one that
+    fails because the server's first bytes are not a TLS record (`CLEARTEXT_REASON`) reached a
+    cleartext server, whatever the time those bytes took to arrive; every other error is the
+    client's own. Either finding raises `TLSMismatchError`, naming the relay's own setting. Anything
+    else connects, or fails, as the client's own `connect` does.
+    """
+    address = (upstream.host, int(upstream.port))
+    name = f'{upstream.host}:{upstream.port}'
+    tls = upstream.tls is not None and upstream.tls.is_active()
+
+    def connect(client: Any, timeout: float) -> None:
+        if not tls:
+            if speaks_tls(address, timeout):
+                raise TLSMismatchError(f'Upstream server {name} uses TLS, and this relay has TLS off '
+                                       f'(--no-tls, or [relay.upstream.tls] enabled = false): '
+                                       f'the relay and its upstream server must agree on TLS')
+            client.connect()
+            return
+        try:
+            client.connect()
+        except ssl.SSLError as error:
+            if getattr(error, 'reason', None) == CLEARTEXT_REASON:
+                raise TLSMismatchError(f'Upstream server {name} does not use TLS, and this relay has TLS on '
+                                       f'([relay.upstream.tls] enabled, the default): the relay and its '
+                                       f'upstream server must agree on TLS (--no-tls on both, or on neither)'
+                                       ) from error
+            raise
+
+    return connect
 
 
 def upstream_key(base: Any = None) -> str:
@@ -179,6 +258,11 @@ _DRAIN_LOCK: Final[threading.Lock] = threading.Lock()
 def never() -> bool:
     """False: the default of a condition that never holds (a puller never retired)."""
     return False
+
+
+def nothing_staged(zone: Optional[str], ids: List[str]) -> List[str]:  # noqa: unused arguments
+    """None of `ids`: the default when no relay-local server stages a zone's tasks (see `UpstreamPuller`)."""
+    return []
 
 
 def log_drain() -> None:
@@ -225,6 +309,7 @@ class PullerState(State, Enum):
     WAIT_LINK = 5
     FINAL = 6
     HALT = 7
+    HAND_BACK = 8
 
 
 class UpstreamPuller(StateMachine):
@@ -244,9 +329,23 @@ class UpstreamPuller(StateMachine):
     confirmation that follow are that identity's too. Its requests wait upstream at most
     `ZONE_REQUEST_WAIT`, so one zone with nothing staged never holds up the others. A zone the
     upstream server answers with a shutdown is asked no more; pulling ends once every zone has been.
-    The upstream server finishes for every zone at once, so once one zone has had a shutdown reply, a
-    zone with no site client and nothing held ends too: it never asks, so it would never hear one. A
-    relay with no site client in any zone never asks at all, and pulling ends only on a drain or halt.
+    The upstream server finishes for every zone at once, but serves each zone what is still staged for
+    it before it answers that zone's requests with a shutdown. So once one zone has had a shutdown
+    reply, a zone with no site client and nothing held, which otherwise never asks, asks for itself,
+    for one task, if its fleet would launch a site client for it: the site topology the relay last
+    read (`view`) gives the zone a target above zero at this relay, or none is published, when the
+    fleet keeps at least one client. A shutdown ends it with the others; a task it takes is held
+    until a site client in the zone runs it, and the zone then asks as usual; an empty reply
+    (another request was served first) has it ask again. A zone the topology gives no client here
+    does not ask: it ends with the others, and what is staged for it stays upstream for a relay
+    the topology gives clients in that zone. A zone still holding only what it took this way, with
+    no site client yet, asks `launches` again at each pass: once a newer topology gives it no client
+    here, it hands those tasks back upstream (HAND_BACK) and ends. Only a task no site client can
+    have received goes back (`unstage` takes it out of the relay-local server's staging pool first,
+    if it is staged there); the rest stay held. An upstream server without the hand-back call, or one
+    that refuses it (one without a database), leaves them to its eviction of the relay, with one
+    warning. A relay with no site client in any zone never asks at all, so it never hears a
+    shutdown, and pulling ends only on a drain or halt.
 
     Every upstream call goes through the link (see `hypershell.core.reconnect`). While the link is down
     the puller waits for it (WAIT_LINK); pulling resumes once the link is back, has carried a heartbeat
@@ -279,9 +378,14 @@ class UpstreamPuller(StateMachine):
     server_id: str
     drain: Callable[[], bool]
     retired: Callable[[], bool]
+    view: Any
+    unstage: Callable[[Optional[str], List[str]], List[str]]
     stopping: bool
+    asked: Dict[str, set]
+    giving: Dict[str, Tuple[Optional[str], List[Tuple[str, Optional[str]]]]]
 
     size: int
+    idle: bool
     bundle: List[Dict[str, Any]]
     task_ids: List[str]
     insert_failures: int
@@ -296,11 +400,15 @@ class UpstreamPuller(StateMachine):
                  drain: Callable[[], bool] = drain_signalled,
                  zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
                  connected: Optional[Callable[[Optional[str]], int]] = None,
-                 retired: Callable[[], bool] = never) -> None:
+                 retired: Callable[[], bool] = never, view: Any = None,
+                 unstage: Optional[Callable[[Optional[str], List[str]], List[str]]] = None) -> None:
         """Initialize with the upstream link (or a connected client), the relay database and the zone identity.
 
         `zones`, if given, are every (identity, zone) served, in place of `identity` and `zone`; with
-        more than one, `connected` must count the site clients serving a zone.
+        more than one, `connected` must count the site clients serving a zone. `view`, if given, is the
+        site topology the relay reads upstream (`hypershell.relay.site.TopologyView`), which its fleets
+        follow. `unstage`, if given, takes the named tasks of a zone out of the relay-local server's
+        staging pool and returns those it took (by default, none are staged).
         """
         self.queue = queue
         self.link = as_link(queue)
@@ -319,8 +427,13 @@ class UpstreamPuller(StateMachine):
         self.server_id = server_id
         self.drain = drain
         self.retired = retired
+        self.view = view
+        self.unstage = unstage or nothing_staged
         self.stopping = False
+        self.asked = {}
+        self.giving = {}
         self.size = 0
+        self.idle = False
         self.bundle = []
         self.task_ids = []
         self.insert_failures = 0
@@ -337,6 +450,7 @@ class UpstreamPuller(StateMachine):
             PullerState.INSERT: self.insert,
             PullerState.CONFIRM: self.confirm,
             PullerState.WAIT_LINK: self.wait_link,
+            PullerState.HAND_BACK: self.hand_back,
             PullerState.FINAL: self.finalize,
         }
 
@@ -362,10 +476,24 @@ class UpstreamPuller(StateMachine):
             return store.count_backlog(self.engine)
         return store.count_backlog(self.engine, zone=zone_id(zone))
 
+    def launches(self: UpstreamPuller, zone: Optional[str] = None) -> bool:
+        """Whether the fleet of `zone` would launch a site client for it.
+
+        Under a published topology, only while it gives the zone a target above zero at this relay;
+        without one, always (the fleet then keeps at least one client).
+        """
+        reply = None if self.view is None else self.view.reply
+        if reply is None:
+            return True
+        return reply.assignment(ZoneRef.from_name(zone).name).target > 0
+
     def gate(self: UpstreamPuller) -> PullerState:
         """Ask for work only at or below the low-water mark, on a ready link; end on a drain, retirement or halt.
 
         Zones are taken in turn, from the one after the zone last asked for: the first with room is asked.
+        Once some zone has had a shutdown reply, a zone with no site client and nothing held has room for
+        one task if its fleet would launch a client for it, and otherwise ends; one holding only what it
+        took that way hands it back once its fleet would launch no client for it (see `take_back`).
         """
         if self.stopping:  # atomic
             return PullerState.FINAL
@@ -375,11 +503,10 @@ class UpstreamPuller(StateMachine):
         if self.retired():
             log.debug(f'Retired - no more upstream requests (puller: {self.identity})')
             return PullerState.FINAL
-        if self.finished and self.finish_idle():
-            log.info('Upstream server is shutting down - no more upstream requests')
-            return PullerState.FINAL
         if not self.link.ready(PULL_STAGES):
             return PullerState.WAIT_LINK
+        if self.giving:
+            return PullerState.HAND_BACK
         count = len(self.zones)
         for step in range(count):
             index = (self.turn + step) % count
@@ -388,27 +515,31 @@ class UpstreamPuller(StateMachine):
                 continue
             bound = self.bound(zone)
             backlog = self.backlog(zone)
-            if bound == 0 or backlog > bound // 2:
+            if bound == 0:
+                if not self.finished:
+                    continue
+                if backlog:
+                    if not self.launches(zone) and self.take_back(identity, zone, backlog):
+                        return PullerState.HAND_BACK
+                    continue
+                if not self.launches(zone):
+                    self.finished.add(identity)
+                    log.info(f'Upstream server is shutting down - no site client for zone '
+                             f'{zone or DEFAULT_ZONE_NAME} and none planned here, no more requests for it '
+                             f'({identity})')
+                    if len(self.finished) == count:
+                        log.info('Upstream server is shutting down - no more upstream requests')
+                        return PullerState.FINAL
+                    continue
+            elif backlog > bound // 2:
                 continue
             self.turn = (index + 1) % count
             self.identity, self.zone = identity, zone
-            self.size = min(bound - backlog, self.bundlesize)
+            self.idle = bound == 0
+            self.size = 1 if self.idle else min(bound - backlog, self.bundlesize)
             return PullerState.REQUEST
         self.wake.wait(min(self.poll, GATE_WAIT))
         return PullerState.GATE
-
-    def finish_idle(self: UpstreamPuller) -> bool:
-        """End every zone with no site client and nothing held, the upstream server being finished; true once all are.
-
-        Only called once some zone has had a shutdown reply. A zone with site clients, or with tasks
-        still held, asks for itself and ends on its own reply.
-        """
-        for identity, zone in self.zones:
-            if identity not in self.finished and self.bound(zone) == 0 and self.backlog(zone) == 0:
-                self.finished.add(identity)
-                log.info(f'Upstream server is shutting down - no site client for zone '
-                         f'{zone or DEFAULT_ZONE_NAME}, no more requests for it ({identity})')
-        return len(self.finished) == len(self.zones)
 
     def request(self: UpstreamPuller) -> PullerState:
         """Request up to `size` tasks under the zone identity (the upstream server bounds the wait), unless retired."""
@@ -424,6 +555,11 @@ class UpstreamPuller(StateMachine):
         if reply['tasks']:
             self.bundle = reply['tasks']
             log.debug(f'Received {len(self.bundle)} tasks ({self.identity})')
+            if self.idle:
+                count = len(self.bundle)
+                log.info(f'Upstream server is shutting down - holding {count} task{"s" if count != 1 else ""} '
+                         f'for zone {self.zone or DEFAULT_ZONE_NAME}, which has no site client, until one '
+                         f'runs them ({self.identity})')
             return PullerState.INSERT
         if reply.get('shutdown'):
             self.finished.add(self.identity)
@@ -449,6 +585,8 @@ class UpstreamPuller(StateMachine):
             return PullerState.INSERT
         self.insert_failures = 0
         self.bundle = []
+        if self.idle:
+            self.asked.setdefault(self.identity, set()).update(self.task_ids)
         return PullerState.CONFIRM
 
     def confirm(self: UpstreamPuller) -> PullerState:
@@ -487,6 +625,73 @@ class UpstreamPuller(StateMachine):
         self.task_ids = []
         return PullerState.GATE
 
+    def take_back(self: UpstreamPuller, identity: str, zone: Optional[str], backlog: int) -> bool:
+        """Take back, to hand back upstream, what `zone` holds when all of it was taken for the zone at a shutdown.
+
+        Only while every task of the zone's `backlog` is one it took for itself (with no site client)
+        is anything taken; then each that no site client can have received leaves the relay-local
+        server (see `hypershell.relay.store.take_back`), and true is returned if any did. A task
+        scheduled here and not in the staging pool is left, to be looked at again on the next pass.
+        """
+        held = store.incomplete(self.engine, self.asked.get(identity, ()))
+        self.asked[identity] = set(held)
+        if not held or len(held) < backlog:
+            return False
+        tasks = store.take_back(self.engine, held, staged=self.unstage(zone, held))
+        if not tasks:
+            return False
+        self.asked[identity].difference_update(task_id for task_id, _ in tasks)
+        self.giving[identity] = (zone, tasks)
+        return True
+
+    def hand_back(self: UpstreamPuller) -> PullerState:
+        """Hand back upstream what a zone took back, at most `MAX_HANDBACK_TASKS` at once; then return to the gate.
+
+        Each acknowledged chunk's stamps are dropped, so the relay holds those tasks no more. A hand-back
+        the link loses is sent again once it is back. One the upstream server refuses, or cannot take
+        (a task with no stamp, from a server without a database), leaves the rest to the server's
+        eviction of the relay: their stamps stay, so the relay does not finish its registration.
+        """
+        identity, (zone, tasks) = next(iter(self.giving.items()))
+        name = zone or DEFAULT_ZONE_NAME
+        reason = None
+        if any(stamp is None for _, stamp in tasks):
+            reason = 'the upstream server has no database'
+        while tasks and reason is None:
+            chunk = tasks[:MAX_HANDBACK_TASKS]
+            text = handback_text(identity, chunk)
+
+            def call(client: Any, text: str = text) -> Optional[str]:
+                method = getattr(getattr(client, 'dispatcher', None), 'handback', None)
+                return None if method is None else method(text)
+
+            try:
+                reply = self.link.call('puller', call)
+            except LinkDown:
+                log.debug(f'Hand-back of {len(chunk)} tasks for zone {name} lost with the link ({identity})')
+                return PullerState.WAIT_LINK
+            except Exception as error:
+                reason = f'{error.__class__.__name__}: {error}'
+                break
+            if reply is None:
+                reason = 'the upstream server takes none'
+                break
+            try:
+                read_handback_reply(reply)
+            except ValueError as error:
+                reason = str(error)
+                break
+            store.drop_stamps(self.engine, [task_id for task_id, _ in chunk])
+            tasks = tasks[len(chunk):]
+            self.giving[identity] = (zone, tasks)
+            log.info(f'Handed back {len(chunk)} tasks for zone {name}, which has no site client and none '
+                     f'planned here ({identity})')
+        if reason is not None:
+            log.warning(f'Could not hand back {len(tasks)} tasks for zone {name}, which has no site client and none '
+                        f"planned here ({reason}) - they are left to the upstream server's eviction of this relay")
+        del self.giving[identity]
+        return PullerState.GATE
+
     def finalize(self: UpstreamPuller) -> PullerState:
         """Stop pulling."""
         log.debug(f'Done (puller: {self.identity})')
@@ -507,13 +712,14 @@ class UpstreamPullerThread(Thread):
                  drain: Callable[[], bool] = drain_signalled,
                  zones: Optional[Sequence[Tuple[str, Optional[str]]]] = None,
                  connected: Optional[Callable[[Optional[str]], int]] = None,
-                 retired: Callable[[], bool] = never) -> None:
+                 retired: Callable[[], bool] = never, view: Any = None,
+                 unstage: Optional[Callable[[Optional[str], List[str]], List[str]]] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-puller')
         self.machine = UpstreamPuller(queue=queue, engine=engine, identity=identity, zone=zone,
                                       bundlesize=bundlesize, local_bundlesize=local_bundlesize, poll=poll,
                                       wait=wait, server_id=server_id, drain=drain, zones=zones,
-                                      connected=connected, retired=retired)
+                                      connected=connected, retired=retired, view=view, unstage=unstage)
 
     def run_with_exceptions(self: UpstreamPullerThread) -> None:
         """Run machine."""
@@ -543,9 +749,11 @@ class UpstreamReturner(StateMachine):
 
     Each cycle moves completed rows into the outbox in one transaction, then sends the oldest pending
     results as one bundle once there are `bundlesize` of them or `bundlewait` seconds have passed since
-    the last send. A bundle is marked returned only after its put returns; a put that does not return
-    leaves it pending, to be sent again. Returned results are pruned after `retention` seconds. Told to
-    flush, it sends whatever it holds at once and ends once nothing is left.
+    the last send, or at once when `idle` says the site holds no unfinished task (nothing more is coming
+    to fill the bundle, as at the end of a run). A bundle is marked returned only after its put
+    returns; a put that does not return leaves it pending, to be sent again. Returned results are
+    pruned after `retention` seconds. Told to flush, it sends whatever it holds at once and ends once
+    nothing is left.
 
     While the upstream link is down, completed rows still move into the outbox, which keeps them
     durable, and nothing is sent (WAIT_LINK). Once the link is back and has carried a heartbeat, the
@@ -560,6 +768,7 @@ class UpstreamReturner(StateMachine):
     bundlewait: float
     poll: float
     retention: float
+    idle: Callable[[], bool]
 
     sent: List[Tuple[str, str]]
     previous_send: float
@@ -571,8 +780,11 @@ class UpstreamReturner(StateMachine):
 
     def __init__(self: UpstreamReturner, queue: Any, engine: Engine,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, bundlewait: float = DEFAULT_RETURN_BUNDLEWAIT,
-                 poll: float = 1, retention: float = DEFAULT_RETENTION) -> None:
-        """Initialize with the upstream link (or a connected client) and the relay database."""
+                 poll: float = 1, retention: float = DEFAULT_RETENTION, idle: Callable[[], bool] = never) -> None:
+        """Initialize with the upstream link (or a connected client) and the relay database.
+
+        `idle`, if given, says whether the site holds no unfinished task; pending results then go at once.
+        """
         self.queue = queue
         self.link = as_link(queue)
         self.engine = engine
@@ -580,6 +792,7 @@ class UpstreamReturner(StateMachine):
         self.bundlewait = bundlewait
         self.poll = poll
         self.retention = retention
+        self.idle = idle
         self.sent = []
         self.previous_send = time.monotonic()
         self.previous_prune = time.monotonic()
@@ -625,11 +838,20 @@ class UpstreamReturner(StateMachine):
             return ReturnerState.WAIT_LINK
         waited = time.monotonic() - self.previous_send
         catching_up = not self.link.is_passed(STAGE_DRAIN)
-        if flushing or catching_up or len(pending) >= self.bundlesize or waited >= self.bundlewait:
+        if (flushing or catching_up or len(pending) >= self.bundlesize or waited >= self.bundlewait
+                or self.site_idle()):
             self.sent = pending
             return ReturnerState.SEND
         self.wake.wait(min(self.poll, self.bundlewait - waited))
         return ReturnerState.COLLECT
+
+    def site_idle(self: UpstreamReturner) -> bool:
+        """Whether the site holds no unfinished task (a failed read counts as not idle: the bundle waits)."""
+        try:
+            return bool(self.idle())
+        except SQLAlchemyError as error:
+            log.debug(f'Could not count unfinished tasks - results wait for the bundle ({error})')
+            return False
 
     def wait_link(self: UpstreamReturner) -> ReturnerState:
         """Wait for the link to carry results again, then collect (completed rows keep moving to the outbox)."""
@@ -695,11 +917,11 @@ class UpstreamReturnerThread(Thread):
 
     def __init__(self: UpstreamReturnerThread, queue: Any, engine: Engine,
                  bundlesize: int = DEFAULT_UPSTREAM_BUNDLESIZE, bundlewait: float = DEFAULT_RETURN_BUNDLEWAIT,
-                 poll: float = 1, retention: float = DEFAULT_RETENTION) -> None:
+                 poll: float = 1, retention: float = DEFAULT_RETENTION, idle: Callable[[], bool] = never) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-relay-returner')
         self.machine = UpstreamReturner(queue=queue, engine=engine, bundlesize=bundlesize, bundlewait=bundlewait,
-                                        poll=poll, retention=retention)
+                                        poll=poll, retention=retention, idle=idle)
 
     def run_with_exceptions(self: UpstreamReturnerThread) -> None:
         """Run machine."""

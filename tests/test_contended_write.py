@@ -430,3 +430,118 @@ def test_contended_handback_revert_skips_another_client(contended_db, caplog: py
     data = row(contended_db, task_id)
     assert data['client_id'] == other and data['schedule_time'] is not None
     assert warnings_with(caplog, 'hand-back') == []
+
+
+# A result, a cancel and a delete of one row, each as another writer's statement.
+RESULT_SQL = (f'UPDATE task SET completion_time = :completed, exit_status = 0, duration = 2, '
+              f'client_id = CAST(:client_id AS uuid), client_host = :client_host {BY_ID}')
+CANCEL_SQL = f'UPDATE task SET schedule_time = :cancelled, completion_time = :cancelled, exit_status = :status {BY_ID}'
+DELETE_SQL = f'DELETE FROM task {BY_ID}'
+
+
+def count(engine: Engine, task_id: str) -> int:
+    """How many committed rows have the id (0 or 1)."""
+    with engine.connect() as conn:
+        return conn.execute(text(f'SELECT count(*) FROM task {BY_ID}'), {'id': task_id}).scalar()
+
+
+def dispatched_and_confirmed() -> str:
+    """Submit, dispatch and confirm one task to the client; return its id."""
+    task_id = submit()
+    dispatch_one(task_id)
+    confirm([task_id])
+    return task_id
+
+
+def dispatched_ids() -> List[str]:
+    """Dispatch the next task (at most one); return the ids dispatched."""
+    return [task.id for task in Task.next(limit=1)]
+
+
+def test_contended_orphan_revert_keeps_result(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """An eviction revert that waited on the result of its row keeps the result, settled and not contended."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = dispatched_and_confirmed()
+    completed = datetime.now().astimezone()
+
+    outcome = contend(contended_db, RESULT_SQL,
+                      {'completed': completed, 'client_id': CLIENT[0], 'client_host': CLIENT[1], 'id': task_id},
+                      lambda: Task.revert_orphaned(CLIENT[0]))
+
+    assert outcome.error is None, repr(outcome.error)
+    data = row(contended_db, task_id)
+    assert (data['completion_time'], data['exit_status']) == (completed, 0)
+    assert data['client_id'] == CLIENT[0] and data['schedule_time'] is not None
+    assert warnings_with(caplog, 'revert') == []
+
+
+def test_contended_orphan_revert_keeps_cancel(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """An eviction revert that waited on a cancel of its row leaves the row cancelled."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = dispatched_and_confirmed()
+    cancelled = datetime.now().astimezone()
+
+    outcome = contend(contended_db, CANCEL_SQL, {'cancelled': cancelled, 'status': CANCEL_STATUS, 'id': task_id},
+                      lambda: Task.revert_orphaned(CLIENT[0]))
+
+    assert outcome.error is None, repr(outcome.error)
+    data = row(contended_db, task_id)
+    assert (data['schedule_time'], data['completion_time']) == (cancelled, cancelled)
+    assert data['exit_status'] == CANCEL_STATUS
+    assert warnings_with(caplog, 'revert') == []
+
+
+def test_contended_orphan_revert_skips_deleted_row(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """An eviction revert that waited on a delete of its row skips it without an error."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = dispatched_and_confirmed()
+
+    outcome = contend(contended_db, DELETE_SQL, {'id': task_id}, lambda: Task.revert_orphaned(CLIENT[0]))
+
+    assert outcome.error is None, repr(outcome.error)
+    assert count(contended_db, task_id) == 0
+    assert warnings_with(caplog, 'revert') == []
+
+
+def test_contended_dispatch_lands(contended_db) -> None:
+    """A dispatch stamp that waited on another write to its still-unscheduled row stamps it."""
+    task_id = submit()
+    holder_sql = f'UPDATE task SET client_host = :client_host {BY_ID}'
+
+    outcome = contend(contended_db, holder_sql, {'client_host': 'holder', 'id': task_id}, dispatched_ids)
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == [task_id]
+    data = row(contended_db, task_id)
+    assert data['schedule_time'] is not None and data['server_id'] is not None
+    assert data['client_host'] == 'holder'
+
+
+def test_contended_dispatch_skips_cancelled_row(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """A dispatch stamp that waited on a cancel of its row does not dispatch it, and the row stays cancelled."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = submit()
+    cancelled = datetime.now().astimezone()
+
+    outcome = contend(contended_db, CANCEL_SQL, {'cancelled': cancelled, 'status': CANCEL_STATUS, 'id': task_id},
+                      dispatched_ids)
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == []
+    data = row(contended_db, task_id)
+    assert (data['schedule_time'], data['completion_time']) == (cancelled, cancelled)
+    assert data['exit_status'] == CANCEL_STATUS and data['server_id'] is None
+    assert warnings_with(caplog, 'dispatch') == []
+
+
+def test_contended_dispatch_skips_deleted_row(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """A dispatch stamp that waited on a delete of its row skips it without an error."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = submit()
+
+    outcome = contend(contended_db, DELETE_SQL, {'id': task_id}, dispatched_ids)
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == []
+    assert count(contended_db, task_id) == 0
+    assert warnings_with(caplog, 'dispatch') == []

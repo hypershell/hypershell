@@ -55,7 +55,7 @@ from hypershell.core.signal import SIGUSR1, SIGUSR2, SIGTERM
 from hypershell.core.exceptions import get_shared_exception_mapping, handle_exception, handle_disconnect
 from hypershell.core.logging import Logger, INSTANCE
 from hypershell.core.queue import QueueClient, QueueConfig
-from hypershell.core.reconnect import UpstreamLink, LinkDown
+from hypershell.core.reconnect import UpstreamLink, LinkDown, TLSMismatchError
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
 from hypershell.core.types import parse_time, UnitError
@@ -69,7 +69,7 @@ from hypershell.relay.site import (site_cluster, zone_launch, zone_fleet, fence_
 from hypershell.core.topology import Bounds, MAX_HANDBACK_TASKS, handback_text, read_handback_reply
 from hypershell.cluster.demand import ZoneRef
 from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThread, UpstreamHeartbeatThread,
-                                       served_zones, upstream_config, upstream_key, relay_site,
+                                       served_zones, upstream_config, upstream_key, relay_site, first_connect,
                                        drain_signalled, log_drain, DEFAULT_UPSTREAM_BUNDLESIZE,
                                        DEFAULT_UPSTREAM_HEARTRATE, DEFAULT_RETENTION, LINK_STAGES)
 from hypershell.cluster.remote import AutoScalingCluster, AutoScalerThread
@@ -580,7 +580,8 @@ class RelayThread(Thread):
             self.link = UpstreamLink(functools.partial(QueueClient, config=upstream),
                                      name=f'upstream server {upstream.host}:{upstream.port}',
                                      deadline=self.deadline, evict_hint=self.evict_hint,
-                                     backoff_cap=self.backoff, stages=LINK_STAGES)
+                                     backoff_cap=self.backoff, stages=LINK_STAGES,
+                                     first_connect=first_connect(upstream))
             self.link.start()
             if not self.wait_link():
                 return
@@ -599,10 +600,11 @@ class RelayThread(Thread):
                                                local_bundlesize=self.bundlesize, poll=self.poll, drain=draining,
                                                zones=self.served,
                                                connected=self.zone_clients if len(self.zones) > 1 else None,
-                                               retired=self.superseded)
+                                               retired=self.superseded, view=self.view, unstage=self.unstage)
             self.returner = UpstreamReturnerThread(queue=self.link, engine=engine,
                                                    bundlesize=self.upstream_bundlesize, bundlewait=self.bundlewait,
-                                                   poll=self.poll, retention=self.retention)
+                                                   poll=self.poll, retention=self.retention,
+                                                   idle=functools.partial(store.site_idle, engine))
             # Read the topology first, so a relay a topology sizes never launches its local fleet first.
             self.heartbeat.machine.fetch()
             self.cluster.start()
@@ -637,6 +639,10 @@ class RelayThread(Thread):
         """Site clients now serving `zone` (asking the relay-local server for its tasks, not yet gone)."""
         return self.server.queue.dispatcher.clients(zone_id(zone))
 
+    def unstage(self: RelayThread, zone: Optional[str], ids: List[str]) -> List[str]:
+        """Take the tasks `ids` of `zone` out of the relay-local server's staging pool; return those taken."""
+        return self.server.queue.dispatcher.withdraw(zone_id(zone), ids)
+
     def zone_launched(self: RelayThread, name: str) -> int:
         """Site clients launched for the zone called `name` and still running, as advertised upstream."""
         fleets = [self.cluster.autoscaler, *self.fleets]
@@ -650,7 +656,7 @@ class RelayThread(Thread):
 
         An upstream server that cannot be reached yet is tried again with backoff (the link logs it);
         one that refuses the relay for good (another protocol, a wrong key) ends it here, with the
-        client's error, before the site is touched.
+        client's error, before the site is touched, as does one whose TLS setting is not the relay's.
         """
         while not self.link.wait_up(timeout=STOP_CHECK_INTERVAL):
             if self.aborted:
@@ -1098,6 +1104,7 @@ class RelayApp(Application):
         ConnectionResetError: functools.partial(handle_disconnect, logger=log),
         ConnectionRefusedError: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
         AuthenticationError: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
+        TLSMismatchError: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
         **get_shared_exception_mapping(__name__)
     }
 
