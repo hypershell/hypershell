@@ -419,6 +419,19 @@ Pre-existing in `develop` and on the 2.8 line.
 `-P`); `cluster-launch-failures` planning*
 **Seed:** [`issues/autoscale-zero-period-spins.md`](issues/autoscale-zero-period-spins.md) · *status: unshaped*
 
+## A `--no-db` cluster can report a failed run when a client dies just after its last result
+
+Once `cluster-launch-failures` lands, `hs cluster` exits non-zero when every launched client has
+gone, one of them non-zero, with work remaining. Without a database the server keeps no rows to
+count, so a client that returned every result and then died in the moment before its `FINISHED`
+heartbeat leaves a server waiting to evict it, which reads as work remaining: the run is reported
+failed although every result is recorded. An exact answer needs a result counter in the server's
+Receiver.
+
+*Horizon: near-term, small · Depends on: `cluster-launch-failures` (in flight) · Refs: its PLAN §2.3
+and plan-gate ruling 3*
+**Seed:** [`issues/nodb-cluster-finish-race.md`](issues/nodb-cluster-finish-race.md) · *status: unshaped*
+
 ## `rotatedb` lost-update window
 
 The clone-then-delete rotation concedes its own race in a source comment, and a crash between the
