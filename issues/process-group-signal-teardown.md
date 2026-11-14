@@ -15,29 +15,32 @@ lane: public
 Two defects that must be fixed together, because fixing either alone makes things worse.
 
 **Kills reach only the `sh` wrapper.** Tasks spawn as `Popen(self.task.command, shell=True, ...)`
-with no `start_new_session`/`process_group`/`preexec_fn` (`src/hypershell/client.py:759-761`;
-grepping `setsid|start_new_session|killpg|process_group` across `src/` returns nothing). The
-walltime and stop escalation ladder is real and well built — INT, wait, TERM, wait, KILL
-(`client.py:855`, `:862`, `:869`) — but every signal targets `self.process`, i.e. the shell. Any
-task that is a pipeline, a wrapper script, or backgrounds children leaves grandchildren running
-after "kill", so **walltime does not actually bound node usage** (`client.py:823-850`) and the
-final branch merely logs `Process ignored SIGKILL`. The resource monitor already enumerates the
-descendant tree (`src/hypershell/core/resource.py:75`, `p.children(recursive=True)`) — we observe
-the tree and never signal it.
+with no `start_new_session`/`process_group`/`preexec_fn` (`src/hypershell/client.py:830-832` on
+`develop`, `f6a1d62`; grepping `setsid|start_new_session|killpg|process_group` across `src/` returns
+nothing). The walltime and stop escalation ladder is real and well built — INT, wait, TERM, wait,
+KILL (`client.py:926`, `:933`, `:940`) — but every signal targets `self.process`, i.e. the shell.
+Any task that is a pipeline, a wrapper script, or backgrounds children leaves grandchildren running
+after "kill", so **walltime does not actually bound node usage** (`client.py:837-900`) and the final
+branch merely logs `Process ignored SIGKILL`. The resource monitor already enumerates the descendant
+tree (`src/hypershell/core/resource.py:75`, `p.children(recursive=True)`) — we observe the tree and
+never signal it.
 
 **The default kill signal produces the worst available outcome.** `register_handlers()` installs
-USR1/USR2/HUP only (`src/hypershell/core/signal.py:111-115`) — deliberate, and the cooperative
-drain built on it is the right design — but it means a plain `kill`, which is what Slurm/PBS
-epilogues and most supervisors send, hits Python's default disposition. The client dies instantly,
-subprocesses reparent and keep running, rows stay "interrupted", and the next server start re-runs
-them (`server.py:197`, `Task.revert_interrupted()`). Ctrl-C has the same hole one layer up: the
-cleanup idiom is `try: thread.join() / except Exception: thread.stop(); raise`
-(`client.py:1412-1416`, `src/hypershell/cluster/local.py:45-50`) and `KeyboardInterrupt` is a
-`BaseException` — so `stop()` never runs. Cluster teardown only terminates *local* handles: the
-launcher `Popen` (`src/hypershell/cluster/remote.py:323`) or the local `ssh` processes
-(`src/hypershell/cluster/ssh.py:320`; clients are spawned without a PTY at `ssh.py:311`, so
-dropping ssh does not reliably kill the remote `hs client`), and the `AutoScaler` has no terminate
-path at all (`remote.py:531-554`).
+USR1/USR2/HUP only (`src/hypershell/core/signal.py:111-115`) — deliberate, and the cooperative drain
+built on it is the right design — but it means a plain `kill`, which is what Slurm/PBS epilogues and
+most supervisors send, hits Python's default disposition. The client dies instantly, subprocesses
+reparent and keep running, rows stay "interrupted", and the next server start re-runs them
+(`server.py:233`, `Task.revert_interrupted()`). Ctrl-C has the same hole one layer up: the cleanup
+idiom is `try: join_waking(thread) / except Exception: thread.stop(); raise` (`client.py:1516-1520`,
+`src/hypershell/cluster/local.py:46-50`). Since #101, `join_waking`
+(`src/hypershell/core/thread.py:63`) waits in bounded steps so a signal handler runs promptly, but
+the `except` clause is unchanged and `KeyboardInterrupt` is a `BaseException` — so `stop()` still
+never runs. Cluster teardown only terminates *local* handles: the launcher `Popen`
+(`src/hypershell/cluster/remote.py:318`) or the local `ssh` processes
+(`src/hypershell/cluster/ssh.py:318`; clients are spawned without a PTY, through
+`ClientLaunch.start` at `src/hypershell/cluster/launch.py:109-110`, so dropping ssh does not
+reliably kill the remote `hs client`), and the autoscaler has no terminate path at all: its `stop`
+only halts the state machine (`remote.py:633-637`).
 
 Together: orphaned compute on every node, *plus* guaranteed duplicate re-execution after restart.
 
