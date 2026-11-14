@@ -43,8 +43,10 @@ subsystems.
   naming the task and path, and a safe outcome: no crash, no silently stranded task, no write that
   lands without its condition). A first-attempt match is neither re-run nor re-checked. Pattern:
   `Task.confirm_all`/`revert_all`, `Task.revert_staged` (re-check on `completion_time IS NULL`, not
-  mere existence), `Task.apply_results` (`ResultOutcome.DEFERRED`). Never
-  `bulk_update_mappings` or an ORM flush for such a write.
+  mere existence), the eviction revert `Task.revert_orphaned` (only while still in flight with the
+  evicted client), the dispatch stamp in `Task.next` (only while `schedule_time IS NULL`),
+  `Task.apply_results` (`ResultOutcome.DEFERRED`). A row gone or no longer qualifying is skipped,
+  never raised on. Never `bulk_update_mappings` or an ORM flush for such a write.
 
 ## 2. `exit_status` overloading
 

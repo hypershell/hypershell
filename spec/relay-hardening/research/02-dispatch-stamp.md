@@ -110,7 +110,8 @@ bind is named `r_id` (as every `__write_rows` statement is), two existing tests 
 so the stamp's UPDATE is counted. With the bind named `d_id`, every dispatch-related file passes on
 SQLite (`test_contended_recovery`, `group_order`, `relay_return`, `retry_gate`, `server_fsm`,
 `writeback*`, `zone_model`, `zone_dispatch`, `restart`) and `test_contended_write`,
-`test_writeback_postgres` and `test_zone_postgres` pass on PG and TSDB (41/41 each). So
+`test_writeback_postgres` and `test_zone_postgres` pass on PG and TSDB (41/41 each). The whole SQLite
+suite with the `d_id` candidate passed too: 2055 passed, 95 skipped. So
 `__row_statements` needs a bind-prefix (or key) parameter, and R10 rules out renaming the existing
 binds or editing those tests.
 

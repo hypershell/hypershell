@@ -1,93 +1,158 @@
 ---
 slug: relay-hardening
-title: "Relay hardening for 2.9.0: no aborts on removed rows or a restarted upstream, a TLS mismatch that ends, zones that wait for their work, eviction by the server's clock"
+title: 'Relay hardening for 2.9.0: no aborts on removed rows or a restarted upstream,
+  a TLS mismatch that ends, zones that wait for their work, eviction by the server''s
+  clock'
 kind: fix
 appetite: big
 status: in_progress
 branch: fix/relay-hardening
 base: develop
-current_phase: P1
-last_updated: "2026-11-13"
+current_phase: P2
+last_updated: '2026-11-13'
 phases:
-  - id: P1
-    name: "Shared conditional task writes: the eviction revert and the dispatch stamp, every server"
-    status: pending
-    satisfies: [R1, R2, R9, R10]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_return.py tests/test_contended_recovery.py tests/test_writeback.py tests/test_writeback_statement.py tests/test_server_fsm.py tests/test_relay_roster.py tests/test_topology_server.py tests/test_group_order.py tests/test_retry_gate.py tests/test_zone_model.py tests/test_zone_dispatch.py tests/test_restart.py tests/test_cancel.py && for ts in community ''; do HS_TEST_POSTGRES=postgresql+psycopg://postgres:postgres@localhost:5432/postgres HS_TEST_TIMESCALE=$ts uv run pytest -v tests/test_contended_write.py tests/test_writeback_postgres.py tests/test_zone_postgres.py || exit 1; done && HS_TEST_POSTGRES=postgresql+psycopg://postgres:postgres@localhost:5432/postgres HS_TEST_TIMESCALE=community sh spec/relay-hardening/drive/red_check.sh"
-  - id: P2
-    name: "Eviction aged by the server's monotonic receive time, every client"
-    status: pending
-    satisfies: [R7, R9, R10]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_server_fsm.py tests/test_relay_roster.py tests/test_topology_server.py tests/test_zone_dispatch.py tests/test_relay_launch.py tests/test_relay_outage.py tests/test_server.py && sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html"
-  - id: P3
-    name: "A restarted upstream's stale proxy id counts as a lost link, all four roles"
-    status: pending
-    satisfies: [R3, R9, R10]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_link.py tests/test_relay_outage.py tests/test_relay_retire.py tests/test_relay_connector.py && sh spec/relay-hardening/drive/red_check.sh"
-  - id: P4
-    name: "TLS mismatch with the upstream fails fast at first connection, both directions"
-    status: pending
-    satisfies: [R4, R9, R10]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_link.py tests/test_relay_workload.py tests/test_queue_tls.py && sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html"
-  - id: P5
-    name: "An idle zone asks once for itself after a shutdown reply; relay docs"
-    status: pending
-    satisfies: [R5, R6, R9, R10]
-    depends_on: [P4]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_relay_connector.py tests/test_relay_workload.py tests/test_relay_retire.py tests/test_dispatch.py tests/test_dispatch_staged.py && sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html"
-  - id: P6
-    name: "End-to-end laptop evidence: restart, TLS, zones and pair drives; earlier relay drives and the full suite on the head"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R9, R10]
-    depends_on: [P5]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "for mode in restart tls-on tls-off zones zones-nodb pair-relay pair-server; do .agents/factory/bin/temp_site.sh sh \"$PWD/spec/relay-hardening/drive/hardening_drive.sh\" $mode || exit 1; done && sh spec/relay/drive/relay_smoke.sh && for mode in retire idle; do .agents/factory/bin/temp_site.sh sh \"$PWD/spec/relay-retire/drive/retire_drive.sh\" $mode || exit 1; done && for mode in spread kill; do .agents/factory/bin/temp_site.sh sh \"$PWD/spec/relay-topology/drive/topology_drive.sh\" $mode || exit 1; done && uv run pytest && sh spec/relay-hardening/drive/red_check.sh"
-  - id: P7
-    name: "Tail investigation on the laptop: tooling, diagnostic runs, the fix if the logs name one, post-fix runs"
-    status: pending
-    satisfies: [R8]
-    depends_on: [P6]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_tail_judge.py && uv run python spec/relay-hardening/drive/tail_judge.py --budget 10 spec/relay-hardening/evidence/laptop && uv run pytest -v tests/test_relay_connector.py tests/test_relay_return.py tests/test_server_fsm.py tests/test_relay_workload.py"
-  - id: P8
-    name: "Conditional cluster tail job (foreman submits) and the recorded R8 outcome"
-    status: pending
-    satisfies: [R8]
-    depends_on: [P7]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -v tests/test_tail_judge.py && uv run python spec/relay-hardening/drive/tail_judge.py --budget 10 --outcome spec/relay-hardening/evidence/laptop spec/relay-hardening/evidence/cluster"
+- id: P1
+  name: 'Shared conditional task writes: the eviction revert and the dispatch stamp,
+    every server'
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R9
+  - R10
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_return.py tests/test_contended_recovery.py
+    tests/test_writeback.py tests/test_writeback_statement.py tests/test_server_fsm.py
+    tests/test_relay_roster.py tests/test_topology_server.py tests/test_group_order.py
+    tests/test_retry_gate.py tests/test_zone_model.py tests/test_zone_dispatch.py
+    tests/test_restart.py tests/test_cancel.py && for ts in community ''; do HS_TEST_POSTGRES=postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+    HS_TEST_TIMESCALE=$ts uv run pytest -v tests/test_contended_write.py tests/test_writeback_postgres.py
+    tests/test_zone_postgres.py || exit 1; done && HS_TEST_POSTGRES=postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+    HS_TEST_TIMESCALE=community sh spec/relay-hardening/drive/red_check.sh
+- id: P2
+  name: Eviction aged by the server's monotonic receive time, every client
+  status: pending
+  satisfies:
+  - R7
+  - R9
+  - R10
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_server_fsm.py tests/test_relay_roster.py tests/test_topology_server.py
+    tests/test_zone_dispatch.py tests/test_relay_launch.py tests/test_relay_outage.py
+    tests/test_server.py && sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    $TMPDIR/docs-html
+- id: P3
+  name: A restarted upstream's stale proxy id counts as a lost link, all four roles
+  status: pending
+  satisfies:
+  - R3
+  - R9
+  - R10
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_link.py tests/test_relay_outage.py tests/test_relay_retire.py
+    tests/test_relay_connector.py && sh spec/relay-hardening/drive/red_check.sh
+- id: P4
+  name: TLS mismatch with the upstream fails fast at first connection, both directions
+  status: pending
+  satisfies:
+  - R4
+  - R9
+  - R10
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_link.py tests/test_relay_workload.py tests/test_queue_tls.py
+    && sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    $TMPDIR/docs-html
+- id: P5
+  name: An idle zone asks once for itself after a shutdown reply; relay docs
+  status: pending
+  satisfies:
+  - R5
+  - R6
+  - R9
+  - R10
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_relay_connector.py tests/test_relay_workload.py
+    tests/test_relay_retire.py tests/test_dispatch.py tests/test_dispatch_staged.py
+    && sh spec/relay-hardening/drive/red_check.sh && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    $TMPDIR/docs-html
+- id: P6
+  name: 'End-to-end laptop evidence: restart, TLS, zones and pair drives; earlier
+    relay drives and the full suite on the head'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R9
+  - R10
+  depends_on:
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: for mode in restart tls-on tls-off zones zones-nodb pair-relay pair-server;
+    do .agents/factory/bin/temp_site.sh sh "$PWD/spec/relay-hardening/drive/hardening_drive.sh"
+    $mode || exit 1; done && sh spec/relay/drive/relay_smoke.sh && for mode in retire
+    idle; do .agents/factory/bin/temp_site.sh sh "$PWD/spec/relay-retire/drive/retire_drive.sh"
+    $mode || exit 1; done && for mode in spread kill; do .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/relay-topology/drive/topology_drive.sh" $mode || exit 1; done &&
+    uv run pytest && sh spec/relay-hardening/drive/red_check.sh
+- id: P7
+  name: 'Tail investigation on the laptop: tooling, diagnostic runs, the fix if the
+    logs name one, post-fix runs'
+  status: pending
+  satisfies:
+  - R8
+  depends_on:
+  - P6
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_tail_judge.py && uv run python spec/relay-hardening/drive/tail_judge.py
+    --budget 10 spec/relay-hardening/evidence/laptop && uv run pytest -v tests/test_relay_connector.py
+    tests/test_relay_return.py tests/test_server_fsm.py tests/test_relay_workload.py
+- id: P8
+  name: Conditional cluster tail job (foreman submits) and the recorded R8 outcome
+  status: pending
+  satisfies:
+  - R8
+  depends_on:
+  - P7
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -v tests/test_tail_judge.py && uv run python spec/relay-hardening/drive/tail_judge.py
+    --budget 10 --outcome spec/relay-hardening/evidence/laptop spec/relay-hardening/evidence/cluster
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Relay hardening for 2.9.0
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above
@@ -153,9 +218,9 @@ code+state commit.
 one §1 loop, on every server; a gone, completed or no-longer-qualifying row is skipped, never raised
 on; a contended row that still qualifies lands. Design: PLAN §2 R1, R2; research 01, 02.
 
-- [ ] Write `spec/relay-hardening/drive/red_check.sh` and `drive/red.txt` (see Conventions); a
+- [x] Write `spec/relay-hardening/drive/red_check.sh` and `drive/red.txt` (see Conventions); a
       `sh -n` check and one dry run with an empty list (exits 0, prints nothing to check).
-- [ ] Generalise `Task.__row_statements` (`model.py:916`) / `__write_rows` (`:937`): a condition
+- [x] Generalise `Task.__row_statements` (`model.py:916`) / `__write_rows` (`:937`): a condition
       argument (`pending` as today; `held_by=<client id>` → `client_id = :r_held_by AND schedule_time
       IS NOT NULL AND completion_time IS NULL`; `unscheduled=True` → `schedule_time IS NULL`), a bind
       prefix (default `r_`; every existing statement byte-for-byte as today), the re-read carrying the
@@ -163,17 +228,17 @@ on; a contended row that still qualifies lands. Design: PLAN §2 R1, R2; researc
       (non-strict) instead of raising `StaleDataError`. Skip messages: "already complete" (revert),
       "already scheduled" (stamp). The re-run at most `CONTENDED_RERUNS`, DEBUG per extra attempt,
       WARNING at the bound, unchanged.
-- [ ] `Task.revert_orphaned` (`:1224`) writes through `__write_rows(…, 'revert', 'task left in
+- [x] `Task.revert_orphaned` (`:1224`) writes through `__write_rows(…, 'revert', 'task left in
       flight', held_by=client_id)`; `select_orphaned` unchanged; `revert_all` unchanged (start-up
       recovery). Docstrings say the revert never undoes a landed result or touches a removed row.
-- [ ] `Task.next` (`:793-810`): ids via `sqlalchemy.inspect(task).identity[0]`; stamp
+- [x] `Task.next` (`:793-810`): ids via `sqlalchemy.inspect(task).identity[0]`; stamp
       `server_id`/`server_host`/`schedule_time` through `__write_rows(…, 'dispatch', 'task left
       unscheduled', unscheduled=True, prefix='d_')`; commit; return the landed rows in order; set no
       ORM attribute (objects reload in `pack_bundle`, so the wire `schedule_time` is the stored
       value). The retry branch untouched (Non-goals).
-- [ ] `AGENTS.md` and `.agents/factory/invariants.md` §1 "Pattern" name the eviction revert
+- [x] `AGENTS.md` and `.agents/factory/invariants.md` §1 "Pattern" name the eviction revert
       (`Task.revert_orphaned`) and the dispatch stamp (`Task.next`), in lockstep.
-- [ ] R9 tests (each in `red.txt` unless CI-only):
+- [x] R9 tests (each in `red.txt` unless CI-only):
   - `tests/test_relay_return.py` (`before_cursor_execute` on the first `UPDATE task` after the read,
     no threads): **revert, relay-local** — the hook applies one result and runs `collect_results`;
     `revert_orphaned` returns, the other row is reverted, the collected row stays collected;

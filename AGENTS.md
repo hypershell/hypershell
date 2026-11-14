@@ -491,11 +491,15 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   stranded task, or a write that lands without its condition). A write that matches first time is
   neither re-run nor re-checked. `Task.confirm_all`/`Task.revert_all` (per-row UPDATE by id),
   `Task.revert_staged` (the same, conditional on `completion_time IS NULL`, and its re-check asks
-  the same: a row completed, cancelled or deleted meanwhile is skipped, never reverted) and
+  the same: a row completed, cancelled or deleted meanwhile is skipped, never reverted), the
+  eviction revert `Task.revert_orphaned` (conditional on the row still being in flight with the
+  evicted client: a result landed meanwhile is kept, a removed row skipped), the dispatch stamp in
+  `Task.next` (conditional on `schedule_time IS NULL`: a row removed, cancelled or scheduled
+  meanwhile is skipped, one never stamped stays unscheduled for a later round) and
   `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
   held by the Receiver) are the pattern. Never use `bulk_update_mappings` or an ORM flush for such a
-  write: they assert the total and raise `StaleDataError`. The Scheduler's `Task.next` stamp and
-  `retried` mark, `Task.cancel_all` and `hs update` do not follow it yet
+  write: they assert the total and raise `StaleDataError`. The Scheduler's `retried` mark,
+  `Task.cancel_all` and `hs update` do not follow it yet
   (`issues/hypertable-contended-scheduler-and-cli-writes.md`).
 
 ## Testing

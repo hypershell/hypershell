@@ -1,0 +1,20 @@
+# Regression tests that must fail on 2ffb5cc (see red_check.sh). `pg:` needs HS_TEST_POSTGRES.
+
+# P1: the eviction revert (R1) and the dispatch stamp (R2).
+tests/test_relay_return.py::test_eviction_revert_skips_a_row_collected_meanwhile
+tests/test_relay_return.py::test_eviction_revert_keeps_a_result_committed_meanwhile
+tests/test_relay_return.py::test_dispatch_skips_a_row_deleted_meanwhile
+tests/test_relay_return.py::test_dispatch_skips_a_row_cancelled_meanwhile
+tests/test_contended_recovery.py::test_contended_revert_keeps_a_result_landed_meanwhile
+tests/test_contended_recovery.py::test_contended_revert_leaves_a_row_confirmed_to_another_client
+tests/test_contended_recovery.py::test_contended_revert_skips_a_row_deleted_meanwhile
+tests/test_contended_recovery.py::test_contended_dispatch_lands_on_rerun
+tests/test_contended_recovery.py::test_contended_dispatch_exhausted_leaves_row_unscheduled
+tests/test_contended_recovery.py::test_contended_dispatch_skips_a_row_cancelled_meanwhile
+tests/test_contended_recovery.py::test_contended_dispatch_skips_a_row_deleted_meanwhile
+tests/test_contended_recovery.py::test_uncontended_dispatch_costs_one_update_per_row
+pg:tests/test_contended_write.py::test_contended_orphan_revert_keeps_result
+pg:tests/test_contended_write.py::test_contended_orphan_revert_keeps_cancel
+pg:tests/test_contended_write.py::test_contended_orphan_revert_skips_deleted_row
+pg:tests/test_contended_write.py::test_contended_dispatch_skips_cancelled_row
+pg:tests/test_contended_write.py::test_contended_dispatch_skips_deleted_row
