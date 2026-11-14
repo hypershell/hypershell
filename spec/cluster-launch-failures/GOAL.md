@@ -86,12 +86,14 @@ such as a certificate's name.
 Failure of every client:
 
 - **R1** — WHEN every client process `hs cluster` launched in launcher, `--mpi` or `--ssh` mode has
-  exited, IF the server still holds tasks not completed, THEN the cluster SHALL stop its server and
+  exited and at least one of them ended with a non-zero status or a signal, IF the server still
+  holds tasks not completed, THEN the cluster SHALL stop its server and
   exit with a non-zero status within 10 s of the last exit (default settings), after one error
   that says every launched client has exited with tasks remaining and names the processes it
   launched (the launcher command in launcher and `--mpi` modes; each host in `--ssh` mode), each
-  one's exit status, and the address the clients were told to dial. This holds however the clients
-  ended (non-zero, zero, or by a signal) and whether or not any had connected; it holds in
+  one's exit status, and the address the clients were told to dial. This holds whether or not any
+  had connected. When every launched process exited 0 (a launcher that hands its clients to a
+  scheduler and returns, say), the cluster keeps waiting as it does today. It holds in
   `--forever` and `--restart` runs too, whenever the last client is gone and tasks are pending.
 - **R2** — WHEN a client process launched by `hs cluster` (any remote mode, autoscaling included)
   exits with a non-zero status, the cluster SHALL log a warning naming that process (its host in
@@ -214,6 +216,21 @@ via the foreman** before `/hs-plan`.
   existing runtime-error status is the natural choice); how `--ssh` exits are watched concurrently;
   the exact error wording.
 
+**Ruled at the GOAL gate** (2026-11-14): approved by the foreman, gate judge under the maintainer's
+mandate, with one amendment.
+- **R1 is narrowed.** It fires only when every launched process has exited and at least one ended
+  non-zero or by a signal. A launched process that returns 0 while tasks remain keeps today's wait.
+  A launcher that hands its clients to a scheduler and returns (a bare `sbatch`) works today
+  whenever the clients connect later, and this cycle must not break it. The clarification on the
+  launcher's exit is superseded on that point. The `--launcher true` drive shows the cluster still
+  waiting (bounded by the drive), not a failure.
+- **Confirmed:** two seeds in one cycle, appetite big; R3's definition with
+  `autoscale.failed_launches` (default 3, 0 off, configuration key only); relay site fleets
+  excluded from stopping; the default address rule reaching relay site clients, with the relay
+  override deferred; `--forever`/`--restart` following R1; `--advertise` with `server.advertise`.
+
+The contract is locked; `hs-plan` designs against it.
+
 ## Evidence plan
 
 What `hs-review` should be able to run against the branch:
@@ -226,7 +243,8 @@ What `hs-review` should be able to run against the branch:
   address for a relay bound to one address.
 - **`.agents/factory/bin/temp_site.sh` drives:**
   - `hs cluster TASKS --no-db --no-tls --launcher false` exits non-zero within 10 s, with the R1
-    error; the same with `--launcher true` (clients that exit 0 with work left).
+    error. With `--launcher true` (a launcher that exits 0 with work left), the cluster is still
+    running at a bounded check, per the GOAL-gate ruling.
   - `hs cluster TASKS --no-tls --ssh hostA hostB` with a stub `ssh` first on `PATH` that exits 255:
     non-zero exit, both hosts and statuses named; with one host's stub running the client locally
     and the other failing, the run completes and warns once for the failed host (R2, R4).
