@@ -390,3 +390,244 @@ The reviewer found no violation of the base invariants:
 - The orchestrator ran only pytest processes (the red checks and two in-process probes), and each
   exited.
 - `git status --porcelain` was empty on hand-back.
+
+## Review cycle 3 — approved (2026-11-14)
+
+- **Reviewed commit:** 4baaada36a22532b7d69a04b7b75583590a37e45  ·  **Base:** `origin/develop` `87002e6` (merge base `2ffb5cc`)  ·  **Date:** 2026-11-14
+- **Verdict:** approved. No CONFIRMED finding; one PLAUSIBLE finding (RV7, LOW) goes to the maintainer for triage.
+- **Cycle:** 3 of ≤3, the last allowed. It mirrors `review.cycle` in `TECH.md`.
+- **Mode:** a fresh blind pass over the whole spec-excluded diff, as in cycle 2.
+  - One fresh reviewer (no `debate`, no `completeness`) read frozen copies of `GOAL.md`, the base
+    `invariants.md` and `AGENTS.md`, and the rubric from a scratch directory.
+  - It got cycle 1's two diff commands and the gate rulings below as readings of the contract.
+  - It was told not to read `PLAN.md`, `TECH.md`, `REVIEW.md`, `META.md`, `research/` or
+    `evidence/`, and was not told what RV1–RV6 said.
+  - It was asked to give `4baaada` at least the scrutiny of the rest, and was given the areas that
+    commit touches.
+- **Orchestrator's own work:**
+  - graded RV1–RV6 by executed command;
+  - graded R8's record;
+  - checked the merge with `develop`, textually and by the full suite on the merged tree;
+  - probed the remediation separately (RV7);
+  - dropped one reviewer note on sanity check.
+
+### Pre-flight
+
+- **Base.** `TECH.md` `base: develop`. `origin/develop` is now `87002e6`; `develop` gained #104
+  (`6c46cbd`) and #105 (`87002e6`) since cycle 2. The merge base is still `2ffb5cc`.
+- **Build state.** `TECH.md` `status: in_review`; cycle 2 left `changes-requested`. Since then:
+  `8ba6d96` (the cycle-2 rulings, recorded in `PLAN.md`) and `4baaada` (the remediation of RV5
+  and RV6).
+- **Contract drift.** `git log --oneline origin/develop..HEAD -- spec/relay-hardening/GOAL.md` still
+  lists only `26b6543` (shape) and `95f8740` (GOAL-gate lock). The contract did not move.
+- **Contract readings applied.**
+  - Cycle 1's four readings: R10's exemptions; R8 fixes (i) and (ii); R8 outcome (b); R2's TimescaleDB leg in CI.
+  - The cycle-1 rulings: R5's request only for a zone whose fleet would launch; every red entry red for the defect.
+  - The cycle-2 rulings:
+    - An idle zone holding only rows it asked for hands them back through the hand-back path once
+      no launch is coming, then ends.
+    - Against a server without the call it falls back to eviction with one WARNING.
+    - It never hands back a row a site client has received.
+    - A TLS-on relay recognises a cleartext upstream from its own failed handshake: no second
+      connection and no timer.
+    - It fails fast regardless of latency, still retries an unreachable upstream, leaves
+      certificate, EOF and zero-return errors unchanged, and never misclassifies a TLS upstream.
+- **Invariants.** The code is graded against the base `invariants.md` and `AGENTS.md`. The
+  branch's edits to both (§1, §6) are graded as part of the diff.
+
+### Merge status
+
+- `git merge-tree --write-tree HEAD origin/develop` → exit 0, tree `a4e83a4`: no conflicts.
+- The full SQLite suite on an export of that merged tree, run with this tree's environment and the
+  export's `src` first on `PYTHONPATH`, gave 2246 passed, 112 skipped, exit 0 (18 min).
+- #104 refuses a key on the command line. The branch's drives give the key only through the
+  environment (`HYPERSHELL_SERVER_AUTH`, `HYPERSHELL_RELAY_UPSTREAM_AUTH`), so they are unaffected.
+
+### Verification run
+
+**Reviewer**
+- SQLite: `uv run pytest -q -p no:cacheprovider -x` → exit 0, 2233 tests collected, only the PostgreSQL-gated skips.
+- PostgreSQL legs (`test_contended_write.py`, `test_writeback_postgres.py`, `test_zone_postgres.py`,
+  `test_contended_recovery.py`):
+  - `HS_TEST_TIMESCALE=community` → 75 passed.
+  - `HS_TEST_TIMESCALE=` → 75 passed.
+- Red checks:
+  - `red.txt` on `2ffb5cc` → 24 of 24.
+  - `red-ff0973a.txt` on `ff0973a` → 5 of 5.
+  - `red-a741340.txt` on `a741340` → 8 of 8.
+  - Each base failure was read and is the defect: the zone ends or never ends, a cancelled row is
+    dispatched, `StaleDataError`, a reverted result.
+- Docs: `sphinx-build -W --keep-going -E` in a separate venv → exit 0.
+- Drives (`temp_site.sh … hardening_drive.sh MODE`), all PASS, exit 0:
+  - `tls-on` and `tls-off`: exit 5 in about 1.1 s, one CRITICAL line, nothing launched.
+  - `zones` and `zones-nodb`.
+  - `restart`: the relay never exits 5. As before, no stale proxy id was hit end to end; R3 rests on the unit harness.
+  - `pair-relay` and `pair-server` against a `2ffb5cc` peer: every task ran once.
+- Probes outside the tree:
+  - TLS on against a cleartext server: a mismatch 30 times out of 30, with 0 attempts. Over a path
+    delaying only server-to-client by 1.5 s, the same after 1.51 s.
+  - A wrong CA stays `SSLCertVerificationError`. A wrong key stays `AuthenticationError`, with TLS and without.
+  - A `--no-tls` link against a cleartext server connects 20 times out of 20.
+  - The stop-time requeue, given late hand-backs of a completed, a cancelled and an assigned row,
+    requeues only the assigned one. With `in_memory` it does nothing.
+
+**Orchestrator**
+- The three red checks, re-run independently with PostgreSQL and TimescaleDB → 24 of 24, 5 of 5, 8 of 8, exit 0.
+- The RV5 and RV6 tests on the head:
+  - `test_relay_connector.py`, `test_relay_retire.py` and `test_dispatch.py` hand-back, take-back,
+    withdraw and idle-zone tests → 31 passed.
+  - `test_relay_link.py` TLS tests → 10 passed.
+- TLS latency probe (`SlowPath` from `test_relay_link.py`, real `QueueServer`, a TLS-on `UpstreamLink`
+  with `first_connect`, deadline 30 s):
+  - Delays of 2.5 s and 6.0 s per chunk → `TLSMismatchError` after 2.51 s and 6.01 s, 0 attempts.
+  - A TLS server behind a 2.5 s path → `UP` after 5.0 s, no failure.
+- `tail_judge.py --budget 10 --outcome spec/relay-hardening/evidence/laptop` → 10 runs, `outcome b: holds`, PASS.
+  - The R8 record, the seed, its `ROADMAP.md` entry and the drive judges are unchanged since cycle 2
+    (`git diff ff0973a HEAD`).
+- RV7 probe: `2ffb5cc`'s `Dispatcher`, run from an export of its `src`, takes a hand-back after
+  `finish()` (see RV7).
+
+### Earlier findings
+
+| Finding | Status | Evidence |
+|---|---|---|
+| RV1 (MEDIUM, PLAUSIBLE) | **Holds, resolved per the cycle-1 ruling** | `red-a741340.txt` 8 of 8 red, green on the head. A zone at target 0 still ends. |
+| RV2 (LOW, CONFIRMED) | **Holds, fixed** | The §1 sentence covers only the conditional writes in both `AGENTS.md` and `invariants.md`; `confirm_all` (strict) and `revert_all` still raise. |
+| RV3 (LOW, CONFIRMED) | **Holds, fixed** | `red.txt` 24 of 24, each base failure the defect. |
+| RV4 (LOW, CONFIRMED) | **Holds, fixed** | `hardening_judge.py` is unchanged since cycle 2; both pair modes pass. |
+| RV5 (MEDIUM, PLAUSIBLE) | **Fixed per the cycle-2 ruling** | See below |
+| RV6 (LOW, CONFIRMED) | **Fixed** | See below |
+
+**RV5.** The zone now re-reads its fleet's target at each pass while it holds only what it took at
+the shutdown (`relay/upstream.py:518-524`). Once the target is 0, `take_back` takes out every task
+no site client can have received and `hand_back` returns them under the zone's identity and stamps.
+- What can go back:
+  - A task unscheduled at the relay goes back.
+  - So does one staged and taken out of the relay-local pool by `Dispatcher.withdraw`, under the
+    dispatcher's lock.
+  - Each leaves by one conditional DELETE (`relay/store.py:318-339`).
+  - A task cut for a site client, or stamped and not yet staged, stays.
+- What happens next:
+  - The stamps are dropped only once the hand-back is acknowledged.
+  - A server without the call, one that refuses it, or a stamp-less task gives one WARNING, keeps
+    the stamps and ends the zone. The relay then withholds its final heartbeat, as relay-retire does.
+- Evidence:
+  - The review's shape (target 1, ask, target 0) is red on `ff0973a` (pulling never ends) and green
+    on the head.
+  - The no-call, no-database and staged-versus-received cases pass, and so does the keep-while-planned case.
+- What the reviewer checked:
+  - It worked each race between the relay-local scheduler, a site client's cut, `withdraw` and the
+    conditional DELETE.
+  - It found no path that hands back a received row or strands a withdrawn one.
+
+**RV6.** `speaks_plain`, `PLAIN_CHECK_WAIT` and the second connection are gone. With TLS on, an
+`SSLError` whose `reason` is `WRONG_VERSION_NUMBER` (a first record that is not TLS) is the
+mismatch; every other error is raised as before (`relay/upstream.py:196-229`).
+- The orchestrator's probe fails fast at 2.5 s and 6.0 s per chunk, where cycle 2's version
+  retried at 1.1 s.
+- A TLS server behind the same path is never taken for cleartext.
+- An unreachable upstream is still retried (`test_relay_link.py`).
+
+### Requirement → evidence matrix
+
+Only the changes since cycle 2 are listed; the cycle-1 and cycle-2 matrices stand otherwise.
+
+| R-ID | Change since cycle 2 | Verified how | Status |
+|------|----------------------|--------------|--------|
+| R1 | none | revert tests red on `2ffb5cc`, green on the head; PostgreSQL and TimescaleDB legs | ✅ |
+| R2 | none | dispatch tests red on `2ffb5cc`; the contended landing passes on PostgreSQL and TimescaleDB 2.32 (2.31 is CI's, reading 4). `test_contended_write.py` is PostgreSQL-only, so the SQLite contended case is in `test_contended_recovery.py`, as since cycle 1 | ✅ |
+| R3 | none | the four-role restart harness, red on `2ffb5cc` | ✅ |
+| R4 | the failed handshake classifies a cleartext upstream | workload tests, the TLS link tests, `tls-on`/`tls-off` drives, both latency probes | ✅ (RV6 fixed) |
+| R5 | the zone hands back what it took once no client is planned | `red-ff0973a.txt` 4 hand-back entries; the `zones` and `zones-nodb` drives | ✅ per ruling; RV7 (plausible) |
+| R6 | `relay_desc.rst` adds the hand-back and its fallback | read; docs `-W` | ✅ |
+| R7 | none | clock tests red on `2ffb5cc` | ✅ |
+| R8 | none | `tail_judge.py` PASS; record unchanged | ✅ |
+| R9 | `red-ff0973a.txt` added | three lists, 37 entries, all red on their bases for the defect | ✅ |
+| R10 | the stop-time requeue of late hand-backs (`server.py:1244`, `:1257-1269`) | full suite, PostgreSQL legs and both pair drives pass; the merged tree passes; a plain server has no hand-back to requeue | ✅ (RV7 for a `2ffb5cc` server) |
+
+Unmapped changes (possible scope creep): `ServerThread.revert_handed_back` and its §6 entry answer
+no R-ID directly.
+- They are the server half of the RV5 remediation, recorded in `4baaada` as a deviation.
+- Without them a hand-back after scheduling ends would never be requeued in that run.
+- They are graded under R5 and R10 above. See Human-gate triggers for the sign-off they need.
+
+**Invariant edits.** §1 is unchanged since cycle 2 and accurate. §6 adds a "late hand-back revert"
+between the staged revert and the sentinels, in `AGENTS.md` and `invariants.md` alike.
+- It matches `ServerThread.wait_heartbeat` (`server.py:1243-1244`).
+- It goes through `Task.revert_handed_back`: a conditional UPDATE on the dispatch `schedule_time`,
+  `completion_time IS NULL`, and the relay's `client_id` or NULL.
+  - So it never touches a completed or cancelled row (the reviewer's probe).
+- It is skipped `in_memory` (§4).
+- It runs after the scheduler and heart monitor have joined, so the order of the existing steps is kept.
+- No rule is weakened.
+
+### Findings
+
+#### RV7 [LOW/PLAUSIBLE] Against a 2.9.0a8 upstream server, a zone's late hand-back is acknowledged and never requeued in that run
+- **Where:** `src/hypershell/relay/upstream.py:684-688` (the stamps are dropped once the hand-back is
+  acknowledged), and `docs/_include/relay_desc.rst:64-66`. The latter says a server that cannot take
+  the tasks back "(an earlier release …) is left to put it back when it evicts the relay".
+- **Failure scenario.**
+  - This relay runs against a `2ffb5cc` (2.9.0a8) server autoscaling with relay sites.
+  - The RV5 case happens: the zone takes a task at the shutdown, then the target falls to 0 before
+    a client starts.
+  - The zone hands the task back. The 2.9.0a8 server has the call and acknowledges it, but only
+    its scheduler drains hand-backs (`2ffb5cc` `server.py:406`). That scheduler has ended: a zone
+    hears a shutdown only after scheduling ends. The stop-time requeue is this branch's
+    (`server.py:1244`).
+  - The relay drops the stamps, logs "Handed back", and finishes its registration with a final
+    heartbeat.
+  - The server is not evicting the relay, so nothing reverts the task. The run ends with the task
+    still assigned to the finished relay: `schedule_time` set, `completion_time` NULL.
+- **Compared with today.**
+  - A `2ffb5cc` relay never asks, so the task stays staged and the server's staged revert makes it unscheduled at exit.
+  - In both cases the task does not run in that run. The next server start's `revert_interrupted`
+    re-runs it, so nothing is lost or doubled.
+  - The difference is the row's state between runs, and a docs claim that does not hold for 2.9.0a8.
+- **Same class as before.** A retiring relay's hand-back after scheduling ends meets the same gap on
+  a 2.9.0a8 server. This branch's server closes it for its own version.
+- **Evidence.**
+  - Run from an export of `2ffb5cc`'s `src`: `Dispatcher().finish()`, then `handback(…)`. The reply
+    is read as 1 accepted, and `take_handbacks()` holds 1.
+  - `grep -rn take_handbacks` in that export finds only the scheduler's call (`server.py:406`).
+  - Not reproduced end to end: it needs a topology change inside a fleet's launch window, against a 2.9.0a8 server.
+- **Touches:** R10 (this relay against a 2.9.0a8 server) and R6's prose. Not the high-blast-radius core.
+- **Triage (maintainer).** The choices:
+  - Accept it, since 2.9.0a8 is a pre-release and the row is recovered at the next start.
+  - Restate the docs line to cover a server that takes the hand-back but cannot requeue it after scheduling ends.
+  - Seed it.
+
+**Dropped on sanity check.**
+- *Ruling 7's fallback logs two WARNINGs end to end.* The reviewer read this as one more than the
+  ruling allows; it was not reproduced.
+  - The zone's own fallback warns once, not once per pass (`relay/upstream.py:690`).
+  - The second line is the relay's existing `finish_upstream` warning, logged whenever it ends with
+    tasks held (`relay/__init__.py:899`). Relay-retire's refused hand-back gives the same pair.
+  - Both are accurate, and the path needs a server with a topology but no hand-back call.
+- *The seed's "fell from 6.6 to 13.4 s to 1.7 s".* It means a range of 6.6–13.4 s falling to 1.7 s.
+  This is wording, unchanged since cycle 1, not a misstated defect.
+
+### Human-gate triggers
+
+- **Not triggered by a finding.** There is no CONFIRMED finding. RV7 is PLAUSIBLE and outside the
+  high-blast-radius core.
+- **Sign-off still needed before `hs-publish`.**
+  - The remediation adds a step to the server's shutdown order (invariant §6, a DB-lifecycle
+    invariant) in `server.py`, a high-blast-radius file, and edits §6 in `AGENTS.md` and `invariants.md` to match.
+  - `4baaada` records it as a deviation. The cycle-2 rulings asked for the hand-back, not for a
+    server change, and no ruling given to this review covers it.
+  - This review finds the step correct: it is conditional, guarded `in_memory`, after the existing
+    steps, a no-op for a plain server, and suites pass on the head and on the merged tree.
+  - Even so, an amended load-bearing invariant needs the maintainer's explicit sign-off.
+- **Escalation.** This is the third and last cycle. It converged, with no CONFIRMED finding. RV7 and
+  the §6 sign-off go to the maintainer.
+
+### Processes
+
+- Every process the reviewer started ended on its own: pytest runs, red checks, the docs build,
+  and the drives, which stop their recorded PIDs through their own trap. The temporary sites removed
+  themselves.
+- The orchestrator ran pytest processes only: the red checks, two RV5/RV6 test runs, three probes,
+  and the merged-tree suite. Their servers and relays were the test fixtures' own. Every one exited,
+  and a process listing afterwards showed none left.
+- `git status --porcelain` was empty before this file was written.

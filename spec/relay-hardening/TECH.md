@@ -150,12 +150,10 @@ phases:
   verify: uv run pytest -v tests/test_tail_judge.py && uv run python spec/relay-hardening/drive/tail_judge.py
     --budget 10 --outcome spec/relay-hardening/evidence/laptop
 review:
-  last_reviewed_commit: ff0973aeea2df99ac856d41afba838a338e9260c
-  verdict: changes-requested
-  blocked_reason: 'Review cycle 2: RV6 LOW confirmed (PLAIN_CHECK_WAIT 1 s: a slow
-    cleartext upstream is retried, not failed fast); RV5 plausible (held task after
-    the target falls to 0), maintainer triage'
-  cycle: 2
+  last_reviewed_commit: 4baaada36a22532b7d69a04b7b75583590a37e45
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — Relay hardening for 2.9.0
 
