@@ -68,3 +68,10 @@ is skipped by the parser):
 - **Skill cause:** The promotion and commit steps assume the public `issues/` lane; the security-lane sentence covers the GOAL's content, not the bookkeeping.
 - **Recommended fix:** Add a security-lane variant: edit the `.security/` seed, the finding's front-matter `status:` (`in_progress`) and the lane's index tables per `.security/README.md`, never stage them, and name each edit in the Step 8 report.
 - **Confidence:** high · **Effort:** small
+
+## F4 — No home or path rule for multi-process drive scripts that a `verify:` runs through `temp_site.sh`
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The R6/R8 drives (a server, a held connection, a delayed relay launcher, older clients) are too long for an inline `verify:` string, so they went into a script under `research/`. The first dry run failed because `temp_site.sh` runs the command inside the throwaway site, so a repo-relative script path does not resolve; the verify now passes `"$PWD/…"`.
+- **Skill cause:** Step 4/6 and the TECH template show only one-line `uv run hs …` drives; nothing says where a drive script lives or that paths given to `temp_site.sh` must be absolute.
+- **Recommended fix:** In Step 6 (and the TECH template's `verify` note), say that a drive too long for one line goes in `spec/{slug}/research/` as a script, is invoked as `temp_site.sh uv run python "$PWD/spec/{slug}/research/<script>"`, and is dry-run on the base before the plan is committed.
+- **Confidence:** high · **Effort:** small
