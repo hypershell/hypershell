@@ -430,3 +430,18 @@ the last review this cycle gets.
   delayed-proxy shape (cleartext server behind a proxy adding 1.1 s per chunk), plus a TLS upstream
   answering slowly that must not be misclassified. The public reason is simplicity and independence
   from timing.
+
+## Review-cycle-3 rulings (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. The cycle converged at review cycle 3
+(approved).
+
+- **RV7 (LOW, PLAUSIBLE).** Against a 2.9.0a8 upstream server, a zone's late hand-back is
+  acknowledged but requeued only at that server's next start. Nothing is lost or run twice. Accepted
+  as the mixed-version behaviour, and the relay docs sentence is corrected to state it
+  (`docs/_include/relay_desc.rst`, docs-only, after the approved review).
+- **The stop-time requeue of handed-back rows** (`ServerThread.revert_handed_back`, a new last step
+  in the §6 shutdown order), a builder deviation in the cycle-2 remediation, is accepted. It is a
+  conditional UPDATE, skipped for in-memory servers, runs after the existing steps, does nothing on a
+  server with no hand-backs, and was graded correct at cycle 3. No CONFIRMED finding touches it, so
+  the rubric's mandatory human gate is not triggered. The maintainer is told of it at landing.

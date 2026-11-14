@@ -5,7 +5,7 @@ title: 'Relay hardening for 2.9.0: no aborts on removed rows or a restarted upst
   clock'
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/relay-hardening
 base: develop
 current_phase: done

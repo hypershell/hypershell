@@ -62,8 +62,8 @@ usual. Under an upstream *server* autoscaling with relay sites, a zone it gives 
 relay does not ask: it ends with the others, and what is staged for it stays upstream for a relay
 that has *clients* planned in that zone. If that *server* stops planning a *client* for the zone at
 this relay before one starts, the zone hands back what it took and ends; an upstream *server* that
-cannot take it back (an earlier release, or one without a database) is left to put it back when it
-evicts the relay. A relay with no *client* at the site in any zone never asks
+cannot take it back (one without a database, or a release before 2.9.0a8) is left to put it back
+when it evicts the relay, and a 2.9.0a8 upstream *server* puts it back the next time it starts. A relay with no *client* at the site in any zone never asks
 for work, so it never hears an upstream shutdown: it waits until it is drained or stopped, and a
 non-forever upstream *server* waits for it too, until the relay is drained or stopped.
 SIGUSR1 or SIGUSR2, sent to the relay process, drain it the same way: the relay stops asking for work, its site finishes every task the relay holds (those not yet started
