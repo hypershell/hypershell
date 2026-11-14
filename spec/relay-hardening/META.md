@@ -32,3 +32,17 @@
 - **Skill cause:** "Promoting an issue" tells an `unshaped` promotion to carry the evidence forward but not to verify each claim against current `develop`, and the status vocabulary has no "partly met by {slug}" marker (related to `spec/relay/META.md` F2).
 - **Recommended fix:** For every promotion, verify each seed claim against current `develop` and drop (with the fixing commit cited) any already fixed; and give `/hs-roadmap` a documented step for narrowing a seed whose criterion another cycle met, triggered by a Non-goal line naming it.
 - **Confidence:** med · **Effort:** small
+
+## F4 — No safe docs-build verify command; precedents clobber the worktree's `.venv`
+`origin=hs-plan:step6 severity=low category=template status=open target=.agents/factory/templates/TECH.md`
+- **What happened:** The verify commands of recent cycles (e.g. `spec/relay-retire/TECH.md` P3) build the docs with `uv run --python 3.12 --group docs sphinx-build … docs docs/_build/html`, which re-syncs the project environment to another interpreter, replacing the worktree's `.venv`, and writes into the tree. The safe form (`UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv … $TMPDIR/docs-html`) reached this plan only through the foreman's brief.
+- **Skill cause:** Neither Step 6 nor the TECH template gives a docs-build `verify:` form, so each plan copies the last cycle's.
+- **Recommended fix:** Add the `UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html` form to the TECH template's Conventions (with its sandbox note), and tell Step 6 to use it.
+- **Confidence:** high · **Effort:** small
+
+## F5 — No convention for proving R9's "fails on the base commit"
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The GOAL requires each regression test to fail on `2ffb5cc` and pass on the head. Nothing in the skill or templates says how a phase proves the first half, so this plan invented `drive/red_check.sh` + `red.txt` (export the base `src` with `git archive`, run the listed tests with it first on `PYTHONPATH`); `relay-retire` invented `DRIVE_BASE_REV` for drives.
+- **Skill cause:** Step 6 asks for a real `verify:` per phase but gives no pattern for the red half of a fails-before/passes-after criterion, which `hs-feature` GOALs routinely state.
+- **Recommended fix:** Ship a generic `.agents/factory/bin/red_check.sh <base-rev> <list>` and reference it from Step 6 and the TECH template whenever a GOAL's R-IDs say "fails on <rev>".
+- **Confidence:** med · **Effort:** small
