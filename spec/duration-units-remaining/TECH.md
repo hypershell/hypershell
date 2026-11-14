@@ -89,10 +89,10 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     $TMPDIR/docs-html
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 21c868f996d5904dc30e41e48f27c42c0a6fc41a
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — Every duration option takes the forms the timeouts take
 

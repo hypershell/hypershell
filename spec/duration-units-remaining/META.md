@@ -56,3 +56,34 @@
   new behaviour against `develop` in a `temp_site` before writing it, and note that a post-condition
   must not lean on a command's usage exit.
 - **Confidence:** med · **Effort:** small
+
+## F4 — No disposition for a finding one criterion requires and another forbids
+`origin=hs-review:step4 severity=low category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** The blind reviewer reproduced `-w 1_000` refused where `develop` read 1000. R5
+  forbids that; R4, the Outcome and a Non-goal require it. The reviewer could only grade it
+  "MEDIUM, CONFIRMED, needs a gate decision". The rubric's *Verdict & loop* offers three routes:
+  CONFIRMED blocks, PLAUSIBLE goes to triage, and pre-existing behaviour is deferred. None fits new
+  behaviour that one criterion mandates, so the orchestrator had to improvise a non-blocking
+  disposition.
+- **Skill cause:** The rubric assumes GOAL criteria never conflict. A CONFIRMED finding whose only
+  remedy fails another criterion cannot converge in `hs-build`, and the rubric gives no route to the
+  gate for it.
+- **Recommended fix:** Add a "contract conflict" class to *Verdict & loop*. The finding is recorded
+  with both criteria cited and does not loop to `hs-build`. It needs a gate ruling before publish,
+  and if the ruling goes against the branch it becomes CONFIRMED. The human gate must be kept for
+  core files.
+- **Confidence:** med · **Effort:** small
+
+## F5 — Pre-flight never checks that the branch still merges into a moved base
+`origin=hs-review:step1 severity=low category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** `develop` moved (#105, which touched `server.py` and the server docs) after the
+  branch was cut. Only the brief asked for a merge check. `git merge-tree` found a conflict in
+  `docs/cli/server.rst`, and the merged tree needed its own test and docs runs.
+- **Skill cause:** Step 1 resolves the base and diffs against the merge-base. It never fetches or
+  tests the merge, and the injected diffstat reads local `develop`, so a conflict or an interaction
+  with the moved base shows up only at publish.
+- **Recommended fix:** In Step 1, run `git fetch` and then
+  `git merge-tree --write-tree origin/{base} HEAD`. On a conflict or a moved base, record it under
+  the Verification run. If the move touched the coupled core, re-run the affected tests on the merged
+  tree.
+- **Confidence:** med · **Effort:** small
