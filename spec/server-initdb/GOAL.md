@@ -49,7 +49,7 @@ the database; against a SQLite file it creates the tables. `hs cluster --no-db` 
 fresh PostgreSQL database (its `__enter__` skips `checkdb` under `--no-db`), though on SQLite it
 too still runs `initdb`. This was first recorded as "Hole C" in
 `spec/schema-upgrade-step/research/02-upgrade-seam.md` and left unbuilt. Whether this cycle takes
-the server half is a sign-off question below.
+the server half is R5, ruled in scope below.
 
 The documentation describes the flag as working for `hs server`: `docs/_include/server_help.rst:110-117`
 ("auto-initialize tables if they don't already exist"), `docs/_include/database.rst:111-112` and
@@ -92,7 +92,7 @@ that initialize with `--initdb`.
 - **R5** — WHEN `hs server` is launched with `--no-db`, the server SHALL start without requiring,
   creating, or upgrading anything in the configured database: a never-initialized PostgreSQL or
   TimescaleDB database SHALL NOT stop it, and a SQLite database file SHALL NOT be created or
-  altered by it. [NEEDS CLARIFICATION: in scope? See Clarifications.]
+  altered by it.
 - **R6** — The documentation of `hs server --initdb` SHALL match the behaviour: the `hs server` help
   text and `docs/_include/server_help.rst`, the Initialization section of `docs/_include/database.rst`
   and `docs/_include/database_alt.rst`, and the TimescaleDB section of `database.rst`, which SHALL
@@ -129,7 +129,7 @@ that initialize with `--initdb`.
 - Changing what any other command does at start-up (`hs info`, `hs wait`, `hs list` and the rest
   keep calling `ensuredb()` as today).
 - Making a launch with `--initdb` run SQLite's `PRAGMA optimize` (the docs are corrected instead,
-  pending sign-off below).
+  as ruled below).
 - Changing the server's automatic in-place schema upgrade without `--initdb` (R4 keeps it).
 - Regenerating `share/man/` pages or editing the GitHub release notes; both are `hs-release`'s job
   at the next pre-release, which also drops the 2.9.0a8 known issue for this defect.
@@ -151,21 +151,23 @@ that initialize with `--initdb`.
   only "Auto-initialize database." (shaping, 2026-11-13).
 - **Q:** Should `hs server --initdb` prompt for confirmation, as `hs initdb` does on PostgreSQL? —
   **A:** No. The flag is the consent, a server launch is often non-interactive, and `hs submit
-  --initdb` and `hs cluster --initdb` do not prompt (R3) (shaping, 2026-11-13; foreman to confirm).
+  --initdb` and `hs cluster --initdb` do not prompt (R3) (shaping, 2026-11-13; confirmed by the foreman at the GOAL gate).
 - **Q:** Does this cycle also fix `hs server --no-db` touching the configured database (R5)? —
-  [NEEDS CLARIFICATION: Recommended **yes**, server only. It is the same start-up call one line
+  **A:** Yes, server only (foreman at the GOAL gate, 2026-11-13). It is the same start-up call one line
   away, the shaping probe shows it as a user-visible failure (`hs server --no-db` exits 5 on a
   fresh PostgreSQL database that `hs cluster --no-db` runs against), and leaving it means the fix
-  touches this call twice in two cycles. The cluster's SQLite `--no-db` path stays a non-goal. If
-  **no**, R5 is struck and moved to a new `issues/` seed with the cluster half.]
+  touches this call twice in two cycles. The cluster's SQLite `--no-db` path stays a non-goal.
 - **Q:** The SQLite note says launching with `--initdb` also runs `PRAGMA optimize`; no launch path
-  does. Correct the docs, or make launches optimize? — [NEEDS CLARIFICATION: Recommended **correct
-  the docs** (R6): it is the smaller change, it keeps `hs submit` and `hs cluster` as they are, and
+  does. Correct the docs, or make launches optimize? — **A:** Correct the docs (R6) (foreman at the GOAL gate, 2026-11-13): it is the smaller change, it keeps `hs submit` and `hs cluster` as they are, and
   `PRAGMA optimize` on every launch is a behaviour change nobody asked for. The note then names
-  `hs initdb` alone.]
+  `hs initdb` alone.
 - **Q:** Version marker? — **A:** The behaviour differs from the stable 2.8 line, so the changed
   `hs server` passage carries `.. versionchanged:: 2.9.0` with one short clause; `hs-release` adds
   the `:pr:` link (`AGENTS.md` § Docs) (shaping, 2026-11-13).
+
+**Ruled at the GOAL gate** (2026-11-13): approved by the foreman, gate judge under the maintainer's
+mandate. R5 is in scope, server only; the SQLite `PRAGMA optimize` note is corrected rather than
+made true; no confirmation prompt. The contract is locked; `hs-plan` designs against it.
 
 ## Related materials
 
