@@ -141,4 +141,11 @@ An `[export]` variable reaches a task with the name and value the user wrote.
   mapping. Relay's `[relay.zone.*]` tables (#82) add the per-zone tables
   named above; zone-aware autoscaling (`spec/zone-autoscale/`, #99) kept the sizing knobs uniform
   and added none.
+- 2026-11-14, re-checked on `develop` (`f6a1d62`, cmdkit 2.8.0): the underscore split still holds.
+  `HYPERSHELL_RELAY_LAUNCHER_ARGS='--mem 4G'` leaves `relay.launcher_args` at `''` and sets
+  `relay.launcher` to the table `{args = '--mem 4G'}`; `HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES=3` sets
+  `autoscale.failed` to `{launches = 3}`. `autoscale.failed_launches` is the key
+  `cluster-launch-failures` adds (its GOAL R3 documents that variable), and that cycle's plan reads
+  the nested path `autoscale.failed.launches` as a key-specific workaround; the general fix here
+  would let it read the key directly. Reported by that cycle's planning.
 - Found by: out-of-cycle review, 2026-11-06; reproduced on 2.9.0a5.
