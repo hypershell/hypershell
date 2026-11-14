@@ -221,3 +221,15 @@ Checked before research and again after this design was drafted.
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+- **D1:** one grammar. `-d` refuses `+5`, `.5`, `5.`, `1e3`, `inf`, `nan` and `1_000`, as `-W` does.
+  The user-facing note lists them.
+- **D2–D8:** approved as proposed. That covers the error clause, round-up on the whole-second
+  options, the relay converting the period in `RelayApp` with `DEFAULT_SITE_PERIOD` at the built-in
+  default, the plain-decimal launched delay, bash candidates, the new test file with a 3.11 run, and
+  the note's contents.
+- The temp-site drives run one at a time (port 50001).
