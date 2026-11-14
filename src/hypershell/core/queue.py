@@ -581,6 +581,11 @@ def _cut(conn) -> None:
 HANDSHAKE_TIMEOUT_CEILING: Final[float] = 1e9
 
 
+def _peer_text(peer: Optional[Tuple[str, int]]) -> str:
+    """A peer's address as ``host:port`` for a log line, or 'unknown peer'."""
+    return f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
+
+
 def _complete_handshake(ssl_sock: ssl.SSLSocket, deadline_at: float) -> None:
     """Run the server side of the TLS handshake on `ssl_sock`, ending by `deadline_at` (monotonic).
 
@@ -647,12 +652,14 @@ class _InProcessServer(Server):
         self._warned_at: Optional[float] = None
         self._handshake_warned_at: Optional[float] = None
         self._handshake_warned_lock = threading.Lock()
+        self._unstarted_warned_at: Optional[float] = None
 
     def serve(self: _InProcessServer) -> None:
         """Accept connections until stopped, one daemon handler thread per connection.
 
         With TLS only the TCP connection is accepted here; its handler thread runs the handshake
-        (:meth:`handle_pending`).
+        (:meth:`handle_pending`). A connection whose handler thread cannot start is closed and
+        logged, and accepting goes on (:meth:`_unstarted`).
         """
         pending = isinstance(self.listener, SecureListener) and self._handshake is not None
         try:
@@ -687,7 +694,10 @@ class _InProcessServer(Server):
                             conn.close()
                             break
                         self._live.add(conn)
-                    _ServerThread(target=target, args=args, name='hypershell-queue-handler').start()
+                    try:
+                        _ServerThread(target=target, args=args, name='hypershell-queue-handler').start()
+                    except Exception as error:
+                        self._unstarted(conn, peer, error)
         except Exception as error:
             if not self._halted:
                 log.error(f'Queue server stopped accepting connections: {error!r}')
@@ -706,6 +716,26 @@ class _InProcessServer(Server):
         else:
             log.debug(message)
         return False
+
+    def _unstarted(self: _InProcessServer, conn, peer: Optional[Tuple[str, int]], error: Exception) -> None:
+        """Forget and close a connection whose handler thread did not start, so the accept loop goes on.
+
+        Logged with the peer address and the error only: a WARNING at most once per
+        :data:`REFUSAL_WARNING_INTERVAL`, the rest at DEBUG.
+        """
+        with self._lock:
+            self._live.discard(conn)
+        try:
+            conn.close()
+        except OSError:
+            pass
+        message = f'Queue server closed a connection from {_peer_text(peer)}: its handler did not start ({error!r})'
+        now = time.monotonic()
+        if self._unstarted_warned_at is None or now - self._unstarted_warned_at >= REFUSAL_WARNING_INTERVAL:
+            self._unstarted_warned_at = now
+            log.warning(message)
+        else:
+            log.debug(message)
 
     def handle_pending(self: _InProcessServer, raw: socket.socket, peer: Optional[Tuple[str, int]],
                        accepted: float) -> None:
@@ -764,7 +794,7 @@ class _InProcessServer(Server):
         Each close is logged at DEBUG. The first also warns, naming the deadline and its key, and so
         does the first after each :data:`REFUSAL_WARNING_INTERVAL` since the last warning.
         """
-        where = f'{peer[0]}:{peer[1]}' if isinstance(peer, tuple) and len(peer) == 2 else 'unknown peer'
+        where = _peer_text(peer)
         log.debug(f'Queue server closed a connection from {where} that did not complete its TLS handshake '
                   f'within {self._handshake} seconds')
         now = time.monotonic()

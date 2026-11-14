@@ -1006,3 +1006,71 @@ def test_other_handshake_failures_logged_as_before(server_tls, caplog) -> None:
     assert any(r.levelname == 'DEBUG' and 'Queue server dropped a connection' in r.getMessage() for r in records)
     assert not [r for r in records if r.levelname == 'WARNING'], [r.getMessage() for r in records]
     assert not any('did not complete its TLS handshake' in r.getMessage() for r in records)
+
+
+# Accepting goes on when one connection's handler cannot start
+
+@mark.integration
+@mark.parametrize('secure', [True, False], ids=['tls', 'plain'])
+def test_accepting_goes_on_when_a_handler_does_not_start(server_tls, monkeypatch, caplog, secure: bool) -> None:
+    """When the handler thread for one accepted connection fails to start, that connection is closed,
+    forgotten and logged with one WARNING naming its peer, and a later client connects and makes its
+    first queue call."""
+    tls = with_handshake(server_tls, 300) if secure else with_handshake(TLSConfig(enabled=False), 300)
+    original = hypershell.core.queue._ServerThread.start
+    failing = {'left': 0}
+
+    def start(thread) -> None:
+        if failing['left'] > 0 and thread.name == HANDLER:
+            failing['left'] -= 1
+            raise RuntimeError("can't start new thread")
+        original(thread)
+
+    monkeypatch.setattr(hypershell.core.queue._ServerThread, 'start', start)
+    caller = None
+    with caplog.at_level('DEBUG', logger='hypershell.core.queue'):
+        with QueueServer(queue_config(tls)) as server:
+            port = server.address[1]
+            in_process = server.shutdown._args[0]
+            failing['left'] = 1
+            sock = socket.create_connection(('127.0.0.1', port), timeout=5)
+            try:
+                after = closed_after(sock, time.monotonic(), 2)
+            finally:
+                sock.close()
+            assert failing['left'] == 0, 'the handler start was never attempted'
+            assert after is not None and after <= 1, f'connection closed after {after} s (expected at once)'
+            assert settles(lambda: not in_process._live), f'{len(in_process._live)} live connections left'
+            result = {}
+            caller = threading.Thread(target=first_call, args=(port, tls, result), daemon=True)
+            caller.start()
+            caller.join(10)
+            assert result.get('seconds') is not None, f'a later client was not served ({result})'
+    if caller is not None:
+        caller.join(10)
+    warnings = [r.getMessage() for r in caplog.records
+                if r.name == 'hypershell.core.queue' and r.levelname == 'WARNING']
+    assert len(warnings) == 1 and 'handler did not start' in warnings[0] and '127.0.0.1:' in warnings[0], warnings
+
+
+@mark.unit
+def test_handler_start_failures_warn_once_per_interval(monkeypatch, caplog) -> None:
+    """Of several connections whose handlers do not start inside the interval, the first is logged as a
+    WARNING and the rest at DEBUG; each is closed and forgotten."""
+    monkeypatch.setattr(hypershell.core.queue, 'REFUSAL_WARNING_INTERVAL', 3600.0)
+    server = hypershell.core.queue._InProcessServer.__new__(hypershell.core.queue._InProcessServer)
+    server._lock, server._live, server._unstarted_warned_at = threading.Lock(), set(), None
+    pairs = [socket.socketpair() for _ in range(3)]
+    try:
+        with caplog.at_level('DEBUG', logger='hypershell.core.queue'):
+            for n, (conn, _) in enumerate(pairs):
+                server._live.add(conn)
+                server._unstarted(conn, ('127.0.0.1', 4000 + n), RuntimeError("can't start new thread"))
+                assert conn.fileno() == -1 and conn not in server._live
+    finally:
+        for conn, other in pairs:
+            conn.close()
+            other.close()
+    levels = [r.levelname for r in caplog.records
+              if r.name == 'hypershell.core.queue' and 'handler did not start' in r.getMessage()]
+    assert levels == ['WARNING', 'DEBUG', 'DEBUG'], levels

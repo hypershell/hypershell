@@ -4,10 +4,10 @@ title: A TLS queue server keeps serving clients while a connection is slow in it
   handshake
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/listener-handshake-deadline
 base: develop
-current_phase: done
+current_phase: P2
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -27,10 +27,10 @@ phases:
     tests/test_queue.py tests/test_queue_address_family.py tests/test_queue_start.py
     tests/test_queue_workload.py && git diff --numstat 6da633d -- tests/test_queue_tls.py
     tests/test_queue_limits.py tests/test_queue_gc.py | awk '$2 != 0 {exit 1}' &&
-    test -s spec/listener-handshake-deadline/evidence/red-develop.txt
+    test -s spec/listener-handshake-deadline/evidence/red-develop.txt && test -s spec/listener-handshake-deadline/evidence/red-review-1.txt
 - id: P2
   name: server.tls.handshake refusal at start, and deadline logging
-  status: done
+  status: in_progress
   satisfies:
   - R4
   - R5
@@ -45,7 +45,7 @@ phases:
     refuse
 - id: P3
   name: Docs, CLI drives with current and older clients, latency evidence
-  status: done
+  status: in_progress
   satisfies:
   - R6
   - R7
@@ -151,6 +151,13 @@ completes the handshake within `handshake` seconds of accept or closes it; nothi
 - [x] Red evidence: run the new tests against the base `src/` (Conventions), save the output to
       `spec/listener-handshake-deadline/evidence/red-develop.txt` (the plain-server and burst tests
       are expected to pass there; say so at the top of the file).
+- [x] *Review cycle 1, ruling 4:* `_InProcessServer.serve` — when the handler thread of an accepted
+      connection does not start, `_unstarted` forgets and closes that connection and logs it (WARNING
+      at most once per `REFUSAL_WARNING_INTERVAL`, the rest DEBUG; peer address and error only), and
+      the loop keeps accepting. Shared by the TLS and plain paths, since the loop is one. Tests: one
+      injected start failure (TLS and plain) closes that connection at once, empties the live set, one
+      WARNING, and a later client connects and makes its first call; three failures inside the
+      interval give WARNING, DEBUG, DEBUG. Red against f75d5e6's `src` in `evidence/red-review-1.txt`.
 - **Verify:** the P1 `verify:` — every queue suite, the existing three suites' diff against the base
   adds lines only, and the red evidence exists.
 - **Touches:** `src/hypershell/core/queue.py`, `src/hypershell/core/tls.py`,
@@ -212,6 +219,25 @@ apply the configured deadline; older clients behave as on develop; latency is wi
   `latency.py compare` (three interleaved rounds against the base `src/`).
 - **Touches:** `docs/_include/config_param_ref.rst`, `docs/security.rst`, `AGENTS.md`,
   `spec/…/evidence/`.
+
+---
+
+## Review cycle 1 remediation
+
+[`REVIEW.md`](REVIEW.md) cycle 1 requested changes; the maintainer's rulings are at the end of
+[`PLAN.md`](PLAN.md) and in the GOAL clarification *Ruled at review cycle 1*. All three phases were
+reopened (`set_phase.py --phase-status in_progress`) and each closes again with its own commit:
+
+| Ruling | Finding | Phase | Fix |
+|--------|---------|-------|-----|
+| 4 | — | P1 | A connection whose handler thread does not start is closed, forgotten and logged; accepting goes on |
+| 1 | F1 | P2 | `handshake_seconds` refuses more than one day; the timeout ceiling in `core/queue.py` goes |
+| 2 | F2 | P2 | `hs server` and `hs cluster` check the key only when `server.tls.enabled` and not `--no-tls` |
+| 3 | F3 | P3 | `server --handshake` drive holds the server up past the window; `--client` drops `PYTHONPATH` |
+| 5 | Observation | P3 | `versionadded` in `config_param_ref.rst` inside `.. only:: html` |
+
+Each new test is red against the reviewed commit's `src` (f75d5e6), recorded in
+`evidence/red-review-1.txt`; the reworked drive is shown failing against develop's `src`.
 
 ---
 

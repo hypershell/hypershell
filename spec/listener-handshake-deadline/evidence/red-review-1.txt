@@ -1,0 +1,14 @@
+# Review cycle 1 remediation: new tests run against the reviewed commit's src (f75d5e6), which they must fail
+# Exported with: git archive f75d5e6 src | tar -x -C "$TMPDIR/lhd-f75d5e6"; run with PYTHONPATH="$TMPDIR/lhd-f75d5e6/src"
+
+## P1: accepting goes on when a handler thread does not start
+$ PYTHONPATH="$TMPDIR/lhd-f75d5e6/src" uv run pytest -q tests/test_queue_tls.py -k "handler_does_not_start or handler_start_failures"
+E               AssertionError: connection closed after None s (expected at once)
+E               assert (None is not None)
+E               AssertionError: connection closed after None s (expected at once)
+E               assert (None is not None)
+E                   AttributeError: '_InProcessServer' object has no attribute '_unstarted'
+FAILED tests/test_queue_tls.py::test_accepting_goes_on_when_a_handler_does_not_start[tls]
+FAILED tests/test_queue_tls.py::test_accepting_goes_on_when_a_handler_does_not_start[plain]
+FAILED tests/test_queue_tls.py::test_handler_start_failures_warn_once_per_interval
+3 failed, 82 deselected in 4.55s
