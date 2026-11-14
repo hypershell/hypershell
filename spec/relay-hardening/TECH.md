@@ -8,7 +8,7 @@ appetite: big
 status: in_progress
 branch: fix/relay-hardening
 base: develop
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -100,7 +100,7 @@ phases:
 - id: P6
   name: 'End-to-end laptop evidence: restart, TLS, zones and pair drives; earlier
     relay drives and the full suite on the head'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -404,7 +404,7 @@ client anywhere does. Design: PLAN §2 R5, R6; research 05.
 **Goal:** the GOAL's laptop drives on the head, recorded; the earlier relay drives and the full suite
 unchanged. Design: PLAN §6.
 
-- [ ] `spec/relay-hardening/drive/hardening_drive.sh MODE` (built on `retire_drive.sh`'s machinery:
+- [x] `spec/relay-hardening/drive/hardening_drive.sh MODE` (built on `retire_drive.sh`'s machinery:
       roles as loopback processes, a recording shim, system-style UTC logs, `DRIVE_DEADLINE`,
       `DRIVE_EVIDENCE`, `DRIVE_BASE_REV` / `DRIVE_BASE_SRC`, PID cleanup on every exit, deletes
       nothing) plus a judge (`hardening_judge.py`). Modes:
@@ -421,15 +421,46 @@ unchanged. Design: PLAN §6.
     exit 0.
   - `pair-relay` / `pair-server` — `DRIVE_BASE_REV=2ffb5cc` for the relay / for the server: a plain
     run completes as today (R10).
-- [ ] Re-run on the head with `DRIVE_EVIDENCE`: every mode of `spec/relay-retire/drive/retire_drive.sh`
+
+  *As built (amended):* the shim is `hardening_shim.sh` (`LOG LABEL WORD HOLD`: the first HOLD launches
+  of a zone run at once, later ones wait for `release-WORD`); each zone launches through its own
+  `[relay.zone.NAME]` launcher, and the relay's fleet check runs every second
+  (`HYPERSHELL_AUTOSCALE_PERIOD=1`, as the retire drive). `DRIVE_BASE_ROLES` runs any mode with the
+  roles named on the earlier build. `restart` runs 60 tasks of 1 s on 3 site clients and restarts the
+  upstream (SIGTERM, `hs server` does not catch it) at 15 complete, at once, and at 35, down 3 s, with
+  the relay's bundlewait at 1 s so that results are usually held for return. Two scenarios changed
+  from the plan, which assumed what the code does not do:
+  - **`zones`: a drain, not a non-forever finish.** A non-forever upstream with a database stops
+    scheduling only once every task is *complete* (`Task.count_remaining` counts rows without a
+    `completion_time`), so it never finishes while rows sit staged for a zone, and a zone never staged
+    for has no rows staged at all (a zone is refilled only while a client of it is registered). The
+    case R5 names arises from a drain: group 0 (12 cpu tasks of 2 s, 2 gpu tasks of 1 s) gives the gpu
+    zone a site client that runs its tasks and exits idle (timeout 2 s), its relaunch is held, so group
+    1's 3 gpu tasks are staged for the relay's gpu identity (it still beats with no client); once every
+    task is staged the upstream is drained (SIGUSR1). The gpu client is released when the relay holds a
+    gpu task taken at the shutdown. Shown red on `2ffb5cc` (`DRIVE_BASE_ROLES='relay server'`): the
+    gpu zone ends with the cpu zone's shutdown and the 3 staged tasks never run.
+  - **`zones-nodb`: the other half of R5.** Without a database a task has no zone (`hs submit --zone`
+    needs one), and a default-zone row sits in a pool, outside the inbound queue, only after a request
+    drained a submitted bundle larger than itself; a zone whose client left at that moment cannot be
+    timed by a laptop drive. So this mode drives the relay against `hs server --no-db` serving the
+    default zone and gpu, every gpu launch held: the zone with nothing staged and no site client ends
+    with the default zone's shutdown, and the relay and the `--no-db` upstream exit 0. The staged
+    no-database case is R9's unit test against the real `Dispatcher`
+    (`test_a_zone_without_site_clients_takes_what_is_staged_for_it_at_a_shutdown[no-database]`).
+- [x] Re-run on the head with `DRIVE_EVIDENCE`: every mode of `spec/relay-retire/drive/retire_drive.sh`
       and `spec/relay-topology/drive/topology_drive.sh`, and `spec/relay/drive/relay_smoke.sh`;
       record each in `spec/relay-hardening/evidence/laptop/README.md` (mode, result, one line) with
       the scrubbed `MODE.txt` files of the new drive.
-- [ ] The full suite (`uv run pytest`) on SQLite; the PostgreSQL/TimescaleDB legs of P1 once more.
+      *As built:* every mode passes but topology `lower`, which fails the three checks relay-retire
+      recorded as changed by its own fix (A, superseded, now retires; `spec/relay-retire/TECH.md` P3).
+      Their scrubbed files are not kept here: the names collide with this drive's, and their cycles'
+      evidence holds the record of each mode.
+- [x] The full suite (`uv run pytest`) on SQLite; the PostgreSQL/TimescaleDB legs of P1 once more.
 - **Verify:** see frontmatter (the seven new modes, the relay smoke, two retire and two topology
   modes as the R10 guard, the full suite, the red check). Expect ~30 min.
-- **Touches:** `spec/relay-hardening/drive/hardening_drive.sh`, `drive/hardening_judge.py`,
-  `spec/relay-hardening/evidence/laptop/`.
+- **Touches:** `spec/relay-hardening/drive/hardening_drive.sh`, `drive/hardening_shim.sh`,
+  `drive/hardening_judge.py`, `spec/relay-hardening/evidence/laptop/`.
 
 ## Phase P7 — Tail investigation on the laptop
 **Satisfies:** R8 · **Depends on:** P6
