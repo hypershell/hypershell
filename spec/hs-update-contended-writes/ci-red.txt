@@ -1,0 +1,9 @@
+# Tests expected to fail on CI only, at the tests-first commit (P1), per `PostgreSQL (ENTRY)` job.
+# Read by drive/ci_check.py with red.txt. `ENTRY[,ENTRY...] NODEID` per line.
+# The real race: TimescaleDB 2.31 reports 0 matched rows for the contended UPDATE or DELETE (upstream
+# #10902, fixed in 2.32.0); the local 2.32 and plain PostgreSQL do not, so these pass there.
+timescale,timescale-oss tests/test_contended_write.py::test_contended_update_legacy_lands
+timescale,timescale-oss tests/test_contended_write.py::test_contended_update_filtered_lands
+timescale,timescale-oss tests/test_contended_write.py::test_contended_update_limit_lands
+timescale,timescale-oss tests/test_contended_write.py::test_contended_update_delete_lands
+timescale,timescale-oss tests/test_contended_write.py::test_contended_update_delete_limit_lands

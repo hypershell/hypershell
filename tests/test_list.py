@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Geoffrey Lentner
 # SPDX-License-Identifier: Apache-2.0
 
-"""Test task listing: exit-status colorization and the --signal filter."""
+"""Test task listing: exit-status colorization, the --signal filter, and tag filters."""
 
 
 # Type annotations
@@ -277,3 +277,15 @@ def test_part_in_normal_view(temp_site: Path) -> None:
     # there, consistent with `group` — not only via `hs list part` / `-x part` / `--json`.
     lines = [strip_ansi(line).strip() for line in main_lines(['hs', 'list', '--all'])[1]]
     assert sorted(line for line in lines if line.startswith('part:')) == ['part: 0', 'part: 1']
+
+
+@mark.integration
+def test_list_name_only_tags_check_every_tag(temp_site: Path) -> None:
+    """Two name-only tag filters both apply: `-t a b` lists only the task with both tags."""
+    taskfile = create_taskfile(temp_site, ['echo 0  # HYPERSHELL: a b', 'echo 1  # HYPERSHELL: b',
+                                           'echo 2  # HYPERSHELL: a'])
+    assert main(['hs', 'submit', str(taskfile)])[0] == cli_status.success
+
+    assert main_lines(['hs', 'list', '--count', '-t', 'a', 'b'])[1] == ['1']
+    assert main_lines(['hs', 'list', '--count', '-t', 'b', 'a'])[1] == ['1']
+    assert main_lines(['hs', 'list', 'args', '-t', 'a', 'b'])[1] == ['echo 0']
