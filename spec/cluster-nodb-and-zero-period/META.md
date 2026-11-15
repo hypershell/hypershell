@@ -53,3 +53,10 @@ is skipped by the parser):
 - **Skill cause:** Same as `spec/cluster-launch-failures/META.md` F2: the steps predate the worktree practice.
 - **Recommended fix:** As there.
 - **Confidence:** high · **Effort:** small
+
+## F3 — The high-blast-radius research exception has no scale for an argument-handling edit
+`origin=hs-plan:step3 severity=low category=instruction status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** A `small` fix with both root causes reproduced in shaping edits `server.py` only in `ServerApp`'s `-P` declaration, help string and `check_args()`. Step 3's high-blast-radius exception says "run the full fan-out … regardless of `appetite`/`kind`", while the invocation asked for no fan-out beyond what the skill allows. The planner pinned the touched contracts itself in one brief (`research/01`) and a digest.
+- **Skill cause:** The exception keys on the file, not on the region touched, and "full fan-out" has no size; it does not say whether one planner-written brief that names the contracts pinned satisfies it when no FSM, thread, queue or database code is touched.
+- **Recommended fix:** Keep the exception (the gate is not weakened), and say what satisfies it at small appetite: at least one brief per high-blast-radius file touched, naming the exact functions edited and the contracts pinned by probe; subagents optional when the edit is confined to argument parsing and help text.
+- **Confidence:** med · **Effort:** small
