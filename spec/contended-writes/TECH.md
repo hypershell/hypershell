@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/contended-writes
 base: develop
-current_phase: P2
+current_phase: P6
 last_updated: '2026-11-14'
 phases:
 - id: P1
@@ -32,7 +32,7 @@ phases:
     done
 - id: P2
   name: CI red at the tests-first commit (external wait on the draft PR)
-  status: pending
+  status: done
   satisfies:
   - R5
   depends_on:
