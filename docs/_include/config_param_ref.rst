@@ -596,8 +596,8 @@
         seconds. ``hs relay`` reads it in the same forms as the period of its site's clients, and
         stops before it starts if the value is not a duration.
         The period must be greater than zero: ``hs cluster``, ``hs server`` and ``hs relay`` each
-        refuse zero or a negative value at start-up. A number below one second is accepted as
-        given; the autoscaler waits a second at a time, so it checks at most once a second.
+        refuse zero or a negative value at start-up. A period below one second, in any form, is one
+        second.
 
         .. only:: html
 
@@ -605,7 +605,7 @@
                A string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               A period of zero or less is refused.
+               A period of zero or less is refused; a number below one second is one second.
 
     ``.launcher``
         Command prefix used to launch each client as a scaling unit (default: none).

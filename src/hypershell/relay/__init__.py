@@ -1209,7 +1209,7 @@ class RelayApp(Application):
         """Seconds between checks on the site clients, from `autoscale.period` (a string in the duration forms).
 
         A number is used as given, as an option default is, so the relay and `hs cluster` read every value alike;
-        either must be greater than zero.
+        either must be greater than zero, and below one second is one second.
         """
         try:
             return parse_period(config.autoscale.period)

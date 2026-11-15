@@ -374,7 +374,8 @@ class ClusterApp(Application):
     def check_arguments(self: ClusterApp) -> None:
         """Various checks on input arguments."""
         try:
-            parse_period(self.autoscaling_period)  # A number from the configuration is not parsed by the option.
+            # A number from the configuration is not parsed by the option.
+            self.autoscaling_period = parse_period(self.autoscaling_period)
         except UnitError as error:
             raise ArgumentError(f'autoscale.period: {error}') from error
         given_filepath = self.filepath is not None

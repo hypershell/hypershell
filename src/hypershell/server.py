@@ -1884,7 +1884,8 @@ class ServerApp(Application):
     def check_args(self: ServerApp) -> None:
         """Fail particular argument combinations."""
         try:
-            parse_period(self.autoscaling_period)  # A number from the configuration is not parsed by the option.
+            # A number from the configuration is not parsed by the option.
+            self.autoscaling_period = parse_period(self.autoscaling_period)
         except UnitError as error:
             raise ArgumentError(f'autoscale.period: {error}') from error
         if self.autoscaling_policy is not None:

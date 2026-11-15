@@ -360,9 +360,9 @@ def test_cluster_launches_whole_seconds() -> None:
 
 
 @mark.unit
-@mark.parametrize('period, expected', [('5m', 300), ('1:30', 90), ('90', 90), ('0.5s', 1), (60, 60), (0.5, 0.5)])
+@mark.parametrize('period, expected', [('5m', 300), ('1:30', 90), ('90', 90), ('0.5s', 1), (60, 60), (0.5, 1)])
 def test_relay_site_period(monkeypatch, period: Any, expected: Any) -> None:
-    """The relay reads a period string in the duration forms and uses a number as given."""
+    """The relay reads a period string in the duration forms and a number as given, one second at the least."""
     monkeypatch.setitem(config['autoscale'], 'period', period)
     site_period = RelayApp.from_cmdline([]).site_period
     assert site_period == expected and type(site_period) is type(expected)

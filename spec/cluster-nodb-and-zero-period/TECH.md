@@ -4,7 +4,7 @@ title: hs cluster --no-db leaves the database alone, and an autoscaling period o
   zero or less is refused
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/cluster-nodb-and-zero-period
 base: develop
 current_phase: done
@@ -72,15 +72,18 @@ phases:
     --no-db --no-tls 2> err.txt; test $? -eq 2; } && grep -q "autoscale.period" err.txt
     && grep -q "greater than zero" err.txt && uv run hs cluster in.txt --no-db --no-tls
     -P 0.5 > out.txt && grep -qx a out.txt && HYPERSHELL_AUTOSCALE_PERIOD=0.5 uv run
-    hs cluster in.txt --no-db --no-tls > out.txt && grep -qx a out.txt'' && uv run
-    hs cluster --help | grep -q "Scaling period, greater than zero" && uv run hs server
-    --help | grep -q "Scaling period, greater than zero" && test "$(grep -c "Scaling
-    period, greater than zero" share/zsh/site-functions/_hs)" -eq 2 && grep -q "greater
-    than zero" docs/_include/cluster_help.rst && grep -q "greater than zero" docs/_include/server_help.rst
-    && grep -q "greater than zero" docs/_include/config_param_ref.rst && grep -A3
-    "versionchanged:: 2.9.0" docs/cli/server.rst | grep -q "greater than zero" &&
-    grep -A3 "versionchanged:: 2.9.0" docs/cli/cluster.rst | grep -q "greater than
-    zero" && git diff --quiet 90ab2fc2 -- src/hypershell/cluster/remote.py src/hypershell/cluster/topology.py
+    hs cluster in.txt --no-db --no-tls > out.txt && grep -qx a out.txt && HYPERSHELL_AUTOSCALE_PERIOD=0.001
+    uv run hs cluster in.txt --no-db --no-tls > out.txt && grep -qx a out.txt'' &&
+    uv run hs cluster --help | grep -q "Scaling period, greater than zero" && uv run
+    hs server --help | grep -q "Scaling period, greater than zero" && test "$(grep
+    -c "Scaling period, greater than zero" share/zsh/site-functions/_hs)" -eq 2 &&
+    grep -q "greater than zero" docs/_include/cluster_help.rst && grep -q "greater
+    than zero" docs/_include/server_help.rst && grep -q "greater than zero" docs/_include/config_param_ref.rst
+    && grep -q "in any form, is one" docs/_include/config_param_ref.rst && ! grep
+    -q "at most once a second" docs/_include/config_param_ref.rst && grep -A3 "versionchanged::
+    2.9.0" docs/cli/server.rst | grep -q "greater than zero" && grep -A3 "versionchanged::
+    2.9.0" docs/cli/cluster.rst | grep -q "greater than zero" && git diff --quiet
+    90ab2fc2 -- src/hypershell/cluster/remote.py src/hypershell/cluster/topology.py
     src/hypershell/relay/site.py src/hypershell/data && UV_PROJECT_ENVIRONMENT="$TMPDIR/docs-venv"
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     "$TMPDIR/docs-html-cnz"'
@@ -108,8 +111,7 @@ phases:
 review:
   last_reviewed_commit: 53f939229613fec56d9cde78932d84a58c3a8bd8
   verdict: changes-requested
-  blocked_reason: F1 config_param_ref sub-second claim wrong (R7); F2 pre-existing
-    tiny-period spin needs human ruling (gate); F3 no NaN test
+  blocked_reason: ''
   cycle: 1
 ---
 # TECH.md — `hs cluster --no-db` leaves the database alone, and an autoscaling period of zero or less is refused
@@ -266,6 +268,38 @@ positive period reads as before.
 - [x] Re-read R7's passages against the behaviour; fix wording only.
 - **Verify:** see frontmatter.
 - **Touches:** none expected (wording fixes only).
+
+## Review-cycle-1 remediation (2026-11-15)
+
+`REVIEW.md` cycle 1 (changes-requested on `53f93922`) and the maintainer's rulings at the end of
+`PLAN.md` ("Round numbers up to 1 s"). P3 and P4 reopened; P3's gate tightened (the
+`HYPERSHELL_AUTOSCALE_PERIOD=0.001` drive starts; the reference entry says "in any form, is one
+second" and no longer "at most once a second").
+
+- [x] **F2** — `core/types.py` `parse_period`: a positive number below one second is one second;
+      every other positive number as before. `ClusterApp.check_arguments` and `ServerApp.check_args`
+      keep what it returns, so a key number from the file or `HYPERSHELL_AUTOSCALE_PERIOD` reaches
+      `run_cluster`/`serve_with_sites` as one second; the relay's `site_period` already returns it.
+      `cluster/remote.py`, `cluster/topology.py`, `relay/site.py` unchanged (D3, the Non-goal).
+- [x] **F2 tests** — `tests/test_period_floor.py`: `test_parse_period_accepted`;
+      `test_period_key_accepted[launch-where-period]` over `hs server --autoscaling`, `hs cluster
+      --autoscaling` and `hs relay` (its `RelayThread` recorded unbuilt), env and file, `0.001`,
+      `0.5` → 1, `1`, `1.5`, `2` as given; `test_relay_period_accepted` adds `0.5`, `0.001` → 1;
+      `tests/test_duration_options.py::test_relay_site_period[0.5-1]`. Red on `53f93922` (17,
+      `0.001 == 1`/`0.5 == 1` at each entry point), green after.
+- [x] **F1** — `docs/_include/config_param_ref.rst` `.period`: "A period below one second, in any
+      form, is one second."; its 2.9.0 marker adds "a number below one second is one second". No
+      other passage the cycle changed made the claim (the `-P` passages already say a fraction
+      rounds up).
+- [x] **F3** — `tests/test_period_floor.py`: `nan`, `-inf`, `-0.0` on the environment variable and
+      the file for every launch (the relay added), `test_parse_period_refused`, and `RELAY_ZEROS`.
+      Green on `53f93922` and HEAD; a floor written `seconds <= 0` fails 10 of them.
+- [x] Drive (`hs server --no-tls --autoscaling fixed`, 8 s, CPU by `ps -o time=`): `-P 1` 0:00.35,
+      env `0.001` 0:00.36, env `0.5` 0:00.33; on `53f93922` env `0.001` 0:07.92. `hs cluster
+      --launcher … --autoscaling fixed -I 1`, 6 s: 5 checks at `-P 1`, env `0.001` and env `0.5`;
+      12 on `53f93922` at env `0.001`.
+- [x] Gates re-run: P3's tightened verify green (652 passed, the drives, the docs build); P4 green
+      (full suite serially: 3199 passed, 116 skipped, no failure; docs `-W` clean).
 
 ---
 
