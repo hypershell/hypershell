@@ -207,6 +207,19 @@ via the foreman** before `/hs-plan`.
   `Task.result_columns` (invariants §3); R2 is about those text columns. `args` is never written
   from a result.
 
+**Ruled at the GOAL gate** (2026-11-14): approved by the foreman, gate judge under the maintainer's
+mandate. All seven clarifications are confirmed as proposed:
+- two seeds at appetite small, with the split held in reserve;
+- a stream run waits for the end of its input and for every task to finish (a producer that never
+  closes keeps the run open; closing it, Ctrl-C or a failure stop ends it);
+- the "30 of 60" case is included;
+- client idle timeouts during a pause are out of scope, with the plan recording a seed if needed;
+- the stop latency is bounded by `server.poll`;
+- the mixed-version leftovers are accepted;
+- R2 covers the result columns only.
+
+The contract is locked; `hs-plan` designs against it.
+
 ## Evidence plan
 
 What `hs-review` should be able to run against the branch (PostgreSQL drives need the sandbox off
