@@ -290,3 +290,24 @@ filters, `completion_time` terminality, one retry row per failure, the `in_memor
 Scheduler stop conditions are not among them; the review's META F3 says so. This finding corrects
 prose so it matches code the review found correct. The foreman rules the gate not triggered and
 reports the ruling to the maintainer. No code or test change. Review cycle 2 verifies this.
+
+## Review-cycle-2 rulings (2026-11-15)
+
+The review's human gate was triggered by F2, a CONFIRMED race in `server.py`. The maintainer signed
+off in session (2026-11-15) to fix both findings. Review cycle 3 is the last.
+
+- **F2.** With the input still open, `Scheduler.load_bundle` must not halt on a group that
+  `increment_group` reports not viable without first re-checking the out-of-work condition. Then a
+  result that lands between the first count and `increment_group` makes the scheduler back off,
+  as with every other open-input case, instead of going FINAL. A permanently failed group with a
+  task waiting in another group still halts as R7 requires
+  (`test_failed_group_still_halts_late_higher_group` stays green).
+  - **Test:** a deterministic test of the interleaving: the failure written right after
+    `count_remaining` returns, with the input open. It must reach no FINAL while the input is open,
+    and the late line must run. Red on `1a28fb9`, green after.
+  - **Drive:** the shipped `fail-pause` drive must also no longer show the CRITICAL on a PostgreSQL
+    provider. Repeat it enough times on TimescaleDB to show this.
+- **F3.** The §3 sentence in `AGENTS.md` and `invariants.md` stops saying "at once". The failed-group
+  halt and the signals take effect on the scheduler's next pass, within `server.poll`. Also make the
+  "a failed task with no retry left never ends a stream run early" claim true as built once F2 is
+  fixed, or reword it.
