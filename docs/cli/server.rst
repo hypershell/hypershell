@@ -31,6 +31,11 @@ Description
    ``-w``/``--bundlewait``, ``-Q``/``--poll`` and ``-P``/``--period`` take a duration with units or
    a Slurm time, as ``-W`` does, and a signed value is refused.
 
+.. versionchanged:: 2.9.0
+   A run fed by a stream (standard input, a pipe or a named pipe) ends once that input ends and
+   every task is done, not once the tasks read so far are done, so a line that arrives after a pause
+   still runs. Input that is never closed keeps the run going until it is.
+
 .. include:: ../_include/server_help.rst
 
 .. _cli_server_sites:

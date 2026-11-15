@@ -199,6 +199,29 @@ the group-order fix.
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (PLAN §5 risk 1)*
 **Seed:** [`issues/stream-run-stops-before-input-ends.md`](issues/stream-run-stops-before-input-ends.md) · *status: adopted:task-input-fidelity*
 
+## A client that times out during a pause in a stream leaves a late line unrun
+
+A run fed by a stream now keeps scheduling until its input ends. A client whose `-T` is shorter
+than a pause in that input exits 0 during the pause, and the next line is staged for a client that
+never comes: `(echo 'echo a'; sleep 8; echo 'echo b') | hsx -N1 -T 3` prints `a` and then waits with
+`echo b` staged. Launcher modes keep waiting by design on all-zero exits; autoscaling relaunches and
+is not affected. Before `task-input-fidelity` the same run dropped the line silently. Scheduled after
+the agreed pre-2.9.0 list.
+
+*Horizon: near-term · Depends on: `task-input-fidelity` · Refs: `spec/task-input-fidelity/` (GOAL
+Clarifications, plan-gate ruling 3)*
+**Seed:** [`issues/stream-pause-client-timeout.md`](issues/stream-pause-client-timeout.md) · *status: unshaped*
+
+## With `-b N>1`, a line read before a pause waits for the next one
+
+The database committer checks `--bundlewait` only when a task arrives, so with a bundle size above
+one, a line read just before a pause in a stream stays uncommitted until the next line or the end of
+the input. It is committed and run eventually, so no stop depends on it. Pre-existing, also in
+`hs submit`, and found by the plan of `task-input-fidelity`.
+
+*Horizon: near-term · Depends on: — · Refs: `spec/task-input-fidelity/research/02-stream-stop.md`*
+**Seed:** [`issues/stream-bundlewait-commit-wait.md`](issues/stream-bundlewait-commit-wait.md) · *status: unshaped*
+
 ## An empty task file never finishes
 
 `hsx` given an empty task file on an empty database never exits: the server logs `Empty database -

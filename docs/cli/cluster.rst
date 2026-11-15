@@ -53,4 +53,9 @@ Description
    instead of relaunching them forever; ``0`` keeps relaunching. Each non-zero exit is warned
    about naming the client's process id and zone.
 
+.. versionchanged:: 2.9.0
+   A run fed by a stream (standard input, a pipe or a named pipe) ends once that input ends and
+   every task is done, not once the tasks read so far are done, so a line that arrives after a pause
+   still runs. Input that is never closed keeps the run going until it is.
+
 .. include:: ../_include/cluster_help.rst

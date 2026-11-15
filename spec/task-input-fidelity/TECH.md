@@ -4,10 +4,10 @@ title: 'Every task the input gives runs as given: date-like lines run as text, a
   a streamed run waits for its input to end'
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/task-input-fidelity
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -65,7 +65,7 @@ phases:
     fail-pause
 - id: P4
   name: Docs, the invariant record and seeds; cross-version, both Pythons, every provider
-  status: pending
+  status: done
   satisfies:
   - R4
   - R8
@@ -233,18 +233,18 @@ whatever `server.poll` is.
 **Goal:** the change is documented, the invariant record matches the code, the deferred findings are
 seeded, and the whole evidence plan of `GOAL.md` passes.
 
-- [ ] `docs/cli/cluster.rst`, `docs/cli/server.rst`: `.. versionchanged:: 2.9.0` beside the existing
+- [x] `docs/cli/cluster.rst`, `docs/cli/server.rst`: `.. versionchanged:: 2.9.0` beside the existing
       2.9.0 markers — a run fed by a stream (standard input, a pipe, a named pipe) ends once that input
       ends and every task is done. `docs/_include/task_groups_alt.rst`: one sentence that a stream with
       long pauses wants no `-T` (or autoscaling). No prose for the date-like fix (PLAN § 2.4).
-- [ ] `AGENTS.md` and `.agents/factory/invariants.md` in lockstep: payload fields decode by their
+- [x] `AGENTS.md` and `.agents/factory/invariants.md` in lockstep: payload fields decode by their
       declared column type, only `datetime` columns as times (§6/§9 and "Shutdown/sentinel ordering");
       a non-`forever` scheduler stops only once its submitter has ended (read before the counts) and
       every task is terminal (§3 group-gating paragraph). Keep clear of #109's paragraphs.
-- [ ] Seeds from [`templates/ISSUE.md`](../../.agents/factory/templates/ISSUE.md), `status: unshaped`,
+- [x] Seeds from [`templates/ISSUE.md`](../../.agents/factory/templates/ISSUE.md), `status: unshaped`,
       each with a `ROADMAP.md` entry: a client idle past `-T` during a pause leaves a late line with no
       one to run it; with `-b N>1` a line read before a pause waits for the next line to be committed.
-- [ ] Evidence (commit body): the full suite on 3.14 and on 3.11
+- [x] Evidence (commit body): the full suite on 3.14 and on 3.11
       (`UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run --python 3.11 pytest -q`); with the sandbox off,
       `HS_TEST_POSTGRES=… uv run pytest -q tests/test_writeback_postgres.py tests/test_timescale.py tests/test_upgrade_postgres.py`
       and again with `HS_TEST_TIMESCALE=community`; every drive mode on 3.14, `dates` and `pause` on

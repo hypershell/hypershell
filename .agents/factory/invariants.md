@@ -89,6 +89,11 @@ subsystems.
   tasks arrive late. File input to `hs cluster`/`hs server` is submitted in full (the whole file)
   before the scheduler starts, so its groups run in order. Stream input is best effort: a late
   lower group runs after the current one, with a warning.
+- **A non-`forever` scheduler stops only once its submitter has ended and every task is terminal**
+  (`Scheduler.load_bundle`). `submission_complete()` is read **before** the counts (a submitter ends
+  only after its last commit); with every task done and the input still open it backs off without
+  `increment_group`/`report_held`, so a pause or a failed task with no retry left never ends a
+  stream run early. `ServerThread` wakes the scheduler once the submitter has ended.
 
 ## 4. Server modes — guard before assuming DB behavior
 
@@ -125,6 +130,9 @@ subsystems.
 - Stream sentinel is `make_sentinel()` (`serialize(None)`).
 - **Remote-queue payloads** go through `serialize_tasks`/`deserialize_tasks` and `heartbeat.pack`
   (JSON) — **never** put a live object or a literal `None` on a remote queue.
+- **Payload fields decode by declared column type** (`Entity.from_json`): only a `datetime` column in
+  `columns` is read as a time; every other value stays as sent (date-like text stays text). Declare
+  a new `DateTime` column `datetime` in `columns`, or it arrives as text.
 
 ## 7. Resource accounting (`core/resource.py`)
 

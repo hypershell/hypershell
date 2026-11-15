@@ -257,7 +257,12 @@ group (and, in non-`forever` mode, the server). This is intended; don't "fix" it
 understanding it. Once the group clears, the next group is the smallest one with incomplete
 tasks, which may be lower when tasks arrive late. File input to `hs cluster`/`hs server` is
 submitted in full (the whole file) before the scheduler starts, so its groups run in order. Stream
-input is best effort: a late lower group runs after the current one, with a warning.
+input is best effort: a late lower group runs after the current one, with a warning. **A
+non-`forever` scheduler stops only once its submitter has ended and every task is terminal**
+(`Scheduler.load_bundle`): it reads `submission_complete()` before the counts (a submitter ends
+only after its last commit, so its rows are then visible), and with every task done and the input
+still open it backs off without `increment_group`, so neither a pause in a stream nor a failed task
+with no retry left ends the run early. The server wakes it once the submitter has ended.
 
 ## Concurrency model (read before touching `server.py`, `client.py`, `core/fsm.py|thread.py|signal.py`)
 
@@ -296,6 +301,10 @@ the row still without a `completion_time`. Never revert staged ids with the unco
 The stream sentinel is `make_sentinel()` (`serialize(None)`); consumers detect end-of-stream
 by dequeuing it. **Remote-queue payloads go through `serialize_tasks`/`deserialize_tasks` and
 `heartbeat.pack` (JSON) — never put a live object or a literal `None` on a remote queue.**
+A payload's fields decode by their declared column type (`Entity.from_json`): only a column
+declared `datetime` in `columns` is read as a time, every other value stays as sent, so a line or
+a returned command that looks like a date stays text. A new `DateTime` column is declared
+`datetime` in `columns`, or it arrives as text.
 
 **Resource accounting** (`core/resource.py`) is process-global mutable state under
 `executor_lock` and assumes **one `ClientThread` per process**. `acquire`/`release` must be
