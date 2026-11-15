@@ -110,7 +110,8 @@ def scheduled_work(server: ServerThread) -> bool:
     This is the scheduler's own rule for stopping, read the same way: every task not completed, in every
     group and zone, and then the failures it would retry in its current group, under its own attempts
     and eager setting. Incomplete tasks are counted first, so a failure written between the two reads
-    is still seen. A scheduler that has ended has finished or failed its run on its own.
+    is still seen. A scheduler that has ended has finished or failed its run on its own. Only committed
+    work counts: input still being read is not work, since no client can run a line until it lands.
     """
     scheduler = server.scheduler
     if not scheduler.is_alive():

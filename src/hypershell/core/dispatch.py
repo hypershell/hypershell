@@ -251,6 +251,15 @@ class Dispatcher:
         self.generation += 1
         self.need.notify_all()
 
+    def wake(self: Dispatcher) -> None:
+        """Wake the scheduler as new demand does, so a wait in :meth:`wait_need` ends at once.
+
+        The generation is bumped under the lock, so a wake that lands before the wait starts still
+        ends it.
+        """
+        with self.lock:
+            self._signal_need()
+
     def _pool(self: Dispatcher, zone: str, name: str) -> Pool:
         """The pool for `zone`, created on first use (lock held)."""
         pool = self.pools.get(zone)

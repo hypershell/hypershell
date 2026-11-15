@@ -24,6 +24,9 @@ naming both groups. The clients that ``hs cluster`` launches start once the file
 their ``-T``/``--timeout`` clock does not run while it is read. A client connected to
 ``hs server`` whose ``-T``/``--timeout`` is shorter than the time to read the file reaches that
 timeout and exits before any task is scheduled, and the server then waits for new clients.
+A run fed by a stream keeps scheduling until that input ends, so a stream with long pauses wants
+clients with no ``-T``/``--timeout`` (or autoscaling): a client that times out during a pause is
+not there to run the lines that follow it.
 
 Filter or update tasks by group with the ``-g``/``--group`` option of ``hs list`` and
 ``hs update``.

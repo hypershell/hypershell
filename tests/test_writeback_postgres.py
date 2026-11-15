@@ -238,3 +238,21 @@ def test_applied_values_match_reference(pg_tasks, name: str) -> None:
     captured = apply_twins(pg_tasks, first, second)
 
     check_twins(first_id, second_id, before, captured)
+
+
+def test_date_like_result_stored_verbatim(pg_tasks) -> None:
+    """A result whose command and paths look like dates is stored as the client sent it."""
+    task_id = submit('2026-11-02')
+    copy = finish(dispatch_one(task_id), exit_status=127)
+    copy.command = '2026-11-02'
+    copy.client_host = '20261102T1200'
+    copy.outpath, copy.errpath, copy.csvpath = '2026W45', '2026-11-02 12:00', '20261102'
+
+    assert Task.apply_results([shifted(copy, 1)]) == [ResultOutcome.STALE]
+    assert Task.apply_results([returned(copy)]) == [ResultOutcome.APPLIED]
+    stored = row(task_id)
+    assert (stored['args'], stored['command'], stored['client_host']) == ('2026-11-02', '2026-11-02', '20261102T1200')
+    assert (stored['outpath'], stored['errpath'], stored['csvpath']) == ('2026W45', '2026-11-02 12:00', '20261102')
+    assert stored['exit_status'] == 127
+    assert Task.apply_results([returned(copy)]) == [ResultOutcome.DUPLICATE]
+    assert copy.args == '2026-11-02'
