@@ -40,4 +40,11 @@
 - **Recommended fix:** As recorded there: move `red_check.sh`, `red_outcome.py` and `rest_green.sh` to `.agents/factory/bin/` and reference them from Step 6 and the TECH template.
 - **Confidence:** high · **Effort:** small
 
+## F5 — `hs-plan` dry-runs each drive mode only on the base, so checks past the first are never run
+`origin=hs-build:P7 severity=low category=instruction status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The plan's dry run ran every `env_drive.sh` mode on `90ab2fc2`, where each stops at its first new-behaviour check, as expected; no later check in any mode had been exercised. Three drive bugs shipped that way and were fixed in P2–P4 (a path that must exist for `HYPERSHELL_PYTHONPATH`, BSD `printenv` taking one name, a completion match read as a pattern); a fourth surfaced in P5: the `durations` mode and `test_duration_refused_at_start[client.heartrate]` ran `hs client` with no argument, which prints the usage and exits 1 before any check.
+- **Skill cause:** Step 6 asks for a drive dry run but only on the base, where "fails at its first new-behaviour check" is the expected outcome, so it cannot show that the rest of a mode is sound; nothing asks for each command the drive or a refusal test runs to be shown reaching the code under test.
+- **Recommended fix:** In Step 6, after the base dry run, run each drive mode once more with every check made to continue (e.g. an `ENV_DRIVE_CONTINUE=1` that reports instead of exiting), and for each command a drive or a refusal test runs, confirm on the base that it gets past argument parsing (not exit 1/2 with usage) before its expected failure.
+- **Confidence:** high · **Effort:** small
+
 **What worked well:** Writing the frontmatter through `_fsm.dump_document` (the writer `set_phase.py` uses) left it byte-stable under a re-dump, so P1's first state change will not reformat the file (`spec/contended-writes/META.md` F5).

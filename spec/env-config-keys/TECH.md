@@ -4,10 +4,10 @@ title: Environment variables reach every configuration key with the value as wri
   the remaining duration keys take units
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/env-config-keys
 base: develop
-current_phase: P7
+current_phase: done
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -129,7 +129,7 @@ phases:
 - id: P7
   name: 'Regression sweep: full suite, red list green, Python 3.11, every drive mode,
     red check, docs'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -411,9 +411,53 @@ is not.
 **Goal:** the whole suite green, every red-list node green, the red check still red on the base,
 Python 3.11, every drive mode, the docs build.
 
-- [ ] Run the verify; record timings and any flake (re-run once, name it in the commit body).
-- [ ] Draft notes for `hs-publish`: the GOAL's nine user-visible changes, with PLAN S4 under change 4
+- [x] Run the verify; record timings and any flake (re-run once, name it in the commit body).
+- [x] Draft notes for `hs-publish`: the GOAL's nine user-visible changes, with PLAN S4 under change 4
       and S7 under change 5.
+- *As built:* the verify's first command, `pytest -n auto`, fails at collection on this suite, so the
+  full suite ran serially (`uv run pytest -q -p no:cacheprovider`) in its place; every other part ran
+  as written, `$TMPDIR` being `/tmp/claude-501` with the sandbox off (the docs build needs it). On
+  `4f89306b` + this file: full suite 3245 passed, 116 skipped (24m05s); red list 62 passed (30s);
+  Python 3.11.18 on the five new test files 215 passed (33s); drive modes `keys`, `typed`,
+  `durations`, `serve`, `export`, `which` all ok (36 checks); `red_check.sh` on `90ab2fc2` 62 of 62
+  RED (75s); `sphinx-build -W` clean. No flake; `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade`
+  passed in the full run.
+
+### Release notes (draft for `hs-publish`)
+
+Changes from 2.8.x (and `develop` `90ab2fc2`):
+
+1. A variable for a key whose name has an underscore now sets that key
+   (`HYPERSHELL_SERVER_TLS_MIN_VERSION`, `HYPERSHELL_RELAY_LAUNCHER_ARGS`,
+   `HYPERSHELL_DATABASE_TIMESCALE_CHUNK_INTERVAL`, `HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES`, …), in any
+   letter case after the prefix. Previously it set a nested key no reader used, so the setting was
+   silently ignored (for `database.timescale.*`, refused as unknown; for `relay.launcher_args`, it
+   also replaced `relay.launcher`).
+2. `HYPERSHELL_<KEY>_ENV` and `_EVAL` work as `_env`/`_eval` do in a file, including the refusal of two
+   forms of one key. Previously they replaced the key with a table.
+3. Values are no longer coerced by their look. A key that takes text keeps `false`, `true`, `null`, an
+   empty value and number-like text (`007`, `1e3`, an all-digit `server.auth`) as written.
+4. A key that takes a whole number, a number or a boolean converts its value or stops the command at
+   start with a configuration error (exit 3) naming the variable; booleans take `true`/`false`,
+   `yes`/`no`, `on`/`off`, `1`/`0` in any case (`no` and `off` were read as true). An empty value is
+   refused too: `HYPERSHELL_SERVER_TLS_ENABLED=` no longer turns TLS off. Such a variable stops every
+   command, `hs config` included, even one that does not read the key.
+5. `HYPERSHELL_EXPORT_<NAME>` reaches tasks under `<NAME>` as written, value unchanged (previously
+   upper-cased, and `007` → `7`, empty → `null`, `1e3` → `1000.0`). The environment wins over a file's
+   `[export]` entry for the same task variable, compared by exact name: `HYPERSHELL_EXPORT_foo` beside
+   a file's `foo` gives tasks both `foo` and `FOO`.
+6. `server.evict`, `client.heartrate`, `relay.bundlewait`, `relay.poll`, `relay.retention`,
+   `relay.timeout` (rounded up), `relay.upstream.heartrate`, `.evict_hint`, `.deadline` and `.backoff`
+   take units and Slurm forms in a file or the environment; a bad value stops `hs server`,
+   `hs client` or `hs relay` at start (exit 3) naming the key and where it came from. Previously a
+   unit value crashed the reader with a traceback (`relay.timeout` was refused by each site client).
+7. A `HYPERSHELL_RELAY_ZONE_*` variable that names no zone key, or one set together with
+   `HYPERSHELL_RELAY_ZONE`, is a configuration error.
+8. `hs config` completion and `hs config which` name keys by their real path and the variable that
+   set them, one key per completion line, and no longer offer `site` or `config.file`.
+9. An unknown `HYPERSHELL_*` name past a known table, and a `[database]` provider argument from the
+   environment, are held as one key with underscores kept (`HYPERSHELL_DATABASE_SSL_MODE` →
+   `database.ssl_mode`). Two variables that set one key (e.g. in two letter cases) are refused.
 - **Verify:** frontmatter.
 - **Touches:** `spec/env-config-keys/TECH.md` only (state), unless the sweep finds a defect.
 
