@@ -593,6 +593,24 @@ def test_contended_retry_mark_lands(contended_db) -> None:
     assert data['client_host'] == 'holder'
 
 
+def test_contended_retry_mark_skips_cancelled_row(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """A retry mark that waited on a cancel of its failed row does not mark it, and the row gets no retry."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = failed_row(contended_db)
+    cancelled = datetime.now().astimezone()
+
+    outcome = contend(contended_db, CANCEL_SQL, {'cancelled': cancelled, 'status': CANCEL_STATUS, 'id': task_id},
+                      lambda: [(task.id, task.previous_id) for task in Task.next(limit=1, attempts=2)])
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == []
+    assert retries_of(contended_db, task_id) == []
+    data = row(contended_db, task_id)
+    assert data['exit_status'] == CANCEL_STATUS and data['completion_time'] == cancelled
+    assert not data['retried'] and data['next_id'] is None
+    assert warnings_with(caplog, 'retry mark') == []
+
+
 def test_contended_cancel_lands(contended_db) -> None:
     """A cancel that waited on another write to its row cancels it."""
     task_id = submit()

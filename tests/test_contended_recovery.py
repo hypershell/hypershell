@@ -829,7 +829,9 @@ class DriverContention:
     Each statement on `task` is recorded once per parameter set as (kind, task id): the kind is
     'mark', 'cancel', 'UPDATE', 'SELECT' or 'INSERT'; the task id is the parameter the WHERE clause
     opens on (`task.id = ?`), else None. Another writer's change, run by `lose`, is neither
-    recorded nor lost.
+    recorded nor lost. A write made to `wait` on another writer's change (`waits`) is not lost: the
+    change commits first and the write then runs as written, on the row as the change left it, as
+    PostgreSQL re-checks a row it waited on.
     """
 
     def __init__(self, engine: Engine) -> None:
@@ -855,6 +857,15 @@ class DriverContention:
         self.losing[task_id] = count
         if meanwhile is not None:
             self.meanwhile[task_id] = meanwhile
+
+    def waits(self, task_id: str, meanwhile: Callable[[], None]) -> None:
+        """Make the next mark or cancel of task `task_id` wait on another writer's change, then run as written.
+
+        `meanwhile` runs once, before that write: the other transaction's change, committed while the
+        write waited on its row lock. The write itself is not lost, so its own row condition decides
+        whether it matches the row as the change left it.
+        """
+        self.meanwhile[task_id] = meanwhile
 
     @staticmethod
     def classify(statement: str) -> Optional[Tuple[str, Optional[int]]]:
@@ -883,16 +894,18 @@ class DriverContention:
         return str(params[position])
 
     def take(self, kind: str, task_id: Optional[str]) -> bool:
-        """Whether this write is lost; runs the other writer's change at the first loss of the task."""
-        if kind not in ('mark', 'cancel') or self.losing.get(task_id, 0) <= 0:
+        """Whether this write is lost; runs the other writer's change at the first mark or cancel of the task."""
+        if kind not in ('mark', 'cancel'):
             return False
-        self.losing[task_id] -= 1
         if (change := self.meanwhile.pop(task_id, None)) is not None:
             self.passing = True
             try:
                 change()
             finally:
                 self.passing = False
+        if self.losing.get(task_id, 0) <= 0:
+            return False
+        self.losing[task_id] -= 1
         return True
 
     def do_execute(self, cursor: Any, statement: str, params: Any, context: Any) -> bool:
@@ -1084,6 +1097,31 @@ def test_retry_mark_skips_row_retried_meanwhile(task_db, driver, logs) -> None:
     assert retries_of(task_db, first) == []
     data = row(first)
     assert data['retried'] and data['next_id'] == other
+    assert [previous for _, previous in dispatched] == [second]
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+@mark.parametrize('change', ['cancelled', 'retried'])
+def test_retry_mark_that_waited_matches_only_a_row_awaiting_retry(task_db, driver, logs, change: str) -> None:
+    """A retry mark that waited on a cancel of its row, or on another writer marking it retried, and then
+    ran on the row as that left it, matches nothing: the row gets no retry row and keeps the other change."""
+    first, second = failed(2)
+    other = uuid()
+    logs.clear()
+    driver.clear()
+    driver.waits(first, cancelled(task_db, first) if change == 'cancelled' else marked_by_another(task_db, first, other))
+
+    dispatched = retry(limit=2)
+
+    assert from_mark(driver.kinds(first)) == ['mark', 'SELECT']
+    assert retries_of(task_db, first) == []
+    data = row(first)
+    if change == 'cancelled':
+        assert data['exit_status'] == CANCEL_STATUS and not data['retried'] and data['next_id'] is None
+    else:
+        assert data['retried'] and data['next_id'] == other
     assert [previous for _, previous in dispatched] == [second]
     assert messages(logs, logging.DEBUG, 'Re-running contended') == []
     assert messages(logs, logging.WARNING) == []

@@ -4,7 +4,7 @@ title: 'Contended writes: the retried mark and Task.cancel_all land when contend
   on a hypertable; concurrent first submits share the reserved source row'
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/contended-writes
 base: develop
 current_phase: P6
@@ -104,15 +104,20 @@ phases:
     retry insert' .agents/factory/invariants.md && ! grep -q 'hypertable-contended-scheduler-and-cli-writes'
     AGENTS.md .agents/factory/invariants.md && grep -q 'issues/hs-update-contended-writes.md'
     AGENTS.md && grep -q 'cancel_all' .agents/factory/invariants.md && grep -q 'retry
-    mark' AGENTS.md && grep -q 'retry mark' .agents/factory/invariants.md && uv run
-    pytest -q -p no:cacheprovider && for ts in community ''; do HS_TEST_POSTGRES=$pg
-    HS_TEST_TIMESCALE=$ts uv run pytest -q -p no:cacheprovider -rs tests/test_contended_write.py
-    tests/test_writeback_postgres.py tests/test_zone_postgres.py || exit 1; done &&
-    RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg
-    HS_TEST_TIMESCALE= sh spec/relay-hardening/drive/red_check.sh
+    mark' AGENTS.md && grep -q 'retry mark' .agents/factory/invariants.md && ! grep
+    -qE 'server killed (between|while)' docs/_include/database.rst docs/_include/database_alt.rst
+    && grep -q 'mark are recorded together' docs/_include/database.rst && UV_PROJECT_ENVIRONMENT=${TMPDIR:-/tmp}/docs-venv
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    ${TMPDIR:-/tmp}/docs-html && uv run pytest -q -p no:cacheprovider && for ts in
+    community ''; do HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts uv run pytest -q -p
+    no:cacheprovider -rs tests/test_contended_write.py tests/test_writeback_postgres.py
+    tests/test_zone_postgres.py || exit 1; HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts
+    sh spec/contended-writes/drive/mutant_check.sh || exit 1; done && RED_BASE_REV=92af9c1
+    RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=
+    sh spec/relay-hardening/drive/red_check.sh
 - id: P6
   name: CI green on the fix (external wait on the draft PR)
-  status: done
+  status: pending
   satisfies:
   - R1
   - R2
@@ -168,7 +173,9 @@ As in [`.agents/factory/templates/TECH.md`](../../.agents/factory/templates/TECH
 - **The base is `92af9c1`** (develop `6da633d` + the GOAL). `red_check.sh` (from
   `spec/relay-hardening/drive/`, reused as is) exports its `src` and runs each [`red.txt`](red.txt)
   line against it; every phase's verify re-runs it, so the tests keep proving the defect.
-- No CLI or prose-docs change in this cycle, so no `docs/_include`, `share/` or Sphinx build.
+- No CLI change in this cycle, so no `share/` change. *Amended at review cycle 1:* the prose pages
+  `docs/_include/database.rst` and `docs/_include/database_alt.rst` change (F1), so P5's gate builds
+  the docs with `-W`.
 
 ### Where each test is expected red
 
@@ -311,9 +318,21 @@ never fails.
       retry row.
 - [x] `.agents/factory/invariants.md` §1 (pattern list) and §3 (unguarded list, two cases), in
       lockstep with AGENTS.md.
-- **Verify:** see frontmatter (the greps; the full suite on SQLite; the server-database modules on PG 18
-      and TS 2.32; `red_check.sh`).
-- **Touches:** `AGENTS.md`, `.agents/factory/invariants.md`.
+- [x] *Review cycle 1, F1.* `docs/_include/database.rst` (Initialization) and
+      `docs/_include/database_alt.rst` drop the server killed between scheduling a retry and marking
+      the original from the doubled-retry cases; `database.rst` gains a `versionchanged:: 2.9.0`
+      (`database_alt.rst`, the manual's Database section, carries no markers).
+- [x] *Review cycle 1, F2.* The retry mark's own row condition is pinned: SQLite
+      `test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[cancelled|retried]`
+      (`DriverContention.waits`: the other writer's change commits, then the mark runs as written)
+      and the real race `test_contended_retry_mark_skips_cancelled_row` (PostgreSQL, TimescaleDB);
+      `drive/mutant_check.sh` shows them red on the mutant (`mutant-red.txt`).
+- **Verify:** see frontmatter (the greps, the docs greps and the `-W` docs build; the full suite on
+      SQLite; the server-database modules and `mutant_check.sh` on PG 18 and TS 2.32; `red_check.sh`).
+- **Touches:** `AGENTS.md`, `.agents/factory/invariants.md`; at review cycle 1 also
+  `docs/_include/database.rst`, `docs/_include/database_alt.rst`, `tests/test_contended_recovery.py`,
+  `tests/test_contended_write.py`, `spec/contended-writes/drive/mutant_check.sh`,
+  `spec/contended-writes/mutant-red.txt`, `spec/contended-writes/evidence/review-1/`.
 
 ## Phase P6 — CI green on the fix (external wait)
 **Satisfies:** R1–R6 · **Depends on:** P2, P5
@@ -324,6 +343,42 @@ never fails.
       databaseId,headSha,conclusion,jobs`).
 - **Verify:** `ci_check.py green`, with the last commit outside `spec/` as `--code-rev`.
 - **Touches:** `spec/contended-writes/evidence/ci-green/`.
+
+---
+
+## Review cycle 1 remediation (2026-11-14)
+
+`hs-review` cycle 1 ([`REVIEW.md`](REVIEW.md), reviewed `e0e61c8`) requested changes: F1 (HIGH, the
+user docs still listed the kill case) and F2 (LOW, no test pinned the retry mark's own row
+condition). The maintainer signed off on both (PLAN.md, *Review-cycle-1 rulings*). P5, whose
+`satisfies` covers both (R6 for the docs, R5 for test strength), is reopened by script and its gate
+retuned; P1–P4 stay done. P6 goes back to `pending`: its verify takes the last commit outside `spec/`
+as the code revision, which is now this one, so the remediation commit needs its own CI run. No
+`src/` change.
+
+- **F1.** The two pages now list two doubled-retry cases (two servers on one database; a reset
+  `retried` flag), matching AGENTS.md § Task lifecycle. `database.rst` marks the change
+  `versionchanged:: 2.9.0` without a PR number (the draft PR's number is not recorded in the spec;
+  `hs-publish` may add it).
+- **F2.** `DriverContention.waits(task_id, change)` commits another writer's change at the task's
+  first mark or cancel and lets that write run as written, as PostgreSQL re-checks a row it waited
+  on; `take` now runs a registered change at the first mark or cancel whether or not it is lost
+  (the existing `lose(…, meanwhile=…)` tests are unchanged, since their first mark is lost). The
+  SQLite pair (cancelled; marked retried by another writer) asserts the mark is followed by the
+  lookup, no retry row, the other writer's change kept, the rest of the batch retried, no re-run and
+  no WARNING. The real-race test holds the failed row with `CANCEL_SQL` around
+  `Task.next(limit=1, attempts=2)`. Mutant (`match = (by_id, )`): all three red by assertion on
+  PG 18 and TS 2.32, the SQLite pair red without a server; head: green. The three are red on the
+  base `92af9c1` too, but stay out of `red.txt`, from which `ci_check.py` derives P2's expected CI
+  failures at the P1 commit. On TimescaleDB 2.29–2.31 the real-race test cannot tell the mutant
+  from the head (the mark misses either way and the lookup skips the row); the SQLite pair carries
+  the pin there. Evidence: [`evidence/review-1/f2-mutant.txt`](evidence/review-1/f2-mutant.txt).
+- **Verification (2026-11-14, sandbox off).** P5's retuned verify exit 0: docs greps and the `-W`
+  html build clean; full suite on SQLite 2652 passed, 114 skipped; the server-database modules 51
+  passed, 1 skipped (the `hs283` template) on PG 18 and on TS 2.32; `mutant_check.sh` 3 of 3 red on
+  each; `red_check.sh` on `92af9c1` 13 of 13 red. `test_contended_write.py`,
+  `test_contended_recovery.py`, `test_source.py`: 80 passed, 1 skipped on PG 18 and on TS 2.32;
+  58 passed, 23 skipped on SQLite.
 
 ---
 

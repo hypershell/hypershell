@@ -1,0 +1,79 @@
+# Review cycle 1, F2: the retry mark's own row condition, red on the mutant, green at the head
+
+Mutant: this tree's src exported with `git archive` into a scratch directory under $TMPDIR, first on
+PYTHONPATH (ahead of the editable install), with one line of src/hypershell/data/model.py changed
+(the 'retryable' condition of `__row_statements`):
+
+    -            match, lookup, read = awaiting, awaiting, table.c.id
+    +            match, lookup, read = (by_id, ), awaiting, table.c.id
+
+Tests (mutant-red.txt): the SQLite fault-injection pair
+tests/test_contended_recovery.py::test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[cancelled|retried]
+(the cancel, or another writer's mark, commits while the mark waits; the mark then runs as written)
+and the real race tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row
+(a holder runs CANCEL_SQL on the failed row and commits once Task.next(limit=1, attempts=2) is seen
+waiting on its lock). Local servers: PostgreSQL 18 (HS_TEST_TIMESCALE empty) and TimescaleDB 2.32
+(HS_TEST_TIMESCALE=community); $pg is the local HS_TEST_POSTGRES URL.
+
+## 1. By hand: mutant red, head green
+### Mutant (PYTHONPATH=<scratch>/src first)
+$ env PYTHONPATH=<scratch>/src uv run pytest -q -p no:cacheprovider -rf --tb=line tests/test_contended_recovery.py
+E   AssertionError: assert ['mark'] == ['mark', 'SELECT']
+E   AssertionError: assert ['mark'] == ['mark', 'SELECT']
+FAILED tests/test_contended_recovery.py::test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[cancelled]
+FAILED tests/test_contended_recovery.py::test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[retried]
+2 failed, 39 passed in 0.85s
+
+$ env PYTHONPATH=<scratch>/src HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE= uv run pytest -q -p no:cacheprovider -rf --tb=line tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row
+E   AssertionError: assert [('01a1dd76-5...1de002b56de')] == []
+FAILED tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row
+1 failed in 1.01s
+
+$ env PYTHONPATH=<scratch>/src HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=community uv run pytest -q -p no:cacheprovider -rf --tb=line tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row
+E   AssertionError: assert [('01a1dd76-5...2606f196bd7')] == []
+FAILED tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row
+1 failed in 1.03s
+
+### Head (this tree's src)
+$ uv run pytest -q -p no:cacheprovider -rf --tb=line tests/test_contended_recovery.py
+41 passed in 0.79s
+
+$ env HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE= uv run pytest -q -p no:cacheprovider -rf --tb=line tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row
+1 passed in 1.03s
+
+$ env HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=community uv run pytest -q -p no:cacheprovider -rf --tb=line tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row
+1 passed in 1.06s
+
+
+## 2. Reproducible: spec/contended-writes/drive/mutant_check.sh (P5's verify runs it on both servers)
+
+$ sh spec/contended-writes/drive/mutant_check.sh
+mutant_check: HEAD with the retry mark matching by id alone
+RED      tests/test_contended_recovery.py::test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[cancelled] (AssertionError)
+RED      tests/test_contended_recovery.py::test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[retried] (AssertionError)
+SKIP     tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row (needs HS_TEST_POSTGRES)
+red_check: 2 of 2 red, 1 skipped
+
+$ HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE= sh spec/contended-writes/drive/mutant_check.sh
+RED      ...[cancelled] (AssertionError)
+RED      ...[retried] (AssertionError)
+RED      tests/test_contended_write.py::test_contended_retry_mark_skips_cancelled_row (AssertionError)
+red_check: 3 of 3 red, 0 skipped
+
+$ HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=community sh spec/contended-writes/drive/mutant_check.sh
+(same: 3 of 3 red, 0 skipped)
+
+## 3. For reference: the same tests on the base 92af9c1 (the unconditional bulk mark)
+
+$ RED_BASE_REV=92af9c1 RED_LIST=spec/contended-writes/mutant-red.txt HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE={,community} sh spec/relay-hardening/drive/red_check.sh
+3 of 3 red on each (AssertionError), so they also catch the defect this cycle fixed. They are not
+added to red.txt: ci_check.py derives P2's expected CI failures from it, and the CI red run was on
+the P1 commit, which does not have them.
+
+## Where the real-race test cannot pin the condition
+
+On TimescaleDB 2.29-2.31 (CI's `timescale`, `timescale-oss` jobs) the waiting mark misses the row
+whether or not it carries the condition, and the lookup's own filters then skip the cancelled row,
+so the mutant would pass there (not run: no local 2.31); at the head the test is expected to pass
+the same way, which CI's run on the remediation commit shows. The SQLite pair pins the condition on
+every job.
