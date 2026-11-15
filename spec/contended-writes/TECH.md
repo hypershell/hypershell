@@ -112,7 +112,7 @@ phases:
     HS_TEST_TIMESCALE= sh spec/relay-hardening/drive/red_check.sh
 - id: P6
   name: CI green on the fix (external wait on the draft PR)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2

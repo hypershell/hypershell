@@ -270,3 +270,21 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
 5. **The optional AGENTS.md lock-retention clause** is left out.
 6. **Eager `Task.next` returning a retry row twice** is already seeded
    (`issues/eager-retry-double-bundle.md`). Out of scope.
+
+## Review-cycle-1 rulings (2026-11-14)
+
+The review's human gate was triggered by F2, a CONFIRMED test gap on the retry and cancel invariant
+in `data/model.py`. The maintainer signed off in session (2026-11-14) to fix both findings.
+
+- **F1.** `docs/_include/database.rst` and `docs/_include/database_alt.rst` drop the case of a
+  server killed between scheduling a retry and marking the original. The retry row and its mark now
+  commit together, so the case cannot happen. Mark the changed passage `versionchanged:: 2.9.0`
+  where the pages carry markers.
+- **F2.** A test pins the retry mark's own row condition: a cancel that holds the row while the mark
+  waits must leave the cancelled row with no retry. A real-race test runs on PostgreSQL and
+  TimescaleDB. A deterministic counterpart that needs no 2.31 behaviour runs on SQLite if one is
+  possible. Each must fail on a mutant that drops the condition (`(by_id,)`) and pass at the head. No
+  code change.
+
+P6 (CI green): the run on `e0e61c8` passed all 15 checks and is recorded under `evidence/ci-green/`.
+The remediation commit gets its own CI run before merge.
