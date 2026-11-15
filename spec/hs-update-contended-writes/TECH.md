@@ -35,7 +35,7 @@ phases:
     tests/test_writeback_postgres.py || exit 1; done
 - id: P2
   name: CI red at the tests-first commit (external wait on the draft PR)
-  status: pending
+  status: done
   satisfies:
   - R6
   depends_on:
