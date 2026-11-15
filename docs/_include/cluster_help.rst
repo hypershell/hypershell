@@ -145,7 +145,8 @@ Options
 
     By default, a scheduler thread selects tasks from a database that were previously submitted.
     With ``--no-db`` enabled, there is no scheduler and instead the `submit` thread publishes
-    bundles directly to the queue.
+    bundles directly to the queue. The configured database is not opened at all, so it need not
+    exist or be initialized.
 
 ``--zone`` *NAME*
     Zone of the submitted tasks and of every client the cluster launches; the own zone with

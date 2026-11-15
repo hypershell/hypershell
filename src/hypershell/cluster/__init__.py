@@ -595,10 +595,11 @@ class ClusterApp(Application):
         """Set up resources and attributes."""
         self.check_arguments()
         self.enable_tls()
-        if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
-            initdb()  # Auto-initialize if local sqlite provider
-        elif not self.in_memory:
-            checkdb()
+        if not self.in_memory:  # With --no-db the configured database is never opened.
+            if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
+                initdb()  # Auto-initialize if local sqlite provider
+            else:
+                checkdb()
         if self.port == DEFAULT_PORT:
             self.port = next(find_available_ports(bind=self.host))
         return self

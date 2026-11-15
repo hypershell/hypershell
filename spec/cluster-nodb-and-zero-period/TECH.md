@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/cluster-nodb-and-zero-period
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
     uv run pytest -q -p no:cacheprovider tests/test_duration_options.py
 - id: P2
   name: hs cluster --no-db makes no database call
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -205,11 +205,11 @@ the guards pass. No source change.
 **Goal:** under `--no-db` the cluster neither creates, initializes, upgrades nor checks the database
 on any provider or launch mode; without it, today's behaviour; the docs say so.
 
-- [ ] `src/hypershell/cluster/__init__.py`, `ClusterApp.__enter__`: `if not self.in_memory:` around
+- [x] `src/hypershell/cluster/__init__.py`, `ClusterApp.__enter__`: `if not self.in_memory:` around
       the existing `initdb()`/`checkdb()` branches (PLAN §2).
-- [ ] `docs/_include/cluster_help.rst` `--no-db`: add "The configured database is not opened at
+- [x] `docs/_include/cluster_help.rst` `--no-db`: add "The configured database is not opened at
       all, so it need not exist or be initialized."
-- [ ] `docs/cli/cluster.rst`: `.. versionchanged:: 2.9.0` before the include — "``--no-db`` leaves
+- [x] `docs/cli/cluster.rst`: `.. versionchanged:: 2.9.0` before the include — "``--no-db`` leaves
       the configured database alone: it is not opened, created or initialized."
 - **Verify:** see frontmatter (`test_cluster_no_db.py` all green with `test_server_initdb.py` and
   `test_cluster.py`; a `temp_site` drive: `--no-db` leaves no file and runs under a missing
