@@ -1116,9 +1116,7 @@ class TaskUpdateApp(Application, SearchableMixin):
 
         # Delete is handled later if a --limit is used with search
         if self.delete_mode and self.limit is None:
-            query.delete()
-            Session.commit()
-            log.info(f'Deleted {count} tasks')
+            self.report_written(count, Task.delete_matching(self.filter_criteria()))
             return
 
         if self.cancel_mode:
@@ -1154,44 +1152,10 @@ class TaskUpdateApp(Application, SearchableMixin):
             self.report_written(count, written)
             return
 
-        if field_updates:
-            query.update(field_updates)
-
-        if tag_updates:
-            if DATABASE_DIALECT == 'sqlite':
-                tag_changes = {}
-                change_expr = 'json_set(task.tag'
-                for i, (k, v) in enumerate(tag_updates.items()):
-                    tag_changes[f'k{i}'] = f'$.{k}'
-                    tag_changes[f'v{i}'] = v
-                    change_expr += f', :k{i}, :v{i}'
-                change_expr += ')'
-                query.update({Task.tag: text(change_expr).params(tag_changes)})
-            else:
-                # We cannot stack inserts with Postgres
-                # Instead we do them with individual update queries
-                for i, (k, v) in enumerate(tag_updates.items()):
-                    change_expr = 'jsonb_set(task.tag, :key, :value)'
-                    params = {'key': '{' + k + '}', 'value': json.dumps(to_json_type(v))}
-                    query.update({Task.tag: text(change_expr).params(**params)})
-
-        if self.remove_tag:
-            if DATABASE_DIALECT == 'sqlite':
-                tag_changes = {}
-                change_expr = 'json_remove(task.tag'
-                for i, name in enumerate(self.remove_tag):
-                    tag_changes[f'k{i}'] = f'$.{name}'
-                    change_expr += f', :k{i}'
-                change_expr += ')'
-                query.update({Task.tag: text(change_expr).params(tag_changes)})
-            else:
-                # We cannot stack subtractions with Postgres
-                # Instead we do them with individual update queries
-                for name in self.remove_tag:
-                    query.update({Task.tag: text('task.tag - :name').params(name=name)})
-
-        Session.commit()
-        log.info(f'Updated {count} tasks')
+        # One statement writes every matching task with every change; on PostgreSQL, the tasks it
+        # missed under contention are found and written by id (see `Task.update_matching`).
+        written = Task.update_matching(self.filter_criteria(), field_updates, tag_updates, self.remove_tag or [])
+        self.report_written(count, written)
 
     def report_written(self: TaskUpdateApp, count: int, written: int) -> None:
         """Log the number of tasks written, and how many of those counted were not, if any."""

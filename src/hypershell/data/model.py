@@ -1226,6 +1226,72 @@ class Task(Entity):
         return len(deleted)
 
     @classmethod
+    def update_matching(cls: Type[Task], criteria: Tuple[ColumnElement, ...], values: Dict[str, Any],
+                        tags: Dict[str, Any] = None, drop: List[str] = None) -> int:
+        """Write the change onto every task that matches `criteria`, in one transaction; return the count.
+
+        The change is the field `values`, the tag keys `tags` set and the tag names `drop` removed,
+        in one UPDATE of every matching row. On SQLite its count is the number written: the write
+        transaction excludes every other writer, so no row can be missed. On PostgreSQL a row that
+        waited on another transaction's row lock can be missed although it still matches, so the
+        UPDATE returns the ids it wrote and one read of the ids still matching finds the rest; each
+        of those is written by `id` under the criteria, re-run at most `CONTENDED_RERUNS` times, and
+        a row still not written after that rolls the whole update back and raises `Task.Contended`.
+        A row that came to match meanwhile is written and counted too. The returned ids are held in
+        memory until the read, and every row written that still matches is read back.
+        """
+        criteria = tuple(criteria)
+        dialect = Session.get_bind().dialect.name
+        change = cls.__change(values, tags or {}, drop or [], dialect)
+        table = cls.__table__
+        write = update(table).where(*criteria).values(change)
+        try:
+            if dialect == 'sqlite':
+                written = Session.execute(write).rowcount
+                Session.commit()
+                return written
+            landed = set(Session.execute(write.returning(table.c.id)).scalars())
+            missed = [id for id in Session.execute(select(table.c.id).where(*criteria)).scalars()
+                      if id not in landed]
+            if missed:
+                log.debug(f'Re-checking {len(missed)} tasks the update did not write')
+                rewritten = cls.__write_rows(missed, change, 'update', 'nothing written', where=criteria,
+                                             abort=True, commit=False, prefix='u_')
+            else:
+                rewritten = []
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        return len(landed) + len(rewritten)
+
+    @classmethod
+    def delete_matching(cls: Type[Task], criteria: Tuple[ColumnElement, ...]) -> int:
+        """Delete every task that matches `criteria`, in one transaction; return the count.
+
+        One DELETE of every matching row; on SQLite its count is the number deleted. On PostgreSQL a
+        row that waited on another transaction's row lock can be missed although it still matches,
+        so one read of the ids still matching (a row deleted is gone for this transaction) finds
+        the rest; each is deleted by `id` under the criteria, re-run and aborted as for
+        `update_matching`.
+        """
+        criteria = tuple(criteria)
+        table = cls.__table__
+        try:
+            deleted = Session.execute(delete(table).where(*criteria)).rowcount
+            if Session.get_bind().dialect.name != 'sqlite':
+                missed = list(Session.execute(select(table.c.id).where(*criteria)).scalars())
+                if missed:
+                    log.debug(f'Re-checking {len(missed)} tasks the delete did not reach')
+                    deleted += len(cls.__write_rows(missed, {}, 'delete', 'nothing deleted', where=criteria,
+                                                    remove=True, abort=True, commit=False, prefix='u_'))
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        return deleted
+
+    @classmethod
     def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str,
                     strict: bool = True) -> List[str]:
         """Record the client that confirmed the tasks identified by `ids`; return the ids recorded.

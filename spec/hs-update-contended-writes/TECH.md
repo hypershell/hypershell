@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/hs-update-contended-writes
 base: develop
-current_phase: P2
+current_phase: P6
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -100,7 +100,7 @@ phases:
 - id: P5
   name: 'Without --limit: one set-based SET, the PostgreSQL residual read, DELETE
     alike'
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -378,15 +378,15 @@ transaction, counts the rows written, and writes nothing when contended at the b
 **Goal:** the filtered form is one SET in one statement; on PostgreSQL its missed rows are found and
 written or the update aborts; DELETE alike; counts are of rows written.
 
-- [ ] `Task.update_matching(criteria, values, tags, drop) -> int` (PLAN §2.6): `UPDATE … WHERE
+- [x] `Task.update_matching(criteria, values, tags, drop) -> int` (PLAN §2.6): `UPDATE … WHERE
       <criteria>` (PostgreSQL: `RETURNING id`); PostgreSQL only, the residual `SELECT id … WHERE
       <criteria>` minus the returned ids; those through `__write_rows(…, where=criteria, abort=True,
       commit=False)`; one commit; return the total. `Task.delete_matching(criteria) -> int`: `DELETE …
       WHERE <criteria>`; PostgreSQL residual = the filter alone; same re-run; one commit. Docstrings say
       why SQLite takes no residual and what the PostgreSQL UPDATE holds in memory.
-- [ ] `TaskUpdateApp.update_tasks` (no `--limit`): the calls; the same WARNING/INFO lines; the
+- [x] `TaskUpdateApp.update_tasks` (no `--limit`): the calls; the same WARNING/INFO lines; the
       `DATABASE_DIALECT` tag branches go.
-- [ ] Every test in `red.txt` and `ci-red.txt` passes locally; `update_drive.sh` passes on SQLite,
+- [x] Every test in `red.txt` and `ci-red.txt` passes locally; `update_drive.sh` passes on SQLite,
       PostgreSQL and TimescaleDB.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/task.py`, `src/hypershell/data/model.py`.
