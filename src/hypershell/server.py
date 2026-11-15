@@ -66,7 +66,8 @@ from sqlalchemy import func
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import (config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH,
                                     AUTH_ENV, resolve_auth, refuse_key_option)
-from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
+from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
+                                 from_namespace as tls_from_namespace)
 from hypershell.core.types import parse_bytes, parse_time
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
@@ -1909,8 +1910,17 @@ class ServerApp(Application):
             return False
 
     def enable_tls(self: ServerApp) -> None:
-        """Configure TLS if enabled."""
+        """Configure TLS if enabled; refuse a handshake deadline that is not valid before anything else.
+
+        The server uses TLS unless ``--no-tls`` is given or ``server.tls.enabled`` is false (the switch
+        :func:`~hypershell.core.tls.from_namespace` reads); a plain server never reads the deadline.
+        """
         if self.tls_enabled:
+            if bool(config.server.tls.get('enabled', False)):
+                try:
+                    handshake_seconds(config.server.tls.get('handshake', DEFAULT_HANDSHAKE))
+                except TLSError as error:
+                    raise ArgumentError(str(error)) from error
             self.tls = tls_from_namespace({
                 **config.server.tls,
                 'cert': self.tls_cert,

@@ -1,0 +1,102 @@
+# Review cycle 1 remediation: new tests run against the reviewed commit's src (f75d5e6), which they must fail
+# Exported with: git archive f75d5e6 src | tar -x -C "$TMPDIR/lhd-f75d5e6"; run with PYTHONPATH="$TMPDIR/lhd-f75d5e6/src"
+
+## P1: accepting goes on when a handler thread does not start
+$ PYTHONPATH="$TMPDIR/lhd-f75d5e6/src" uv run pytest -q tests/test_queue_tls.py -k "handler_does_not_start or handler_start_failures"
+E               AssertionError: connection closed after None s (expected at once)
+E               assert (None is not None)
+E               AssertionError: connection closed after None s (expected at once)
+E               assert (None is not None)
+E                   AttributeError: '_InProcessServer' object has no attribute '_unstarted'
+FAILED tests/test_queue_tls.py::test_accepting_goes_on_when_a_handler_does_not_start[tls]
+FAILED tests/test_queue_tls.py::test_accepting_goes_on_when_a_handler_does_not_start[plain]
+FAILED tests/test_queue_tls.py::test_handler_start_failures_warn_once_per_interval
+3 failed, 82 deselected in 4.55s
+
+## P2: a deadline above one day refused at start; a server made plain by configuration ignores the key
+$ PYTHONPATH="$TMPDIR/lhd-f75d5e6/src" uv run pytest -q tests/test_queue_tls.py -k "more_than_a_day or accepts_one_day or refuse_bad_handshake or refuses_bad_handshake or without_tls_ignore or relay_without_tls"
+FAILED tests/test_queue_tls.py::test_tls_server_refuses_bad_handshake_before_binding[30d]
+FAILED tests/test_queue_tls.py::test_tls_server_refuses_bad_handshake_before_binding[str-401]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[30d]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[4294968_0]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[4294968_1]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[49d17h2m48s]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[86401]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[1d1s]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[str-401]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[int-401]
+FAILED tests/test_queue_tls.py::test_handshake_seconds_refuses_more_than_a_day[str-5000]
+FAILED tests/test_queue_tls.py::test_commands_refuse_bad_handshake[30d-server]
+FAILED tests/test_queue_tls.py::test_commands_refuse_bad_handshake[30d-cluster]
+FAILED tests/test_queue_tls.py::test_commands_refuse_bad_handshake[30d-relay]
+FAILED tests/test_queue_tls.py::test_commands_without_tls_ignore_handshake[abc-enabled = false-server]
+FAILED tests/test_queue_tls.py::test_commands_without_tls_ignore_handshake[abc-enabled = false-cluster]
+16 failed, 25 passed, 71 deselected in 0.65s
+(Passing there, as guards: one day accepted, the refusals of 0, -5 and abc, and the --no-tls cases.)
+
+$ PYTHONPATH="$TMPDIR/lhd-f75d5e6/src" .agents/factory/bin/temp_site.sh uv run python "$PWD/spec/listener-handshake-deadline/research/drive.py" refuse
+PASS: server refuses handshake = '0' naming server.tls.handshake (exit 2)
+PASS: cluster refuses handshake = '0' naming server.tls.handshake (exit 2)
+PASS: relay refuses handshake = '0' naming server.tls.handshake (exit 2)
+PASS: server refuses handshake = '-5' naming server.tls.handshake (exit 2)
+PASS: cluster refuses handshake = '-5' naming server.tls.handshake (exit 2)
+PASS: relay refuses handshake = '-5' naming server.tls.handshake (exit 2)
+PASS: server refuses handshake = 'abc' naming server.tls.handshake (exit 2)
+PASS: cluster refuses handshake = 'abc' naming server.tls.handshake (exit 2)
+PASS: relay refuses handshake = 'abc' naming server.tls.handshake (exit 2)
+FAIL: server refuses handshake = '30d' naming server.tls.handshake (exit None)
+FAIL: cluster refuses handshake = '30d' naming server.tls.handshake (exit 0)
+FAIL: relay refuses handshake = '30d' naming server.tls.handshake (exit None)
+FAIL: server refuses handshake = '4294968' naming server.tls.handshake (exit None)
+FAIL: cluster refuses handshake = '4294968' naming server.tls.handshake (exit 0)
+FAIL: relay refuses handshake = '4294968' naming server.tls.handshake (exit None)
+FAIL: server refuses handshake = <401-digit integer> naming server.tls.handshake (exit None)
+FAIL: cluster refuses handshake = <401-digit integer> naming server.tls.handshake (exit 5)
+FAIL: relay refuses handshake = <401-digit integer> naming server.tls.handshake (exit 5)
+PASS: server made plain by --no-tls starts with handshake = 'abc' (still serving after 5 s)
+PASS: cluster made plain by --no-tls starts with handshake = 'abc' (exit 0)
+FAIL: server made plain by enabled = false starts with handshake = 'abc' (exit 2)
+FAIL: cluster made plain by enabled = false starts with handshake = 'abc' (exit 2)
+PASS: server made plain by --no-tls starts with handshake = '30d' (still serving after 5 s)
+PASS: cluster made plain by --no-tls starts with handshake = '30d' (exit 0)
+PASS: server made plain by enabled = false starts with handshake = '30d' (still serving after 5 s)
+PASS: cluster made plain by enabled = false starts with handshake = '30d' (exit 0)
+(exit 1; on the branch the same drive passes all 26 checks)
+
+## P3: the server and cluster deadline drives fail on a build without the deadline
+develop's src (6da633d, exported to $TMPDIR/lhd-develop):
+$ PYTHONPATH="$TMPDIR/lhd-develop/src" temp_site.sh uv run python drive.py server --handshake 2
+PASS: hs server listening
+FAIL: hs server: server closed the held connection None s after it connected (expected 2 to 5 s)
+PASS: hs server still running when the window ended (no client has run yet)
+FAIL: client hs finished the tasks in 25.0 s (exit None, bound 25 s)
+FAIL: hs server exited 0
+(exit 1)
+$ PYTHONPATH="$TMPDIR/lhd-develop/src" temp_site.sh uv run python drive.py cluster --handshake 2
+PASS: hs cluster server listening
+FAIL: hs cluster finished the tasks in 25.4 s (exit None)
+FAIL: hs cluster: server closed the held connection None s after it connected (expected 2 to 5 s)
+(exit 1)
+
+The branch's src with the handshake's socket timeout removed (settimeout(None)), $TMPDIR/lhd-nodeadline:
+$ PYTHONPATH="$TMPDIR/lhd-nodeadline/src" temp_site.sh uv run python drive.py server --handshake 2
+PASS: hs server listening
+FAIL: hs server: server closed the held connection None s after it connected (expected 2 to 5 s)
+PASS: hs server still running when the window ended (no client has run yet)
+PASS: client hs finished the tasks in 2.5 s (exit 0, bound 25 s)
+PASS: hs server exited 0
+(exit 1)
+$ PYTHONPATH="$TMPDIR/lhd-nodeadline/src" temp_site.sh uv run python drive.py cluster --handshake 2
+PASS: hs cluster server listening
+PASS: hs cluster finished the tasks in 9.9 s (exit 0)
+FAIL: hs cluster: server closed the held connection 9.13 s after it connected (expected 2 to 5 s)
+(exit 1)
+
+--client no longer passes PYTHONPATH on: with PYTHONPATH set to the branch's src, the drive before the fix
+ran the 2.8.7 client on the branch's code; after it, the 2.8.7 client runs its own and is refused as too old.
+$ PYTHONPATH="$PWD/src" temp_site.sh uv run python <drive.py at 4971433> server --client "$TMPDIR/lhd-clients/2.8.7/bin/hs" --expect-too-old
+FAIL: client $TMPDIR/lhd-clients/2.8.7/bin/hs connected, authenticated and was refused as too old in 2.5 s (exit 0)
+(exit 1)
+$ PYTHONPATH="$PWD/src" temp_site.sh uv run python drive.py server --client "$TMPDIR/lhd-clients/2.8.7/bin/hs" --expect-too-old
+PASS: client $TMPDIR/lhd-clients/2.8.7/bin/hs connected, authenticated and was refused as too old in 0.4 s (exit 5)
+(exit 0)

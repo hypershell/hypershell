@@ -363,6 +363,21 @@
             anchor set but no ``.servername``, the client checks only that the certificate
             chains to the anchor, not which host presented it.
 
+        ``.handshake``
+            Seconds a connection has to complete its TLS handshake with a server (default: `30`).
+
+            Counted from when the server accepts the connection; data the peer sends meanwhile
+            does not extend it. A connection that misses it is closed, and the server keeps
+            accepting other clients while handshakes are pending. Takes a number of seconds or
+            any duration form (e.g., ``30``, ``"30s"``, ``"1m"``), rounded up to whole seconds;
+            it must be greater than 0 and at most one day (``1d``), or a TLS server refuses to
+            start. Also set with ``HYPERSHELL_SERVER_TLS_HANDSHAKE``. A server without TLS, by
+            ``--no-tls`` or ``.enabled`` set to `false`, ignores it; clients never read it.
+
+            .. only:: html
+
+                .. versionadded:: 2.9.0
+
 ``[client]``
     Section for `client` workflow parameters.
 

@@ -21,7 +21,8 @@ from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
 from hypershell.core.config import config, blame, find_available_ports, PARAM_UNSET
-from hypershell.core.tls import TLSConfig, from_namespace as tls_from_namespace
+from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
+                                 from_namespace as tls_from_namespace)
 from hypershell.core.types import parse_bytes, parse_time, parse_delay
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
@@ -451,8 +452,17 @@ class ClusterApp(Application):
                             f'for scaling down after task pressure subsides')
 
     def enable_tls(self: ClusterApp) -> None:
-        """Configure TLS if enabled."""
+        """Configure TLS if enabled; refuse a handshake deadline that is not valid before anything else.
+
+        The server uses TLS unless ``--no-tls`` is given or ``server.tls.enabled`` is false (the switch
+        :func:`~hypershell.core.tls.from_namespace` reads); a plain server never reads the deadline.
+        """
         if self.tls_enabled:
+            if bool(config.server.tls.get('enabled', False)):
+                try:
+                    handshake_seconds(config.server.tls.get('handshake', DEFAULT_HANDSHAKE))
+                except TLSError as error:
+                    raise ArgumentError(str(error)) from error
             self.tls = tls_from_namespace({
                 **config.server.tls,
                 'cert': self.tls_cert,

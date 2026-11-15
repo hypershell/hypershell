@@ -12,6 +12,8 @@ from typing import Optional, Tuple
 # Standard libs
 import io
 import os
+import sys
+import subprocess
 import ssl
 import socket
 import struct
@@ -38,6 +40,11 @@ from hypershell.core.tls import (TLSConfig, TLSError,
                                  verify_peer_fingerprint,
                                  _select_subject_cn, _default_hostnames,
                                  _X509_CN_MAX_LEN, _FALLBACK_CN)
+import hypershell.core.queue
+from hypershell.core.queue import QueueServer, QueueClient, QueueConfig, QueueServerError
+from hypershell.core.tls import handshake_seconds, DEFAULT_HANDSHAKE, HANDSHAKE_KEY
+from hypershell.core.types import TIME_FORMS
+from hypershell.core.config import config as hypershell_config
 
 
 @fixture(scope='module')
@@ -570,3 +577,544 @@ def test_secure_manager_subprocess_roundtrip(tls_materials) -> None:
         if proc.is_alive():
             proc.terminate()
             proc.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------------------------------
+# Handshake deadline: a TLS queue server keeps serving others while a connection is slow or silent in
+# its TLS handshake, and closes one that has not completed it within the deadline.
+# ---------------------------------------------------------------------------------------------------
+
+AUTH = 'queue-test-key-0123456789abcdef'
+HANDLER = 'hypershell-queue-handler'
+
+
+@fixture
+def server_tls(tls_materials):
+    """A server TLSConfig; the process-wide client context that connecting clients install is cleared after."""
+    cert, key = tls_materials
+    yield TLSConfig(enabled=True, cert=cert, key=key, cafile=cert)
+    clear_process_context()
+
+
+def queue_config(tls: Optional[TLSConfig], port: int = 0) -> QueueConfig:
+    """Queue configuration on loopback (port 0 binds an ephemeral port)."""
+    return QueueConfig(host='127.0.0.1', port=port, auth=AUTH, size=2, tls=tls)
+
+
+def with_handshake(cfg: TLSConfig, seconds) -> TLSConfig:
+    """`cfg` with its handshake deadline set by assignment."""
+    cfg.handshake = seconds
+    return cfg
+
+
+def closed_after(sock: socket.socket, opened: float, limit: float) -> Optional[float]:
+    """Seconds from `opened` until the server closed `sock` (anything it sends is read and dropped), or
+    None if it is still open `limit` seconds after `opened`."""
+    end = opened + limit
+    while True:
+        left = end - time.monotonic()
+        if left <= 0:
+            return None
+        sock.settimeout(left)
+        try:
+            data = sock.recv(4096)
+        except TimeoutError:
+            return None
+        except OSError:  # Reset: closed with our bytes unread
+            return time.monotonic() - opened
+        if not data:
+            return time.monotonic() - opened
+
+
+def client_hello() -> bytes:
+    """The first flight of a real TLS client: a ClientHello, built in memory."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+    tls = ctx.wrap_bio(incoming, outgoing)
+    try:
+        tls.do_handshake()
+    except ssl.SSLWantReadError:
+        pass
+    return outgoing.read()
+
+
+class Trickle(threading.Thread):
+    """Send `data` on `sock` one byte every `interval` seconds until stopped or the socket fails."""
+
+    def __init__(self: Trickle, sock: socket.socket, data: bytes, interval: float = 0.25) -> None:
+        super().__init__(daemon=True)
+        self.sock, self.data, self.interval = sock, data, interval
+        self.halt = threading.Event()
+        self.start()
+
+    def run(self: Trickle) -> None:
+        for n in range(len(self.data)):
+            if self.halt.wait(self.interval):
+                return
+            try:
+                self.sock.send(self.data[n:n + 1])
+            except OSError:
+                return
+
+    def stop(self: Trickle) -> None:
+        self.halt.set()
+        self.join(5)
+
+
+def handlers() -> int:
+    """Live handler threads of in-process queue servers."""
+    return sum(1 for thread in threading.enumerate() if thread.name == HANDLER)
+
+
+def descriptors() -> int:
+    """Open descriptors of this process."""
+    return len(os.listdir('/dev/fd'))
+
+
+def settles(predicate, limit: float = 1.0) -> bool:
+    """Whether `predicate` holds within `limit` seconds."""
+    end = time.monotonic() + limit
+    while not predicate():
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def first_call(port: int, tls: TLSConfig, result: dict) -> None:
+    """Connect a client and make its first queue call, recording the seconds taken or the error."""
+    start = time.monotonic()
+    try:
+        client = QueueClient(queue_config(tls, port))
+        client.connect()
+        client.completed.qsize()
+        result['seconds'] = time.monotonic() - start
+    except Exception as error:
+        result['error'] = repr(error)
+
+
+@mark.integration
+def test_client_served_while_connections_stall_in_handshake(server_tls) -> None:
+    """With 8 connections open that never send a byte, another client connects and makes its first
+    queue call within 5 s."""
+    with_handshake(server_tls, 300)
+    stalled, caller = [], None
+    with QueueServer(queue_config(server_tls)) as server:
+        port = server.address[1]
+        try:
+            for _ in range(8):
+                stalled.append(socket.create_connection(('127.0.0.1', port), timeout=5))
+            time.sleep(0.25)
+            result = {}
+            caller = threading.Thread(target=first_call, args=(port, server_tls, result), daemon=True)
+            caller.start()
+            caller.join(5)
+            assert 'error' not in result, result
+            assert result.get('seconds') is not None and result['seconds'] <= 5, \
+                f'no connect and first call within 5 s with 8 connections stalled ({result})'
+        finally:
+            for sock in stalled:
+                sock.close()
+            if caller is not None:
+                caller.join(10)
+
+
+@mark.integration
+@mark.skipif(not os.path.isdir('/dev/fd'), reason='needs /dev/fd to count descriptors')
+@mark.parametrize('peer', ['silent', 'slow'])
+def test_handshake_deadline_closes_and_releases(server_tls, peer: str) -> None:
+    """With a 2 s deadline, a connection that sends nothing and one that sends a real ClientHello a byte
+    every 0.25 s are each closed 2 to 5 s after connecting, and their thread and descriptor are released
+    within 1 s of the close. The bytes the slow peer keeps sending do not extend the deadline."""
+    with_handshake(server_tls, 2)
+    with QueueServer(queue_config(server_tls)) as server:
+        port = server.address[1]
+        time.sleep(0.25)
+        threads, fds = handlers(), descriptors()
+        sock = socket.create_connection(('127.0.0.1', port), timeout=5)
+        opened = time.monotonic()
+        hello = client_hello()
+        assert len(hello) > 40  # More than 10 s of bytes at this rate
+        trickle = Trickle(sock, hello) if peer == 'slow' else None
+        try:
+            after = closed_after(sock, opened, 6)
+        finally:
+            if trickle is not None:
+                trickle.stop()
+            sock.close()
+        assert after is not None and 2 <= after <= 5, f'{peer} connection closed after {after} s (expected 2 to 5 s)'
+        assert settles(lambda: handlers() <= threads), f'{handlers()} handler threads, {threads} before'
+        assert settles(lambda: descriptors() <= fds), f'{descriptors()} descriptors, {fds} before'
+
+
+@mark.integration
+def test_stop_releases_a_pending_handshake(server_tls) -> None:
+    """Stopping the server closes a connection still in its handshake and ends its thread within 1 s."""
+    with_handshake(server_tls, 300)
+    server = QueueServer(queue_config(server_tls))
+    server.start()
+    sock = None
+    try:
+        time.sleep(0.25)
+        threads = handlers()
+        sock = socket.create_connection(('127.0.0.1', server.address[1]), timeout=5)
+        time.sleep(0.5)
+        server.shutdown()
+        stopped = time.monotonic()
+        after = closed_after(sock, stopped, 1)
+        assert after is not None, 'connection still open 1 s after the server stopped'
+        assert settles(lambda: handlers() <= threads), f'{handlers()} handler threads, {threads} before'
+    finally:
+        if sock is not None:
+            sock.close()
+        server.shutdown()
+
+
+@mark.integration
+def test_reserve_refuses_a_pending_connection_at_once(server_tls, monkeypatch) -> None:
+    """A connection that would use a reserved descriptor is closed at once, before any handshake."""
+    limit = {'value': None}
+    monkeypatch.setattr(hypershell.core.queue, '_open_file_limit', lambda: limit['value'])
+    with_handshake(server_tls, 300)
+    with QueueServer(queue_config(server_tls)) as server:
+        limit['value'] = 0
+        sock = socket.create_connection(('127.0.0.1', server.address[1]), timeout=5)
+        try:
+            after = closed_after(sock, time.monotonic(), 2)
+        finally:
+            sock.close()
+        assert after is not None and after <= 1, f'refused connection closed after {after} s (expected at once)'
+
+
+@mark.integration
+def test_plain_server_has_no_handshake_deadline(server_tls) -> None:
+    """A server without TLS never applies the deadline: a silent connection is still open after 3 s with
+    a 2 s deadline set on a TLS configuration that is not enabled."""
+    unused = with_handshake(TLSConfig(enabled=False), 2)
+    with QueueServer(queue_config(unused)) as server:
+        sock = socket.create_connection(('127.0.0.1', server.address[1]), timeout=5)
+        try:
+            after = closed_after(sock, time.monotonic(), 3)
+        finally:
+            sock.close()
+        assert after is None, f'plain server closed a silent connection after {after} s'
+
+
+@mark.integration
+def test_burst_of_clients_with_default_deadline(server_tls) -> None:
+    """64 clients connecting at once with the default deadline all connect and complete a queue call."""
+    with QueueServer(queue_config(server_tls)) as server:
+        port = server.address[1]
+        results = [{} for _ in range(64)]
+        callers = [threading.Thread(target=first_call, args=(port, server_tls, result), daemon=True)
+                   for result in results]
+        for caller in callers:
+            caller.start()
+        for caller in callers:
+            caller.join(60)
+        errors = [result['error'] for result in results if 'error' in result]
+        done = [result for result in results if 'seconds' in result]
+        assert not errors, errors[:3]
+        assert len(done) == 64, f'{len(done)} of 64 clients completed a call'
+
+
+# Handshake deadline configuration and logging
+
+LONG = '1' + '0' * 400  # An integer far too large to wait for: TOML takes one
+LONGEST = '9' * 5000  # More digits than Python converts to an integer
+
+
+def short_id(value) -> str:
+    """A test id that names a very long number by its length."""
+    text = str(value) if not isinstance(value, int) or value < 10 ** 20 else 'int-' + str(len(str(value)))
+    return text if len(text) <= 20 else f'{type(value).__name__}-{len(text)}'
+
+
+@mark.unit
+@mark.parametrize('value, seconds', [(30, 30), ('30', 30), ('30s', 30), ('1m', 60), (2.5, 3), ('1:30', 90)])
+def test_handshake_seconds_accepts_duration_forms(value, seconds: int) -> None:
+    """The deadline takes any duration form, rounded up to whole seconds."""
+    assert handshake_seconds(value) == seconds
+
+
+@mark.unit
+def test_handshake_default() -> None:
+    """The deadline defaults to 30 seconds, in the configuration and on a TLSConfig."""
+    assert DEFAULT_HANDSHAKE == 30
+    assert TLSConfig().handshake == 30
+    assert hypershell_config.server.tls.handshake == 30
+    assert handshake_seconds(hypershell_config.server.tls.handshake) == 30
+
+
+@mark.unit
+@mark.parametrize('value', [0, '0', -5, '-5', 'abc', True, ''])
+def test_handshake_seconds_refuses(value) -> None:
+    """Zero, a negative or anything not a duration is refused, naming the key and the accepted forms."""
+    with raises(TLSError) as exc_info:
+        handshake_seconds(value)
+    message = str(exc_info.value)
+    assert message.startswith(HANDSHAKE_KEY) and TIME_FORMS in message
+
+
+@mark.unit
+def test_from_namespace_keeps_the_configured_value() -> None:
+    """A TLSConfig built from a section carries the configured value unparsed, so a client never refuses
+    a key only servers read."""
+    section = {'enabled': True, 'cert': '<none>', 'key': '<none>', 'cafile': '<none>'}
+    assert from_namespace({**section, 'handshake': '1m'}).handshake == '1m'
+    assert from_namespace({**section, 'handshake': 'abc'}).handshake == 'abc'
+    assert from_namespace(section).handshake == DEFAULT_HANDSHAKE
+
+
+@mark.unit
+@mark.parametrize('value', [0, -5, 'abc', '30d', LONG], ids=short_id)
+def test_tls_server_refuses_bad_handshake_before_binding(server_tls, value) -> None:
+    """A TLS queue server with a bad deadline does not start and leaves its port free."""
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    server = QueueServer(queue_config(with_handshake(server_tls, value), port))
+    with raises(QueueServerError) as exc_info:
+        server.start()
+    assert HANDSHAKE_KEY in str(exc_info.value) and TIME_FORMS in str(exc_info.value)
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', port))  # Nothing was left listening there
+
+
+@mark.unit
+@mark.parametrize('value', ['30d', 4294968, '4294968', '49d17h2m48s', 86401, '1d1s', LONG, int(LONG), LONGEST],
+                   ids=short_id)
+def test_handshake_seconds_refuses_more_than_a_day(value) -> None:
+    """A deadline above one day is refused, naming the key, the limit and the accepted forms; so is an
+    integer too large to represent, and the message does not repeat it in full."""
+    with raises(TLSError) as exc_info:
+        handshake_seconds(value)
+    message = str(exc_info.value)
+    assert message.startswith(HANDSHAKE_KEY) and TIME_FORMS in message
+    assert len(message) < len(TIME_FORMS) + 200, message[:300]
+
+
+@mark.unit
+@mark.parametrize('value', ['1d', '24h', 86400, '86400', '23h59m59.5s', '1-00'])
+def test_handshake_seconds_accepts_one_day(value) -> None:
+    """Exactly one day is the most accepted, in any duration form."""
+    assert handshake_seconds(value) == 86400
+
+
+@mark.unit
+@mark.parametrize('value', [0, 'abc'])
+def test_plain_server_ignores_handshake(value) -> None:
+    """A server without TLS never reads the deadline, so any value lets it start."""
+    with QueueServer(queue_config(with_handshake(TLSConfig(enabled=False), value))) as server:
+        assert server.address[1] > 0
+
+
+@mark.integration
+def test_handshake_environment_variable(tmp_path: Path) -> None:
+    """HYPERSHELL_SERVER_TLS_HANDSHAKE reaches the key and a TLSConfig built from its section."""
+    code = ('from hypershell.core.config import config\n'
+            'from hypershell.core.tls import from_namespace, handshake_seconds\n'
+            "section = {**config.server.tls, 'cert': '<none>', 'key': '<none>', 'cafile': '<none>'}\n"
+            'value = from_namespace(section).handshake\n'
+            'print(repr(config.server.tls.handshake), repr(value), handshake_seconds(value))\n')
+    env = {**os.environ, 'HYPERSHELL_SERVER_TLS_HANDSHAKE': '1m', 'HYPERSHELL_SITE': str(tmp_path)}
+    out = subprocess.run([sys.executable, '-c', code], env=env, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.split() == ["'1m'", "'1m'", '60']
+
+
+@mark.unit
+@mark.parametrize('app', ['server', 'cluster'])
+def test_commands_carry_handshake_onto_tls(app: str, monkeypatch, tmp_path: Path) -> None:
+    """hs server and hs cluster put the configured deadline on the TLSConfig their server starts with."""
+    from hypershell.server import ServerApp
+    from hypershell.cluster import ClusterApp
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', '2m')
+    cert, key = ensure_default_materials(str(tmp_path), hostnames=['localhost', '127.0.0.1'])
+    command = (ServerApp if app == 'server' else ClusterApp).from_cmdline(
+        ['--tls-cert', cert, '--tls-key', key, '--tls-ca', cert])
+    command.enable_tls()
+    assert command.tls.handshake == '2m'
+
+
+@mark.unit
+@mark.parametrize('app', ['server', 'cluster', 'relay'])
+@mark.parametrize('value', [0, -5, 'abc', '30d'])
+def test_commands_refuse_bad_handshake(app: str, value, monkeypatch) -> None:
+    """hs server, hs cluster and hs relay refuse a bad deadline as an argument error naming the key."""
+    from cmdkit.cli import ArgumentError
+    from hypershell.server import ServerApp
+    from hypershell.cluster import ClusterApp
+    from hypershell.relay import RelayApp
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', value)
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'enabled', True)
+    with raises(ArgumentError) as exc_info:
+        if app == 'relay':
+            RelayApp.from_cmdline([]).check_args()
+        else:
+            (ServerApp if app == 'server' else ClusterApp).from_cmdline([]).enable_tls()
+    assert str(exc_info.value).startswith(HANDSHAKE_KEY)
+
+
+@mark.unit
+@mark.parametrize('app', ['server', 'cluster'])
+@mark.parametrize('plain', ['--no-tls', 'enabled = false'])
+@mark.parametrize('value', ['abc', '30d'])
+def test_commands_without_tls_ignore_handshake(app: str, plain: str, value: str, monkeypatch) -> None:
+    """A server made plain by --no-tls or by server.tls.enabled = false never reads the deadline, so
+    hs server and hs cluster start with any value."""
+    from hypershell.server import ServerApp
+    from hypershell.cluster import ClusterApp
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', value)
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'enabled', plain == '--no-tls')
+    command = (ServerApp if app == 'server' else ClusterApp).from_cmdline(['--no-tls'] if plain == '--no-tls' else [])
+    command.enable_tls()
+    assert command.tls is None
+
+
+@mark.unit
+def test_relay_without_tls_ignores_handshake(monkeypatch) -> None:
+    """A relay whose site-local server is plain (server.tls.enabled = false) never reads the deadline."""
+    from hypershell.relay import RelayApp
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'handshake', 'abc')
+    monkeypatch.setitem(hypershell_config['server']['tls'], 'enabled', False)
+    RelayApp.from_cmdline([]).check_args()
+
+
+MARKER = 'handshake-peer-marker.example'
+
+
+@mark.integration
+def test_deadline_closes_are_logged_without_peer_data(server_tls, monkeypatch, caplog) -> None:
+    """Each close at the deadline is logged at DEBUG with the peer address and the deadline; one WARNING
+    names the key for several closes inside the interval; nothing the peers sent is logged."""
+    monkeypatch.setattr(hypershell.core.queue, 'REFUSAL_WARNING_INTERVAL', 3600.0)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    incoming, outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
+    tls = ctx.wrap_bio(incoming, outgoing, server_hostname=MARKER)
+    try:
+        tls.do_handshake()
+    except ssl.SSLWantReadError:
+        pass
+    hello = outgoing.read()
+    assert MARKER.encode() in hello
+    with_handshake(server_tls, 1)
+    socks, trickle = [], None
+    with caplog.at_level('DEBUG', logger='hypershell.core.queue'):
+        with QueueServer(queue_config(server_tls)) as server:
+            port = server.address[1]
+            try:
+                for _ in range(3):
+                    socks.append(socket.create_connection(('127.0.0.1', port), timeout=5))
+                opened = time.monotonic()
+                socks[1].sendall(hello[:-1])  # All but the last byte: the name is sent, the hello never ends
+                trickle = Trickle(socks[2], hello)
+                closes = [closed_after(sock, opened, 4) for sock in socks]
+            finally:
+                if trickle is not None:
+                    trickle.stop()
+                for sock in socks:
+                    sock.close()
+            assert all(after is not None for after in closes), closes
+            assert settles(lambda: sum('did not complete its TLS handshake' in r.getMessage()
+                                       for r in caplog.records) >= 3)
+    records = [r for r in caplog.records if r.name == 'hypershell.core.queue']
+    debug = [r.getMessage() for r in records
+             if r.levelname == 'DEBUG' and 'did not complete its TLS handshake within 1 seconds' in r.getMessage()]
+    warning = [r.getMessage() for r in records if r.levelname == 'WARNING']
+    assert len(debug) == 3, debug
+    assert all('127.0.0.1:' in line for line in debug), debug
+    assert len(warning) == 1 and HANDSHAKE_KEY in warning[0] and '1 seconds' in warning[0], warning
+    text = ' '.join(r.getMessage() for r in caplog.records)
+    for fragment in (MARKER, hello[:8].hex(), repr(hello[:8])[2:-1]):
+        assert fragment not in text
+
+
+@mark.integration
+def test_other_handshake_failures_logged_as_before(server_tls, caplog) -> None:
+    """A peer that sends something other than TLS and closes is dropped with the usual DEBUG line and
+    no deadline warning."""
+    with_handshake(server_tls, 300)
+    with caplog.at_level('DEBUG', logger='hypershell.core.queue'):
+        with QueueServer(queue_config(server_tls)) as server:
+            with socket.create_connection(('127.0.0.1', server.address[1]), timeout=5) as sock:
+                sock.sendall(b'GET / HTTP/1.0\r\n\r\n')
+                closed_after(sock, time.monotonic(), 2)
+            assert settles(lambda: any('Queue server dropped a connection' in r.getMessage()
+                                       for r in caplog.records), 2)
+    records = [r for r in caplog.records if r.name == 'hypershell.core.queue']
+    assert any(r.levelname == 'DEBUG' and 'Queue server dropped a connection' in r.getMessage() for r in records)
+    assert not [r for r in records if r.levelname == 'WARNING'], [r.getMessage() for r in records]
+    assert not any('did not complete its TLS handshake' in r.getMessage() for r in records)
+
+
+# Accepting goes on when one connection's handler cannot start
+
+@mark.integration
+@mark.parametrize('secure', [True, False], ids=['tls', 'plain'])
+def test_accepting_goes_on_when_a_handler_does_not_start(server_tls, monkeypatch, caplog, secure: bool) -> None:
+    """When the handler thread for one accepted connection fails to start, that connection is closed,
+    forgotten and logged with one WARNING naming its peer, and a later client connects and makes its
+    first queue call."""
+    tls = with_handshake(server_tls, 300) if secure else with_handshake(TLSConfig(enabled=False), 300)
+    original = hypershell.core.queue._ServerThread.start
+    failing = {'left': 0}
+
+    def start(thread) -> None:
+        if failing['left'] > 0 and thread.name == HANDLER:
+            failing['left'] -= 1
+            raise RuntimeError("can't start new thread")
+        original(thread)
+
+    monkeypatch.setattr(hypershell.core.queue._ServerThread, 'start', start)
+    caller = None
+    with caplog.at_level('DEBUG', logger='hypershell.core.queue'):
+        with QueueServer(queue_config(tls)) as server:
+            port = server.address[1]
+            in_process = server.shutdown._args[0]
+            failing['left'] = 1
+            sock = socket.create_connection(('127.0.0.1', port), timeout=5)
+            try:
+                after = closed_after(sock, time.monotonic(), 2)
+            finally:
+                sock.close()
+            assert failing['left'] == 0, 'the handler start was never attempted'
+            assert after is not None and after <= 1, f'connection closed after {after} s (expected at once)'
+            assert settles(lambda: not in_process._live), f'{len(in_process._live)} live connections left'
+            result = {}
+            caller = threading.Thread(target=first_call, args=(port, tls, result), daemon=True)
+            caller.start()
+            caller.join(10)
+            assert result.get('seconds') is not None, f'a later client was not served ({result})'
+    if caller is not None:
+        caller.join(10)
+    warnings = [r.getMessage() for r in caplog.records
+                if r.name == 'hypershell.core.queue' and r.levelname == 'WARNING']
+    assert len(warnings) == 1 and 'handler did not start' in warnings[0] and '127.0.0.1:' in warnings[0], warnings
+
+
+@mark.unit
+def test_handler_start_failures_warn_once_per_interval(monkeypatch, caplog) -> None:
+    """Of several connections whose handlers do not start inside the interval, the first is logged as a
+    WARNING and the rest at DEBUG; each is closed and forgotten."""
+    monkeypatch.setattr(hypershell.core.queue, 'REFUSAL_WARNING_INTERVAL', 3600.0)
+    server = hypershell.core.queue._InProcessServer.__new__(hypershell.core.queue._InProcessServer)
+    server._lock, server._live, server._unstarted_warned_at = threading.Lock(), set(), None
+    pairs = [socket.socketpair() for _ in range(3)]
+    try:
+        with caplog.at_level('DEBUG', logger='hypershell.core.queue'):
+            for n, (conn, _) in enumerate(pairs):
+                server._live.add(conn)
+                server._unstarted(conn, ('127.0.0.1', 4000 + n), RuntimeError("can't start new thread"))
+                assert conn.fileno() == -1 and conn not in server._live
+    finally:
+        for conn, other in pairs:
+            conn.close()
+            other.close()
+    levels = [r.levelname for r in caplog.records
+              if r.name == 'hypershell.core.queue' and 'handler did not start' in r.getMessage()]
+    assert levels == ['WARNING', 'DEBUG', 'DEBUG'], levels

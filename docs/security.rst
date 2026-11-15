@@ -94,9 +94,15 @@ channel:
    can reach.
 
 5. **Denial of service.** Neither connection flooding nor application-level resource
-   exhaustion is mitigated by cryptography. The queue transport imposes no handshake timeout,
-   frame-size cap, or connection limit of its own (see the Built-in TLS *Limitations* below),
+   exhaustion is mitigated by cryptography. A TLS queue server closes a connection that does not
+   complete its TLS handshake within ``server.tls.handshake`` (default 30 seconds), and keeps
+   accepting other clients meanwhile. Beyond that the queue transport imposes no frame-size cap
+   or connection limit of its own (see the Built-in TLS *Limitations* below),
    so DoS resistance must come from firewall and rate-limit controls at the network layer.
+
+   .. versionchanged:: 2.9.0
+      A TLS queue server closes a connection that does not complete its handshake within
+      ``server.tls.handshake``.
 
 The defenses below address (1)–(3) directly and partially address (4). DoS mitigation is
 provided at the network perimeter, not by the queue transport.
@@ -399,12 +405,19 @@ Understanding these properties matters most for deployments on untrusted network
    this with ``insecure`` mode). Rotating the auto-generated certificate requires
    redistributing the new certificate or fingerprint to clients.
 
-4. **No transport-level DoS controls.** The queue sets no per-connection handshake timeout, no
-   inbound frame-size cap, and no limit on concurrent connections or worker threads. A peer
+4. **No transport-level DoS controls.** Beyond a deadline on the TLS handshake, the queue sets no
+   inbound frame-size cap, and no limit on concurrent connections or worker threads. A TLS queue
+   server closes a connection that has not completed its TLS handshake within
+   ``server.tls.handshake`` (default 30 seconds) counted from when it was accepted, whatever the
+   peer sends meanwhile, and keeps accepting other clients while handshakes are pending. A peer
    that reaches the listener — including a slow peer that stalls before authenticating — can
    consume server resources, and failed authentication/handshake attempts are handled by the
-   underlying multiprocessing layer without surfacing in *HyperShell*'s logs. Denial-of-service
+   underlying multiprocessing layer without surfacing in *HyperShell*'s logs, except that a
+   connection closed at the handshake deadline is logged. Denial-of-service
    protection must come from the network layer (see the deployment guides).
+
+   .. versionchanged:: 2.9.0
+      The ``server.tls.handshake`` deadline.
 
 5. **IPv4 only.** The built-in TLS queue listener binds ``AF_INET`` (IPv4). On IPv6-only or
    IPv6-preferred networks, clients must reach the server over an IPv4 address.
@@ -991,7 +1004,8 @@ Independent of the deployment style above:
 
 * **Monitor connection patterns.** *HyperShell* does not itself log failed authentication or
   failed TLS handshakes — they are handled by the underlying multiprocessing / TLS layer and
-  not surfaced in the application log — so watch for probes and connection surges at the
+  not surfaced in the application log, except that a connection closed at the TLS handshake
+  deadline (``server.tls.handshake``) is logged — so watch for probes and connection surges at the
   network layer (firewall counters, ``fail2ban``, flow logs) rather than expecting them in
   *HyperShell*'s output.
 
