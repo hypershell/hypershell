@@ -246,7 +246,7 @@ an upgraded 2.8.3 database, which starts with an empty `source` table. Pre-exist
 the review of the schema-upgrade fix.
 
 *Horizon: near-term · Depends on: — · Refs: `spec/schema-upgrade-step/` (review cycle 2)*
-**Seed:** [`issues/source-reserved-race.md`](issues/source-reserved-race.md)
+**Seed:** [`issues/source-reserved-race.md`](issues/source-reserved-race.md) · *status: adopted:contended-writes*
 
 ## Docs and runtime surfacing
 
@@ -281,18 +281,30 @@ confirmation then names the already-evicted client. Either way the row waits unt
 *Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
-## A contended `retried` mark or `hs update` write fails on a TimescaleDB hypertable
+## A contended `retried` mark or `Task.cancel_all` fails on a TimescaleDB hypertable
 
 On TimescaleDB 2.29+, a `task`-row UPDATE that waited on another writer's row lock matches 0 rows
 although the row still qualifies. The server's Confirm, revert, result and dispatch-stamp writes now
-re-run in that case; the Scheduler's `retried` mark, `Task.cancel_all` and every `hs update` write
-do not. A contended mark exits the server mid-run (a late confirmation is an in-server contender),
-and the unmarked failed row would be retried twice; `hs update` reports a false "not found",
-commits partially, or silently skips rows.
+re-run in that case; the Scheduler's `retried` mark and `Task.cancel_all` do not. A contended mark
+exits the server mid-run, and the unmarked failed row would be retried twice. Narrowed at the
+`contended-writes` GOAL gate to this server half; `hs update` moved to the entry below.
 
 *Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); `relay-hardening`
 (landed, #103: the dispatch stamp); resilience*
-**Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: unshaped*
+**Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: adopted:contended-writes*
+
+## `hs update` misreports or skips rows: contended on a hypertable, and when it combines changes
+
+Every `hs update` write treats a 0-row match on a TimescaleDB 2.29+ hypertable as proof the row is
+gone: the legacy form reports a false "not found", `--limit` commits partially and ends in a
+traceback, and the filtered paths skip contended rows while "Updated N" reports a count taken
+before the write. Two defects need no contention: under `--limit` only the first kind of change is
+applied, and a tag change misses rows a field change moved out of the filter, both reporting every
+row updated. Split from `contended-writes` at its GOAL gate.
+
+*Horizon: near-term · Depends on: `contended-writes` · Refs: hypertable-update-retry (the pattern);
+`contended-writes` (the server half)*
+**Seed:** [`issues/hs-update-contended-writes.md`](issues/hs-update-contended-writes.md) · *status: unshaped*
 
 ## `hs cluster --no-db` still initializes a SQLite database it never uses
 

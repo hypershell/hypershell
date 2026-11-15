@@ -759,14 +759,28 @@ class Task(Entity):
         return query.limit(limit).all()
 
     @classmethod
+    @cache
+    def __awaiting_retry(cls: Type[Task]) -> Tuple[Tuple[Any, ...], Any]:
+        """The row-state filters of a failed task still awaiting retry, from the table's columns.
+
+        Returns the failure filters (an exit status, neither success nor a cancel) and the filter
+        that the row is not yet retried. The retry selection and the retry mark both use them, so
+        a row the selection finds is exactly a row the mark may still write.
+        """
+        table = cls.__table__
+        failed = (table.c.exit_status.isnot(None),
+                  table.c.exit_status != 0,
+                  table.c.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
+        return failed, table.c.retried.is_(False)
+
+    @classmethod
     def query_retryable(cls: Type[Task], attempts: int, group: int = None, zone: str = None) -> Query:
         """Query failed tasks still eligible for retry under given number of `attempts` (in one `zone` if given)."""
+        failed, unretried = cls.__awaiting_retry()
         query = (cls.query()
-                 .filter(cls.exit_status.isnot(None))
-                 .filter(cls.exit_status != 0)
-                 .filter(cls.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
+                 .filter(*failed)
                  .filter(cls.attempt < attempts)
-                 .filter(cls.retried.is_(False)))
+                 .filter(unretried))
         if group is not None:
             query = query.filter(cls.group == group)
         return cls._filter_zone(query, zone)
@@ -846,24 +860,42 @@ class Task(Entity):
     @classmethod
     def __schedule_next_failed_tasks(cls: Type[Task], attempts: int, limit: int, group: int = None,
                                      zone: str = None) -> List[Task]:
-        """Select previously failed tasks for scheduling."""
-        tasks = []
+        """Select previously failed tasks and create their retries; return the retries created.
+
+        Each failed task is marked `retried` (naming its retry as `next_id`) by a conditional
+        UPDATE that matches only while the row still awaits retry, and only the retries whose mark
+        landed are inserted; the marks and the retries are one transaction, so a retry row is never
+        committed without its mark nor a mark without its retry row. A row cancelled, deleted or
+        marked by another writer since it was selected gets no retry. A mark missed under
+        contention is re-run, and one that never lands leaves its row unmarked, with no retry row,
+        for a later round. Returns the retries in the order their failed tasks were selected.
+        """
         failed_tasks = cls.select_failed(attempts=attempts, limit=limit, group=group, zone=zone)
-        if failed_tasks:
-            log.trace(f'Selected {len(failed_tasks)} previously failed tasks')
-            new_tasks = [cls.new(args=task.args,
-                                 attempt=task.attempt + 1,
-                                 previous_id=task.id,
-                                 tag=task.tag,
-                                 group=task.group,
-                                 fingerprint=task.fingerprint,  # A retry is the same logical task.
-                                 source=task.source,            # Keep the retry chain linked to its source.
-                                 zone=task.zone)                # A retry runs in its task's zone.
-                         for task in failed_tasks]
-            tasks.extend(new_tasks)
-            cls.add_all(tasks)
-            cls.update_all([{'id': old_task.id, 'retried': True, 'next_id': new_task.id}
-                            for old_task, new_task in zip(failed_tasks, new_tasks)])
+        if not failed_tasks:
+            return []
+        log.trace(f'Selected {len(failed_tasks)} previously failed tasks')
+        retries = {task.id: cls.new(args=task.args,
+                                    attempt=task.attempt + 1,
+                                    previous_id=task.id,
+                                    tag=task.tag,
+                                    group=task.group,
+                                    fingerprint=task.fingerprint,  # A retry is the same logical task.
+                                    source=task.source,            # Keep the retry chain linked to its source.
+                                    zone=task.zone)                # A retry runs in its task's zone.
+                   for task in failed_tasks}
+        next_ids = {id: {'next_id': task.id} for id, task in retries.items()}
+        try:
+            # NOTE: marks first: the retry rows are added only for the marks that landed.
+            marked = set(cls.__write_rows(list(retries), {'retried': True}, 'retry mark', 'task left to retry later',
+                                          retryable=True, each=next_ids, commit=False, prefix='m_'))
+            tasks = [task for id, task in retries.items() if id in marked]
+            Session.add_all(tasks)
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        for task in tasks:
+            log.trace(f'Added {cls.__tablename__} ({inspect(task).identity[0]})')
         return tasks
 
     @classmethod
@@ -939,6 +971,9 @@ class Task(Entity):
           `completion_time` and that `client_id`; the SELECT reads the `completion_time` of a row
           scheduled with that client, so a row gone or held by another client reads as nothing.
         - 'unscheduled': a row with no `schedule_time`; the SELECT reads that `schedule_time`.
+        - 'retryable': a failed row still awaiting retry (the row-state filters of the retry
+          selection: failed, not cancelled, not yet retried); the SELECT applies the same filters
+          and reads the row's `id`, so it finds nothing for a row gone or no longer awaiting retry.
 
         Built once per column set, condition and prefix, with binds typed from the table and named
         with `prefix`, as for the result statements.
@@ -956,6 +991,10 @@ class Task(Entity):
                 table.c.completion_time
         elif condition == 'unscheduled':
             match, lookup, read = (by_id, table.c.schedule_time.is_(None)), (by_id, ), table.c.schedule_time
+        elif condition == 'retryable':
+            failed, unretried = cls.__awaiting_retry()
+            awaiting = (by_id, *failed, unretried)
+            match, lookup, read = awaiting, awaiting, table.c.id
         else:
             raise ValueError(f'Unknown task row condition: {condition!r}')
         write = (
@@ -969,8 +1008,10 @@ class Task(Entity):
     @classmethod
     def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any], path: str, consequence: str,
                      pending: bool = False, strict: bool = False, held_by: Optional[str] = None,
-                     unscheduled: bool = False, prefix: str = 'r_') -> List[str]:
-        """Write the same `values` onto each task in `ids` by `id`, committing once; return the ids written.
+                     unscheduled: bool = False, retryable: bool = False,
+                     each: Optional[Dict[str, Dict[str, Any]]] = None, commit: bool = True,
+                     prefix: str = 'r_') -> List[str]:
+        """Write `values` onto each task in `ids` by `id`, in one transaction; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
         attempt costs that one statement. A row that matched nothing is looked up: a missing row
@@ -991,11 +1032,29 @@ class Task(Entity):
         With `unscheduled`, the write requires that the row has no `schedule_time`; a row that is
         gone or already scheduled (or cancelled, which stamps one) is skipped. Neither raises on a
         row that no longer qualifies, and both re-run only a row that still does.
+        With `retryable`, the write requires that the row is a failure still awaiting retry (the
+        row-state filters of the retry selection); a row that is gone or no longer awaits retry
+        (cancelled, marked retried by another writer, or no longer failed) is skipped, and only a
+        row that still awaits retry is re-run.
+
+        With `each`, a task's own values (by id) are written over the shared `values`; every task
+        in `ids` has an entry, all with the same columns, or a `ValueError` is raised before
+        anything is written. Without `commit`, the transaction is left open for the caller to
+        extend and commit; an error still rolls it back (the caller's writes with it) and is
+        raised.
 
         The binds are named with `prefix`, so statements of different paths can be told apart.
         """
-        condition = 'held' if held_by is not None else 'unscheduled' if unscheduled else 'pending' if pending else None
-        write, exists = cls.__row_statements(tuple(values), condition, prefix)
+        condition = ('held' if held_by is not None else 'unscheduled' if unscheduled else
+                     'retryable' if retryable else 'pending' if pending else None)
+        own: Tuple[str, ...] = ()
+        if each is not None:
+            own = tuple(each[ids[0]]) if ids and ids[0] in each else ()
+            for id in ids:
+                if id not in each or each[id].keys() != set(own):
+                    raise ValueError(f'Per-task values for {path} must name the same columns for every task')
+        write, exists = cls.__row_statements(tuple(values) + tuple(name for name in own if name not in values),
+                                             condition, prefix)
         key = f'{prefix}id'
         params = {f'{prefix}{name}': value for name, value in values.items()}
         lookup = {f'{prefix}held_by': held_by} if held_by is not None else {}
@@ -1003,9 +1062,10 @@ class Task(Entity):
         landed = []
         try:
             for id in ids:
+                row = {f'{prefix}{name}': value for name, value in each[id].items()} if each is not None else {}
                 for attempt in range(1, attempts + 1):
                     # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per row.
-                    if Session.execute(write, {**params, **lookup, key: id}).rowcount == 1:
+                    if Session.execute(write, {**params, **row, **lookup, key: id}).rowcount == 1:
                         landed.append(id)
                         break
                     found = Session.execute(exists, {**lookup, key: id}).first()
@@ -1015,6 +1075,9 @@ class Task(Entity):
                             break
                         if condition == 'unscheduled':
                             log.debug(f'Ignored {path} for task ({id}) - task gone')
+                            break
+                        if condition == 'retryable':
+                            log.debug(f'Ignored {path} for task ({id}) - task gone or no longer awaiting retry')
                             break
                         if condition == 'pending' and not strict:
                             break
@@ -1032,7 +1095,8 @@ class Task(Entity):
                 else:
                     log.warning(f'Contended {path} write did not land for task ({id}) '
                                 f'after {attempts} attempts - {consequence}')
-            Session.commit()
+            if commit:
+                Session.commit()
         except Exception:
             Session.rollback()
             raise
@@ -1162,27 +1226,29 @@ class Task(Entity):
                 break
 
     @classmethod
-    def cancel_all(cls: Type[Task], ids: List[str]) -> None:
-        """Cancel all tasks identified by `ids`."""
+    def cancel_all(cls: Type[Task], ids: List[str]) -> List[str]:
+        """Cancel all tasks identified by `ids`, in one transaction; return the ids cancelled.
+
+        Each row is one UPDATE by `id`, whatever state it is in. A row that is gone raises
+        `StaleDataError` and nothing of the call is committed. A row that matched nothing but
+        still exists was missed because the write waited on another transaction's row lock, and
+        the cancel is re-run, at most `CONTENDED_RERUNS` times; a row still not cancelled after
+        that is logged as a warning, left as it is, and left out of the ids returned, so a caller
+        can compare them with `ids`.
+        """
         # NOTE: completion_time is set so the task is terminal - otherwise it reads as
         # "interrupted" (scheduled but incomplete) and gets reverted/re-run on restart.
         now = datetime.now().astimezone()
-        cls.update_all([
-            {
-                'id': id,
-                'schedule_time': now,
-                'completion_time': now,
-                'exit_status': CANCEL_STATUS,
-             }
-            for id in ids
-        ])
-        for id in ids:
+        cancelled = cls.__write_rows(ids, {'schedule_time': now, 'completion_time': now, 'exit_status': CANCEL_STATUS},
+                                     'cancel', 'task not cancelled', prefix='c_')
+        for id in cancelled:
             log.trace(f'Cancelled task ({id})')
+        return cancelled
 
     @classmethod
-    def cancel(cls: Type[Task], id: str) -> None:
-        """Cancel single task by `id`."""
-        cls.cancel_all([id, ])
+    def cancel(cls: Type[Task], id: str) -> bool:
+        """Cancel single task by `id`; return whether it was cancelled (see `cancel_all`)."""
+        return cls.cancel_all([id, ]) == [id, ]
 
     @classmethod
     def apply_results(cls: Type[Task], results: List[Task]) -> List[ResultOutcome]:
@@ -1596,14 +1662,28 @@ class Source(Entity):
 
         Idempotent: the fixed-id row (`<direct>`/`<stdin>`) is created once on first use
         and reused thereafter, so `Task.source` can point at a real native-UUID row.
+
+        Safe under concurrency on SQLite and PostgreSQL: several processes may all miss the row
+        and all insert it, so the insert does nothing when the id already exists, and the row is
+        read again after it, whichever process wrote it. The insert's row count is never read
+        (PostgreSQL does not report one for a skipped row).
         """
         try:
             return cls.from_id(const_id, caching=False)
         except cls.NotFound:
-            source = cls(id=const_id, path=RESERVED_SOURCE_PATHS[const_id],
-                         created=datetime.now().astimezone())
-            cls.add(source)
-            return source
+            values = {'id': const_id, 'path': RESERVED_SOURCE_PATHS[const_id], 'created': datetime.now().astimezone()}
+            insert = UPSERT_BY_DIALECT.get(Session.get_bind().dialect.name)
+            if insert is None:
+                source = cls(**values)
+                cls.add(source)
+                return source
+            try:
+                Session.execute(insert(cls).values(**values).on_conflict_do_nothing(index_elements=['id']))
+                Session.commit()
+            except Exception:
+                Session.rollback()
+                raise
+            return cls.from_id(const_id, caching=False)
 
     @classmethod
     def lookup(cls: Type[Source], path: str) -> List[Source]:

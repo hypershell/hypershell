@@ -10,8 +10,9 @@ report 0 matched rows without running, optionally committing another writer's ch
 first, as the transaction it waited on would. Every recovery path is driven in-process, as the
 server drives it (``Confirm.update_info``, ``Receiver.update_tasks``, ``Task.revert_orphaned``,
 ``Task.revert_staged``), and the wrapper's record of executed statements pins what an uncontended
-write costs. The real race, on a
-server database, is ``tests/test_contended_write.py``.
+write costs. The Scheduler's ``retried`` mark and ``Task.cancel_all`` are made to miss at the
+driver instead (``DriverContention``), below the ORM, so a bulk update is reached as well as a
+per-row one. The real race, on a server database, is ``tests/test_contended_write.py``.
 """
 
 
@@ -22,6 +23,7 @@ from pathlib import Path
 
 # Standard libs
 import io
+import re
 import logging
 from datetime import datetime, timedelta
 from queue import Empty as QueueEmpty
@@ -29,7 +31,7 @@ from queue import Empty as QueueEmpty
 # External libs
 import pytest
 from pytest import mark, fixture
-from sqlalchemy import create_engine, text, update, delete
+from sqlalchemy import create_engine, event, text, update, delete
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -799,3 +801,435 @@ def test_uncontended_dispatch_costs_one_update_per_row(stamp_contention, logs) -
     assert [task_id for _, task_id, _ in stamp_contention.executed] == ids
     assert all(stamped(row(task_id)) for task_id in ids)
     assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+
+
+# --- The retry mark and the cancel, lost at the driver ----------------------------------------------
+
+
+# A column named in an UPDATE's SET clause, as SQLite's compiled statements write it.
+SET_COLUMN = re.compile(r'"?(\w+)"?\s*=\s*\?')
+
+# The columns a cancel writes, and nothing else.
+CANCEL_COLUMNS = frozenset({'schedule_time', 'completion_time', 'exit_status'})
+
+# What a lost write runs in its place: an UPDATE of `task` that matches no row.
+LOST_UPDATE = 'UPDATE task SET id = id WHERE 0'
+
+
+class DriverContention:
+    """Makes the retry mark or the cancel of chosen tasks match no row, at the driver; records statements on `task`.
+
+    Installed on the engine by the dialect's `do_execute` and `do_executemany` events, below the
+    ORM, so a bulk update (one executemany) is reached as well as a per-row UPDATE. A lost write
+    runs a 0-row UPDATE in its place; in an executemany, the lost task's parameter set is dropped
+    and the rest run. Only the retry mark (an UPDATE whose SET names `retried`) and the cancel (an
+    UPDATE whose SET is exactly the columns a cancel writes) are ever lost, so the dispatch stamp,
+    the result write and the reverts always land.
+
+    Each statement on `task` is recorded once per parameter set as (kind, task id): the kind is
+    'mark', 'cancel', 'UPDATE', 'SELECT' or 'INSERT'; the task id is the parameter the WHERE clause
+    opens on (`task.id = ?`), else None. Another writer's change, run by `lose`, is neither
+    recorded nor lost. A write made to `wait` on another writer's change (`waits`) is not lost: the
+    change commits first and the write then runs as written, on the row as the change left it, as
+    PostgreSQL re-checks a row it waited on.
+    """
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+        self.losing: Dict[str, int] = {}
+        self.meanwhile: Dict[str, Callable[[], None]] = {}
+        self.executed: List[Tuple[str, Optional[str]]] = []
+        self.passing = False
+        event.listen(engine, 'do_execute', self.do_execute)
+        event.listen(engine, 'do_executemany', self.do_executemany)
+
+    def remove(self) -> None:
+        """Uninstall from the engine."""
+        event.remove(self.engine, 'do_execute', self.do_execute)
+        event.remove(self.engine, 'do_executemany', self.do_executemany)
+
+    def lose(self, task_id: str, count: int, meanwhile: Optional[Callable[[], None]] = None) -> None:
+        """Make the next `count` marks or cancels of task `task_id` match no row.
+
+        A `meanwhile` callable runs once, at the first of them, before the 0-row UPDATE: the other
+        transaction's change, committed while the write waited on its row lock.
+        """
+        self.losing[task_id] = count
+        if meanwhile is not None:
+            self.meanwhile[task_id] = meanwhile
+
+    def waits(self, task_id: str, meanwhile: Callable[[], None]) -> None:
+        """Make the next mark or cancel of task `task_id` wait on another writer's change, then run as written.
+
+        `meanwhile` runs once, before that write: the other transaction's change, committed while the
+        write waited on its row lock. The write itself is not lost, so its own row condition decides
+        whether it matches the row as the change left it.
+        """
+        self.meanwhile[task_id] = meanwhile
+
+    @staticmethod
+    def classify(statement: str) -> Optional[Tuple[str, Optional[int]]]:
+        """The kind of a statement on `task` and the position of its task-id parameter; None for other tables."""
+        sql = ' '.join(statement.split())
+        where = sql.find(' WHERE ')
+        position = None
+        if where >= 0 and sql.startswith('task.id = ?', where + len(' WHERE ')):
+            position = sql.count('?', 0, where)
+        if sql.startswith('UPDATE task SET '):
+            names = set(SET_COLUMN.findall(sql[len('UPDATE task SET '):where if where >= 0 else None]))
+            kind = 'mark' if 'retried' in names else 'cancel' if names == CANCEL_COLUMNS else 'UPDATE'
+        elif sql.startswith('INSERT INTO task '):
+            kind = 'INSERT'
+        elif sql.startswith('SELECT ') and ' FROM task ' in f'{sql} ':
+            kind = 'SELECT'
+        else:
+            return None
+        return kind, position
+
+    @staticmethod
+    def task_of(params: Any, position: Optional[int]) -> Optional[str]:
+        """The task id in one positional parameter set, if the statement names one."""
+        if position is None or not isinstance(params, (tuple, list)) or position >= len(params):
+            return None
+        return str(params[position])
+
+    def take(self, kind: str, task_id: Optional[str]) -> bool:
+        """Whether this write is lost; runs the other writer's change at the first mark or cancel of the task."""
+        if kind not in ('mark', 'cancel'):
+            return False
+        if (change := self.meanwhile.pop(task_id, None)) is not None:
+            self.passing = True
+            try:
+                change()
+            finally:
+                self.passing = False
+        if self.losing.get(task_id, 0) <= 0:
+            return False
+        self.losing[task_id] -= 1
+        return True
+
+    def do_execute(self, cursor: Any, statement: str, params: Any, context: Any) -> bool:
+        if self.passing or (shape := self.classify(statement)) is None:
+            return False
+        kind, position = shape
+        task_id = self.task_of(params, position)
+        self.executed.append((kind, task_id))
+        if not self.take(kind, task_id):
+            return False
+        cursor.execute(LOST_UPDATE)
+        return True
+
+    def do_executemany(self, cursor: Any, statement: str, params: Any, context: Any) -> bool:
+        if self.passing or (shape := self.classify(statement)) is None:
+            return False
+        kind, position = shape
+        kept = []
+        for each in params:
+            task_id = self.task_of(each, position)
+            self.executed.append((kind, task_id))
+            if not self.take(kind, task_id):
+                kept.append(each)
+        if len(kept) == len(params):
+            return False
+        if kept:
+            cursor.executemany(statement, kept)
+        else:
+            cursor.execute(LOST_UPDATE)
+        return True
+
+    def kinds(self, task_id: str = None) -> List[str]:
+        """The kinds of statement executed (for one task, if given), in order."""
+        return [kind for kind, of in self.executed if task_id is None or of == task_id]
+
+    def clear(self) -> None:
+        self.executed.clear()
+
+
+@fixture
+def driver(task_db) -> Iterator[DriverContention]:
+    """A `DriverContention` on the per-test engine."""
+    injector = DriverContention(task_db)
+    try:
+        yield injector
+    finally:
+        injector.remove()
+
+
+def from_mark(kinds: List[str]) -> List[str]:
+    """The statements from the first retry mark on (none if there was no mark)."""
+    return kinds[kinds.index('mark'):] if 'mark' in kinds else []
+
+
+def failed(count: int = 1) -> List[str]:
+    """Dispatch `count` new tasks and write back a failure for each, in that order; return their ids."""
+    copies = dispatched_and_confirmed(count)
+    finished = [finish(copy, exit_status=1) for copy in copies]
+    for n, copy in enumerate(finished):
+        copy.completion_time += timedelta(seconds=n)  # NOTE: the retry selection orders by completion time.
+    machine = receiver(io.StringIO())
+    machine.tasks = returned(finished)
+    machine.update_tasks()
+    ids = [copy.id for copy in copies]
+    if [row(task_id)['exit_status'] for task_id in ids] != [1] * count:
+        pytest.fail(f'The failures of {ids} were not written back')
+    return ids
+
+
+def retry(limit: int) -> List[Tuple[str, str]]:
+    """One Scheduler round with retries allowed; return (id, previous id) of each task it dispatched."""
+    return [(task.id, task.previous_id) for task in Task.next(limit=limit, attempts=2)]
+
+
+def retries_of(engine: Engine, task_id: str) -> List[str]:
+    """Ids of the committed rows that name the task as their previous attempt."""
+    with engine.connect() as conn:
+        return list(conn.execute(text('SELECT id FROM task WHERE previous_id = :id'), {'id': task_id}).scalars())
+
+
+def cancelled_ids(engine: Engine) -> List[str]:
+    """Ids of the committed rows that are cancelled."""
+    with engine.connect() as conn:
+        return sorted(conn.execute(text('SELECT id FROM task WHERE exit_status = :status'),
+                                   {'status': CANCEL_STATUS}).scalars())
+
+
+def marked_by_another(engine: Engine, task_id: str, next_id: str) -> Callable[[], None]:
+    """The task marked retried, naming `next_id`, from another connection."""
+    table = Task.__table__
+    return committed(engine, update(table).where(table.c.id == task_id).values(retried=True, next_id=next_id))
+
+
+@mark.unit
+def test_contended_retry_mark_lands_on_rerun(task_db, driver, logs) -> None:
+    """A retry mark that missed its row the first time re-runs and lands, with the one retry row it names."""
+    failed_id, = failed()
+    logs.clear()
+    driver.lose(failed_id, 1)
+
+    dispatched = retry(limit=1)
+
+    retry_ids = retries_of(task_db, failed_id)
+    assert len(retry_ids) == 1, retry_ids
+    assert dispatched == [(retry_ids[0], failed_id)]
+    data = row(failed_id)
+    assert data['retried'] and data['next_id'] == retry_ids[0]
+    assert stamped(row(retry_ids[0]))
+    assert len(reruns(logs, 'retry mark', failed_id)) == 1
+    assert reruns(logs, 'retry mark', failed_id)[0].endswith(f'(attempt 2 of {attempts()})')
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_contended_retry_mark_exhausted_leaves_row_retryable(task_db, driver, logs) -> None:
+    """At the bound, the row gets no retry row and stays retryable, the rest of the batch is retried,
+    and the next round retries it once."""
+    first, second = failed(2)
+    logs.clear()
+    driver.lose(first, ALWAYS)
+
+    dispatched = retry(limit=2)
+
+    assert driver.kinds(first).count('mark') == attempts()
+    assert retries_of(task_db, first) == []
+    assert not row(first)['retried'] and row(first)['next_id'] is None
+    assert [previous for _, previous in dispatched] == [second]
+    assert retries_of(task_db, second) == [dispatched[0][0]]
+    assert row(second)['retried'] and row(second)['next_id'] == dispatched[0][0]
+    warnings = messages(logs, logging.WARNING)
+    assert len(warnings) == 1, warnings
+    assert f'({first})' in warnings[0] and 'retry mark' in warnings[0]
+
+    driver.losing.clear()
+    assert [previous for _, previous in retry(limit=2)] == [first]
+    assert len(retries_of(task_db, first)) == 1
+    assert row(first)['retried']
+
+
+@mark.unit
+def test_retry_mark_skips_row_cancelled_meanwhile(task_db, driver, logs) -> None:
+    """A retry mark that waited on a cancel of its row gives it no retry row, and the row stays cancelled."""
+    first, second = failed(2)
+    logs.clear()
+    driver.clear()
+    driver.lose(first, 1, meanwhile=cancelled(task_db, first))
+
+    dispatched = retry(limit=2)
+
+    assert from_mark(driver.kinds(first)) == ['mark', 'SELECT']
+    assert retries_of(task_db, first) == []
+    data = row(first)
+    assert data['exit_status'] == CANCEL_STATUS and not data['retried'] and data['next_id'] is None
+    assert [previous for _, previous in dispatched] == [second]
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_retry_mark_skips_row_deleted_meanwhile(task_db, driver, logs) -> None:
+    """A retry mark that waited on a delete of its row gives it no retry row, without an error."""
+    first, second = failed(2)
+    logs.clear()
+    driver.clear()
+    driver.lose(first, 1, meanwhile=deleted(task_db, first))
+
+    dispatched = retry(limit=2)
+
+    assert from_mark(driver.kinds(first)) == ['mark', 'SELECT']
+    assert retries_of(task_db, first) == []
+    with task_db.connect() as conn:
+        assert conn.execute(text('SELECT count(*) FROM task WHERE id = :id'), {'id': first}).scalar() == 0
+    assert [previous for _, previous in dispatched] == [second]
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_retry_mark_skips_row_retried_meanwhile(task_db, driver, logs) -> None:
+    """A retry mark that waited on another writer marking its row retried adds no second retry row."""
+    first, second = failed(2)
+    other = uuid()
+    logs.clear()
+    driver.clear()
+    driver.lose(first, 1, meanwhile=marked_by_another(task_db, first, other))
+
+    dispatched = retry(limit=2)
+
+    assert from_mark(driver.kinds(first)) == ['mark', 'SELECT']
+    assert retries_of(task_db, first) == []
+    data = row(first)
+    assert data['retried'] and data['next_id'] == other
+    assert [previous for _, previous in dispatched] == [second]
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+@mark.parametrize('change', ['cancelled', 'retried'])
+def test_retry_mark_that_waited_matches_only_a_row_awaiting_retry(task_db, driver, logs, change: str) -> None:
+    """A retry mark that waited on a cancel of its row, or on another writer marking it retried, and then
+    ran on the row as that left it, matches nothing: the row gets no retry row and keeps the other change."""
+    first, second = failed(2)
+    other = uuid()
+    logs.clear()
+    driver.clear()
+    driver.waits(first, cancelled(task_db, first) if change == 'cancelled' else marked_by_another(task_db, first, other))
+
+    dispatched = retry(limit=2)
+
+    assert from_mark(driver.kinds(first)) == ['mark', 'SELECT']
+    assert retries_of(task_db, first) == []
+    data = row(first)
+    if change == 'cancelled':
+        assert data['exit_status'] == CANCEL_STATUS and not data['retried'] and data['next_id'] is None
+    else:
+        assert data['retried'] and data['next_id'] == other
+    assert [previous for _, previous in dispatched] == [second]
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+    assert messages(logs, logging.WARNING) == []
+
+
+class Stopped(BaseException):
+    """The process stopping mid-call (never caught by `except Exception`)."""
+
+
+@mark.unit
+def test_stop_between_retry_insert_and_mark_leaves_no_retry(task_db, logs) -> None:
+    """A stop between the retry row's insert and the retry mark leaves no retry row, and the next round
+    retries the row once."""
+    failed_id, = failed()
+    seen: List[str] = []
+
+    def stop(conn: Any, cursor: Any, statement: str, params: Any, context: Any, executemany: bool) -> None:
+        kind = (DriverContention.classify(statement) or (None, None))[0]
+        if kind in ('INSERT', 'mark') and kind not in seen:
+            seen.append(kind)
+            if len(seen) == 2:
+                raise Stopped()
+
+    event.listen(task_db, 'before_cursor_execute', stop)
+    try:
+        with pytest.raises(Stopped):
+            retry(limit=1)
+    finally:
+        event.remove(task_db, 'before_cursor_execute', stop)
+        Session.remove()  # NOTE: the connection goes away with the process.
+
+    assert retries_of(task_db, failed_id) == []
+    assert not row(failed_id)['retried'] and row(failed_id)['next_id'] is None
+    assert [previous for _, previous in retry(limit=5)] == [failed_id]
+    assert len(retries_of(task_db, failed_id)) == 1
+
+
+@mark.unit
+def test_contended_cancel_lands_on_rerun(task_db, driver, logs) -> None:
+    """A cancel that missed a row the first time re-runs and cancels it, with the rest of the call."""
+    ids = [submit(f'echo {n}') for n in range(3)]
+    driver.lose(ids[1], 1)
+
+    assert Task.cancel_all(ids) == ids
+
+    assert cancelled_ids(task_db) == sorted(ids)
+    assert len(reruns(logs, 'cancel', ids[1])) == 1
+    assert reruns(logs, 'cancel', ids[1])[0].endswith(f'(attempt 2 of {attempts()})')
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_contended_cancel_exhausted_reports_rows_not_cancelled(task_db, driver, logs) -> None:
+    """At the bound, the row is left as it was and left out of what `cancel_all` returns; the rest is
+    cancelled and committed, and `cancel` of that row says it did not cancel it."""
+    ids = [submit(f'echo {n}') for n in range(3)]
+    before = row(ids[1])
+    driver.lose(ids[1], ALWAYS)
+
+    assert Task.cancel_all(ids) == [ids[0], ids[2]]
+
+    assert cancelled_ids(task_db) == sorted([ids[0], ids[2]])
+    assert row(ids[1]) == before
+    assert driver.kinds(ids[1]).count('cancel') == attempts()
+    warnings = messages(logs, logging.WARNING)
+    assert len(warnings) == 1, warnings
+    assert f'({ids[1]})' in warnings[0] and 'cancel' in warnings[0]
+
+    assert Task.cancel(ids[1]) is False
+    assert row(ids[1]) == before
+
+
+@mark.unit
+def test_uncontended_retry_mark_costs_one_update_per_row(task_db, driver, logs) -> None:
+    """A retry mark that matches first time is one UPDATE per row, with no re-check and no re-run."""
+    ids = failed(2)
+    driver.clear()
+
+    dispatched = retry(limit=2)
+
+    assert {task_id: from_mark(driver.kinds(task_id)) for task_id in ids} == {task_id: ['mark'] for task_id in ids}
+    assert driver.kinds().count('mark') == len(ids)
+    assert sorted(previous for _, previous in dispatched) == sorted(ids)
+    assert all(row(task_id)['retried'] for task_id in ids)
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+
+
+@mark.unit
+def test_uncontended_cancel_costs_one_update_per_row(task_db, driver, logs) -> None:
+    """A cancel that matches first time is one UPDATE per row, with no re-check and no re-run."""
+    ids = [submit(f'echo {n}') for n in range(3)]
+    driver.clear()
+
+    Task.cancel_all(ids)
+
+    assert driver.kinds() == ['cancel'] * len(ids)
+    assert sorted(task_id for _, task_id in driver.executed) == sorted(ids)
+    assert cancelled_ids(task_db) == sorted(ids)
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+
+
+@mark.unit
+def test_cancel_of_gone_row_raises_and_cancels_nothing(task_db) -> None:
+    """A cancel naming a row that no longer exists raises, and cancels none of the rows it names."""
+    ids = [submit(f'echo {n}') for n in range(3)]
+    Task.delete(Task.from_id(ids[1]))
+
+    with pytest.raises(StaleDataError):
+        Task.cancel_all(ids)
+
+    assert cancelled_ids(task_db) == []

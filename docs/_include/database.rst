@@ -121,13 +121,15 @@ If the lock is still held after 15 minutes (e.g., by a session left idle in a tr
 upgrade gives up with an error that names what it waited on and leaves the schema unchanged;
 find and stop that session, then try again.
 
+.. versionchanged:: 2.9.0
+   A failed task's retry and its ``retried`` mark are recorded together, so a server stopped
+   while scheduling a retry no longer leaves the task to be retried twice.
+
 SQLite cannot drop a table constraint without rebuilding the table, so a SQLite database
 created by an earlier release (2.8, or the 2.9.0a1 pre-release) keeps those ``UNIQUE``
-constraints. This has no effect on behaviour in normal operation. It only matters in the rare cases where a failed task could be retried twice: two
-servers running against one database (which is not supported), a server killed between
-scheduling a retry and marking the original task as retried, or a task's ``retried`` flag reset
-after the fact. In those cases an older SQLite database rejects the second retry with an error,
-where a newer one records it.
+constraints. This has no effect on behaviour in normal operation. It only matters in the rare case where a failed task could be retried twice: a task's
+``retried`` flag reset after the fact. Then an older SQLite database rejects the second retry
+with an error, where a newer one records it.
 
 See also the :ref:`command-line interface <cli_initdb>` for ``hs initdb``.
 

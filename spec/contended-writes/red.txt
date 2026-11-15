@@ -1,0 +1,25 @@
+# R5 regression tests that must fail on 92af9c1 (the base of fix/contended-writes), checked with
+#   RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt" sh spec/relay-hardening/drive/red_check.sh
+# One pytest node id per line; ` raises=NAME` = red by the defect's own error; `pg:` = needs
+# HS_TEST_POSTGRES (red on plain PostgreSQL and every TimescaleDB version). Tests red only on CI's
+# TimescaleDB 2.31 jobs (the real race) are in ci-red.txt, not here: they pass locally before the fix.
+# hs-build P1 writes these tests; it may rename a node here, never drop one without a PLAN note.
+
+# R1/R2: the retried mark, fault injection below the ORM (the bulk mark meets the same 0-row match)
+tests/test_contended_recovery.py::test_contended_retry_mark_lands_on_rerun raises=StaleDataError
+tests/test_contended_recovery.py::test_contended_retry_mark_exhausted_leaves_row_retryable raises=StaleDataError
+tests/test_contended_recovery.py::test_retry_mark_skips_row_cancelled_meanwhile raises=StaleDataError
+tests/test_contended_recovery.py::test_retry_mark_skips_row_deleted_meanwhile raises=StaleDataError
+tests/test_contended_recovery.py::test_retry_mark_skips_row_retried_meanwhile raises=StaleDataError
+tests/test_contended_recovery.py::test_stop_between_retry_insert_and_mark_leaves_no_retry
+
+# R3: Task.cancel_all / Task.cancel
+tests/test_contended_recovery.py::test_contended_cancel_lands_on_rerun raises=StaleDataError
+tests/test_contended_recovery.py::test_contended_cancel_exhausted_reports_rows_not_cancelled raises=StaleDataError
+
+# R4: two sessions both miss the reserved source row before either inserts
+tests/test_source.py::test_reserved_source_concurrent_first_use[fresh-direct]
+tests/test_source.py::test_reserved_source_concurrent_first_use[fresh-stdin]
+tests/test_source.py::test_reserved_source_concurrent_first_use[upgraded-direct]
+tests/test_source.py::test_reserved_source_concurrent_first_use[upgraded-stdin]
+pg:tests/test_contended_write.py::test_reserved_source_concurrent_first_use[fresh]

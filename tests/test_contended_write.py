@@ -20,6 +20,11 @@ The tests need a PostgreSQL server, as `tests/test_timescale.py` documents:
 With HS_TEST_TIMESCALE set, the database is initialized under the `timescale` provider and `task`
 must be a hypertable; with it empty, under the `postgres` provider. They are skipped when
 HS_TEST_POSTGRES is unset.
+
+Two sessions creating the reserved source row at once are here too, since they need the same
+server: the race is forced by holding each at its INSERT until both have missed the row
+(`tests/test_source.py` has the helper and the SQLite cases). The case on a database upgraded from
+2.8.3 needs the `hs283` template (HS_TEST_POSTGRES_TEMPLATES, as `tests/test_upgrade_postgres.py`).
 """
 
 
@@ -49,11 +54,12 @@ from hypershell.client import ClientInfo
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
 from hypershell.core.types import to_json_type
-from hypershell.data.model import Task, CANCEL_STATUS, serialize_tasks, deserialize_tasks
+from hypershell.data.model import Task, CANCEL_STATUS, STDIN_SOURCE_ID, serialize_tasks, deserialize_tasks
 from hypershell.server import Confirm, ConfirmState, Receiver
 from tests import main_lines
+from tests.test_source import first_use_race, source_ids
 from tests.test_timescale import (admin, ts_database, ts_site, database_engine, is_hypertable, uuid7,  # noqa: F401
-                                  needs_server, TIMESCALE)
+                                  needs_server, TIMESCALE, TEMPLATES)
 
 
 pytestmark = [mark.integration, needs_server]
@@ -545,3 +551,109 @@ def test_contended_dispatch_skips_deleted_row(contended_db, caplog: pytest.LogCa
     assert outcome.value == []
     assert count(contended_db, task_id) == 0
     assert warnings_with(caplog, 'dispatch') == []
+
+
+# --- The retry mark, the cancel, and the reserved source row ----------------------------------------
+
+
+def failed_row(engine: Engine) -> str:
+    """Submit, dispatch and confirm one task, and write back its failure; return its id."""
+    task_id = submit('false')
+    copy = dispatch_one(task_id)
+    confirm([task_id])
+    receive([finish(copy, exit_status=1)], io.StringIO())
+    if row(engine, task_id)['exit_status'] != 1:
+        pytest.fail(f'The failure of task ({task_id}) was not written back')
+    return task_id
+
+
+def retries_of(engine: Engine, task_id: str) -> List[Dict[str, Any]]:
+    """The committed rows that name the task as their previous attempt (id and schedule time)."""
+    with engine.connect() as conn:
+        rows = conn.execute(text('SELECT id, schedule_time FROM task WHERE previous_id = CAST(:id AS uuid)'),
+                            {'id': task_id}).mappings().all()
+    return [{'id': str(data['id']), 'schedule_time': data['schedule_time']} for data in rows]
+
+
+def test_contended_retry_mark_lands(contended_db) -> None:
+    """A retry mark that waited on another write to its failed row lands, and the row has exactly one retry."""
+    task_id = failed_row(contended_db)
+    holder_sql = f'UPDATE task SET client_host = :client_host {BY_ID}'
+
+    outcome = contend(contended_db, holder_sql, {'client_host': 'holder', 'id': task_id},
+                      lambda: [(task.id, task.previous_id) for task in Task.next(limit=1, attempts=2)])
+
+    assert outcome.error is None, repr(outcome.error)
+    retries = retries_of(contended_db, task_id)
+    assert len(retries) == 1, retries
+    assert outcome.value == [(retries[0]['id'], task_id)]
+    assert retries[0]['schedule_time'] is not None
+    data = row(contended_db, task_id)
+    assert data['retried'] is True and data['next_id'] == retries[0]['id']
+    assert data['client_host'] == 'holder'
+
+
+def test_contended_retry_mark_skips_cancelled_row(contended_db, caplog: pytest.LogCaptureFixture) -> None:
+    """A retry mark that waited on a cancel of its failed row does not mark it, and the row gets no retry."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    task_id = failed_row(contended_db)
+    cancelled = datetime.now().astimezone()
+
+    outcome = contend(contended_db, CANCEL_SQL, {'cancelled': cancelled, 'status': CANCEL_STATUS, 'id': task_id},
+                      lambda: [(task.id, task.previous_id) for task in Task.next(limit=1, attempts=2)])
+
+    assert outcome.error is None, repr(outcome.error)
+    assert outcome.value == []
+    assert retries_of(contended_db, task_id) == []
+    data = row(contended_db, task_id)
+    assert data['exit_status'] == CANCEL_STATUS and data['completion_time'] == cancelled
+    assert not data['retried'] and data['next_id'] is None
+    assert warnings_with(caplog, 'retry mark') == []
+
+
+def test_contended_cancel_lands(contended_db) -> None:
+    """A cancel that waited on another write to its row cancels it."""
+    task_id = submit()
+    holder_sql = f'UPDATE task SET client_host = :client_host {BY_ID}'
+
+    outcome = contend(contended_db, holder_sql, {'client_host': 'holder', 'id': task_id},
+                      lambda: Task.cancel_all([task_id]))
+
+    assert outcome.error is None, repr(outcome.error)
+    data = row(contended_db, task_id)
+    assert data['exit_status'] == CANCEL_STATUS
+    assert data['schedule_time'] is not None and data['completion_time'] is not None
+    assert data['client_host'] == 'holder'
+
+
+needs_hs283 = mark.skipif('hs283' not in TEMPLATES,
+                          reason='set HS_TEST_POSTGRES_TEMPLATES to include hs283 (a 2.8.3 database template)')
+
+
+@mark.parametrize('database', ['fresh', pytest.param('upgraded', marks=needs_hs283)])
+def test_reserved_source_concurrent_first_use(ts_database, ts_site, database: str) -> None:
+    """Two sessions that both miss the reserved source row before either inserts it both use the one row:
+    on a fresh database under the entry's provider, and on a 2.8.3 database upgraded under `postgres`."""
+    if database == 'upgraded':
+        name = ts_database('hs283')
+        engine = ts_site(name, provider='postgres')
+    else:
+        name = ts_database()
+        engine = ts_site(name, provider='timescale' if TIMESCALE else 'postgres')
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    if rc != exit_status.success:
+        pytest.fail(f'hs initdb failed ({rc}): {stderr}')
+    if source_ids(engine):
+        pytest.fail(f'The {database} database already has a source row')
+    bound = database_engine(name)
+    try:
+        Session.remove()
+        Session.configure(bind=bound)
+        results = first_use_race(bound, STDIN_SOURCE_ID)
+    finally:
+        Session.remove()
+        Session.configure(bind=data_core.engine)
+        bound.dispose()
+
+    assert results == [STDIN_SOURCE_ID, STDIN_SOURCE_ID], results
+    assert source_ids(engine) == [STDIN_SOURCE_ID]

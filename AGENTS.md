@@ -231,12 +231,15 @@ exit_status != CANCEL_STATUS`**, or cancelled tasks get resurrected.
 
 Nothing in the schema prevents a doubled retry. A failed row is retried once because the
 server's single Scheduler thread is the only caller of `Task.next`, and `Task.query_retryable`
-(under `select_failed`) skips rows already marked `retried`. **Unguarded**, each adding a second
-retry row with the same `previous_id`:
-- two servers on one database, which is unsupported: no query takes row locks, so new tasks
-  double-schedule too;
-- a process killed between the retry insert and the `retried` mark, which are separate commits;
-- a reset `retried` flag, from `hs update`.
+(under `select_failed`) skips rows already marked `retried`. **Unguarded**, adding a second retry
+row with the same `previous_id`: a reset `retried` flag, from `hs update`. Two servers on one
+database (unsupported) no longer double a retry, because each retry row commits only with its
+conditional `retried` mark, and a dispatch stamp lands only on a row still unscheduled. They can
+still run a task twice: a server that starts while another runs reverts that server's in-flight
+tasks (`Task.revert_interrupted`) and dispatches them again.
+
+The retry rows and their `retried` marks commit in one transaction, so a process killed between
+them leaves neither, and the failed row is retried in a later round.
 
 A returned result writes only its result columns (`Task.result_columns`), and only for its current
 assignment: the row's `schedule_time` as dispatched, while `completion_time` is NULL
@@ -248,7 +251,7 @@ A confirmation writes `client_id`/`client_host` only while `completion_time` is 
 so the result's attribution stands.
 
 Pre-2.9 SQLite databases keep `UNIQUE` on both columns, because SQLite cannot drop them without a
-table rebuild. Normal operation never trips them; in the three cases above they raise
+table rebuild. Normal operation never trips them; in the case above they raise
 `IntegrityError` instead.
 
 **Group-gating can stall by design:** `increment_group` won't advance while the current group
@@ -513,15 +516,19 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   eviction revert `Task.revert_orphaned` (conditional on the row still being in flight with the
   evicted client: a result landed meanwhile is kept, a removed row skipped), the dispatch stamp in
   `Task.next` (conditional on `schedule_time IS NULL`: a row removed, cancelled or scheduled
-  meanwhile is skipped, one never stamped stays unscheduled for a later round) and
-  `Task.apply_results` (re-run behind the classifying SELECT, `ResultOutcome.DEFERRED` at the bound,
-  held by the Receiver) are the pattern. The conditional writes (`revert_staged`, the eviction
-  revert, the dispatch stamp) skip a row gone or no longer qualifying and never raise on it;
-  `Task.confirm_all` (strict, the default) and `Task.revert_all` still raise `StaleDataError` on a
-  gone row, by design. Never use `bulk_update_mappings` or an ORM flush for such a
-  write: they assert the total and raise `StaleDataError`. The Scheduler's `retried` mark,
-  `Task.cancel_all` and `hs update` do not follow it yet
-  (`issues/hypertable-contended-scheduler-and-cli-writes.md`).
+  meanwhile is skipped, one never stamped stays unscheduled for a later round), the Scheduler's
+  retry mark in `Task.next` (conditional on the row still awaiting retry, and committed in one
+  transaction with its retry row: a row cancelled, deleted or marked meanwhile is skipped with no
+  retry row, one not marked at the bound stays retryable with no retry row for a later round),
+  `Task.cancel_all` (per-row UPDATE by id; returns the ids cancelled, leaving out a row not
+  cancelled at the bound) and `Task.apply_results` (re-run behind the classifying SELECT,
+  `ResultOutcome.DEFERRED` at the bound, held by the Receiver) are the pattern. The conditional
+  writes (`revert_staged`, the eviction revert, the dispatch stamp, the retry mark) skip a row gone
+  or no longer qualifying and never raise on it; `Task.confirm_all` (strict, the default),
+  `Task.revert_all` and `Task.cancel_all` still raise `StaleDataError` on a gone row, by design.
+  Never use `bulk_update_mappings` or an ORM flush for such a write: they assert the total and
+  raise `StaleDataError`. `hs update` does not follow it yet
+  (`issues/hs-update-contended-writes.md`).
 
 ## Testing
 
@@ -581,10 +588,10 @@ compatibility until v3, but are never referenced.
 
 - **`data/model.py`** — highest blast radius. A dropped `CANCEL_STATUS` filter or a missing
   `completion_time` silently double-runs or resurrects tasks; one retry per failed row rests on
-  the single Scheduler plus the `retried` filter, not on the schema (`previous_id`/`next_id` are
-  not unique, except in pre-2.9 SQLite databases); a contended `task`-row UPDATE can match 0 rows on
-  a TimescaleDB 2.29+ hypertable, so a new task-row write follows the `CONTENDED_RERUNS` rule in
-  *Data layer specifics*.
+  the single Scheduler plus the `retried` filter, with each retry mark committing with its retry
+  row, not on the schema (`previous_id`/`next_id` are not unique, except in pre-2.9 SQLite
+  databases); a contended `task`-row UPDATE can match 0 rows on a TimescaleDB 2.29+ hypertable,
+  so a new task-row write follows the `CONTENDED_RERUNS` rule in *Data layer specifics*.
 - **`server.py`** — Scheduler FSM, HeartMonitor (Issue-#29 re-registration branch, `evict_after≥10`),
   and shutdown/sentinel ordering.
 - **`client.py`** — FSMs, process-global resource counters under `executor_lock`, sticky
