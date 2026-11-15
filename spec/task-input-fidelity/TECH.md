@@ -82,12 +82,10 @@ phases:
     UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build
     -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 review:
-  last_reviewed_commit: 1a28fb9e4b360de91acb2f88275ee5898007ba88
-  verdict: changes-requested
-  blocked_reason: 'F2 (MEDIUM): a failure landing in the scheduler count window still
-    stops a stream run with the input open (server.py, human gate); F3 (LOW): §3 says
-    signals stop the scheduler at once'
-  cycle: 2
+  last_reviewed_commit: 664027aa35c718b205f1add40fe42f845afe9870
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — Every task the input gives runs as given
 

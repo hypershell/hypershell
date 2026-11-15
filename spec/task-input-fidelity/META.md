@@ -46,6 +46,17 @@
 - **Recommended fix:** Fetch in Step 1 and use `origin/{base}` for the diffstat, Step 2's diff and the merge check.
 - **Confidence:** high · **Effort:** small
 
+## F5 — The rubric does not say whether a coverage-only gap (a surviving mutant, no wrong behaviour) blocks
+`origin=hs-review:step4 severity=medium category=instruction status=open target=.agents/factory/review-rubric.md`
+- **What happened:** In cycle 3 the blind reviewer reported a guard that no test pins (`server.py:285`). A mutant that removes it passes every suite, and the branch itself behaves correctly. The rubric gives three answers to whether that blocks:
+  - the refutation protocol defines CONFIRMED as "reproduced with observed wrong behavior";
+  - the severity table grades "missing-but-non-blocking test coverage" as LOW;
+  - Verdict & loop blocks on any CONFIRMED finding.
+  On the last allowed cycle, the orchestrator had to rule alone. It recorded the gap as a non-blocking note (REVIEW N1) and surfaced it for triage.
+- **Skill cause:** The three sections disagree on coverage gaps, and none names surviving mutants.
+- **Recommended fix:** State in Verdict & loop whether a coverage-only gap blocks. For example: it blocks when a test an R-ID names is missing; otherwise it is recorded as LOW and surfaced for triage. Either answer changes when the loop's block fires, so the maintainer decides.
+- **Confidence:** med · **Effort:** small
+
 ## What worked well — hs-review (cycle 2)
 - **A later cycle defaults to a fresh blind pass over the full diff.** Cycle 2's only change was wording, yet the fresh
   reviewer, told nothing of cycle 1's finding, found a scheduler race (REVIEW F2) that a remediation-only check would have
