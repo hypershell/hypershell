@@ -261,3 +261,17 @@ the plain condition swap, then the §2.2 branch; `develop` itself for the "befor
   3.14 and 3.11, SQLite, and with `FD_PROVIDER=postgres|timescale` (sandbox off).
 - **Suite** on 3.11 and 3.14; PostgreSQL/TimescaleDB tests with `HS_TEST_POSTGRES`,
   `HS_TEST_TIMESCALE=community`; Sphinx `-W`.
+
+## Plan-gate rulings (2026-11-15)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+1. **P3 is kept.** The run stops promptly at the end of input, through a public wake that does not
+   touch the shutdown order and is not exposed over RPC.
+2. **`scheduled_work` keeps counting committed work only.** An open but silent input is not counted
+   as work, so runs that exit 0 on `develop` do not turn into exit 5.
+3. **`-T` during a pause is now a visible wait.** It used to be a silent drop. This is accepted as
+   the GOAL ruled. P4 files both seeds: the `-T` wait with work left, and the `-b N>1` commit wait
+   before a pause. The foreman schedules the `-T` seed after the agreed pre-2.9.0 list.
+4. **A producer that never closes keeps the run open,** as ruled at the GOAL gate. R9's note covers
+   it.
