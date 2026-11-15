@@ -4,7 +4,7 @@ title: 'Every task the input gives runs as given: date-like lines run as text, a
   a streamed run waits for its input to end'
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/task-input-fidelity
 base: develop
 current_phase: done
@@ -210,8 +210,27 @@ task is terminal; nothing else about when a run ends changes.
       input still being read does not.
 - [x] Evidence (commit body): the verify command; the stream modes with `FD_PROVIDER=postgres` and
       `FD_PROVIDER=timescale` (`pause`, `burst`, `fail-pause`; sandbox off); `pause` and `burst` on 3.11.
+- [x] Review-cycle-2 F2 (reopened; PLAN "Review-cycle-2 rulings"): tests first in
+      `tests/test_stream_input.py` that write a result between `count_remaining` and `increment_group`
+      — the failure with the input open (no FINAL, the late line runs, no critical); a line committed
+      to the failed group right after its check (run, not halted on); the last success with the input
+      ended after an earlier exhausted failure (FINAL, no critical); a task waiting in a higher group
+      (still the critical halt); and a `LocalCluster` whose scheduler count is held until the Receiver
+      has written the failure (`echo b` runs). Red on `1a28fb9`, green after.
+- [x] `Scheduler.load_bundle`: a non-viable group in non-`forever` mode halts only while a task waits
+      in another group (`Task.count_remaining_outside`, one statement); otherwise it is the out-of-work
+      case — back off while the input is open (or a line sits in the group), FINAL without the critical
+      once the input has ended and nothing is left.
+- [x] Review-cycle-2 F3: the §3 sentence in `AGENTS.md` and `invariants.md` drops "at once" (the
+      failed-group halt and the signals take effect on the next pass, within `server.poll`), names the
+      halt's condition (a task waiting in another group) and keeps the failed-task claim, now true.
+- [x] Evidence: P2's verify; the stream drives on SQLite, `postgres` and `timescale`; `fail-pause`
+      repeated on `timescale` and the natural `-N2` probe; full suite on 3.14; `test_stream_input.py`
+      on 3.11. Recorded under "Review remediation".
 - **Verify:** `uv run pytest -q tests/test_stream_input.py tests/test_group_order.py tests/test_server_fsm.py tests/test_restart.py tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py` and the drive modes `pause fail-pause burst server fifo nodb-stream file launch-false`.
-- **Touches:** `src/hypershell/server.py`, `src/hypershell/cluster/watch.py`, `tests/test_stream_input.py`.
+- **Touches:** `src/hypershell/server.py`, `src/hypershell/cluster/watch.py`, `tests/test_stream_input.py`;
+  for review-cycle-2, `src/hypershell/data/model.py` (one read-only `Task` count), `AGENTS.md`,
+  `.agents/factory/invariants.md`.
 
 ## Phase P3 — Optional: a prompt stop at the end of input
 **Satisfies:** R6 · **Depends on:** P2 · **hammerable** (the foreman may cut it at the plan gate;
@@ -254,6 +273,46 @@ seeded, and the whole evidence plan of `GOAL.md` passes.
       cross-version modes; the Sphinx build.
 - **Verify:** `uv run pytest -q`, the cross-version drives against `git archive 2.9.0a8 src`, and the Sphinx `-W` build.
 - **Touches:** `docs/cli/cluster.rst`, `docs/cli/server.rst`, `docs/_include/task_groups_alt.rst`, `AGENTS.md`, `.agents/factory/invariants.md`, `issues/`, `ROADMAP.md`.
+
+## Review remediation
+
+### Review cycle 2 (2026-11-15) — F2, F3
+
+Rulings: [`PLAN.md`](PLAN.md) "Review-cycle-2 rulings" (maintainer sign-off). P2 reopened and closed
+again with `set_phase.py`.
+
+- **F2 fix.** `Scheduler.load_bundle` (`server.py`, the non-viable branch after `increment_group`): in
+  non-`forever` mode a failed group halts (critical, FINAL) only while
+  `Task.count_remaining_outside(group)` (`data/model.py`, one read statement) finds a task waiting in
+  another group. With none, a result written back between `count_remaining` and `increment_group`
+  makes the pass the out-of-work case: FINAL without the critical when the input has ended and
+  nothing is left, otherwise a back-off. The ruling asked for the input-open case; the input-ended
+  case is handled too because the shipped `fail-pause` drive's CRITICAL on TimescaleDB is that
+  variant (the last success lands mid-pass after the earlier failure; `b` has run). The re-check
+  counts outside the failed group, not `count_remaining()`, so a line committed to the failed group
+  between `increment_group` and the re-check is loaded on the next pass instead of halted on.
+  `test_failed_group_still_halts_late_higher_group` stays green.
+- **F3.** `AGENTS.md` and `invariants.md` §3: the failed-group halt (now named with its condition, a
+  task waiting in another group) and SIGUSR1/SIGUSR2 take effect on the next pass, within
+  `server.poll`, not during a back-off; the failed-group/out-of-work equivalence is stated, which
+  keeps "a failed task with no retry left never ends a stream run early" true as built.
+- **Tests** (`tests/test_stream_input.py`, five new): `…failure_landing_during_the_count_waits_for_late_line`,
+  `…late_line_in_the_failed_group_during_the_check_still_runs`,
+  `…last_result_landing_during_the_count_after_a_failure_stops_quietly`,
+  `…failure_landing_during_the_count_still_halts_higher_group` (guard), and the integration
+  `…local_cluster_failure_during_the_count_waits_for_late_line` (the scheduler's count held until the
+  Receiver has written the failure; deterministic, ~2 s). On `1a28fb9`'s source (`git archive`,
+  `PYTHONPATH`, import path printed): 4 failed, 12 passed (the guard passes, as it should). On the
+  fix: 16 passed on 3.14 and on 3.11.
+- **Repeats, TimescaleDB, sandbox off.** `FD_PROVIDER=timescale fidelity_drive.sh fail-pause`: 24 of
+  24 ok, no CRITICAL, `b` ran every time. Natural probe `{ echo false; sleep 4; echo 'echo b'; } |
+  hsx -N2` with the drive's checks (no CRITICAL, `b` printed, one failed, none remaining): 16 of 16
+  ok. Before the input-ended branch was added, the first `fail-pause` smoke run on TimescaleDB
+  failed with the CRITICAL — the variant above.
+- **Verify.** P2's gate: 141 passed; drives pause, fail-pause, burst, server, fifo, nodb-stream, file,
+  launch-false all ok (SQLite, 3.14). `postgres` and `timescale`: pause, fail-pause, burst, server,
+  fifo all ok. Related suites (group order, server FSM, retry gate, cluster exit, zone model, zone
+  autoscale, autoscale, relay return, signal wake): 246 passed. Full suite, 3.14: 3012 passed, 111 skipped (3007 + the five new tests).
 
 ---
 

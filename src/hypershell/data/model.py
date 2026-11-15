@@ -880,6 +880,11 @@ class Task(Entity):
         return cls._filter_zone(query, zone).count()
 
     @classmethod
+    def count_remaining_outside(cls: Type[Task], group: int) -> int:
+        """Count of remaining unfinished tasks in every task group but `group`, in one statement."""
+        return cls.query().filter(cls.completion_time.is_(None)).filter(cls.group != group).count()
+
+    @classmethod
     def count_remaining_by_zone(cls: Type[Task], group: int) -> Dict[str, int]:
         """Count of unfinished tasks in `group` by zone id; the default zone is keyed by its reserved id."""
         counts = dict(cls.query(cls.zone, func.count(cls.id))

@@ -90,11 +90,16 @@ subsystems.
   before the scheduler starts, so its groups run in order. Stream input is best effort: a late
   lower group runs after the current one, with a warning.
 - **A non-`forever` scheduler stops for having run out of work only once its submitter has ended
-  and every task is terminal** (`Scheduler.load_bundle`). It still stops at once, input open or
-  not, when a group fails permanently (the halt above) or on SIGUSR1/SIGUSR2. `submission_complete()` is read **before** the counts (a submitter ends
-  only after its last commit); with every task done and the input still open it backs off without
-  `increment_group`/`report_held`, so a pause or a failed task with no retry left never ends a
-  stream run early. `ServerThread` wakes the scheduler once the submitter has ended.
+  and every task is terminal** (`Scheduler.load_bundle`). It also stops, input open or not, when a
+  group fails permanently while a task waits in another group (the halt above), and on
+  SIGUSR1/SIGUSR2; each takes effect on its next pass, within `server.poll`, not during a
+  back-off. `submission_complete()` is read **before** the counts (a submitter ends only after its
+  last commit); with every task done and the input still open it backs off without
+  `increment_group`/`report_held`. A failed group with no task waiting in another group is that
+  same case (a result can land between the count and `increment_group`): it backs off while the
+  input is open and stops without the halt once the input has ended. So neither a pause nor a
+  failed task with no retry left ends a stream run early. `ServerThread` wakes the scheduler once
+  the submitter has ended.
 
 ## 4. Server modes — guard before assuming DB behavior
 

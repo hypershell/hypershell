@@ -277,6 +277,15 @@ class Scheduler(StateMachine):
                 log.warning(f'Failed task group {group_info.value} ({group_info.reason})')
                 group_info.reason = f'waiting on failed tasks to be cleared'
                 # NOTE: Do not halt in this mode
+            elif Task.count_remaining_outside(group_info.value) == 0:
+                # A failed group halts the run only while a task waits in another group. With none, a
+                # result written back after the counts above makes this the out-of-work case: the run
+                # stops once the input has ended and nothing is left, and otherwise waits as it does
+                # there (a line committed to this group since its check is loaded on the next pass).
+                if input_ended and Task.count_remaining() == 0:
+                    return SchedulerState.FINAL
+                return self.back_off(generation, f'Failed task group {group_info.value} holds no task '
+                                                 f'in another group')
             else:
                 log.critical(f'Failed task group {group_info.value} ({group_info.reason})')
                 return SchedulerState.FINAL

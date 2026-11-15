@@ -29,6 +29,7 @@ from sqlalchemy.engine import Engine
 
 # Internal libs
 import hypershell.server
+from hypershell.data.core import Session
 from hypershell.data.model import Task
 from hypershell.server import Scheduler, SchedulerState
 from hypershell.cluster.local import LocalCluster
@@ -146,6 +147,115 @@ def test_failed_group_still_halts_late_higher_group(task_db: Engine, caplog: pyt
     assert [message for message in critical(caplog) if f'{FAILED_GROUP_MESSAGE} 0' in message]
 
 
+def land_after_count(monkeypatch: pytest.MonkeyPatch, task_id: str, outcome=fail) -> List[str]:
+    """Write the task's result (`outcome`) right after the first count that still sees it unfinished.
+
+    This is a result written back by the Receiver while the scheduler is between its count of
+    unfinished tasks and its group check. Returns a list that holds the task id once it has landed.
+    """
+    count_remaining = Task.count_remaining
+    landed = []
+
+    def count_then_land(*args: Any, **kwargs: Any) -> int:
+        count = count_remaining(*args, **kwargs)
+        if count and not landed:
+            outcome(task_id)
+            landed.append(task_id)
+        return count
+
+    monkeypatch.setattr(Task, 'count_remaining', count_then_land)
+    return landed
+
+
+@mark.unit
+def test_failure_landing_during_the_count_waits_for_late_line(task_db: Engine, monkeypatch: pytest.MonkeyPatch,
+                                                              caplog: pytest.LogCaptureFixture) -> None:
+    """A failure written back between the count and the group check does not halt a run with input open."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    submitter = OpenInput()
+    scheduler = make_scheduler(submitter=submitter, attempts=1)
+    first = commit_tasks(0)
+    assert [task_id for _, task_id in first_bundle(scheduler)] == first
+    landed = land_after_count(monkeypatch, first[0])
+    assert scheduler.load_bundle() is SchedulerState.LOAD
+    assert landed == first
+    assert critical(caplog) == []
+    late = commit_tasks(0)
+    assert run_bundle(scheduler) == late
+    assert scheduler.load_bundle() is SchedulerState.LOAD
+    submitter.alive = False
+    assert scheduler.load_bundle() is SchedulerState.FINAL
+    assert critical(caplog) == []
+
+
+@mark.unit
+def test_late_line_in_the_failed_group_during_the_check_still_runs(task_db: Engine,
+                                                                   monkeypatch: pytest.MonkeyPatch,
+                                                                   caplog: pytest.LogCaptureFixture) -> None:
+    """A line committed to the failed group just after its group check is run, not halted on."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    submitter = OpenInput()
+    scheduler = make_scheduler(submitter=submitter, attempts=1)
+    first = commit_tasks(0)
+    assert [task_id for _, task_id in first_bundle(scheduler)] == first
+    land_after_count(monkeypatch, first[0])
+    increment_group = Task.increment_group
+    late = []
+
+    def check_then_commit(*args: Any, **kwargs: Any) -> Any:
+        info = increment_group(*args, **kwargs)
+        if not late:
+            late.extend(commit_tasks(0))
+        return info
+
+    monkeypatch.setattr(Task, 'increment_group', check_then_commit)
+    assert scheduler.load_bundle() is SchedulerState.LOAD
+    assert critical(caplog) == []
+    assert late and run_bundle(scheduler) == late
+    submitter.alive = False
+    assert scheduler.load_bundle() is SchedulerState.FINAL
+    assert critical(caplog) == []
+
+
+@mark.unit
+def test_last_result_landing_during_the_count_after_a_failure_stops_quietly(task_db: Engine,
+                                                                            monkeypatch: pytest.MonkeyPatch,
+                                                                            caplog: pytest.LogCaptureFixture) -> None:
+    """With the input ended, the last result landing between the count and the group check ends the run.
+
+    An earlier task in the group failed with no retry left; the run is complete, so it stops as any
+    complete run does, with no failed-group halt.
+    """
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    submitter = OpenInput()
+    scheduler = make_scheduler(submitter=submitter, attempts=1)
+    commit_tasks(0)
+    run_bundle(scheduler, outcome=fail)
+    late = commit_tasks(0)
+    assert [task_id for _, task_id in first_bundle(scheduler)] == late
+    submitter.alive = False
+    landed = land_after_count(monkeypatch, late[0], outcome=succeed)
+    assert scheduler.load_bundle() is SchedulerState.FINAL
+    assert landed == late
+    assert critical(caplog) == []
+    assert Task.count_remaining() == 0
+
+
+@mark.unit
+def test_failure_landing_during_the_count_still_halts_higher_group(task_db: Engine,
+                                                                   monkeypatch: pytest.MonkeyPatch,
+                                                                   caplog: pytest.LogCaptureFixture) -> None:
+    """The same late failure halts the run when a task waits in another group, as any failed group does."""
+    caplog.set_level(logging.DEBUG, logger='hypershell')
+    scheduler = make_scheduler(submitter=OpenInput(), attempts=1)
+    first = commit_tasks(0)
+    assert [task_id for _, task_id in first_bundle(scheduler)] == first
+    commit_tasks(1)
+    land_after_count(monkeypatch, first[0])
+    assert scheduler.load_bundle() is SchedulerState.FINAL
+    assert [message for message in critical(caplog) if f'{FAILED_GROUP_MESSAGE} 0' in message]
+
+
 @mark.unit
 def test_scheduled_work_ignores_open_input(task_db: Engine) -> None:
     """Input still being read is not work a client could run; a committed line is."""
@@ -200,6 +310,64 @@ def test_local_cluster_runs_input_after_a_pause(task_db: Engine, monkeypatch: py
     assert rows == {'echo a': 0, 'echo b': 0}
     assert final_input_ended == [True]
     assert sorted((tmp_path / 'out.txt').read_text().split()) == ['a', 'b']
+
+
+def task_stage(args: str) -> str:
+    """Where the task with these `args` stands (new, scheduled or finished), read through a separate session."""
+    session = Session.session_factory()
+    try:
+        task = session.query(Task).filter(Task.args == args).one_or_none()
+        if task is None or task.schedule_time is None:
+            return 'new'
+        return 'scheduled' if task.completion_time is None else 'finished'
+    finally:
+        session.close()
+
+
+@mark.integration
+def test_local_cluster_failure_during_the_count_waits_for_late_line(task_db: Engine,
+                                                                    monkeypatch: pytest.MonkeyPatch,
+                                                                    tmp_path: Path) -> None:
+    """A failure written back while the scheduler counts, its input open, still lets a late line run."""
+    monkeypatch.setattr(hypershell.server, 'DATABASE_ENABLED', True)
+    landed = threading.Event()
+    count_remaining = Task.count_remaining
+
+    def count_then_wait(*args: Any, **kwargs: Any) -> int:
+        # The scheduler's first count that sees the failing task dispatched and not yet finished is
+        # held until the Receiver has written its failure, so the group check that follows sees it.
+        count = count_remaining(*args, **kwargs)
+        if (count and not landed.is_set() and threading.current_thread().name == 'hypershell-scheduler'
+                and task_stage('false') == 'scheduled'):
+            deadline = time.monotonic() + 30
+            while task_stage('false') != 'finished' and time.monotonic() < deadline:
+                time.sleep(0.05)
+            landed.set()
+        return count
+
+    monkeypatch.setattr(Task, 'count_remaining', count_then_wait)
+
+    def source():
+        yield 'false'
+        if not landed.wait(60):
+            raise RuntimeError('The scheduler never counted the failing task while it ran')
+        yield 'echo b'
+
+    with open(tmp_path / 'out.txt', mode='w') as output:
+        cluster = LocalCluster(source=source(), num_threads=1, bundlesize=1, bundlewait=1, poll=1,
+                               max_retries=0, port=free_port(), redirect_output=output)
+        cluster.start()
+        try:
+            cluster.join(timeout=60)
+            assert not cluster.is_alive()
+        finally:
+            if cluster.is_alive():
+                cluster.server.scheduler.stop()
+                cluster.join(timeout=30)
+
+    rows = {task.args: task.exit_status for task in Task.query(caching=False).all()}
+    assert rows == {'false': 1, 'echo b': 0}
+    assert (tmp_path / 'out.txt').read_text().split() == ['b']
 
 
 WAKE_BOUND = 10
