@@ -273,3 +273,19 @@ its own docs environment.
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-15)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+- **D1 (wording):** accepted. A key number names `autoscale.period`; a key string names `-P/--period`,
+  as #106 does for `"5MB"`.
+- **D2 (NaN):** accepted. A NaN period is refused as not greater than zero.
+- **D3 (Python API):** accepted. `AutoScaler`, `TopologyPublisher` and `SiteScaler` stay unguarded;
+  only the commands and the key are graded.
+- **D4 (ordering):** accepted. P2 and P3 are independent slices after P1, run in order.
+- **Sibling cycle:** `env-config-keys` is in flight and will give `autoscale.period` a declared type
+  from the environment. `check_args()` re-runs `parse_period` on the parsed value, so the floor holds
+  whichever type arrives; whichever cycle lands second rebases onto the other.
+- **Flaky test:** a `database is locked` failure in `test_upgrade_cli.py` under load is not this
+  cycle's; re-run it alone, as TECH says.
