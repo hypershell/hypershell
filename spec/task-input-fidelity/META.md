@@ -31,3 +31,17 @@
   question" and the obvious stream fix was a one-term change; the scoped two-brief fan-out the
   exception forced found that the one-term change still drops a late line after any failed task (the
   failed-group halt), which the design now avoids. `origin=hs-plan:step3`
+
+## F3 — The human-gate trigger list omits the lifecycle invariants a scheduler change touches
+`origin=hs-review:step4 severity=medium category=instruction status=open target=.agents/factory/review-rubric.md`
+- **What happened:** The only CONFIRMED finding (F1 in `REVIEW.md`) is prose in the branch's §3 invariant record about the scheduler's stop conditions and group gating. The rubric's gate lists core files and "security / DB-lifecycle" invariants by name (auth, TLS, CANCEL_STATUS/exit_status filters, `completion_time`, one retry row, `in_memory` guards); scheduler stop conditions, group gating and the §6 shutdown order are not on it, and the invocation had to say they count. Nor does the rubric say whether a finding confined to `invariants.md`/`AGENTS.md` text "touches" an invariant.
+- **Skill cause:** The gate list predates changes to the scheduler's lifecycle, and it is silent on findings in the invariant record itself.
+- **Recommended fix:** Add the scheduler stop conditions, group gating (§3) and the shutdown order (§6) to the gate list, and say that a CONFIRMED finding in the text of a gated invariant triggers the gate. This widens the gate; it does not weaken it.
+- **Confidence:** med · **Effort:** small
+
+## F4 — The review's base is local `develop`; worktree cycles need `origin/develop`
+`origin=hs-review:step1 severity=low category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** The injected diffstat and Step 2's diff use `develop...HEAD`. In a worktree the local `develop` can lag `origin/develop`, so the diff the blind reviewer gets would carry unrelated hunks. The invocation said to fetch and diff against `origin/develop`, and the review did.
+- **Skill cause:** Same root as F2 (hs-feature): the steps predate the worktree practice.
+- **Recommended fix:** Fetch in Step 1 and use `origin/{base}` for the diffstat, Step 2's diff and the merge check.
+- **Confidence:** high · **Effort:** small

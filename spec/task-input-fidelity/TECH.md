@@ -4,7 +4,7 @@ title: 'Every task the input gives runs as given: date-like lines run as text, a
   a streamed run waits for its input to end'
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/task-input-fidelity
 base: develop
 current_phase: done
@@ -82,10 +82,11 @@ phases:
     UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build
     -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 0b84a745b0fa63ac1450ed7d67f28eb10c1b175d
+  verdict: changes-requested
+  blocked_reason: 'F1 (LOW, prose): invariants.md §3 and AGENTS.md overstate the scheduler
+    stop rule; human gate'
+  cycle: 1
 ---
 # TECH.md — Every task the input gives runs as given
 
