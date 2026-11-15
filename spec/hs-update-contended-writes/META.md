@@ -56,3 +56,17 @@
 - **Recommended fix:** As recorded there: an external-wait phase flag, and a Step 1 rule that
   proceeds past it.
 - **Confidence:** high · **Effort:** small
+
+## F4 — hs-review Step 2 has no input for gate rulings or a prior cycle's findings
+`origin=hs-review:step2 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** Review cycle 2 had to grade cycle 1's F1–F3 under the maintainer's review-cycle-1
+  rulings, and grade the code under the plan-gate rulings D1–D5. Both sets of rulings are recorded in
+  `PLAN.md`, and the findings in `REVIEW.md`. The reviewer may read neither. The orchestrator rewrote
+  them into the reviewer's prompt, as the brief directed.
+- **Skill cause:** Step 2 says the reviewer gets *only* GOAL, the diff, invariants and the rubric.
+  Step 3's cycle-2+ rule says to verify the remediation of named findings, but no step says how those
+  findings and the rulings reach a blind reviewer.
+- **Recommended fix:** Add to Step 2's input list: the verbatim ruling bullets of every gate (the
+  contract readings, not the plan's rationale), and for cycle 2+ the prior cycle's Findings section
+  from `REVIEW.md`. Keep `PLAN.md` and `TECH.md` themselves off-limits; blindness is not weakened.
+- **Confidence:** med · **Effort:** small

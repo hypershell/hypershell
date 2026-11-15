@@ -167,3 +167,154 @@ mutated more than once.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Review cycle 2 — approved (2026-11-15)
+
+- **Reviewed commit:** 839dfff8ebb1e0c23b7b5bd2a845bbf70a09b903  ·  **Base:** `fbc656e` (`origin/develop`, unchanged since cycle 1)
+- **Verdict:** approved
+- **Cycle:** 2 of ≤3
+- **Mode:** a fresh blind pass over the full spec-excluded diff, which also graded the remediation of
+  cycle 1's F1–F3. One reviewer; no `debate`, no `completeness` sub-pass. The reviewer got
+  `GOAL.md`, the drive scripts, `red.txt`, `ci-red.txt` and `evidence/ci-red/`, and the base copies
+  of `invariants.md` and `AGENTS.md`. It also got the GOAL-gate, plan-gate (D1–D5, risks, wording)
+  and review-cycle-1 rulings as contract readings, plus a neutral statement of F1–F3. It did not
+  see `PLAN.md`, `TECH.md`, `research/`, `META.md`, this file, or branch commit bodies. The
+  orchestrator re-ran the deciding evidence.
+
+### Pre-flight
+
+- **Base.** `origin/develop` was fetched at the start and again at the end. Both times it was
+  `fbc656e`, the merge base. The cycle-2 delta outside `spec/` (`git diff ee5fcd45 HEAD -- .
+  ':(exclude)spec/'`) is four files: invariants §1, `data/model.py` (the `tried` parameter and its
+  two call sites), `tests/test_contended_recovery.py` and `tests/test_contended_write.py`.
+- **Build state.** `TECH.md` reads `status: in_progress`, with P7 (CI green on the fix, an external
+  wait on the draft PR) `pending`. CI on this head is the build's to record and was not checked
+  here (no GitHub calls).
+- **Contract drift.** None after the lock: `GOAL.md`'s history is still the shaping commit `86bd92d`
+  and the GOAL-gate lock `f00f853`.
+- **Merge.** Clean against `origin/develop`, which is the merge base. PR #110's head
+  (`origin/fix/task-input-fidelity`) has moved to `424cefd` since cycle 1. Against it,
+  `git merge-tree --write-tree HEAD origin/fix/task-input-fidelity` reports no conflict (tree
+  `6221a92`). That merge tree was exported and the affected suites run from it:
+  - SQLite (`test_update`, `test_list`, `test_contended_recovery`, `test_task_wire`,
+    `test_stream_input`): 258 passed.
+  - `test_contended_write` and `test_writeback_postgres`: 70 passed, 1 skipped (the 2.8.3
+    template) on plain PostgreSQL 18, and the same on TimescaleDB 2.32.
+
+### Verification run
+
+Orchestrator (sandbox off for PostgreSQL; test fixtures create and drop their own databases):
+
+- Full SQLite suite, serial: `uv run pytest -q -p no:cacheprovider` → 2869 passed, 136 skipped, 0
+  failed.
+- Docs: `UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-hurv2`
+  → exit 0 with no Sphinx warnings. `cli/task_update.html` renders seven "Changed in version 2.9.0"
+  blocks.
+- The seven tests added since cycle 1 (`test_update_filtered_skipped_row_lands_at_bound[update|delete]`,
+  `test_update_filtered_skipped_row_past_bound_writes_nothing[update|delete]`,
+  `test_contended_update_delete_leaves_row_moved_out_of_filter[filtered|limit]`,
+  `test_update_delete_limit_skips_task_changed_out_of_filter`) → 7 passed on plain PostgreSQL 18 and
+  7 passed on TimescaleDB 2.32.
+- `RED_BASE_REV=ee5fcd45 RED_LIST=<the four F1 lines of red.txt> sh spec/relay-hardening/drive/red_check.sh`
+  on plain PostgreSQL 18 → 4 of 4 RED (AssertionError). The F1 tests tell the cycle-1 code from the
+  fix.
+
+Reviewer (its own `hurv2r_` databases, all dropped; tree clean on hand-back):
+
+- `tests/test_contended_recovery.py tests/test_update.py tests/test_list.py` (SQLite) → 78 passed.
+- `tests/test_contended_write.py` → 44 passed, 1 skipped, on plain PostgreSQL 18 and on TimescaleDB
+  2.32.
+- `red_check.sh` with `RED_BASE_REV=f00f853` and the full `red.txt` on plain PostgreSQL → 32 of 32
+  RED.
+- `red_check.sh` with `RED_BASE_REV=ee5fcd45` and the four F1 tests → 4 of 4 RED, on both servers.
+- An attempt-counting probe:
+  - **Setup.** A row trigger bumps a non-transactional sequence, so the count survives a rollback,
+    on top of the `skipping` trigger. It ran on both servers, over the filtered update, the
+    filtered `--delete`, the `--limit` update, `--limit --delete` and the legacy form.
+  - **At HEAD,** every form makes exactly 4 attempts on the skipped row, both at the bound (3
+    skips: exit 0, written) and past it (4 skips: exit 5, every row unchanged). Past the bound the
+    log shows `WARNING … did not land for task (<id>) after 4 attempts - nothing written|deleted`,
+    then `CRITICAL … Contended: Update of task (<id>) was contended after 4 attempts - nothing was
+    written`.
+  - **At `ee5fcd45`,** the two filtered forms make 5 attempts with 4 skips and exit 0. This is the
+    cycle-1 defect.
+- SQL capture on PostgreSQL (`before_cursor_execute`):
+  - The filtered update sends `UPDATE … WHERE … RETURNING task.id`, then one `SELECT task.id … WHERE …`.
+  - The filtered `--delete` sends `DELETE FROM task WHERE …` with no `RETURNING`, then the same
+    `SELECT`.
+- Compressed TimescaleDB chunks: six filtered and `--limit` forms, update and delete. Every
+  "Updated N" and "Deleted N" equals the rows written.
+- Base-vs-HEAD differential drive in `temp_site.sh` (SQLite; 17 `hs list` queries and 14 `hs update`
+  scenarios): only the D2 lines differ (`-t a b`, `-t b a`).
+- `update_drive.sh` → 6 of 6 PASS on sqlite, postgres and timescale.
+- Other callers of `Task.update` (`test_zone_postgres`, `test_writeback_postgres`, `test_update`,
+  `test_list`) → 54 passed on plain PostgreSQL, and the same on TimescaleDB.
+
+### Cycle-1 findings
+
+- **F1 [CRITICAL] — fixed.** `update_matching` and `delete_matching` pass `tried=1` (`model.py:1268`,
+  `:1296`), so a missed row gets attempts 2 to 4 by id (`model.py:1111-1118`). The WARNING and
+  `Task.Contended` (`:1151-1155`) say "after 4 attempts", the true total. The `--limit` and legacy
+  paths pass no `tried` and run `range(1, 5)` with no extra DEBUG line, as before. Evidence: the F1
+  tests are red on `ee5fcd45` and green at HEAD; the attempt-counting probe gives 4 attempts on
+  every form.
+- **F2 [LOW] — fixed.** invariants §1 now says that the UPDATE returns its ids (`RETURNING id`),
+  while the DELETE takes its row count and the one read of the ids still matching, with no
+  `RETURNING`. The SQL capture shows exactly that. `AGENTS.md` was already right.
+- **F3 [LOW] — fixed.** `test_update_delete_limit_skips_task_changed_out_of_filter` (SQLite, `--limit`)
+  and `test_contended_update_delete_leaves_row_moved_out_of_filter[filtered|limit]` (the real race)
+  each assert "Deleted 3 tasks", the warning and exit 0. All three pass at HEAD and are red on
+  `f00f853`.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `Task.update` → `__write_rows(abort=True)`; `update_legacy` maps a gone row's `StaleDataError` to `Task.NotFound`; `Task.Contended` in `exceptions` | `test_update_legacy_contended_lands_on_rerun`, `…_exhausted_writes_nothing`, `…_missing_task_not_found`; `test_contended_update_legacy_lands` (red on CI 2.31 only); attempt probe; CLI drive of a missing id (CRITICAL NotFound, exit 5) | ✅ |
+| R2 | `update_selected`/`delete_selected` (by id under the filter); `update_matching`/`delete_matching` (set-based, then the PostgreSQL residual read) | `…_skips_task_changed_out_of_filter`, `test_update_limit_cancel_keeps_result_landed_meanwhile`, `test_contended_update_*_lands`, `…_leaves_row_moved_out_of_filter` (now `--delete` too), `test_update_filtered_skipped_row_written`/`…_deleted` | ✅ |
+| R3 | `TaskUpdateApp.report_written` | `NOT_MATCHED` assertions (update and now delete); `update_drive.sh` prompt scenario on three databases; compressed-chunk probe | ✅ |
+| R4 | `abort=True` on every `hs update` path; `Task.Contended` → `handle_exception`, CRITICAL, exit 5 | exhausted tests (incl. `--limit` over 150 rows); the past-bound F1 tests; attempt probe across five forms | ✅ |
+| R5 | `Task.__change`: one SET for every change | `tests/test_update.py` R5 tests; `test_update_combined_changes_pg[*]`, `test_update_tag_keys_and_removals_pg[*]`; `update_drive.sh` on three databases | ✅ |
+| R6 | `DriverContention` kinds; the PostgreSQL `skipping` trigger; `contend` | `red.txt` 32 of 32 RED at `f00f853`; `evidence/ci-red/failed.log`: the five real-race tests red only on the 2.31.0 jobs | ✅ (CI green is P7's) |
+| R7 | `task_update.rst` (seven `versionchanged:: 2.9.0`), `task_update_desc.rst`, `task_search.rst`, AGENTS.md, invariants §1 | docs build `-W` exit 0; prose checked against the SQL capture and the attempt probe | ✅ |
+| D2 | the shared tag-criteria builder | `test_list_name_only_tags_check_every_tag`, `test_update_name_only_tags_check_every_tag`; differential drive (only `-t a b`/`-t b a` differ) | ✅ |
+| Set-based pin | `update_matching` | `test_update_filtered_uncontended_is_one_statement`, `test_update_filtered_uncontended_statements_pg`; SQL capture | ✅ |
+| D4, D5 | early return; `handle_exception` | drive: "Updated 0 tasks", exit 0, no warning; CRITICAL lines in the probe | ✅ |
+
+Unmapped changes are as in cycle 1 and none is harmful:
+- the argument-order sentence in `task_update_desc.rst`, which the reviewer drove and found accurate;
+- `--revert` using `Task.revert_columns` (the same thirteen columns);
+- `UPDATE_BATCH_SIZE` removed (no other user);
+- test infrastructure;
+- the seed and `ROADMAP.md` status flip.
+
+### Findings
+
+None. No CONFIRMED and no PLAUSIBLE findings.
+
+Candidates refuted and dropped:
+- **A row that starts matching only after the set-based statement.** It is handed over with
+  `tried=1`, so it gets three attempts by id while the messages say four. The review-cycle-1 ruling
+  counts the set-based statement as each missed row's first attempt, and the case needs such a row
+  to be contended three times in a row. Not reproduced.
+- **`tried` at or above the bound.** The loop would make no attempt, but the only value any caller
+  passes is 1.
+- **Bind-name collisions, the `commit=False` rollback, and `remove=True` with `tried`.** All correct
+  in the probes: an abort rolls back the rows the set-based statement had already written.
+- **Counts on compressed chunks.** Exact.
+- **Any change to the `--limit` and legacy paths in cycle 2.** None: `tried` defaults to 0.
+
+### Human-gate triggers
+
+- **Not triggered this cycle.** There is no CONFIRMED finding. Cycle 1's trigger (F1 in
+  `data/model.py`, against invariants §1) was discharged by the maintainer's sign-off on the
+  review-cycle-1 rulings, given before the remediation.
+- The remediation is itself a `data/model.py` change: the `tried` parameter, in 27 changed lines.
+  This cycle verified it by executed evidence: the F1 tests red on `ee5fcd45`, and the
+  attempt-counting probe on both servers.
+- The DB-lifecycle invariants are not hit. The cycle-2 delta changes only how many attempts the
+  filtered form makes on a missed row.
+
+### Optional completeness sub-pass
+
+- Not run (not requested).

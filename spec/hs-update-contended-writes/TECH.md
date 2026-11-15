@@ -168,12 +168,10 @@ phases:
   verify: uv run python spec/hs-update-contended-writes/drive/ci_check.py green spec/hs-update-contended-writes/evidence/ci-green
     --code-rev "$(git log -1 --format=%H -- . ':!spec')"
 review:
-  last_reviewed_commit: ee5fcd45d51f101dabb8f72b84581c9043c96fe0
-  verdict: changes-requested
-  blocked_reason: 'review cycle 1: F1 PostgreSQL residual pass re-runs a missed row
-    CONTENDED_RERUNS+1 times (invariants §1); F2 invariants prose; F3 delete coverage;
-    human gate'
-  cycle: 1
+  last_reviewed_commit: 839dfff8ebb1e0c23b7b5bd2a845bbf70a09b903
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
 ---
 # TECH.md — `hs update` writes every requested change to exactly the rows it counts, contended or not, and says plainly when it cannot
 
