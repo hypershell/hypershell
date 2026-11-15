@@ -222,6 +222,16 @@ the input. It is committed and run eventually, so no stop depends on it. Pre-exi
 *Horizon: near-term · Depends on: — · Refs: `spec/task-input-fidelity/research/02-stream-stop.md`*
 **Seed:** [`issues/stream-bundlewait-commit-wait.md`](issues/stream-bundlewait-commit-wait.md) · *status: unshaped*
 
+## No test pins the re-count before a quiet stop when a failed group ends a stream run
+
+When the input has ended and a failed group holds no task in another group, the scheduler counts the
+remaining tasks once more before it stops quietly, so a row another writer commits in that instant
+is still scheduled or halts the run. The behaviour is right, but removing the re-count passes every
+test. A deterministic interleaving test should pin it. Filed after `task-input-fidelity` (#110).
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/task-input-fidelity/` (REVIEW cycle 3, N1)*
+**Seed:** [`issues/stream-failed-group-recount-test.md`](issues/stream-failed-group-recount-test.md) · *status: unshaped*
+
 ## An empty task file never finishes
 
 `hsx` given an empty task file on an empty database never exits: the server logs `Empty database -
@@ -243,6 +253,17 @@ and after `group-advance-strands-lower-group`. Pre-existing, and found by that c
 
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
 **Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
+
+## An autoscaler read that meets a locked SQLite database ends the cluster
+
+With failed-launch counting on (the default for `hs cluster`), the autoscaler reads client
+registrations on every check. On SQLite under a busy stream of submissions that read can fail with
+`database is locked`, and the autoscaler ends the run with a traceback file instead of treating it
+as transient. Seen once on CI; introduced with `cluster-launch-failures` (#107), not yet released.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/cluster-launch-failures/`; the submitter's
+side above*
+**Seed:** [`issues/autoscale-read-database-locked.md`](issues/autoscale-read-database-locked.md) · *status: unshaped*
 
 ## A non-integer task group is accepted at submit time
 
@@ -670,6 +691,26 @@ developer's own database location. Split out of `relay`'s review.
 *Horizon: near-term, small · Depends on: — · Refs: `spec/relay/` C4-3, C4-4; `relay-hardening`
 (landed, #103: the relay abort races and rough edges, each with its own tests)*
 **Seed:** [`issues/relay-test-strength.md`](issues/relay-test-strength.md) · *status: unshaped*
+
+## Two CI tests fail intermittently and pass on a re-run
+
+`test_queue_limits.py`'s open-file-limit test can wait forever for two distinct clients when one
+client takes every quick task, and the relay site-key test fails when a process it scans exits
+mid-read and psutil raises `AccessDenied`. Each has cost re-runs on recent pull requests; both are
+small test-side fixes.
+
+*Horizon: near-term, small · Depends on: — · Refs: CI on #104, #107 and #110*
+**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md),
+[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: unshaped*
+
+## `pytest -n auto` fails at collection
+
+`AGENTS.md` recommends a parallel local run, but some parametrized test ids differ between workers,
+so pytest-xdist refuses to start and every run is serial (about 25 minutes). Stable ids, or an
+honest `AGENTS.md`, would fix it.
+
+*Horizon: near-term, small · Depends on: — · Refs: `AGENTS.md` § Commands*
+**Seed:** [`issues/pytest-xdist-collection-ids.md`](issues/pytest-xdist-collection-ids.md) · *status: unshaped*
 
 # Part III — Turso follow-ons
 
