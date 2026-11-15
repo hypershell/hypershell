@@ -9,8 +9,8 @@ transaction open, so the row lock is held. HyperShell's write then runs in a thr
 that lock; the test sees it blocked from the server (`pg_stat_activity` and `pg_blocking_pids`),
 not from a sleep, and only then commits the holder. The write must behave as it does on PostgreSQL:
 it lands if the row still qualifies once the holder commits, and is refused only for the reason it
-would be refused without the wait. TimescaleDB 2.29 and later report 0 matched rows for such a
-write on a hypertable, although the row exists and still qualifies.
+would be refused without the wait. TimescaleDB 2.28.1 through 2.31.0 report 0 matched rows for
+such a write on a hypertable, although the row exists and still qualifies (fixed in 2.32.0).
 
 The tests need a PostgreSQL server, as `tests/test_timescale.py` documents:
 

@@ -67,10 +67,10 @@ scheduler's failure and retry queries filter it out explicitly.
 CONTENDED_RERUNS: Final[int] = 3
 """Extra attempts for a task-row UPDATE that matched no row while the row still qualifies.
 
-On a TimescaleDB 2.29+ hypertable, an UPDATE that waited on another transaction's row lock can
-report 0 matched rows although the row exists and still satisfies the statement's condition. A
-new statement sees the other transaction's commit and matches normally, so a write that a fresh
-read shows still qualifies is re-run, at most this many times.
+On a TimescaleDB 2.28.1 through 2.31.0 hypertable, an UPDATE or DELETE that waited on another
+transaction's row lock can report 0 matched rows although the row exists and still satisfies the
+statement's condition. A new statement sees the other transaction's commit and matches normally,
+so a write that a fresh read shows still qualifies is re-run, at most this many times.
 """
 
 DIRECT_SOURCE_ID: Final[str] = '00000000-0000-7000-8000-000000000000'

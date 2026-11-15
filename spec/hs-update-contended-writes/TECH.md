@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/hs-update-contended-writes
 base: develop
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -124,7 +124,7 @@ phases:
 - id: P6
   name: Docs (versionchanged 2.9.0), AGENTS.md and invariants §1 drop the hs update
     exception; full local evidence
-  status: pending
+  status: done
   satisfies:
   - R7
   - R6
@@ -395,22 +395,30 @@ written or the update aborts; DELETE alike; counts are of rows written.
 **Satisfies:** R7, R6 · **Depends on:** P5
 **Goal:** the user docs and the constitution say what the code now does, in the same change.
 
-- [ ] `docs/cli/task_update.rst`: `.. versionchanged:: 2.9.0` entries for the six user-visible changes
+- [x] `docs/cli/task_update.rst`: `.. versionchanged:: 2.9.0` entries for the six user-visible changes
       (GOAL list), after the existing `versionadded`.
-- [ ] `docs/_include/task_update_desc.rst`: what "Updated N"/"Deleted N" count and the "no longer
+- [x] `docs/_include/task_update_desc.rst`: what "Updated N"/"Deleted N" count and the "no longer
       matched" warning; the filter re-checked as each task is written; a contended update writes
       nothing and exits 5, so rerunning it is safe; `--limit` holds its rows until it finishes;
       changes go before `-t`.
-- [ ] `AGENTS.md` § Data layer specifics and `.agents/factory/invariants.md` §1: the closing "`hs
+- [x] `AGENTS.md` § Data layer specifics and `.agents/factory/invariants.md` §1: the closing "`hs
       update` does not follow it yet" sentence goes; the pattern list gains `hs update` (`Task.update`
       by id, raising on a gone row; `update_selected`/`delete_selected` by id under the user's filter;
       `update_matching`/`delete_matching` set-based with the PostgreSQL residual read; all-or-nothing
       at the bound, `Task.Contended`). `AGENTS.md` § High-risk files' `data/model.py` line names the
       filter condition if it lists conditions.
-- [ ] `sphinx-build -W` clean; the full suite on SQLite; the server modules on both local servers.
+- [x] `sphinx-build -W` clean; the full suite on SQLite; the server modules on both local servers.
+- [x] As built, beyond the list: the plan-gate rulings' wording fix (the TimescaleDB miss dated
+      2.28.1 through 2.31.0, fixed in 2.32.0, and named for DELETE too) in AGENTS.md, invariants §1,
+      the `CONTENDED_RERUNS` docstring and the two contended test modules' docstrings; the plan-gate
+      risks (SQLite's write lock for a long `--limit`, the PostgreSQL ids held in memory) as a
+      sentence in `task_update_desc.rst`; ruling D2's `-t a b` fix as a `versionchanged` on
+      `docs/cli/task_search.rst` too. The entries carry no `:pr:` role: the PR number is the
+      publisher's to add.
 - **Verify:** see frontmatter.
-- **Touches:** `docs/cli/task_update.rst`, `docs/_include/task_update_desc.rst`, `AGENTS.md`,
-  `.agents/factory/invariants.md`.
+- **Touches:** `docs/cli/task_update.rst`, `docs/_include/task_update_desc.rst`,
+  `docs/cli/task_search.rst`, `AGENTS.md`, `.agents/factory/invariants.md`, `src/hypershell/data/model.py`
+  and `tests/test_contended_{recovery,write}.py` (docstrings only).
 
 ## Phase P7 — CI green on the fix (external wait)
 **Satisfies:** R1–R7 · **Depends on:** P2, P6

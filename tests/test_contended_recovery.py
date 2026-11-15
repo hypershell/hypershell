@@ -3,12 +3,12 @@
 
 """Recovering a task-row write that a row lock made miss, by fault injection on SQLite.
 
-On a TimescaleDB 2.29+ hypertable, an UPDATE that waited on another transaction's row lock can
-match 0 rows although the row exists and still qualifies. SQLite never does that, so these tests
-inject it: a wrapper around the session's ``execute`` makes the next *k* UPDATEs of a chosen task
-report 0 matched rows without running, optionally committing another writer's change to the row
-first, as the transaction it waited on would. Every recovery path is driven in-process, as the
-server drives it (``Confirm.update_info``, ``Receiver.update_tasks``, ``Task.revert_orphaned``,
+On a TimescaleDB 2.28.1 through 2.31.0 hypertable, an UPDATE that waited on another transaction's
+row lock can match 0 rows although the row exists and still qualifies. SQLite never does that, so
+these tests inject it: a wrapper around the session's ``execute`` makes the next *k* UPDATEs of a
+chosen task report 0 matched rows without running, optionally committing another writer's change to
+the row first, as the transaction it waited on would. Every recovery path is driven in-process, as
+the server drives it (``Confirm.update_info``, ``Receiver.update_tasks``, ``Task.revert_orphaned``,
 ``Task.revert_staged``), and the wrapper's record of executed statements pins what an uncontended
 write costs. The Scheduler's ``retried`` mark and ``Task.cancel_all`` are made to miss at the
 driver instead (``DriverContention``), below the ORM, so a bulk update is reached as well as a
