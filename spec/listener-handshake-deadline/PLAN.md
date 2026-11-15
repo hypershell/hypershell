@@ -238,3 +238,11 @@ maintainer signed off in session (2026-11-14) to fix all of the following in thi
    `.. only:: html`, as the rest of that file does.
 
 Public wording stays neutral: robustness, deadlines and resource release.
+
+## Review-cycle-3 ruling (2026-11-14)
+
+Review cycle 3 approved with no findings. The rubric's pre-publish human approval for the CONFIRMED
+cycle-1 findings in `core/queue.py`, `core/tls.py` and `server.py` was given by the maintainer in
+session on 2026-11-14: "Approve, merge #108". On that approval, the optional docs clause the review
+noted was added at publish: `docs/security.rst` Limitations item 4 now says that a connection closed
+at the handshake deadline is logged. This is docs only, after the approved review.

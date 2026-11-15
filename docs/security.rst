@@ -402,7 +402,8 @@ Understanding these properties matters most for deployments on untrusted network
    peer sends meanwhile, and keeps accepting other clients while handshakes are pending. A peer
    that reaches the listener — including a slow peer that stalls before authenticating — can
    consume server resources, and failed authentication/handshake attempts are handled by the
-   underlying multiprocessing layer without surfacing in *HyperShell*'s logs. Denial-of-service
+   underlying multiprocessing layer without surfacing in *HyperShell*'s logs, except that a
+   connection closed at the handshake deadline is logged. Denial-of-service
    protection must come from the network layer (see the deployment guides).
 
    .. versionchanged:: 2.9.0

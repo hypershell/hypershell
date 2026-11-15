@@ -4,7 +4,7 @@ title: A TLS queue server keeps serving clients while a connection is slow in it
   handshake
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/listener-handshake-deadline
 base: develop
 current_phase: done
