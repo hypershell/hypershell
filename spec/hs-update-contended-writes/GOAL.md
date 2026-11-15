@@ -195,28 +195,39 @@ deleted for `--delete`; "the count" is the number `hs update` counted before its
 **Proposed by the shaper, awaiting the foreman's sign-off at the GOAL gate** (2026-11-15):
 
 - **Q:** Without `--limit`, what of a task that comes to match the filter after the count (a new
-  submission matching `-R`, say)? — **A (proposed):** The filter at the time of the write decides,
+  submission matching `-R`, say)? — **A:** The filter at the time of the write decides,
   as today, so it is written and counted. R3's warning then reports the net shortfall (count − N)
   only when N is lower; with `--limit` the written set is always within the selected ids, so the
   figure is exact. The alternative — bound the write to the tasks counted — means reading every id
   before writing, which a set-based update avoids.
-- **Q:** Level and wording of R3's "no longer matched" line? — **A (proposed):** A WARNING (visible
+- **Q:** Level and wording of R3's "no longer matched" line? — **A:** A WARNING (visible
   at the default level, as `--cancel`'s "already scheduled" warning is), along the lines of "K of
   the M tasks counted no longer matched and were left as they are"; exact wording is the plan's.
 - **Q:** Is the PostgreSQL multi-key variant (several tag keys or `--remove-tag` names, one moving
-  the task out of a tag filter) in scope? — **A (proposed):** Yes, in R5. It is the same mechanism
+  the task out of a tag filter) in scope? — **A:** Yes, in R5. It is the same mechanism
   as the seed's second defect (each change re-applies a filter an earlier change altered), found by
   reading `:1195-1198` and `:1212-1213`; `hs-plan` confirms it on the local PostgreSQL, and if it
   does not reproduce R5's clause for it is met by a passing test.
-- **Q:** Cost of an uncontended update? — **A (proposed):** Without `--limit`, an uncontended
+- **Q:** Cost of an uncontended update? — **A:** Without `--limit`, an uncontended
   `hs update` stays set-based: its statement count does not grow with the number of tasks it writes
   (a test pins it, as the `contended-writes` tests pin one UPDATE per row for the server paths).
   With `--limit`, per-row writes are acceptable (the batches already read every selected row).
 - **Q:** R4 with `--limit` makes the whole update one transaction where today each batch of 100
-  commits; is the longer lock acceptable? — **A (proposed):** Yes. It follows from direction (a),
+  commits; is the longer lock acceptable? — **A:** Yes. It follows from direction (a),
   and the filtered form already holds every matched row's lock until its one commit; a running
   server's writes to those tasks wait for it as they do today. `hs-plan` notes the cost for a large
   `--limit`.
+
+**Ruled at the GOAL gate** (2026-11-15): approved by the foreman, gate judge under the maintainer's
+mandate. Appetite big, and all five proposed answers confirmed:
+- tasks that begin matching after the count are written and counted as today;
+- the "no longer matched" line is a WARNING;
+- the PostgreSQL multi-key variant is in R5's scope, which `hs-plan` confirms by driving it;
+- an uncontended update without `--limit` stays set-based, with a test pinning that, and per-row
+  writes are accepted with `--limit`;
+- `--limit` becomes one transaction, with the lock cost noted in the plan.
+
+The contract is locked; `hs-plan` designs against it.
 
 ## Evidence plan
 
