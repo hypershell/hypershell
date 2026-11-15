@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:hs-update-contended-writes
 kind: fix
 appetite: small
 lane: public
