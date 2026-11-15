@@ -4,7 +4,7 @@ title: hs update writes every requested change to exactly the rows it counts, co
   or not, and says plainly when it cannot
 kind: fix
 appetite: big
-status: in_progress
+status: blocked
 branch: fix/hs-update-contended-writes
 base: develop
 current_phase: P7
@@ -168,10 +168,12 @@ phases:
   verify: uv run python spec/hs-update-contended-writes/drive/ci_check.py green spec/hs-update-contended-writes/evidence/ci-green
     --code-rev "$(git log -1 --format=%H -- . ':!spec')"
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: ee5fcd45d51f101dabb8f72b84581c9043c96fe0
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: F1 PostgreSQL residual pass re-runs a missed row
+    CONTENDED_RERUNS+1 times (invariants §1); F2 invariants prose; F3 delete coverage;
+    human gate'
+  cycle: 1
 ---
 # TECH.md — `hs update` writes every requested change to exactly the rows it counts, contended or not, and says plainly when it cannot
 

@@ -45,3 +45,14 @@
 - **Recommended fix:** As recorded there: name a third state, a proposed answer awaiting the gate's
   sign-off, which blocks `hs-plan` until the gate rules on it.
 - **Confidence:** high · **Effort:** small
+
+## F3 — hs-review Step 1 has no rule for a build whose last phase is an external CI wait · seen again
+`origin=hs-review:step1 severity=low category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** `TECH.md` read `status: in_progress` with P1–P6 `done` and P7 (CI green on the
+  fix, an external wait on the draft PR) `pending`; Step 1 says to ask before reviewing. The
+  foreman's brief had to say to proceed.
+- **Skill cause:** The same finding as `spec/zone-queue-primitive/META.md` F3 (seen again there for
+  hs-review step 1), still open: Step 1 knows only `in_review`/`done`.
+- **Recommended fix:** As recorded there: an external-wait phase flag, and a Step 1 rule that
+  proceeds past it.
+- **Confidence:** high · **Effort:** small
