@@ -336,3 +336,21 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned, with th
   update holds the written ids in memory.
 - **Wording:** P6 corrects `AGENTS.md`'s dating of the TimescaleDB miss to the versions affected
   upstream (2.28.1 through 2.31.0, fixed in 2.32.0), as it rewrites that passage anyway.
+
+## Review-cycle-1 rulings (2026-11-15)
+
+The review's human gate was triggered by F1, a CONFIRMED breach of the §1 retry bound in
+`data/model.py`. The maintainer signed off in session (2026-11-15) to fix all three findings.
+
+- **F1.** On PostgreSQL without `--limit`, the set-based UPDATE or DELETE counts as each row's first
+  attempt. A row it misses gets at most `CONTENDED_RERUNS` further per-row tries, so the total
+  stays within §1's bound. The WARNING and the contended error report the true number of attempts.
+  - **Tests:** a trigger skipping one row exactly `CONTENDED_RERUNS` times lands. One that skips it
+    `CONTENDED_RERUNS + 1` times aborts with nothing written and exit 5. The attempt count in the
+    message is checked. The tests are red on `ee5fcd4` where they differ.
+  - **Unchanged:** the `--limit` and single-task forms, which were already within the bound.
+- **F2.** `invariants.md` §1 describes `delete_matching` as it is built: the DELETE's row count plus
+  one read of the ids still matching. It does not use `RETURNING`. `AGENTS.md` already has it
+  right.
+- **F3.** Add a test of a `--delete` that leaves behind a row which stopped matching: "Deleted N",
+  the warning, and exit 0. Cover it with and without `--limit`.
