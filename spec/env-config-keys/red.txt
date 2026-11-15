@@ -1,0 +1,84 @@
+# Regression tests that must fail on 90ab2fc2 (the base of fix/env-config-keys), checked with
+#   RED_BASE_REV=90ab2fc2 RED_LIST="$PWD/spec/env-config-keys/red.txt" sh spec/relay-hardening/drive/red_check.sh
+# One pytest node id per line. Every test drives a child interpreter or the `hs` CLI with HYPERSHELL_*
+# variables set (the configuration is built at import), so on the base build each fails by an
+# assertion about the defect, never by a missing name. hs-build P1 writes these tests; it may rename a
+# node or split a parametrized case, never drop one without a PLAN note.
+
+# Underscore keys and letter case (GOAL R1)
+tests/test_env_config.py::test_underscore_key[server.tls.min_version]
+tests/test_env_config.py::test_underscore_key[database.timescale.chunk_interval]
+tests/test_env_config.py::test_underscore_key[database.timescale.compress_after]
+tests/test_env_config.py::test_underscore_key[relay.launcher_args]
+tests/test_env_config.py::test_underscore_key[relay.num_threads]
+tests/test_env_config.py::test_underscore_key[relay.upstream.evict_hint]
+tests/test_env_config.py::test_underscore_key[autoscale.failed_launches]
+tests/test_env_config.py::test_key_any_letter_case
+tests/test_env_config.py::test_launcher_args_leaves_launcher
+tests/test_env_config.py::test_config_get_underscore_key
+tests/test_env_config.py::test_unknown_name_held_whole
+
+# Open tables and zones (R2)
+tests/test_env_config.py::test_open_table_entry[database.pragmas.journal_mode]
+tests/test_env_config.py::test_open_table_entry[database.connect_args.check_same_thread]
+tests/test_env_config.py::test_open_table_entry[ssh.nodelist.my_group]
+tests/test_env_config.py::test_provider_argument_kept_whole
+tests/test_env_config.py::test_zone_table_key
+tests/test_env_config.py::test_zone_variable_without_zone_key_refused
+tests/test_env_config.py::test_zone_name_and_tables_refused
+
+# _ENV and _EVAL (R3)
+tests/test_env_config.py::test_variant_from_environment[server.auth_env]
+tests/test_env_config.py::test_variant_from_environment[relay.upstream.auth_eval]
+tests/test_env_config.py::test_variant_database_password_env
+tests/test_env_config.py::test_variant_two_forms_refused
+
+# Text stays text (R4)
+tests/test_env_config.py::test_text_kept[autoscale.launcher-false]
+tests/test_env_config.py::test_text_kept[relay.launcher-true]
+tests/test_env_config.py::test_text_kept[logging.datefmt-empty]
+tests/test_env_config.py::test_text_kept[relay.template-null]
+tests/test_env_config.py::test_text_kept[server.auth-leading-zeros]
+tests/test_env_config.py::test_text_kept[server.auth-exponent]
+tests/test_env_config.py::test_all_digit_key_server_and_client
+tests/test_env_config.py::test_all_digit_key_submit_queue
+
+# Typed keys (R5)
+tests/test_env_config.py::test_boolean_words[no]
+tests/test_env_config.py::test_boolean_words[OFF]
+tests/test_env_config.py::test_boolean_words[Yes]
+tests/test_env_config.py::test_boolean_words[1]
+tests/test_env_config.py::test_typed_refused[server.port-abc]
+tests/test_env_config.py::test_typed_refused[server.eager-maybe]
+tests/test_env_config.py::test_typed_refused[relay.max-fraction]
+tests/test_env_config.py::test_typed_refused[autoscale.factor-inf]
+tests/test_env_config.py::test_typed_refused[server.tls.enabled-empty]
+tests/test_env_config.py::test_logging_file_enabled_any_case
+tests/test_env_config.py::test_logging_file_false_refused
+tests/test_env_config.py::test_open_entry_toml_rule
+
+# Duration keys (R6)
+tests/test_env_duration.py::test_server_evict_units[file]
+tests/test_env_duration.py::test_server_evict_units[environment]
+tests/test_env_duration.py::test_duration_refused_at_start[server.evict]
+tests/test_env_duration.py::test_duration_refused_at_start[client.heartrate]
+tests/test_env_duration.py::test_duration_refused_at_start[relay.upstream.deadline]
+tests/test_env_duration.py::test_duration_refused_at_start[relay.upstream.evict_hint]
+tests/test_env_duration.py::test_duration_refused_at_start[relay.poll]
+
+# [export] as written (R7), and the key variable in any letter case kept from tasks and exports (R4, R1)
+tests/test_env_export.py::test_export_as_written[leading-zeros]
+tests/test_env_export.py::test_export_as_written[mixed-case]
+tests/test_env_export.py::test_export_as_written[empty]
+tests/test_env_export.py::test_export_as_written[exponent]
+tests/test_env_export.py::test_export_reaches_task
+tests/test_env_export.py::test_key_variable_any_case_not_inherited
+tests/test_env_export.py::test_key_variable_any_case_not_exported
+
+# blame, hs config which, completion (R8)
+tests/test_env_blame.py::test_blame_names_variable
+tests/test_env_blame.py::test_which_names_variable[server.tls.min_version]
+tests/test_env_blame.py::test_which_names_variable[export.MyVar]
+tests/test_env_blame.py::test_completion_offers_key_paths
+tests/test_env_blame.py::test_completion_one_per_line
+tests/test_env_blame.py::test_process_variables_not_keys

@@ -380,6 +380,19 @@ key should be settable, with the text given. Pre-existing since 2.7.0.
 form of `auth_env`; the environment form stays here); relay (its zone tables add more keys)*
 **Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: adopted:env-config-keys*
 
+## `hs config set` writes text that looks like a number, boolean or null as that type
+
+`hs config set` coerces its value by its look before writing it, whatever the key
+(`src/hypershell/config.py:284`): `hs config set autoscale.launcher false` writes the boolean, an
+all-digit `server.auth` loses its leading zeros and then fails the length check, and `null` fails with
+a traceback. A boolean key given `no` is written as text that reads as true. The same defect class
+`env-config-keys` fixes for `HYPERSHELL_*` variables; its key table and typed reader should serve
+this command too. Pre-existing.
+
+*Horizon: near-term, small · Depends on: `env-config-keys` (the key table) · Refs: its GOAL's
+Non-goals*
+**Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: unshaped*
+
 ## `hs cluster` waits forever when every launched client fails
 
 When every client a cluster launched exits early, from an authkey or TLS mismatch, an unreachable
@@ -521,6 +534,17 @@ client too.
 *Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) · Refs:
 `spec/zone-dispatch/` (plan gate ruling N4)*
 **Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
+
+## Three documented keys are never read by the command they describe
+
+`server.eager` never takes effect: `--eager`'s `store_true` default overwrites it in `hs server` and
+`hs cluster`. `hs cluster` ignores `server.evict` (it uses the built-in period), and its `-R` reads
+the undocumented `task.ratelimit` instead of `client.ratelimit`. The same class as the `-b` entry
+above. Pre-existing; found by `env-config-keys`' research, out of its scope.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/env-config-keys/research/03-duration-keys.md`,
+`04-typed-readers.md`*
+**Seed:** [`issues/config-keys-unread.md`](issues/config-keys-unread.md) · *status: unshaped*
 
 ## `hs submit -q` cannot feed a server with a database
 

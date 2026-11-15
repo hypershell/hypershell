@@ -32,3 +32,12 @@
 - **Skill cause:** Step 4 asks a `shaped` seed to be re-confirmed against `develop`, but for an `unshaped` seed only says to carry its evidence into Problem, so a stale reproduction becomes the contract's motivation unchecked.
 - **Recommended fix:** In the `unshaped` bullet: re-run the seed's reproduction (or a minimal probe) on current `develop` before carrying it, and cite the revision; say this is in scope despite "shaping only".
 - **Confidence:** high · **Effort:** small
+
+## F4 — No shared red-on-base harness; this plan reuses two other cycles' drive scripts · seen again
+`origin=hs-plan:step6 severity=low category=tooling status=open target=.agents/factory/bin/`
+- **What happened:** The brief asked for a tests-first phase with a recorded red list on `90ab2fc2`. P1's and P7's `verify:` call `spec/relay-hardening/drive/red_check.sh` and `spec/contended-writes/drive/rest_green.sh`, found by searching earlier cycles' `TECH.md`; neither the skill nor the TECH template names them.
+- **Skill cause:** As `spec/relay-hardening/META.md` F5 and `spec/contended-writes/META.md` F4: Step 6 gives no pattern for proving "fails on <rev>", and the harness lives in two cycle folders.
+- **Recommended fix:** As recorded there: move `red_check.sh`, `red_outcome.py` and `rest_green.sh` to `.agents/factory/bin/` and reference them from Step 6 and the TECH template.
+- **Confidence:** high · **Effort:** small
+
+**What worked well:** Writing the frontmatter through `_fsm.dump_document` (the writer `set_phase.py` uses) left it byte-stable under a re-dump, so P1's first state change will not reformat the file (`spec/contended-writes/META.md` F5).
