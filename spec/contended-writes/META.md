@@ -46,3 +46,10 @@
 - **Skill cause:** Step 5 mandates the script ("never hand-edit YAML"), and `hs-plan` writes the frontmatter in a style the script does not keep, so the first build commit of every cycle buries its state change in reformatting.
 - **Recommended fix:** Have `hs-plan` emit the frontmatter through the same dumper (or `set_phase.py --touch` at plan time), or make the dumper keep the template's style.
 - **Confidence:** high · **Effort:** small
+
+## F6 — `next_phase.py` points at an external-wait phase while a later phase is buildable · seen again
+`origin=hs-build:P3 severity=low category=tooling status=open target=.agents/factory/bin/next_phase.py`
+- **What happened:** With P2 (CI red on the draft PR) pending as an external wait and P3 depending only on P1, `next_phase.py` reported P2 as next; P3 was built by explicit phase selection, and Step 5's `--current {next_id_or_done}` left `current_phase` on P2, a phase no build can run.
+- **Skill cause:** As `spec/hypertable-update-retry/META.md` and earlier cycles ("no way to express an external wait in a TECH phase"): the FSM has no external-wait status, so the resume pointer cannot skip a wait to the next buildable phase.
+- **Recommended fix:** As recorded there: an `external` phase flag (or `waiting` status) that `next_phase.py` skips when choosing the next buildable phase, reporting the wait separately.
+- **Confidence:** high · **Effort:** small

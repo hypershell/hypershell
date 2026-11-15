@@ -44,7 +44,7 @@ phases:
     --code-rev "$(git log -1 --format=%H --grep='^\[fix\] Build contended-writes P1:')"
 - id: P3
   name: The retried mark commits with its retry rows, on the re-run pattern
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -258,20 +258,20 @@ derives each job's expected failures from both.
 **Goal:** a contended mark lands or leaves the row retryable with no retry row; mark and retry rows
 commit together; the mark tests go green.
 
-- [ ] `src/hypershell/data/model.py`: one private helper building the row-state retry filters
+- [x] `src/hypershell/data/model.py`: one private helper building the row-state retry filters
       (`retried IS FALSE`, `exit_status` not NULL, not 0, not `CANCEL_STATUS`) from the table's
       columns; `query_retryable` uses it (SQL unchanged; `tests/test_retry_gate.py` and
       `tests/test_groups.py` stay green unedited).
-- [ ] `__row_statements`: condition `'retryable'` (match and lookup: `id` plus those filters; read
+- [x] `__row_statements`: condition `'retryable'` (match and lookup: `id` plus those filters; read
       `id`). `__write_rows`: `retryable: bool = False` (no row found → DEBUG `Ignored {path} for task
       ({id}) - task gone or no longer awaiting retry`, skip; found → re-run), `each=` per-row values
       (same keys for every id, else `ValueError`), `commit: bool = True` (False: no commit; still
       rollback and re-raise on error). Docstrings say all three.
-- [ ] `__schedule_next_failed_tasks` as PLAN §2.2: mint retries; marks through `__write_rows(...,
+- [x] `__schedule_next_failed_tasks` as PLAN §2.2: mint retries; marks through `__write_rows(...,
       'retry mark', 'task left to retry later', retryable=True, each=…, commit=False, prefix='m_')`;
       `Session.add_all` the landed ones; one commit; rollback and re-raise on error; return the landed
       retries in selection order. `Entity.update_all` stays (used by `hs update`).
-- [ ] The mark tests and the stop-between test pass; the cancel tests still fail (P4).
+- [x] The mark tests and the stop-between test pass; the cancel tests still fail (P4).
 - **Verify:** see frontmatter (the recovery module minus the cancel tests; the retry/group/restart/
       writeback/dispatch modules; the server-database modules minus the source test on PG 18 and TS
       2.32; `red_check.sh` still all red on the base; `retry_drive.sh` on SQLite and TimescaleDB:
