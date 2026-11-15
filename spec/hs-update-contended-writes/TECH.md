@@ -4,10 +4,10 @@ title: hs update writes every requested change to exactly the rows it counts, co
   or not, and says plainly when it cannot
 kind: fix
 appetite: big
-status: in_progress
+status: done
 branch: fix/hs-update-contended-writes
 base: develop
-current_phase: P7
+current_phase: done
 last_updated: '2026-11-15'
 phases:
 - id: P1

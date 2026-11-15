@@ -354,3 +354,9 @@ The review's human gate was triggered by F1, a CONFIRMED breach of the §1 retry
   right.
 - **F3.** Add a test of a `--delete` that leaves behind a row which stopped matching: "Deleted N",
   the warning, and exit 0. Cover it with and without `--limit`.
+
+## Review-cycle-2 ruling (2026-11-15)
+
+Review cycle 2 approved at `839dfff` with no CONFIRMED and no PLAUSIBLE finding. The rubric's
+pre-publish human approval for the cycle-1 finding in `data/model.py` was given by the maintainer in
+session (2026-11-15): "Approve, merge #111". CI is green at `839dfff` (15 jobs).
