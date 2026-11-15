@@ -39,9 +39,14 @@
 - **Recommended fix:** Add the scheduler stop conditions, group gating (§3) and the shutdown order (§6) to the gate list, and say that a CONFIRMED finding in the text of a gated invariant triggers the gate. This widens the gate; it does not weaken it.
 - **Confidence:** med · **Effort:** small
 
-## F4 — The review's base is local `develop`; worktree cycles need `origin/develop`
+## F4 — The review's base is local `develop`; worktree cycles need `origin/develop` · seen again
 `origin=hs-review:step1 severity=low category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
 - **What happened:** The injected diffstat and Step 2's diff use `develop...HEAD`. In a worktree the local `develop` can lag `origin/develop`, so the diff the blind reviewer gets would carry unrelated hunks. The invocation said to fetch and diff against `origin/develop`, and the review did.
 - **Skill cause:** Same root as F2 (hs-feature): the steps predate the worktree practice.
 - **Recommended fix:** Fetch in Step 1 and use `origin/{base}` for the diffstat, Step 2's diff and the merge check.
 - **Confidence:** high · **Effort:** small
+
+## What worked well — hs-review (cycle 2)
+- **A later cycle defaults to a fresh blind pass over the full diff.** Cycle 2's only change was wording, yet the fresh
+  reviewer, told nothing of cycle 1's finding, found a scheduler race (REVIEW F2) that a remediation-only check would have
+  missed. `origin=hs-review:step3`

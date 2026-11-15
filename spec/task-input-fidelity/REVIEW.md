@@ -156,3 +156,160 @@ were found correct against the base invariants.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run.
+
+## Review cycle 2 — changes-requested (2026-11-15)
+
+- **Reviewed commit:** 1a28fb9e4b360de91acb2f88275ee5898007ba88  ·  **Base:** `origin/develop` fbc656e5 (merge-base 48cc5056)  ·  **Date:** 2026-11-15
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`. Second cycle without convergence: escalate to the human.
+
+**Mode.** A fresh blind pass over the full spec-excluded diff (the default for a later cycle), plus the
+orchestrator's own grading of F1. Since cycle 1 the only non-spec change is 1a28fb9e, wording in
+`AGENTS.md` and `invariants.md`; no `src/`, `tests/` or `docs/` change since 0b84a745. One fresh
+`general-purpose` reviewer (not `debate`, no completeness sub-pass) got `GOAL.md`, the diff command
+`git diff origin/develop...HEAD -- . ':(exclude)spec/'`, the **base** (`origin/develop`) copies of
+`invariants.md` and `AGENTS.md`, `review-rubric.md`, a copy of the drive, the binding gate rulings,
+and the instruction not to read `spec/`. It was not told about F1. `TECH.md` read `status: blocked`
+at the start (cycle 1's verdict); the review proceeded on the invocation's instruction.
+
+**Reviewer hand-back.** The reviewer had not handed back when the orchestrator closed the review: its
+last item, the Python 3.11 full suite on the branch, was at 60% (the cycle-1 3.11 full run on the same
+code passed, and the merged-tree 3.11 run below passed). Its executed results were read from its
+session record and are reported below as "Reviewer"; the two findings were re-run by the
+orchestrator before grading.
+
+**Contract.** No drift: `GOAL.md` still has only the shaping (`afde825f`) and lock (`ae83e66e`)
+commits. Gate rulings binding the grading are as in cycle 1, plus the review-cycle-1 ruling: F1 is
+fixed as wording, and the gate was ruled not triggered by it.
+
+### Verification run
+
+Orchestrator:
+
+- Merge: `git merge-tree --write-tree HEAD origin/develop` → tree d9d13b16, no conflicts. #109's
+  `invariants.md` §1/§3 and `AGENTS.md` edits sit apart from this branch's; the merged §3 text is
+  intact. Exported the merged tree and ran it with `PYTHONPATH` set to its `src` and root, with `hs`
+  on `PATH` (import path printed, merged `src` confirmed):
+  - full suite, Python 3.14 → 3021 passed, 119 skipped;
+  - PostgreSQL files (`test_contended_write`, `test_contended_recovery`, `test_source`,
+    `test_server_initdb`, `test_timescale`, `test_zone_postgres`, `test_writeback_postgres`,
+    `test_stream_input`, `test_task_wire`), 3.14: `HS_TEST_TIMESCALE=community` → 436 passed, 1
+    failed (`test_legacy_database_upgraded_not_converted`: "Template hs283 not listed in
+    HS_TEST_POSTGRES_TEMPLATES"); empty → 416 passed, 2 failed ("server offers TimescaleDB 2.32.0, but
+    HS_TEST_TIMESCALE is empty"). Both environmental, as in cycle 1;
+  - 15 affected files on Python 3.11 (wire, stream input, contended write/recovery, source,
+    writeback, writeback statement, relay return, topology server, server FSM, group order, restart,
+    cluster exit, signal wake, retry gate) → 441 passed, 23 skipped.
+- F1 probes (`temp_site.sh sh <scratch>/probes/f1.sh MODE`, `HYPERSHELL_LOGGING_LEVEL=TRACE`,
+  default poll 30): `sig1` and `failhigh` (F3 below).
+- F2 re-run: the reviewer's interleaving probe (pytest, `-s`) → both cases fail as described below;
+  `fidelity_drive.sh fail-pause` with `FD_PROVIDER=timescale`, ten runs → 9 ok, 1 FAIL (critical).
+
+Reviewer (Python 3.14 unless noted):
+
+- Full suite on the branch → 3007 passed, 111 skipped. New test files pass on 3.14 and 3.11.
+  Mutations: the old decoder → 112 of `test_task_wire` fail; the old stop rule →
+  `test_stream_input` fails.
+- PostgreSQL files, both Pythons, both providers: `community` → 375 passed, 29 failed; empty → 355
+  passed, 30 failed; every failure template-missing (`test_upgrade_postgres`, 28) or the
+  provider/variable mismatch in `test_timescale`.
+- Drives, SQLite, 3.14 and 3.11: dates, dates-default, dates-stdin, dates-nodb, pause, fail-pause,
+  burst, server, fifo, nodb-stream, file, launch-false, cross-old-client, cross-old-server, all ok
+  (old side confirmed importing the 2.9.0a8 tree). `postgres` (3.14; 3.11 subset): all ok.
+  `timescale`: all ok except **fail-pause, FAIL** (CRITICAL `Failed task group 0`) — F2.
+- Fixture regenerated from the 2.9.0a8 tree on both Pythons → `DISPATCH`, `BUNDLE`, `RESULT` equal
+  the test literals. Date-like lines on 3.11 keep `waited` and `duration`. Process substitution as
+  FILE runs both lines. Sphinx `-W` → exit 0; "Changed in version 2.9.0" renders on the cluster and
+  server pages.
+- Seeds: `-T 3` with a pause → still running at 25 s, `echo b` staged; `-b 2` → first output at
+  9 s. Both Problems hold as written; every `ROADMAP.md` seed link resolves.
+- Probes: SIGUSR1 during a pause (F3); the count/`increment_group` interleaving and natural
+  repeats of the fail-pause shape (F2): TimescaleDB `{ echo false; sleep 4; echo "echo b"; } |
+  hsx -N2`, 16 trials → 1 early stop; SQLite 20 trials and plain PostgreSQL 12 → none.
+
+### Requirement → evidence matrix
+
+| R-ID | Status | Change since cycle 1 |
+|------|--------|----------------------|
+| R1–R4 | ✅ | None in code; drives, wire tests and cross-version runs pass again on both Pythons and all three backends |
+| R5 | ⚠️ F2 | Holds for the common timing; a failure landing inside the scheduler's count window still stops a stream run with the input open |
+| R6 | ✅ | Pause, server and fifo end 1–2 s after the input ends |
+| R7 | ✅ | file, nodb-stream, launch-false; the fail-higher probe still halts with the input open |
+| R8 | ✅ (gap) | The deterministic stream tests do not cover F2's interleaving |
+| R9 | ✅ | Prose and markers render; `-W` clean |
+
+Unmapped changes: none.
+
+### F1 status
+
+**Fixed as worded, with one residual inaccuracy (F3).** Both files now scope the absolute sentence
+to the out-of-work stop and name the failed-group halt and SIGUSR1/SIGUSR2 as stops that apply with
+the input open or not. The failed-group claim holds: `failhigh` (`false`, then at 4 s a group-1 task,
+input open to 30 s) logs `CRITICAL Failed task group 0` at 7.7 s and the scheduler is done while the
+input stays open. The pointers "(the halt above)" and "(above)" resolve to the group-gating text in
+each file. Two claims are not accurate: "at once" (F3) and "a failed task with no retry left never
+ends a stream run early" (`invariants.md:96`, `AGENTS.md:266`), which F2 contradicts until it is
+fixed.
+
+### Findings
+
+#### [MEDIUM/CONFIRMED] F2 — A stream run still stops early when the last in-flight task fails during the scheduler's count
+- **Where:** `src/hypershell/server.py:264-282` (`Scheduler.load_bundle`: `Task.count_remaining()` at
+  :265, `Task.increment_group` at :274, `log.critical` and FINAL at :281-282), with
+  `Task.increment_group` (`src/hypershell/data/model.py:676-713`).
+- **Failure scenario:** input open; the only task in flight fails with no retry left. `load_bundle`
+  reads `count_remaining() == 1`, so it skips the out-of-work branch and its input-open back-off. The
+  Receiver writes the failure. `increment_group(0)` then finds no incomplete task, nothing retryable
+  and one exhausted failure, and returns not viable. The scheduler logs `CRITICAL Failed task group 0`
+  and goes FINAL with the input still open; the next line is committed and never scheduled; exit 0.
+  The same input otherwise runs every line, so the outcome depends on timing. This violates R5
+  ("whatever the timing of the input") and the branch's own §3 text. It is not the R7 failed-group
+  halt the GOAL keeps unchanged: no task waits in another group; the halt is reached only because
+  the result landed between the two reads. When the input has already ended, the same interleaving
+  only logs a spurious critical at the end of a complete run.
+- **Evidence:** `pytest -q -s <reviewer probe>` (run by the reviewer and again by the orchestrator):
+  (1) the result written right after `count_remaining` returns → `STATE=FINAL input_open=True`,
+  critical logged, late line `schedule_time` None; (2) a `LocalCluster` fed
+  `false`, a 4 s pause and `echo b` (`max_retries=0`, `poll=2`), with the scheduler thread's
+  `count_remaining` 0.5 s slower → done in 4.1 s, `echo b` never scheduled, nothing printed. Natural,
+  with no injection: TimescaleDB `{ echo false; sleep 4; echo "echo b"; } | hsx -N2`, 16 trials → 1
+  with `echo b` remaining and the critical logged (reviewer); `fidelity_drive.sh fail-pause` on
+  `timescale` failed once in the reviewer's run and once in ten of the orchestrator's (critical
+  logged; in that run `b` ran, the end-of-input variant). SQLite 20 and plain PostgreSQL 12 trials →
+  no early stop.
+- **Touches:** R5, R8 (no test of the interleaving); `server.py` (high-blast-radius core). The
+  deferral exception does not apply: R5 requires the change, not preserving the old behaviour.
+- **Repair direction:** before halting on a non-viable group in non-`forever` mode with the input
+  open, re-check the out-of-work condition (or count incomplete tasks after the group check), so a
+  failure that lands mid-pass backs off rather than halts; add a deterministic test that writes the
+  failure between the two reads.
+
+#### [LOW/CONFIRMED] F3 — The new §3 wording says the scheduler stops "at once" on SIGUSR1/SIGUSR2; it stops on its next pass, up to `server.poll` later
+- **Where:** `.agents/factory/invariants.md:93-94`, `AGENTS.md:262-263`.
+- **Failure scenario:** the signal handler only records the signal (`core/signal.py:96-100`).
+  `load_bundle` checks it at the top of a pass (`server.py:246`), and a back-off wait ends only on
+  `halt()`, a dispatcher generation change or its timeout (`server.py:302-313`). During a pause the
+  back-off grows to `server.poll`, so the scheduler sees a signal up to one poll later. The
+  failed-group halt is likewise taken on the next pass. A later cycle reading "at once" would assume
+  a signal ends a back-off.
+- **Evidence:** `sig1` (input `echo a`, a 45 s pause, `echo b`; SIGUSR1 to `hsx` at 20.1 s):
+  `Received signal 30: SIGUSR1` at 05:56:29.938, `Signal interrupt (SIGUSR1)` at 05:56:41.425,
+  11.5 s later at the end of a 16 s back-off; `hsx` exited when the input ended (46 s), `echo b`
+  committed and never scheduled, rc 0. The reviewer saw the same independently: the signal was taken
+  at the end of an 8 s back-off. `failhigh`: the group-1 task was committed at 05:57:32.949 and the
+  halt logged at 05:57:36.609, at the end of a 4 s back-off.
+- **Touches:** the §3 record (prose only); the code is pre-existing and signals are a GOAL non-goal.
+  **Repair:** replace "at once" with "on its next pass (within one back-off, bounded by
+  `server.poll`)", or drop it, in both files.
+
+### Notes (not findings)
+- `invariants.md:94` runs past the file's line width; a reflow can ride with the F3 fix.
+
+### Human-gate triggers
+- **Triggered — F2.** It is CONFIRMED and the code is in `server.py`, on the rubric's
+  high-blast-radius list. Human sign-off is required before any further step.
+- F3 is prose about the scheduler's stop conditions; under the review-cycle-1 ruling (those
+  conditions are not on the rubric's mandatory list) it does not trigger the gate on its own.
+
+### Optional completeness sub-pass
+- Not run.

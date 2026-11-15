@@ -82,11 +82,12 @@ phases:
     UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build
     -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 review:
-  last_reviewed_commit: 0b84a745b0fa63ac1450ed7d67f28eb10c1b175d
+  last_reviewed_commit: 1a28fb9e4b360de91acb2f88275ee5898007ba88
   verdict: changes-requested
-  blocked_reason: 'F1 (LOW, prose): invariants.md §3 and AGENTS.md overstate the scheduler
-    stop rule; human gate'
-  cycle: 1
+  blocked_reason: 'F2 (MEDIUM): a failure landing in the scheduler count window still
+    stops a stream run with the input open (server.py, human gate); F3 (LOW): §3 says
+    signals stop the scheduler at once'
+  cycle: 2
 ---
 # TECH.md — Every task the input gives runs as given
 
