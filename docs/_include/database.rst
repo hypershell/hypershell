@@ -127,10 +127,9 @@ find and stop that session, then try again.
 
 SQLite cannot drop a table constraint without rebuilding the table, so a SQLite database
 created by an earlier release (2.8, or the 2.9.0a1 pre-release) keeps those ``UNIQUE``
-constraints. This has no effect on behaviour in normal operation. It only matters in the rare cases where a failed task could be retried twice: two
-servers running against one database (which is not supported), or a task's ``retried`` flag
-reset after the fact. In those cases an older SQLite database rejects the second retry with an
-error, where a newer one records it.
+constraints. This has no effect on behaviour in normal operation. It only matters in the rare case where a failed task could be retried twice: a task's
+``retried`` flag reset after the fact. Then an older SQLite database rejects the second retry
+with an error, where a newer one records it.
 
 See also the :ref:`command-line interface <cli_initdb>` for ``hs initdb``.
 

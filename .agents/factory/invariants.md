@@ -74,11 +74,12 @@ subsystems.
   `retried=True` and `next_id` → new row) — never mutate a row in place to retry.
 - One retry per failed row is held by the single Scheduler thread (sole `Task.next` caller) and
   `Task.query_retryable`'s `retried IS FALSE` (under `select_failed`), **not** by the schema.
-  Unguarded, each yielding a second retry with the same `previous_id`: two servers on one database
-  (unsupported, no row locks, so new tasks double-schedule too); a reset `retried` (`hs update`).
-  Retry rows and their marks commit in one transaction, so a stop between them leaves neither.
+  Unguarded, yielding a second retry with the same `previous_id`: a reset `retried` (`hs update`).
+  Retry rows and their conditional marks commit in one transaction, so a stop between them leaves
+  neither, and two servers on one database (unsupported; no row locks, so new tasks still
+  double-schedule) no longer double a retry.
   Pre-2.9 SQLite DBs keep the `UNIQUE` constraints (forward-only, no table rebuild): never
-  tripped in normal operation, an `IntegrityError` in those cases.
+  tripped in normal operation, an `IntegrityError` in that case.
 - A returned result writes only its result columns (`Task.result_columns`), and only for its
   current assignment: the row's `schedule_time` as dispatched, while `completion_time` is NULL
   (`Task.apply_results`). A stale or duplicate result is logged and dropped, so a late result from

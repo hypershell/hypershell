@@ -14,9 +14,9 @@ rewrites existing tasks; on Postgres it also drops the ``UNIQUE`` constraints on
 columns. It holds an exclusive lock while it runs (minutes, on a large database), and processes
 started meanwhile wait for it. A SQLite database created by an
 earlier release (2.8, or the 2.9.0a1 pre-release) keeps those constraints, with no effect on
-behaviour in normal operation. Only in the rare cases where a failed task could be retried
-twice (two servers on one database, which is not supported, or a task's ``retried`` flag reset
-after the fact) does it reject the second retry with an error, where a newer database records it.
+behaviour in normal operation. Only in the rare case where a failed task could be retried twice
+(a task's ``retried`` flag reset after the fact) does it reject the second retry with an error,
+where a newer database records it.
 
 SQLite only needs the local file path.
 

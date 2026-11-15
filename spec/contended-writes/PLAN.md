@@ -288,3 +288,13 @@ in `data/model.py`. The maintainer signed off in session (2026-11-14) to fix bot
 
 P6 (CI green): the run on `e0e61c8` passed all 15 checks and is recorded under `evidence/ci-green/`.
 The remediation commit gets its own CI run before merge.
+
+## Review-cycle-2 ruling (2026-11-15)
+
+Foreman, gate judge under the maintainer's mandate. N1 (LOW, wording; the human gate is not
+triggered) is fixed directly. `AGENTS.md`, `invariants.md` §3, `docs/_include/database.rst` and
+`docs/_include/database_alt.rst` no longer list two servers on one database as a way a retry is
+doubled, since each retry row now commits only with its conditional mark. The note that two servers
+still double-schedule new tasks (no row locks) stays. The counts that followed ("the two cases
+above", "those cases") now read in the singular. The docs build with `-W` is clean. No code or test
+change. Review cycle 3 verifies this.

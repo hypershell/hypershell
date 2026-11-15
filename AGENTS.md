@@ -231,11 +231,10 @@ exit_status != CANCEL_STATUS`**, or cancelled tasks get resurrected.
 
 Nothing in the schema prevents a doubled retry. A failed row is retried once because the
 server's single Scheduler thread is the only caller of `Task.next`, and `Task.query_retryable`
-(under `select_failed`) skips rows already marked `retried`. **Unguarded**, each adding a second
-retry row with the same `previous_id`:
-- two servers on one database, which is unsupported: no query takes row locks, so new tasks
-  double-schedule too;
-- a reset `retried` flag, from `hs update`.
+(under `select_failed`) skips rows already marked `retried`. **Unguarded**, adding a second retry
+row with the same `previous_id`: a reset `retried` flag, from `hs update`. Two servers on one
+database (unsupported) no longer double a retry, because each retry row commits only with its
+conditional `retried` mark; they still double-schedule new tasks, since no query takes row locks.
 
 The retry rows and their `retried` marks commit in one transaction, so a process killed between
 them leaves neither, and the failed row is retried in a later round.
@@ -250,7 +249,7 @@ A confirmation writes `client_id`/`client_host` only while `completion_time` is 
 so the result's attribution stands.
 
 Pre-2.9 SQLite databases keep `UNIQUE` on both columns, because SQLite cannot drop them without a
-table rebuild. Normal operation never trips them; in the two cases above they raise
+table rebuild. Normal operation never trips them; in the case above they raise
 `IntegrityError` instead.
 
 **Group-gating can stall by design:** `increment_group` won't advance while the current group
