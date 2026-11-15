@@ -150,7 +150,7 @@ phases:
     || exit 1; done'
 - id: P7
   name: CI green on the fix (external wait on the draft PR)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
