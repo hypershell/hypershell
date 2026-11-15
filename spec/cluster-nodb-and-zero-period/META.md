@@ -60,3 +60,10 @@ is skipped by the parser):
 - **Skill cause:** The exception keys on the file, not on the region touched, and "full fan-out" has no size; it does not say whether one planner-written brief that names the contracts pinned satisfies it when no FSM, thread, queue or database code is touched.
 - **Recommended fix:** Keep the exception (the gate is not weakened), and say what satisfies it at small appetite: at least one brief per high-blast-radius file touched, naming the exact functions edited and the contracts pinned by probe; subagents optional when the edit is confined to argument parsing and help text.
 - **Confidence:** med · **Effort:** small
+
+## F4 — The deferral exception has no rule for a pre-existing defect whose only in-contract repair sits in a Non-goal area of the core
+`origin=hs-review:step4 severity=low category=instruction status=open target=.agents/factory/review-rubric.md`
+- **What happened:** A CONFIRMED pre-existing defect (a tiny positive configuration period still spins the autoscalers) contradicts the GOAL Outcome. Refusing or rounding the value fails R6, but a repair in the autoscalers' wait might satisfy every criterion while brushing a Non-goal and a high-blast-radius file. The exception's second condition ("cannot be repaired this cycle without failing that criterion") could be read either way, so the orchestrator left the deferral to the human instead of writing the seed.
+- **Skill cause:** The exception weighs only GOAL criteria; it says nothing about a repair that satisfies the criteria but sits in a Non-goal or exceeds the appetite, nor who decides then.
+- **Recommended fix:** In the rubric's *Verdict & loop* and hs-review Step 4, add: when the only repair that satisfies the criteria lies in a Non-goal area, beyond the appetite, or in the high-blast-radius core, record the finding as CONFIRMED, write no seed, and route the deferral-or-amend choice to the human gate.
+- **Confidence:** med · **Effort:** small

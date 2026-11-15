@@ -4,7 +4,7 @@ title: hs cluster --no-db leaves the database alone, and an autoscaling period o
   zero or less is refused
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/cluster-nodb-and-zero-period
 base: develop
 current_phase: done
@@ -106,10 +106,11 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     "$TMPDIR/docs-html-cnz"
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 53f939229613fec56d9cde78932d84a58c3a8bd8
+  verdict: changes-requested
+  blocked_reason: F1 config_param_ref sub-second claim wrong (R7); F2 pre-existing
+    tiny-period spin needs human ruling (gate); F3 no NaN test
+  cycle: 1
 ---
 # TECH.md — `hs cluster --no-db` leaves the database alone, and an autoscaling period of zero or less is refused
 
