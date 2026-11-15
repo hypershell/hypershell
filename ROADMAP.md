@@ -35,8 +35,8 @@ ids are stable, the path is not resolvable from a clone.
 
 Findings from a comparative review against GNU Parallel (2026-08), which looked specifically for
 failure modes dangerous to task fidelity. Triaged rather than adopted wholesale: some items are
-answered by feature work further down this file, and two were judged not to be defects at all
-(see *Settled questions*).
+answered by feature work further down this file, two were judged not to be defects at all, and one
+was declined (see *Settled questions*).
 
 ## Bare `#` silently truncates the submitted command
 
@@ -81,16 +81,6 @@ Ctrl-C currently kills tasks only *because* they share the client's process grou
 
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/process-group-signal-teardown.md`](issues/process-group-signal-teardown.md)
-
-## A run with failed tasks exits 0
-
-The cluster entry points return nothing, so cmdkit exits 0 regardless of outcomes — every CI
-pipeline, Makefile, and Slurm chain wrapping `hsx` sees success while jobs failed. The information
-is in the database; the process contract discards it. Under `--no-db` it is not recorded anywhere at
-all.
-
-*Horizon: near-term · Depends on: — · Refs: —*
-**Seed:** [`issues/run-exit-status-failure-aware.md`](issues/run-exit-status-failure-aware.md)
 
 ## Transient coordinator failures should degrade to retry, not process death
 
@@ -339,18 +329,6 @@ maintainer's call. Pre-existing on the 2.8 line.
 *Horizon: maintainer's call (a 2.8.x hotfix against `master`) · Depends on: — · Refs:
 `key-option-refused` (landed, #104: the 2.9 half); the key hand-off hardening (#80, #81)*
 **Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: unshaped*
-
-## A mistyped option can print its value, a key included, to stderr and the log
-
-The parser's error for an unknown or ambiguous option repeats the arguments it could not place, and
-every command logs that error at CRITICAL after logging is set up, so a value given to a mistyped
-option reaches stderr and any log file. `-k`/`--auth` itself is refused without an echo since
-`key-option-refused`; other forms, such as `hs server --au=KEY`, still echo. The general fix belongs
-in cmdkit's argument-error path.
-
-*Horizon: near-term, small · Depends on: `key-option-refused` (landed, #104) · Refs: its plan's
-refusal-mechanism probes; cmdkit*
-**Seed:** [`issues/parser-echoes-option-values.md`](issues/parser-echoes-option-values.md) · *status: unshaped*
 
 ## Environment variables cannot reach every configuration key
 
@@ -709,6 +687,10 @@ describes. Work that *shipped* leaves no entry here: the code refutes a re-filin
   already enforced externally, and pressure-driven kill-and-requeue is actively wrong against our
   new-row retry chain. Declined as standing debt, not refused forever — the conditions that would
   change the answer are written down. → [`issues/stance-declared-resource-accounting.md`](issues/stance-declared-resource-accounting.md)
+- **A run whose tasks failed still exits 0.** Reported as the process contract discarding failures;
+  declined by the maintainer (2026-11-14): "a non-zero exit in HyperShell is an application failure.
+  Failed tasks are an expected part of any pipeline and do not constitute a non-zero exit for
+  HyperShell itself." → [`issues/run-exit-status-failure-aware.md`](issues/run-exit-status-failure-aware.md)
 
 # A note on security work
 

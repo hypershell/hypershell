@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: declined
 kind: fix
 appetite: small
 lane: public
@@ -7,8 +7,12 @@ lane: public
 
 # A run with failed tasks exits 0
 
-> **Candidate, not a contract.** `/hs-feature` promotes this into `spec/{slug}/GOAL.md`, where
-> appetite, non-goals and R-IDs get negotiated. Do not copy it verbatim.
+> **Declined (2026-11-14), a terminal record.** The maintainer's ruling: "a non-zero exit in
+> HyperShell is an application failure. Failed tasks are an expected part of any pipeline and do not
+> constitute a non-zero exit for HyperShell itself." So a run's exit status reports whether
+> HyperShell itself succeeded, not whether its tasks did. Kept so the request is not re-filed; not a
+> candidate for `/hs-feature`. Listed under `ROADMAP.md` § *Settled questions*. Reopening it is the
+> maintainer's call; the body below is the original request, kept as filed.
 
 ## Problem
 

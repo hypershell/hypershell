@@ -47,8 +47,8 @@ is that the consequence is deliberate.
    not file it again. The user-facing docs should mention that `kill -1` on a task reads as a cancel.
 2. **Exit-code conflation is a separate question.** `hs wait -r` maps the raw `-1` onto process
    exit code 255 (`task.py:332-366`), which conflates a cancel with a generic failure at the shell
-   boundary. That is about the *process contract*, not the sentinel, and is in scope for
-   `issues/run-exit-status-failure-aware.md`.
+   boundary. That is about the *process contract*, not the sentinel; the maintainer's ruling on the
+   process contract (2026-11-14) is recorded in `issues/run-exit-status-failure-aware.md` (declined).
 
 ## Notes
 
