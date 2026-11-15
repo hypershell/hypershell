@@ -233,29 +233,29 @@ Each is a change from `develop` `90ab2fc2` and from 2.8.x.
   but take size or duration text (by the default, `HYPERSHELL_TASK_MEMORY=16G` would become an
   error); `logging.file` defaults to a table but takes `true`/`enabled`/a path, and the reader treats
   the text `'true'` as a path (`src/hypershell/core/logging.py:1024`). R5 binds the outcome.
-  **Needs sign-off.**
+  **Confirmed at the GOAL gate.**
 - **Q:** Keys with no type of their own (open-table entries other than `export`; `[database]`
   provider arguments)? — **Proposed:** the text is taken as a TOML integer, float or boolean when it
   is one, else kept as text. This keeps what works today (`..._CONNECT_ARGS_TIMEOUT=5` stays the
   number `5`, which `sqlite3.connect` needs) and gives text when TOML says it is not a scalar
-  (`007`, `null`, an empty value, `True` stay text). **Needs sign-off.**
+  (`007`, `null`, an empty value, `True` stay text). **Confirmed at the GOAL gate.**
 - **Q:** Which words does a boolean key accept? — **Proposed:** `true`/`false`, `yes`/`no`,
   `on`/`off`, `1`/`0`, in any case. `1`/`0` work today by truthiness; `no` and `off` change from
-  true to false (change 4). **Needs sign-off.**
+  true to false (change 4). **Confirmed at the GOAL gate.**
 - **Q:** A double-underscore spelling as well? — **Proposed:** No (Non-goals). Schema matching leaves
   only the `[database]` provider-argument corner unreachable, a `__` form would not reach names with
   characters a variable cannot hold either, and two spellings would give `blame` and completion two
-  answers. **Needs sign-off.**
+  answers. **Confirmed at the GOAL gate.**
 - **Q:** Do R6's keys round up to whole seconds, as the duration options do? — **Proposed:** No; each
   key keeps fractions, as its bare number does today (`relay.poll` defaults to `0.1`, and
   `deadline`, `backoff` and `evict_hint` are floats). Whether a whole-number key such as
-  `server.evict` rounds a fractional unit value is left to `hs-plan`. **Needs sign-off.**
+  `server.evict` rounds a fractional unit value is left to `hs-plan`. **Confirmed at the GOAL gate.**
 - **Q:** What happens to a variable that matches no key? — **Proposed:** it is held as one key at the
   deepest known table its name spells, underscores kept (change 9), unread and not an error; the four
-  process variables of R8 are dropped. **Needs sign-off.**
+  process variables of R8 are dropped. **Confirmed at the GOAL gate.**
 - **Q:** Release line? — **Proposed:** 2.9 only, with `versionchanged:: 2.9.0` (Non-goals). The
   behaviour is documented and pre-existing on 2.8, and the fix changes values users may rely on.
-  **Needs sign-off.**
+  **Confirmed at the GOAL gate.**
 - **Q:** Size circuit-breaker? — **A:** Nine R-IDs, two seeds that share one reader; under the
   ~10 limit. If the gate wants it smaller, R6 (the duration keys) splits off cleanly into its own
   cycle after this one, with the duration-seed status reverted; R1–R5 and R7–R8 do not split without
@@ -265,6 +265,23 @@ Each is a change from `develop` `90ab2fc2` and from 2.8.x.
   whether `load_env` keeps cmdkit's `Environ` as the container; where each duration key is
   converted (load time or at its reader); the error text and exit status (`exit_status.bad_config`
   is today's for configuration errors).
+
+**Ruled at the GOAL gate** (2026-11-15): approved by the foreman, gate judge under the maintainer's
+mandate. Every clarification marked **Needs sign-off** is confirmed as proposed:
+- the type is declared per key, starting from the default (R5);
+- a key with no type of its own takes a TOML integer, float or boolean when its text is one, else the
+  text;
+- a boolean key accepts `true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0` in any case;
+- no double-underscore spelling;
+- R6's keys keep fractions; rounding of a whole-number key is `hs-plan`'s to decide and record;
+- an unmatched variable is held as one key at the deepest known table, not an error; the four
+  process variables are dropped;
+- 2.9 only, with `versionchanged:: 2.9.0`;
+- appetite `big`, R6 kept in this cycle.
+
+The brief's "`[export]` as written" means the environment form only, as shaped; a file's `[export]`
+keeps its documented upper-casing. The `hs config set` coercion follow-up is filed as a seed by the
+plan or at retirement. The contract is locked; `hs-plan` designs against it.
 
 ## Related materials
 
