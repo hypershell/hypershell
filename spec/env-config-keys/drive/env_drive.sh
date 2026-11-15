@@ -166,10 +166,10 @@ which)
     case $out in *'env: HYPERSHELL_EXPORT_MyVar'*) ok "which -> $out" ;; *) fail "which gave: $out" ;; esac
     list=$(env HYPERSHELL_SERVER_TLS_MIN_VERSION=TLSv1.3 HYPERSHELL_SITE="$site" hs config get --list-available)
     for want in server.tls.min_version autoscale.failed_launches relay.launcher_args; do
-        printf '%s\n' "$list" | grep -qx "$want" || fail "completion lacks $want (one per line)"
+        printf '%s\n' "$list" | grep -qxF "$want" || fail "completion lacks $want (one per line)"
     done
     for bad in server.tls.min.version autoscale.failed.launches site config.file; do
-        printf '%s\n' "$list" | grep -qx "$bad" && fail "completion offers $bad"
+        printf '%s\n' "$list" | grep -qxF "$bad" && fail "completion offers $bad"
     done
     ok "completion offers key paths, one per line, no process variables"
     ;;

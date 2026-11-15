@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/env-config-keys
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -75,7 +75,7 @@ phases:
 - id: P4
   name: blame, hs config which and completion name keys and variables by the loader's
     rule
-  status: pending
+  status: done
   satisfies:
   - R8
   depends_on:
@@ -328,12 +328,18 @@ key variable reaches a task or a remote command line.
 **Goal:** every key a variable sets is named by that variable; completion offers real dotted paths,
 one per line, never a process variable.
 
-- [ ] `core/config.py` `blame` and `ACTIVE_CONFIG_VARS` (PLAN §2.8); `src/hypershell/config.py`
+- [x] `core/config.py` `blame` and `ACTIVE_CONFIG_VARS` (PLAN §2.8); `src/hypershell/config.py`
       `ConfigWhichApp` uses the map; `--list-available` prints one per line.
-- [ ] `tests/test_completions.py`: bash and zsh consume the list one key per candidate (change
+- [x] `tests/test_completions.py`: bash and zsh consume the list one key per candidate (change
       `share/` only if this shows it must; keep the CI `share/` list in step if a path changes).
-- [ ] Keep the pinned `which`/blame texts (`test_initdb.py:25`, `test_topology_server.py:361`,
+- [x] Keep the pinned `which`/blame texts (`test_initdb.py:25`, `test_topology_server.py:361`,
       `test_autoscale_failed_launches.py:287`).
+- *As built:* `env_variable(*varpath)` in `core/config.py` names the variable from `ENV_VARIABLES`
+  (for a table, the first under it; the guide's rule only for a path no variable set); `blame` and
+  `hs config which` both use it. `share/` is unchanged: the new `test_completions.py` check shows
+  zsh already splits the list on newlines and bash gives it to `compgen -W`. The drive's `which`
+  mode matches completion words with `grep -qxF`: as a pattern, `server.tls.min.version` matched
+  `server.tls.min_version`.
 - **Verify:** frontmatter (blame, completion, pinned texts; drive `which`).
 - **Touches:** `src/hypershell/core/config.py`, `src/hypershell/config.py`, `share/` (if needed),
   `tests/`.

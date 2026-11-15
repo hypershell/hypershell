@@ -31,12 +31,12 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.platform import path, home, default_path
 from hypershell.core.exceptions import write_traceback, display_critical
 from hypershell.core.sys import PATH_SEP
-from hypershell.core.config_schema import read_environment, match_name, VariableError
+from hypershell.core.config_schema import KEYS, read_environment, match_name, variable_name, VariableError
 
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
-    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable',
+    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable', 'env_variable',
     'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
     'ENV_VARIABLES',
@@ -312,6 +312,17 @@ def partial_reload(system: Optional[str] = path.system.config,
     })
 
 
+def env_variable(*varpath: str) -> str:
+    """The variable, as written, that set `varpath` in the environment layer (for a table, the first under it).
+
+    A path no variable set is named by the guide's rule (see `config_schema.variable_name`).
+    """
+    if (name := ENV_VARIABLES.get(varpath)) is not None:
+        return name
+    beneath = sorted(path for path in ENV_VARIABLES if path[:len(varpath)] == varpath)
+    return ENV_VARIABLES[beneath[0]] if beneath else variable_name('.'.join(varpath))
+
+
 def blame(base: Configuration, *varpath: str) -> Optional[str]:
     """Construct filename or variable assignment string based on precedent of `varpath`."""
     source = base.which(*varpath)
@@ -320,7 +331,7 @@ def blame(base: Configuration, *varpath: str) -> Optional[str]:
     if source in ('system', 'user', 'local'):
         return f'from: {path.get(source).config}'
     elif source == 'env':
-        return 'from: HYPERSHELL_' + '_'.join([node.upper() for node in varpath])
+        return f'from: {env_variable(*varpath)}'
     else:
         return f'from: <{source}>'
 
@@ -575,10 +586,17 @@ if RELAY_PROCESS:
     config['database'] = relay_database_section(config)
 
 
-ACTIVE_CONFIG_VARS: Final[List[str]] = [
-    re.sub(r'_(?!(env|eval))', r'.', name.lower())
-    for name in Namespace(config).to_env().flatten()
-]
+def _leaf_paths(tree: dict, path: tuple = ()) -> Iterator[str]:
+    """The dotted path of each value in `tree` that is not a table (an empty table counts as one)."""
+    for name, value in tree.items():
+        if isinstance(value, dict) and value:
+            yield from _leaf_paths(value, (*path, name))
+        else:
+            yield '.'.join((*path, name))
+
+
+ACTIVE_CONFIG_VARS: Final[List[str]] = sorted({*KEYS, *_leaf_paths(config)})
+"""Every documented key and every key the configuration holds, by dotted path (for completion)."""
 
 
 SSH_GROUPS = []
