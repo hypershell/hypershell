@@ -76,8 +76,9 @@ subsystems.
   `Task.query_retryable`'s `retried IS FALSE` (under `select_failed`), **not** by the schema.
   Unguarded, yielding a second retry with the same `previous_id`: a reset `retried` (`hs update`).
   Retry rows and their conditional marks commit in one transaction, so a stop between them leaves
-  neither, and two servers on one database (unsupported; no row locks, so new tasks still
-  double-schedule) no longer double a retry.
+  neither, and two servers on one database (unsupported) no longer double a retry. They can still
+  run a task twice: a server starting while another runs reverts that server's in-flight tasks
+  (`Task.revert_interrupted`) and dispatches them again.
   Pre-2.9 SQLite DBs keep the `UNIQUE` constraints (forward-only, no table rebuild): never
   tripped in normal operation, an `IntegrityError` in that case.
 - A returned result writes only its result columns (`Task.result_columns`), and only for its

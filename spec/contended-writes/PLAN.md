@@ -298,3 +298,14 @@ doubled, since each retry row now commits only with its conditional mark. The no
 still double-schedule new tasks (no row locks) stays. The counts that followed ("the two cases
 above", "those cases") now read in the singular. The docs build with `-W` is clean. No code or test
 change. Review cycle 3 verifies this.
+
+## Review-cycle-3 ruling (2026-11-15)
+
+Review cycle 3 reached the loop bound with one LOW wording finding, G1: the clause that two servers
+"still double-schedule new tasks" is false since #103's conditional dispatch stamp. The maintainer
+ruled in session (2026-11-15): "Fix wording, merge". The foreman checks the fix and there is no
+fourth review. In `AGENTS.md` and `invariants.md` §3 the clause now states the remaining way two
+servers run a task twice: a server starting while another runs reverts that server's in-flight
+tasks (`Task.revert_interrupted`, called from the scheduler's start-up in `server.py`) and
+dispatches them again. The foreman verified the call path in the code. Wording only, with no code,
+test or user-docs change.

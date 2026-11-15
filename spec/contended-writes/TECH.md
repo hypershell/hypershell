@@ -4,7 +4,7 @@ title: 'Contended writes: the retried mark and Task.cancel_all land when contend
   on a hypertable; concurrent first submits share the reserved source row'
 kind: fix
 appetite: small
-status: blocked
+status: done
 branch: fix/contended-writes
 base: develop
 current_phase: P6
@@ -135,12 +135,9 @@ phases:
     --code-rev "$(git log -1 --format=%H -- . ':!spec')"
 review:
   last_reviewed_commit: 4def5c42909028cc3261fb5232e1ef3283ae958b
-  verdict: changes-requested
-  blocked_reason: 'G1 (LOW, wording): AGENTS.md:236-237 and invariants §3 keep ''two
-    servers still double-schedule new tasks (no row locks)'', false since #103''s
-    conditional dispatch stamp; F1, F2, N1 fixed; third changes-requested, bound reached,
-    escalated to the maintainer'
-  cycle: 3
+  verdict: approved
+  blocked_reason: ''
+  cycle: 4
 ---
 # TECH.md — Contended writes: the retried mark and Task.cancel_all land when contended; concurrent first submits share the reserved source row
 

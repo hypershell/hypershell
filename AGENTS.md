@@ -234,7 +234,9 @@ server's single Scheduler thread is the only caller of `Task.next`, and `Task.qu
 (under `select_failed`) skips rows already marked `retried`. **Unguarded**, adding a second retry
 row with the same `previous_id`: a reset `retried` flag, from `hs update`. Two servers on one
 database (unsupported) no longer double a retry, because each retry row commits only with its
-conditional `retried` mark; they still double-schedule new tasks, since no query takes row locks.
+conditional `retried` mark, and a dispatch stamp lands only on a row still unscheduled. They can
+still run a task twice: a server that starts while another runs reverts that server's in-flight
+tasks (`Task.revert_interrupted`) and dispatches them again.
 
 The retry rows and their `retried` marks commit in one transaction, so a process killed between
 them leaves neither, and the failed row is retried in a later round.
