@@ -18,8 +18,8 @@ Local             ``./.hypershell/config.toml``      ``./.hypershell/config.toml
 The `TOML <https://toml.io>`_ format is modern and minimal.
 
 Every configurable option can be set in one of these files. Further, every option can
-also be set by an environment variable, where the name aligns to the path
-to that option, delimited by underscores.
+also be set by an environment variable: ``HYPERSHELL_`` followed by the option's path, with each
+``.`` written as ``_`` (see *Environment Variables* below).
 
 For example, set the logging level at the user level with a command:
 
@@ -45,9 +45,9 @@ would be equivalent:
     $ export HYPERSHELL_LOGGING_LEVEL=INFO
 
 Finally, any option defined within a configuration file that ends with ``_env`` or ``_eval``
-is automatically expanded by the given environment variable or shell expression,
-respectively. This is useful as both a dynamic feature but also as a means to
-obfuscate sensitive information, such as database connection details.
+(or by a variable that ends with ``_ENV`` or ``_EVAL``) is automatically expanded by the given
+environment variable or shell expression, respectively. This is useful as both a dynamic feature
+but also as a means to obfuscate sensitive information, such as database connection details.
 
 .. code-block:: toml
 

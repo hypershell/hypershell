@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/env-config-keys
 base: develop
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -106,7 +106,7 @@ phases:
 - id: P6
   name: 'Docs: the environment rule once, the duration forms, [export]; AGENTS.md
     and invariants in lockstep'
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on:
@@ -385,16 +385,24 @@ a bind or a launch.
 **Goal:** the guide states the mapping once (PLAN §2.11) and nothing claims a key is reachable when it
 is not.
 
-- [ ] `docs/_include/config_intro.rst`: the `config_env` section (rule, underscore keys, open tables,
+- [x] `docs/_include/config_intro.rst`: the `config_env` section (rule, underscore keys, open tables,
       zones, `_ENV`/`_EVAL`, typing, process variables, unknown names, a scalar beside its table, two
       variables for one key, a name equal to a table, what stays unreachable), `versionchanged:: 2.9.0`.
-- [ ] `config_intro_alt.rst` and `manual.rst` § Environment Variables: the same in short, no stronger
+- [x] `config_intro_alt.rst` and `manual.rst` § Environment Variables: the same in short, no stronger
       claim; `config_site_vars.rst` if it needs the process-variable list.
-- [ ] `config_param_ref.rst`: the `[server.tls]` and other "also exposed as an environment variable"
+- [x] `config_param_ref.rst`: the `[server.tls]` and other "also exposed as an environment variable"
       lines hold; timescale and zone keys as prose or entries (the sync test follows).
-- [ ] `AGENTS.md` § Configuration and `invariants.md` §10: the environment layer is read through
+- [x] `AGENTS.md` § Configuration and `invariants.md` §10: the environment layer is read through
       `core/config_schema.py`; a new documented key gets its kind there and its reference entry in the
       same commit.
+- *As built:* the `config_env` section closes `config_intro.rst` as a `---` section of the
+  Configuration page, after a transition; the page's `hs config edit` paragraph moved from
+  `config.rst` into the include ahead of it, so it stays in the page's introduction rather than
+  falling under the new section. Both introductions say `_ENV`/`_EVAL` variables expand as the file
+  forms do. `manual.rst` gives the rule in short and names `HYPERSHELL_ZONE` beside the process
+  variables it includes; `config_site_vars.rst` is unchanged. `[server.tls]`'s environment line
+  links the section. AGENTS.md also names `is_key_variable()` where it describes the key variable's
+  stripping (§ Queue transport and security) and invariants §11 likewise.
 - **Verify:** frontmatter (sync test, docs greps, `sphinx-build -W`).
 - **Touches:** `docs/`, `AGENTS.md`, `.agents/factory/invariants.md`.
 

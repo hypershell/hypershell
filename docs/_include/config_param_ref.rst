@@ -323,8 +323,9 @@
 
     ``[tls]``
         Transport-layer security for queue connections. Enabled by default; every key below
-        is also exposed as an environment variable (e.g., ``HYPERSHELL_SERVER_TLS_ENABLED``)
-        with the usual precedence. See the :ref:`built-in TLS <builtin-tls>` section for the
+        is also exposed as an environment variable (e.g., ``HYPERSHELL_SERVER_TLS_ENABLED``,
+        ``HYPERSHELL_SERVER_TLS_MIN_VERSION``) with the usual precedence (see
+        :ref:`Environment Variables <config_env>`). See the :ref:`built-in TLS <builtin-tls>` section for the
         full model, including peer verification modes and limitations.
 
         ``.enabled``
