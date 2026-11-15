@@ -84,9 +84,43 @@ FIXED_RESULT: Dict[str, Any] = {
 }
 
 # Printed by tests/fixtures/make-task-wire-2.9.0a8.sh with hypershell 2.9.0a8 (see tests/fixtures/README.md).
-WIRE_2_9_0A8_DISPATCH = b'{"id": "6f1c2a3e-8b4d-4e5f-9a0b-1c2d3e4f5a6b", "group": 0, "args": "2026-11-02", "submit_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "submit_time": "2026-11-02 09:30:00.123456-05:00", "submit_host": "submit-host", "cores": 1, "memory": null, "cores_max": null, "memory_max": null, "timeout": null, "server_id": "1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e", "server_host": "server-host", "schedule_time": "2026-11-02 14:31:00+00:00", "client_id": null, "client_host": null, "command": null, "start_time": null, "completion_time": null, "exit_status": null, "outpath": null, "errpath": null, "csvpath": null, "attempt": 1, "retried": false, "waited": null, "duration": null, "previous_id": null, "next_id": null, "source": "2c3d4e5f-6a7b-4c8d-8e9f-1a2b3c4d5e6f", "fingerprint": "3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "zone": null, "part": 0, "tag": {"day": "2026-11-02"}}'
-WIRE_2_9_0A8_BUNDLE = b'[{"id": "6f1c2a3e-8b4d-4e5f-9a0b-1c2d3e4f5a6b", "group": 0, "args": "2026-11-02", "submit_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "submit_time": "2026-11-02 09:30:00.123456-05:00", "submit_host": "submit-host", "cores": 1, "memory": null, "cores_max": null, "memory_max": null, "timeout": null, "server_id": "1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e", "server_host": "server-host", "schedule_time": "2026-11-02 14:31:00+00:00", "client_id": null, "client_host": null, "command": null, "start_time": null, "completion_time": null, "exit_status": null, "outpath": null, "errpath": null, "csvpath": null, "attempt": 1, "retried": false, "waited": null, "duration": null, "previous_id": null, "next_id": null, "source": "2c3d4e5f-6a7b-4c8d-8e9f-1a2b3c4d5e6f", "fingerprint": "3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "zone": null, "part": 0, "tag": {"day": "2026-11-02"}}]'
-WIRE_2_9_0A8_RESULT = b'[{"id": "6f1c2a3e-8b4d-4e5f-9a0b-1c2d3e4f5a6b", "group": 0, "args": "2026-11-02", "submit_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "submit_time": "2026-11-02 09:30:00.123456-05:00", "submit_host": "submit-host", "cores": 1, "memory": null, "cores_max": null, "memory_max": null, "timeout": null, "server_id": "1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e", "server_host": "server-host", "schedule_time": "2026-11-02 14:31:00+00:00", "client_id": "4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8", "client_host": "client-host", "command": "2026-11-02", "start_time": "2026-11-02 09:31:01.654321-05:00", "completion_time": "2026-11-02 09:31:03.000005", "exit_status": 0, "outpath": "2026-11-02.out", "errpath": "2026-11-02.err", "csvpath": null, "attempt": 1, "retried": false, "waited": 61, "duration": 2, "previous_id": null, "next_id": null, "source": "2c3d4e5f-6a7b-4c8d-8e9f-1a2b3c4d5e6f", "fingerprint": "3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "zone": null, "part": 0, "tag": {"day": "2026-11-02"}}]'
+WIRE_2_9_0A8_DISPATCH = (
+    b'{"id": "6f1c2a3e-8b4d-4e5f-9a0b-1c2d3e4f5a6b", "group": 0, "args": "2026-11-02", "submit_id": "0'
+    b'a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "submit_time": "2026-11-02 09:30:00.123456-05:00", "submit'
+    b'_host": "submit-host", "cores": 1, "memory": null, "cores_max": null, "memory_max": null, "timeo'
+    b'ut": null, "server_id": "1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e", "server_host": "server-host", "s'
+    b'chedule_time": "2026-11-02 14:31:00+00:00", "client_id": null, "client_host": null, "command": n'
+    b'ull, "start_time": null, "completion_time": null, "exit_status": null, "outpath": null, "errpath'
+    b'": null, "csvpath": null, "attempt": 1, "retried": false, "waited": null, "duration": null, "pre'
+    b'vious_id": null, "next_id": null, "source": "2c3d4e5f-6a7b-4c8d-8e9f-1a2b3c4d5e6f", "fingerprint'
+    b'": "3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "zone": null, "part": 0, '
+    b'"tag": {"day": "2026-11-02"}}'
+)
+WIRE_2_9_0A8_BUNDLE = (
+    b'[{"id": "6f1c2a3e-8b4d-4e5f-9a0b-1c2d3e4f5a6b", "group": 0, "args": "2026-11-02", "submit_id": "'
+    b'0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "submit_time": "2026-11-02 09:30:00.123456-05:00", "submi'
+    b't_host": "submit-host", "cores": 1, "memory": null, "cores_max": null, "memory_max": null, "time'
+    b'out": null, "server_id": "1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e", "server_host": "server-host", "'
+    b'schedule_time": "2026-11-02 14:31:00+00:00", "client_id": null, "client_host": null, "command": '
+    b'null, "start_time": null, "completion_time": null, "exit_status": null, "outpath": null, "errpat'
+    b'h": null, "csvpath": null, "attempt": 1, "retried": false, "waited": null, "duration": null, "pr'
+    b'evious_id": null, "next_id": null, "source": "2c3d4e5f-6a7b-4c8d-8e9f-1a2b3c4d5e6f", "fingerprin'
+    b't": "3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e", "zone": null, "part": 0,'
+    b' "tag": {"day": "2026-11-02"}}]'
+)
+WIRE_2_9_0A8_RESULT = (
+    b'[{"id": "6f1c2a3e-8b4d-4e5f-9a0b-1c2d3e4f5a6b", "group": 0, "args": "2026-11-02", "submit_id": "'
+    b'0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "submit_time": "2026-11-02 09:30:00.123456-05:00", "submi'
+    b't_host": "submit-host", "cores": 1, "memory": null, "cores_max": null, "memory_max": null, "time'
+    b'out": null, "server_id": "1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e", "server_host": "server-host", "'
+    b'schedule_time": "2026-11-02 14:31:00+00:00", "client_id": "4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8"'
+    b', "client_host": "client-host", "command": "2026-11-02", "start_time": "2026-11-02 09:31:01.6543'
+    b'21-05:00", "completion_time": "2026-11-02 09:31:03.000005", "exit_status": 0, "outpath": "2026-1'
+    b'1-02.out", "errpath": "2026-11-02.err", "csvpath": null, "attempt": 1, "retried": false, "waited'
+    b'": 61, "duration": 2, "previous_id": null, "next_id": null, "source": "2c3d4e5f-6a7b-4c8d-8e9f-1'
+    b'a2b3c4d5e6f", "fingerprint": "3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e",'
+    b' "zone": null, "part": 0, "tag": {"day": "2026-11-02"}}]'
+)
 
 
 @fixture

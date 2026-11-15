@@ -17,6 +17,7 @@ from typing import Any, List
 from pathlib import Path
 
 # Standard libs
+import time
 import logging
 import threading
 from types import SimpleNamespace
@@ -199,3 +200,99 @@ def test_local_cluster_runs_input_after_a_pause(task_db: Engine, monkeypatch: py
     assert rows == {'echo a': 0, 'echo b': 0}
     assert final_input_ended == [True]
     assert sorted((tmp_path / 'out.txt').read_text().split()) == ['a', 'b']
+
+
+WAKE_BOUND = 10
+"""Seconds a woken back-off may take to end; the back-off itself is a long poll, far beyond this."""
+
+
+def open_input_scheduler(submitter: OpenInput, poll: int = 600) -> Scheduler:
+    """Started scheduler on a database whose one task is done, its input open, backing off for `poll` seconds."""
+    commit_finished(0)
+    scheduler = Scheduler(queue=None, poll=poll, attempts=1, submitter=submitter)
+    assert scheduler.start() is SchedulerState.LOAD
+    scheduler.poll = poll  # Already backed off to its full interval, as after a long pause
+    scheduler.woken = True
+    return scheduler
+
+
+@mark.unit
+def test_wake_ends_a_back_off(task_db: Engine) -> None:
+    """A wake ends the scheduler's wait for demand at once, and the next pass sees the input ended."""
+    submitter = OpenInput()
+    scheduler = open_input_scheduler(submitter)
+    waiting = threading.Event()
+    wait_need = scheduler.wait_need
+
+    def entered_wait(generation: int, timeout: float) -> bool:
+        waiting.set()
+        return wait_need(generation, timeout)
+
+    scheduler.wait_need = entered_wait
+    states = []
+    thread = threading.Thread(target=lambda: states.append(scheduler.load_bundle()), daemon=True)
+    start = time.monotonic()
+    thread.start()
+    assert waiting.wait(WAKE_BOUND)
+    submitter.alive = False
+    scheduler.wake()
+    thread.join(WAKE_BOUND)
+    assert not thread.is_alive()
+    assert time.monotonic() - start < WAKE_BOUND
+    assert states == [SchedulerState.LOAD]
+    assert scheduler.load_bundle() is SchedulerState.FINAL
+
+
+@mark.unit
+def test_wake_before_the_wait_is_not_lost(task_db: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wake that lands during a pass, before its back-off starts, still ends that back-off."""
+    submitter = OpenInput()
+    scheduler = open_input_scheduler(submitter)
+    count_retryable = Task.count_retryable
+
+    def wake_then_count(*args: Any, **kwargs: Any) -> int:
+        scheduler.wake()
+        return count_retryable(*args, **kwargs)
+
+    monkeypatch.setattr(Task, 'count_retryable', wake_then_count)
+    start = time.monotonic()
+    assert scheduler.load_bundle() is SchedulerState.LOAD
+    assert time.monotonic() - start < WAKE_BOUND
+
+
+@mark.integration
+def test_local_cluster_stops_promptly_at_end_of_input(task_db: Engine, monkeypatch: pytest.MonkeyPatch,
+                                                      tmp_path: Path) -> None:
+    """Input that ends during a long back-off ends the run at once, not after the poll interval."""
+    monkeypatch.setattr(hypershell.server, 'DATABASE_ENABLED', True)
+    released = threading.Event()
+    back_off = Scheduler.back_off
+
+    def long_back_off(self: Scheduler, generation: int, reason: str) -> SchedulerState:
+        if reason.startswith('All tasks done'):
+            self.poll, self.woken = self.poll_max, True  # A long pause: the full interval, every time
+            released.set()
+        return back_off(self, generation, reason)
+
+    monkeypatch.setattr(Scheduler, 'back_off', long_back_off)
+
+    def source():
+        yield 'echo a'
+        if not released.wait(60):
+            raise RuntimeError('The scheduler never waited on the open input')
+
+    with open(tmp_path / 'out.txt', mode='w') as output:
+        cluster = LocalCluster(source=source(), num_threads=1, bundlesize=1, bundlewait=1, poll=600,
+                               max_retries=0, port=free_port(), redirect_output=output)
+        cluster.start()
+        try:
+            cluster.join(timeout=60)
+            assert not cluster.is_alive()
+        finally:
+            if cluster.is_alive():
+                cluster.server.scheduler.stop()  # Ends the back-off; the run then shuts down in order
+                cluster.join(timeout=30)
+
+    assert released.is_set()
+    rows = {task.args: task.exit_status for task in Task.query(caching=False).all()}
+    assert rows == {'echo a': 0}

@@ -320,6 +320,10 @@ class Scheduler(StateMachine):
             self.halting = True
             dispatcher.need.notify_all()
 
+    def wake(self: Scheduler) -> None:
+        """End a back-off at once, so the next pass runs without waiting out the poll interval."""
+        self.dispatcher.wake()
+
     def next_tasks(self: Scheduler, refills: List[Tuple[str, int]]) -> List[Tuple[str, List[Task]]]:
         """Select the next tasks to schedule from the current group, for each zone that needs a refill."""
         if self.first_group_pending:
@@ -1206,6 +1210,8 @@ class ServerThread(Thread):
         with self.queue:
             self.start_threads()
             self.wait_submitter()
+            if self.scheduler is not None:
+                self.scheduler.machine.wake()  # The input has ended: the scheduler sees it without waiting out its poll
             self.wait_scheduler()
             self.wait_heartbeat()
             self.wait_receiver()

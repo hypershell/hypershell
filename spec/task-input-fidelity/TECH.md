@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/task-input-fidelity
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -50,7 +50,7 @@ phases:
     $m || exit 1; done
 - id: P3
   name: 'Optional: wake the scheduler at the end of input so a stream run stops promptly'
-  status: pending
+  status: done
   satisfies:
   - R6
   depends_on:
@@ -217,12 +217,12 @@ without it R6 holds within `server.poll`)
 **Goal:** a stream run ends within a second or two of its input ending and its last task finishing,
 whatever `server.poll` is.
 
-- [ ] Tests first: a unit test that `Scheduler.wake()` ends a back-off at once, including a wake that
+- [x] Tests first: a unit test that `Scheduler.wake()` ends a back-off at once, including a wake that
       lands before the wait starts (lossless); the P2 integration test with `poll=600` still ends well
       inside its join timeout.
-- [ ] `src/hypershell/core/dispatch.py`: public `Dispatcher.wake()` — bump the need generation under the
+- [x] `src/hypershell/core/dispatch.py`: public `Dispatcher.wake()` — bump the need generation under the
       dispatcher's lock and notify (as its own `_signal_need` callers do). Not on `DISPATCH_EXPOSED`.
-- [ ] `src/hypershell/server.py`: `Scheduler.wake()` calls it; `ServerThread.run_with_exceptions` calls
+- [x] `src/hypershell/server.py`: `Scheduler.wake()` calls it; `ServerThread.run_with_exceptions` calls
       `self.scheduler.machine.wake()` (when there is a scheduler) between `wait_submitter()` and
       `wait_scheduler()`. No other change to the shutdown sequence.
 - **Verify:** `uv run pytest -q tests/test_stream_input.py tests/test_dispatch.py tests/test_dispatch_staged.py tests/test_dispatch_version.py tests/test_signal_wake.py tests/test_server_fsm.py`, then `pause` with `FD_POLL=600 FD_BOUND=10`, then `fail-pause`.
