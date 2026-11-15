@@ -358,25 +358,11 @@ DEFAULT_AUTOSCALE_FAILED_LAUNCHES: Final[int] = default.autoscale.failed_launche
 
 
 def configured_failed_launches() -> int:
-    """
-    The `[autoscale] failed_launches` setting, refused naming its source unless a non-negative integer.
-
-    Its environment form, ``HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES``, is split at every underscore when
-    read, and so lands at `autoscale.failed.launches`; from there it takes precedence, as the
-    environment does over every file.
-    """
-    varpath = ('autoscale', 'failed_launches')
-    try:
-        if config.which('autoscale', 'failed', 'launches') == 'env':
-            varpath = ('autoscale', 'failed', 'launches')
-    except KeyError:
-        pass
-    value = config
-    for name in varpath:
-        value = value[name]
+    """The `[autoscale] failed_launches` setting, refused naming its source unless a non-negative integer."""
+    value = config.autoscale.failed_launches
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ConfigurationError(f'Expected a non-negative integer for `autoscale.failed_launches`, '
-                                 f'given {value!r} ({blame(config, *varpath)})')
+                                 f'given {value!r} ({blame(config, "autoscale", "failed_launches")})')
     return value
 
 

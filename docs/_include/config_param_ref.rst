@@ -51,7 +51,16 @@
 
         As a shorthand, ``logging.file`` may be set directly to ``"enabled"`` (or ``true``) to
         log to the default per-process file, or to a path to log there; both forms disable
-        rotation and compression.
+        rotation and compression. From the environment, ``HYPERSHELL_LOGGING_FILE`` takes
+        ``enabled``, ``true``, ``yes``, ``on`` or ``1``, in any letter case, for the default file;
+        ``false``, ``no``, ``off`` and ``0`` are refused, since there is no form that disables it;
+        any other text is a path.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               ``HYPERSHELL_LOGGING_FILE`` takes ``enabled`` in any letter case and refuses the
+               false words.
 
         ``.path``
             Destination file path. Defaults to a per-process, host-scoped file in the site

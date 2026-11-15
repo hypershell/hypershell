@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/env-config-keys
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -38,7 +38,7 @@ phases:
 - id: P2
   name: The key table, the matcher and the typed environment layer (core/config_schema.py,
     core/config.py)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -271,19 +271,32 @@ change.
 **Goal:** every `HYPERSHELL_*` name reaches its key by PLAN §2.2 with the value read by its kind
 (§2.3); `hs config get` shows it; the reference and the table cannot drift.
 
-- [ ] `src/hypershell/core/config_schema.py` (PLAN §2.1): `Kind`, `KEYS`, `TABLES`, `ZONE_KEYS`,
+- [x] `src/hypershell/core/config_schema.py` (PLAN §2.1): `Kind`, `KEYS`, `TABLES`, `ZONE_KEYS`,
       `PROCESS_VARIABLES`, `PROSE_KEYS`, the kind readers (§2.3) and
       `read_environment(environ) -> (Namespace, variables)` (§2.2, steps 1–4).
-- [ ] `core/config.py`: `reload_env`/`load_env` return the `Namespace` and keep `ENV_VARIABLES`
+- [x] `core/config.py`: `reload_env`/`load_env` return the `Namespace` and keep `ENV_VARIABLES`
       (§2.4); `is_key_variable(name)` (§2.5, used in P3); `__all__` updated.
-- [ ] Empty text as unset where `None` was (§2.9): `core/tls.py` `resolve_auto_paths`, `core/logging.py`
+- [x] Empty text as unset where `None` was (§2.9): `core/tls.py` `resolve_auto_paths`, `core/logging.py`
       (`logging.file.path`/`compress`), `data/core.py` (user/password), `task.cwd`.
-- [ ] `cluster/remote.py` `configured_failed_launches` reads `('autoscale', 'failed_launches')` (§2.10);
+- [x] `cluster/remote.py` `configured_failed_launches` reads `('autoscale', 'failed_launches')` (§2.10);
       reshape `tests/test_autoscale_failed_launches.py::test_refused_from_environment` (loader refusals
       for `true`/`abc`/`1.5`, reader refusal for `-1`), keeping its pinned message text where it holds.
-- [ ] `tests/test_config_schema.py` (§2.1 sync test; parse rules for every kind, including the
+- [x] `tests/test_config_schema.py` (§2.1 sync test; parse rules for every kind, including the
       untyped list in §2.3).
-- [ ] `docs/_include/config_param_ref.rst`: `logging.file`'s words; nothing else yet (P6).
+- [x] `docs/_include/config_param_ref.rst`: `logging.file`'s words; nothing else yet (P6).
+- *As built:* `SCALAR_TABLES` (`logging.file`, `ssh.nodelist`, `database`: each a key and a table)
+  is split from `PROSE_KEYS` (`logging.file.format` and the timescale keys, named in their table's
+  text), so the sync test checks each against what the reference holds; the undocumented
+  `database` scalar needs no prose. The refusal from a typed variable is
+  `<key>: expected <form>, given <text> (from: <VARIABLE>)` (forms: `a whole number`, `a number`,
+  `a boolean (true/false, yes/no, on/off, 1/0)`, `a whole number or <none>`, `true, enabled, or a
+  path`). `test_variant_database_password_env` reads the configuration without the package's own
+  import (SQLite takes no password); it is still red on `90ab2fc2`.
+  `test_cluster_launch.py::test_client_zone_never_comes_from_configuration` pinned `config.zone`
+  from `HYPERSHELL_ZONE`; it now asserts the zone variable is not a key. The drive's `typed` mode
+  sets `HYPERSHELL_PYTHONPATH` to the site directory, since `core/sys.py` refuses a path that does
+  not exist (unchanged here), which `/nowhere` was. An empty `database.user`/`password` is unset in
+  `DatabaseURL` whatever the layer, so a file's `password = ""` beside a user is refused too.
 - **Verify:** frontmatter (the new and touched tests; drive modes `keys` and `typed`).
 - **Touches:** `src/hypershell/core/config_schema.py`, `src/hypershell/core/config.py`,
   `src/hypershell/core/tls.py`, `src/hypershell/core/logging.py`, `src/hypershell/data/core.py`,

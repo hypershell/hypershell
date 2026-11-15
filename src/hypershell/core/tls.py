@@ -467,14 +467,15 @@ def resolve_auto_paths(cfg: TLSConfig, directory: str) -> TLSConfig:
     cafile = cfg.cafile
     if cafile == PARAM_AUTO:
         cafile = cert  # Mirror the server cert; useful for single-host out-of-the-box setup.
+    unset = (PARAM_NONE, None, '')  # Empty text, as an environment variable gives it, is unset too.
     return replace(
         cfg,
-        cert=None if cert in (PARAM_NONE, None) else cert,
-        key=None if key in (PARAM_NONE, None) else key,
-        cafile=None if cafile in (PARAM_NONE, None) else cafile,
-        fingerprint=None if cfg.fingerprint in (PARAM_NONE, None) else cfg.fingerprint,
-        ciphers=None if cfg.ciphers in (PARAM_NONE, None) else cfg.ciphers,
-        servername=None if cfg.servername in (PARAM_NONE, None) else cfg.servername,
+        cert=None if cert in unset else cert,
+        key=None if key in unset else key,
+        cafile=None if cafile in unset else cafile,
+        fingerprint=None if cfg.fingerprint in unset else cfg.fingerprint,
+        ciphers=None if cfg.ciphers in unset else cfg.ciphers,
+        servername=None if cfg.servername in unset else cfg.servername,
     )
 
 

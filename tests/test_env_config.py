@@ -46,7 +46,7 @@ MISSING: Final[str] = '<missing>'
 
 CHILD: Final[str] = '''\
 import sys
-{imports}
+{bare}{imports}
 
 MISSING = {missing!r}
 
@@ -65,6 +65,14 @@ print(repr(eval(sys.argv[1])))
 '''
 """Program a child interpreter runs to print `repr` of one expression over the configuration."""
 
+BARE: Final[str] = '''\
+import types, importlib.util
+package = types.ModuleType('hypershell')
+package.__path__ = list(importlib.util.find_spec('hypershell').submodule_search_locations)
+sys.modules['hypershell'] = package
+'''
+"""Child preamble that stands in for the package's own import, so only the configuration modules load."""
+
 
 def child_env(site: Path, **variables: Optional[str]) -> Dict[str, str]:
     """The test's environment with `variables` set (a value of None unsets it), for a child in `site`."""
@@ -72,14 +80,16 @@ def child_env(site: Path, **variables: Optional[str]) -> Dict[str, str]:
     return {name: value for name, value in env.items() if value is not None}
 
 
-def config_repr(site: Path, expr: str, imports: str = '', **variables: Optional[str]) -> Tuple[int, str, str]:
+def config_repr(site: Path, expr: str, imports: str = '', bare: bool = False, **variables: Optional[str]
+                ) -> Tuple[int, str, str]:
     """Run a child interpreter in `site` with `variables` set; return its status, `repr(expr)` and stderr.
 
     The child imports `config` from `hypershell.core.config` (plus `imports`) and defines `key(path)`
-    and `MISSING`, so `expr` may use them.
+    and `MISSING`, so `expr` may use them. With `bare`, the package's own import (and so the
+    database engine) is left out and only the configuration modules load.
     """
-    program = CHILD.format(imports='\n'.join(['from hypershell.core.config import config', imports]),
-                           missing=MISSING)
+    program = CHILD.format(bare=BARE if bare else '', missing=MISSING,
+                           imports='\n'.join(['from hypershell.core.config import config', imports]))
     result = run([sys.executable, '-c', program, expr], cwd=site, env=child_env(site, **variables),
                  stdin=DEVNULL, capture_output=True, text=True, timeout=DEADLINE)
     lines = result.stdout.strip().splitlines()
@@ -270,8 +280,11 @@ def test_variant_from_environment(temp_site: Path, variant: str) -> None:
 
 @mark.integration
 def test_variant_database_password_env(temp_site: Path) -> None:
-    """`HYPERSHELL_DATABASE_PASSWORD_ENV` gives `database.password` the named variable's value."""
-    rc, seen, stderr = config_repr(temp_site, 'config.database.password',
+    """`HYPERSHELL_DATABASE_PASSWORD_ENV` gives `database.password` the named variable's value.
+
+    The database engine is not built (SQLite takes no password); only the configuration is read.
+    """
+    rc, seen, stderr = config_repr(temp_site, 'config.database.password', bare=True,
                                    HYPERSHELL_DATABASE_PASSWORD_ENV='ENV_CONFIG_TEST_PASSWORD',
                                    ENV_CONFIG_TEST_PASSWORD='s3cret')
     assert rc == exit_status.success, stderr

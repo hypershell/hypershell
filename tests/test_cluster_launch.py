@@ -1290,16 +1290,19 @@ def test_ssh_launch_refuses_to_expose_zone() -> None:
 
 
 def test_client_zone_never_comes_from_configuration(temp_site: Path) -> None:
-    """A client given no --zone serves the default zone, even when the environment names a zone."""
+    """A client given no --zone serves the default zone, even when the environment names a zone.
+
+    The zone variable is a process variable, not a configuration key.
+    """
     script = ('from hypershell.core.config import config\n'
               'from hypershell.client import ClientApp\n'
               'app = ClientApp.from_cmdline([\'-H\', \'localhost\'])\n'
               'app.check_args()\n'
-              'print(config.zone, app.zone)\n')
+              'print(\'zone\' in config, app.zone)\n')
     env = {**os.environ, ZONE_ENV: 'gpu'}
     result = subprocess.run([sys.executable, '-c', script], env=env, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ['gpu', 'None']
+    assert result.stdout.split() == ['False', 'None']
 
 
 def test_ssh_env_export_never_carries_key(stand_ins: StandIns, temp_site: Path) -> None:

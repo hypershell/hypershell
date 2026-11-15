@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Dict
+from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Dict, Tuple
 
 # Standard libs
 import os
@@ -31,13 +31,15 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.platform import path, home, default_path
 from hypershell.core.exceptions import write_traceback, display_critical
 from hypershell.core.sys import PATH_SEP
+from hypershell.core.config_schema import read_environment, match_name, VariableError
 
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
-    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV',
+    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable',
     'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
+    'ENV_VARIABLES',
     'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
     'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
     'AUTH_ALLOWED_CHARS', 'AUTH_MINIMUM_LENGTH', 'find_available_ports',
@@ -257,14 +259,28 @@ def load_file(filepath: str) -> Namespace:
     return reload_file(filepath)
 
 
-def reload_env() -> Environ:
-    """Force reloading environment variables and expanding hierarchy as namespace."""
-    return Environ(prefix='HYPERSHELL').expand()
+ENV_VARIABLES: Dict[Tuple[str, ...], str] = {}
+"""The variable, as written, that set each key path of the environment layer last read."""
+
+
+def reload_env() -> Namespace:
+    """Force reloading the environment layer: each `HYPERSHELL_*` variable at the key its name matches.
+
+    The names are matched against the documented keys and tables (`hypershell.core.config_schema`),
+    and each value is read by its key's kind. :data:`ENV_VARIABLES` is rebuilt to match.
+    """
+    try:
+        layer, variables = read_environment(os.environ)
+    except VariableError as error:
+        raise ConfigurationError(str(error)) from None
+    ENV_VARIABLES.clear()
+    ENV_VARIABLES.update(variables)
+    return Namespace(layer)
 
 
 @functools.lru_cache(maxsize=None)
-def load_env() -> Environ:
-    """Load environment variables and expand hierarchy as namespace."""
+def load_env() -> Namespace:
+    """Load the environment layer (see :func:`reload_env`)."""
     return reload_env()
 
 
@@ -396,6 +412,15 @@ def resolve_auth(*section: str, base: Configuration = None) -> str:
 
 AUTH_ENV: Final[str] = 'HYPERSHELL_SERVER_AUTH'
 """Environment variable that gives `server.auth`; `hs cluster` launchers hand the key over in it."""
+
+
+def is_key_variable(name: str) -> bool:
+    """True if the environment variable `name` sets `server.auth` (as :const:`AUTH_ENV` does, in any letter case)."""
+    try:
+        match = match_name(name)
+    except VariableError:
+        return False
+    return match is not None and match[0] == ('server', 'auth')
 
 KEY_OPTION_STRINGS: Final[tuple[str, ...]] = ('-k', '--auth')
 """Option strings registered on the commands only to be refused (see :func:`refuse_key_option`)."""

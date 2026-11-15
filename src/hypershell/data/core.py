@@ -47,12 +47,13 @@ class DatabaseURL(dict):
 
     def __init__(self: DatabaseURL, **fields) -> None:
         """Initialize fields."""
+        # An empty user or password is unset, so either one given alone is refused.
         try:
             super().__init__(provider=fields.pop('provider'),
                              database=fields.pop('database', None),
                              file=fields.pop('file', None),
-                             user=fields.pop('user', None),
-                             password=fields.pop('password', None),
+                             user=fields.pop('user', None) or None,
+                             password=fields.pop('password', None) or None,
                              host=fields.pop('host', None),
                              port=fields.pop('port', None),
                              parameters=fields)

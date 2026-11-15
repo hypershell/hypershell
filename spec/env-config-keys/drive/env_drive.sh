@@ -113,7 +113,7 @@ typed)
     expect_get '<none>' 'HYPERSHELL_RELAY_MAX=<none>' -- relay.max
     expect_get 50123 HYPERSHELL_SERVER_PORT=50123 -- server.port
     out=$(env HYPERSHELL_SERVER_EAGER=no HYPERSHELL_LOGGING_FILE=Enabled HYPERSHELL_AUTOSCALE_LAUNCHER=false \
-          HYPERSHELL_LOGGING_DATEFMT= HYPERSHELL_ZONE=gpu HYPERSHELL_PYTHONPATH=/nowhere \
+          HYPERSHELL_LOGGING_DATEFMT= HYPERSHELL_ZONE=gpu HYPERSHELL_PYTHONPATH="$site" \
           python -c 'from hypershell.core.config import config as c; print(repr((c.server.eager, c.logging.file, c.autoscale.launcher, c.logging.datefmt, "zone" in c, "pythonpath" in c, "site" in c, "config" in c)))')
     [ "$out" = "(False, True, 'false', '', False, False, False, False)" ] || fail "typed values: $out"
     ok "typed values and process variables: $out"
