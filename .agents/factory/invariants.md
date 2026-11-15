@@ -187,8 +187,19 @@ subsystems.
   Python reading the client's own `os.environ` on purpose).
 - In JSON mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
   expansion.
-- Advertised `HOSTNAME` must be routable from clients. The autoscaler never terminates clients
-  (they self-exit on idle) and ignores `no_confirm`/`in_memory`/`forever`/`restart`.
+- One rule gives the address every launch tells its clients (`cluster/launch.py::advertised_host`,
+  at each launch site incl. `relay/site.py::zone_launch`): `--advertise`/`server.advertise` (remote
+  `hs cluster` modes only; constructors take `advertise=` and never read configuration), else the
+  bind address, else `HOSTNAME` for a wildcard bind. It must be routable from clients. The
+  autoscaler never terminates clients (they self-exit on idle) and ignores
+  `no_confirm`/`in_memory`/`forever`/`restart`.
+- A cluster whose launched clients are all gone with work left exits 5 (`ClusterLaunchError`):
+  launcher, `--mpi` and `--ssh` through `cluster/watch.py` (all exited, at least one non-zero, and
+  `work_remains`; all-zero exits keep waiting); autoscaling after `autoscale.failed_launches`
+  (default 3, 0 off) failed launches in a row with no client of this server registered
+  (`INSTANCE`-stamped `Client` rows). `AutoScaler`/`AutoScalerThread` default the limit to 0 and
+  `site_scaler`/`zone_fleet` never set it, so relay fleets and `hs server --autoscaling` never stop
+  for it.
 - Autoscaled launches are per zone (`LaunchActuator`, `client_launch(..., expose_zone=True)`):
   `{zone}` in launcher words only (never `-t`), `HYPERSHELL_ZONE` in the launch env and never in
   the Open MPI forward list, no exposure over SSH, and no `--zone` for the own default zone. The

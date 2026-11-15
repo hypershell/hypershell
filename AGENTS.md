@@ -414,9 +414,20 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   arguments goes there (and only options a 2.9.0a4 client accepts may be emitted; a contract
   test pins this). `LocalCluster` runs its clients in-process and builds no argv. In JSON
   mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
-  expansion. The advertised
-  `HOSTNAME` must be routable from clients. The `AutoScaler` never terminates clients (they
-  self-exit on idle) and silently ignores `no_confirm`/`in_memory`/`forever`/`restart`.
+  expansion. Every launch mode, and a relay's site clients, tells its clients the address
+  `cluster/launch.py::advertised_host` gives: `--advertise`/`server.advertise` when given (remote
+  `hs cluster` modes only; the relay has no override), else the bind address, else this host's own
+  `HOSTNAME` for a wildcard (`0.0.0.0`) bind; whichever it is must be routable from clients. The
+  `AutoScaler` never terminates clients (they self-exit on idle) and silently ignores
+  `no_confirm`/`in_memory`/`forever`/`restart`.
+- **A cluster with every launched client gone and work left exits 5** (`ClusterLaunchError`).
+  Launcher, `--mpi` and `--ssh` modes watch every launched process (`cluster/watch.py`
+  `watch_launched`): each non-zero exit is warned about as it happens, and once all have exited, at
+  least one non-zero, with work the server would otherwise wait on forever (`work_remains`), the
+  server is stopped. All-zero exits keep today's wait. Under autoscaling, `autoscale.failed_launches`
+  (default 3, 0 off) launched clients in a row exiting non-zero with no client of this server
+  registered end the `AutoScaler` and the cluster the same way; `AutoScaler`/`AutoScalerThread`
+  default to 0, so relay site fleets never stop for it.
 - The autoscaler launches zone by zone through `cluster/launch.py` `LaunchActuator`, one
   `client_launch(..., expose_zone=True)` per zone: `{zone}` is replaced in launcher words only
   (never the client's `-t`), `HYPERSHELL_ZONE` is added to the launch env (never to the Open MPI
@@ -580,7 +591,9 @@ compatibility until v3, but are never referenced.
   flag and sticky global `RECEIVED` are subtle.
 - **`cluster/launch.py|remote.py|ssh.py`** — every launched client is built by
   `client_launch()`; the key goes in the environment or on ssh's stdin, never in argv; fresh
-  auth token; `HOSTNAME` routability; autoscaler never terminates clients.
+  auth token; the advertised address (`advertised_host`) routable from clients; autoscaler never
+  terminates clients; every client gone with work left exits 5 (`cluster/watch.py`,
+  `autoscale.failed_launches`, off for relay fleets).
 - `submit.py` queue-mode silently ignores `-t/--tag` (leaves `group=None`) — asymmetric vs DB
   mode; tag/attribute resolution actually happens in `Task.new`.
 - **`relay/`** — **one relay per process**: `core/config.py` swaps the whole `[database]` section

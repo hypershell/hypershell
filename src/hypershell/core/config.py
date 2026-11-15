@@ -135,6 +135,7 @@ default = Namespace({
     'server': {
         'bind': 'localhost',   # Used by server
         'host': 'localhost',   # Used by clients
+        'advertise': PARAM_UNSET,  # Address launched clients dial (unset: the bind, or this host's name)
         'port': 50_001,
         'auth': DEFAULT_AUTH,  # Initializes to fixed default value (DO NOT USE THIS)
         'queuesize': 1,        # Only allow a single bundle (scheduler must wait)
@@ -183,6 +184,7 @@ default = Namespace({
         'launcher': '',     # Empty means just 'hs client ...'
         'distribution': 'spread',  # Relay sites only: either 'spread' or 'fill'
         'sites': PARAM_UNSET,      # Relay sites only: preferred site order for 'fill' (list or comma string)
+        'failed_launches': 3,      # Stop after this many failed launches in a row with no client (0: never)
         'size': {
             'init': 1,
             'min': 0,

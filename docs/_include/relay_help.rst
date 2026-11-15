@@ -39,8 +39,10 @@ Options
     With none, *clients* run directly on the relay's host. Otherwise each is launched as
     ``CMD [ARGS...] hyper-shell client ...`` (e.g., ``srun``). A ``{zone}`` in the launcher or
     its arguments is replaced by the zone the *client* serves, and the launched process has it in
-    ``HYPERSHELL_ZONE``. The *clients* connect back to the relay by its host name. The launcher must pass the environment through: each *client*
-    receives the site key there (``HYPERSHELL_SERVER_AUTH``), never on its command line.
+    ``HYPERSHELL_ZONE``. The *clients* connect back to the relay at its bind address (``--bind``),
+    or by its host name when it binds every interface (*0.0.0.0*, the default). The launcher must
+    pass the environment through: each *client* receives the site key there
+    (``HYPERSHELL_SERVER_AUTH``), never on its command line.
     See also ``relay.launcher``.
 
 ``--launcher-args`` *ARGS*

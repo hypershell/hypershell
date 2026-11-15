@@ -684,7 +684,7 @@ function _hs_server() {
 function _hs_cluster() {
 	local current="${COMP_WORDS[COMP_CWORD]}"
 	local previous="${COMP_WORDS[COMP_CWORD - 1]}"
-	local all_opts="-h --help -N --num-threads -t --template --from-json -H --bind -p --port
+	local all_opts="-h --help -N --num-threads -t --template --from-json -H --bind --advertise -p --port
 	--no-tls --tls-key --tls-cert --tls-ca -b --bundlesize -w --bundlewait
 	-r --max-retries --eager -Q --poll --no-db --initdb --no-confirm --forever --restart --repeat --update
 	--ssh --mpi --launcher --ssh-args --ssh-group -E --env --remote-exe
@@ -730,6 +730,7 @@ function _hs_cluster() {
 		-t | --template | --ssh-args | --remote-exe | --launcher)
 			COMPREPLY=(); return ;;
 		-H | --bind)         COMPREPLY=($(compgen -W "localhost 127.0.0.1 0.0.0.0" -- "${current}")); return ;;
+		--advertise)         COMPREPLY=($(compgen -A hostname -- "${current}")); return ;;
 		-p | --port)         COMPREPLY=($(compgen -W "$(hs server --available-ports 2>/dev/null)" -- "${current}")); return ;;
 		--ssh)               COMPREPLY=($(compgen -W "$(_hs_known_hosts)" -- "${current}")); return ;;
 		--ssh-group)         COMPREPLY=($(compgen -W "$(hs client --available-ssh-groups 2>/dev/null)" -- "${current}")); return ;;

@@ -145,6 +145,7 @@ class Scheduler(StateMachine):
     last_scheduled_group: Optional[int]
     current_group: Optional[int]
     submitter: Optional[SubmitThread]
+    halting: bool
 
     state = SchedulerState.START
     states = SchedulerState
@@ -174,6 +175,7 @@ class Scheduler(StateMachine):
         self.submitter = submitter
         self.held = set()
         self.woken = False
+        self.halting = False
 
     @property
     def dispatcher(self: Scheduler) -> Dispatcher:
@@ -249,7 +251,7 @@ class Scheduler(StateMachine):
         self.revert_handed_back()
         generation, refills = self.dispatcher.refills()
         if not refills:
-            self.dispatcher.wait_need(generation, timeout=DEFAULT_REMOTE_TIMEOUT)
+            self.wait_need(generation, timeout=DEFAULT_REMOTE_TIMEOUT)
             return SchedulerState.LOAD
         self.loaded = self.next_tasks(refills)
         if self.loaded:
@@ -287,8 +289,29 @@ class Scheduler(StateMachine):
             if not self.woken:
                 self.poll = min(self.poll_max, 2 * self.poll)
             log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
-            self.woken = self.dispatcher.wait_need(generation, timeout=self.poll)
+            self.woken = self.wait_need(generation, timeout=self.poll)
             return SchedulerState.LOAD
+
+    def wait_need(self: Scheduler, generation: int, timeout: float) -> bool:
+        """Wait up to `timeout` for a cut or new demand, as the dispatcher's own wait does, unless halting.
+
+        Returns True when a cut or new demand ended (or skipped) the wait. The wait is on the
+        dispatcher's condition, and :meth:`halt` flags the halt and wakes that condition under the same
+        lock, so a halt is either seen before the wait or ends it at once.
+        """
+        dispatcher = self.dispatcher
+        with dispatcher.need:
+            if not self.halting and dispatcher.generation == generation:
+                dispatcher.need.wait(timeout)
+            return dispatcher.generation != generation
+
+    def halt(self: Scheduler) -> None:
+        """Set flag to signal for termination, and end a wait for demand so the halt is seen at once."""
+        super().halt()
+        dispatcher = self.dispatcher
+        with dispatcher.need:
+            self.halting = True
+            dispatcher.need.notify_all()
 
     def next_tasks(self: Scheduler, refills: List[Tuple[str, int]]) -> List[Tuple[str, List[Task]]]:
         """Select the next tasks to schedule from the current group, for each zone that needs a refill."""
@@ -1282,11 +1305,16 @@ class ServerThread(Thread):
             self.queue.confirmed.put(make_sentinel())
             self.confirm.join()
 
-    def stop(self: ServerThread, wait: bool = False, timeout: int = None) -> None:
-        """Stop child threads before main thread."""
+    def stop(self: ServerThread, wait: bool = False, timeout: int = None, leave_input: bool = False) -> None:
+        """Stop child threads before main thread.
+
+        With `leave_input`, a submitter blocked reading its input (standard input from a producer that
+        stays open) is not waited on: the tasks it has committed are kept, and the rest of its input is
+        not read. Without it, a read the submitter is blocked in is waited on until it returns.
+        """
         log.warning('Stopping')
         if self.submitter is not None:
-            self.submitter.stop(wait=wait, timeout=timeout)
+            self.submitter.stop(wait=wait, timeout=timeout, leave_input=leave_input)
         if self.scheduler is not None:
             # A scheduler not yet started, because a task file is still being submitted, has
             # nothing to join.
