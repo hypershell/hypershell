@@ -494,10 +494,17 @@ def zoned_scaler(policy: str = 'fixed', own: ZoneRef = DEFAULT, **opts) -> tuple
 
 
 def run_checks(scaler: AutoScaler, count: int) -> List[AutoScalerState]:
-    """Run `count` checks, each followed by the scale it asks for; return the state of each check."""
+    """Run `count` checks, each followed by the scale it asks for; return the state of each check.
+
+    A check that ends the machine (`FINAL`) is recorded as such and ends the run.
+    """
     states = []
     for _ in range(count):
-        state = scaler.actions[scaler.check()]()
+        state = scaler.check()
+        if state is AutoScalerState.FINAL:
+            states.append(state)
+            break
+        state = scaler.actions[state]()
         states.append(state)
         if state is AutoScalerState.SCALE:
             scaler.scale()
