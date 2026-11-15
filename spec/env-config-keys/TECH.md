@@ -7,12 +7,12 @@ appetite: big
 status: in_progress
 branch: fix/env-config-keys
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-15'
 phases:
 - id: P1
   name: 'Tests first: the regression tests and the red list on 90ab2fc2 (tests only)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -216,7 +216,7 @@ code+state commit.
 the defect, and every other test in the touched files still green; no `src/`, `docs/` or `share/`
 change.
 
-- [ ] `tests/test_env_config.py` with helpers `config_repr(env, expr)` (a child interpreter printing
+- [x] `tests/test_env_config.py` with helpers `config_repr(env, expr)` (a child interpreter printing
       `repr(<expr>)` over `hypershell.core.config.config`; returns `(rc, stdout, stderr)`; every test
       asserts `rc` first so a crash is an assertion, never an exception) and `hs_lines(env, argv)`.
       Cases as `red.txt` lists them (PLAN §6), with explicit `ids=` so node ids have no spaces:
@@ -234,10 +234,13 @@ change.
       stderr; `logging.file=Enabled` reads as enabled (`True`), `logging.file=false` exits 3 naming the
       variable; the untyped rule (`DATABASE_CONNECT_ARGS_TIMEOUT=5` → `5`,
       `DATABASE_PRAGMAS_X=007` → `'007'`, `DATABASE_PRAGMAS_Y=true` → `True`).
-- [ ] The same file's **must-keep** tests (green before and after; not in `red.txt`): PLAN §6's list,
+- [x] The same file's **must-keep** tests (green before and after; not in `red.txt`): PLAN §6's list,
       including `RELAY_ZONE=gpu` with `RELAY_ZONE_GPU_SIZE=2`, `TASK_MEMORY=16G`, `SERVER_EVICT=10`
       (an `int`), the #106 keys with `7`/`0.5`/units, `LOGGING_FILE=enabled` + `LOGGING_FILE_LEVEL`.
-- [ ] `tests/test_env_duration.py`: `test_server_evict_units[file|environment]` (`evict = "10m"` /
+      *As built:* `test_kept[...]`; `RELAY_ZONE=gpu` and `RELAY_ZONE_GPU_SIZE=2` are two cases, since
+      the two together are the refusal R2 asks for; `DATABASE_PORT` is left out (SQLite refuses a
+      port at import, so it cannot be a child-interpreter case).
+- [x] `tests/test_env_duration.py`: `test_server_evict_units[file|environment]` (`evict = "10m"` /
       `HYPERSHELL_SERVER_EVICT=10m`; `hs server --no-db` with a one-task file and a key reaches
       "Server listening" and finishes with a client); `test_duration_refused_at_start[…]` for
       `server.evict` (`hs server`), `client.heartrate` (`hs client`), `relay.upstream.deadline` and
@@ -245,20 +248,20 @@ change.
       `HYPERSHELL_RELAY_PORT`: exit 3 within a bound, stderr naming the key, the variable or file, and
       `Duration`. A process still running at the bound is stopped (SIGTERM, then kill) and the test
       fails with `pytest.fail`, so the base's never-ending relay is red, not an error.
-- [ ] `tests/test_env_export.py`: `test_export_as_written[leading-zeros|mixed-case|empty|exponent]`
+- [x] `tests/test_env_export.py`: `test_export_as_written[leading-zeros|mixed-case|empty|exponent]`
       (child: `dict(load_task_env())`), `test_export_reaches_task` (`hs cluster --no-db -N1`, a task
       printing the variables), `test_key_variable_any_case_not_inherited` (child:
       `HYPERSHELL_Server_Auth` set; not in `client.inherited_task_env()`),
       `test_key_variable_any_case_not_exported` (not in `cluster.launch.ssh_env_exports(os.environ)`);
       must-keep: `HYPERSHELL_EXPORT_FOO` over a file's `foo`, a file's list joined and upper-cased.
-- [ ] `tests/test_env_blame.py`: `test_blame_names_variable` (`blame(config, 'server', 'tls',
+- [x] `tests/test_env_blame.py`: `test_blame_names_variable` (`blame(config, 'server', 'tls',
       'min_version')` under `HYPERSHELL_server_tls_min_version`), `test_which_names_variable[…]`,
       `test_completion_offers_key_paths`, `test_completion_one_per_line`,
       `test_process_variables_not_keys` (`site`, `config`, `pythonpath`, `zone` not in `config`, nor
       in the completion list).
-- [ ] Reconcile [`red.txt`](red.txt) with the node ids as written (renaming is fine; dropping a line
+- [x] Reconcile [`red.txt`](red.txt) with the node ids as written (renaming is fine; dropping a line
       needs a note in PLAN §5).
-- [ ] Record the red: the `red_check.sh` output (every line RED) goes in the commit body.
+- [x] Record the red: the `red_check.sh` output (every line RED) goes in the commit body.
 - **Verify:** frontmatter (no `src`/`.github`/`share`/`docs` change; ≥62 listed; all RED on
   `90ab2fc2`; the rest of the touched files green with the red list deselected).
 - **Touches:** `tests/test_env_*.py`, `spec/env-config-keys/red.txt`.
