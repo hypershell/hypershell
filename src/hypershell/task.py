@@ -16,7 +16,6 @@ import csv
 import json
 import time
 import functools
-import itertools
 from datetime import timedelta, datetime
 from dataclasses import dataclass
 from shutil import copyfileobj
@@ -32,11 +31,12 @@ from rich import box
 from cmdkit.app import Application, ApplicationGroup, exit_status
 from cmdkit.cli import Interface, ArgumentError
 from cmdkit.ansi import red, green, yellow, faint, COLOR_STDOUT
-from sqlalchemy import Column, type_coerce, text, func, distinct
+from sqlalchemy import Column, type_coerce, text, func, distinct, literal
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Query
 from sqlalchemy.orm.exc import StaleDataError
-from sqlalchemy.sql.elements import BinaryExpression
+from sqlalchemy.sql.elements import BinaryExpression, ColumnElement
+from sqlalchemy.types import Text as TEXT
 
 # Internal libs
 from hypershell.core.platform import default_path
@@ -487,40 +487,44 @@ class SearchableMixin:
     retry_filter: bool = False
     signal_filter: Optional[str] = None
 
+    # The filter, once built (see `filter_criteria`).
+    __criteria: Optional[Tuple[ColumnElement, ...]] = None
+
     def build_query(self: SearchableMixin) -> Query:
         """Build original query interface."""
         query = Task.query(*self.fields)
         query = self.__build_order_by_clause(query)
-        query = self.__build_where_clause(query)
-        query = self.__build_where_clause_for_tags(query)
+        query = query.filter(*self.filter_criteria())
         return query.limit(self.limit)
 
-    def __build_where_clause_for_tags(self: SearchableMixin, query: Query) -> Query:
-        """Add JSON-based tag where-clauses to query if necessary."""
-        tags_name_only = []
-        tags_with_value = Tag.parse_cmdline_list(self.taglist)
-        for name in list(tags_with_value.keys()):
-            if isinstance(tags_with_value[name], str) and not tags_with_value[name]:
-                tags_name_only.append(name)
-                tags_with_value.pop(name)
-        for name in tags_name_only:
-            if DATABASE_DIALECT == 'sqlite':
-                # NOTE: sqlalchemy adds `json_quote(json_extract(task.tag, ?)) is not null`
-                # and cannot find a way to exclude `json_quote`, so we do it ourselves
-                query = query.filter(text('json_extract(task.tag, :key) is not null')).params(key=f'$."{name}"')
-            else:
-                query = query.filter(Task.tag[name].isnot(None))
-        for name, value in tags_with_value.items():
-            if DATABASE_DIALECT == 'sqlite' and value in (True, False):
-                value = int(value)  # NOTE: SQLite stores as 0/1 not JSON true/false :(
-            query = query.filter(Task.tag[name] == type_coerce(value, JSON))
-        return query
+    def filter_criteria(self: SearchableMixin) -> Tuple[ColumnElement, ...]:
+        """The filter as self-contained criteria: the where-clauses (and their aliases), then the tags.
 
-    def __build_where_clause(self: SearchableMixin, query: Query) -> Query:
-        """Add explicit where-clauses to query if necessary."""
-        for where_clause in self.__build_filters():
-            query = query.filter(where_clause.compile())
-        return query
+        Each criterion carries its own binds, so the same criteria serve a query, an UPDATE or DELETE
+        of every matching row, and the write of one row by `id`. Built once.
+        """
+        if self.__criteria is None:
+            self.__criteria = (*(clause.compile() for clause in self.__build_filters()),
+                               *self.__build_tag_criteria())
+        return self.__criteria
+
+    def __build_tag_criteria(self: SearchableMixin) -> List[ColumnElement]:
+        """JSON-based tag criteria: a name alone requires the key, a `key:value` requires that value."""
+        sqlite = Session.get_bind().dialect.name == 'sqlite'
+        criteria = []
+        for name, value in Tag.parse_cmdline_list(self.taglist).items():
+            if isinstance(value, str) and not value:
+                if sqlite:
+                    # NOTE: sqlalchemy adds `json_quote(json_extract(task.tag, ?)) is not null`,
+                    # which is never null, so the path is extracted directly (one bind per name).
+                    criteria.append(func.json_extract(Task.tag, literal(f'$."{name}"', TEXT())).isnot(None))
+                else:
+                    criteria.append(Task.tag[name].isnot(None))
+            else:
+                if sqlite and value in (True, False):
+                    value = int(value)  # NOTE: SQLite stores as 0/1 not JSON true/false :(
+                criteria.append(Task.tag[name] == type_coerce(value, JSON))
+        return criteria
 
     def __build_order_by_clause(self: SearchableMixin, query: Query) -> Query:
         """Add order by clause to query if necessary."""
@@ -937,10 +941,6 @@ def select_task_columns(database: str) -> str:
 MISSING_COLUMN_DEFAULTS: Final[Dict[str, str]] = {'part': '0'}
 
 
-# Iterative update batch size for updates with a limit
-UPDATE_BATCH_SIZE: Final[int] = 100
-
-
 UPDATE_PROGRAM = 'hs update'
 UPDATE_SYNOPSIS = f'{UPDATE_PROGRAM} [-h] ARG [ARG...] [--cancel | --revert | --delete] ...'
 UPDATE_USAGE = f"""\
@@ -1136,45 +1136,22 @@ class TaskUpdateApp(Application, SearchableMixin):
             field_updates['exit_status'] = CANCEL_STATUS
 
         if self.revert_mode:
-            field_updates['schedule_time'] = None
-            field_updates['server_host'] = None
-            field_updates['server_id'] = None
-            field_updates['client_host'] = None
-            field_updates['client_id'] = None
-            field_updates['command'] = None
-            field_updates['start_time'] = None
-            field_updates['completion_time'] = None
-            field_updates['exit_status'] = None
-            field_updates['outpath'] = None
-            field_updates['errpath'] = None
-            field_updates['waited'] = None
-            field_updates['duration'] = None
+            field_updates.update(dict.fromkeys(Task.revert_columns))
+
+        if not (self.delete_mode or field_updates or tag_updates or self.remove_tag):
+            log.info('Updated 0 tasks')
+            return
 
         if self.limit is not None:
-            # We cannot apply an UPDATE query with a LIMIT field
-            # The alternative is to pull the data and batch the update
-            # While terribly inefficient, at least it has a LIMIT
-            tasks = query.all()
-            tasks_it = iter(tasks)
+            # An UPDATE cannot take a LIMIT, so the tasks are selected first, then each is written
+            # by id while it still matches the filter, all in one transaction.
+            ids = [task_id for task_id, in query.with_entities(Task.id)]
             if self.delete_mode:
-                while batch := tuple(itertools.islice(tasks_it, UPDATE_BATCH_SIZE)):
-                    Task.delete_all(list(batch))
-            if field_updates:
-                while batch := tuple(itertools.islice(tasks_it, UPDATE_BATCH_SIZE)):
-                    Task.update_all([{'id': task.id, **field_updates} for task in batch])
-            if tag_updates:
-                while batch := tuple(itertools.islice(tasks_it, UPDATE_BATCH_SIZE)):
-                    Task.update_all([{'id': task.id, 'tag': {**task.tag, **tag_updates}} for task in batch])
-            if self.remove_tag:
-                while batch := tuple(itertools.islice(tasks_it, UPDATE_BATCH_SIZE)):
-                    Task.update_all([
-                        {'id': task.id, 'tag': self.drop_items(task.tag, *self.remove_tag)}
-                        for task in batch
-                    ])
-            if self.delete_mode:
-                log.info(f'Deleted {count} tasks')
+                written = Task.delete_selected(ids, self.filter_criteria())
             else:
-                log.info(f'Updated {count} tasks')
+                written = Task.update_selected(ids, self.filter_criteria(), field_updates, tag_updates,
+                                               self.remove_tag or [])
+            self.report_written(count, written)
             return
 
         if field_updates:
@@ -1216,6 +1193,13 @@ class TaskUpdateApp(Application, SearchableMixin):
         Session.commit()
         log.info(f'Updated {count} tasks')
 
+    def report_written(self: TaskUpdateApp, count: int, written: int) -> None:
+        """Log the number of tasks written, and how many of those counted were not, if any."""
+        if written < count:
+            log.warning(f'{count - written} of the {count} tasks counted no longer matched '
+                        f'and were left as they are')
+        log.info(f'{"Deleted" if self.delete_mode else "Updated"} {written} tasks')
+
     def process_arguments(self: TaskUpdateApp) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Process positional arguments and build dictionaries for changes."""
         field_updates = {}
@@ -1252,13 +1236,6 @@ class TaskUpdateApp(Application, SearchableMixin):
             raise ArgumentError('Using -s/--order-by without -l/--limit is meaningless')
 
         return field_updates, tag_updates
-
-    @staticmethod
-    def drop_items(d: dict, *keys: str) -> dict:
-        """Drop items by key if they exist."""
-        for key in keys:
-            d.pop(key, None)
-        return d
 
 
 TASK_PROGRAM = 'hs task'

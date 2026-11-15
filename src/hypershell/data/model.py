@@ -19,13 +19,14 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, select, bindparam, or_, cast, inspect
+from sqlalchemy import Column, Index, func, text, update, delete, select, bindparam, literal, or_, cast, inspect
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.sql.elements import ClauseElement, ColumnElement
 from sqlalchemy.types import Integer, Float, DateTime, Text, Boolean, JSON as JSON_TEXT
-from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES
+from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES, ARRAY
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -1013,11 +1014,33 @@ class Task(Entity):
         return write, exists
 
     @classmethod
+    def __filter_statements(cls: Type[Task], values: Dict[str, Any], where: Tuple[ColumnElement, ...],
+                            remove: bool = False, prefix: str = 'r_') -> Tuple[Any, Any]:
+        """The UPDATE (or DELETE) of one row by `id` that still matches `where`, and the SELECT that looks it up.
+
+        Both match the row by `id` first, then the criteria; the SELECT reads the row's `id`, so it
+        finds nothing for a row that is gone or no longer matches. A value that is a SQL expression
+        is written as given; any other is a bind typed from the table and named with `prefix`.
+        """
+        table = cls.__table__
+        match = (table.c.id == bindparam(f'{prefix}id', type_=table.c.id.type), *where)
+        if remove:
+            write = delete(table).where(*match)
+        else:
+            write = update(table).where(*match).values({
+                name: value if isinstance(value, ClauseElement) else
+                bindparam(f'{prefix}{name}', type_=table.c[name].type)
+                for name, value in values.items()
+            })
+        return write, select(table.c.id).where(*match)
+
+    @classmethod
     def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any], path: str, consequence: str,
                      pending: bool = False, strict: bool = False, held_by: Optional[str] = None,
                      unscheduled: bool = False, retryable: bool = False,
                      each: Optional[Dict[str, Dict[str, Any]]] = None, commit: bool = True,
-                     abort: bool = False, prefix: str = 'r_') -> List[str]:
+                     abort: bool = False, where: Optional[Tuple[ColumnElement, ...]] = None,
+                     remove: bool = False, prefix: str = 'r_') -> List[str]:
         """Write `values` onto each task in `ids` by `id`, in one transaction; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
@@ -1046,6 +1069,13 @@ class Task(Entity):
         (cancelled, marked retried by another writer, or no longer failed) is skipped, and only a
         row that still awaits retry is re-run.
 
+        With `where`, the write requires that the row still matches those criteria (a user's filter,
+        possibly none); a row that is gone or no longer matches is skipped, never raised on, and
+        only a row that still matches is re-run. A value may then be a SQL expression (of the row's
+        own columns), written as given. With `remove`, the write is a DELETE of the row under the
+        same condition, with the same count, lookup and re-run; `values` is ignored. Statements with
+        `where` are built for the call, not cached, since the criteria differ from call to call.
+
         With `each`, a task's own values (by id) are written over the shared `values`; every task
         in `ids` has an entry, all with the same columns, or a `ValueError` is raised before
         anything is written. Without `commit`, the transaction is left open for the caller to
@@ -1054,16 +1084,21 @@ class Task(Entity):
 
         The binds are named with `prefix`, so statements of different paths can be told apart.
         """
-        condition = ('held' if held_by is not None else 'unscheduled' if unscheduled else
-                     'retryable' if retryable else 'pending' if pending else None)
+        condition = ('filter' if where is not None else 'held' if held_by is not None else
+                     'unscheduled' if unscheduled else 'retryable' if retryable else 'pending' if pending else None)
         own: Tuple[str, ...] = ()
         if each is not None:
             own = tuple(each[ids[0]]) if ids and ids[0] in each else ()
             for id in ids:
                 if id not in each or each[id].keys() != set(own):
                     raise ValueError(f'Per-task values for {path} must name the same columns for every task')
-        write, exists = cls.__row_statements(tuple(values) + tuple(name for name in own if name not in values),
-                                             condition, prefix)
+        if condition == 'filter':
+            write, exists = cls.__filter_statements(values, where, remove, prefix)
+            values = {} if remove else {name: value for name, value in values.items()
+                                        if not isinstance(value, ClauseElement)}
+        else:
+            write, exists = cls.__row_statements(tuple(values) + tuple(name for name in own if name not in values),
+                                                 condition, prefix)
         key = f'{prefix}id'
         params = {f'{prefix}{name}': value for name, value in values.items()}
         lookup = {f'{prefix}held_by': held_by} if held_by is not None else {}
@@ -1079,6 +1114,9 @@ class Task(Entity):
                         break
                     found = Session.execute(exists, {**lookup, key: id}).first()
                     if found is None:
+                        if condition == 'filter':
+                            log.debug(f'Ignored {path} for task ({id}) - task gone or no longer matches')
+                            break
                         if condition == 'held':
                             log.debug(f'Ignored {path} for task ({id}) - task gone or no longer held by client')
                             break
@@ -1125,6 +1163,67 @@ class Task(Entity):
         raises `Task.Contended`, with nothing written.
         """
         cls.__write_rows([id], changes, 'update', 'nothing written', abort=True, prefix='u_')
+
+    @classmethod
+    def __change(cls: Type[Task], values: Dict[str, Any], tags: Dict[str, Any], drop: List[str],
+                 dialect: str) -> Dict[str, Any]:
+        """The SET of an update: the field `values` as given, and one `tag` expression for every tag change.
+
+        The tag expression works on the row's own tag at the time of the write: `tags` are set,
+        then the names in `drop` are removed. On SQLite it is `json_remove(json_set(tag, ...), ...)`
+        with one bind per key and value (a boolean is stored 1/0 and a dotted key nests); on
+        PostgreSQL, `(tag || patch) - names`, two binds whatever the number of keys. A part with
+        nothing to do is left out. `dialect` is the dialect name of the session's bind.
+        """
+        change = dict(values)
+        if not tags and not drop:
+            return change
+        column = cls.__table__.c.tag
+        tag = literal(values['tag'], column.type) if 'tag' in values else column
+        if dialect == 'sqlite':
+            if tags:
+                pairs = [part for key, value in tags.items() for part in (literal(f'$.{key}', Text()), literal(value))]
+                tag = func.json_set(tag, *pairs, type_=JSON)
+            if drop:
+                tag = func.json_remove(tag, *[literal(f'$.{name}', Text()) for name in drop], type_=JSON)
+        else:
+            if tags:
+                patch = {key: to_json_type(value) for key, value in tags.items()}
+                tag = tag.op('||', return_type=JSON_BYTES())(literal(patch, JSON_BYTES()))
+            if drop:
+                tag = tag.op('-', return_type=JSON_BYTES())(literal(list(drop), ARRAY(Text())))
+        change['tag'] = tag
+        return change
+
+    @classmethod
+    def update_selected(cls: Type[Task], ids: List[str], criteria: Tuple[ColumnElement, ...],
+                        values: Dict[str, Any], tags: Dict[str, Any] = None, drop: List[str] = None) -> int:
+        """Write the change onto each task in `ids` that still matches `criteria`, in one transaction; return the count.
+
+        The change is the field `values`, the tag keys `tags` set and the tag names `drop` removed,
+        one UPDATE per row by `id` and the criteria, so a task that no longer matches at its write
+        (changed or deleted since it was selected) is left as it is and not counted. A row that
+        matched nothing but still matches was missed because the write waited on another
+        transaction's row lock, and the write is re-run, at most `CONTENDED_RERUNS` times; a row
+        still not written after that rolls the whole update back and raises `Task.Contended`.
+        Every row written stays locked until the one commit at the end (on SQLite, the database's
+        write lock is held from the first write to that commit).
+        """
+        change = cls.__change(values, tags or {}, drop or [], Session.get_bind().dialect.name)
+        written = cls.__write_rows(ids, change, 'update', 'nothing written', where=tuple(criteria),
+                                   abort=True, prefix='u_')
+        return len(written)
+
+    @classmethod
+    def delete_selected(cls: Type[Task], ids: List[str], criteria: Tuple[ColumnElement, ...]) -> int:
+        """Delete each task in `ids` that still matches `criteria`, in one transaction; return the count.
+
+        One DELETE per row by `id` and the criteria, re-run and aborted as for `update_selected`;
+        every row deleted stays locked until the one commit at the end.
+        """
+        deleted = cls.__write_rows(ids, {}, 'delete', 'nothing deleted', where=tuple(criteria),
+                                   remove=True, abort=True, prefix='u_')
+        return len(deleted)
 
     @classmethod
     def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str,

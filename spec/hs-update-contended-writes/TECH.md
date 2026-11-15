@@ -72,7 +72,7 @@ phases:
 - id: P4
   name: '--limit: one filter, one SET, per-row writes under the filter in one transaction;
     counts and the warning'
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -82,7 +82,7 @@ phases:
   - P3
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres; spec=spec/hs-update-contended-writes;
     uv run pytest -q -p no:cacheprovider tests/test_contended_recovery.py -k 'not
     update_filtered' && uv run pytest -q -p no:cacheprovider tests/test_update.py
@@ -348,24 +348,27 @@ and at the bound writes nothing, logs the contended error and exits 5.
 **Goal:** `--limit` applies every change to every selected row still matching at its write, in one
 transaction, counts the rows written, and writes nothing when contended at the bound.
 
-- [ ] `task.py` `SearchableMixin.filter_criteria()` (cached; PLAN §2.1): the `-w`/alias clauses
+- [x] `task.py` `SearchableMixin.filter_criteria()` (cached; PLAN §2.1): the `-w`/alias clauses
       through `WhereClause.compile()`, the tag criteria with the SQLite name-only tag as
       `func.json_extract(Task.tag, literal('$."name"')).isnot(None)`; `build_query()` filters on them
       (subject to the foreman's ruling D2; `tests/test_list.py` stays green).
-- [ ] `model.py` `Task.__change(values, tags, drop, dialect)` (PLAN §2.2) from the session bind's
+- [x] `model.py` `Task.__change(values, tags, drop, dialect)` (PLAN §2.2) from the session bind's
       dialect; `__write_rows` gains `where=` (condition `'filter'`: match and lookup `id` plus the
       criteria, read `id`; no row → DEBUG `Ignored {path} for task ({id}) - task gone or no longer
-      matches`, skipped; built per call), SET expressions in `values`, and `delete: bool = False`.
-- [ ] `Task.update_selected(ids, criteria, values, tags, drop) -> int` and
+      matches`, skipped; built per call), SET expressions in `values`, and `delete: bool = False`
+      (built as `remove: bool = False`: a `delete` parameter would shadow SQLAlchemy's `delete()` in
+      the helper; the statements come from `Task.__filter_statements`).
+- [x] `Task.update_selected(ids, criteria, values, tags, drop) -> int` and
       `Task.delete_selected(ids, criteria) -> int`: one `__write_rows(…, where=criteria, abort=True,
       commit=False, prefix='u_')`, one commit, return the count written. Docstrings name the lock held
-      to the commit.
-- [ ] `TaskUpdateApp.update_tasks` (`--limit` branch): criteria and change built once; `--revert` uses
+      to the commit. (Built with the helper's own commit: one call is the whole transaction, so
+      `commit=False` plus a caller commit would be the same.)
+- [x] `TaskUpdateApp.update_tasks` (`--limit` branch): criteria and change built once; `--revert` uses
       `Task.revert_columns`; ids selected after the prompt (`select(Task.id)`, order, limit); the call;
       WARNING `{K} of the {M} tasks counted no longer matched and were left as they are` when lower;
       `Updated N tasks` / `Deleted N tasks`; `UPDATE_BATCH_SIZE` and the shared iterator go.
       An update with nothing to change logs `Updated 0 tasks` (PLAN D4, as ruled).
-- [ ] The `--limit` slice's tests pass (SQLite recovery and CLI; PostgreSQL CLI `[limit]`, the
+- [x] The `--limit` slice's tests pass (SQLite recovery and CLI; PostgreSQL CLI `[limit]`, the
       `--limit` real races); `update_drive.sh` `limit` passes on SQLite and TimescaleDB.
 - **Verify:** see frontmatter.
 - **Touches:** `src/hypershell/task.py`, `src/hypershell/data/model.py`.
