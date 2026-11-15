@@ -44,11 +44,15 @@ subsystems.
   lands without its condition). A first-attempt match is neither re-run nor re-checked. Pattern:
   `Task.confirm_all`/`revert_all`, `Task.revert_staged` (re-check on `completion_time IS NULL`, not
   mere existence), the eviction revert `Task.revert_orphaned` (only while still in flight with the
-  evicted client), the dispatch stamp in `Task.next` (only while `schedule_time IS NULL`),
-  `Task.apply_results` (`ResultOutcome.DEFERRED`). The conditional writes (`revert_staged`, the
-  eviction revert, the dispatch stamp) skip a row gone or no longer qualifying, never raise on it;
-  `confirm_all` (strict, the default) and `revert_all` still raise `StaleDataError` on a gone row,
-  by design. Never `bulk_update_mappings` or an ORM flush for such a write.
+  evicted client), the dispatch stamp in `Task.next` (only while `schedule_time IS NULL`), the
+  retry mark in `Task.next` (only while the row still awaits retry, committed with its retry row;
+  at the bound the row stays retryable with no retry row), `Task.cancel_all` (by id; returns the ids
+  cancelled), `Task.apply_results` (`ResultOutcome.DEFERRED`). The conditional writes
+  (`revert_staged`, the eviction revert, the dispatch stamp, the retry mark) skip a row gone or no
+  longer qualifying, never raise on it; `confirm_all` (strict, the default), `revert_all` and
+  `cancel_all` still raise `StaleDataError` on a gone row, by design. Never `bulk_update_mappings`
+  or an ORM flush for such a write. `hs update` does not follow it yet
+  (`issues/hs-update-contended-writes.md`).
 
 ## 2. `exit_status` overloading
 
@@ -71,10 +75,10 @@ subsystems.
 - One retry per failed row is held by the single Scheduler thread (sole `Task.next` caller) and
   `Task.query_retryable`'s `retried IS FALSE` (under `select_failed`), **not** by the schema.
   Unguarded, each yielding a second retry with the same `previous_id`: two servers on one database
-  (unsupported, no row locks, so new tasks double-schedule too); a kill between the retry insert
-  and the `retried` mark (two commits); a reset `retried` (`hs update`). Pre-2.9 SQLite DBs
-  keep the `UNIQUE` constraints (forward-only, no table rebuild): never tripped in normal
-  operation, an `IntegrityError` in those cases.
+  (unsupported, no row locks, so new tasks double-schedule too); a reset `retried` (`hs update`).
+  Retry rows and their marks commit in one transaction, so a stop between them leaves neither.
+  Pre-2.9 SQLite DBs keep the `UNIQUE` constraints (forward-only, no table rebuild): never
+  tripped in normal operation, an `IntegrityError` in those cases.
 - A returned result writes only its result columns (`Task.result_columns`), and only for its
   current assignment: the row's `schedule_time` as dispatched, while `completion_time` is NULL
   (`Task.apply_results`). A stale or duplicate result is logged and dropped, so a late result from

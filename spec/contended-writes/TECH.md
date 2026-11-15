@@ -90,7 +90,7 @@ phases:
     postgres 20
 - id: P5
   name: AGENTS.md and the invariants drop the two exceptions; full local evidence
-  status: pending
+  status: done
   satisfies:
   - R6
   - R5
@@ -299,16 +299,16 @@ never fails.
 **Satisfies:** R6, R5 · **Depends on:** P4
 **Goal:** the constitution says what the code now does, in the same change.
 
-- [ ] `AGENTS.md` § Task lifecycle: drop the "process killed between the retry insert and the
+- [x] `AGENTS.md` § Task lifecycle: drop the "process killed between the retry insert and the
       `retried` mark" bullet; the pre-2.9 `UNIQUE` sentence's "three cases above" becomes two.
-- [ ] `AGENTS.md` § Data layer specifics: add the retry mark (conditional on still awaiting retry,
+- [x] `AGENTS.md` § Data layer specifics: add the retry mark (conditional on still awaiting retry,
       committed with its retry row; skipped when no longer awaiting; at the bound left retryable with
       no retry row) and `Task.cancel_all` (by id; raises on a gone row; returns the ids cancelled) to
       the pattern; the closing sentence names only `hs update`, pointing at
       `issues/hs-update-contended-writes.md`.
-- [ ] `AGENTS.md` § High-risk files: the `data/model.py` line adds that the mark commits with its
+- [x] `AGENTS.md` § High-risk files: the `data/model.py` line adds that the mark commits with its
       retry row.
-- [ ] `.agents/factory/invariants.md` §1 (pattern list) and §3 (unguarded list, two cases), in
+- [x] `.agents/factory/invariants.md` §1 (pattern list) and §3 (unguarded list, two cases), in
       lockstep with AGENTS.md.
 - **Verify:** see frontmatter (the greps; the full suite on SQLite; the server-database modules on PG 18
       and TS 2.32; `red_check.sh`).
