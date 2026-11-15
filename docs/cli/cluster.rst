@@ -61,4 +61,8 @@ Description
 .. versionchanged:: 2.9.0
    ``--no-db`` leaves the configured database alone: it is not opened, created or initialized.
 
+.. versionchanged:: 2.9.0
+   ``-P``/``--period`` and ``autoscale.period`` must be greater than zero; zero or a negative
+   value is refused.
+
 .. include:: ../_include/cluster_help.rst

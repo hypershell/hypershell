@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/cluster-nodb-and-zero-period
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -51,7 +51,7 @@ phases:
     "$TMPDIR/docs-html-cnz"'
 - id: P3
   name: A period of zero or less is refused on hs cluster, hs server and hs relay
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -224,23 +224,23 @@ on any provider or launch mode; without it, today's behaviour; the docs say so.
 start-up when it is not greater than zero, naming the option or key, the value and the floor; every
 positive period reads as before.
 
-- [ ] `src/hypershell/core/types.py`: `parse_period` (PLAN §2) and its `__all__` entry.
-- [ ] `src/hypershell/cluster/__init__.py`: `-P` `type=parse_period`; first in `check_arguments()`,
+- [x] `src/hypershell/core/types.py`: `parse_period` (PLAN §2) and its `__all__` entry.
+- [x] `src/hypershell/cluster/__init__.py`: `-P` `type=parse_period`; first in `check_arguments()`,
       `parse_period(self.autoscaling_period)` → `ArgumentError(f'autoscale.period: {error}')`;
       `APP_HELP` `-P` line "Scaling period, greater than zero; …".
-- [ ] `src/hypershell/server.py`: the same `type=`, the same check first in `check_args()`, the same
+- [x] `src/hypershell/server.py`: the same `type=`, the same check first in `check_args()`, the same
       help line. Nothing else in `server.py`.
-- [ ] `src/hypershell/relay/__init__.py`: `RelayApp.site_period` returns `parse_period(…)` under the
+- [x] `src/hypershell/relay/__init__.py`: `RelayApp.site_period` returns `parse_period(…)` under the
       existing `UnitError` → `ArgumentError('autoscale.period: …')` wrap; docstring says greater
       than zero.
-- [ ] `share/zsh/site-functions/_hs`: both `-P` descriptions "Scaling period, greater than zero; …".
-- [ ] `docs/_include/cluster_help.rst`, `docs/_include/server_help.rst`: `-P` summary "Scaling
+- [x] `share/zsh/site-functions/_hs`: both `-P` descriptions "Scaling period, greater than zero; …".
+- [x] `docs/_include/cluster_help.rst`, `docs/_include/server_help.rst`: `-P` summary "Scaling
       period, greater than zero (default: 60)." and "A period of zero or less, here or in
       ``autoscale.period``, is refused."
-- [ ] `docs/_include/config_param_ref.rst` `[autoscale] .period`: greater than zero, refused at
+- [x] `docs/_include/config_param_ref.rst` `[autoscale] .period`: greater than zero, refused at
       start-up by `hs cluster`, `hs server` and `hs relay`, a number below one second accepted as
       given; a second `.. versionchanged:: 2.9.0` in the `.. only:: html` block.
-- [ ] `docs/cli/cluster.rst`, `docs/cli/server.rst`: `.. versionchanged:: 2.9.0` — "``-P``/``--period``
+- [x] `docs/cli/cluster.rst`, `docs/cli/server.rst`: `.. versionchanged:: 2.9.0` — "``-P``/``--period``
       and ``autoscale.period`` must be greater than zero; zero or a negative value is refused."
 - **Verify:** see frontmatter (period, duration, relay and autoscaler tests; a `temp_site` drive:
   `-P 0` exits 2 naming `-P/--period` and running nothing, `HYPERSHELL_AUTOSCALE_PERIOD=-5` exits 2

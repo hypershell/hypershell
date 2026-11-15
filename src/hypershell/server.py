@@ -68,7 +68,7 @@ from hypershell.core.config import (config, default, find_available_ports, AUTH_
                                     AUTH_ENV, resolve_auth, refuse_key_option)
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import parse_bytes, parse_time
+from hypershell.core.types import parse_bytes, parse_time, parse_period, UnitError
 from hypershell.core.logging import Logger
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.thread import Thread, join_waking
@@ -1723,7 +1723,7 @@ Options:
       --restart               Start scheduling from last completed task.
   -A, --autoscaling   [MODE]  Publish client targets for relay sites (fixed or dynamic; implies --forever).
   -F, --factor        VALUE   Scaling factor (default: {default.autoscale.factor}).
-  -P, --period        SEC     Scaling period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {default.autoscale.period}).
+  -P, --period        SEC     Scaling period, greater than zero; seconds, 30s, 5m or [D-]HH:MM:SS (default: {default.autoscale.period}).
   -c, --task-cores      NUM   Number of cores to assign each task (default: none).
   -m, --task-memory     MEM   Memory to assign each task; K/M/G/T[B|iB] are powers of 1024 (default: none).
   -W, --task-timeout    SEC   Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
@@ -1780,7 +1780,7 @@ class ServerApp(Application):
     interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
                            const=config.autoscale.policy, dest='autoscaling_policy')
     interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
-    interface.add_argument('-P', '--period', type=parse_time, default=autoscaling_period, dest='autoscaling_period')
+    interface.add_argument('-P', '--period', type=parse_period, default=autoscaling_period, dest='autoscaling_period')
 
     poll: int = config.server.poll
     interface.add_argument('-Q', '--poll', type=parse_time, default=poll)
@@ -1883,6 +1883,10 @@ class ServerApp(Application):
 
     def check_args(self: ServerApp) -> None:
         """Fail particular argument combinations."""
+        try:
+            parse_period(self.autoscaling_period)  # A number from the configuration is not parsed by the option.
+        except UnitError as error:
+            raise ArgumentError(f'autoscale.period: {error}') from error
         if self.autoscaling_policy is not None:
             self.check_autoscaling()
         if self.filepath and self.forever_mode:

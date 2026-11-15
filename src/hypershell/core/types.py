@@ -20,7 +20,7 @@ from datetime import datetime
 __all__ = [
     'smart_coerce', 'NoneType', 'JSONData', 'ExtendedValue',
     'to_json_type', 'from_json_type', 'serialize', 'deserialize',
-    'parse_bytes', 'parse_time', 'parse_delay', 'UnitError',
+    'parse_bytes', 'parse_time', 'parse_delay', 'parse_period', 'UnitError',
 ]
 
 
@@ -158,6 +158,17 @@ def parse_time(value: str) -> int:
     if seconds is None:
         raise UnitError(f'Duration {value!r} is not valid: expected {TIME_FORMS}')
     return math.ceil(seconds)
+
+
+def parse_period(value: str | int | float) -> int | float:
+    """Seconds in a scaling period: a string as parse_time reads it, a number as given; it must be greater than zero.
+
+    A value that is neither a string nor a number is returned as given.
+    """
+    seconds = parse_time(value) if isinstance(value, str) else value
+    if isinstance(seconds, (int, float)) and not seconds > 0:
+        raise UnitError(f'Period {value!r} is not valid: must be greater than zero')
+    return seconds
 
 
 def parse_delay(value: str) -> float:

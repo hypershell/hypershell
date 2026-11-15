@@ -89,10 +89,10 @@ def test_period_option_accepted(app: str, argv: List[str], expected: int) -> Non
 # The key, read at import, in a fresh interpreter
 
 
-# Runs one command in-process with its serving and launching entry points replaced by recorders.
+# Runs one command through the `hs` entry point with its serving and launching entry points replaced by recorders.
 RUN_RECORDED: Final[str] = """\
 import sys, json
-import hypershell.server, hypershell.cluster, hypershell.cluster.topology
+import hypershell, hypershell.server, hypershell.cluster, hypershell.cluster.topology
 recorded = []
 def recorder(name):
     def record(*args, **options):
@@ -103,8 +103,7 @@ for module, names in [(hypershell.server, ['serve_from', 'serve_forever']),
                       (hypershell.cluster, ['run_local', 'run_cluster', 'run_ssh'])]:
     for name in names:
         setattr(module, name, recorder(name))
-app = {'server': hypershell.server.ServerApp, 'cluster': hypershell.cluster.ClusterApp}[sys.argv[1]]
-status = app.main(sys.argv[2:])
+status = hypershell.main(sys.argv[1:])
 print(json.dumps({'status': status, 'recorded': recorded}))
 """
 

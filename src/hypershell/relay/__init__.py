@@ -59,7 +59,7 @@ from hypershell.core.reconnect import UpstreamLink, LinkDown, TLSMismatchError
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import parse_time, UnitError
+from hypershell.core.types import parse_period, UnitError
 from hypershell.data import ensuredb
 from hypershell.data.core import engine
 from hypershell.data.model import Task, zone_name, zone_id, DEFAULT_ZONE_NAME
@@ -1208,13 +1208,11 @@ class RelayApp(Application):
     def site_period(self: RelayApp) -> int | float:
         """Seconds between checks on the site clients, from `autoscale.period` (a string in the duration forms).
 
-        A number is used as given, as an option default is, so the relay and `hs cluster` read every value alike.
+        A number is used as given, as an option default is, so the relay and `hs cluster` read every value alike;
+        either must be greater than zero.
         """
-        period = config.autoscale.period
-        if not isinstance(period, str):
-            return period
         try:
-            return parse_time(period)
+            return parse_period(config.autoscale.period)
         except UnitError as error:
             raise ArgumentError(f'autoscale.period: {error}') from error
 
