@@ -25,3 +25,9 @@
 - **Skill cause:** Same as `spec/cluster-launch-failures/META.md` F2: the steps predate the worktree practice.
 - **Recommended fix:** As there.
 - **Confidence:** high · **Effort:** small
+
+## What worked well — hs-plan
+- **Step 3's high-blast-radius exception paid for itself.** The GOAL said shaping left "no open research
+  question" and the obvious stream fix was a one-term change; the scoped two-brief fan-out the
+  exception forced found that the one-term change still drops a late line after any failed task (the
+  failed-group halt), which the design now avoids. `origin=hs-plan:step3`
