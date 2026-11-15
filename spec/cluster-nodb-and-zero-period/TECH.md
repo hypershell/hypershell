@@ -4,10 +4,10 @@ title: hs cluster --no-db leaves the database alone, and an autoscaling period o
   zero or less is refused
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/cluster-nodb-and-zero-period
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -86,7 +86,7 @@ phases:
     "$TMPDIR/docs-html-cnz"'
 - id: P4
   name: Whole suite and docs
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -256,13 +256,13 @@ positive period reads as before.
 **Satisfies:** R1, R2, R3, R4, R5, R6, R7, R8 · **Depends on:** P3
 **Goal:** nothing else moved: the full suite passes serially and the docs build is clean.
 
-- [ ] Run the whole suite serially (`-n auto` fails collection on this suite; research/00 §5). With
+- [x] Run the whole suite serially (`-n auto` fails collection on this suite; research/00 §5). With
       `HS_TEST_POSTGRES` set, the PostgreSQL rows run too; without it they skip. Dry-run on the base
       tree (2026-11-15, no `HS_TEST_POSTGRES`): 3028 passed, 116 skipped, 1 failed in 23 min. The
       failure, `tests/test_upgrade_cli.py::test_waits_for_slow_peer_upgrade` (`database is locked`),
       came while other pytest runs shared the machine and passes alone; run P4 with nothing else
       running, and if that test alone fails, re-run it by itself and note both runs in the commit body.
-- [ ] Re-read R7's passages against the behaviour; fix wording only.
+- [x] Re-read R7's passages against the behaviour; fix wording only.
 - **Verify:** see frontmatter.
 - **Touches:** none expected (wording fixes only).
 
