@@ -254,3 +254,19 @@ one §3 unguarded case. Gate #2 (on this design):
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-14)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+1. **Plain PostgreSQL jobs at the tests-first commit.** "Green throughout" reads as "the real-race
+   tests never fail there". The two-session source test is expected red on every PostgreSQL job
+   before the fix, as R5 requires. `ci_check.py` checks it test by test.
+2. **New return values** (`cancel_all` returns the ids cancelled, `cancel` a bool) are approved.
+3. **Only the P1 commit is pushed for P2.** Nothing past it is pushed until P2's CI run is recorded.
+   P3 may be built locally meanwhile.
+4. **If CI on TimescaleDB 2.31 does not show the mark or cancel race red,** P2 stops for the
+   foreman's call. The fault-injection red stands either way.
+5. **The optional AGENTS.md lock-retention clause** is left out.
+6. **Eager `Task.next` returning a retry row twice** is already seeded
+   (`issues/eager-retry-double-bundle.md`). Out of scope.
