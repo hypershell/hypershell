@@ -1,4 +1,4 @@
-# GOAL — `hs cluster --no-db` leaves the database alone, and an autoscaling period below one second is refused
+# GOAL — `hs cluster --no-db` leaves the database alone, and an autoscaling period of zero or less is refused
 
 > **Origin spec.** The *what* and *why* — the locked contract `hs-review` grades against.
 > The *how* lives in [`PLAN.md`](PLAN.md) and [`TECH.md`](TECH.md) (written by `hs-plan`).
@@ -64,9 +64,9 @@ exit status 2 and `argument -P/--period: Duration '5MB' is not valid: …`, auto
 
 `hs cluster --no-db` behaves like `hs server --no-db`: on every provider it neither creates,
 initializes, upgrades nor checks the configured database, so a missing or unusable database never
-stops a run that does not use it. And an autoscaling period below one second is refused at start-up
+stops a run that does not use it. And an autoscaling period of zero or less is refused at start-up
 the way an invalid duration already is, by `hs cluster`, `hs server` and `hs relay` alike, so no
-autoscaler can spin; every period of one second or more works as today.
+autoscaler can spin; every period greater than zero works as today.
 
 ## Acceptance criteria (the contract)
 
@@ -81,26 +81,27 @@ autoscaler can spin; every period of one second or more works as today.
   otherwise a PostgreSQL or TimescaleDB database is checked and upgraded in place and a
   never-initialized one refused with today's message and exit status. With `--no-db`, a
   never-initialized PostgreSQL or TimescaleDB database SHALL still not stop the run, as today.
-- **R3** — IF `-P`/`--period` is given to `hs cluster` or `hs server` a duration below one second
+- **R3** — IF `-P`/`--period` is given to `hs cluster` or `hs server` a duration of zero
   (`0`, `0s`, `0m`, `0:00`, `0-0`, `0.0`), THEN the command SHALL exit with status 2 before it
   listens or launches any client, with an error that names `-P`/`--period`, the value given, and
-  the minimum of one second.
+  that the period must be greater than zero.
 - **R4** — IF the `autoscale.period` key, in a configuration file or as
-  `HYPERSHELL_AUTOSCALE_PERIOD`, holds a value below one second (zero in any duration form, a
-  negative number, or a number below 1; see Clarifications), THEN `hs cluster` and `hs server`
+  `HYPERSHELL_AUTOSCALE_PERIOD`, holds a value that is not greater than zero (zero in any
+  duration form, or a negative number; see Clarifications), THEN `hs cluster` and `hs server`
   SHALL refuse it as R3 does, with an error that names `-P`/`--period` or `autoscale.period`, the
-  value, and the minimum of one second.
+  value, and that the period must be greater than zero.
 - **R5** — IF `autoscale.period` holds a value R4 refuses, THEN `hs relay` SHALL exit before it
   connects upstream or launches any site client, with an error that names `autoscale.period`, the
-  value, and the minimum of one second, and the exit status it gives today for an
+  value, and that the period must be greater than zero, and the exit status it gives today for an
   `autoscale.period` that is not a duration.
-- **R6** — Every period of one second or more, in every form accepted today, SHALL be accepted and
+- **R6** — Every period greater than zero, in every form accepted today, SHALL be accepted and
   read as the same number of seconds as before on all three commands (a fraction given as a string
-  or on the command line still rounds up, so `-P 0.5` is one second), and an autoscaler SHALL wait
-  that period between checks as today.
+  or on the command line still rounds up, so `-P 0.5` is one second; a number such as `period = 0.5`
+  keeps its meaning, per #106 R5), and an autoscaler SHALL wait that period between checks as today
+  (one second at the least, by its existing granularity).
 - **R7** — The documentation SHALL match: the `hs cluster` and `hs server` help text for
   `-P`/`--period` and `docs/_include/cluster_help.rst` and `docs/_include/server_help.rst` SHALL
-  state the one-second minimum; the configuration reference entry for `autoscale.period`
+  state that the period must be greater than zero; the configuration reference entry for `autoscale.period`
   (`docs/_include/config_param_ref.rst`) SHALL state it for all three commands; and the `--no-db`
   passage of `docs/_include/cluster_help.rst` SHALL say, as the `hs server` one does, that the
   configured database is not opened at all, so it need not exist or be initialized. Each changed
@@ -113,6 +114,20 @@ autoscaler can spin; every period of one second or more works as today.
   `hs relay`'s read of the key refuses the same values (R5); and a one-second period is accepted
   (R6).
 
+**Ruled at the GOAL gate** (2026-11-15): approved by the foreman, gate judge under the maintainer's
+mandate, with one amendment.
+- **Every launch:** confirmed as proposed. A period that is not greater than zero is refused on every
+  launch of `hs cluster`, `hs server` and `hs relay`, as #106 refuses `-P 5MB`, autoscaling or not.
+- **Numbers below one second:** not refused. The floor is "greater than zero", not one second. A
+  positive period below one second already waits one second (the autoscalers sleep a second at a
+  time, so it cannot spin), `-P 0.5` already rounds up, and #106 R5 keeps a configuration number's
+  meaning; refusing `period = 0.5` would break a value that works today and create the asymmetry the
+  proposal named. R3–R7, the Evidence plan, the Outcome and the Non-goals are amended to match; the
+  error names the option or key, the value, and that the period must be greater than zero. The
+  defect is only zero and below.
+
+The contract is locked; `hs-plan` designs against it.
+
 ## Evidence plan
 
 - **CLI drive (`.agents/factory/bin/temp_site.sh`).** `hs cluster in.txt --no-db -N1 -t 'echo {}'
@@ -121,17 +136,19 @@ autoscaler can spin; every period of one second or more works as today.
   four tables as today. Red on `90ab2fc2`: the tables are created, and the unopenable path exits 5.
 - **Refusals.** `hs cluster in.txt --no-db --no-tls -P 0`, `hs server --autoscaling fixed --no-tls
   -P 0s` (with `HYPERSHELL_SERVER_AUTH` set, never a key on the command line), and each with
-  `HYPERSHELL_AUTOSCALE_PERIOD=0`, `=-5` and `=0.5`, and with `period = 0` and `period = "0s"` under
-  `[autoscale]` in the site `config.toml`, exit 2 naming the option or key and the one-second
-  minimum, before any listener starts. `-P 1` and `-P 0.5` start. Red on `90ab2fc2`: each zero or
+  `HYPERSHELL_AUTOSCALE_PERIOD=0` and `=-5`, and with `period = 0` and `period = "0s"` under
+  `[autoscale]` in the site `config.toml`, exit 2 naming the option or key and that the period
+  must be greater than zero, before any listener starts. `-P 1`, `-P 0.5`,
+  `HYPERSHELL_AUTOSCALE_PERIOD=0.5` and `period = 0.5` start. Red on `90ab2fc2`: each zero or
   negative value starts.
 - **Relay.** `RelayApp`'s argument checks refuse the same values for `autoscale.period` and accept
-  `1`, without a running server.
+  `1` and `0.5`, without a running server.
 - **Docs.** The docs build passes with `-W`; R7's passages are read against the behaviour above.
 
 ## Non-goals (no-gos)
 
-- Clamping a too-small period to one second instead of refusing it (ruled below).
+- Clamping a zero or negative period instead of refusing it (ruled below), and refusing a positive
+  period below one second (ruled at the GOAL gate).
 - Any change to `hs server --no-db` (fixed by #105), to `hs submit`, or to what `--initdb` does.
 - Any other duration's floor (`-w`/`--bundlewait`, `-Q`/`--poll`, `-S`/`--signalwait`, the relay's
   other keys), or a maximum for the period.
@@ -162,16 +179,16 @@ GOAL gate before `/hs-plan`. The rest follow the foreman's brief or the seeds di
   with how #106 reports an invalid duration (R3–R5). Shaping found no reason to prefer clamping: no
   test, example or doc uses a zero period, and zero has never meant anything but a loop that does
   not wait (foreman's brief, 2026-11-15).
-- **Q:** Where is the floor? — **A:** One second: `-P 1` is accepted, anything below refused. The
-  autoscalers already wait a second at a time, so one second is the finest period they honour
-  (foreman's brief, 2026-11-15).
-- **Q (pending):** Is a too-small period refused on every launch, or only when the autoscaler runs
+- **Q:** Where is the floor? — **A:** Greater than zero (amended at the GOAL gate, 2026-11-15; the
+  shaping proposal was one second). The autoscalers already wait a second at a time, so any positive
+  period is honoured as at least one second.
+- **Q (ruled at the gate: as proposed):** Is a too-small period refused on every launch, or only when the autoscaler runs
   (`--autoscaling`)? — **Proposed:** every launch of `hs cluster` and `hs server` (and every
   `hs relay`, whose fleet always runs), as R3–R4 say. That is how #106 already treats `-P 5MB` and
   `period = "5MB"`, autoscaling or not, so one rule covers both kinds of bad period. The cost: a
   site whose configuration holds `period = 0` cannot start any `hs cluster` or `hs server` until it
   is fixed. The alternative refuses only with `--autoscaling` and leaves an unused value alone.
-- **Q (pending):** A number below one second in configuration (`period = 0.5`,
+- **Q (ruled at the gate: accepted, not refused):** A number below one second in configuration (`period = 0.5`,
   `HYPERSHELL_AUTOSCALE_PERIOD=0.5`, which the loader reads as a number): refuse, or round up?
   — **Proposed:** refuse (R4). #106 R5 keeps a number's meaning unchanged, so the value as read is
   half a second, below the floor. The cost is an asymmetry a user can see: `-P 0.5` and
