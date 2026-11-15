@@ -258,9 +258,11 @@ understanding it. Once the group clears, the next group is the smallest one with
 tasks, which may be lower when tasks arrive late. File input to `hs cluster`/`hs server` is
 submitted in full (the whole file) before the scheduler starts, so its groups run in order. Stream
 input is best effort: a late lower group runs after the current one, with a warning. **A
-non-`forever` scheduler stops only once its submitter has ended and every task is terminal**
-(`Scheduler.load_bundle`): it reads `submission_complete()` before the counts (a submitter ends
-only after its last commit, so its rows are then visible), and with every task done and the input
+non-`forever` scheduler stops for having run out of work only once its submitter has ended and
+every task is terminal** (`Scheduler.load_bundle`); it still stops at once, input open or not, when
+a group fails permanently (above) or on SIGUSR1/SIGUSR2. To decide it is out of work, it reads
+`submission_complete()` before the counts (a submitter ends only after its last commit, so its
+rows are then visible), and with every task done and the input
 still open it backs off without `increment_group`, so neither a pause in a stream nor a failed task
 with no retry left ends the run early. The server wakes it once the submitter has ended.
 

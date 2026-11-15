@@ -275,3 +275,18 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
    before a pause. The foreman schedules the `-T` seed after the agreed pre-2.9.0 list.
 4. **A producer that never closes keeps the run open,** as ruled at the GOAL gate. R9's note covers
    it.
+
+## Review-cycle-1 ruling (2026-11-15)
+
+Foreman, gate judge under the maintainer's mandate. F1 (LOW) is fixed directly, as wording. The §3
+stop sentence in `AGENTS.md` and `invariants.md` is scoped to the out-of-work stop, and it names the
+two other stops that apply whether the input is open or not: a group failing permanently, and
+SIGUSR1/SIGUSR2. Both are already in the code and pinned by tests.
+
+The reviewer read the finding as triggering the human gate, because it concerns the recorded text
+of a lifecycle invariant. The rubric's mandatory gate lists the high-blast-radius core and the
+security and DB-lifecycle invariants (auth minimums, TLS posture, the CANCEL_STATUS and exit-status
+filters, `completion_time` terminality, one retry row per failure, the `in_memory` guards).
+Scheduler stop conditions are not among them; the review's META F3 says so. This finding corrects
+prose so it matches code the review found correct. The foreman rules the gate not triggered and
+reports the ruling to the maintainer. No code or test change. Review cycle 2 verifies this.

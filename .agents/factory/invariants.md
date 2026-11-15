@@ -89,8 +89,9 @@ subsystems.
   tasks arrive late. File input to `hs cluster`/`hs server` is submitted in full (the whole file)
   before the scheduler starts, so its groups run in order. Stream input is best effort: a late
   lower group runs after the current one, with a warning.
-- **A non-`forever` scheduler stops only once its submitter has ended and every task is terminal**
-  (`Scheduler.load_bundle`). `submission_complete()` is read **before** the counts (a submitter ends
+- **A non-`forever` scheduler stops for having run out of work only once its submitter has ended
+  and every task is terminal** (`Scheduler.load_bundle`). It still stops at once, input open or
+  not, when a group fails permanently (the halt above) or on SIGUSR1/SIGUSR2. `submission_complete()` is read **before** the counts (a submitter ends
   only after its last commit); with every task done and the input still open it backs off without
   `increment_group`/`report_held`, so a pause or a failed task with no retry left never ends a
   stream run early. `ServerThread` wakes the scheduler once the submitter has ended.
