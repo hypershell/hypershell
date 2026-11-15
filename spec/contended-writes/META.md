@@ -25,3 +25,17 @@
 - **Skill cause:** Open in `spec/relay-hardening/META.md` F2 and earlier cycles' META files; the skill text is unchanged.
 - **Recommended fix:** As recorded there.
 - **Confidence:** high · **Effort:** small
+
+## F3 — High-blast-radius research exception vs a GOAL that says no fan-out is needed · seen again
+`origin=hs-plan:step3 severity=low category=instruction status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The GOAL (`appetite: small`) says the change "does not need a research fan-out", while Step 3's high-blast-radius and GOAL-deferred-unknowns exceptions both require one "regardless of appetite/kind"; only the diagnostic exception says the GOAL wins a disagreement. The two questions needed live database probes with the sandbox off, so they ran in-session as two briefs plus probes, against the letter of the step.
+- **Skill cause:** As `spec/server-initdb/META.md` F3 and `spec/tls-client-address-family/META.md` F1: no depth scale and no in-session path for a diagnosed small fix, and no rule for which wins when the GOAL rules on research depth.
+- **Recommended fix:** As recorded there, plus: say whether a GOAL's explicit research ruling overrides the blast-radius exception (it should not drop `research/`, only the parallel fan-out).
+- **Confidence:** med · **Effort:** small
+
+## F4 — No shared red-on-base harness; this plan reuses another cycle's `drive/red_check.sh` · seen again
+`origin=hs-plan:step6 severity=low category=tooling status=open target=.agents/factory/bin/`
+- **What happened:** R5 requires each test to fail before the fix. The verify gates call `spec/relay-hardening/drive/red_check.sh` with `RED_BASE_REV`/`RED_LIST`, because nothing under `.agents/factory/bin/` does this, and add a `rest_green.sh` beside it.
+- **Skill cause:** As `spec/relay-hardening/META.md` (the generic `red_check.sh` recommendation): Step 6 and the TECH template still give no way to prove "fails on <rev>".
+- **Recommended fix:** As recorded there: move `red_check.sh` + `red_outcome.py` (and a deselect-the-red-list runner) to `.agents/factory/bin/` and reference them from Step 6.
+- **Confidence:** high · **Effort:** small
