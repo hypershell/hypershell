@@ -114,3 +114,187 @@ semantics, an upgraded database's `source.id` is its primary key, and only `task
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Review cycle 2 — changes-requested (2026-11-15)
+
+- **Reviewed commit:** d5a9836b5bd40c94c21ed2de031b5f82c9640be7  ·  **Base:** develop (`origin/develop` 48cc505; merge base 6da633d)  ·  **Date:** 2026-11-15
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`
+- **Mode:** a fresh blind pass over the full spec-excluded diff, plus verification of cycle 1's F1 and F2 remediation.
+
+**Pre-flight.** `TECH.md` read `status: in_progress`, `current_phase: P6` (CI on this head, the
+foreman's external wait). Reviewed at the foreman's direction. Contract drift: only the shaping commit
+92af9c1 touches `GOAL.md`. Graded under cycle 1's rulings, with the review-cycle-1 ruling (maintainer
+sign-off) added. F1: the docs drop the kill case, with a `versionchanged` marker on pages that carry
+markers. F2: tests that pin the retry mark's own row condition — a real-race test on
+PostgreSQL/TimescaleDB and a deterministic SQLite counterpart, red on the mutant — and no code change.
+
+**Merge status.** `git merge-tree --write-tree origin/develop HEAD` is clean against 48cc505 (after
+#107, #108 and the roadmap commit): tree aedf193. In the merged tree, the branch side of `AGENTS.md`,
+`.agents/factory/invariants.md`, `ROADMAP.md`, `src/`, `tests/`, `docs/` and `issues/` equals the
+branch diff line for line. Develop's edits to `AGENTS.md` and `invariants.md` do not touch the retry,
+cancel or hypertable passages. The merged tree ran on SQLite: `test_contended_recovery.py`,
+`test_source.py`, `test_contended_write.py`, `test_writeback.py`, `test_retry_gate.py`,
+`test_dispatch_staged.py`, `test_topology_server.py`, `test_cluster_exit.py` and `test_submit*.py`
+gave 245 passed, 23 skipped (PostgreSQL only). That count is with the venv's `hs` on `PATH`; a first
+run without it failed 64 subprocess tests on `FileNotFoundError`, which is environmental.
+
+**Reviewer.** One fresh `general-purpose` reviewer received:
+- `GOAL.md`;
+- the spec-excluded diff command;
+- `review-rubric.md`, and the base `invariants.md` and `AGENTS.md` (`origin/develop`) by exact command;
+- the binding rulings;
+- cycle 1's F1 and F2 failure scenarios and the signed-off remediation;
+- `drive/`, `red.txt`, `ci-red.txt`, `mutant-red.txt`, `evidence/` and `spec/relay-hardening/drive/red_check.sh`.
+
+The brief told it to keep every search off `PLAN.md`, `TECH.md`, `META.md`, `REVIEW.md` and
+`research/` (META F7's recommended fix). It reports that it opened none of them. It left the tree clean
+(`git status --porcelain` empty, HEAD d5a9836), and its one background process, the full SQLite suite,
+exited.
+
+### Verification run (cycle 2)
+
+- `git diff e0e61c8 HEAD -- src/` is empty: the cycle-1 remediation is tests, docs and evidence only.
+- Full SQLite suite: `python -m pytest -q -p no:cacheprovider -x tests` gave 2652 passed, 114 skipped.
+- The touched test files (`test_contended_recovery.py`, `test_contended_write.py`, `test_source.py`)
+  on PostgreSQL 18.7 and on TimescaleDB 2.32.0: 80 passed, 1 skipped (the hs283 template) on each.
+- CI's PostgreSQL file list, less `test_upgrade_postgres.py` (it needs `HS_TEST_POSTGRES_TEMPLATES`):
+  - PostgreSQL 18: 181 passed. The 2 failures are `test_timescale` entry checks ("server offers
+    TimescaleDB 2.32.0, but HS_TEST_TIMESCALE is empty").
+  - TimescaleDB: 201 passed. The 1 failure needs the hs283 template.
+  - All three failures come from the local setup, and the diff touches none of those files.
+- `drive/mutant_check.sh` (TMPDIR under `/tmp/claude-501/`):
+  - SQLite: 2 of 2 red, 1 skipped. PostgreSQL 18 and TimescaleDB 2.32: 3 of 3 red each. Exit 0 on all three.
+  - The export differs from the tree in exactly one line, `model.py:997`.
+  - Failure messages on the mutant: the SQLite pair gives `assert ['mark'] == ['mark', 'SELECT']`; the
+    real race gives `assert [(<retry id>, <failed id>)] == []`, meaning the cancelled row's retry was dispatched.
+  - `MUTANT_REV=92af9c1` exits 2 ("the 'retryable' match line is not in … once").
+- `red_check.sh` with `RED_BASE_REV=92af9c1` and `red.txt`, using the HEAD tests: SQLite 12 of 12 red
+  (1 skipped); PostgreSQL 18 and TimescaleDB 2.32 13 of 13 red. The cycle-2 harness change turned no
+  base-red test green. With `mutant-red.txt` at base on PostgreSQL 18: 3 of 3 red.
+- Stability: the new SQLite tests ran 10 times and the new real-race tests 5 times on each server, with
+  no failure.
+- `sphinx-build -W --keep-going -q -E -b html docs <scratch>` exits 0. This used the worktree venv's
+  Sphinx (Python 3.14): `uv run --python 3.12 --group docs` needed a download, which the network
+  restriction refused. The rendered HTML contains no "killed between/while".
+- `drive/ci_check.py`:
+  - `red evidence/ci-red --code-rev 23e47ef`: 15 jobs, 0 differences.
+  - `green evidence/ci-green --code-rev e0e61c8`: 15 jobs, 0 differences.
+  - CI on d5a9836 is P6, still running; not graded here.
+- Drives in `temp_site.sh`:
+  - Six concurrent first `hs submit -f -`, 10 rounds each, on fresh SQLite and on a 2.8.3 database
+    upgraded in place: 0 failed rounds.
+  - `hsx -t 'exit 3' -r 1 -N4`, 40 tasks, plain and `--eager`, on SQLite and on the TimescaleDB
+    hypertable: 40 first attempts, 40 retry rows, 0 problems and exit 0 each time.
+- The compiled retry-selection SQL is identical at HEAD and at base.
+- The `issues/hs-update-contended-writes.md` citations (`task.py:1070-1216`) match the code; `task.py`
+  is unchanged since 6da633d.
+- Two-scheduler probe (N1): two threads call `Task.next(limit=1, attempts=2)`, each held at its first
+  mark or insert until both have selected the same failed row.
+  - The reviewer ran it on SQLite and PostgreSQL 18: HEAD leaves 1 retry row of the failed row, base
+    92af9c1 leaves 2.
+  - The orchestrator re-ran it on SQLite: HEAD `dispatched per round: [[], [<id>]] | retry rows … 1`;
+    base `[[<id>], [<id>]] | … 2`.
+
+### Cycle-1 findings
+
+- **F1 — fixed.** The kill case is gone from both pages:
+  - `docs/_include/database.rst:124-133` also adds `.. versionchanged:: 2.9.0` ("A failed task's retry
+    and its `retried` mark are recorded together …"), which is true at HEAD (one transaction).
+  - `docs/_include/database_alt.rst:15-19` has no marker. It is included by `manual.rst`'s Database
+    section, which carries no markers (its 2.9.0 upgrade text has none either), so the ruling's "where
+    markers exist" holds.
+  - The `-W` build passes.
+  - `share/man/man1/*.1:3247` still carries the old sentence. Man pages are rebuilt only in `[release]`
+    commits (AGENTS.md), so this is not a finding.
+- **F2 — fixed.** No `src/` change since e0e61c8.
+  - The new tests are red on the `(by_id, )` mutant and green at HEAD on SQLite, PostgreSQL 18 and
+    TimescaleDB 2.32: `test_retry_mark_that_waited_matches_only_a_row_awaiting_retry[cancelled|retried]`
+    and `test_contended_retry_mark_skips_cancelled_row`.
+  - `mutant_check.sh` tests the committed rev's export, not the installed tree; `red_check.sh` refuses
+    to run unless `hypershell` imports from the export. It mutates exactly one line, checks it before
+    and after, and exits 2 when the mutation stops applying.
+  - The harness change (`DriverContention.waits`, the reordered `take`) differs from before only when
+    `meanwhile` is set with `losing` at 0. Only `waits` creates that state, and every `lose()` call
+    uses a count ≥ 1, so the earlier tests behave as before; the base red check confirms it.
+  - `waits` models PostgreSQL's re-check (the other change commits, then the write runs as written).
+    It relies on the tested row being the batch's first mark, which `failed()` orders by completion time.
+  - **TimescaleDB 2.31 coverage:** sufficient for the ruling.
+    - The mutant fails 7 of CI's 9 test jobs: the four SQLite jobs (`tests (3.11–3.14)`) through the
+      SQLite pair; `pg13`, `pg18` and `timescale-floor` (2.24 re-checks the row) through the real race.
+    - On `timescale`/`timescale-oss` (2.31) a waited-on mark matches 0 rows with or without the
+      condition. The lookup that follows applies the same awaiting-retry filters, so the condition has
+      no work to do there and the mutant is harmless on 2.31.
+    - At HEAD the test should pass on 2.31 by that same path. This is reasoned, since no 2.31 server is
+      available locally. It is the path of `test_contended_dispatch_skips_cancelled_row`, which CI ran
+      green on 2.31 at e0e61c8.
+
+### Requirement → evidence matrix (cycle 2)
+
+| R-ID | Implemented by (file/commit) | Verified how | Status |
+|------|------------------------------|--------------|--------|
+| R1 | `data/model.py:861-899`: marks via `__write_rows(retryable=True, each=next_ids, commit=False, prefix='m_')` (:889-890), retry rows only for marks that landed (:891-893); condition :994-997; re-run loop :1063-1097. 13a552d | `test_contended_retry_mark_lands_on_rerun` (SQLite, red at base); `test_contended_retry_mark_lands` green on PG 18 and TS 2.32, CI red on 2.31 at 23e47ef and green at e0e61c8 (`ci_check.py`, 0 differences); hsx drive on SQLite and the hypertable | ✅ |
+| R2 | Same function: marks and inserts in one transaction (:884-896); a row no longer awaiting retry skipped (:1079-1081); WARNING at the bound (:1094-1096) | Exhausted, cancelled/deleted/retried-meanwhile and stop-between tests; the waited pair and `test_contended_retry_mark_skips_cancelled_row`; red check at base; `mutant_check.sh` 3 of 3 red | ✅ (F2 closed) |
+| R3 | `data/model.py:1228-1251`, `cancel_all` returns the ids cancelled, `cancel` a bool. 005cb33 | `test_contended_cancel_lands_on_rerun`, `…_exhausted_reports_rows_not_cancelled`, `test_cancel_of_gone_row_raises_and_cancels_nothing`, the uncontended-cost pin, `test_contended_cancel_lands` | ✅ |
+| R4 | `data/model.py:1660-1686`, `ON CONFLICT (id) DO NOTHING` via `UPSERT_BY_DIALECT`, then a re-read. 005cb33 | SQLite two-session tests ×4; PostgreSQL `[fresh]` on both providers (`[upgraded]` needs hs283, CI only); submit drive 20 of 20 rounds clean | ✅ |
+| R5 | `tests/` at 23e47ef and d5a9836 | Red check 12/12 and 13/13 at base; CI red set exact; cost pins pass | ✅ |
+| R6 | `AGENTS.md:232-254, :499-514, :571-577`; `invariants.md:44-55, :75-81`. 4d9d61a, docs in d5a9836 | Each claim read against the code at HEAD | ✅ as R6 words it (the mark, `cancel_all` and the kill case dropped); N1 for the two-server clause left in the same lists |
+
+Unmapped changes (possible scope creep): none.
+- `Task.__awaiting_retry` shares the selection's filters with the R2 mark, and the compiled SQL is
+  unchanged from base.
+- The seed and ROADMAP edits follow the GOAL-gate split. The new seed's Problem section matches the code
+  it cites, its status is `unshaped`, and its ROADMAP links resolve.
+
+### Findings (cycle 2)
+
+#### [LOW/CONFIRMED] N1 — The doubled-retry lists still name two servers on one database, which the conditional mark now guards
+- **Where:**
+  - `AGENTS.md:232-238` and `:252-254` ("in the two cases above they raise `IntegrityError`");
+  - `.agents/factory/invariants.md:75-81` (§3);
+  - `docs/_include/database.rst:129-133`;
+  - `docs/_include/database_alt.rst:17-19`.
+- **Failure scenario:** Each passage lists two servers on one database as a case that adds a second
+  retry row with the same `previous_id`, which a pre-2.9 SQLite database rejects with an error. At HEAD
+  that no longer happens. The retry mark matches only a row that is still a failure with
+  `retried IS FALSE`, and it commits in one transaction with its retry row. A second Scheduler that
+  selected the same failed row finds its mark matching nothing (on SQLite after the first commit; on
+  PostgreSQL by re-check, or on TimescaleDB 2.29+ by miss and lookup), and it skips the row. The diff
+  rewrote these very lists (R6, F1) and left this clause, so the invariant file, AGENTS.md and the user
+  docs now state a guard gap the code closed.
+- **Evidence:** the two-scheduler probe. HEAD leaves 1 retry row and base 92af9c1 leaves 2, on SQLite
+  (reviewer and orchestrator) and on PostgreSQL 18 (reviewer).
+- **Touches invariant / requirement:** R6, read as claims true at HEAD, and the §12 docs rule. Graded
+  LOW, not as F1's HIGH: the prose and marker for the user-visible change exist and the build passes.
+  The leftover clause overstates a risk in a configuration the docs already call unsupported, and the
+  GOAL leaves two servers out of scope. No GOAL criterion requires keeping it, so the deferral exception
+  does not apply. It blocks, as cycle 1 applied the rule to a CONFIRMED LOW (META F8).
+- **Remediation (wording only):** take two servers out of the doubled-retry lists, or move it out of
+  those lists as a statement of its own about the unsupported setup that makes no retry claim. Then fix
+  the counts that follow ("in the two cases above"; "the rare cases"). If the maintainer prefers to keep
+  the clause as a conservative warning, that is the alternative to rule on.
+- **Not a finding:** the same bullet's "new tasks double-schedule too" may be stale since #103's
+  conditional dispatch stamp. This diff did not change it, and it was not probed.
+
+Dropped after checking: the man pages' old sentence (rebuilt at release). The PostgreSQL CI-list
+failures were checked and are all environmental (the TimescaleDB entry check, the hs283 template).
+
+### Human-gate triggers (cycle 2)
+
+- **Not triggered by N1.** It is wording only, with no core file touched and no invariant broken in code.
+  That is the reading cycle 1 applied to F1, the same class of finding. The remediation edits the text
+  of invariants §3, which the maintainer sees at publish.
+- Cycle 1's gate (F2) was met by the maintainer's sign-off on the remediation. F2 is closed with no
+  `src/` change.
+
+### Loop status
+
+This is the second consecutive changes-requested verdict; per the rubric's bounded loop it is escalated
+to the maintainer. One build↔review cycle remains within the bound (≤3). There are two routes:
+- a wording-only `hs-build` for N1, with cycle 3 scoped to verifying that remediation;
+- the maintainer rules N1 accepted as a conservative overstatement, and the verdict is re-set to
+  approved.
+
+### Optional completeness sub-pass (cycle 2)
+
+- Not run (not requested).

@@ -62,11 +62,14 @@
 - **Recommended fix:** In Step 2's reviewer brief, require every search to exclude the cycle's spec artifacts (`git grep … -- . ':(exclude)spec/'`, or `grep -r --exclude-dir=spec`), naming the exception for the evidence files the brief hands over. This tightens blind-review integrity; it weakens no gate.
 - **Confidence:** high · **Effort:** small
 
-## F8 — A CONFIRMED LOW coverage finding: "non-blocking" by the severity table, blocking and gate-triggering by the loop rules
+## F8 — A CONFIRMED LOW coverage finding: "non-blocking" by the severity table, blocking and gate-triggering by the loop rules · seen again
 `origin=hs-review:step4 severity=high category=instruction status=open target=.agents/factory/review-rubric.md`
 - **What happened:** A mutation showed the retry mark's own UPDATE condition (the `CANCEL_STATUS` guard, in `data/model.py`) is pinned by no test, though the code is correct. The severity table calls such a finding LOW, "missing-but-non-blocking test coverage"; the verdict rule blocks on any CONFIRMED finding; the human gate fires when a CONFIRMED finding "touches" `data/model.py` or a DB-lifecycle invariant. Grading required a judgment call (applied as written: gate triggered).
 - **Skill cause:** The rubric and Step 4 do not say whether a coverage-only finding (correct code, missing pin) is CONFIRMED in the blocking sense, nor what "touches" means for one.
 - **Recommended fix:** State it explicitly in `review-rubric.md` (Severity, Verdict & loop, human gate) and Step 4. Any wording that exempts coverage-only findings from blocking or from the gate weakens the human gate, a non-negotiable gate, and needs the maintainer's ruling; the safe clarification is to keep both and drop "non-blocking" from the LOW row.
+- **Seen again:** review cycle 2. N1 is a CONFIRMED LOW, a wording-only overstatement in an unsupported setup. Under the severity table it is minor; under the verdict rule it blocks, and it was applied as written, so the cycle runs one more loop for a wording fix. The rubric also does not say whether a §12 docs inaccuracy that is not a *missing* update (the prose and marker exist; a leftover clause overstates a risk) grades HIGH as §12 or by its impact.
 - **Confidence:** med · **Effort:** small
 
 **What worked well:** The executed-evidence spine held: the reviewer ran mutations from scratch copies on `PYTHONPATH` with the tree untouched, which is what exposed F2, and the red_check/ci_check scripts re-graded R5's red in minutes.
+
+**What worked well (review cycle 2):** F7's recommended fix, applied ad hoc in the brief (every search kept off PLAN/TECH/META/REVIEW/research, with the evidence files named as the exception), held: the reviewer reports opening none of them. Handing it the shared `red_check.sh` and the cycle's `mutant_check.sh` let it re-grade F2 on three backends in minutes.

@@ -4,11 +4,11 @@ title: 'Contended writes: the retried mark and Task.cancel_all land when contend
   on a hypertable; concurrent first submits share the reserved source row'
 kind: fix
 appetite: small
-status: in_progress
+status: blocked
 branch: fix/contended-writes
 base: develop
 current_phase: P6
-last_updated: '2026-11-14'
+last_updated: '2026-11-15'
 phases:
 - id: P1
   name: 'Tests first: R5''s fault-injection, real-race and two-session tests and the
@@ -134,11 +134,12 @@ phases:
   verify: uv run python spec/contended-writes/drive/ci_check.py green spec/contended-writes/evidence/ci-green
     --code-rev "$(git log -1 --format=%H -- . ':!spec')"
 review:
-  last_reviewed_commit: e0e61c8625ca2ce5c594dd4bfa0f53a3f5561b84
+  last_reviewed_commit: d5a9836b5bd40c94c21ed2de031b5f82c9640be7
   verdict: changes-requested
-  blocked_reason: 'F1 (HIGH, §12): docs/_include/database*.rst still list the kill
-    case; F2 (LOW): no test pins the retry mark''s UPDATE condition; human gate (F2)'
-  cycle: 1
+  blocked_reason: 'N1 (LOW, wording): AGENTS.md, invariants §3 and docs/_include/database*.rst
+    still list two servers on one database as a doubled-retry case the conditional
+    mark now guards; F1, F2 fixed; second changes-requested, escalated to the maintainer'
+  cycle: 2
 ---
 # TECH.md — Contended writes: the retried mark and Task.cancel_all land when contended; concurrent first submits share the reserved source row
 
