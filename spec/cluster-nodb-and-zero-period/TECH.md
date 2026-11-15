@@ -7,12 +7,12 @@ appetite: small
 status: in_progress
 branch: fix/cluster-nodb-and-zero-period
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-15'
 phases:
 - id: P1
   name: Regression tests first, red on 90ab2fc2
-  status: pending
+  status: done
   satisfies:
   - R8
   depends_on: []
@@ -159,7 +159,7 @@ one atomic code+state commit.
 **Goal:** every R1–R6 behaviour has a test; the defect tests fail on the base tree and none hangs;
 the guards pass. No source change.
 
-- [ ] `tests/test_cluster_no_db.py` (PLAN §6): the unit `test_no_db_makes_no_database_call[mode]`
+- [x] `tests/test_cluster_no_db.py` (PLAN §6): the unit `test_no_db_makes_no_database_call[mode]`
       (SQLite dialect; local, `--launcher env`, `--ssh localhost`) and the guard matrix
       `test_database_step_kept[dialect-mode-flag]` (every other row), both through
       `ClusterApp.from_cmdline` + `__enter__`/`__exit__` with `hypershell.cluster.initdb`/`checkdb`
@@ -168,7 +168,7 @@ the guards pass. No source change.
       bytes), `test_no_db_runs_with_unopenable_database` (missing directory),
       `test_no_db_runs_with_launcher` (`--launcher env -H 127.0.0.1 --remote-exe` the venv's `hs`),
       and the guard `test_without_no_db_initializes_kept` (four tables).
-- [ ] `tests/test_period_floor.py` (PLAN §6): `test_period_option_zero_refused` (unit, both apps,
+- [x] `tests/test_period_floor.py` (PLAN §6): `test_period_option_zero_refused` (unit, both apps,
       `-P v`/`--period=v`, six zero forms); `test_period_key_refused` (integration, fresh
       interpreter with `serve_from`/`serve_forever`/`serve_with_sites`/`run_local`/`run_cluster`/
       `run_ssh` recorded; `hs server FILE --no-db`, `hs server --autoscaling fixed`, `hs cluster
@@ -179,12 +179,12 @@ the guards pass. No source change.
       start-up helpers and `RelayThread` stubbed returns `bad_argument` with nothing built); guards
       `test_period_option_accepted`, `test_period_key_accepted` (key `0.5` → `0.5` at the recorded
       `period=`), `test_relay_period_accepted`.
-- [ ] Every new test tagged `@mark.unit` or `@mark.integration`; no test may start a server or
+- [x] Every new test tagged `@mark.unit` or `@mark.integration`; no test may start a server or
       relay that a zero period would leave running (PLAN §5). Assert on "greater than zero", the
       option or key, and the value; not on the full sentence.
-- [ ] `tests/test_duration_options.py::test_seconds_option_parsed`: keep `('0', 0)` for every option
+- [x] `tests/test_duration_options.py::test_seconds_option_parsed`: keep `('0', 0)` for every option
       but `-P` on `ServerApp`/`ClusterApp` (now refused; covered above).
-- [ ] Record the red list (the failing node ids from the verify log) in the commit body.
+- [x] Record the red list (the failing node ids from the verify log) in the commit body.
 - **Expected red on `90ab2fc2`** (`-k "not kept and not accepted"`; all fail, none passes, no
   error): `test_no_db_makes_no_database_call` ×3 (records `initdb`);
   `test_no_db_creates_no_file` (file created); `test_no_db_leaves_file_unchanged` (exit 5, not a

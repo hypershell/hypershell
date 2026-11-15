@@ -226,10 +226,16 @@ SECONDS_OPTIONS: Final[List[tuple[type, List[str], str, str]]] = [
 ]
 
 
+# Each whole-second value and its seconds; a zero period is refused instead (tests/test_period_floor.py).
+SECONDS_PARSED: Final[List[tuple[str, int]]] = [('30s', 30), ('5m', 300), ('1h30m', 5400), ('1.5h', 5400), ('1:30', 90),
+                                                ('1:30:00', 5400), ('1-12', 129600), ('90', 90), ('0.5', 1), ('0', 0)]
+
+
 @mark.unit
-@mark.parametrize('app, args, option, dest', SECONDS_OPTIONS)
-@mark.parametrize('value, expected', [('30s', 30), ('5m', 300), ('1h30m', 5400), ('1.5h', 5400), ('1:30', 90),
-                                      ('1:30:00', 5400), ('1-12', 129600), ('90', 90), ('0.5', 1), ('0', 0)])
+@mark.parametrize('app, args, option, dest, value, expected', [
+    (*option, *case) for option in SECONDS_OPTIONS for case in SECONDS_PARSED
+    if not (option[3] == 'autoscaling_period' and case[1] == 0)
+])
 def test_seconds_option_parsed(app: type, args: List[str], option: str, dest: str, value: str, expected: int) -> None:
     """Every whole-second duration option reads seconds, units and Slurm times, rounded up."""
     assert getattr(app.interface.parse_args([*args, option, value]), dest) == expected
