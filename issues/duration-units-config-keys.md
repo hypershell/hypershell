@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:env-config-keys
 kind: fix
 appetite: small
 lane: public

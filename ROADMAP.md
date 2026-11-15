@@ -349,7 +349,7 @@ command-line option and are read straight from configuration, so `evict = "10m"`
 misread while `autoscale.period = "5m"` works.
 
 *Horizon: near-term, small · Depends on: `duration-units-remaining` (landed, #106) · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: unshaped*
+**Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: adopted:env-config-keys*
 
 ## On the 2.8 line, the queue key can still be given on a command line without a warning
 
@@ -378,7 +378,7 @@ key should be settable, with the text given. Pre-existing since 2.7.0.
 
 *Horizon: near-term · Depends on: — · Refs: `server-auth-variant-collision` (landed, #97: the file
 form of `auth_env`; the environment form stays here); relay (its zone tables add more keys)*
-**Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: unshaped*
+**Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: adopted:env-config-keys*
 
 ## `hs cluster` waits forever when every launched client fails
 
