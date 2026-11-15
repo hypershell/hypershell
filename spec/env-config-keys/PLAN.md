@@ -404,3 +404,25 @@ otherwise):
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-15)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned; S1–S13 (§5) are accepted as
+proposed.
+
+- **S1–S5:** accepted. The ten duration keys are converted at the start of the command that reads
+  them and refused with exit 3; #106's keys keep exit 2. Only `relay.timeout` rounds up. A typed
+  variable that does not convert stops every command at import, naming the variable. Empty text on
+  a boolean or number key is refused (release note, change 4); on an optional text key it reads as
+  unset.
+- **S6:** accepted, with the maintainer's sign-off in session (2026-11-15): the key variable is
+  recognised by the matcher wherever HyperShell handles it by name. Public text states the outcome
+  only.
+- **S7–S13:** accepted. `S7` and `S4` go into the release note under changes 5 and 4.
+- **Sibling cycle:** `cluster-nodb-and-zero-period` refuses an `autoscale.period` not greater than
+  zero through `parse_period`, which leaves non-numeric values to the command. Keep the key's text
+  reaching argparse as planned; whichever cycle lands second rebases onto the other.
+- **High-blast files** (`server.py`, `client.py`, `cluster/remote.py`, `core/tls.py`): the review's
+  human gate applies as the rubric says.
+- **Toolchain:** the shared uv cache under `/tmp/claude-501/uv-cache` is corrupt; use a fresh
+  `UV_CACHE_DIR` as TECH says.
