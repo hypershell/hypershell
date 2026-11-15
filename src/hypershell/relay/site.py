@@ -89,7 +89,7 @@ DEFAULT_SITE_PERIOD: Final[int] = default.autoscale.period
 The relay passes the configured period (`autoscale.period`); this default never reads configuration.
 """
 
-DEFAULT_SITE_EVICT: Final[int] = config.server.evict
+DEFAULT_SITE_EVICT: Final[int] = default.server.evict
 """Default seconds the site server waits on a silent site client before evicting it (`[server] evict`)."""
 
 

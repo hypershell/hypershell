@@ -62,7 +62,7 @@ from hypershell.data.model import Task, serialize_tasks, deserialize_tasks, zone
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, resolve_auth, refuse_key_option,
-                                    AUTH_ENV, is_key_variable)
+                                    AUTH_ENV, is_key_variable, config_seconds)
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
@@ -1653,6 +1653,9 @@ class ClientApp(Application):
     interface.add_argument('--available-cores', action='version', version=str(cpu_count()))
     interface.add_argument('--available-ssh-groups', action='version', version='\n'.join(SSH_GROUPS))
 
+    # Seconds from `client.heartrate` (any duration form), read when the arguments are checked.
+    heartrate: int | float = DEFAULT_HEARTRATE
+
     exceptions = {
         EOFError: functools.partial(handle_disconnect, logger=log),
         ConnectionResetError: functools.partial(handle_disconnect, logger=log),
@@ -1684,7 +1687,7 @@ class ClientApp(Application):
                        memory=self.client_memory,
                        delay_start=self.delay_start,
                        no_confirm=self.no_confirm,
-                       heartrate=config.client.heartrate,
+                       heartrate=self.heartrate,
                        client_timeout=self.client_timeout,
                        task_timeout=self.task_timeout,
                        task_signalwait=self.task_signalwait,
@@ -1715,6 +1718,7 @@ class ClientApp(Application):
             raise ArgumentError('Client --timeout should be positive integer')
         if self.task_timeout is not None and self.task_timeout <= 0:
             raise ArgumentError('Client --task-timeout should be positive integer')
+        self.heartrate = config_seconds('client', 'heartrate')
         if self.auth == DEFAULT_AUTH:
             log.warning('Using default authentication key - do not use this in production!')
         if not self.tls_enabled:

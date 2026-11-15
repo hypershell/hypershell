@@ -501,8 +501,8 @@ def client_options(address: Tuple[str, int],
                    zone: Optional[str]) -> List[str]:
     """The `hs client` options shared by every launch mode (never the key)."""
     host, port = address
-    options = ['-H', host, '-p', str(port), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-               '-t', template, '-d', plain_seconds(delay_start), '-S', str(task_signalwait)]
+    options = ['-H', host, '-p', str(port), '-N', str(num_threads), '-b', str(bundlesize),
+               '-w', plain_seconds(bundlewait), '-t', template, '-d', plain_seconds(delay_start), '-S', str(task_signalwait)]
     if no_confirm:
         options.append('--no-confirm')
     if capture:
@@ -514,7 +514,7 @@ def client_options(address: Tuple[str, int],
     if client_memory is not None:
         options.extend(['-M', str(client_memory)])
     if client_timeout is not None:
-        options.extend(['-T', str(client_timeout)])
+        options.extend(['-T', plain_seconds(client_timeout)])
     if task_timeout is not None:
         options.extend(['-W', str(task_timeout)])
     if ratelimit is not None:

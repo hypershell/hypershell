@@ -13,15 +13,17 @@ stopped and the test fails.
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, Final, List, Optional, Tuple
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 # Standard libs
 import shutil
 from pathlib import Path
 
 # External libs
+import pytest
 from pytest import mark
 from cmdkit.app import exit_status
+from cmdkit.config import Configuration, Namespace
 
 # Internal libs
 from tests import create_taskfile
@@ -31,6 +33,58 @@ from tests.test_env_config import KEY, child_env, run_bounded, start_server, sto
 
 BOUND: Final[float] = 30
 """Seconds a command refused at start may take."""
+
+
+# The configuration modules are imported in each unit test below, so the command tests in this file
+# collect, and can be checked red, against a build without `config_seconds`.
+def layered(**server: Any) -> Configuration:
+    """A configuration of the defaults with `server` keys set by the environment layer."""
+    from hypershell.core.config import default
+    return Configuration(default=Namespace(default), env=Namespace({'server': server}))
+
+
+SECONDS: Final[Dict[str, Tuple[Any, bool, Any]]] = {
+    'number': (600, False, 600),
+    'fraction': (9.5, False, 9.5),
+    'units': ('10m', False, 600),
+    'fractional-units': ('1.5s', False, 1.5),
+    'slurm': ('1:30:00', False, 5400),
+    'spaces': (' 90 ', False, 90),
+    'whole-rounds-up': ('1.2s', True, 2),
+    'whole-units': ('5m', True, 300),
+}
+"""For each case: the value given, whether whole seconds are asked for, and the seconds read."""
+
+
+@mark.unit
+@mark.parametrize('case', list(SECONDS))
+def test_config_seconds(case: str) -> None:
+    """A number is used as given; text takes the duration forms, exact unless whole seconds are asked for."""
+    from hypershell.core.config import config_seconds
+    value, whole, seconds = SECONDS[case]
+    result = config_seconds('server', 'evict', base=layered(evict=value), whole=whole)
+    assert result == seconds and type(result) is type(seconds)
+
+
+@mark.unit
+@mark.parametrize('value', ['10x', '5MB', '', '-5m', 'true'])
+def test_config_seconds_refused(value: str) -> None:
+    """Text that is not a duration is refused, naming the key, the variable and the forms."""
+    from hypershell.core.config import config_seconds, ConfigurationError
+    with pytest.raises(ConfigurationError, match=r'server\.evict: Duration .* is not valid: expected .*'
+                                                 r'\(from: HYPERSHELL_SERVER_EVICT\)'):
+        config_seconds('server', 'evict', base=layered(evict=value))
+
+
+@mark.unit
+def test_config_seconds_variable_form(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The `_env` form of a duration key is read through the variable it names."""
+    from hypershell.core.config import config_seconds, ConfigurationError
+    monkeypatch.setenv('MY_EVICT', '2m')
+    assert config_seconds('server', 'evict', base=layered(evict_env='MY_EVICT')) == 120
+    monkeypatch.delenv('MY_EVICT')
+    with pytest.raises(ConfigurationError, match='server.evict_env names MY_EVICT, which is not set'):
+        config_seconds('server', 'evict', base=layered(evict_env='MY_EVICT'))
 
 
 def write_config(site: Path, text: str) -> Path:
@@ -71,7 +125,7 @@ def relay_env(site: Path, **variables: Optional[str]) -> Dict[str, str]:
 
 REFUSED: Final[Dict[str, Tuple[List[str], str, str, Optional[str]]]] = {
     'server.evict': (['hs', 'server', '--no-db'], 'HYPERSHELL_SERVER_EVICT', '10x', None),
-    'client.heartrate': (['hs', 'client'], 'HYPERSHELL_CLIENT_HEARTRATE', '10x', None),
+    'client.heartrate': (['hs', 'client', '-N', '1'], 'HYPERSHELL_CLIENT_HEARTRATE', '10x', None),
     'relay.upstream.deadline': (['hs', 'relay'], 'HYPERSHELL_RELAY_UPSTREAM_DEADLINE', '10x', None),
     'relay.upstream.evict_hint': (['hs', 'relay'], '', '', '[relay.upstream]\nevict_hint = "5MB"\n'),
     'relay.poll': (['hs', 'relay'], 'HYPERSHELL_RELAY_POLL', '5MB', None),

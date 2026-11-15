@@ -120,7 +120,7 @@ typed)
     ;;
 durations)
     refused 3 'HYPERSHELL_SERVER_EVICT' HYPERSHELL_SERVER_EVICT=10x HYPERSHELL_SERVER_AUTH=abcdefghijklmnop1234 -- hs server --no-db
-    refused 3 'HYPERSHELL_CLIENT_HEARTRATE' HYPERSHELL_CLIENT_HEARTRATE=10x HYPERSHELL_SERVER_AUTH=abcdefghijklmnop1234 -- hs client
+    refused 3 'HYPERSHELL_CLIENT_HEARTRATE' HYPERSHELL_CLIENT_HEARTRATE=10x HYPERSHELL_SERVER_AUTH=abcdefghijklmnop1234 -- hs client -N 1
     refused_timed 3 'HYPERSHELL_RELAY_UPSTREAM_DEADLINE' HYPERSHELL_RELAY_UPSTREAM_DEADLINE=10x -- hs relay
     refused_timed 3 'HYPERSHELL_RELAY_POLL' HYPERSHELL_RELAY_POLL=5MB -- hs relay
     printf '[relay]\ntimeout = "5MB"\n' > "$site/bad.toml"

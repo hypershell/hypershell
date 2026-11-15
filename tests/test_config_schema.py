@@ -327,3 +327,21 @@ def test_read_environment_table_over_scalar() -> None:
                                          'HYPERSHELL_DATABASE': 'my.db', 'HYPERSHELL_DATABASE_FILE': 'x.db'})
     assert layer == {'ssh': {'nodelist': {'g': 'c'}}, 'database': {'file': 'x.db'}}
     assert set(variables) == {('ssh', 'nodelist', 'g'), ('database', 'file')}
+
+
+DURATION_KEYS: Tuple[str, ...] = (
+    'server.evict', 'client.heartrate', 'relay.bundlewait', 'relay.poll', 'relay.retention', 'relay.timeout',
+    'relay.upstream.heartrate', 'relay.upstream.evict_hint', 'relay.upstream.deadline', 'relay.upstream.backoff',
+)
+"""The duration keys no option reads, converted at the start of the command that reads them."""
+
+
+@mark.unit
+@mark.parametrize('path', DURATION_KEYS)
+def test_duration_keys_documented(path: str) -> None:
+    """Each duration key no option reads is declared a duration and its entry gives the forms."""
+    assert KEYS[path] is Kind.DURATION
+    text = parse_reference()[path][1]
+    assert 'units ``d``, ``h``, ``m``' in text and 'Slurm time' in text, path
+    assert ('rounded up to whole seconds' if path == 'relay.timeout' else 'fractions are kept') in text, path
+    assert 'not a duration' in text and 'versionchanged:: 2.9.0' in text, path

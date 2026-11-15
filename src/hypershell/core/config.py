@@ -12,6 +12,7 @@ from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Di
 import os
 import re
 import sys
+import math
 import argparse
 import shutil
 import tomlkit
@@ -31,12 +32,14 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.platform import path, home, default_path
 from hypershell.core.exceptions import write_traceback, display_critical
 from hypershell.core.sys import PATH_SEP
+from hypershell.core.types import TIME_FORMS, _match_seconds
 from hypershell.core.config_schema import KEYS, read_environment, match_name, variable_name, VariableError
 
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
     'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable', 'env_variable',
+    'config_seconds',
     'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
     'ENV_VARIABLES',
@@ -334,6 +337,39 @@ def blame(base: Configuration, *varpath: str) -> Optional[str]:
         return f'from: {env_variable(*varpath)}'
     else:
         return f'from: <{source}>'
+
+
+def config_seconds(*varpath: str, base: Configuration = None, whole: bool = False) -> int | float:
+    """Seconds given by the duration key `varpath`, in any duration form; with `whole`, rounded up.
+
+    A number is used as given. Text takes the forms of the duration options, its exact value an `int`
+    when whole and a `float` otherwise. The key is read by attribute, so its `_env` and `_eval` forms
+    resolve. A value that is not a duration raises `ConfigurationError` naming the key, where it came
+    from, and the forms a duration takes.
+    """
+    base = config if base is None else base
+    key = '.'.join(varpath)
+    *section, name = varpath
+    table = functools.reduce(lambda parent, part: parent[part], section, base)
+    form = next((given for given in (name, f'{name}_env', f'{name}_eval') if given in table), name)
+    try:
+        value = getattr(table, name)
+    except Exception as error:
+        # Only the error's type is named: its text can carry part of a command's output.
+        raise ConfigurationError(f'{key} could not be resolved: {type(error).__name__} '
+                                 f'({blame(base, *section, form)})') from None
+    if value is None and form == f'{name}_env':
+        raise ConfigurationError(f'{key}_env names {table[form]}, which is not set ({blame(base, *section, form)})')
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    seconds = _match_seconds(value.strip()) if isinstance(value, str) else None
+    try:
+        if seconds is not None:
+            return math.ceil(seconds) if whole else int(seconds) if seconds.denominator == 1 else float(seconds)
+    except OverflowError:
+        pass
+    raise ConfigurationError(f'{key}: Duration {value!r} is not valid: expected {TIME_FORMS} '
+                             f'({blame(base, *section, form)})')
 
 
 def get_logging_style(base: Configuration) -> str:

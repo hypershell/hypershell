@@ -49,8 +49,8 @@ from cmdkit.config import Namespace
 from sqlalchemy import inspect
 
 # Internal libs
-from hypershell.core.config import (config, RELAY_PROCESS, RELAY_MARKER, DEFAULT_RELAY_PORT, DEFAULT_AUTH,
-                                    PARAM_UNSET, relay_database_section)
+from hypershell.core.config import (config, default, RELAY_PROCESS, RELAY_MARKER, DEFAULT_RELAY_PORT, DEFAULT_AUTH,
+                                    PARAM_UNSET, relay_database_section, config_seconds)
 from hypershell.core.signal import SIGUSR1, SIGUSR2, SIGTERM
 from hypershell.core.exceptions import get_shared_exception_mapping, handle_exception, handle_disconnect
 from hypershell.core.logging import Logger, INSTANCE
@@ -95,25 +95,25 @@ log = Logger.with_name(__name__)
 DEFAULT_RELAY_BIND: Final[str] = config.relay.bind
 """Default bind address of the relay-local server."""
 
-DEFAULT_RELAY_POLL: Final[float] = config.relay.poll
+DEFAULT_RELAY_POLL: Final[float] = default.relay.poll
 """Default polling interval of the relay-local scheduler in seconds."""
 
-DEFAULT_UPSTREAM_DEADLINE: Final[float] = config.relay.upstream.deadline
+DEFAULT_UPSTREAM_DEADLINE: Final[float] = default.relay.upstream.deadline
 """Default seconds an upstream call may take before the upstream link counts as down."""
 
-DEFAULT_UPSTREAM_BACKOFF: Final[float] = config.relay.upstream.backoff
+DEFAULT_UPSTREAM_BACKOFF: Final[float] = default.relay.upstream.backoff
 """Default longest wait in seconds between attempts to reach the upstream server again."""
 
-DEFAULT_EVICT_HINT: Final[float] = config.relay.upstream.evict_hint
+DEFAULT_EVICT_HINT: Final[float] = default.relay.upstream.evict_hint
 """Default seconds of upstream outage after which the upstream server has likely evicted the relay."""
 
-DEFAULT_SITE_EVICT: Final[int] = config.server.evict
+DEFAULT_SITE_EVICT: Final[int] = default.server.evict
 """Default seconds the relay-local server waits on a silent site client before evicting it."""
 
 DEFAULT_RELAY_BUNDLESIZE: Final[int] = config.relay.bundlesize
 """Default bundle size of the relay-local server."""
 
-DEFAULT_RELAY_BUNDLEWAIT: Final[int] = config.relay.bundlewait
+DEFAULT_RELAY_BUNDLEWAIT: Final[int] = default.relay.bundlewait
 """Default seconds the relay waits before returning results regardless of size."""
 
 DEFAULT_RELAY_SIZE: Final[int] = config.relay.size
@@ -124,6 +124,13 @@ DEFAULT_RELAY_LAUNCHER: Final[str] = config.relay.launcher
 
 DEFAULT_RELAY_LAUNCHER_ARGS: Final[str] = config.relay.launcher_args
 """Default extra arguments for the site client launcher."""
+
+RELAY_DURATIONS: Final[tuple[tuple[str, ...], ...]] = (
+    ('server', 'evict'), ('relay', 'bundlewait'), ('relay', 'poll'), ('relay', 'retention'), ('relay', 'timeout'),
+    ('relay', 'upstream', 'heartrate'), ('relay', 'upstream', 'evict_hint'), ('relay', 'upstream', 'deadline'),
+    ('relay', 'upstream', 'backoff'),
+)
+"""The duration keys `hs relay` reads, converted to seconds before it binds its database or a port."""
 
 STOP_CHECK_INTERVAL: Final[float] = 1.0
 """Seconds between the relay's checks on its parts: whether one has failed or died, and whether the site should stop."""
@@ -1141,15 +1148,15 @@ class RelayApp(Application):
         install_terminate_handler()
         thread = RelayThread(address=(self.bind, self.port),
                              bundlesize=config.relay.bundlesize,
-                             bundlewait=config.relay.bundlewait,
-                             poll=config.relay.poll,
+                             bundlewait=self.durations['relay.bundlewait'],
+                             poll=self.durations['relay.poll'],
                              tls=tls_from_namespace(config.server.tls),
                              upstream=upstream_config(self.upstream_host, self.upstream_port, self.no_tls),
                              zones=self.zones,
                              zone_settings=self.zone_settings,
                              site=config.relay.get('site', None),
                              upstream_bundlesize=config.relay.upstream.bundlesize,
-                             heartrate=config.relay.upstream.heartrate,
+                             heartrate=self.durations['relay.upstream.heartrate'],
                              size=self.size,
                              min_size=self.relay_bounds['min'],
                              max_size=self.relay_bounds['max'],
@@ -1158,12 +1165,12 @@ class RelayApp(Application):
                              launcher_args=[self.launcher_args] if self.launcher_args else None,
                              num_threads=config.relay.num_threads,
                              template=config.relay.template,
-                             client_timeout=config.relay.timeout or None,
-                             retention=config.relay.retention,
-                             deadline=config.relay.upstream.deadline,
-                             backoff=config.relay.upstream.backoff,
-                             evict_hint=config.relay.upstream.evict_hint,
-                             evict=config.server.evict,
+                             client_timeout=self.durations['relay.timeout'] or None,
+                             retention=self.durations['relay.retention'],
+                             deadline=self.durations['relay.upstream.deadline'],
+                             backoff=self.durations['relay.upstream.backoff'],
+                             evict_hint=self.durations['relay.upstream.evict_hint'],
+                             evict=self.durations['server.evict'],
                              period=self.site_period)
         try:
             thread.start()
@@ -1192,6 +1199,7 @@ class RelayApp(Application):
             raise ArgumentError(f'Invalid launcher ({error})') from error
         self.zone_settings  # noqa: checked when first read
         self.site_period  # noqa: checked when first read
+        self.durations  # noqa: checked when first read
         self.check_bounds()
         self.check_handshake()
 
@@ -1217,6 +1225,16 @@ class RelayApp(Application):
             return parse_time(period)
         except UnitError as error:
             raise ArgumentError(f'autoscale.period: {error}') from error
+
+    @functools.cached_property
+    def durations(self: RelayApp) -> Dict[str, int | float]:
+        """Seconds for each duration key the relay reads, by dotted path, in any duration form.
+
+        `relay.timeout` is rounded up to whole seconds (each site client's ``-T``, where 0 is never);
+        the others keep fractions. A value that is not a duration stops the relay before it starts.
+        """
+        return {'.'.join(varpath): config_seconds(*varpath, whole=varpath == ('relay', 'timeout'))
+                for varpath in RELAY_DURATIONS}
 
     @functools.cached_property
     def relay_bounds(self: RelayApp) -> Dict[str, Optional[int]]:

@@ -65,7 +65,7 @@ from sqlalchemy import func
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import (config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH,
-                                    AUTH_ENV, resolve_auth, refuse_key_option)
+                                    AUTH_ENV, resolve_auth, refuse_key_option, config_seconds)
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
 from hypershell.core.types import parse_bytes, parse_time
@@ -1823,6 +1823,9 @@ class ServerApp(Application):
     show_available_ports: bool = False
     interface.add_argument('--available-ports', action='store_true', dest='show_available_ports')
 
+    # Seconds from `server.evict` (any duration form), read when the arguments are checked.
+    evict_after: int | float = DEFAULT_EVICT
+
     exceptions = {
         **get_shared_exception_mapping(__name__)
     }
@@ -1845,7 +1848,7 @@ class ServerApp(Application):
                              max_retries=self.max_retries,
                              eager=self.eager_mode,
                              redirect_failures=self.failure_stream,
-                             evict_after=config.server.evict,
+                             evict_after=self.evict_after,
                              tls=self.tls,
                              policy=self.autoscaling_policy,
                              factor=self.autoscaling_factor,
@@ -1860,7 +1863,7 @@ class ServerApp(Application):
                           max_retries=self.max_retries,
                           eager=self.eager_mode,
                           redirect_failures=self.failure_stream,
-                          evict_after=config.server.evict,
+                          evict_after=self.evict_after,
                           tls=self.tls)
         else:
             serve_from(source=self.input_stream,
@@ -1878,7 +1881,7 @@ class ServerApp(Application):
                        max_retries=self.max_retries,
                        eager=self.eager_mode,
                        redirect_failures=self.failure_stream,
-                       evict_after=config.server.evict,
+                       evict_after=self.evict_after,
                        tls=self.tls)
 
     def check_args(self: ServerApp) -> None:
@@ -1899,6 +1902,7 @@ class ServerApp(Application):
             raise ArgumentError(f'Authentication key must be at least {AUTH_MINIMUM_LENGTH} characters')
         if not AUTH_ALLOWED_CHARS.fullmatch(self.auth):
             raise ArgumentError(f'Authentication key must contain only "{AUTH_ALLOWED_CHARS.pattern}"')
+        self.evict_after = config_seconds('server', 'evict')
         if not self.tls_enabled:
             log.warning('TLS is disabled - this is not recommended for production!')
 

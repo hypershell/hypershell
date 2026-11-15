@@ -52,7 +52,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 # Internal libs
-from hypershell.core.config import config, PARAM_UNSET, resolve_auth
+from hypershell.core.config import config, default, PARAM_UNSET, resolve_auth
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.heartbeat import Heartbeat, ClientState, RosterEntry
 from hypershell.core.topology import (Bounds, request_text as topology_request, read_topology, MAX_HANDBACK_TASKS,
@@ -87,7 +87,7 @@ log = Logger.with_name(__name__)
 DEFAULT_UPSTREAM_BUNDLESIZE: Final[int] = config.relay.upstream.bundlesize
 """Default bundle size the relay advertises upstream."""
 
-DEFAULT_UPSTREAM_HEARTRATE: Final[int] = config.relay.upstream.heartrate
+DEFAULT_UPSTREAM_HEARTRATE: Final[int] = default.relay.upstream.heartrate
 """Default seconds between upstream heartbeats."""
 
 DEFAULT_REQUEST_WAIT: Final[float] = DEFAULT_REMOTE_TIMEOUT
@@ -102,10 +102,10 @@ INSERT_ATTEMPTS: Final[int] = 3
 HEARTBEAT_WAIT_STEP: float = 1.0
 """Longest single wait between heartbeats, in seconds, so the machine re-enters often."""
 
-DEFAULT_RETENTION: Final[int] = config.relay.retention
+DEFAULT_RETENTION: Final[int] = default.relay.retention
 """Default seconds a returned result is kept in the relay database before it is pruned."""
 
-DEFAULT_RETURN_BUNDLEWAIT: Final[int] = config.relay.bundlewait
+DEFAULT_RETURN_BUNDLEWAIT: Final[int] = default.relay.bundlewait
 """Default seconds the relay waits before returning results regardless of size."""
 
 PRUNE_INTERVAL: float = 60.0

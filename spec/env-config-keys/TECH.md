@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/env-config-keys
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -90,7 +90,7 @@ phases:
 - id: P5
   name: The ten duration keys take units, converted at the start of the command that
     reads them
-  status: pending
+  status: done
   satisfies:
   - R6
   depends_on:
@@ -350,16 +350,30 @@ one per line, never a process variable.
 value stops the reading command at start (exit 3, naming key and source) before TLS material, a lock,
 a bind or a launch.
 
-- [ ] `core/config.py` `config_seconds(*varpath, base=config, whole=False)` (PLAN §2.6).
-- [ ] `ServerApp.check_args` (`server.evict`); `ClientApp.check_args` (`client.heartrate`);
+- [x] `core/config.py` `config_seconds(*varpath, base=config, whole=False)` (PLAN §2.6).
+- [x] `ServerApp.check_args` (`server.evict`); `ClientApp.check_args` (`client.heartrate`);
       `RelayApp.check_args` beside `site_period` (`server.evict` and the eight `relay.*` keys,
       `relay.timeout` rounded up); `RelayApp.run` passes the converted values.
-- [ ] Relay import-time defaults read `default.` (`relay/__init__.py:98-116`, `relay/upstream.py`,
+- [x] Relay import-time defaults read `default.` (`relay/__init__.py:98-116`, `relay/upstream.py`,
       `relay/site.py:92`); `-w`/`-T` for site clients through `plain_seconds`.
-- [ ] `docs/_include/config_param_ref.rst`: the ten entries give the forms (adapt
+- [x] `docs/_include/config_param_ref.rst`: the ten entries give the forms (adapt
       `server.tls.handshake`'s sentence; "rounded up" for `relay.timeout`, fractions kept for the
       rest), each with `versionchanged:: 2.9.0`.
-- [ ] `tests/test_config_schema.py`: each of the ten keys' reference entries gives the duration forms.
+- [x] `tests/test_config_schema.py`: each of the ten keys' reference entries gives the duration forms.
+- *As built:* `config_seconds` takes `base=None` (the module's `config`, which is built after the
+  function). An `_env` form naming an unset variable is refused as `resolve_auth` refuses it
+  (`<key>_env names <VAR>, which is not set (from: …)`), and a form that fails to resolve is named by
+  its error type only. `ServerApp.evict_after` and `ClientApp.heartrate` hold the seconds (class
+  defaults `DEFAULT_EVICT`/`DEFAULT_HEARTRATE`); the relay's are `RelayApp.durations`, a cached
+  property over `RELAY_DURATIONS` read in `check_args` as `site_period` is. Only the duration
+  constants of `relay/__init__.py:98-116` read `default.` (`bundlesize`, `size` stay typed keys).
+  `client_options` writes `-w` and `-T` with `plain_seconds` for every launch, which changes no
+  word `str()` wrote without an exponent. `test_duration_refused_at_start[client.heartrate]` and the
+  drive's `durations` mode ran `hs client` with no argument, which prints the usage and exits 1
+  before any check (`ALLOW_NOARGS` is not set); both now give `-N 1`, and the case is still red on
+  `90ab2fc2`. `tests/test_env_duration.py` gains unit tests of `config_seconds` (numbers as given,
+  each form, rounding, refusals naming the variable, the `_env` form), importing `config_seconds` inside
+  each test so the file still collects on `90ab2fc2` (its seven red-list nodes: 7 of 7 RED there).
 - **Verify:** frontmatter (duration tests, #106's tests, relay and launch suites; drives `durations`
   and `serve`).
 - **Touches:** `src/hypershell/core/config.py`, `src/hypershell/server.py`, `src/hypershell/client.py`,
