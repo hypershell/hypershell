@@ -314,3 +314,25 @@ exception onto the §1 pattern. Gate #2 (on this design):
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-15)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned, with these rulings.
+
+- **D1:** the filtered form's fault injection runs on PostgreSQL through the trigger, red on every
+  PostgreSQL job at P1, as #109's ruling 1 set out. SQLite covers R1–R4 through the legacy and
+  `--limit` paths.
+- **D2:** fix the shared criteria builder, which also fixes `hs list -t a b` (two name-only tags)
+  checking only the last tag on SQLite. A test covers `hs list` too, and the user-facing note lists
+  it as a fix. This reaches `hs list` only because the builder is shared; no other `hs list`
+  behaviour changes.
+- **D3:** accepted. `--limit` on SQLite stores booleans as 0/1 and nests dotted keys, as the
+  filtered form already does.
+- **D4:** accepted. An update with nothing to change logs "Updated 0 tasks" and no warning.
+- **D5:** accepted. The contended error is logged at CRITICAL through `handle_exception`, like
+  NotFound, and tests check ERROR or above.
+- **Risks:** both are accepted and get a sentence in the `hs update` docs. A long `--limit` holds
+  SQLite's write lock, and another writer fails after its busy timeout. The PostgreSQL set-based
+  update holds the written ids in memory.
+- **Wording:** P6 corrects `AGENTS.md`'s dating of the TimescaleDB miss to the versions affected
+  upstream (2.28.1 through 2.31.0, fixed in 2.32.0), as it rewrites that passage anyway.
