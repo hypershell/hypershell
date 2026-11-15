@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:task-input-fidelity
 kind: fix
 appetite: small
 lane: public

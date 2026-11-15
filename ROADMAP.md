@@ -57,7 +57,7 @@ the client as a datetime, template expansion fails on it, and the task is record
 error without running. Decoding by declared column type, not by guessing, removes the class.
 
 *Horizon: near-term · Depends on: — · Refs: found by `writeback-scoped-conditional`'s research*
-**Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md)
+**Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md) · *status: adopted:task-input-fidelity*
 
 ## Unguarded task start kills the executor and poisons the task
 
@@ -197,7 +197,7 @@ on `develop`; 2.8.x lacks the submitter reference it needs. Pre-existing, and fo
 the group-order fix.
 
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (PLAN §5 risk 1)*
-**Seed:** [`issues/stream-run-stops-before-input-ends.md`](issues/stream-run-stops-before-input-ends.md) · *status: unshaped*
+**Seed:** [`issues/stream-run-stops-before-input-ends.md`](issues/stream-run-stops-before-input-ends.md) · *status: adopted:task-input-fidelity*
 
 ## An empty task file never finishes
 
