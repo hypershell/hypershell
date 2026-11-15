@@ -68,8 +68,18 @@
 - **Skill cause:** The rubric and Step 4 do not say whether a coverage-only finding (correct code, missing pin) is CONFIRMED in the blocking sense, nor what "touches" means for one.
 - **Recommended fix:** State it explicitly in `review-rubric.md` (Severity, Verdict & loop, human gate) and Step 4. Any wording that exempts coverage-only findings from blocking or from the gate weakens the human gate, a non-negotiable gate, and needs the maintainer's ruling; the safe clarification is to keep both and drop "non-blocking" from the LOW row.
 - **Seen again:** review cycle 2. N1 is a CONFIRMED LOW, a wording-only overstatement in an unsupported setup. Under the severity table it is minor; under the verdict rule it blocks, and it was applied as written, so the cycle runs one more loop for a wording fix. The rubric also does not say whether a §12 docs inaccuracy that is not a *missing* update (the prose and marker exist; a leftover clause overstates a risk) grades HIGH as §12 or by its impact.
+- **Seen again:** review cycle 3. G1 is again a CONFIRMED LOW, wording-only finding, at the last cycle the bound allows, so the verdict rule as written ends the loop in an escalation over one clause about an unsupported setup.
+- **Confidence:** med · **Effort:** small
+
+## F9 — No route for pre-existing inaccurate prose in a passage the diff rewrites
+`origin=hs-review:step3 severity=low category=missing-guidance status=open target=.agents/factory/review-rubric.md`
+- **What happened:** Cycle 2 marked a clause in a passage it was grading as "may be stale … not probed". The clause was "new tasks double-schedule" with two servers, false since #103. It was left out of the findings because the diff had not changed it. The N1 remediation then rewrote that sentence and kept the clause by ruling. Cycle 3 probed it, found it false, and had to block on it at the last cycle.
+- **Skill cause:** The rubric defines CONFIRMED, PLAUSIBLE and dropped for findings, but it has no class for a doubt about text next to the diff that predates it. The deferral exception covers only behaviour a GOAL criterion requires keeping. So pre-existing wrong prose that a remediation re-authors has one route, which is to block, and no rule says an unprobed doubt next to a finding must be probed before the remediation is shaped.
+- **Recommended fix:** In `review-rubric.md` (Refutation protocol) and Step 3, require that a doubt about prose in a passage a finding's remediation will touch is either probed in the same cycle or listed as PLAUSIBLE for triage, never left as "not a finding, not probed". The change only tightens the evidence spine; it weakens no gate.
 - **Confidence:** med · **Effort:** small
 
 **What worked well:** The executed-evidence spine held: the reviewer ran mutations from scratch copies on `PYTHONPATH` with the tree untouched, which is what exposed F2, and the red_check/ci_check scripts re-graded R5's red in minutes.
 
 **What worked well (review cycle 2):** F7's recommended fix, applied ad hoc in the brief (every search kept off PLAN/TECH/META/REVIEW/research, with the evidence files named as the exception), held: the reviewer reports opening none of them. Handing it the shared `red_check.sh` and the cycle's `mutant_check.sh` let it re-grade F2 on three backends in minutes.
+
+**What worked well (review cycle 3):** Asking the reviewer for an executed probe of each sentence in the remediation, at HEAD and at base, turned a carried-over doubt into a 48-run answer. Checksumming the reviewer's source exports against `git` before re-running its probe made the orchestrator's sanity pass cheap.

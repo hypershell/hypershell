@@ -298,3 +298,206 @@ to the maintainer. One build↔review cycle remains within the bound (≤3). The
 ### Optional completeness sub-pass (cycle 2)
 
 - Not run (not requested).
+
+## Review cycle 3 — changes-requested (2026-11-15)
+
+- **Reviewed commit:** 4def5c42909028cc3261fb5232e1ef3283ae958b  ·  **Base:** develop (`origin/develop` 48cc505; merge base 6da633d)  ·  **Date:** 2026-11-15
+- **Verdict:** changes-requested
+- **Cycle:** 3 of ≤3 — mirrors `review.cycle` in `TECH.md`. The bound is reached; escalated to the maintainer (Loop status).
+- **Mode:** a fresh blind pass over the full spec-excluded diff, plus verification of F1, F2 and N1.
+
+**Pre-flight.** `TECH.md` read `status: blocked` (cycle 2's verdict) and `current_phase: P6` (CI on the
+remediation head, the foreman's external wait). Reviewed at the foreman's direction. Contract drift:
+only the shaping commit 92af9c1 touches `GOAL.md`. Since d5a9836 the only non-spec change is 4def5c4,
+which rewords `AGENTS.md`, `invariants.md` §3 and the two `docs/_include/database*.rst` files. There is
+no `src/` or `tests/` change (`git diff --quiet d5a9836 HEAD -- src tests`). Graded under the rulings
+of cycles 1 and 2. The review-cycle-2 ruling fixed N1 by wording only and kept the note that two
+servers still double-schedule new tasks. The foreman's brief for this cycle asked that this note be
+graded for accuracy against the code.
+
+**Merge status.** `git merge-tree --write-tree origin/develop HEAD` is clean against 48cc505 (tree
+11d828b). Against `origin/develop`, the merged tree's changes to `AGENTS.md`, `invariants.md`,
+`ROADMAP.md`, `docs/`, `src/`, `tests/` and `issues/` equal the branch diff's changes.
+
+**Reviewer.** One fresh `general-purpose` reviewer received:
+- `GOAL.md`, inline;
+- the spec-excluded diff command, and the cycle-3 delta command;
+- `review-rubric.md`, and the base `invariants.md` and `AGENTS.md` (`origin/develop`) by exact command;
+- the binding rulings, with the review-cycle-2 ruling given only as "N1 fixed by wording only";
+- the F1, F2 and N1 failure scenarios;
+- the allowed spec inputs (`drive/`, `red.txt`, `ci-red.txt`, `mutant-red.txt`, `evidence/`) and
+  `spec/relay-hardening/drive/red_check.sh`.
+
+For N1 it was asked to settle three things by executed probe: whether the lists are clean, whether "two
+servers no longer double a retry" is true, and whether "they still double-schedule new tasks" is true.
+It reports that it opened none of `PLAN.md`, `TECH.md`, `META.md`, `REVIEW.md` or `research/`. One
+`ls` of the spec folder showed their names. Every repo-wide search excluded `spec/`. It left the tree
+clean (`git status --porcelain` empty, HEAD 4def5c4). Its background processes, the drives' `hs`
+processes and its PostgreSQL databases are all gone; an out-of-sandbox `ps` and a `pg_database`
+listing by the orchestrator confirm it.
+
+### Verification run (cycle 3)
+
+- Full SQLite suite, serial: 2652 passed, 114 skipped, 0 failed.
+- `test_contended_write.py` on PostgreSQL 18 and on TimescaleDB 2.32: 22 passed, 1 skipped (the hs283
+  template) on each.
+- The five PostgreSQL files (`test_contended_write`, `test_server_initdb`, `test_timescale`,
+  `test_writeback_postgres`, `test_zone_postgres`):
+  - TimescaleDB: 201 passed, 1 failed, 2 skipped.
+  - PostgreSQL 18: 181 passed, 2 failed, 21 skipped.
+  - All three failures are environmental. One is the hs283 template; the other two are the
+    `test_timescale` entry checks, which fail with `HS_TEST_TIMESCALE` empty against a server that
+    offers TimescaleDB. These are the same failures as in cycle 2.
+- Red at base: the `red.txt` SQLite tests on a 6da633d export gave 12 of 12 red.
+- F2 mutant (`match = (by_id, )` at `model.py:997`, in an export):
+  - SQLite: the `[cancelled]` and `[retried]` pair are red (`assert ['mark'] == ['mark', 'SELECT']`).
+  - `test_contended_retry_mark_skips_cancelled_row` is red on PostgreSQL 18 and TimescaleDB 2.32
+    (`assert [(<retry id>, <failed id>)] == []`).
+  - All three are green at HEAD.
+- `sphinx-build -W --keep-going -q -E -b html docs` with `uv run --frozen --python 3.12 --group docs` exits 0, with no warnings.
+- Drives in `temp_site.sh`:
+  - Six concurrent first `hs submit`s:
+
+    | Backend | Rounds | Failed at HEAD | Failed at 6da633d |
+    |---|---|---|---|
+    | Fresh SQLite | 20 | 0 | 1 (`IntegrityError` on `source.id`) |
+    | Upgraded 2.8.3 SQLite | 20 | 0 | 4 (`IntegrityError` on `source.id`) |
+    | Fresh PostgreSQL | 8 | 0 | not run |
+    | Fresh TimescaleDB | 8 | 0 | not run |
+
+  - One `hs cluster` from stdin plus three submits, 5 rounds: 0 failed.
+  - `hsx -r 1` with 40 failing tasks, plain and eager, on SQLite and TimescaleDB: 40 retry rows each,
+    exit 0.
+- Two-scheduler probe:
+  - Setup: two threads with separate sessions call `Task.next(limit=3, attempts=2)`. Each is held after
+    its selection until both have selected the same rows.
+  - Four orderings: serial, each thread first; contended, with one thread's write held uncommitted at
+    COMMIT while the other's write blocks on it, each thread first.
+  - Run on SQLite, PostgreSQL 18 and TimescaleDB 2.32 (`task` a hypertable), at HEAD and at 6da633d.
+    48 runs per kind.
+  - Retry kind: HEAD gives 1 retry row per failed row, and the second thread returns no retries. Base
+    gives 2 retry rows per failed row, and both threads return all three retries.
+  - New kind: at HEAD and at base, no task is dispatched by both threads, and every task is dispatched
+    by exactly one.
+  - The orchestrator re-ran it with the exports' sources checksummed against `git`:
+    - SQLite, contended, both orders, both kinds, at HEAD and base;
+    - PostgreSQL 18, contended, both kinds, at HEAD and base. The second thread's write was issued
+      while the first was held at COMMIT.
+    - Same results: retry 1/1/1 at HEAD and 2/2/2 at base; new 0 of 3 dispatched by both, at both
+      revisions.
+- Reset-`retried` probe on an upgraded 2.8.3 SQLite database, which keeps `UNIQUE(previous_id)`:
+  - The second round raises `IntegrityError: UNIQUE constraint failed: task.previous_id`, the mark is
+    rolled back, and 1 retry row remains. Same at base.
+  - On a fresh 2.9 database: no error, and 2 retry rows.
+- Startup-revert probe: server B, started while server A has tasks in flight, reverts and re-dispatches
+  them ("dispatched by A: 3 then again after B started: 3"). The cause is `Task.revert_interrupted` at
+  Scheduler start (`server.py:231-233`, `model.py:1221-1226`).
+
+### Prior findings
+
+- **F1 — fixed, holds.** No user-docs page lists the kill case:
+  - `database.rst` keeps its `versionchanged:: 2.9.0` (:124).
+  - `database_alt.rst` sits under the marker-free `manual.rst` Database section.
+  - The `-W` build passes.
+  - `test_stop_between_retry_insert_and_mark_leaves_no_retry` is green at HEAD and red at base.
+  - Only the generated man pages keep the old text; they are rebuilt at release.
+- **F2 — fixed, holds.** The pins are red on the mutant on all three backends and green at HEAD (above).
+  The F2 real-race test has not yet run on CI's TimescaleDB 2.31. The recorded green run is at
+  e0e61c8, before d5a9836, and that is P6's pending wait. By reading, on 2.29–2.31 the missed mark's
+  lookup finds the row cancelled and skips it.
+- **N1 — fixed.**
+  - (a) Two servers on one database is gone from every doubled-retry list (`AGENTS.md:232-237`,
+    `invariants.md` §3 :77-80, `database.rst:128-132`, `database_alt.rst:15-19`). The counts that
+    follow are singular and right: `AGENTS.md:252` "in the case above", `invariants.md:82` "in that
+    case", and "the rare case" in both docs files.
+  - (b) "Two servers on one database … no longer double a retry, because each retry row commits only
+    with its conditional `retried` mark" is true: the retry-kind probe gives 1 retry row at HEAD and 2
+    at base, on all three backends.
+  - The remaining case's claim (a reset `retried` on a pre-2.9 SQLite database raises
+    `IntegrityError`) is true (the reset probe).
+  - The kept clause in the same sentence is not true; that is G1.
+
+### Requirement → evidence matrix (cycle 3)
+
+| R-ID | Implemented by (file/commit) | Verified how | Status |
+|------|------------------------------|--------------|--------|
+| R1 | `data/model.py:861-899` marks via `__write_rows(retryable=True, each=next_ids, commit=False, prefix='m_')`; condition :994-997; re-run loop :1063-1097. 13a552d | `test_contended_retry_mark_lands_on_rerun` (SQLite); `test_contended_retry_mark_lands` green on PG 18 and TS 2.32, CI red on 2.31 at 23e47ef and green at e0e61c8; hsx drives | ✅ |
+| R2 | Same function: marks, then retry rows for the marks that landed, one commit (:887-896); skip :1079-1081; WARNING at the bound :1096 | Exhausted, cancelled/deleted/retried-meanwhile and stop-between tests, red at base; F2 pins red on the mutant; two-scheduler retry probe | ✅ |
+| R3 | `data/model.py:1229-1251`; `cancel_all` returns the ids cancelled, `cancel` a bool. 005cb33 | Re-run, exhausted, gone-row and uncontended-cost tests; `test_contended_cancel_lands` on PG 18 and TS 2.32 | ✅ |
+| R4 | `data/model.py:1660-1686`, `ON CONFLICT (id) DO NOTHING`, commit, re-read. 005cb33 | `test_source.py` two-session tests (red at base); PG `[fresh]` on both providers; submit drives 0 failed at HEAD vs 1/20 and 4/20 at base; `hs cluster` drive | ✅ |
+| R5 | `tests/` at 23e47ef and d5a9836 | 12 of 12 SQLite red at base; CI red set recorded; cost pins pass; all green at HEAD on three backends | ✅ (F2 pin on 2.31 awaits P6) |
+| R6 | `AGENTS.md:232-254, :498-513`; `invariants.md:44-55, :77-82`. 4d9d61a, 4def5c4 | Each claim read against the code and the probes above | ✅ as R6 words it; G1 for the clause kept in the same sentence |
+
+Unmapped changes (possible scope creep): none. The `__awaiting_retry` refactor serves R2 (same SQL). The
+new `__write_rows` parameters serve R1/R2. The docs edits are the F1 and N1 remediations, and the
+ROADMAP and seed edits record the GOAL-gate split. The `issues/hs-update-contended-writes.md` citations
+still match `task.py` at 6da633d.
+
+### Findings (cycle 3)
+
+#### [LOW/CONFIRMED] G1 — The kept note that two servers still double-schedule new tasks is false
+- **Where:**
+  - `AGENTS.md:236-237`: "…they still double-schedule new tasks, since no query takes row locks."
+  - `.agents/factory/invariants.md:79-80`: "(unsupported; no row locks, so new tasks still double-schedule)".
+- **Failure scenario:** Since #103 (in the base), the dispatch stamp in `Task.next`
+  (`model.py:832-836`) is a per-row UPDATE that matches only while `schedule_time IS NULL`, on the
+  re-run pattern. Two Schedulers that select the same new task stamp it once. The second one's write
+  matches nothing: on SQLite after the first commit, on PostgreSQL by re-check, and on TimescaleDB 2.29+
+  by miss and lookup. It is then skipped as "already scheduled", so neither the selection race nor the
+  absence of row locks double-schedules a new task. The invariant checklist and AGENTS.md tell agents
+  that this guard is missing.
+- **What does run a task twice with two servers:** the startup revert. A server starting against a
+  database another server is using reverts that server's in-flight tasks (`Task.revert_interrupted`,
+  `server.py:231-233`) and dispatches them again. The clause names neither that path nor its cause.
+- **Evidence:** the two-scheduler probe, new kind, 48 runs (four orderings on SQLite, PostgreSQL 18 and
+  the TimescaleDB 2.32 hypertable, at HEAD and 6da633d), gave "dispatched by both: 0 of 3" every time.
+  The orchestrator reproduced it on SQLite and PostgreSQL 18 with the contended ordering, at both
+  revisions. The startup-revert probe shows the real double run.
+- **Predates the diff?** Its content does. The base wording is "no query takes row locks, so new tasks
+  double-schedule too", already false at 6da633d. Commit 4def5c4 rewrote the sentence and re-asserts the
+  clause with "still"; cycle 2 had left it unprobed ("may be stale … not probed").
+- **Touches invariant / requirement:** prose in the passages R6 edits, graded as N1 was: claims true at
+  HEAD. LOW: it is wording about a configuration the docs call unsupported, it is not in the user docs,
+  and no code is wrong.
+  - It is not the deferral exception. No GOAL criterion requires keeping the clause; the GOAL leaves two
+    servers out of scope. So under the verdict rule as applied in cycles 1 and 2 (META F8) it blocks.
+- **Remediation (wording only):** do one of the following in both files.
+  - Drop the clause.
+  - Replace it with the true statement: a server started against a database another server is using
+    reverts that server's in-flight tasks at startup, so those run twice.
+
+  The review-cycle-2 ruling kept the clause while it was unprobed, so the maintainer should rule on it.
+
+Dropped after checking:
+- `next_id` is written before its retry row exists; there is no foreign key on it, in the model or the
+  2.8.3 schema.
+- The man pages' old sentences: they are rebuilt at release.
+- The PostgreSQL-file failures: all are environmental (above).
+
+### Human-gate triggers (cycle 3)
+
+- **Not triggered by G1.** It is wording only. It touches no high-blast-radius file in code. It breaks
+  no listed DB-lifecycle invariant: it concerns new-task dispatch in an unsupported setup, not one
+  retry row per failure, which N1's probe shows holds. This is the reading applied to F1 and N1.
+- Escalation to the maintainer is required anyway by the bounded loop (Loop status).
+
+### Loop status
+
+This is the third consecutive changes-requested verdict and the last cycle the rubric allows
+(`review.cycle` 3), so it is escalated to the maintainer: no further build↔review loop without the
+maintainer's ruling. Everything else is clean:
+- F1, F2 and N1 are fixed.
+- R1–R6 are met.
+- The merge with develop is clean.
+- The only open external item is P6, CI on the remediation head.
+
+The maintainer has three routes:
+- rule the G1 wording (drop the clause, or name the startup revert), applied with no code or test
+  change and accepted on the maintainer's own check of that diff;
+- order a fourth, scoped review of that diff;
+- accept the clause as a conservative overstatement (two servers on one database can still run a task
+  twice, by the startup revert) and re-set the verdict to approved.
+
+### Optional completeness sub-pass (cycle 3)
+
+- Not run (not requested).

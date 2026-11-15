@@ -134,12 +134,13 @@ phases:
   verify: uv run python spec/contended-writes/drive/ci_check.py green spec/contended-writes/evidence/ci-green
     --code-rev "$(git log -1 --format=%H -- . ':!spec')"
 review:
-  last_reviewed_commit: d5a9836b5bd40c94c21ed2de031b5f82c9640be7
+  last_reviewed_commit: 4def5c42909028cc3261fb5232e1ef3283ae958b
   verdict: changes-requested
-  blocked_reason: 'N1 (LOW, wording): AGENTS.md, invariants §3 and docs/_include/database*.rst
-    still list two servers on one database as a doubled-retry case the conditional
-    mark now guards; F1, F2 fixed; second changes-requested, escalated to the maintainer'
-  cycle: 2
+  blocked_reason: 'G1 (LOW, wording): AGENTS.md:236-237 and invariants §3 keep ''two
+    servers still double-schedule new tasks (no row locks)'', false since #103''s
+    conditional dispatch stamp; F1, F2, N1 fixed; third changes-requested, bound reached,
+    escalated to the maintainer'
+  cycle: 3
 ---
 # TECH.md — Contended writes: the retried mark and Task.cancel_all land when contended; concurrent first submits share the reserved source row
 
