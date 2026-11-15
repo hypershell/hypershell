@@ -310,3 +310,9 @@ period shorter than one check, in `cluster/remote.py`). The maintainer ruled in 
   a period below one second, in any form, is one second.
 - **F3.** `tests/test_period_floor.py` covers NaN, `-inf` and `-0.0` on the key and the environment
   variable, so a floor written `seconds <= 0` would fail.
+
+## Review-cycle-2 ruling (2026-11-15)
+
+Review cycle 2 approved at `77a3af79` with no CONFIRMED and no PLAUSIBLE finding. The maintainer's
+approval to merge on approval was given in session with the review-cycle-1 rulings (2026-11-15):
+"Yes, proceed and merge".

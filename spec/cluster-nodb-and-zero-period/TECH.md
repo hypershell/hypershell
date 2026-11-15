@@ -4,7 +4,7 @@ title: hs cluster --no-db leaves the database alone, and an autoscaling period o
   zero or less is refused
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/cluster-nodb-and-zero-period
 base: develop
 current_phase: done
