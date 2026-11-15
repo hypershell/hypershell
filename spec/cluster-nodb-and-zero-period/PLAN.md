@@ -289,3 +289,24 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
   whichever type arrives; whichever cycle lands second rebases onto the other.
 - **Flaky test:** a `database is locked` failure in `test_upgrade_cli.py` under load is not this
   cycle's; re-run it alone, as TECH says.
+
+## Review-cycle-1 rulings (2026-11-15)
+
+The review's human gate was triggered by F2 (the autoscalers re-check without sleeping for a positive
+period shorter than one check, in `cluster/remote.py`). The maintainer ruled in session (2026-11-15):
+"Round numbers up to 1 s", and approved proceeding to review cycle 2 and merging on approval.
+
+- **F2.** `parse_period` rounds a positive number below one second up to one second, as `-P` and a
+  key string already do. This applies to `autoscale.period` from a file or `HYPERSHELL_AUTOSCALE_PERIOD`,
+  on `hs cluster`, `hs server` and `hs relay`. It amends GOAL R6 for this one key: #106 R5 ("a number
+  in a configuration file keeps today's meaning") no longer holds for a positive number below one
+  second, which now reads as one second. Nothing that starts today is refused. `cluster/remote.py`,
+  `cluster/topology.py` and `relay/site.py` stay unchanged (D3 and the sleep-granularity Non-goal
+  stand).
+  - **Tests:** `period = 0.001`, `period = 0.5` and `HYPERSHELL_AUTOSCALE_PERIOD=0.001` start and
+    reach the autoscaler as one second, on all three commands; a number of one or more is unchanged.
+    Red on `53f93922`.
+- **F1.** `config_param_ref.rst`'s period entry states the rule as built: zero or less is refused;
+  a period below one second, in any form, is one second.
+- **F3.** `tests/test_period_floor.py` covers NaN, `-inf` and `-0.0` on the key and the environment
+  variable, so a floor written `seconds <= 0` would fail.
