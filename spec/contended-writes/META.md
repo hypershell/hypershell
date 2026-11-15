@@ -51,5 +51,6 @@
 `origin=hs-build:P3 severity=low category=tooling status=open target=.agents/factory/bin/next_phase.py`
 - **What happened:** With P2 (CI red on the draft PR) pending as an external wait and P3 depending only on P1, `next_phase.py` reported P2 as next; P3 was built by explicit phase selection, and Step 5's `--current {next_id_or_done}` left `current_phase` on P2, a phase no build can run.
 - **Skill cause:** As `spec/hypertable-update-retry/META.md` and earlier cycles ("no way to express an external wait in a TECH phase"): the FSM has no external-wait status, so the resume pointer cannot skip a wait to the next buildable phase.
+- **Seen again:** P4, selected explicitly past the same pointer.
 - **Recommended fix:** As recorded there: an `external` phase flag (or `waiting` status) that `next_phase.py` skips when choosing the next buildable phase, reporting the wait separately.
 - **Confidence:** high · **Effort:** small

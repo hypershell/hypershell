@@ -1226,27 +1226,29 @@ class Task(Entity):
                 break
 
     @classmethod
-    def cancel_all(cls: Type[Task], ids: List[str]) -> None:
-        """Cancel all tasks identified by `ids`."""
+    def cancel_all(cls: Type[Task], ids: List[str]) -> List[str]:
+        """Cancel all tasks identified by `ids`, in one transaction; return the ids cancelled.
+
+        Each row is one UPDATE by `id`, whatever state it is in. A row that is gone raises
+        `StaleDataError` and nothing of the call is committed. A row that matched nothing but
+        still exists was missed because the write waited on another transaction's row lock, and
+        the cancel is re-run, at most `CONTENDED_RERUNS` times; a row still not cancelled after
+        that is logged as a warning, left as it is, and left out of the ids returned, so a caller
+        can compare them with `ids`.
+        """
         # NOTE: completion_time is set so the task is terminal - otherwise it reads as
         # "interrupted" (scheduled but incomplete) and gets reverted/re-run on restart.
         now = datetime.now().astimezone()
-        cls.update_all([
-            {
-                'id': id,
-                'schedule_time': now,
-                'completion_time': now,
-                'exit_status': CANCEL_STATUS,
-             }
-            for id in ids
-        ])
-        for id in ids:
+        cancelled = cls.__write_rows(ids, {'schedule_time': now, 'completion_time': now, 'exit_status': CANCEL_STATUS},
+                                     'cancel', 'task not cancelled', prefix='c_')
+        for id in cancelled:
             log.trace(f'Cancelled task ({id})')
+        return cancelled
 
     @classmethod
-    def cancel(cls: Type[Task], id: str) -> None:
-        """Cancel single task by `id`."""
-        cls.cancel_all([id, ])
+    def cancel(cls: Type[Task], id: str) -> bool:
+        """Cancel single task by `id`; return whether it was cancelled (see `cancel_all`)."""
+        return cls.cancel_all([id, ]) == [id, ]
 
     @classmethod
     def apply_results(cls: Type[Task], results: List[Task]) -> List[ResultOutcome]:
@@ -1660,14 +1662,28 @@ class Source(Entity):
 
         Idempotent: the fixed-id row (`<direct>`/`<stdin>`) is created once on first use
         and reused thereafter, so `Task.source` can point at a real native-UUID row.
+
+        Safe under concurrency on SQLite and PostgreSQL: several processes may all miss the row
+        and all insert it, so the insert does nothing when the id already exists, and the row is
+        read again after it, whichever process wrote it. The insert's row count is never read
+        (PostgreSQL does not report one for a skipped row).
         """
         try:
             return cls.from_id(const_id, caching=False)
         except cls.NotFound:
-            source = cls(id=const_id, path=RESERVED_SOURCE_PATHS[const_id],
-                         created=datetime.now().astimezone())
-            cls.add(source)
-            return source
+            values = {'id': const_id, 'path': RESERVED_SOURCE_PATHS[const_id], 'created': datetime.now().astimezone()}
+            insert = UPSERT_BY_DIALECT.get(Session.get_bind().dialect.name)
+            if insert is None:
+                source = cls(**values)
+                cls.add(source)
+                return source
+            try:
+                Session.execute(insert(cls).values(**values).on_conflict_do_nothing(index_elements=['id']))
+                Session.commit()
+            except Exception:
+                Session.rollback()
+                raise
+            return cls.from_id(const_id, caching=False)
 
     @classmethod
     def lookup(cls: Type[Source], path: str) -> List[Source]:

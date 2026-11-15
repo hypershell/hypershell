@@ -68,7 +68,7 @@ phases:
 - id: P4
   name: Task.cancel_all/cancel on the re-run pattern, and a conflict-safe reserved
     source row
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -283,12 +283,12 @@ commit together; the mark tests go green.
 **Goal:** a contended cancel lands or is reported; concurrent first use of a reserved source row
 never fails.
 
-- [ ] `Task.cancel_all(ids) -> List[str]` and `Task.cancel(id) -> bool` as PLAN §2.3 (`__write_rows`,
+- [x] `Task.cancel_all(ids) -> List[str]` and `Task.cancel(id) -> bool` as PLAN §2.3 (`__write_rows`,
       `'cancel'`, `'task not cancelled'`, `prefix='c_'`); docstrings name the return and the gone-row
       `StaleDataError`.
-- [ ] `Source.reserved` as PLAN §2.4: lookup; on a miss `INSERT … ON CONFLICT (id) DO NOTHING` for
+- [x] `Source.reserved` as PLAN §2.4: lookup; on a miss `INSERT … ON CONFLICT (id) DO NOTHING` for
       the bind's dialect, commit (rollback and re-raise on error), re-read; docstring says why.
-- [ ] Every test in `red.txt` and `ci-red.txt` now passes locally (the upgraded PostgreSQL case
+- [x] Every test in `red.txt` and `ci-red.txt` now passes locally (the upgraded PostgreSQL case
       stays skipped without a template).
 - **Verify:** see frontmatter (the recovery, source, cancel and submit modules; both server-database
       modules on PG 18 and TS 2.32; `red_check.sh`; `concurrent_submit.sh` 20 rounds each on fresh
