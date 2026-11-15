@@ -6,21 +6,29 @@
 
 # Type annotations
 from __future__ import annotations
+from typing import List, Optional, Union
 from pathlib import Path
 
 # Standard libs
 import os
 import re
+import shutil
+import threading
 
 # External libs
+import pytest
 from pytest import mark
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.engine import Engine
 
 # Internal libs
 from hypershell.core.pretty_print import format_source
+from hypershell.data import core as data_core
+from hypershell.data.core import Session
 from hypershell.data.model import (
     Task, Source, Entity, DIRECT_SOURCE_ID, STDIN_SOURCE_ID,
 )
+from hypershell.data.upgrade import upgrade_schema
 from tests import main, main_lines, assert_output, create_taskfile_echo, UUID_PATTERN
 
 
@@ -223,3 +231,92 @@ def test_normal_view_resolves_reserved_sentinels(temp_site: Path) -> None:
     rc, stdout, _ = main(['hs', 'info', ids[0]])
     assert rc == 0
     assert_output(rf'source: <direct> \({re.escape(DIRECT_SOURCE_ID)}\)$', stdout, 1)
+
+
+# --- Concurrent first use of a reserved source row --------------------------------------------------
+
+# A 2.8.3 database, which has no `source` table until it is upgraded.
+FIXTURE_283 = Path(__file__).parent / 'fixtures' / 'hypershell-2.8.3.db'
+
+# Seconds for both sessions to reach their INSERT, and again for both to finish.
+FIRST_USE_DEADLINE = 30.0
+
+# The INSERT of a source row, with or without a schema prefix.
+INSERT_SOURCE = re.compile(r'^\s*INSERT\s+INTO\s+(\S+\.)?"?source"?\s', re.I)
+
+
+def first_use_race(engine: Engine, const_id: str) -> List[Union[str, BaseException, None]]:
+    """Two sessions get-or-create the reserved source row `const_id`, both missing it before either inserts it.
+
+    Each runs `Source.reserved` on its own thread (the scoped session is per thread). A hook on the
+    engine holds each at its first INSERT of a source row until both are there, so both lookups have
+    missed. Returns what each returned (the row's id) or raised; None if it never finished.
+    """
+    arrived = threading.Barrier(2, timeout=FIRST_USE_DEADLINE)
+    held = set()
+    results: List[Union[str, BaseException, None]] = [None, None]
+
+    def hold(conn, cursor, statement, params, context, executemany) -> None:
+        if INSERT_SOURCE.match(statement) and threading.get_ident() not in held:
+            held.add(threading.get_ident())
+            arrived.wait()
+
+    def work(index: int) -> None:
+        try:
+            results[index] = str(Source.reserved(const_id).id)
+        except BaseException as error:  # noqa: B036 (the test inspects whatever the call raised)
+            results[index] = error
+        finally:
+            Session.remove()
+
+    event.listen(engine, 'before_cursor_execute', hold)
+    try:
+        workers = [threading.Thread(target=work, args=(index, ), name=f'first-use-{index}', daemon=True)
+                   for index in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(2 * FIRST_USE_DEADLINE)
+        if any(worker.is_alive() for worker in workers):
+            pytest.fail(f'A session did not finish within {2 * FIRST_USE_DEADLINE} seconds')
+    finally:
+        event.remove(engine, 'before_cursor_execute', hold)
+    return results
+
+
+def source_ids(engine: Engine) -> List[str]:
+    """Ids of the committed rows of `source`."""
+    with engine.connect() as conn:
+        return [str(value) for value in conn.execute(text('SELECT id FROM source')).scalars()]
+
+
+def sqlite_database(path: Path, database: str) -> Engine:
+    """A SQLite database at `path`: fresh from the metadata, or the 2.8.3 fixture upgraded in place."""
+    if database == 'upgraded':
+        shutil.copy(FIXTURE_283, path)
+    engine = create_engine(f'sqlite:///{path}', connect_args={'check_same_thread': False})
+    if database == 'upgraded':
+        upgrade_schema(engine)
+    else:
+        Entity.metadata.create_all(engine)
+    return engine
+
+
+@mark.unit
+@mark.parametrize('const_id', [DIRECT_SOURCE_ID, STDIN_SOURCE_ID], ids=['direct', 'stdin'])
+@mark.parametrize('database', ['fresh', 'upgraded'])
+def test_reserved_source_concurrent_first_use(tmp_path: Path, database: str, const_id: str) -> None:
+    """Two sessions that both miss the reserved source row before either inserts it both use the one row."""
+    engine = sqlite_database(tmp_path / 'tasks.db', database)
+    try:
+        if source_ids(engine):
+            pytest.fail(f'The {database} database already has a source row')
+        Session.remove()
+        Session.configure(bind=engine)
+        results = first_use_race(engine, const_id)
+        assert results == [const_id, const_id], results
+        assert source_ids(engine) == [const_id]
+    finally:
+        Session.remove()
+        Session.configure(bind=data_core.engine)
+        engine.dispose()

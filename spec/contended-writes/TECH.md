@@ -1,124 +1,139 @@
 ---
 slug: contended-writes
-title: "Contended writes: the retried mark and Task.cancel_all land when contended on a hypertable; concurrent first submits share the reserved source row"
+title: 'Contended writes: the retried mark and Task.cancel_all land when contended
+  on a hypertable; concurrent first submits share the reserved source row'
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/contended-writes
 base: develop
-current_phase: P1
-last_updated: "2026-11-14"
+current_phase: P2
+last_updated: '2026-11-14'
 phases:
-  - id: P1
-    name: "Tests first: R5's fault-injection, real-race and two-session tests and the red list (tests only)"
-    status: pending
-    satisfies: [R5]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres;
-      git diff --quiet 92af9c1 -- src .github &&
-      test -z "$(git diff --name-only 92af9c1 -- . ':!spec' ':!tests')" &&
-      for t in test_contended_retry_mark_lands test_contended_cancel_lands test_reserved_source_concurrent_first_use;
-      do grep -q "^def $t(" tests/test_contended_write.py || exit 1; done &&
-      test "$(grep -cvE '^#|^$' spec/contended-writes/red.txt)" -ge 13 &&
-      RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=
-      sh spec/relay-hardening/drive/red_check.sh &&
-      sh spec/contended-writes/drive/rest_green.sh &&
-      for ts in community ''; do HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts
-      sh spec/contended-writes/drive/rest_green.sh -rs tests/test_contended_write.py tests/test_writeback_postgres.py || exit 1; done
-  - id: P2
-    name: "CI red at the tests-first commit (external wait on the draft PR)"
-    status: pending
-    satisfies: [R5]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      uv run python spec/contended-writes/drive/ci_check.py red spec/contended-writes/evidence/ci-red
-      --code-rev "$(git log -1 --format=%H --grep='^\[fix\] Build contended-writes P1:')"
-  - id: P3
-    name: "The retried mark commits with its retry rows, on the re-run pattern"
-    status: pending
-    satisfies: [R1, R2, R5]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres;
-      uv run pytest -q -p no:cacheprovider tests/test_contended_recovery.py -k 'not contended_cancel' &&
-      uv run pytest -q -p no:cacheprovider tests/test_retry_gate.py tests/test_groups.py tests/test_group_order.py
-      tests/test_cancel.py tests/test_restart.py tests/test_writeback.py tests/test_server_fsm.py
-      tests/test_zone_dispatch.py tests/test_dispatch_staged.py tests/test_zone_model.py &&
-      for ts in community ''; do HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts uv run pytest -q -p no:cacheprovider -rs
-      tests/test_contended_write.py tests/test_writeback_postgres.py tests/test_zone_postgres.py -k 'not reserved_source'
-      || exit 1; done &&
-      RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=
-      sh spec/relay-hardening/drive/red_check.sh &&
-      sh spec/contended-writes/drive/retry_drive.sh sqlite &&
-      HS_TEST_POSTGRES=$pg sh spec/contended-writes/drive/retry_drive.sh timescale
-  - id: P4
-    name: "Task.cancel_all/cancel on the re-run pattern, and a conflict-safe reserved source row"
-    status: pending
-    satisfies: [R3, R4, R5]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres;
-      uv run pytest -q -p no:cacheprovider tests/test_contended_recovery.py tests/test_source.py tests/test_cancel.py
-      tests/test_dispatch_staged.py tests/test_writeback.py tests/test_topology_server.py tests/test_submit.py &&
-      for ts in community ''; do HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts uv run pytest -q -p no:cacheprovider -rs
-      tests/test_contended_write.py tests/test_writeback_postgres.py || exit 1; done &&
-      RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=
-      sh spec/relay-hardening/drive/red_check.sh &&
-      for b in sqlite sqlite-283; do sh spec/contended-writes/drive/concurrent_submit.sh $b 20 || exit 1; done &&
-      HS_TEST_POSTGRES=$pg sh spec/contended-writes/drive/concurrent_submit.sh postgres 20
-  - id: P5
-    name: "AGENTS.md and the invariants drop the two exceptions; full local evidence"
-    status: pending
-    satisfies: [R6, R5]
-    depends_on: [P4]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres;
-      ! grep -q 'killed between the retry insert' AGENTS.md &&
-      ! grep -q 'kill between the retry insert' .agents/factory/invariants.md &&
-      ! grep -q 'hypertable-contended-scheduler-and-cli-writes' AGENTS.md .agents/factory/invariants.md &&
-      grep -q 'issues/hs-update-contended-writes.md' AGENTS.md &&
-      grep -q 'cancel_all' .agents/factory/invariants.md && grep -q 'retry mark' AGENTS.md &&
-      grep -q 'retry mark' .agents/factory/invariants.md &&
-      uv run pytest -q -p no:cacheprovider &&
-      for ts in community ''; do HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts uv run pytest -q -p no:cacheprovider -rs
-      tests/test_contended_write.py tests/test_writeback_postgres.py tests/test_zone_postgres.py
-      || exit 1; done &&
-      RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=
-      sh spec/relay-hardening/drive/red_check.sh
-  - id: P6
-    name: "CI green on the fix (external wait on the draft PR)"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6]
-    depends_on: [P2, P5]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      uv run python spec/contended-writes/drive/ci_check.py green spec/contended-writes/evidence/ci-green
-      --code-rev "$(git log -1 --format=%H -- . ':!spec')"
+- id: P1
+  name: 'Tests first: R5''s fault-injection, real-race and two-session tests and the
+    red list (tests only)'
+  status: done
+  satisfies:
+  - R5
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres; git diff
+    --quiet 92af9c1 -- src .github && test -z "$(git diff --name-only 92af9c1 -- .
+    ':!spec' ':!tests')" && for t in test_contended_retry_mark_lands test_contended_cancel_lands
+    test_reserved_source_concurrent_first_use; do grep -q "^def $t(" tests/test_contended_write.py
+    || exit 1; done && test "$(grep -cvE '^#|^$' spec/contended-writes/red.txt)" -ge
+    13 && RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg
+    HS_TEST_TIMESCALE= sh spec/relay-hardening/drive/red_check.sh && sh spec/contended-writes/drive/rest_green.sh
+    && for ts in community ''; do HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts sh spec/contended-writes/drive/rest_green.sh
+    -rs tests/test_contended_write.py tests/test_writeback_postgres.py || exit 1;
+    done
+- id: P2
+  name: CI red at the tests-first commit (external wait on the draft PR)
+  status: pending
+  satisfies:
+  - R5
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run python spec/contended-writes/drive/ci_check.py red spec/contended-writes/evidence/ci-red
+    --code-rev "$(git log -1 --format=%H --grep='^\[fix\] Build contended-writes P1:')"
+- id: P3
+  name: The retried mark commits with its retry rows, on the re-run pattern
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R5
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres; uv run
+    pytest -q -p no:cacheprovider tests/test_contended_recovery.py -k 'not contended_cancel'
+    && uv run pytest -q -p no:cacheprovider tests/test_retry_gate.py tests/test_groups.py
+    tests/test_group_order.py tests/test_cancel.py tests/test_restart.py tests/test_writeback.py
+    tests/test_server_fsm.py tests/test_zone_dispatch.py tests/test_dispatch_staged.py
+    tests/test_zone_model.py && for ts in community ''; do HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts
+    uv run pytest -q -p no:cacheprovider -rs tests/test_contended_write.py tests/test_writeback_postgres.py
+    tests/test_zone_postgres.py -k 'not reserved_source' || exit 1; done && RED_BASE_REV=92af9c1
+    RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=
+    sh spec/relay-hardening/drive/red_check.sh && sh spec/contended-writes/drive/retry_drive.sh
+    sqlite && HS_TEST_POSTGRES=$pg sh spec/contended-writes/drive/retry_drive.sh timescale
+- id: P4
+  name: Task.cancel_all/cancel on the re-run pattern, and a conflict-safe reserved
+    source row
+  status: pending
+  satisfies:
+  - R3
+  - R4
+  - R5
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres; uv run
+    pytest -q -p no:cacheprovider tests/test_contended_recovery.py tests/test_source.py
+    tests/test_cancel.py tests/test_dispatch_staged.py tests/test_writeback.py tests/test_topology_server.py
+    tests/test_submit.py && for ts in community ''; do HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE=$ts
+    uv run pytest -q -p no:cacheprovider -rs tests/test_contended_write.py tests/test_writeback_postgres.py
+    || exit 1; done && RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt"
+    HS_TEST_POSTGRES=$pg HS_TEST_TIMESCALE= sh spec/relay-hardening/drive/red_check.sh
+    && for b in sqlite sqlite-283; do sh spec/contended-writes/drive/concurrent_submit.sh
+    $b 20 || exit 1; done && HS_TEST_POSTGRES=$pg sh spec/contended-writes/drive/concurrent_submit.sh
+    postgres 20
+- id: P5
+  name: AGENTS.md and the invariants drop the two exceptions; full local evidence
+  status: pending
+  satisfies:
+  - R6
+  - R5
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres; ! grep
+    -q 'killed between the retry insert' AGENTS.md && ! grep -q 'kill between the
+    retry insert' .agents/factory/invariants.md && ! grep -q 'hypertable-contended-scheduler-and-cli-writes'
+    AGENTS.md .agents/factory/invariants.md && grep -q 'issues/hs-update-contended-writes.md'
+    AGENTS.md && grep -q 'cancel_all' .agents/factory/invariants.md && grep -q 'retry
+    mark' AGENTS.md && grep -q 'retry mark' .agents/factory/invariants.md && uv run
+    pytest -q -p no:cacheprovider && for ts in community ''; do HS_TEST_POSTGRES=$pg
+    HS_TEST_TIMESCALE=$ts uv run pytest -q -p no:cacheprovider -rs tests/test_contended_write.py
+    tests/test_writeback_postgres.py tests/test_zone_postgres.py || exit 1; done &&
+    RED_BASE_REV=92af9c1 RED_LIST="$PWD/spec/contended-writes/red.txt" HS_TEST_POSTGRES=$pg
+    HS_TEST_TIMESCALE= sh spec/relay-hardening/drive/red_check.sh
+- id: P6
+  name: CI green on the fix (external wait on the draft PR)
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  depends_on:
+  - P2
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run python spec/contended-writes/drive/ci_check.py green spec/contended-writes/evidence/ci-green
+    --code-rev "$(git log -1 --format=%H -- . ':!spec')"
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Contended writes: the retried mark and Task.cancel_all land when contended; concurrent first submits share the reserved source row
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -177,35 +192,35 @@ derives each job's expected failures from both.
 **Goal:** every R5 test in the tree, red on the base for the defect, with nothing else red; no
 `src/` change. This commit is what the foreman pushes to the draft PR for P2.
 
-- [ ] `tests/test_contended_recovery.py`: a driver-level injector (PLAN §2.5) on the per-test engine
+- [x] `tests/test_contended_recovery.py`: a driver-level injector (PLAN §2.5) on the per-test engine
       (`do_execute`/`do_executemany` dialect events): `lose(task_id, count, meanwhile=None)` makes
       that task's UPDATE of `task` match 0 rows by executing a 0-row UPDATE in its place (an
       executemany drops that task's parameter set and runs the rest); `meanwhile` commits another
       writer's change first on a separate connection; it records `(kind, task id)` per parameter set.
       Identify the mark by its SET of `retried` and the cancel by its SET of `exit_status` with
       `completion_time`, so the dispatch stamp and the result write are never lost by mistake.
-- [ ] Mark tests (`Task.next(limit=…, attempts=2)` on failed rows set up through dispatch and a
+- [x] Mark tests (`Task.next(limit=…, attempts=2)` on failed rows set up through dispatch and a
       written-back failure, as the module's helpers do): lands on a re-run (one retry row,
       `retried`/`next_id` set, the retry returned, DEBUG re-run line, no WARNING); exhausted (no retry
       row for that row, `retried` still false, one WARNING naming the task and `retry mark`, the other
       failed row in the batch retried, and the next round retries it once); skips a row cancelled,
       deleted, or marked `retried` (with a `next_id`) meanwhile, with no retry row and no WARNING.
-- [ ] `test_stop_between_retry_insert_and_mark_leaves_no_retry`: a `before_cursor_execute` hook
+- [x] `test_stop_between_retry_insert_and_mark_leaves_no_retry`: a `before_cursor_execute` hook
       raises a `BaseException` subclass at whichever of {INSERT INTO task, UPDATE of `retried`} comes
       second; `Session.remove()`; then no row names the failed row as `previous_id`, it is not
       `retried`, and the next `Task.next` retries it exactly once.
-- [ ] Cancel tests: lands on a re-run (`Task.cancel_all(ids) == ids`, rows cancelled); exhausted
+- [x] Cancel tests: lands on a re-run (`Task.cancel_all(ids) == ids`, rows cancelled); exhausted
       (`cancel_all` returns the other ids, one WARNING naming the task and `cancel`, that row
       unchanged, the rest cancelled and committed; `Task.cancel(id) is False` under the same loss).
       Guards: uncontended mark and cancel each cost one UPDATE per row and no SELECT re-check;
       `cancel_all` with a gone id raises `StaleDataError` and cancels nothing.
-- [ ] `tests/test_source.py`: `test_reserved_source_concurrent_first_use[fresh|upgraded-direct|stdin]`
+- [x] `tests/test_source.py`: `test_reserved_source_concurrent_first_use[fresh|upgraded-direct|stdin]`
       (`@mark.unit`): a per-test SQLite engine bound as `task_db` does (fresh: `create_all`;
       upgraded: a copy of `tests/fixtures/hypershell-2.8.3.db` through `upgrade_schema`); two threads
       call `Source.reserved`, a `before_cursor_execute` barrier (`threading.Barrier(2, timeout=…)`)
       on `INSERT INTO source` holds each until both have missed; each thread returns its row id or
       the exception and calls `Session.remove()`. Both return the reserved id; one row in `source`.
-- [ ] `tests/test_contended_write.py`: `test_reserved_source_concurrent_first_use[fresh|upgraded]`
+- [x] `tests/test_contended_write.py`: `test_reserved_source_concurrent_first_use[fresh|upgraded]`
       (fresh: `contended_db`; upgraded: the `hs283` template under the `postgres` provider, `hs initdb
       --yes`, skipped unless `HS_TEST_POSTGRES_TEMPLATES` lists `hs283`); `test_contended_retry_mark_lands`
       (holder `UPDATE task SET client_host = …` on the failed row; worker `Task.next(limit=1,
@@ -213,9 +228,9 @@ derives each job's expected failures from both.
       exactly one row naming it); `test_contended_cancel_lands` (holder as above on an unscheduled row;
       worker `Task.cancel_all([id])`; after release: no error, the row cancelled). Assert outcomes
       only, never the new return values, so they pass on the base locally.
-- [ ] Reconcile [`red.txt`](red.txt) and [`ci-red.txt`](ci-red.txt) with the node ids as written
+- [x] Reconcile [`red.txt`](red.txt) and [`ci-red.txt`](ci-red.txt) with the node ids as written
       (renaming is fine; dropping a line needs a note in PLAN §5).
-- [ ] Record the red: the `red_check.sh` output (every line RED) goes in the commit body.
+- [x] Record the red: the `red_check.sh` output (every line RED) goes in the commit body.
 - **Verify:** see frontmatter (no `src`/`.github` change; the three PostgreSQL tests exist; ≥13
   listed; `red_check.sh` all red on the base; the suite and both contended server modules otherwise
   green on SQLite, PG 18 and TS 2.32).

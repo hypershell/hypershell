@@ -39,3 +39,10 @@
 - **Skill cause:** As `spec/relay-hardening/META.md` (the generic `red_check.sh` recommendation): Step 6 and the TECH template still give no way to prove "fails on <rev>".
 - **Recommended fix:** As recorded there: move `red_check.sh` + `red_outcome.py` (and a deselect-the-red-list runner) to `.agents/factory/bin/` and reference them from Step 6.
 - **Confidence:** high · **Effort:** small
+
+## F5 — `set_phase.py` re-serializes the whole frontmatter on its first run
+`origin=hs-build:P1 severity=low category=tooling status=open target=.agents/factory/bin/set_phase.py`
+- **What happened:** Advancing P1 (two fields: `status`, `current_phase`) rewrote every line of the hand-written frontmatter in the dumper's style (single quotes, wrapped `title`, `- id` dedented, folded `verify:` blocks re-flowed), a ~120-line diff; parsed, only the two fields differ.
+- **Skill cause:** Step 5 mandates the script ("never hand-edit YAML"), and `hs-plan` writes the frontmatter in a style the script does not keep, so the first build commit of every cycle buries its state change in reformatting.
+- **Recommended fix:** Have `hs-plan` emit the frontmatter through the same dumper (or `set_phase.py --touch` at plan time), or make the dumper keep the template's style.
+- **Confidence:** high · **Effort:** small
