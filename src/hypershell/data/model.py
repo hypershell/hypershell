@@ -192,8 +192,13 @@ class Entity(DeclarativeBase):
 
     @classmethod
     def from_json(cls: Type[Entity], data: Dict[str, JSONData]) -> Entity:
-        """Build from JSON `text` string."""
-        return cls.from_dict({key: from_json_type(value) for key, value in data.items()})
+        """Build from JSON `data`, decoded by each column's declared type.
+
+        Only a column declared ``datetime`` in `columns` is read as a time; every other value stays
+        exactly as sent, so text that happens to look like a date remains text.
+        """
+        return cls.from_dict({key: from_json_type(value) if cls.columns.get(key) is datetime else value
+                              for key, value in data.items()})
 
     # NOTE:
     # The pack() and unpack() remaining available for backwards compatibility, but not recommended.

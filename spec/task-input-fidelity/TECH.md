@@ -1,57 +1,92 @@
 ---
 slug: task-input-fidelity
-title: "Every task the input gives runs as given: date-like lines run as text, and a streamed run waits for its input to end"
+title: 'Every task the input gives runs as given: date-like lines run as text, and
+  a streamed run waits for its input to end'
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/task-input-fidelity
 base: develop
-current_phase: P1
-last_updated: "2026-11-14"
+current_phase: P2
+last_updated: '2026-11-15'
 phases:
-  - id: P1
-    name: "Decode the task wire by declared type: date-like text stays text, times stay times, bytes unchanged"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R8]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -q tests/test_task_wire.py tests/test_writeback.py tests/test_writeback_statement.py tests/test_relay_return.py tests/test_topology_server.py tests/test_contended_write.py && for m in dates dates-default dates-stdin dates-nodb; do .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh\" $m || exit 1; done"
-  - id: P2
-    name: "The scheduler waits for the end of stream input before it stops, without reaching the failed-group halt"
-    status: pending
-    satisfies: [R5, R6, R7, R8]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -q tests/test_stream_input.py tests/test_group_order.py tests/test_server_fsm.py tests/test_restart.py tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py && for m in pause fail-pause burst server fifo nodb-stream file launch-false; do .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh\" $m || exit 1; done"
-  - id: P3
-    name: "Optional: wake the scheduler at the end of input so a stream run stops promptly"
-    status: pending
-    satisfies: [R6]
-    depends_on: [P2]
-    parallel: false
-    hammerable: true
-    hill: uphill
-    verify: "uv run pytest -q tests/test_stream_input.py tests/test_dispatch.py tests/test_dispatch_staged.py tests/test_dispatch_version.py tests/test_signal_wake.py tests/test_server_fsm.py && FD_POLL=600 FD_BOUND=10 .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh\" pause && .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh\" fail-pause"
-  - id: P4
-    name: "Docs, the invariant record and seeds; cross-version, both Pythons, every provider"
-    status: pending
-    satisfies: [R4, R8, R9]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "uv run pytest -q && mkdir -p $TMPDIR/hs-2.9.0a8 && git archive 2.9.0a8 src | tar -x -C $TMPDIR/hs-2.9.0a8 && for m in cross-old-client cross-old-server; do FD_OLD_SRC=$TMPDIR/hs-2.9.0a8/src .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh\" $m || exit 1; done && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html"
+- id: P1
+  name: 'Decode the task wire by declared type: date-like text stays text, times stay
+    times, bytes unchanged'
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R8
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -q tests/test_task_wire.py tests/test_writeback.py tests/test_writeback_statement.py
+    tests/test_relay_return.py tests/test_topology_server.py tests/test_contended_write.py
+    && for m in dates dates-default dates-stdin dates-nodb; do .agents/factory/bin/temp_site.sh
+    uv run sh "$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh" $m || exit 1;
+    done
+- id: P2
+  name: The scheduler waits for the end of stream input before it stops, without reaching
+    the failed-group halt
+  status: pending
+  satisfies:
+  - R5
+  - R6
+  - R7
+  - R8
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -q tests/test_stream_input.py tests/test_group_order.py tests/test_server_fsm.py
+    tests/test_restart.py tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py
+    && for m in pause fail-pause burst server fifo nodb-stream file launch-false;
+    do .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh"
+    $m || exit 1; done
+- id: P3
+  name: 'Optional: wake the scheduler at the end of input so a stream run stops promptly'
+  status: pending
+  satisfies:
+  - R6
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: true
+  hill: uphill
+  verify: uv run pytest -q tests/test_stream_input.py tests/test_dispatch.py tests/test_dispatch_staged.py
+    tests/test_dispatch_version.py tests/test_signal_wake.py tests/test_server_fsm.py
+    && FD_POLL=600 FD_BOUND=10 .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh"
+    pause && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh"
+    fail-pause
+- id: P4
+  name: Docs, the invariant record and seeds; cross-version, both Pythons, every provider
+  status: pending
+  satisfies:
+  - R4
+  - R8
+  - R9
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run pytest -q && mkdir -p $TMPDIR/hs-2.9.0a8 && git archive 2.9.0a8 src
+    | tar -x -C $TMPDIR/hs-2.9.0a8 && for m in cross-old-client cross-old-server;
+    do FD_OLD_SRC=$TMPDIR/hs-2.9.0a8/src .agents/factory/bin/temp_site.sh uv run sh
+    "$PWD/spec/task-input-fidelity/drive/fidelity_drive.sh" $m || exit 1; done &&
+    UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs sphinx-build
+    -W --keep-going -q -E -b html docs $TMPDIR/docs-html
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Every task the input gives runs as given
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -107,7 +142,7 @@ until the code lands.
 **Goal:** a date-like line reaches the client as text and a date-like result is stored as text; every
 timestamp still decodes as a time; the encoded bytes equal 2.9.0a8's.
 
-- [ ] Tests first, `tests/test_task_wire.py` (`@mark.unit`), per PLAN § 6 and research/01's list:
+- [x] Tests first, `tests/test_task_wire.py` (`@mark.unit`), per PLAN § 6 and research/01's list:
       every R1 form (`20261102`, `2026-11-02`, `2026W45`, `2026-W45-1`, `20261102T1200`,
       `2026-11-02 12:00`) in `args`, `command`, `outpath`, `errpath`, `csvpath`, `submit_host`,
       `server_host`, `client_host`, through `deserialize_tasks(serialize_tasks(…))` and
@@ -118,20 +153,20 @@ timestamp still decodes as a time; the encoded bytes equal 2.9.0a8's.
       `columns`; template expansion of each form (`'echo {}'` and the default template) gives the exact
       text; `Task.apply_results` stores `command='2026-11-02'` verbatim (SQLite `task_db` fixture) and
       the row matches only its dispatch.
-- [ ] R4 fixture: `tests/fixtures/make-task-wire-2.9.0a8.sh` extracts `git archive 2.9.0a8 src` under
+- [x] R4 fixture: `tests/fixtures/make-task-wire-2.9.0a8.sh` extracts `git archive 2.9.0a8 src` under
       `$TMPDIR`, encodes a fixed task (fixed UUIDs, aware times with and without microseconds, one naive
       time, `args='2026-11-02'`, `tag={'day': '2026-11-02'}`) with that code, and prints the dispatch
       text, `serialize_tasks([task])` and the result bundle (`command='2026-11-02'`, client fields,
       start/completion times, `waited`, `duration`, `exit_status=0`). Paste the three outputs as
       `bytes` literals into `test_task_wire.py`; add a provenance row to `tests/fixtures/README.md`.
       Tests: today's encoding equals the literals; the literals decode with text and times intact.
-- [ ] PostgreSQL twin of the `apply_results` test in `tests/test_writeback_postgres.py` (skipped
+- [x] PostgreSQL twin of the `apply_results` test in `tests/test_writeback_postgres.py` (skipped
       without `HS_TEST_POSTGRES`; runs under both providers as that file's others do).
-- [ ] Confirm the new tests fail on the unchanged code (the text-field and template cases; the R4 and
+- [x] Confirm the new tests fail on the unchanged code (the text-field and template cases; the R4 and
       time cases pass already).
-- [ ] `src/hypershell/data/model.py` `Entity.from_json`: decode a value with `from_json_type` only
+- [x] `src/hypershell/data/model.py` `Entity.from_json`: decode a value with `from_json_type` only
       when `cls.columns.get(key) is datetime`; docstring says so. Nothing else in the file.
-- [ ] Evidence (record in the commit body): the verify command on 3.14; `UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run --python 3.11 pytest -q tests/test_task_wire.py`;
+- [x] Evidence (record in the commit body): the verify command on 3.14; `UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run --python 3.11 pytest -q tests/test_task_wire.py`;
       with the sandbox off, `HS_TEST_POSTGRES=… uv run pytest -q tests/test_writeback_postgres.py` and
       again with `HS_TEST_TIMESCALE=community`; the `dates` modes with `FD_PROVIDER=postgres` and
       `FD_PROVIDER=timescale`.

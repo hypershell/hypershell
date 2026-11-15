@@ -50,3 +50,35 @@ It refuses to keep the file if the local hostname, username or output directory 
 
 Ids are random (uuid4) and timestamps are wall-clock, so a regenerated file differs byte for byte.
 Its schema and row shape (ids mapped to ordinals) are the same.
+
+## `make-task-wire-2.9.0a8.sh`
+
+Prints the task wire as **hypershell 2.9.0a8** encodes one fixed task: the dispatch text a server
+sends, the task bundle, and the result bundle a client returns. `tests/test_task_wire.py` holds the
+three outputs as `bytes` literals (`WIRE_2_9_0A8_*`) and checks that this release encodes the same
+task to the same bytes and decodes the recorded bytes with their text and times intact.
+
+The task's every value is a literal: fixed ids, `args` and a returned `command` of `2026-11-02`, a
+`tag` value `2026-11-02`, aware times with and without microseconds, and one naive time. No host,
+user or path of the machine that runs the script enters the output, and a rerun prints the same
+bytes.
+
+### Provenance
+
+| Item | Value |
+|------|-------|
+| hypershell | 2.9.0a8 (`git archive 2.9.0a8 src`) |
+| Python | 3.14 (the project's `.venv`) |
+| Output | `DISPATCH`, `BUNDLE`, `RESULT` |
+
+Produced with:
+
+```sh
+mkdir -p "$TMPDIR/hs-2.9.0a8"
+git archive 2.9.0a8 src | tar -x -C "$TMPDIR/hs-2.9.0a8"
+sh tests/fixtures/make-task-wire-2.9.0a8.sh .venv/bin/python "$TMPDIR/hs-2.9.0a8/src"
+```
+
+The script drops every inherited `HYPERSHELL_*` variable, pins `TZ=UTC`, imports the 2.9.0a8
+package from the extracted source (it checks the version and the import path), and reads a
+temporary site that is removed on exit.

@@ -32,7 +32,8 @@
 #                  times, and the server logs no stale or dropped result.
 #
 # Database: the site's SQLite file by default. With FD_PROVIDER=postgres or timescale, a database of
-# its own is created on the server HS_TEST_POSTGRES names (sandbox off), used, and dropped on exit.
+# its own is created on the server HS_TEST_POSTGRES names (sandbox off), initialized with `hs initdb`,
+# used, and dropped on exit.
 # Settings: FD_PAUSE (default 8), FD_POLL (default 30, also exported as server.poll), FD_BOUND (how
 # long after the input ends a stream run may take to end; default FD_POLL + 5), FD_FAIL (default 20),
 # in seconds. Every process the drive starts is stopped before it exits.
@@ -82,6 +83,7 @@ EOF
 )"
     export HYPERSHELL_DATABASE_PROVIDER="$FD_PROVIDER" HYPERSHELL_DATABASE_DATABASE="$dbname"
     unset HYPERSHELL_DATABASE_FILE
+    hs initdb --yes > /dev/null
     note "database $dbname ($FD_PROVIDER)"
 fi
 export HYPERSHELL_SERVER_POLL="$poll"
