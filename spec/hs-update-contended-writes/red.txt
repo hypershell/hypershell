@@ -38,6 +38,13 @@ pg:tests/test_contended_write.py::test_update_filtered_skipped_row_written
 pg:tests/test_contended_write.py::test_update_filtered_skipped_row_exhausted_writes_nothing
 pg:tests/test_contended_write.py::test_update_delete_filtered_skipped_row_deleted
 
+# Review cycle 1, F1: the set-based statement is a missed row's first attempt, so the bound is the same
+# as by id (red on f00f853, and on ee5fcd4, which gave the row one attempt more)
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_lands_at_bound[update]
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_lands_at_bound[delete]
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_past_bound_writes_nothing[update]
+pg:tests/test_contended_write.py::test_update_filtered_skipped_row_past_bound_writes_nothing[delete]
+
 # R5 on PostgreSQL, by the command line
 pg:tests/test_contended_write.py::test_update_combined_changes_pg[limit]
 pg:tests/test_contended_write.py::test_update_combined_changes_pg[moved]
@@ -48,3 +55,9 @@ pg:tests/test_contended_write.py::test_update_tag_keys_and_removals_pg[set_and_r
 
 # R2/R3: the real race, a holder that takes its row out of the filter (red by the count everywhere)
 pg:tests/test_contended_write.py::test_contended_update_leaves_row_moved_out_of_filter
+
+# Review cycle 1, F3: --delete, with and without --limit, leaves a row taken out of the filter, counts
+# the rows deleted, and warns (SQLite by the driver; the real race on the server)
+tests/test_contended_recovery.py::test_update_delete_limit_skips_task_changed_out_of_filter
+pg:tests/test_contended_write.py::test_contended_update_delete_leaves_row_moved_out_of_filter[filtered]
+pg:tests/test_contended_write.py::test_contended_update_delete_leaves_row_moved_out_of_filter[limit]

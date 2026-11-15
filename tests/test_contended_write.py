@@ -61,7 +61,8 @@ from hypershell.client import ClientInfo
 from hypershell.data import core as data_core
 from hypershell.data.core import Session
 from hypershell.core.types import to_json_type
-from hypershell.data.model import Task, CANCEL_STATUS, STDIN_SOURCE_ID, serialize_tasks, deserialize_tasks
+from hypershell.data.model import (Task, CANCEL_STATUS, CONTENDED_RERUNS, STDIN_SOURCE_ID, serialize_tasks,
+                                   deserialize_tasks)
 from hypershell.server import Confirm, ConfirmState, Receiver
 from hypershell.task import TaskUpdateApp
 from tests import main, main_lines
@@ -773,6 +774,59 @@ def test_update_delete_filtered_skipped_row_deleted(contended_db, skipping) -> N
     assert 'Deleted 4 tasks' in stderr
 
 
+# Every attempt a write gets: the first, then `CONTENDED_RERUNS` re-runs.
+ATTEMPTS = 1 + CONTENDED_RERUNS
+
+# The filtered form's two set-based writes, an UPDATE and a DELETE.
+SET_BASED = {'update': ['-f', '-R', 'group=5'], 'delete': ['-f', '-R', '--delete']}
+
+
+def reruns(stderr: str, task_id: str) -> List[int]:
+    """The attempt numbers of the DEBUG lines re-running the task's write, in order, each checked `of ATTEMPTS`."""
+    found = re.findall(rf'Re-running contended \w+ write for task \({task_id}\) \(attempt (\d+) of (\d+)\)', stderr)
+    assert all(int(total) == ATTEMPTS for _, total in found), found
+    return [int(number) for number, _ in found]
+
+
+@mark.parametrize('form', list(SET_BASED))
+def test_update_filtered_skipped_row_lands_at_bound(contended_db, skipping, form: str) -> None:
+    """A row the set-based statement and then each re-run miss, `CONTENDED_RERUNS` misses in all, is written at
+    the last attempt the bound allows: the statement is its first attempt, and every re-run after it is logged."""
+    ids = [submit(f'echo {n}') for n in range(4)]
+    skipping(ids[1], CONTENDED_RERUNS)
+
+    rc, _, stderr = hs_update(*SET_BASED[form])
+
+    assert rc == exit_status.success, stderr
+    if form == 'update':
+        assert groups(contended_db) == dict.fromkeys(ids, 5)
+        assert 'Updated 4 tasks' in stderr
+    else:
+        assert tasks(contended_db) == {}
+        assert 'Deleted 4 tasks' in stderr
+    assert reruns(stderr, ids[1]) == list(range(2, ATTEMPTS + 1)), stderr
+    assert 'did not land' not in stderr
+
+
+@mark.parametrize('form', list(SET_BASED))
+def test_update_filtered_skipped_row_past_bound_writes_nothing(contended_db, skipping, form: str) -> None:
+    """A row missed once more than `CONTENDED_RERUNS` times, the set-based statement included, aborts the
+    update after `1 + CONTENDED_RERUNS` attempts in all: nothing written, the true count said, exit 5."""
+    ids = [submit(f'echo {n}') for n in range(4)]
+    skipping(ids[1], CONTENDED_RERUNS + 1)
+
+    rc, _, stderr = hs_update(*SET_BASED[form])
+
+    assert rc == exit_status.runtime_error, stderr
+    assert groups(contended_db) == dict.fromkeys(ids, 0)
+    assert reruns(stderr, ids[1]) == list(range(2, ATTEMPTS + 1)), stderr
+    warning = [line for line in stderr.splitlines() if re.match(r'^\s*WARNING\b', line)
+               and f'write did not land for task ({ids[1]}) after {ATTEMPTS} attempts' in line]
+    assert warning, stderr
+    assert [line for line in contended_error(stderr, ids[1]) if f'after {ATTEMPTS} attempts' in line], stderr
+    assert 'traceback written' not in stderr
+
+
 # Combined changes, each case one update of four untagged tasks.
 COMBINED_CASES = {
     'limit': ['--limit', '2', '-f', 'group=7', 'color:red'],
@@ -944,4 +998,21 @@ def test_contended_update_leaves_row_moved_out_of_filter(contended_db) -> None:
     assert (after[ids[1]]['group'], after[ids[1]]['exit_status']) == (0, 0)
     assert [after[task_id]['group'] for task_id in ids if task_id != ids[1]] == [5, 5, 5]
     assert 'Updated 3 tasks' in stderr, stderr
+    assert NOT_MATCHED in stderr, stderr
+
+
+@mark.parametrize('limit', [[], ['--limit', '4']], ids=['filtered', 'limit'])
+def test_contended_update_delete_leaves_row_moved_out_of_filter(contended_db, limit: List[str]) -> None:
+    """A `--delete`, with or without `--limit`, that waited on another writer completing one of its tasks leaves
+    that task, does not count it, and says so; exit 0."""
+    ids = [submit(f'echo {n}') for n in range(4)]
+    holder_sql = f'UPDATE task SET client_host = :client_host, exit_status = 0 {BY_ID}'
+
+    rc, _, stderr = update_while_held(contended_db, ids[1], *limit, '-f', '-R', '--delete', holder_sql=holder_sql)
+
+    assert rc == exit_status.success, stderr
+    after = tasks(contended_db)
+    assert list(after) == [ids[1]], after
+    assert (after[ids[1]]['exit_status'], after[ids[1]]['client_host']) == (0, 'holder')
+    assert 'Deleted 3 tasks' in stderr, stderr
     assert NOT_MATCHED in stderr, stderr

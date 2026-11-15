@@ -51,9 +51,12 @@ subsystems.
   cancelled), `Task.apply_results` (`ResultOutcome.DEFERRED`), and every `hs update` write:
   `Task.update` (legacy, by id), `Task.update_selected`/`delete_selected` (`--limit`, by id under the
   user's filter, a row no longer matching skipped), `Task.update_matching`/`delete_matching` (no
-  `--limit`: one set-based statement; on PostgreSQL `RETURNING id` and one residual read of the
-  filter find the rows missed, written by id under the filter, the one check after a first-attempt
-  match; none on SQLite), all-or-nothing at the bound (rollback, `Task.Contended`, exit 5). The
+  `--limit`: one set-based statement, each row's first attempt; on PostgreSQL the UPDATE returns
+  the ids it wrote (`RETURNING id`) and one read of the ids still matching, less those, finds the
+  rows it missed, while the DELETE takes its row count and that one read alone, with no
+  `RETURNING` (a row it deleted no longer matches); each row missed is written by id under the
+  filter at most `CONTENDED_RERUNS` more times, the one check after a first-attempt match; none on
+  SQLite), all-or-nothing at the bound (rollback, `Task.Contended`, exit 5). The
   conditional writes
   (`revert_staged`, the eviction revert, the dispatch stamp, the retry mark) skip a row gone or no
   longer qualifying, never raise on it; `confirm_all` (strict, the default), `revert_all`,

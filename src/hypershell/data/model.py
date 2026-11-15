@@ -1040,7 +1040,7 @@ class Task(Entity):
                      unscheduled: bool = False, retryable: bool = False,
                      each: Optional[Dict[str, Dict[str, Any]]] = None, commit: bool = True,
                      abort: bool = False, where: Optional[Tuple[ColumnElement, ...]] = None,
-                     remove: bool = False, prefix: str = 'r_') -> List[str]:
+                     remove: bool = False, tried: int = 0, prefix: str = 'r_') -> List[str]:
         """Write `values` onto each task in `ids` by `id`, in one transaction; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
@@ -1076,6 +1076,11 @@ class Task(Entity):
         same condition, with the same count, lookup and re-run; `values` is ignored. Statements with
         `where` are built for the call, not cached, since the criteria differ from call to call.
 
+        With `tried`, every task in `ids` has already had that many attempts (a set-based statement
+        that missed it), and they count toward the bound: each row gets at most `1 + CONTENDED_RERUNS
+        - tried` attempts here, the first of them logged as a re-run, and the warning and
+        `Task.Contended` give the total.
+
         With `each`, a task's own values (by id) are written over the shared `values`; every task
         in `ids` has an entry, all with the same columns, or a `ValueError` is raised before
         anything is written. Without `commit`, the transaction is left open for the caller to
@@ -1103,11 +1108,14 @@ class Task(Entity):
         params = {f'{prefix}{name}': value for name, value in values.items()}
         lookup = {f'{prefix}held_by': held_by} if held_by is not None else {}
         attempts = 1 + CONTENDED_RERUNS
+        first = 1 + tried
         landed = []
         try:
             for id in ids:
                 row = {f'{prefix}{name}': value for name, value in each[id].items()} if each is not None else {}
-                for attempt in range(1, attempts + 1):
+                if first > 1:
+                    log.debug(f'Re-running contended {path} write for task ({id}) (attempt {first} of {attempts})')
+                for attempt in range(first, attempts + 1):
                     # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per row.
                     if Session.execute(write, {**params, **row, **lookup, key: id}).rowcount == 1:
                         landed.append(id)
@@ -1234,9 +1242,10 @@ class Task(Entity):
         in one UPDATE of every matching row. On SQLite its count is the number written: the write
         transaction excludes every other writer, so no row can be missed. On PostgreSQL a row that
         waited on another transaction's row lock can be missed although it still matches, so the
-        UPDATE returns the ids it wrote and one read of the ids still matching finds the rest; each
-        of those is written by `id` under the criteria, re-run at most `CONTENDED_RERUNS` times, and
-        a row still not written after that rolls the whole update back and raises `Task.Contended`.
+        UPDATE returns the ids it wrote and one read of the ids still matching finds the rest. The
+        UPDATE is each such row's first attempt; it is written by `id` under the criteria, at most
+        `CONTENDED_RERUNS` more times, and a row still not written after that rolls the whole update
+        back and raises `Task.Contended`.
         A row that came to match meanwhile is written and counted too. The returned ids are held in
         memory until the read, and every row written that still matches is read back.
         """
@@ -1256,7 +1265,7 @@ class Task(Entity):
             if missed:
                 log.debug(f'Re-checking {len(missed)} tasks the update did not write')
                 rewritten = cls.__write_rows(missed, change, 'update', 'nothing written', where=criteria,
-                                             abort=True, commit=False, prefix='u_')
+                                             abort=True, commit=False, tried=1, prefix='u_')
             else:
                 rewritten = []
             Session.commit()
@@ -1272,8 +1281,8 @@ class Task(Entity):
         One DELETE of every matching row; on SQLite its count is the number deleted. On PostgreSQL a
         row that waited on another transaction's row lock can be missed although it still matches,
         so one read of the ids still matching (a row deleted is gone for this transaction) finds
-        the rest; each is deleted by `id` under the criteria, re-run and aborted as for
-        `update_matching`.
+        the rest; each is deleted by `id` under the criteria, the DELETE counting as its first
+        attempt, re-run and aborted as for `update_matching`.
         """
         criteria = tuple(criteria)
         table = cls.__table__
@@ -1284,7 +1293,7 @@ class Task(Entity):
                 if missed:
                     log.debug(f'Re-checking {len(missed)} tasks the delete did not reach')
                     deleted += len(cls.__write_rows(missed, {}, 'delete', 'nothing deleted', where=criteria,
-                                                    remove=True, abort=True, commit=False, prefix='u_'))
+                                                    remove=True, abort=True, commit=False, tried=1, prefix='u_'))
             Session.commit()
         except Exception:
             Session.rollback()

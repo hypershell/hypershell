@@ -1488,6 +1488,23 @@ def test_update_delete_limit_contended_exhausted_deletes_nothing(task_db, update
 
 
 @mark.unit
+def test_update_delete_limit_skips_task_changed_out_of_filter(task_db, update_driver, hs_update, logs) -> None:
+    """A selected task that completed before its delete no longer matches `-R`: `--delete --limit` leaves it,
+    does not count it, and says so; exit 0."""
+    ids = submitted(4)
+    update_driver.waits(ids[0], completed_as(task_db, ids[0]))
+
+    assert hs_update('--limit', '4', '-s', 'args', '-R', '--delete') == cli_status.success
+
+    after = rows(task_db)
+    assert list(after) == [ids[0]]
+    assert after[ids[0]]['exit_status'] == 0
+    assert messages(logs, logging.WARNING, NOT_MATCHED)
+    assert messages(logs, logging.INFO, 'Deleted 3 tasks')
+    assert severe(logs) == []
+
+
+@mark.unit
 def test_update_filtered_uncontended_is_one_statement(task_db, update_driver, hs_update, logs) -> None:
     """Without `--limit`, a field change, a tag set and a tag removal are one UPDATE of `task`, for 5 rows
     and for 30, and every row gets all three."""

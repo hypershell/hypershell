@@ -4,7 +4,7 @@ title: hs update writes every requested change to exactly the rows it counts, co
   or not, and says plainly when it cannot
 kind: fix
 appetite: big
-status: blocked
+status: in_progress
 branch: fix/hs-update-contended-writes
 base: develop
 current_phase: P7
@@ -390,8 +390,24 @@ written or the update aborts; DELETE alike; counts are of rows written.
       `DATABASE_DIALECT` tag branches go.
 - [x] Every test in `red.txt` and `ci-red.txt` passes locally; `update_drive.sh` passes on SQLite,
       PostgreSQL and TimescaleDB.
+- [x] Review-cycle-1 F1 (reopened; PLAN "Review-cycle-1 rulings"): `__write_rows(…, tried=N)` counts
+      the attempts a set-based statement already made on every row it is given; `update_matching` and
+      `delete_matching` pass `tried=1`, so a missed row gets at most `CONTENDED_RERUNS` further tries
+      (the first logged as a re-run, `attempt 2 of 4`) and the WARNING and `Task.Contended` say
+      `after 4 attempts`, the true total. `--limit` and the single-task form are unchanged.
+- [x] F1 tests (row trigger, `tests/test_contended_write.py`):
+      `test_update_filtered_skipped_row_lands_at_bound[update|delete]` (skipped `CONTENDED_RERUNS`
+      times: written, counted, re-runs logged as attempts 2 to 4) and
+      `test_update_filtered_skipped_row_past_bound_writes_nothing[update|delete]` (skipped once more:
+      exit 5, nothing written, WARNING and error `after 4 attempts`); red on `ee5fcd4` and on
+      `f00f853`, added to `red.txt`.
+- [x] Review-cycle-1 F3: `--delete` leaving a row that stopped matching ("Deleted 3 tasks", the
+      warning, exit 0): `tests/test_contended_recovery.py::test_update_delete_limit_skips_task_changed_out_of_filter`
+      (SQLite, `--limit`) and `test_contended_update_delete_leaves_row_moved_out_of_filter[filtered|limit]`
+      (the real race); red on `f00f853` (green on `ee5fcd4`: coverage only), added to `red.txt`.
 - **Verify:** see frontmatter.
-- **Touches:** `src/hypershell/task.py`, `src/hypershell/data/model.py`.
+- **Touches:** `src/hypershell/task.py`, `src/hypershell/data/model.py`; for review-cycle-1,
+  `tests/test_contended_write.py`, `tests/test_contended_recovery.py`, `spec/hs-update-contended-writes/red.txt`.
 
 ## Phase P6 — Docs, AGENTS.md, invariants (R7); full local evidence
 **Satisfies:** R7, R6 · **Depends on:** P5
@@ -417,6 +433,12 @@ written or the update aborts; DELETE alike; counts are of rows written.
       sentence in `task_update_desc.rst`; ruling D2's `-t a b` fix as a `versionchanged` on
       `docs/cli/task_search.rst` too. The entries carry no `:pr:` role: the PR number is the
       publisher's to add.
+- [x] Review-cycle-1 F2 (reopened): invariants §1 describes `delete_matching` as built (its row
+      count and one read of the ids still matching, no `RETURNING`), and the set-based statement as
+      each row's first attempt, with at most `CONTENDED_RERUNS` more by id. `AGENTS.md` was already
+      right.
+- [x] Re-run of this phase's verify after the F1 fix (full suite, server modules, `red_check.sh`,
+      `sphinx-build -W`).
 - **Verify:** see frontmatter.
 - **Touches:** `docs/cli/task_update.rst`, `docs/_include/task_update_desc.rst`,
   `docs/cli/task_search.rst`, `AGENTS.md`, `.agents/factory/invariants.md`, `src/hypershell/data/model.py`
@@ -430,6 +452,37 @@ written or the update aborts; DELETE alike; counts are of rows written.
       `spec/hs-update-contended-writes/evidence/ci-green/run.json`.
 - **Verify:** `ci_check.py green`, with the last commit outside `spec/` as `--code-rev`.
 - **Touches:** `spec/hs-update-contended-writes/evidence/ci-green/`.
+
+## Review remediation
+
+### Review cycle 1 (2026-11-15) — F1, F2, F3
+
+Rulings: [`PLAN.md`](PLAN.md) "Review-cycle-1 rulings" (maintainer sign-off; the human gate F1
+triggered). P5 (F1, F3) and P6 (F2) reopened and closed again with `set_phase.py`; no verify retuned,
+since both already run `test_contended_write.py` and `red_check.sh` over `red.txt`, which now lists
+the new tests.
+
+- **F1 fix.** `Task.__write_rows` takes `tried`: attempts already made on every row it is given,
+  counted toward `1 + CONTENDED_RERUNS`. `update_matching` and `delete_matching` hand their residual
+  rows over with `tried=1`, so the set-based statement is each row's first attempt, a missed row gets
+  at most `CONTENDED_RERUNS` tries by id (the first logged `Re-running … (attempt 2 of 4)`), and the
+  WARNING and `Task.Contended` report the 4 attempts made. `--limit` (`update_selected`/
+  `delete_selected`) and `Task.update` pass no `tried` and are unchanged. A row that came to match
+  only after the set-based statement is held to the same total.
+- **F1 tests.** `test_update_filtered_skipped_row_lands_at_bound[update|delete]` and
+  `test_update_filtered_skipped_row_past_bound_writes_nothing[update|delete]`: red on `ee5fcd4`
+  (4 of 4, plain PostgreSQL 18 and TimescaleDB 2.32: there the row lands a fifth time and the re-run
+  lines stop at attempt 3), red on `f00f853`, green after.
+- **F2.** invariants §1: the UPDATE returns its ids (`RETURNING id`); the DELETE takes its row count
+  and the one read of the ids still matching, with no `RETURNING`; the set-based statement is the
+  first attempt.
+- **F3.** `test_update_delete_limit_skips_task_changed_out_of_filter` (SQLite) and
+  `test_contended_update_delete_leaves_row_moved_out_of_filter[filtered|limit]` (real race): "Deleted
+  3 tasks", the warning, exit 0. Red on `f00f853`, green on `ee5fcd4` (coverage of behaviour already
+  right) and after.
+- **Evidence.** P5's verify (red_check 32 of 32 red on both servers; `update_drive.sh` 18 of 18 PASS
+  on SQLite, PostgreSQL, TimescaleDB) and P6's verify (full suite, server modules on both, docs `-W`)
+  re-run green; counts in the commit body.
 
 ---
 
