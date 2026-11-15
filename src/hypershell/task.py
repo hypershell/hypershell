@@ -1056,6 +1056,7 @@ class TaskUpdateApp(Application, SearchableMixin):
 
     exceptions = {
         Task.NotFound: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
+        Task.Contended: functools.partial(handle_exception, logger=log, status=exit_status.runtime_error),
         **get_shared_exception_mapping(__name__)
     }
 

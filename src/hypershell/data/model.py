@@ -138,6 +138,10 @@ class NotDistinct(DatabaseError):
     """Exception specific to multiple records found when only one should have been."""
 
 
+class Contended(DatabaseError):
+    """Exception specific to a write that did not land after its re-runs, another writer holding the row."""
+
+
 class AlreadyExists(DatabaseError):
     """Exception specific to a record with unique properties already existing."""
 
@@ -459,6 +463,9 @@ class Task(Entity):
         pass
 
     class AlreadyExists(AlreadyExists):
+        pass
+
+    class Contended(Contended):
         pass
 
     @property
@@ -1010,7 +1017,7 @@ class Task(Entity):
                      pending: bool = False, strict: bool = False, held_by: Optional[str] = None,
                      unscheduled: bool = False, retryable: bool = False,
                      each: Optional[Dict[str, Dict[str, Any]]] = None, commit: bool = True,
-                     prefix: str = 'r_') -> List[str]:
+                     abort: bool = False, prefix: str = 'r_') -> List[str]:
         """Write `values` onto each task in `ids` by `id`, in one transaction; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
@@ -1018,7 +1025,9 @@ class Task(Entity):
         raises `StaleDataError` and nothing of the call is committed, as for a bulk update; a row
         that still exists was missed because the write waited on another transaction's row lock,
         and the write is re-run, at most `CONTENDED_RERUNS` times. A row still not written after
-        that is logged as a warning with the `consequence` and left as it is.
+        that is logged as a warning with the `consequence` and left as it is; with `abort`, the
+        warning is followed by a rollback of the whole transaction (the caller's earlier writes
+        with it) and `Task.Contended` naming the task, so nothing of the call is written.
 
         With `pending`, the write requires that the row has no `completion_time`. A row that is
         completed or cancelled no longer qualifies: it is settled, never re-run and never an
@@ -1095,6 +1104,9 @@ class Task(Entity):
                 else:
                     log.warning(f'Contended {path} write did not land for task ({id}) '
                                 f'after {attempts} attempts - {consequence}')
+                    if abort:
+                        raise cls.Contended(f'Update of task ({id}) was contended after {attempts} attempts '
+                                            f'- nothing was written')
             if commit:
                 Session.commit()
         except Exception:
@@ -1102,6 +1114,17 @@ class Task(Entity):
             raise
         log.trace(f'Updated {len(landed)} {cls.__table__.name}s')
         return landed
+
+    @classmethod
+    def update(cls: Type[Task], id: str, **changes: Any) -> None:
+        """Write `changes` onto the task `id`, re-running the write while it is contended.
+
+        One UPDATE by `id`. A row that is gone raises `StaleDataError`. A row that matched nothing
+        but still exists was missed because the write waited on another transaction's row lock, and
+        the write is re-run, at most `CONTENDED_RERUNS` times; a row still not written after that
+        raises `Task.Contended`, with nothing written.
+        """
+        cls.__write_rows([id], changes, 'update', 'nothing written', abort=True, prefix='u_')
 
     @classmethod
     def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str,

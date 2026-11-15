@@ -49,7 +49,7 @@ phases:
 - id: P3
   name: 'The legacy form on the re-run helper: Task.update, Task.Contended, the abort
     at the bound'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R4
@@ -57,7 +57,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: pg=postgresql+psycopg://postgres:postgres@localhost:5432/postgres; spec=spec/hs-update-contended-writes;
     uv run pytest -q -p no:cacheprovider tests/test_contended_recovery.py -k 'not
     update_limit and not update_delete_limit and not update_filtered' && uv run pytest
@@ -328,16 +328,16 @@ change. This commit is what the foreman pushes to the draft PR for P2.
 **Goal:** `hs update ID FIELD VALUE` lands under contention, reports not found only for a missing row,
 and at the bound writes nothing, logs the contended error and exits 5.
 
-- [ ] `src/hypershell/data/model.py`: `class Contended(DatabaseError)` beside `NotFound`;
+- [x] `src/hypershell/data/model.py`: `class Contended(DatabaseError)` beside `NotFound`;
       `Task.Contended`. `__write_rows` gains `abort: bool = False` (at the bound: today's WARNING, then
       rollback and raise `Task.Contended` with `Update of task ({id}) was contended after N attempts -
       nothing was written`). Docstring.
-- [ ] `Task.update(id, **changes)` overrides `Entity.update`: `__write_rows([id], changes, 'update',
+- [x] `Task.update(id, **changes)` overrides `Entity.update`: `__write_rows([id], changes, 'update',
       'nothing written', abort=True, prefix='u_')`. A gone row still raises `StaleDataError`.
-- [ ] `src/hypershell/task.py`: `TaskUpdateApp.exceptions` maps `Task.Contended` to
+- [x] `src/hypershell/task.py`: `TaskUpdateApp.exceptions` maps `Task.Contended` to
       `handle_exception` with `exit_status.runtime_error`; `update_legacy` keeps `StaleDataError` →
       `Task.NotFound`.
-- [ ] The legacy tests pass; every existing contended test still passes.
+- [x] The legacy tests pass; every existing contended test still passes.
 - **Verify:** see frontmatter (the recovery module minus the `--limit`/filtered slices; the server
   write modules; the server-database modules minus the new slices but with the legacy real race, on PG
   18 and TS 2.32; `red_check.sh`).
