@@ -23,7 +23,7 @@ import subprocess
 from datetime import datetime
 
 # External libs
-from cmdkit.config import Namespace, Configuration, Environ, ConfigurationError
+from cmdkit.config import Namespace, Configuration, ConfigurationError
 from cmdkit.app import exit_status
 from cmdkit.cli import Interface, ArgumentError
 
@@ -662,6 +662,17 @@ def __collapse_lists(ns: Namespace) -> Namespace:
 
 
 @functools.cache
-def load_task_env() -> Environ:
-    """Export environment defined in `config.export`."""
-    return __collapse_lists(config.export).to_env().flatten()
+def load_task_env() -> Dict[str, str]:
+    """The variables `config.export` gives every task.
+
+    A configuration file's `[export]` names are upper-cased and its lists joined (tables merge
+    across files as any table does). Each `HYPERSHELL_EXPORT_<NAME>` variable is laid over them as
+    `<NAME>`, name and value as written, so for the same task variable the environment's wins.
+    """
+    files = Namespace()
+    for name, layer in config.namespaces.items():
+        if name != 'env' and isinstance(table := layer.get('export'), dict):
+            files.update(table)
+    table = config.namespaces.get('env', {}).get('export')
+    written = {name: str(value) for name, value in table.items()} if isinstance(table, dict) else {}
+    return {**__collapse_lists(files).to_env().flatten(), **written}

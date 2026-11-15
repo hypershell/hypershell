@@ -55,7 +55,7 @@ def test_export_as_written(temp_site: Path, case: str) -> None:
 def test_export_reaches_task(temp_site: Path) -> None:
     """A task run by `hs cluster` sees each exported variable by its name and value as written."""
     site = Path(str(temp_site))
-    taskfile = create_taskfile(site, ['printenv RUN_ID MyVar; printenv EMPTY > /dev/null && echo empty-set'])
+    taskfile = create_taskfile(site, ['printenv RUN_ID; printenv MyVar; printenv EMPTY > /dev/null && echo empty-set'])
     env = child_env(site, HYPERSHELL_EXPORT_RUN_ID='007', HYPERSHELL_EXPORT_MyVar='x', HYPERSHELL_EXPORT_EMPTY='')
     status, stdout, stderr = run_bounded(site, ['hs', 'cluster', '--no-db', '-N1', str(taskfile)], env)
     assert status == exit_status.success, stderr

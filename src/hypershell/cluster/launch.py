@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from subprocess import Popen, PIPE
 
 # Internal libs
-from hypershell.core.config import load_task_env
+from hypershell.core.config import load_task_env, is_key_variable
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
 from hypershell.data.model import DEFAULT_ZONE_NAME
@@ -153,8 +153,8 @@ class ClientLaunch:
         Shell-quoted command line for logging, with any key option value redacted.
 
         A word that assigns :const:`AUTH_ENV` shows the name only: each word is parsed as a
-        shell would parse it, and any `NAME=value` it holds whose name is :const:`AUTH_ENV`
-        redacts the whole word, however the word is quoted. The last word of an SSH launch
+        shell would parse it, and any `NAME=value` it holds whose name sets `server.auth`
+        (:func:`assigns_key`) redacts the whole word, however the word is quoted. The last word of an SSH launch
         (the one with `stdin`) is already quoted for the remote shell and ssh sends it as it
         is, so it is shown as it is.
         """
@@ -384,9 +384,11 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
     """
     One `NAME=value` word per variable in `env`, for the remote shell of an SSH launch.
 
-    :const:`AUTH_ENV` is left out by name before anything is quoted. Each value is quoted
-    with :func:`shlex.quote`, so a POSIX shell reads it back as exactly that value, and
-    no value can join or split words. A name that a shell cannot assign is left out.
+    Every variable that sets `server.auth` (:const:`AUTH_ENV`, in any letter case; see
+    :func:`~hypershell.core.config.is_key_variable`) is left out by name before anything is
+    quoted. Each value is quoted with :func:`shlex.quote`, so a POSIX shell reads it back as
+    exactly that value, and no value can join or split words. A name that a shell cannot assign
+    is left out.
 
     Example:
         >>> ssh_env_exports({'HYPERSHELL_A': 'a b', AUTH_ENV: 'secret', 'HYPERSHELL_B': 'b'})
@@ -394,7 +396,7 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
     """
     words = []
     for name, value in env.items():
-        if name == AUTH_ENV:
+        if is_key_variable(name):
             continue
         if not SHELL_NAME.fullmatch(name):
             log.warning(f'Not exporting {name!r} to remote clients: not a shell variable name')
@@ -404,12 +406,12 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
 
 
 def assigns_key(word: str) -> bool:
-    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name is :const:`AUTH_ENV`."""
+    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name sets `server.auth`."""
     try:
         tokens = shlex.split(word)
     except ValueError:  # Unbalanced quotes: look at the word as it is
         tokens = word.split()
-    return any(token.split('=', 1)[0] == AUTH_ENV and '=' in token for token in tokens)
+    return any('=' in token and is_key_variable(token.split('=', 1)[0]) for token in tokens)
 
 
 def ssh_launch_args(args: Sequence[str]) -> List[str]:

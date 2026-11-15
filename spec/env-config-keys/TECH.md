@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/env-config-keys
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -58,7 +58,7 @@ phases:
     uv run sh "$PWD/spec/env-config-keys/drive/env_drive.sh" $m || exit 1; done
 - id: P3
   name: '[export] as written, and the key variable recognised in any letter case'
-  status: pending
+  status: done
   satisfies:
   - R7
   - R4
@@ -307,13 +307,18 @@ change.
 **Goal:** a task sees `HYPERSHELL_EXPORT_<NAME>` by its name and value as written; no spelling of the
 key variable reaches a task or a remote command line.
 
-- [ ] `core/config.py` `load_task_env` per layer (PLAN §2.7).
-- [ ] `client.py` `inherited_task_env` and the no-key hint, `cluster/launch.py` `ssh_env_exports` and
+- [x] `core/config.py` `load_task_env` per layer (PLAN §2.7).
+- [x] `client.py` `inherited_task_env` and the no-key hint, `cluster/launch.py` `ssh_env_exports` and
       `assigns_key`: `is_key_variable` in place of `== AUTH_ENV` (§2.5); the Open MPI list entry the
       same way.
-- [ ] `docs/_include/config_task_env.rst` and `_alt`: names and values as written from the
+- [x] `docs/_include/config_task_env.rst` and `_alt`: names and values as written from the
       environment; a file's table upper-cased; the same-name rule (`versionchanged:: 2.9.0` in the
       html page).
+- *As built:* `load_task_env` returns a plain `dict`; `ompi_env_list` is unchanged, since the launch
+  environment it names holds `AUTH_ENV` exactly as `client_launch` sets it. The task in
+  `test_export_reaches_task` and the drive's `export` mode calls `printenv` once per name: BSD
+  `printenv` takes one name, so `printenv RUN_ID MyVar` printed only the first on macOS (the test
+  is still red on `90ab2fc2`).
 - **Verify:** frontmatter (export tests, launch and relay-launch contract tests; drive `export`).
 - **Touches:** `src/hypershell/core/config.py`, `src/hypershell/client.py`,
   `src/hypershell/cluster/launch.py`, `docs/_include/config_task_env*.rst`, `tests/`.

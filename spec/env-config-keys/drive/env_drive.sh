@@ -152,7 +152,7 @@ serve)
     ok "all-digit key, evict = \"10m\", heartrate 5s: server and client exit 0"
     ;;
 export)
-    echo 'printenv RUN_ID MyVar; printenv EMPTY > /dev/null && echo empty-set' > "$site/tasks.in"
+    echo 'printenv RUN_ID; printenv MyVar; printenv EMPTY > /dev/null && echo empty-set' > "$site/tasks.in"
     out=$(env HYPERSHELL_SERVER_PORT="$(port)" HYPERSHELL_EXPORT_RUN_ID=007 HYPERSHELL_EXPORT_MyVar=x HYPERSHELL_EXPORT_EMPTY= \
           hs cluster --no-db -N1 "$site/tasks.in" 2> "$site/cluster.log")
     want=$(printf '007\nx\nempty-set\n')

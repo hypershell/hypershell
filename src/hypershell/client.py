@@ -62,7 +62,7 @@ from hypershell.data.model import Task, serialize_tasks, deserialize_tasks, zone
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, resolve_auth, refuse_key_option,
-                                    AUTH_ENV)
+                                    AUTH_ENV, is_key_variable)
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
@@ -477,12 +477,14 @@ def inherited_task_env() -> Dict[str, str]:
     """
     The client's own environment as its tasks inherit it, without the authentication key.
 
-    :const:`AUTH_ENV` is left out, and its name is taken out of :const:`OMPI_ENV_LIST`, which
-    is left out too if no other name remains. The client's own environment is not modified.
+    Every variable that sets `server.auth` (:const:`AUTH_ENV`, in any letter case; see
+    :func:`~hypershell.core.config.is_key_variable`) is left out, and its name is taken out of
+    :const:`OMPI_ENV_LIST`, which is left out too if no other name remains. The client's own
+    environment is not modified.
     """
-    env = {name: value for name, value in os.environ.items() if name != AUTH_ENV}
+    env = {name: value for name, value in os.environ.items() if not is_key_variable(name)}
     if OMPI_ENV_LIST in env:
-        names = [name for name in env.pop(OMPI_ENV_LIST).split(';') if name and name != AUTH_ENV]
+        names = [name for name in env.pop(OMPI_ENV_LIST).split(';') if name and not is_key_variable(name)]
         if names:
             env[OMPI_ENV_LIST] = ';'.join(names)
     return env
@@ -1664,7 +1666,7 @@ class ClientApp(Application):
         """Run client."""
         self.auth = resolve_auth('server')
         # The hints below name a missing key only when none came from the environment or a configuration file.
-        no_key = AUTH_ENV not in os.environ and self.auth == DEFAULT_AUTH
+        no_key = not any(is_key_variable(name) for name in os.environ) and self.auth == DEFAULT_AUTH
         try:
             self.check_args()
             self.enable_tls()
