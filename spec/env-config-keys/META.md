@@ -48,3 +48,10 @@
 - **Confidence:** high · **Effort:** small
 
 **What worked well:** Writing the frontmatter through `_fsm.dump_document` (the writer `set_phase.py` uses) left it byte-stable under a re-dump, so P1's first state change will not reformat the file (`spec/contended-writes/META.md` F5).
+
+## F6 — Plan-gate rulings that bind the contract's reading live in PLAN.md, out of the blind reviewer's sight · seen again
+`origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** The plan gate accepted S1–S13, which change what R1, R5 and R6 require (a typed variable that does not convert stops every command at import; empty text refused on a number key; two variables for one key refused; the duration keys' exit status). They are recorded at the end of `PLAN.md`, which Step 2 forbids passing. The foreman's brief supplied a summary and the orchestrator relayed it as contract readings; without it the reviewer would have graded ruled behaviour as defects.
+- **Skill cause:** As `spec/key-option-refused/META.md` F5: no skill says where a gate ruling that changes a contract reading must live for the blind pass to see it. This cycle shows it applies to cycle 1's plan-gate rulings, not only to later review cycles.
+- **Recommended fix:** As recorded there, extended: `hs-plan`'s gate copies each ruling that changes an R-ID's reading into `GOAL.md` (a "Contract readings" block beside the GOAL-gate block), and Step 2 says that block is part of the contract the reviewer reads.
+- **Confidence:** high · **Effort:** small
