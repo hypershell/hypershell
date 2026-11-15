@@ -176,3 +176,170 @@ the top of `check_args`, before `enable_tls`, `check_database` and any serve cal
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run.
+
+## Review cycle 2 — approved (2026-11-15)
+
+- **Reviewed commit:** 77a3af79d35997ff4a9b026ac1370c1d368d6666  ·  **Base:** `b17ff1a` (`origin/develop`)
+- **Verdict:** approved
+- **Cycle:** 2 of ≤3
+- **Mode:** cycle 1's F1–F3 remediation graded, plus a fresh blind pass over the full spec-excluded
+  diff. One blind correctness reviewer (no `debate`, no `completeness` sub-pass). The orchestrator
+  re-ran the deciding evidence for F2 and the docs build.
+
+### Pre-flight
+
+- **Base.** `origin/develop` fetched: `b17ff1a`. The branch was cut at `90ab2fc`. The graded diff is
+  `git diff origin/develop...HEAD -- . ':(exclude)spec/'`, 16 files. Code was graded against the
+  `origin/develop` copies of `invariants.md` and `AGENTS.md`.
+- **Merge.** `git merge-tree --write-tree origin/develop HEAD` exits 0, so the branch merges cleanly.
+- **Contract drift.** `GOAL.md` has only its shaping commit `57fcced` and the gate lock `2f4df3e`.
+  The review-cycle-1 ruling `e89f3c9` has maintainer sign-off and is recorded outside `GOAL.md`. It
+  amends R6 for `autoscale.period`: a positive number below one second, from a file or
+  `HYPERSHELL_AUTOSCALE_PERIOD`, is read as one second, as `-P` and a key string already are. Nothing
+  that starts today is refused, and `cluster/remote.py`, `cluster/topology.py` and `relay/site.py`
+  stay unchanged. The reviewer got this ruling as a binding reading, along with the gate readings:
+  - the floor is greater than zero;
+  - a number in the key names `autoscale.period`, and a string names `-P/--period`;
+  - NaN is refused;
+  - the Python API stays unguarded.
+
+### Verification run
+
+The reviewer ran these in throwaway sites (`temp_site.sh`), with the key in `HYPERSHELL_SERVER_AUTH`.
+
+- **Tests at HEAD.** `tests/test_cluster_no_db.py tests/test_period_floor.py tests/test_duration_options.py`
+  gave 556 passed. The orchestrator re-ran them and got the same 556.
+  - Targeted wider suite: 1921 passed, 9 skipped. It covered `test_server_initdb`, `test_autoscale*`,
+    `test_cluster*`, `test_relay_*`, `test_topology_*`, `test_zone_autoscale`, `test_size_duration`,
+    `test_duration*` and `test_period_floor`.
+  - `test_server`, `test_main`, `test_key_option` and `test_queue_tls`: 274 passed.
+  - Every new test carries a real marker: `--collect-only -m "not unit and not integration"`
+    collects 0.
+- **Red on `90ab2fc`.** With the base `src` first on `PYTHONPATH`:
+  - The no-db and duration files gave 8 failed, each for the defect: `['initdb'] == []`, the
+    database file created, exit 5 on an unopenable path, and relay `0.5` not read as one second.
+  - `test_period_floor.py` fails at collection on base, because `parse_period` does not exist
+    there. With that import guarded in a scratch copy, it gave 121 failed and 28 passed. The 28 that
+    pass are the kept-behaviour pins.
+- **Mutation.** The floor was rewritten as `seconds <= 0` in a scratch copy of HEAD `src`. 10 tests
+  fail against it: the NaN cases in the parser, in the key and environment for every launch, and in
+  the relay.
+- **`--no-db`.** With `HYPERSHELL_DATABASE_FILE` under a missing directory, `hsx`, `hs cluster` and
+  `--launcher` gave rc 0, ran both tasks, and did not create the directory.
+  - An initialized `task.db` was left byte-identical by local and `--launcher` runs (same sha and
+    mtime).
+  - In-process `ClusterApp.__enter__` with the unopenable path, under `--mpi`, `--ssh localhost`,
+    `--launcher` and local mode: HEAD creates nothing, and base raises `OperationalError` in every mode.
+  - `--autoscaling --no-db` is still refused in `check_arguments`.
+  - Without `--no-db`, the four tables are created and the unopenable path still exits 5.
+  - PostgreSQL on an unreachable port: rc 0 with `--no-db` and rc 5 without, the same as base.
+    The `turso` provider was not driven because its driver is not installed; the skip does not
+    depend on the provider.
+- **Period refusals.** Each of the following exits 2 on HEAD and starts on base:
+  - `-P`/`--period` set to `0 0s 0m 0:00 0-0 0.0`, on `hs cluster`, on `hs server FILE --no-db`
+    and on `hs server --autoscaling fixed`. The error is
+    `argument -P/--period: Period '<v>' is not valid: must be greater than zero`.
+  - Key numbers (env and file) `0 -5 0.0 -0.0 nan -inf false`. The error is
+    `autoscale.period: Period <v> is not valid: must be greater than zero`.
+  - Key strings `"0s"` and `"0:00"`, which are refused naming `-P/--period`.
+  - `hs relay` with env and file values `0 -5 0.0 -0.0 nan -inf 0s 0:00 false`: it exits 2 naming
+    `autoscale.period`, before `bind_database` or any upstream connection. On base, `nan` and `-inf`
+    exit 5. `5MB` exits 2 on both HEAD and base.
+- **Accepted periods.** `0.001`, `0.5`, `1`, `"0.5"` and `true` start.
+  `test_period_key_accepted` records what reaches `run_cluster`, `serve_with_sites` and
+  `RelayThread`:
+  - `0.001` and `0.5` arrive as int `1`;
+  - `1.5` arrives as `1.5`;
+  - `2` arrives as `2`.
+- **Spin drive.** The cluster runs used `--autoscaling fixed -I 1 --launcher <sleeper> --no-tls` with
+  debug logging. Each run lasted 7.5 s, measured by `Autoscale check` lines and lifetime CPU.
+
+  | Case | Base `90ab2fc` | HEAD (reviewer) | HEAD (orchestrator re-run) |
+  |---|---|---|---|
+  | cluster, env `0.001` | 4530 checks, 7.39 s | 7 checks, 0.34 s | 7 checks, 0.36 s |
+  | cluster, file `0.001` | 4517 checks, 7.41 s | 7 checks, 0.34 s | 6 checks, 0.37 s |
+  | cluster, `-P 0` | 4320 checks, 7.40 s | refused | not run |
+  | cluster, env/file `0.5`, file `true`, `-P 0.5` | not run | 7 checks, about 0.35 s each | not run |
+  | cluster, `-P 1` | 6 checks, 0.37 s | 6 checks, 0.37 s | 7 checks, 0.35 s |
+  | server `--autoscaling fixed`, env `0.001` | 7.41 s CPU | 0.36 s CPU | 0.31 s CPU |
+  | server, `-P 0` | 7.42 s CPU | refused | not run |
+  | server, `-P 1` | 0.33 s CPU | 0.34 s CPU | 0.33 s CPU |
+
+  Every process the drives started was stopped by its recorded PID or process group. A final
+  out-of-sandbox `ps` showed none of them left.
+- **Docs.** `sphinx-build -W --keep-going -q -E -b html` exits 0 with no warnings, in both the
+  reviewer's run and the orchestrator's.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how | Status |
+|------|----------------|--------------|--------|
+| R1 | `cluster/__init__.py` `ClusterApp.__enter__`: no `initdb`/`checkdb` under `--no-db` | `--no-db` drives and in-process enters above (local, `--launcher`, `--mpi`, `--ssh`, `hsx`, unopenable path, existing file byte-identical); `test_no_db_makes_no_database_call` | ✅ |
+| R2 | same | tables created; unopenable path still exits 5; `--initdb`; PostgreSQL identical to base; `test_database_step_kept` | ✅ |
+| R3 | `core/types.py` `parse_period` as the `-P` type in `server.py` and `cluster/__init__.py` | every zero form refused with rc 2 on all three launch kinds, message naming option, value and floor; `test_period_option_zero_refused` | ✅ |
+| R4 | `check_args` / `check_arguments` parse the key first and keep the result | env/file numbers and strings, NaN, `±0.0`, `-inf`, `false` → rc 2 with the D1 naming; `test_period_key_refused` | ✅ |
+| R5 | `RelayApp.site_period` through `parse_period`, read in `check_args` | relay refusals above, before any database or upstream; `test_relay_period_zero_refused` | ✅ |
+| R6 (as amended) | `parse_period`: a number below one second → `1`, one or more as given; strings via `parse_time` | values reaching `run_cluster`/`serve_with_sites`/`RelayThread`; positive forms start; spin drive above | ✅ |
+| R7 | help strings, `cluster_help.rst`, `server_help.rst`, `config_param_ref.rst`, `docs/cli/cluster.rst`, `docs/cli/server.rst`, zsh `_hs` | each passage read against the drives; markers beside each `.. include::` and under `.period` alongside the existing one; `-W` clean | ✅ |
+| R8 | `tests/test_cluster_no_db.py`, `tests/test_period_floor.py`, `tests/test_duration_options.py` | red on `90ab2fc` for the defect, green at HEAD; the NaN cases catch a `<= 0` floor | ✅ |
+
+Unmapped changes (possible scope creep): none. In `ROADMAP.md` and the two seeds, only `status:`
+changes, to `adopted:cluster-nodb-and-zero-period`. Both seed files exist.
+
+### Cycle-1 remediation
+
+- **F1: remedied.** `config_param_ref.rst` `.period` now reads: "A period below one second, in any
+  form, is one second." Its marker reads: "a number below one second is one second". Both match the
+  drives: the option, a string and a number all read `0.5` as one second, and `0.001` as one second
+  where it is a number.
+- **F2: remedied.** The maintainer ruled that numbers round up at the command layer. No autoscaler
+  spins from any route; the spin table above shows it. Every caller that builds an autoscaler gets
+  its period through the floor:
+  - `run_cluster` via `ClusterApp`;
+  - `serve_with_sites` via `ServerApp`;
+  - the relay fleets via `site_period`.
+
+  Nothing else reads `config.autoscale.period`. As ruled, `cluster/remote.py`, `cluster/topology.py`
+  and `relay/site.py` are unchanged.
+- **F3: remedied.** NaN, `-inf` and `-0.0` are covered in the parser, in the key and environment for
+  every launch, and in the relay. The NaN cases fail against a `seconds <= 0` floor.
+
+### Findings
+
+None. The reviewer dropped each candidate below after running it:
+
+- **`+inf` (or `1e309`) in the key.** It is accepted, and an autoscaling run then exits 5 with
+  `OverflowError`, exactly as on base. A maximum period is a Non-goal.
+- **Negative strings (`-P -5`, `"-5s"`).** They exit 2 as `Duration … is not valid`, as on base:
+  #106 refuses a sign. R3 covers zero, and R4's "negative number" means a number.
+- **`true`.** It is read as `True`, which is one second, the same as base. It does not spin.
+
+No invariant violation:
+
+- §4: `in_memory` is honoured before any database step.
+- §10: the configuration singleton is not mutated, and the CLI still wins.
+- §11: no launch, argv or key handling changed.
+- §12: help, snippets, completions, prose pages and markers changed together, tests are tagged, and
+  the docs build is `-W` clean.
+
+`server.py` changes only two things: the `-P` type, and a check at the top of `check_args` that stores
+the parsed period. That check runs after `special_options()` and `resolve_auth`, and before
+`enable_tls`, `check_database` and every `serve_*`. Only `--available-ports` skips it, and that
+launches nothing.
+
+### Human-gate triggers
+
+- **Not triggered this cycle.** No CONFIRMED finding exists, so none touches `server.py`, any other
+  high-blast-radius file, or a security or DB-lifecycle invariant.
+- Cycle 1's trigger (F2) was discharged by the maintainer's sign-off on the review-cycle-1 rulings,
+  given before the remediation. The remediation stayed inside that ruling: `parse_period` and the
+  two command-layer call sites changed, and `remote.py` and `topology.py` did not.
+
+### Routing
+
+- **Verdict:** approved. Recommend `/hs-publish`.
+
+### Out of scope observations (not graded)
+
+- `+inf` in `autoscale.period` is accepted at start-up and fails with `OverflowError` once an
+  autoscaler starts, the same as base. This touches the no-maximum Non-goal.

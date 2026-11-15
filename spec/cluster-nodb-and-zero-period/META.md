@@ -67,3 +67,10 @@ is skipped by the parser):
 - **Skill cause:** The exception weighs only GOAL criteria; it says nothing about a repair that satisfies the criteria but sits in a Non-goal or exceeds the appetite, nor who decides then.
 - **Recommended fix:** In the rubric's *Verdict & loop* and hs-review Step 4, add: when the only repair that satisfies the criteria lies in a Non-goal area, beyond the appetite, or in the high-blast-radius core, record the finding as CONFIRMED, write no seed, and route the deferral-or-amend choice to the human gate.
 - **Confidence:** med · **Effort:** small
+
+## F5 — A cycle-2 blind reviewer has no sanctioned channel for the named findings or a ruling that amends GOAL outside GOAL.md
+`origin=hs-review:step2 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** Cycle 2 had two jobs: grade the remediation of F1–F3, and apply a maintainer ruling that amends R6. That ruling is recorded in `PLAN.md`, and `GOAL.md` was not edited. Step 2 gives the reviewer "only" `GOAL.md`, the diff, `invariants.md` and the rubric. So the reviewer could see neither the findings it had to grade (they are in `REVIEW.md`, under the excluded `spec/`) nor the amended contract. The orchestrator had to restate both in the prompt, as binding readings the caller supplied.
+- **Skill cause:** Step 2's input list does not cover cycle 2+. It names no input for the prior findings to verify, and none for a post-lock ruling that lives outside `GOAL.md`. A reviewer given the inputs exactly as listed would grade R6 as originally written and could not grade the remediation.
+- **Recommended fix:** In Step 2, add a cycle-2+ input. Pass each prior finding's id, title, location and remedy target, without the earlier reviewer's reasoning. Pass every recorded ruling that amends a requirement, quoted verbatim as a contract amendment. Or require hs-build to write such a ruling into `GOAL.md` Clarifications, so the blind inputs carry it. Blindness to `PLAN.md`/`TECH.md` reasoning is unchanged.
+- **Confidence:** med · **Effort:** small

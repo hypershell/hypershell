@@ -109,10 +109,10 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     "$TMPDIR/docs-html-cnz"
 review:
-  last_reviewed_commit: 53f939229613fec56d9cde78932d84a58c3a8bd8
-  verdict: changes-requested
+  last_reviewed_commit: 77a3af79d35997ff4a9b026ac1370c1d368d6666
+  verdict: approved
   blocked_reason: ''
-  cycle: 1
+  cycle: 2
 ---
 # TECH.md — `hs cluster --no-db` leaves the database alone, and an autoscaling period of zero or less is refused
 
