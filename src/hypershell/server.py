@@ -140,7 +140,6 @@ class Scheduler(StateMachine):
     restart_mode: bool
     poll: float
     poll_max: float
-    startup_phase: bool
     first_group_pending: bool
     highest_started_group: Optional[int]
     last_scheduled_group: Optional[int]
@@ -168,7 +167,6 @@ class Scheduler(StateMachine):
         self.restart_mode = restart_mode
         self.poll = SERVER_POLL_MIN
         self.poll_max = poll
-        self.startup_phase = not self.restart_mode  # NOTE: Halt if everything in the database is already finished
         self.first_group_pending = False
         self.highest_started_group = None
         self.last_scheduled_group = None
@@ -196,11 +194,11 @@ class Scheduler(StateMachine):
         """True once no more tasks can arrive from a co-running submitter.
 
         The scheduler shares a process with an optional :class:`~hypershell.submit.SubmitThread`
-        (the cluster/server file-ingest path). It must not conclude "all tasks completed —
-        stop" while that submitter is still committing rows: a database holding only prior
-        *completed* tasks reads as ``remaining == 0`` right up until the first novel row lands,
-        so an unguarded early-exit would halt before the new work is ever scheduled. When there
-        is no submitter (bare ``--restart`` DB resume) submission is trivially complete.
+        (a file or a stream given to the cluster or server). It does not stop while that submitter
+        is still reading: with every task read so far done, the database reads as ``remaining == 0``
+        until the next line lands, however late it comes. The submitter ends only after its last
+        commit, so once this is True every row it read is visible to counts taken afterwards. When
+        there is no submitter (bare ``--restart`` DB resume) submission is trivially complete.
         """
         return self.submitter is None or not self.submitter.is_alive()
 
@@ -258,40 +256,48 @@ class Scheduler(StateMachine):
         if self.loaded:
             self.tasks = [task for _, tasks in self.loaded for task in tasks]
             self.mark_group_started()
-            self.startup_phase = False
             self.poll = SERVER_POLL_MIN
             self.woken = False
             return SchedulerState.PACK
-        elif (not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0
-              and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0
-              and (not self.startup_phase or self.submission_complete())):
-            # Nothing left to schedule, and either real work has already been seen this run
-            # or the submitter has finished — safe to stop (won't fire mid-ingest).
-            # A failure written back after Task.next() is still retried before the run stops;
-            # retryable failures are counted after incomplete tasks so that write is always seen.
-            return SchedulerState.FINAL
-        else:
-            group_info = Task.increment_group(self.current_group, attempts=self.attempts, eager=self.eager)
-            if not group_info.viable:
-                if self.forever_mode:
-                    log.warning(f'Failed task group {group_info.value} ({group_info.reason})')
-                    group_info.reason = f'waiting on failed tasks to be cleared'
-                    # NOTE: Do not halt in this mode
-                else:
-                    log.critical(f'Failed task group {group_info.value} ({group_info.reason})')
-                    return SchedulerState.FINAL
-            elif group_info.value != self.current_group:
-                log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
-                self.current_group = group_info.value
-                return SchedulerState.LOAD
-            self.report_held(group_info.value)
-            # A back-off cut short by a client taking tasks was not an empty poll; only a wait that
-            # ran its full length grows the next one.
-            if not self.woken:
-                self.poll = min(self.poll_max, 2 * self.poll)
-            log.trace(f'No tasks available for group ({group_info.reason}) - backing off {int(self.poll)} seconds')
-            self.woken = self.wait_need(generation, timeout=self.poll)
+        # The submitter is read before the counts: once it has ended, every row it read is committed
+        # and the counts below see it.
+        input_ended = self.submission_complete()
+        if (not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0
+                and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0):
+            # Every task is terminal. A failure written back after Task.next() is still retried before
+            # the run stops; retryable failures are counted after incomplete tasks so that write is seen.
+            if input_ended:
+                return SchedulerState.FINAL
+            # Input still being read may yet bring tasks, so wait for it without choosing a next group:
+            # with nothing incomplete there is no group to advance to or to halt on.
+            return self.back_off(generation, 'All tasks done, input still open')
+        group_info = Task.increment_group(self.current_group, attempts=self.attempts, eager=self.eager)
+        if not group_info.viable:
+            if self.forever_mode:
+                log.warning(f'Failed task group {group_info.value} ({group_info.reason})')
+                group_info.reason = f'waiting on failed tasks to be cleared'
+                # NOTE: Do not halt in this mode
+            else:
+                log.critical(f'Failed task group {group_info.value} ({group_info.reason})')
+                return SchedulerState.FINAL
+        elif group_info.value != self.current_group:
+            log.info(f'Completed task group {self.current_group} - starting task group {group_info.value}')
+            self.current_group = group_info.value
             return SchedulerState.LOAD
+        self.report_held(group_info.value)
+        return self.back_off(generation, f'No tasks available for group ({group_info.reason})')
+
+    def back_off(self: Scheduler, generation: int, reason: str) -> SchedulerState:
+        """Wait for new demand or the next poll, then load again.
+
+        A back-off cut short by a client taking tasks was not an empty poll; only a wait that ran its
+        full length grows the next one, up to the server's poll interval.
+        """
+        if not self.woken:
+            self.poll = min(self.poll_max, 2 * self.poll)
+        log.trace(f'{reason} - backing off {int(self.poll)} seconds')
+        self.woken = self.wait_need(generation, timeout=self.poll)
+        return SchedulerState.LOAD
 
     def wait_need(self: Scheduler, generation: int, timeout: float) -> bool:
         """Wait up to `timeout` for a cut or new demand, as the dispatcher's own wait does, unless halting.

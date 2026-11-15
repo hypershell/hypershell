@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/task-input-fidelity
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-15'
 phases:
 - id: P1
@@ -32,7 +32,7 @@ phases:
 - id: P2
   name: The scheduler waits for the end of stream input before it stops, without reaching
     the failed-group halt
-  status: pending
+  status: done
   satisfies:
   - R5
   - R6
@@ -178,7 +178,7 @@ timestamp still decodes as a time; the encoded bytes equal 2.9.0a8's.
 **Goal:** a non-`forever` scheduler with a database stops only once its submitter has ended and every
 task is terminal; nothing else about when a run ends changes.
 
-- [ ] Tests first, `tests/test_stream_input.py` (reuse `tests/test_group_order.py`'s `task_db`,
+- [x] Tests first, `tests/test_stream_input.py` (reuse `tests/test_group_order.py`'s `task_db`,
       `commit_tasks`, `succeed`, `fail`, `make_scheduler`; a fake submitter whose `is_alive()` the test
       flips), `@mark.unit`:
       `test_open_input_holds_the_stop[restart_mode]` (first task done → passes return LOAD; a late
@@ -198,15 +198,15 @@ task is terminal; nothing else about when a run ends changes.
       It needs `monkeypatch.setattr(hypershell.server, 'DATABASE_ENABLED', True)` with the `task_db`
       binding (else `ServerThread` falls back to `in_memory`); fall back to the child-script pattern of
       `tests/test_cluster_exit.py` under `temp_site` if the in-process binding fights the cluster.
-- [ ] Confirm they fail on the unchanged scheduler (each R5 case reaches FINAL early).
-- [ ] `src/hypershell/server.py` `Scheduler.load_bundle`: read `submission_complete()` before the
+- [x] Confirm they fail on the unchanged scheduler (each R5 case reaches FINAL early).
+- [x] `src/hypershell/server.py` `Scheduler.load_bundle`: read `submission_complete()` before the
       counts; when every task is terminal and nothing is retryable, return FINAL if the input has
       ended, else back off without `increment_group`/`report_held`. Move the back-off tail into a
       `back_off(generation, reason)` method used by both branches. Remove `Scheduler.startup_phase`
       (annotation, init, clear, read); keep `restart_mode`. Update `submission_complete`'s docstring.
-- [ ] `src/hypershell/cluster/watch.py` `scheduled_work`: docstring only — committed work counts,
+- [x] `src/hypershell/cluster/watch.py` `scheduled_work`: docstring only — committed work counts,
       input still being read does not.
-- [ ] Evidence (commit body): the verify command; the stream modes with `FD_PROVIDER=postgres` and
+- [x] Evidence (commit body): the verify command; the stream modes with `FD_PROVIDER=postgres` and
       `FD_PROVIDER=timescale` (`pause`, `burst`, `fail-pause`; sandbox off); `pause` and `burst` on 3.11.
 - **Verify:** `uv run pytest -q tests/test_stream_input.py tests/test_group_order.py tests/test_server_fsm.py tests/test_restart.py tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py` and the drive modes `pause fail-pause burst server fifo nodb-stream file launch-false`.
 - **Touches:** `src/hypershell/server.py`, `src/hypershell/cluster/watch.py`, `tests/test_stream_input.py`.
