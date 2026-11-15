@@ -311,3 +311,11 @@ off in session (2026-11-15) to fix both findings. Review cycle 3 is the last.
   halt and the signals take effect on the scheduler's next pass, within `server.poll`. Also make the
   "a failed task with no retry left never ends a stream run early" claim true as built once F2 is
   fixed, or reword it.
+
+## Review-cycle-3 ruling (2026-11-15)
+
+Review cycle 3 approved with no CONFIRMED finding. The rubric's pre-publish human approval for the
+cycle-2 finding in `server.py` was given by the maintainer in session (2026-11-15): "Approve; seed
+N1". N1 is a non-blocking coverage note: no test pins the re-count guard for a row committed by
+another writer in the instant a failed group ends a finished run. The foreman files it as a small
+seed on `develop` after the merge.

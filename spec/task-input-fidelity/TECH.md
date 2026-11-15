@@ -4,7 +4,7 @@ title: 'Every task the input gives runs as given: date-like lines run as text, a
   a streamed run waits for its input to end'
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/task-input-fidelity
 base: develop
 current_phase: done
