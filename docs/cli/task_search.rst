@@ -23,4 +23,8 @@ Description
    :commit:`961fb22`: more than 1,000 results are refused without ``--all``, ``--limit`` or
    ``--count``. :commit:`210a93e`: output to a terminal is colorized by exit status.
 
+.. versionchanged:: 2.9.0
+   On SQLite, ``-t``/``--with-tag`` with several tag names and no values requires every one of
+   them, as on PostgreSQL; before, only the last name was checked.
+
 .. include:: ../_include/task_search_help.rst

@@ -327,7 +327,7 @@ row updated. Split from `contended-writes` at its GOAL gate.
 
 *Horizon: near-term · Depends on: `contended-writes` · Refs: hypertable-update-retry (the pattern);
 `contended-writes` (the server half)*
-**Seed:** [`issues/hs-update-contended-writes.md`](issues/hs-update-contended-writes.md) · *status: unshaped*
+**Seed:** [`issues/hs-update-contended-writes.md`](issues/hs-update-contended-writes.md) · *status: adopted:hs-update-contended-writes*
 
 ## `hs cluster --no-db` still initializes a SQLite database it never uses
 
