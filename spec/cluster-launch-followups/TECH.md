@@ -1,32 +1,33 @@
 ---
 slug: cluster-launch-followups
-title: A locked database delays a cluster's decision instead of ending the run; a --no-db
-  cluster whose work is done never reports a failed launch
+title: A locked database delays a cluster's decision instead of ending the run; a
+  --no-db cluster whose work is done never reports a failed launch
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/cluster-launch-followups
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-16'
 phases:
 - id: P1
   name: Regression tests first, red on 9c82842d
-  status: pending
+  status: done
   satisfies:
   - R7
   depends_on: []
   parallel: false
   hammerable: false
   hill: uphill
-  verify: git diff --quiet 9c82842d -- src && l=/tmp/claude-501/clf-p1-red.log; uv run pytest -q -p no:cacheprovider
-    -rf tests/test_cluster_locked.py tests/test_cluster_nodb_finish.py -k "not still" > "$l" 2>&1; r=$?;
-    tail -n 40 "$l"; s="$(tail -n 1 "$l")"; test $r -eq 1 && echo "$s" | grep -qE "^[0-9]+ failed" && !
-    echo "$s" | grep -qE "passed|error" && uv run pytest -q -p no:cacheprovider tests/test_cluster_locked.py
-    tests/test_cluster_nodb_finish.py -k still && uv run pytest -q -p no:cacheprovider tests/test_cluster_exit.py
-    tests/test_autoscale_failed_launches.py
+  verify: git diff --quiet 9c82842d -- src && l=/tmp/claude-501/clf-p1-red.log; uv
+    run pytest -q -p no:cacheprovider -rf tests/test_cluster_locked.py tests/test_cluster_nodb_finish.py
+    -k "not still" > "$l" 2>&1; r=$?; tail -n 40 "$l"; s="$(tail -n 1 "$l")"; test
+    $r -eq 1 && echo "$s" | grep -qE "^[0-9]+ failed" && ! echo "$s" | grep -qE "passed|error"
+    && uv run pytest -q -p no:cacheprovider tests/test_cluster_locked.py tests/test_cluster_nodb_finish.py
+    -k still && uv run pytest -q -p no:cacheprovider tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py
 - id: P2
-  name: The cluster's own checks skip a locked read, warn once and decide at their next pass
+  name: The cluster's own checks skip a locked read, warn once and decide at their
+    next pass
   status: pending
   satisfies:
   - R1
@@ -38,9 +39,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run pytest -q -p no:cacheprovider tests/test_cluster_locked.py tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py
-    tests/test_autoscale.py tests/test_zone_autoscale.py tests/test_relay_launch.py tests/test_relay_topology.py
-    tests/test_topology_server.py && for m in locked-scale-fail locked-scale-off locked-scale-ok locked-launch;
+  verify: uv run pytest -q -p no:cacheprovider tests/test_cluster_locked.py tests/test_cluster_exit.py
+    tests/test_autoscale_failed_launches.py tests/test_autoscale.py tests/test_zone_autoscale.py
+    tests/test_relay_launch.py tests/test_relay_topology.py tests/test_topology_server.py
+    && for m in locked-scale-fail locked-scale-off locked-scale-ok locked-launch;
     do .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-followups/drive/followups_drive.sh"
     $m || exit 1; done && git diff --quiet 9c82842d -- src/hypershell/server.py src/hypershell/cluster/demand.py
     src/hypershell/data src/hypershell/relay src/hypershell/cluster/topology.py
@@ -57,13 +59,15 @@ phases:
   hill: uphill
   verify: uv run pytest -q -p no:cacheprovider tests/test_cluster_nodb_finish.py tests/test_cluster_exit.py
     tests/test_cluster_no_db.py tests/test_server.py tests/test_server_fsm.py tests/test_writeback.py
-    tests/test_task_wire.py && for m in nodb-crashy nodb-fail; do .agents/factory/bin/temp_site.sh sh
-    "$PWD/spec/cluster-launch-followups/drive/followups_drive.sh" $m || exit 1; done && ! grep -q -e MEMORY_SETTLE
-    -e memory_settle src/hypershell/cluster/watch.py && d="$(git diff --numstat 9c82842d -- src/hypershell/server.py)"
-    && test "$(echo "$d" | cut -f2)" = 0 && test "$(echo "$d" | cut -f1)" -ge 2 && test "$(echo "$d" | cut
-    -f1)" -le 8
+    tests/test_task_wire.py && for m in nodb-crashy nodb-fail; do .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/cluster-launch-followups/drive/followups_drive.sh" $m || exit 1;
+    done && ! grep -q -e MEMORY_SETTLE -e memory_settle src/hypershell/cluster/watch.py
+    && d="$(git diff --numstat 9c82842d -- src/hypershell/server.py)" && test "$(echo
+    "$d" | cut -f2)" = 0 && test "$(echo "$d" | cut -f1)" -ge 2 && test "$(echo "$d"
+    | cut -f1)" -le 8
 - id: P4
-  name: 'Gate: every drive, the whole suite under 3.14 and 3.11, docs and pinned tests unchanged'
+  name: 'Gate: every drive, the whole suite under 3.14 and 3.11, docs and pinned tests
+    unchanged'
   status: pending
   satisfies:
   - R1
@@ -79,19 +83,18 @@ phases:
   hammerable: false
   hill: uphill
   verify: git diff --quiet 9c82842d -- docs share tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py
-    src/hypershell/cluster/demand.py src/hypershell/data src/hypershell/submit.py src/hypershell/core
-    && for m in locked-scale-fail locked-scale-off locked-scale-ok locked-launch nodb-crashy nodb-fail;
-    do .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-followups/drive/followups_drive.sh"
-    $m || exit 1; done && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv314-clf uv run --python 3.14 pytest
-    -p no:cacheprovider -q && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv311-clf uv run --python 3.11 pytest
-    -p no:cacheprovider -q
+    src/hypershell/cluster/demand.py src/hypershell/data src/hypershell/submit.py
+    src/hypershell/core && for m in locked-scale-fail locked-scale-off locked-scale-ok
+    locked-launch nodb-crashy nodb-fail; do .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-followups/drive/followups_drive.sh"
+    $m || exit 1; done && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv314-clf uv run
+    --python 3.14 pytest -p no:cacheprovider -q && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv311-clf
+    uv run --python 3.11 pytest -p no:cacheprovider -q
 review:
   last_reviewed_commit: ''
   verdict: none
   blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — A locked database delays a cluster's decision instead of ending the run; a `--no-db` cluster whose work is done never reports a failed launch
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -118,9 +121,11 @@ one atomic code+state commit.
 - Run every `verify:` from the worktree root with the sandbox off, `UV_CACHE_DIR=/tmp/claude-501/uv-cache-clf`
   and `TMPDIR=/tmp/claude-501`. Explicit `/tmp/claude-501/...` paths are used throughout.
 - `pytest -n auto` is broken on this suite: everything runs serially.
-- The worktree's `.venv` is Python 3.15 (outside the supported 3.11–3.14); phases P1–P3 use it for
-  speed. The gate runs 3.14 and 3.11 in their own environments (`/tmp/claude-501/venv314-clf`,
-  `/tmp/claude-501/venv311-clf`), never the other builder's.
+- The worktree's `.venv` is Python 3.15 (outside the supported 3.11–3.14) and is not used: per the
+  plan gate (D5), every phase runs with `UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv314-clf` and
+  `UV_PYTHON=3.14` exported (so each `uv run` in a verify, the drive included, uses 3.14), with that
+  environment's `bin` first on `PATH` for subprocess tests. The gate also runs 3.11 in
+  `/tmp/claude-501/venv311-clf`, never the other builder's environments.
 - The drive binds `127.0.0.1` on a free port and stops every process it starts by PID (its process
   tree). The tests bound every subprocess (`wait(timeout)`, then `kill_group`) and every thread join.
 - Expected durations: P1 red selection ≈ 45 s; each locked drive mode 15–60 s; the whole suite a few
@@ -155,7 +160,7 @@ one atomic code+state commit.
 **Goal:** every R1, R2, R3 and R5 behaviour has a test that fails on the base tree, none hangs, and
 the guards pass. No source change.
 
-- [ ] New `tests/test_cluster_locked.py`, from `research/prototypes/` (`locking.py`, `locked_*_proto.py`). Helpers:
+- [x] New `tests/test_cluster_locked.py`, from `research/prototypes/` (`locking.py`, `locked_*_proto.py`). Helpers:
       `locked_db(path)` (binds the scoped `Session` to a per-test SQLite file through its own engine
       with `connect_args={'check_same_thread': False, 'timeout': 0.5}`, creates the tables, restores
       `data.core.engine` after; the product's busy wait is untouched), `exclusive(path)` (a second raw
@@ -204,7 +209,7 @@ the guards pass. No source change.
     `hs cluster tasks.txt --no-tls -H 127.0.0.1 -p <free> --launcher <gated>`, lock 7.5 s; exit 5,
     `every launched client has exited with tasks remaining`, ended ≤ 10 s after the release, a
     `database was locked` WARNING, no traceback file.
-- [ ] New `tests/test_cluster_nodb_finish.py`:
+- [x] New `tests/test_cluster_nodb_finish.py`:
   - `test_receiver_counts_written_results[in-memory, database]` (unit): a `Receiver` fed bundles
     through a stand-in queue; in memory every result counts; with a database (`task_db`), a result
     applied once counts 1 and its duplicate does not.
@@ -220,8 +225,8 @@ the guards pass. No source change.
     drops the remote-exe word; research 03 §4), five tasks; `wait(13)` must time out; stdout holds all
     five results; a WARNING with `exited with status 1`; no `every launched client has exited`; then
     `kill_group`.
-- [ ] Guards carry `still` in their names (the verify selects on it); no red test does.
-- [ ] Record the red list (the failing node ids from the verify log) in the commit body.
+- [x] Guards carry `still` in their names (the verify selects on it); no red test does.
+- [x] Record the red list (the failing node ids from the verify log) in the commit body.
 - **Expected red on `9c82842d`** (`-k "not still"`; all fail, none passes, no error), 22 node ids:
   `test_database_locked` ×6 (no such name); `test_locked_check_is_skipped_with_one_warning` ×6
   (`OperationalError` from `client_registrations`, `remote.py:392`, or `current_group`, `:599`);
@@ -231,6 +236,16 @@ the guards pass. No source change.
   locked` and a traceback file); `test_receiver_counts_written_results` ×2 (no `written`);
   `test_no_db_work_done_when_every_result_is_written` (True after 3 s); the crashy CLI test
   (`ClusterLaunchError`, exit 5 at ≈ 5 s). The builder may split or merge rows; the count follows.
+- **Recorded red at build (Python 3.14), 24 node ids:** `test_database_locked` ×7 (busy, table-locked,
+  table-locked-extended, no-code; disk-io, not-sqlite, not-operational) and
+  `test_database_locked_by_a_held_lock` (the error a real held lock raises), all `AttributeError`;
+  `test_locked_check_is_skipped_with_one_warning` ×6, `test_exits_during_a_skipped_check_are_counted`,
+  `test_limit_off_relaunches_after_a_skipped_check` (`OperationalError: database is locked`);
+  `test_watch_reads_again_after_a_locked_read` (the watch ended with `OperationalError`); the three
+  locked CLI tests (CRITICAL `database is locked` and a traceback file); the receiver count split
+  into `test_receiver_counts_written_results_in_memory` / `_with_a_database` (no `written`);
+  `test_no_db_work_done_when_every_result_is_written` (True); the crashy CLI test
+  (`ClusterLaunchError`). Guards: 7 green.
 - **Expected green on `9c82842d`:** the 7 `still` guards, and `tests/test_cluster_exit.py` and
   `tests/test_autoscale_failed_launches.py` unchanged (R6 is already covered there:
   `test_launcher_cluster_exits_when_every_client_fails[*-no-db]`,
