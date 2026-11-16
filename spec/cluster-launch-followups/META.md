@@ -53,3 +53,10 @@ is skipped by the parser):
 - **Skill cause:** Same as `spec/cluster-launch-failures/META.md` F2: the steps predate the worktree practice.
 - **Recommended fix:** As there.
 - **Confidence:** high · **Effort:** small
+
+## F3 — Research prototypes live in `$TMPDIR` and vanish before the build · seen again
+`origin=hs-plan:step3 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The test-research subagent built red-on-base test prototypes in the session scratchpad, which a routine `/tmp` cleanup can purge before `/hs-build`. They were copied by hand into `research/prototypes/`, and renamed away from `test_*.py` with their `conftest.py` dropped: the repo sets no `testpaths`, so a bare `pytest` (the gate) would otherwise collect red prototypes from `spec/`.
+- **Skill cause:** As `spec/zone-queue-primitive/META.md` F4: Step 3 names only `research/NN-topic.md` as research output, with no home or naming rule for runnable prototypes.
+- **Recommended fix:** As there, plus: prototypes kept under `spec/{slug}/research/prototypes/` must not match pytest's `test_*.py`/`*_test.py` or ship a `conftest.py`; run them with `-p tests.conftest`.
+- **Confidence:** high · **Effort:** small
