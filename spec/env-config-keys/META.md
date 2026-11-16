@@ -55,3 +55,10 @@
 - **Skill cause:** As `spec/key-option-refused/META.md` F5: no skill says where a gate ruling that changes a contract reading must live for the blind pass to see it. This cycle shows it applies to cycle 1's plan-gate rulings, not only to later review cycles.
 - **Recommended fix:** As recorded there, extended: `hs-plan`'s gate copies each ruling that changes an R-ID's reading into `GOAL.md` (a "Contract readings" block beside the GOAL-gate block), and Step 2 says that block is part of the contract the reviewer reads.
 - **Confidence:** high · **Effort:** small
+
+## F7 — Remediation mode gives no rule for red evidence of a finding the branch itself introduced
+`origin=hs-build:P3 severity=low category=missing-guidance status=open target=.claude/skills/hs-build/SKILL.md`
+- **What happened:** F1 (a launch refused when the key came in another form) was introduced on this branch, so its tests pass on `90ab2fc2` and cannot join `red.txt`, which `red_check.sh` checks against the cycle's base. The red evidence was taken by hand against the reviewed commit (`RED_BASE_REV=f495fa20` with a scratch list), and the ruling's "red on `f495fa20`" was the only guide.
+- **Skill cause:** Step 1.3 says how to reopen phases but not how to prove a remediation test red, nor that `red.txt` is red-on-base only; the precedent (`cluster-nodb-and-zero-period`) records its red run in TECH prose the same ad hoc way.
+- **Recommended fix:** In Step 1.3, say: a remediation test is proven red on `review.last_reviewed_commit` (`RED_BASE_REV=<that commit>`), recorded in the TECH remediation section; only a test also red on the cycle's base joins `red.txt`.
+- **Confidence:** med · **Effort:** small

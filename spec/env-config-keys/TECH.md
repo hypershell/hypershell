@@ -4,11 +4,11 @@ title: Environment variables reach every configuration key with the value as wri
   the remaining duration keys take units
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/env-config-keys
 base: develop
 current_phase: done
-last_updated: '2026-11-15'
+last_updated: '2026-11-16'
 phases:
 - id: P1
   name: 'Tests first: the regression tests and the red list on 90ab2fc2 (tests only)'
@@ -57,7 +57,7 @@ phases:
     tests/test_cluster_launch.py tests/test_submit.py && for m in keys typed; do .agents/factory/bin/temp_site.sh
     uv run sh "$PWD/spec/env-config-keys/drive/env_drive.sh" $m || exit 1; done
 - id: P3
-  name: '[export] as written, and the key variable recognised in any letter case'
+  name: '[export] as written, and key variables recognised by the matcher'
   status: done
   satisfies:
   - R7
@@ -124,6 +124,9 @@ phases:
     ''versionchanged:: 2.9.0'' docs/_include/config_param_ref.rst)" -ge 19 && ! grep
     -qs ''aligns to the path'' docs/_include/config_intro.rst docs/_include/config_intro_alt.rst
     docs/manual.rst && grep -q config_schema AGENTS.md && grep -q config_schema .agents/factory/invariants.md
+    && grep -q ''recognised by the matcher'' AGENTS.md && grep -q ''recognised by
+    the matcher'' .agents/factory/invariants.md && grep -q ''recognised by the matcher''
+    docs/security.rst && grep -q ''optional text key'' docs/_include/config_intro.rst
     && UV_PROJECT_ENVIRONMENT=$TMPDIR/docs-venv uv run --python 3.12 --group docs
     sphinx-build -W --keep-going -q -E -b html docs $TMPDIR/docs-html-eck'
 - id: P7
@@ -145,7 +148,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run pytest -q -p no:cacheprovider -n auto && uv run pytest -q -p no:cacheprovider
+  verify: uv run pytest -q -p no:cacheprovider && uv run pytest -q -p no:cacheprovider
     $(sed -e '/^#/d' -e '/^$/d' -e 's/ raises=.*$//' spec/env-config-keys/red.txt)
     && UV_PROJECT_ENVIRONMENT=$TMPDIR/venv311 uv run --python 3.11 pytest -q -p no:cacheprovider
     tests/test_config_schema.py tests/test_env_config.py tests/test_env_duration.py
@@ -251,9 +254,9 @@ change.
       fails with `pytest.fail`, so the base's never-ending relay is red, not an error.
 - [x] `tests/test_env_export.py`: `test_export_as_written[leading-zeros|mixed-case|empty|exponent]`
       (child: `dict(load_task_env())`), `test_export_reaches_task` (`hs cluster --no-db -N1`, a task
-      printing the variables), `test_key_variable_any_case_not_inherited` (child:
-      `HYPERSHELL_Server_Auth` set; not in `client.inherited_task_env()`),
-      `test_key_variable_any_case_not_exported` (not in `cluster.launch.ssh_env_exports(os.environ)`);
+      printing the variables), `test_key_variable_forms_not_inherited` (child: a key variable set;
+      not in `client.inherited_task_env()`), `test_key_variable_forms_not_exported` (not in
+      `cluster.launch.ssh_env_exports(os.environ)`); both renamed in the review-cycle-1 remediation;
       must-keep: `HYPERSHELL_EXPORT_FOO` over a file's `foo`, a file's list joined and upper-cased.
 - [x] `tests/test_env_blame.py`: `test_blame_names_variable` (`blame(config, 'server', 'tls',
       'min_version')` under `HYPERSHELL_server_tls_min_version`), `test_which_names_variable[…]`,
@@ -303,10 +306,10 @@ change.
   `src/hypershell/core/tls.py`, `src/hypershell/core/logging.py`, `src/hypershell/data/core.py`,
   `src/hypershell/cluster/remote.py`, `tests/`.
 
-## Phase P3 — `[export]` as written, and the key variable in any letter case
+## Phase P3 — `[export]` as written, and key variables recognised by the matcher
 **Satisfies:** R7, R4, R1 · **Depends on:** P2
-**Goal:** a task sees `HYPERSHELL_EXPORT_<NAME>` by its name and value as written; no spelling of the
-key variable reaches a task or a remote command line.
+**Goal:** a task sees `HYPERSHELL_EXPORT_<NAME>` by its name and value as written; no key variable,
+as the matcher recognises it, reaches a task or a remote command line.
 
 - [x] `core/config.py` `load_task_env` per layer (PLAN §2.7).
 - [x] `client.py` `inherited_task_env` and the no-key hint, `cluster/launch.py` `ssh_env_exports` and
@@ -437,7 +440,10 @@ Changes from 2.8.x (and `develop` `90ab2fc2`):
 2. `HYPERSHELL_<KEY>_ENV` and `_EVAL` work as `_env`/`_eval` do in a file, including the refusal of two
    forms of one key. Previously they replaced the key with a table.
 3. Values are no longer coerced by their look. A key that takes text keeps `false`, `true`, `null`, an
-   empty value and number-like text (`007`, `1e3`, an all-digit `server.auth`) as written.
+   empty value and number-like text (`007`, `1e3`, an all-digit `server.auth`) as written. An empty
+   value for an optional text key (no default, or one that means none: `logging.file`,
+   `database.host`, the `[server.tls]` files, …) or for `server.bind`/`relay.bind` is not given, so
+   the key's default applies (an empty bind is the default bind).
 4. A key that takes a whole number, a number or a boolean converts its value or stops the command at
    start with a configuration error (exit 3) naming the variable; booleans take `true`/`false`,
    `yes`/`no`, `on`/`off`, `1`/`0` in any case (`no` and `off` were read as true). An empty value is
@@ -461,6 +467,66 @@ Changes from 2.8.x (and `develop` `90ab2fc2`):
    `database.ssl_mode`). Two variables that set one key (e.g. in two letter cases) are refused.
 - **Verify:** frontmatter.
 - **Touches:** `spec/env-config-keys/TECH.md` only (state), unless the sweep finds a defect.
+
+## Review-cycle-1 remediation (2026-11-16)
+
+`REVIEW.md` cycle 1 (changes-requested on `f495fa20`) and the maintainer's rulings at the end of
+`PLAN.md` ("Review-cycle-1 rulings"). P2, P3, P6 and P7 reopened; P3 renamed; P6's and P7's gates
+retuned (P6 greps the matcher wording and the empty-text rule; P7 runs the suite serially, since
+`pytest -n auto` fails at collection here). `origin/develop` (`91c5aa9a`, #112) merged first.
+
+- [x] **#112 merge** — `tests/test_period_floor.py::test_period_key_refused`: the eight `env-nan` and
+      `env-neginf` cases (`server-file`, `server-autoscaling`, `cluster-file`, `relay`) expect the
+      refusal as not a duration (`-P/--period: Duration 'nan' is not valid`, `autoscale.period: …`
+      for the relay), still `bad_argument` with nothing served or launched; the `file-nan` and
+      `file-neginf` cases keep the "greater than zero" refusal of a TOML float.
+- [x] **F1** — `cluster/launch.py` `ClientLaunch.start`: every key variable
+      (`is_key_variable`) is left out of the inherited and task environments before the launch's own
+      `env` (the run key) is applied; with `inherit_env` (`--ssh`), ssh gets the caller's environment
+      without them. One place for launcher, `--mpi`, autoscaling and relay site launches.
+      Tests: `test_cluster_launch.py::test_key_in_any_form_reaches_launched_clients[mode-form]`
+      (`launcher`, `mpi`, `autoscaling` × `_ENV`, `_EVAL`, another spelling: each client holds the
+      run key in `HYPERSHELL_SERVER_AUTH` alone and every task runs), and by construction
+      `test_client_launch_gives_only_its_own_key[launcher|ssh]` and
+      `test_ssh_launch_exports_no_key_variable[…]`.
+- [x] **Key handling by the matcher** — `core/config.py`: `is_key_variable(name, sections=AUTH_SECTIONS)`
+      recognises every form (`AUTH_FORMS`) of `server.auth` and `relay.upstream.auth` as the matcher
+      reads the name; `is_relay_variable(name)` every name it maps under `relay`. `client.py`
+      (`inherited_task_env`, the no-key hint narrowed to `server.auth`), `cluster/launch.py`
+      (`ssh_env_exports`, `assigns_key`, `ClientLaunch.start`) and `relay/site.py` (`is_fenced`, used
+      by `scrub_environment`) use them. Tests: `test_env_export.py::test_key_variable_forms_not_inherited`
+      and `test_key_variable_forms_not_exported` (renamed; six forms each),
+      `test_relay_launch.py::test_relay_fence_by_matcher`.
+- [x] **F2** — `core/config_schema.py` `EMPTY_UNSET`: an empty variable for an optional text key (no
+      default, or `<none>`/`<auto>`), a scalar table (`logging.file`, `ssh.nodelist`, `database`) or a
+      bind (`server.bind`, `relay.bind`) sets nothing, so the default applies; any other text key keeps
+      `''` (R4: `logging.datefmt`). The readers' own `''` checks added in P2 (`core/tls.py`,
+      `core/logging.py`) are back as on `develop`, so a file reads as before. Guide (`config_intro.rst`,
+      its 2.9.0 marker) and `manual.rst` say so. Tests: `test_env_config.py::test_empty_optional_text_not_given[…]`,
+      `test_empty_bind_is_default_bind`, `test_empty_optional_text_runs[…]` (`hs list` with an empty
+      `HYPERSHELL_LOGGING_FILE`, `_DATABASE_HOST`, `_DATABASE_DATABASE` on SQLite: exit 0, no
+      traceback, no log file); `test_config_schema.py::test_empty_unset_keys` (the list against the
+      defaults) and `test_read_environment_empty_unset`.
+- [x] **F3** — `data/core.py` `DatabaseURL` as on `develop` (no `or None`): a file's empty
+      `database.user`/`password` reads as before; the environment's empty value is not given (F2).
+      Tests: `test_empty_password_in_file_as_before` (URL `postgresql+psycopg://localhost/d`,
+      `hs config get` exit 0), `test_empty_password_from_environment_not_given` (exit 3, as before).
+- [x] **F4** — `issues/config-keys-unread.md` cites `cluster/remote.py:949`,
+      `issues/config-set-coerces-text.md` cites `core/config.py:458`; both say the line numbers are
+      as of this branch (the other citations hold).
+- [x] **Wording** — docstrings, `AGENTS.md`, `invariants.md` §10–§11 and `docs/security.rst` (with a
+      2.9.0 marker) say key variables and relay variables are recognised by the matcher wherever
+      HyperShell handles them by name; `red.txt` names the renamed tests (six forms each, 72 nodes).
+- [x] Red then green: the 23 new nodes for F1–F3 are red on `f495fa20` with this branch's tests
+      (`RED_BASE_REV=f495fa20 red_check.sh`, 23 of 23 RED), green here.
+- Gates (on `092c80c0` + this work): P2 1389 passed, 1 skipped, drive modes `keys`, `typed` ok; P3 381
+  passed, 1 skipped, drive `export` ok; P6 123 passed, greps and `sphinx-build -W` clean; P7 (sandbox
+  off, 28m10s) full suite serially 3479 passed, 138 skipped, red list 72 passed, Python 3.11 on the
+  five new test files 240 passed, every drive mode ok, `red_check.sh` on `90ab2fc2` 72 of 72 RED,
+  docs clean. `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade` passed in the full run; no
+  flake. CLI drive in `temp_site.sh` (`hs cluster … --no-db --no-tls -N1 -H 127.0.0.1`, two tasks):
+  `HYPERSHELL_SERVER_AUTH_ENV`, `_EVAL` and another spelling under `--launcher=env` and `--mpi` (an
+  `mpirun` stand-in that runs its arguments) each print both tasks' output, exit 0.
 
 ---
 

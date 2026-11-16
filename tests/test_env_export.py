@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Task variables given by `HYPERSHELL_EXPORT_<NAME>`, and the key variable in any letter case.
+Task variables given by `HYPERSHELL_EXPORT_<NAME>`, and the key variables recognised by the matcher.
 
 A task sees `<NAME>` as written, with the variable's value unchanged; a file's `[export]` table is
 upper-cased and its lists joined, and the environment's value wins for the same task variable.
-Every name the configuration reads as `server.auth` is recognised as the key variable by the client
-and by `--ssh --env`.
+Every name the matcher reads as a form of `server.auth` or `relay.upstream.auth` is a key variable
+to the client and to `--ssh --env`: neither hands it on.
 """
 
 
@@ -86,23 +86,45 @@ def test_export_file_table_as_before(temp_site: Path) -> None:
     assert seen == repr([('LST', f'a{PATH_SEP}b'), ('NUM', '7')])
 
 
+KEY_VARIABLES: Final[Dict[str, Dict[str, str]]] = {
+    'spelling': {'HYPERSHELL_Server_Auth': KEY},
+    'env': {'HYPERSHELL_SERVER_AUTH_ENV': 'ENV_EXPORT_TEST_KEY', 'ENV_EXPORT_TEST_KEY': KEY},
+    'eval': {'HYPERSHELL_server_auth_eval': f'echo {KEY}'},
+    'relay': {'HYPERSHELL_relay_upstream_auth': KEY},
+    'relay-env': {'HYPERSHELL_RELAY_UPSTREAM_AUTH_ENV': 'ENV_EXPORT_TEST_KEY', 'ENV_EXPORT_TEST_KEY': KEY},
+    'relay-eval': {'HYPERSHELL_Relay_Upstream_Auth_Eval': f'echo {KEY}'},
+}
+"""Each key variable form the matcher recognises, given in the environment (with any variable it names)."""
+
+
+def key_variable(case: str) -> str:
+    """The key variable of `case` (the `HYPERSHELL_` name among its variables)."""
+    name, = [name for name in KEY_VARIABLES[case] if name.startswith('HYPERSHELL_')]
+    return name
+
+
 @mark.integration
-def test_key_variable_any_case_not_inherited(temp_site: Path) -> None:
-    """The key variable, in any letter case, is not part of the environment a task inherits."""
-    rc, seen, stderr = config_repr(temp_site, "[name for name in inherited_task_env() if name.upper() == "
-                                              "'HYPERSHELL_SERVER_AUTH']",
+@mark.parametrize('case', list(KEY_VARIABLES), ids=list(KEY_VARIABLES))
+def test_key_variable_forms_not_inherited(temp_site: Path, case: str) -> None:
+    """A key variable, in any form the matcher recognises, is not part of the environment a task inherits."""
+    name = key_variable(case)
+    rc, seen, stderr = config_repr(temp_site, f"sorted(name for name in inherited_task_env() "
+                                              f"if name in ({name!r}, 'ENV_EXPORT_TEST_MARK'))",
                                    'from hypershell.client import inherited_task_env',
-                                   HYPERSHELL_Server_Auth=KEY)
+                                   ENV_EXPORT_TEST_MARK='x', **KEY_VARIABLES[case])
     assert rc == exit_status.success, stderr
-    assert seen == repr([])
+    assert seen == repr(['ENV_EXPORT_TEST_MARK'])
 
 
 @mark.integration
-def test_key_variable_any_case_not_exported(temp_site: Path) -> None:
-    """The key variable, in any letter case, is not among the `--ssh --env` exports."""
-    rc, seen, stderr = config_repr(temp_site, f"[word for word in ssh_env_exports(dict(os.environ)) "
-                                              f"if {KEY!r} in word]",
+@mark.parametrize('case', list(KEY_VARIABLES), ids=list(KEY_VARIABLES))
+def test_key_variable_forms_not_exported(temp_site: Path, case: str) -> None:
+    """A key variable, in any form the matcher recognises, is not among the `--ssh --env` exports."""
+    name = key_variable(case)
+    rc, seen, stderr = config_repr(temp_site, f"sorted(word.split('=', 1)[0] for word in "
+                                              f"ssh_env_exports(dict(os.environ)) "
+                                              f"if word.startswith(({name!r} + '=', 'HYPERSHELL_SITE=')))",
                                    'import os\nfrom hypershell.cluster.launch import ssh_env_exports',
-                                   HYPERSHELL_Server_Auth=KEY)
+                                   **KEY_VARIABLES[case])
     assert rc == exit_status.success, stderr
-    assert seen == repr([])
+    assert seen == repr(['HYPERSHELL_SITE'])

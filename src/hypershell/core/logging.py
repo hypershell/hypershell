@@ -1038,12 +1038,12 @@ def initialize_logging(role: str = DEFAULT_ROLE) -> None:
     elif isinstance(file_config, Namespace):
 
         requested = file_config.pop('path', default_config.logging.file.path)
-        is_default = requested in (PARAM_UNSET, '')  # Empty text, as a variable gives it, is unset.
+        is_default = requested == PARAM_UNSET
         canonical_path = host_scoped_path(default_file if is_default else requested, role, is_default)
         file_path = claim_file_slot(canonical_path)
         file_policy = file_config.pop('rotate', DEFAULT_ROTATION_INTERVAL)
         file_compress = file_config.pop('compress', default_config.logging.file.compress)
-        file_compress = file_compress if file_compress not in (PARAM_UNSET, '') else None
+        file_compress = file_compress if file_compress != PARAM_UNSET else None
         file_keep = file_config.pop('keep', DEFAULT_BACKUP_COUNT)
         file_level = level_from_name(file_config.pop('level', default_file_level), 'logging.file.level')
         file_format = format_from_style(file_config.pop('style', default_file_style), 'logging.file.style')

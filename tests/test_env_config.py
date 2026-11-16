@@ -323,6 +323,87 @@ def test_text_kept(temp_site: Path, case: str) -> None:
     assert seen == repr(value)
 
 
+EMPTY_NOT_GIVEN: Final[Dict[str, Tuple[str, str]]] = {
+    'logging.file': ('logging.file', 'HYPERSHELL_LOGGING_FILE'),
+    'logging.file.path': ('logging.file', 'HYPERSHELL_LOGGING_FILE_PATH'),
+    'database.host': ('database.host', 'HYPERSHELL_DATABASE_HOST'),
+    'database.database': ('database.database', 'HYPERSHELL_DATABASE_DATABASE'),
+    'server.bind': ('server.bind', 'HYPERSHELL_SERVER_BIND'),
+    'relay.bind': ('relay.bind', 'HYPERSHELL_RELAY_BIND'),
+    'server.tls.cert': ('server.tls.cert', 'HYPERSHELL_SERVER_TLS_CERT'),
+}
+"""Optional text keys (and the bind addresses): the key compared, and the variable given empty."""
+
+
+@mark.integration
+@mark.parametrize('case', list(EMPTY_NOT_GIVEN), ids=list(EMPTY_NOT_GIVEN))
+def test_empty_optional_text_not_given(temp_site: Path, case: str) -> None:
+    """An empty variable for an optional text key is not given: the key holds what it holds without it."""
+    path, name = EMPTY_NOT_GIVEN[case]
+    rc, unset, stderr = config_repr(temp_site, f'key({path!r})')
+    assert rc == exit_status.success, stderr
+    rc, seen, stderr = config_repr(temp_site, f'key({path!r})', **{name: ''})
+    assert rc == exit_status.success, stderr
+    assert seen == unset
+
+
+@mark.integration
+def test_empty_bind_is_default_bind(temp_site: Path) -> None:
+    """An empty `HYPERSHELL_SERVER_BIND` is the default bind, and `hs config which` names no variable for it."""
+    rc, stdout, stderr = hs(temp_site, ['hs', 'config', 'get', '-r', 'server.bind'], HYPERSHELL_SERVER_BIND='')
+    assert rc == exit_status.success, stderr
+    assert stdout == 'localhost'
+    rc, stdout, stderr = hs(temp_site, ['hs', 'config', 'which', 'server.bind'], HYPERSHELL_SERVER_BIND='')
+    assert rc == exit_status.success, stderr
+    assert 'HYPERSHELL_SERVER_BIND' not in stdout
+
+
+@mark.integration
+@mark.parametrize('name', ['HYPERSHELL_LOGGING_FILE', 'HYPERSHELL_DATABASE_HOST', 'HYPERSHELL_DATABASE_DATABASE'])
+def test_empty_optional_text_runs(temp_site: Path, name: str) -> None:
+    """With an empty optional text variable on SQLite, `hs list` runs as without it: no error, no file log."""
+    rc, stdout, stderr = hs(temp_site, ['hs', 'list', '--count'], **{name: ''})
+    assert rc == exit_status.success, stderr
+    assert stdout == '0'
+    assert 'traceback' not in stderr.lower(), stderr
+    assert not list(Path(temp_site).glob('log/*.log'))
+
+
+DATABASE_FILE: Final[str] = """\
+[database]
+provider = "postgres"
+database = "d"
+user = "u"
+password = ""
+"""
+"""A configuration file giving a user and an empty password for a server database."""
+
+
+@mark.integration
+def test_empty_password_in_file_as_before(temp_site: Path) -> None:
+    """A file's empty `database.password` beside a user is read as before: the URL leaves both out."""
+    config_file = Path(temp_site) / 'config.toml'
+    config_file.write_text(DATABASE_FILE, encoding='utf-8')
+    variables = {'HYPERSHELL_CONFIG_FILE': str(config_file), 'HYPERSHELL_DATABASE_FILE': None}
+    rc, seen, stderr = config_repr(temp_site, 'str(get_url())', 'from hypershell.data.core import get_url',
+                                   **variables)
+    assert rc == exit_status.success, stderr
+    assert seen == repr('postgresql+psycopg://localhost/d')
+    rc, stdout, stderr = hs(temp_site, ['hs', 'config', 'get', '-r', 'database.provider'], **variables)
+    assert rc == exit_status.success, stderr
+    assert stdout == 'postgres'
+
+
+@mark.integration
+def test_empty_password_from_environment_not_given(temp_site: Path) -> None:
+    """An empty `HYPERSHELL_DATABASE_PASSWORD` beside a user is not given, so the user alone is refused."""
+    rc, _, stderr = hs(temp_site, ['hs', 'config', 'get', '-r', 'logging.level'], HYPERSHELL_DATABASE_FILE=None,
+                       HYPERSHELL_DATABASE_PROVIDER='postgres', HYPERSHELL_DATABASE_DATABASE='d',
+                       HYPERSHELL_DATABASE_USER='u', HYPERSHELL_DATABASE_PASSWORD='')
+    assert rc == exit_status.bad_config, stderr
+    assert "Must provide 'password' if 'user' provided" in stderr, stderr
+
+
 def start_server(site: Path, env: Dict[str, str], *args: str) -> Popen:
     """Start `hs server` in its own process group, writing to `server.log` in `site`; wait until it listens."""
     log_path = site / 'server.log'

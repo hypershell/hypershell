@@ -66,14 +66,24 @@ tests/test_env_duration.py::test_duration_refused_at_start[relay.upstream.deadli
 tests/test_env_duration.py::test_duration_refused_at_start[relay.upstream.evict_hint]
 tests/test_env_duration.py::test_duration_refused_at_start[relay.poll]
 
-# [export] as written (R7), and the key variable in any letter case kept from tasks and exports (R4, R1)
+# [export] as written (R7), and key variables, recognised by the matcher, kept from tasks and exports (R4, R1)
 tests/test_env_export.py::test_export_as_written[leading-zeros]
 tests/test_env_export.py::test_export_as_written[mixed-case]
 tests/test_env_export.py::test_export_as_written[empty]
 tests/test_env_export.py::test_export_as_written[exponent]
 tests/test_env_export.py::test_export_reaches_task
-tests/test_env_export.py::test_key_variable_any_case_not_inherited
-tests/test_env_export.py::test_key_variable_any_case_not_exported
+tests/test_env_export.py::test_key_variable_forms_not_inherited[spelling]
+tests/test_env_export.py::test_key_variable_forms_not_inherited[env]
+tests/test_env_export.py::test_key_variable_forms_not_inherited[eval]
+tests/test_env_export.py::test_key_variable_forms_not_inherited[relay]
+tests/test_env_export.py::test_key_variable_forms_not_inherited[relay-env]
+tests/test_env_export.py::test_key_variable_forms_not_inherited[relay-eval]
+tests/test_env_export.py::test_key_variable_forms_not_exported[spelling]
+tests/test_env_export.py::test_key_variable_forms_not_exported[env]
+tests/test_env_export.py::test_key_variable_forms_not_exported[eval]
+tests/test_env_export.py::test_key_variable_forms_not_exported[relay]
+tests/test_env_export.py::test_key_variable_forms_not_exported[relay-env]
+tests/test_env_export.py::test_key_variable_forms_not_exported[relay-eval]
 
 # blame, hs config which, completion (R8)
 tests/test_env_blame.py::test_blame_names_variable

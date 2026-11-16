@@ -26,7 +26,7 @@ from pytest import mark
 # Internal libs
 from hypershell.core.config import default
 from hypershell.core.config_schema import (Kind, TableKind, KEYS, TABLES, ZONE_KEYS, TIMESCALE_KEYS, PROSE_KEYS,
-                                           SCALAR_TABLES, PROCESS_VARIABLES, VARIANTS, VariableError,
+                                           SCALAR_TABLES, PROCESS_VARIABLES, VARIANTS, EMPTY_UNSET, VariableError,
                                            read_value, read_untyped, match_name, read_environment, variable_name)
 
 
@@ -327,6 +327,37 @@ def test_read_environment_table_over_scalar() -> None:
                                          'HYPERSHELL_DATABASE': 'my.db', 'HYPERSHELL_DATABASE_FILE': 'x.db'})
     assert layer == {'ssh': {'nodelist': {'g': 'c'}}, 'database': {'file': 'x.db'}}
     assert set(variables) == {('ssh', 'nodelist', 'g'), ('database', 'file')}
+
+
+def default_at(path: str) -> Any:
+    """The default at dotted `path`, or None if there is none."""
+    node: Any = default
+    for name in path.split('.'):
+        if not isinstance(node, dict) or name not in node:
+            return None
+        node = node[name]
+    return node
+
+
+@mark.unit
+def test_empty_unset_keys() -> None:
+    """The keys an empty variable leaves unset are the optional text keys, the scalar tables and the binds.
+
+    An optional text key takes text and has no default, or a default that means none.
+    """
+    optional = {path for path, kind in KEYS.items() if kind is Kind.TEXT
+                and default_at(path) in (None, '<none>', '<auto>')}
+    assert set(EMPTY_UNSET) == optional | set(SCALAR_TABLES) | {'server.bind', 'relay.bind'}
+    assert len(EMPTY_UNSET) == len(set(EMPTY_UNSET))
+
+
+@mark.unit
+def test_read_environment_empty_unset() -> None:
+    """An empty variable for an optional text key sets nothing; for another text key it is kept empty."""
+    layer, variables = read_environment({'HYPERSHELL_DATABASE_HOST': '', 'HYPERSHELL_SERVER_BIND': '',
+                                         'HYPERSHELL_LOGGING_FILE': '', 'HYPERSHELL_LOGGING_DATEFMT': ''})
+    assert layer == {'logging': {'datefmt': ''}}
+    assert set(variables) == {('logging', 'datefmt')}
 
 
 DURATION_KEYS: Tuple[str, ...] = (

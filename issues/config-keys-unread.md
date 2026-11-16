@@ -17,7 +17,8 @@ lane: public
 
 `env-config-keys`' research (`spec/env-config-keys/research/03-duration-keys.md`,
 `04-typed-readers.md`) found three keys that the parameter reference documents but that a command
-ignores, from a file and from the environment alike. Each was read on `develop` `90ab2fc2`:
+ignores, from a file and from the environment alike. Each was read on `develop` `90ab2fc2` (line
+numbers as of `fix/env-config-keys`):
 
 - **`server.eager`.** `ServerApp` and `ClusterApp` set the class attribute `eager_mode` from
   `config.server.eager` and then register `--eager` with `action='store_true', dest='eager_mode'`
@@ -26,7 +27,7 @@ ignores, from a file and from the environment alike. Each was read on `develop` 
   `HYPERSHELL_SERVER_EAGER=true` gives `eager_mode == False` in both apps).
 - **`server.evict` under `hs cluster`.** `hs cluster` passes no eviction period, and
   `RemoteCluster`/`AutoScalingCluster` default to `DEFAULT_EVICT = default.server.evict`
-  (`src/hypershell/server.py:738`, `src/hypershell/cluster/remote.py:963`), the built-in value, so a
+  (`src/hypershell/server.py:738`, `src/hypershell/cluster/remote.py:949`), the built-in value, so a
   configured `evict` is ignored there; `hs server` and `hs relay` read it.
 - **`client.ratelimit` under `hs cluster`.** `hs cluster -R` defaults to `config.task.get('ratelimit')`
   (`src/hypershell/cluster/__init__.py:240`), a key the reference does not document, not

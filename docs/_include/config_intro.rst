@@ -143,6 +143,12 @@ The value is read by the key's type:
 
 - A key that takes text holds the value as written, including ``false``, ``null``, an empty value,
   leading zeros and an exponent (``HYPERSHELL_SERVER_AUTH=0012345678901234`` is that key).
+- An empty value for an optional text key is not given, and the key's default applies, as if the
+  variable were not set. The optional text keys are those with no default or one that means none
+  (``<none>``, ``<auto>``), such as ``logging.file`` and its ``path``, ``database.host``,
+  ``database.user`` and ``database.password``, the ``[server.tls]`` files and
+  ``server.advertise``; so are ``server.bind`` and ``relay.bind``, so an empty bind is the default
+  bind. In a file, an empty value is read as before.
 - A key that takes a whole number, a number or a boolean holds the converted value. A boolean takes
   ``true``/``false``, ``yes``/``no``, ``on``/``off`` or ``1``/``0``, in any letter case. A value
   that does not convert, an empty one included, stops the command with a configuration error naming
@@ -181,5 +187,5 @@ hold (e.g., a zone ``gpu-a100``).
 .. only:: html
 
     .. versionchanged:: 2.9.0
-       A key whose name has an underscore, open-table entries, zone tables, ``_ENV``/``_EVAL`` and
-       values as written.
+       A key whose name has an underscore, open-table entries, zone tables, ``_ENV``/``_EVAL``,
+       values as written, and an empty value for an optional text key read as not given.

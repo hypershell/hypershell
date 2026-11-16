@@ -409,12 +409,14 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   with `=`). `--ssh` writes it to ssh's standard input with a forced `-T` (a bare `-n` in the
   ssh args is dropped), and a remote `sh` step reads it into that variable and `exec`s the
   client; `--env` exports are built by `ssh_env_exports()` from the variables themselves,
-  the key variable dropped by name first (`is_key_variable()`: every name the loader maps to
-  `server.auth`) and every value `shlex.quote`d, so they never carry it. The launching process's
+  every key variable dropped by name first (`is_key_variable()`: every form of `server.auth` and
+  `relay.upstream.auth` recognised by the matcher) and every value `shlex.quote`d, so they never
+  carry it. Every launch (`ClientLaunch.start()`) drops every key variable from the launched
+  environment before it sets the run key. The launching process's
   own `os.environ` is never modified; `ClientLaunch.env`/
   `stdin` are `repr=False` and `describe()` (redacted, including any word that, parsed as a
   shell parses it, assigns `HYPERSHELL_SERVER_AUTH`) is the only thing logged. The client
-  never passes the key variable (by `is_key_variable()`), or its name in the Open MPI list, to a
+  never passes a key variable (by `is_key_variable()`), or its name in the Open MPI list, to a
   task's environment (`task_env()`) or to a `{% %}` template command (`Template(shell_env=
   inherited_task_env)`). A task gets the key only explicitly: `config.export` (a key the
   operator holds; never a run's minted key), or a `{= =}` lambda, which is client-side Python
@@ -653,7 +655,8 @@ compatibility until v3, but are never referenced.
   server and each relay as separate processes. Site clients are launched only through
   `client_launch()` (every zone's via `relay/site.py::zone_launch`, the first zone's set as the
   `AutoScalingCluster`'s launch), behind `fence_site`, which keeps the upstream key
-  off every site command line and environment. Its signal handling is the carve-out under *Signals*.
+  off every site command line and environment and removes every relay variable
+  (`is_fenced()`: recognised by the matcher). Its signal handling is the carve-out under *Signals*.
 
 ## Working on this codebase as an agent
 

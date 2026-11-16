@@ -20,13 +20,14 @@ lane: public
 file, whatever the key. `true`/`false` in any case become booleans, anything `int()` or `float()`
 accepts becomes a number, and `null`/`none` become `None`, which tomlkit cannot write: the command
 fails with `ConvertError` and a traceback file (exit 5). So a key that takes text cannot be given
-those texts from this command (probed on `develop` `90ab2fc2`, `--local` in a throwaway site):
+those texts from this command (probed on `develop` `90ab2fc2`, `--local` in a throwaway site; line
+numbers as of `fix/env-config-keys`):
 
 - `hs config set autoscale.launcher false` writes `launcher = false`, the boolean, not the command
   `false`.
 - `hs config set server.auth 0012345678901234` writes the integer `12345678901234`, which
   `hs server` then refuses as shorter than 16 characters (`resolve_auth` stringifies it,
-  `src/hypershell/core/config.py:394`).
+  `src/hypershell/core/config.py:458`).
 - `hs config set export.RUN_ID 007` writes `RUN_ID = 7`, and a task sees `RUN_ID=7`.
 
 A key that takes a number or boolean gets no check either: `hs config set server.eager no` writes the

@@ -154,8 +154,9 @@ every command reads the key through `resolve_auth` ([05 §2](research/05-auth-ex
 letter case. Every place that handles the key variable by name (the client's task environment,
 `client.py` `inherited_task_env`, and its no-key hint; `--ssh --env` exports and `assigns_key`,
 `cluster/launch.py`) recognises the same names the matcher maps to `server.auth`: one predicate,
-`is_key_variable(name)` in `core/config.py`, replaces the exact-name tests. The relay's site fence
-matches the key by value and is unchanged (Non-goal).
+`is_key_variable(name)` in `core/config.py`, replaces the exact-name tests. Key variables and relay
+variables are recognised by the matcher wherever HyperShell handles them by name (Review-cycle-1
+rulings, below).
 
 ### 2.6 Duration keys — R6
 
@@ -286,7 +287,8 @@ Checked against [`.agents/factory/invariants.md`](../../.agents/factory/invarian
   `is_key_variable`, and the client still strips it from every task's environment, now in any letter
   case. Launched-client arguments are unchanged (`-w`/`-T` values only change spelling through
   `plain_seconds`; the 2.9.0a4 contract test still applies). `autoscale.failed_launches` keeps its
-  default 3 and 0 for relay fleets. The relay's `HYPERSHELL_RELAY_*` fence is unchanged (Non-goal).
+  default 3 and 0 for relay fleets. The relay's site fence recognises relay variables by the matcher
+  (Review-cycle-1 rulings).
 - **§5 Concurrency** — no FSM or thread change; `HeartMonitor`, the client heartbeat and the relay's
   upstream FSMs receive numbers converted before they are constructed.
 - **§12 Conventions** — docs in the same commit as each behaviour change, `versionchanged:: 2.9.0`; the
@@ -365,8 +367,6 @@ otherwise):
   never used. The release note says so.
 - The full suite runs against the new loader for every test (conftest sets variables at import); a
   mistyped kind shows up widely and early, which is the point of P2's broad verify.
-- `HYPERSHELL_relay_*` (lower case) sets relay keys but passes the relay's case-sensitive name fence
-  to site clients; the key itself is fenced by value. Unchanged by this cycle (Non-goal); recorded.
 - The shared uv cache under `$TMPDIR/uv-cache` had a broken `trove-classifiers` entry while planning;
   the docs and 3.11 environments were built with `UV_CACHE_DIR=$TMPDIR/uv-cache-eck`.
 

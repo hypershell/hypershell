@@ -38,7 +38,8 @@ from hypershell.core.config_schema import KEYS, read_environment, match_name, va
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
-    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable', 'env_variable',
+    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable',
+    'is_relay_variable', 'env_variable',
     'config_seconds',
     'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
@@ -461,13 +462,27 @@ AUTH_ENV: Final[str] = 'HYPERSHELL_SERVER_AUTH'
 """Environment variable that gives `server.auth`; `hs cluster` launchers hand the key over in it."""
 
 
-def is_key_variable(name: str) -> bool:
-    """True if the environment variable `name` sets `server.auth` (as :const:`AUTH_ENV` does, in any letter case)."""
+def is_key_variable(name: str, sections: tuple[tuple[str, ...], ...] = AUTH_SECTIONS) -> bool:
+    """True if the environment variable `name` gives a key: any form of `server.auth` or `relay.upstream.auth`.
+
+    A name is recognised by the matcher, as the environment layer reads it, so every form of the
+    key (:data:`AUTH_FORMS`) counts. `sections` narrows the keys considered (`(('server', ), )` for
+    `server.auth` alone).
+    """
     try:
         match = match_name(name)
     except VariableError:
         return False
-    return match is not None and match[0] == ('server', 'auth')
+    return match is not None and match[0][:-1] in sections and match[0][-1] in AUTH_FORMS
+
+
+def is_relay_variable(name: str) -> bool:
+    """True if the environment variable `name` sets a relay setting: a key the matcher maps under `relay`."""
+    try:
+        match = match_name(name)
+    except VariableError:
+        return True  # Only a `relay.zone` name is refused by the matcher.
+    return match is not None and match[0][0] == 'relay'
 
 KEY_OPTION_STRINGS: Final[tuple[str, ...]] = ('-k', '--auth')
 """Option strings registered on the commands only to be refused (see :func:`refuse_key_option`)."""

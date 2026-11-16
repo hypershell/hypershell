@@ -217,7 +217,9 @@ key generators used in the deployment guides below satisfy this policy.
       and ``--autoscaling`` with no launcher. If such a launcher needs Open MPI to forward
       the variable, add ``-x HYPERSHELL_SERVER_AUTH`` (the name only) to ``--launcher``. A
       launcher set to drop the environment, such as ``srun --export=NONE``, leaves its
-      clients without the key, so they cannot authenticate.
+      clients without the key, so they cannot authenticate. The launched environment holds no
+      other key variable (see below), so however the key was given to ``hs cluster``, the key
+      the launch sets is the only one its clients see.
       Such a client exits with a ``CRITICAL`` error that names ``HYPERSHELL_SERVER_AUTH`` and
       the launcher not passing the environment as the likely cause. With TLS on, where the
       dropped environment also held the client's TLS settings, the client fails to verify the
@@ -230,8 +232,8 @@ key generators used in the deployment guides below satisfy this policy.
       line there either. With ``--env``, the other ``HYPERSHELL_*`` variables of the launching
       environment are still passed on ssh's command line, one ``NAME=value`` word each, with
       the value quoted for a POSIX shell, so a POSIX login shell on the remote host reads back
-      exactly that value, and no value can run into another word. ``HYPERSHELL_SERVER_AUTH`` is left out by name before any
-      word is built, so it is never among them, whatever the other values hold. (A name that
+      exactly that value, and no value can run into another word. Every key variable is left out by name before any
+      word is built, so none is among them, whatever the other values hold. (A name that
       is not a valid shell variable name is left out too, with a warning.) The launch owns ssh's standard input and always passes ``-T``, so no remote
       terminal is allocated. A ``-t`` or ``-tt`` in ``--ssh-args`` or ``ssh.args``
       therefore has no effect on client launches, and a bare ``-n`` there is dropped with a
@@ -241,8 +243,17 @@ key generators used in the deployment guides below satisfy this policy.
 
     The key is also redacted from *HyperShell*'s own launch logs, at every level.
 
-    Tasks run with their client's environment, except that the client does not pass
-    ``HYPERSHELL_SERVER_AUTH`` to them, and takes that name out of
+    A key variable is any form of ``server.auth`` or ``relay.upstream.auth`` that the
+    configuration reads from the environment (``HYPERSHELL_SERVER_AUTH``, its ``_ENV`` and
+    ``_EVAL`` forms, and the same for ``HYPERSHELL_RELAY_UPSTREAM_AUTH``): key variables are
+    recognised by the matcher wherever *HyperShell* handles them by name.
+
+    .. versionchanged:: 2.9.0
+       Key variables and relay variables are recognised by the matcher wherever *HyperShell*
+       handles them by name.
+
+    Tasks run with their client's environment, except that the client passes no key variable
+    to them, and takes ``HYPERSHELL_SERVER_AUTH`` out of
     ``OMPI_MCA_mca_base_env_list`` (keeping any other names, and dropping the variable if none
     is left). The client runs the shell commands of ``{% %}`` template patterns, once per
     task, with that same environment. So, whatever the launch mode, neither a task's
@@ -567,8 +578,8 @@ authentication domains, and each keeps its own key.
 
 * **The upstream key stays in the relay process.** Site *clients* inherit the relay's environment,
   and tasks their *client*'s, so before the first site *client* starts the relay removes from its own
-  environment every relay setting (``HYPERSHELL_RELAY_*``) and every variable whose name or value
-  holds the upstream key. When ``HYPERSHELL_CONFIG_FILE`` names a file with relay settings or the key
+  environment every relay setting (``HYPERSHELL_RELAY_*``, and any other name the configuration
+  reads as a relay setting) and every variable whose name or value holds the upstream key. When ``HYPERSHELL_CONFIG_FILE`` names a file with relay settings or the key
   in it, the site is given a copy without them (readable by its owner only, beside the relay
   database, and removed when the relay ends; a relay ended by SIGKILL, or by a second SIGTERM while
   it ends, leaves it behind, and the next relay on that database writes over it). The relay refuses

@@ -42,6 +42,7 @@ from cmdkit.app import exit_status
 from tests import create_taskfile_echo
 from hypershell import client as client_module
 from hypershell.client import DEFAULT_AUTH, task_env
+from hypershell.core.config import is_key_variable
 from hypershell.cluster.launch import AUTH_ENV, OMPI_ENV_LIST, ZONE_ENV, ClientLaunch, client_launch
 from hypershell.cluster.remote import AutoScaler, AutoScalingCluster
 from hypershell.cluster.ssh import SSHCluster, DEFAULT_REMOTE_EXE
@@ -77,7 +78,8 @@ def record(role, **fields):
     with os.fdopen(os.open(path + '.part', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
         json.dump({{'role': role, 'name': os.path.basename(sys.argv[0]), 'argv': sys.argv,
                     'key': os.environ.get({auth_env!r}), 'ompi': os.environ.get({ompi_env!r}),
-                    'level': os.environ.get('HYPERSHELL_LOGGING_LEVEL'), **fields}}, stream)
+                    'level': os.environ.get('HYPERSHELL_LOGGING_LEVEL'), 'variables': sorted(os.environ),
+                    **fields}}, stream)
     os.rename(path + '.part', path)
 """
 
@@ -1362,6 +1364,78 @@ def test_ssh_launch_exports_never_carry_key(monkeypatch: MonkeyPatch) -> None:
     for launch in cluster.launches:
         assert held not in ' '.join(launch.argv) and held not in launch.describe()
         assert any(word.startswith('HYPERSHELL_SERVER_PORT=') for word in launch.argv)
+
+
+KEY_FORMS: Final[Dict[str, Callable[[str], Dict[str, str]]]] = {
+    'env': lambda key: {'HYPERSHELL_SERVER_AUTH_ENV': 'LAUNCH_TEST_KEY', 'LAUNCH_TEST_KEY': key},
+    'eval': lambda key: {'HYPERSHELL_SERVER_AUTH_EVAL': f'echo {key}'},
+    'spelling': lambda key: {'HYPERSHELL_Server_Auth': key},
+}
+"""Each form of the key besides its canonical variable: the variables that give `key` in that form."""
+
+FORM_KEY: Final[str] = 'form-key-7d1e4b09a2c35f68'
+"""The key given to each run of `test_key_in_any_form_reaches_launched_clients`."""
+
+
+@mark.parametrize('form', list(KEY_FORMS))
+@mark.parametrize('mode', ['launcher', 'mpi', 'autoscaling'])
+def test_key_in_any_form_reaches_launched_clients(stand_ins: StandIns, temp_site: Path,
+                                                   mode: str, form: str) -> None:
+    """However the key is given, each launched client holds the run's key in one variable, and every task runs."""
+    env = KEY_FORMS[form](FORM_KEY)
+    if mode == 'autoscaling':
+        launch_mode = [f'--launcher={stand_ins.autoscale_launcher}', '--autoscaling=fixed']
+        run = run_cluster(stand_ins, launch_mode, temp_site, True, None, env=env,
+                          until=all_tasks_done(stand_ins, temp_site))
+        assert run.status is None, f'Run exited ({run.status}) before its tasks completed\n' + run.stderr[-4000:]
+    else:
+        launch_mode = [f'--launcher={stand_ins.launcher}'] if mode == 'launcher' else ['--mpi']
+        run = run_cluster(stand_ins, launch_mode, temp_site, True, None, env=env)
+        assert run.status == exit_status.success, run.stderr[-4000:]
+    clients = [record for record in stand_ins.read() if record['role'] == 'client']
+    assert clients, 'No client was launched'
+    assert len({record['key'] for record in clients}) == 1 and clients[0]['key']
+    for record in clients:
+        assert [name for name in record['variables'] if is_key_variable(name)] == [AUTH_ENV]
+    results = task_results(stand_ins, temp_site)
+    assert sorted(args for args, _ in results) == sorted(f'echo {n}' for n in range(TASK_COUNT))
+    assert [status for _, status in results] == [0] * TASK_COUNT
+
+
+KEY_VARIABLE_FORMS: Final[List[str]] = [
+    AUTH_ENV, 'HYPERSHELL_Server_Auth', 'HYPERSHELL_SERVER_AUTH_ENV', 'HYPERSHELL_server_auth_eval',
+    'HYPERSHELL_RELAY_UPSTREAM_AUTH', 'HYPERSHELL_relay_upstream_auth_env', 'HYPERSHELL_Relay_Upstream_Auth_Eval',
+]
+"""Names of key variables, in forms the matcher recognises."""
+
+# Prints, as JSON, every variable of its environment whose name is in its arguments.
+PRINT_VARIABLES: Final[str] = ('import os, sys, json; '
+                               'print(json.dumps({n: os.environ[n] for n in sys.argv[1:] if n in os.environ}))')
+
+
+@mark.parametrize('inherit_env', [pytest.param(False, id='launcher'), pytest.param(True, id='ssh')])
+def test_client_launch_gives_only_its_own_key(monkeypatch: MonkeyPatch, inherit_env: bool) -> None:
+    """A launched process holds no key variable but the one its launch sets, whatever the caller's holds."""
+    for name in KEY_VARIABLE_FORMS:
+        monkeypatch.setenv(name, 'held-by-caller')
+    launch = ClientLaunch(argv=[sys.executable, '-c', PRINT_VARIABLES, *KEY_VARIABLE_FORMS],
+                          env={} if inherit_env else {AUTH_ENV: 'run-key'}, inherit_env=inherit_env)
+    proc = launch.start(stdout=PIPE)
+    stdout, _ = proc.communicate(timeout=30)
+    assert proc.returncode == 0
+    assert json.loads(stdout) == ({} if inherit_env else {AUTH_ENV: 'run-key'})
+
+
+@mark.parametrize('name', KEY_VARIABLE_FORMS)
+def test_ssh_launch_exports_no_key_variable(name: str) -> None:
+    """An SSH launch exports no key variable, in any form the matcher recognises, and keeps every other export."""
+    params = {**SSH_LAUNCH_BASE}
+    remote_exe, address = params.pop('remote_exe'), params.pop('address')
+    launch = client_launch(remote_exe, address, 'k' * 32, ssh_host='node-7',
+                           ssh_exports={'HYPERSHELL_SITE': '/site', name: 'held-by-caller'}, **params)
+    _, after, _, _ = split_ssh_launch(launch.argv, 'node-7')
+    assert after[:-1] == ['HYPERSHELL_SITE=/site', 'sh', '-c']
+    assert 'held-by-caller' not in ' '.join(launch.argv)
 
 
 @mark.parametrize('stdin', [pytest.param(None, id='launcher'), pytest.param('key', id='ssh')])

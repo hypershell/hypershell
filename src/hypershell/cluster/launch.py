@@ -127,11 +127,16 @@ class ClientLaunch:
 
         The launched process gets the inherited environment, the task environment
         from configuration, and the additions in `env`, in that order; or, with
-        `inherit_env`, exactly the inherited environment. The environment of the
-        calling process is never modified. When there is `stdin`, it is written to
-        the process's standard input, which is then closed.
+        `inherit_env`, the inherited environment alone. Every variable that gives a key
+        (see :func:`~hypershell.core.config.is_key_variable`) is left out of the first two,
+        so the key this launch sets in `env` is the only one the process is given. The
+        environment of the calling process is never modified. When there is `stdin`, it is
+        written to the process's standard input, which is then closed.
         """
-        env = None if self.inherit_env else {**os.environ, **load_task_env(), **self.env}
+        given = os.environ if self.inherit_env else {**os.environ, **load_task_env()}
+        env = {name: value for name, value in given.items() if not is_key_variable(name)}
+        if not self.inherit_env:
+            env.update(self.env)
         if self.stdin is None:
             return Popen(self.argv, env=env, **popen_options)
         proc = Popen(self.argv, env=env, stdin=PIPE, **popen_options)
@@ -152,8 +157,8 @@ class ClientLaunch:
         """
         Shell-quoted command line for logging, with any key option value redacted.
 
-        A word that assigns :const:`AUTH_ENV` shows the name only: each word is parsed as a
-        shell would parse it, and any `NAME=value` it holds whose name sets `server.auth`
+        A word that assigns a key variable is shown as `AUTH_ENV=***`: each word is parsed as a
+        shell would parse it, and any `NAME=value` it holds whose name gives a key
         (:func:`assigns_key`) redacts the whole word, however the word is quoted. The last word of an SSH launch
         (the one with `stdin`) is already quoted for the remote shell and ssh sends it as it
         is, so it is shown as it is.
@@ -204,8 +209,9 @@ def client_launch(remote_exe: str,
     With `ssh_host`, the command line is `launcher` and `launcher_args`, then `-T` (no
     remote terminal, whatever those arguments or the ssh configuration ask for), the host,
     one `NAME=value` word for each of `ssh_exports` (see :func:`ssh_env_exports`, which never
-    exports :const:`AUTH_ENV`), and a remote `sh -c` step (see :func:`ssh_remote_script`).
-    The key is the launch's standard input, and ssh gets the caller's environment unchanged.
+    exports a key variable), and a remote `sh -c` step (see :func:`ssh_remote_script`).
+    The key is the launch's standard input, and ssh gets the caller's environment without any
+    variable that gives a key.
     The launch owns that input, so a bare `-n` among the ssh arguments is dropped (see
     :func:`ssh_launch_args`).
 
@@ -384,8 +390,8 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
     """
     One `NAME=value` word per variable in `env`, for the remote shell of an SSH launch.
 
-    Every variable that sets `server.auth` (:const:`AUTH_ENV`, in any letter case; see
-    :func:`~hypershell.core.config.is_key_variable`) is left out by name before anything is
+    Every variable that gives a key, in any form the matcher recognises (see
+    :func:`~hypershell.core.config.is_key_variable`), is left out by name before anything is
     quoted. Each value is quoted with :func:`shlex.quote`, so a POSIX shell reads it back as
     exactly that value, and no value can join or split words. A name that a shell cannot assign
     is left out.
@@ -406,7 +412,7 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
 
 
 def assigns_key(word: str) -> bool:
-    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name sets `server.auth`."""
+    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name gives a key (`is_key_variable`)."""
     try:
         tokens = shlex.split(word)
     except ValueError:  # Unbalanced quotes: look at the word as it is

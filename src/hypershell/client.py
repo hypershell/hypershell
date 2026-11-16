@@ -477,8 +477,8 @@ def inherited_task_env() -> Dict[str, str]:
     """
     The client's own environment as its tasks inherit it, without the authentication key.
 
-    Every variable that sets `server.auth` (:const:`AUTH_ENV`, in any letter case; see
-    :func:`~hypershell.core.config.is_key_variable`) is left out, and its name is taken out of
+    Every variable that gives a key, in any form the matcher recognises (see
+    :func:`~hypershell.core.config.is_key_variable`), is left out, and its name is taken out of
     :const:`OMPI_ENV_LIST`, which is left out too if no other name remains. The client's own
     environment is not modified.
     """
@@ -1669,7 +1669,8 @@ class ClientApp(Application):
         """Run client."""
         self.auth = resolve_auth('server')
         # The hints below name a missing key only when none came from the environment or a configuration file.
-        no_key = not any(is_key_variable(name) for name in os.environ) and self.auth == DEFAULT_AUTH
+        no_key = (not any(is_key_variable(name, sections=(('server', ), )) for name in os.environ)
+                  and self.auth == DEFAULT_AUTH)
         try:
             self.check_args()
             self.enable_tls()

@@ -28,8 +28,8 @@ from enum import Enum
 
 # Public interface
 __all__ = ['Kind', 'TableKind', 'KEYS', 'TABLES', 'ZONE_KEYS', 'TIMESCALE_KEYS', 'PROCESS_VARIABLES',
-           'PROSE_KEYS', 'SCALAR_TABLES', 'VARIANTS', 'PREFIX', 'VariableError', 'read_value', 'read_untyped',
-           'match_name', 'read_environment', 'variable_name']
+           'PROSE_KEYS', 'SCALAR_TABLES', 'EMPTY_UNSET', 'VARIANTS', 'PREFIX', 'VariableError', 'read_value',
+           'read_untyped', 'match_name', 'read_environment', 'variable_name']
 
 
 PREFIX: Final[str] = 'HYPERSHELL_'
@@ -145,6 +145,22 @@ PROSE_KEYS: Final[Tuple[str, ...]] = ('logging.file.format', *(f'database.timesc
 
 SCALAR_TABLES: Final[Tuple[str, ...]] = ('logging.file', 'ssh.nodelist', 'database')
 """Tables that may be given one value in place of the table (each is a key and a table here)."""
+
+EMPTY_UNSET: Final[Tuple[str, ...]] = (
+    'logging.file', 'logging.file.path', 'logging.file.compress', 'logging.file.format',
+    'database', 'database.url', 'database.file', 'database.database', 'database.schema', 'database.host',
+    'database.user', 'database.password', 'database.timescale.chunk_interval', 'database.timescale.segmentby',
+    'database.timescale.orderby', 'database.timescale.compress_after',
+    'server.bind', 'server.advertise', 'server.tls.cert', 'server.tls.key', 'server.tls.cafile',
+    'server.tls.fingerprint', 'server.tls.ciphers', 'server.tls.servername',
+    'ssh.args', 'ssh.nodelist', 'autoscale.sites',
+    'relay.database', 'relay.bind', 'relay.zone', 'relay.site',
+    'relay.upstream.tls.cert', 'relay.upstream.tls.cafile', 'relay.upstream.tls.fingerprint',
+)
+"""Optional text keys, and the bind addresses: an empty variable for one is not given.
+
+The key's default applies, as it does when no variable is set (an empty bind is the default bind).
+"""
 
 VARIANTS: Final[Tuple[str, ...]] = ('_env', '_eval')
 """Suffixes by which a key is given as the name of a variable, or a command, that gives its value."""
@@ -305,9 +321,10 @@ def _below(path: Tuple[str, ...], paths: Iterable[Tuple[str, ...]]) -> bool:
 def read_environment(environ: Mapping[str, str]) -> Tuple[Dict[str, Any], Dict[Tuple[str, ...], str]]:
     """The environment layer that `environ` gives, and the variable that set each key path.
 
-    Raises :class:`VariableError`, naming the variables, for a value that does not convert to
-    its key's kind, a `relay.zone` name with no zone key, `HYPERSHELL_RELAY_ZONE` together with a
-    zone-table variable, and two variables that set one key.
+    An empty variable for a key of :data:`EMPTY_UNSET` sets nothing. Raises :class:`VariableError`,
+    naming the variables, for a value that does not convert to its key's kind, a `relay.zone` name
+    with no zone key, `HYPERSHELL_RELAY_ZONE` together with a zone-table variable, and two variables
+    that set one key.
     """
     values: Dict[Tuple[str, ...], Any] = {}
     variables: Dict[Tuple[str, ...], str] = {}
@@ -315,6 +332,8 @@ def read_environment(environ: Mapping[str, str]) -> Tuple[Dict[str, Any], Dict[T
         if (match := match_name(name)) is None:
             continue
         path, kind = match
+        if environ[name] == '' and '.'.join(path) in EMPTY_UNSET:
+            continue
         if path in variables:
             raise VariableError(f'{variables[path]} and {name} both set {".".join(path)}')
         try:
