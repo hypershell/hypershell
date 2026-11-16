@@ -4,7 +4,7 @@ title: Environment variables reach every configuration key with the value as wri
   the remaining duration keys take units
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/env-config-keys
 base: develop
 current_phase: done
@@ -159,11 +159,11 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     $TMPDIR/docs-html-eck
 review:
-  last_reviewed_commit: f495fa20cb17ebecb32978a6c2288d75ce217786
+  last_reviewed_commit: 085538c81869b4617fdbe8821dcb675c0227ee29
   verdict: changes-requested
-  blocked_reason: 'review cycle 1: F1 R3 key forms break launches; F3 DatabaseURL
-    file change undocumented; F2 empty text; F4 seed lines'
-  cycle: 1
+  blocked_reason: 'review cycle 2: N2 task.cwd file change undocumented (client.py,
+    human gate); N1 empty timescale variables dropped; N3 AGENTS/invariants lockstep'
+  cycle: 2
 ---
 # TECH.md — Environment variables reach every configuration key with the value as written; the remaining duration keys take units
 
