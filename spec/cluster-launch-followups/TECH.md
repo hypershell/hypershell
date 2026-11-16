@@ -4,10 +4,10 @@ title: A locked database delays a cluster's decision instead of ending the run; 
   --no-db cluster whose work is done never reports a failed launch
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/cluster-launch-followups
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-16'
 phases:
 - id: P1
@@ -68,7 +68,7 @@ phases:
 - id: P4
   name: 'Gate: every drive, the whole suite under 3.14 and 3.11, docs and pinned tests
     unchanged'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -303,10 +303,10 @@ still raises within 10 s.
 **Goal:** the whole change holds together: every drive mode, the whole suite serially under 3.14 and
 3.11, and nothing outside the fence moved.
 
-- [ ] Run the verify. A failure in a test unrelated to this change that passes alone on a rerun is
+- [x] Run the verify. A failure in a test unrelated to this change that passes alone on a rerun is
       recorded in the commit body with its node id and both outcomes (the 3.11 suite had one such
       failure in an earlier cycle); one that fails twice stops the phase.
-- [ ] Commit body: the drive results per mode and the suite totals per Python.
+- [x] Commit body: the drive results per mode and the suite totals per Python.
 - **Verify:** see frontmatter. Dry-run at plan time: the fence check passes and the whole suite on the
   base is green under both Pythons (totals in the plan commit); the drives as in P2/P3.
 - **Touches:** `spec/cluster-launch-followups/TECH.md` only.
