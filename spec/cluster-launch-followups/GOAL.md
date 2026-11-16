@@ -153,7 +153,7 @@ Both:
 
 ## Clarifications
 
-Proposed in shaping on 2026-11-16; every item marked **pending** needs the foreman's sign-off at
+Proposed in shaping on 2026-11-16; every item marked **confirmed at the GOAL gate** needs the foreman's sign-off at
 the GOAL gate before `/hs-plan`.
 
 - **Q:** Two seeds in one cycle, and what appetite? — **A:** One cycle, `fix`, `small`, on the
@@ -189,6 +189,22 @@ the GOAL gate before `/hs-plan`.
   or per check), how exits seen during a skipped check are carried to the next (R2), the warning
   wording, whether `MEMORY_SETTLE` stays once the count is exact, and how a locked read is told from
   other `OperationalError`s.
+
+**Ruled at the GOAL gate** (2026-11-16): approved by the foreman, gate judge under the maintainer's
+mandate. Every pending clarification is confirmed as proposed:
+- two seeds in one cycle, appetite small;
+- R3 is in scope: the launcher, `--mpi` and `--ssh` "tasks remain" read is #107 code with the same
+  exposure;
+- one WARNING per skipped check or failed read;
+- R5 restores the pre-#107 ending (the eviction wait), not a prompt end;
+- the Receiver result counter in `server.py` is accepted now that #103 has landed; `server.py` is
+  high-blast-radius, so the plan keeps that edit minimal and the review's human gate applies as the
+  rubric says;
+- relay site fleets and `hs server --autoscaling` may inherit R1's handling through the shared
+  `AutoScaler` without a requirement of their own.
+
+`hs cluster` ignoring `server.evict` is already filed (`issues/config-keys-unread.md`, from
+`env-config-keys`). The contract is locked; `hs-plan` designs against it.
 
 ## Evidence plan
 
