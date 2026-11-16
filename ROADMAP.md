@@ -360,7 +360,7 @@ deferred work.
 
 *Horizon: near-term, small · Depends on: — · Refs: `spec/server-initdb/` (Non-goals; R5 for the
 server half)*
-**Seed:** [`issues/cluster-no-db-initializes-sqlite.md`](issues/cluster-no-db-initializes-sqlite.md) · *status: unshaped*
+**Seed:** [`issues/cluster-no-db-initializes-sqlite.md`](issues/cluster-no-db-initializes-sqlite.md) · *status: adopted:cluster-nodb-and-zero-period*
 
 ## Duration settings read only from configuration still take bare seconds only
 
@@ -452,7 +452,7 @@ Pre-existing in `develop` and on the 2.8 line.
 
 *Horizon: near-term, small · Depends on: — · Refs: `duration-units-remaining` (the parser behind
 `-P`); `cluster-launch-failures` planning*
-**Seed:** [`issues/autoscale-zero-period-spins.md`](issues/autoscale-zero-period-spins.md) · *status: unshaped*
+**Seed:** [`issues/autoscale-zero-period-spins.md`](issues/autoscale-zero-period-spins.md) · *status: adopted:cluster-nodb-and-zero-period*
 
 ## A `--no-db` cluster can report a failed run when a client dies just after its last result
 

@@ -58,4 +58,11 @@ Description
    every task is done, not once the tasks read so far are done, so a line that arrives after a pause
    still runs. Input that is never closed keeps the run going until it is.
 
+.. versionchanged:: 2.9.0
+   ``--no-db`` leaves the configured database alone: it is not opened, created or initialized.
+
+.. versionchanged:: 2.9.0
+   ``-P``/``--period`` and ``autoscale.period`` must be greater than zero; zero or a negative
+   value is refused.
+
 .. include:: ../_include/cluster_help.rst
