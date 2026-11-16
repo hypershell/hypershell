@@ -426,3 +426,35 @@ proposed.
   human gate applies as the rubric says.
 - **Toolchain:** the shared uv cache under `/tmp/claude-501/uv-cache` is corrupt; use a fresh
   `UV_CACHE_DIR` as TECH says.
+
+## Review-cycle-1 rulings (2026-11-16)
+
+The review's human gate was triggered: F1 concerns how the queue key reaches launched clients
+(invariants §11). The maintainer ruled in session (2026-11-16) on every finding, and on the review's
+private notes, which the foreman hands to the builder directly.
+
+- **F1.** Every launch path drops every form of the key variable the matcher recognises (`_ENV` and
+  `_EVAL` included) from a launched client's environment before it sets the run key, so a key given
+  by any form never makes a client refuse two forms. Tests cover launcher, `--mpi` and autoscaling
+  launches with the key given by `_ENV`, `_EVAL` and a non-canonical spelling, and `--ssh` and relay
+  site launches by their command construction. They are red on `f495fa20`.
+- **Key handling by the matcher.** Wherever HyperShell handles key variables by name (a task's
+  environment, `--ssh --env` exports, the relay's site fence), it recognises them by the matcher:
+  every form of the key, and every name that maps under `relay`. Public text states this outcome
+  only.
+- **F2.** Empty text on an optional text key means "not given", and the key's default applies:
+  `logging.file`, `database.host` and the other optional text keys, and `server.bind` too (an empty
+  bind is the default bind). The guide says so. Tests cover `HYPERSHELL_LOGGING_FILE=`,
+  `HYPERSHELL_DATABASE_HOST=` on SQLite, and an empty bind.
+- **F3.** The file layer keeps base behaviour for an empty `database.user` or `database.password`;
+  "empty means unset" applies to the environment layer only. A test pins the file case.
+- **F4.** The two new seeds cite line numbers as of this branch.
+- **Wording.** Docstrings, `AGENTS.md`, `invariants.md` and test names describe the outcome
+  ("recognised by the matcher") and do not single out letter case. Rename
+  `test_key_variable_any_case_not_inherited` and `test_key_variable_any_case_not_exported` to
+  `test_key_variable_forms_not_inherited` and `test_key_variable_forms_not_exported`, and update
+  `red.txt` to match.
+- **Sibling #112** (`cluster-nodb-and-zero-period`) lands first. Rebase onto it. Eight
+  `tests/test_period_floor.py::test_period_key_refused` cases (`env-nan` and `env-neginf`) expect the
+  "greater than zero" message, but the environment's `nan` and `-inf` now arrive as text and are
+  refused as not a duration. Update those expectations; the behaviour stays a refusal with exit 2.
