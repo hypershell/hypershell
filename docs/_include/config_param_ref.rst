@@ -611,7 +611,7 @@
         See also ``.period``.
 
     ``.period``
-        Scaling period in seconds (default: 60).
+        Scaling period in seconds, greater than zero (default: 60).
 
         The autoscaler waits for this period of time in between checks and scaling events.
         A shorter period makes the scaling behavior more responsive but can effect database
@@ -620,11 +620,17 @@
         (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number is
         seconds. ``hs relay`` reads it in the same forms as the period of its site's clients, and
         stops before it starts if the value is not a duration.
+        The period must be greater than zero: ``hs cluster``, ``hs server`` and ``hs relay`` each
+        refuse zero or a negative value at start-up. A period below one second, in any form, is one
+        second.
 
         .. only:: html
 
             .. versionchanged:: 2.9.0
                A string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               A period of zero or less is refused; a number below one second is one second.
 
     ``.launcher``
         Command prefix used to launch each client as a scaling unit (default: none).

@@ -35,9 +35,10 @@ subsystems.
   files.
 - A confirmation writes the client only onto a row with `completion_time` NULL (`Task.confirm_all`);
   a late one leaves a complete row's result attribution as it is.
-- **A 0-row UPDATE of a `task` row is not proof the row is gone or no longer qualifies.** On a
-  TimescaleDB 2.29+ hypertable (the `timescale` provider), an UPDATE that waited on another
-  transaction's row lock can match 0 rows although the row still qualifies. A task-row write another
+- **A 0-row UPDATE or DELETE of a `task` row is not proof the row is gone or no longer qualifies.**
+  On a TimescaleDB 2.28.1 through 2.31.0 hypertable (the `timescale` provider; upstream issue #10902,
+  fixed in 2.32.0), an UPDATE or DELETE that waited on another transaction's row lock can match 0
+  rows although the row still qualifies. A task-row write another
   writer can contend checks its own count and, on 0, re-runs only while a fresh read says the row
   still qualifies, at most `CONTENDED_RERUNS` times (DEBUG per extra attempt; at the bound a WARNING
   naming the task and path, and a safe outcome: no crash, no silently stranded task, no write that
@@ -47,12 +48,20 @@ subsystems.
   evicted client), the dispatch stamp in `Task.next` (only while `schedule_time IS NULL`), the
   retry mark in `Task.next` (only while the row still awaits retry, committed with its retry row;
   at the bound the row stays retryable with no retry row), `Task.cancel_all` (by id; returns the ids
-  cancelled), `Task.apply_results` (`ResultOutcome.DEFERRED`). The conditional writes
+  cancelled), `Task.apply_results` (`ResultOutcome.DEFERRED`), and every `hs update` write:
+  `Task.update` (legacy, by id), `Task.update_selected`/`delete_selected` (`--limit`, by id under the
+  user's filter, a row no longer matching skipped), `Task.update_matching`/`delete_matching` (no
+  `--limit`: one set-based statement, each row's first attempt; on PostgreSQL the UPDATE returns
+  the ids it wrote (`RETURNING id`) and one read of the ids still matching, less those, finds the
+  rows it missed, while the DELETE takes its row count and that one read alone, with no
+  `RETURNING` (a row it deleted no longer matches); each row missed is written by id under the
+  filter at most `CONTENDED_RERUNS` more times, the one check after a first-attempt match; none on
+  SQLite), all-or-nothing at the bound (rollback, `Task.Contended`, exit 5). The
+  conditional writes
   (`revert_staged`, the eviction revert, the dispatch stamp, the retry mark) skip a row gone or no
-  longer qualifying, never raise on it; `confirm_all` (strict, the default), `revert_all` and
-  `cancel_all` still raise `StaleDataError` on a gone row, by design. Never `bulk_update_mappings`
-  or an ORM flush for such a write. `hs update` does not follow it yet
-  (`issues/hs-update-contended-writes.md`).
+  longer qualifying, never raise on it; `confirm_all` (strict, the default), `revert_all`,
+  `cancel_all` and `Task.update` still raise `StaleDataError` on a gone row, by design. Never
+  `bulk_update_mappings` or an ORM flush for such a write.
 
 ## 2. `exit_status` overloading
 

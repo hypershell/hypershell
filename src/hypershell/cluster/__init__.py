@@ -23,7 +23,7 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.config import config, blame, find_available_ports, PARAM_UNSET
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import parse_bytes, parse_time, parse_delay
+from hypershell.core.types import parse_bytes, parse_time, parse_delay, parse_period, UnitError
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -116,7 +116,7 @@ Options:
   -Q, --poll           SEC      Polling interval between database queries if no tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SERVER_POLL}).
   -A, --autoscaling   [MODE]    Enable autoscaling per zone (default: disabled). Used with --launcher.
   -F, --factor         VALUE    Scaling factor (default: 1).
-  -P, --period         SEC      Scaling period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_AUTOSCALE_PERIOD}).
+  -P, --period         SEC      Scaling period, greater than zero; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_AUTOSCALE_PERIOD}).
   -I, --init-size      SIZE     Initial size of cluster (default: {DEFAULT_AUTOSCALE_INIT_SIZE}).
   -X, --min-size       SIZE     Minimum size of cluster (default: {DEFAULT_AUTOSCALE_MIN_SIZE}).
   -Y, --max-size       SIZE     Maximum size of cluster (default: {DEFAULT_AUTOSCALE_MAX_SIZE}).
@@ -260,7 +260,7 @@ class ClusterApp(Application):
     interface.add_argument('-A', '--autoscaling', nargs='?', default=None,
                            const=config.autoscale.policy, dest='autoscaling_policy',)
     interface.add_argument('-F', '--factor', type=float, default=autoscaling_factor, dest='autoscaling_factor')
-    interface.add_argument('-P', '--period', type=parse_time, default=autoscaling_period, dest='autoscaling_period')
+    interface.add_argument('-P', '--period', type=parse_period, default=autoscaling_period, dest='autoscaling_period')
     interface.add_argument('-X', '--min-size', type=int, default=autoscaling_minimum, dest='autoscaling_minimum')
     interface.add_argument('-Y', '--max-size', type=int, default=autoscaling_maximum, dest='autoscaling_maximum')
     interface.add_argument('-I', '--init-size', type=int, default=autoscaling_initial, dest='autoscaling_initial')
@@ -373,6 +373,11 @@ class ClusterApp(Application):
 
     def check_arguments(self: ClusterApp) -> None:
         """Various checks on input arguments."""
+        try:
+            # A number from the configuration is not parsed by the option.
+            self.autoscaling_period = parse_period(self.autoscaling_period)
+        except UnitError as error:
+            raise ArgumentError(f'autoscale.period: {error}') from error
         given_filepath = self.filepath is not None
         if self.from_json:
             if given_filepath:
@@ -595,10 +600,11 @@ class ClusterApp(Application):
         """Set up resources and attributes."""
         self.check_arguments()
         self.enable_tls()
-        if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
-            initdb()  # Auto-initialize if local sqlite provider
-        elif not self.in_memory:
-            checkdb()
+        if not self.in_memory:  # With --no-db the configured database is never opened.
+            if DATABASE_DIALECT == 'sqlite' or self.auto_initdb:
+                initdb()  # Auto-initialize if local sqlite provider
+            else:
+                checkdb()
         if self.port == DEFAULT_PORT:
             self.port = next(find_available_ports(bind=self.host))
         return self

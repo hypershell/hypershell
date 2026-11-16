@@ -145,7 +145,8 @@ Options
 
     By default, a scheduler thread selects tasks from a database that were previously submitted.
     With ``--no-db`` enabled, there is no scheduler and instead the `submit` thread publishes
-    bundles directly to the queue.
+    bundles directly to the queue. The configured database is not opened at all, so it need not
+    exist or be initialized.
 
 ``--zone`` *NAME*
     Zone of the submitted tasks and of every client the cluster launches; the own zone with
@@ -442,12 +443,13 @@ Options
     See also ``--period``.  Only valid with ``--autoscaling``.
 
 ``-P``, ``--period`` *SEC*
-    Scaling period (default: 60).
+    Scaling period, greater than zero (default: 60).
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
     ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
-    second is rounded up to the next whole second.
+    second is rounded up to the next whole second. A period of zero or less, here or in
+    ``autoscale.period``, is refused.
 
     The autoscaler waits for this period of time in between checks and scaling events.
     A shorter period makes the scaling behavior more responsive but can effect database

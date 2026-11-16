@@ -3,16 +3,18 @@
 
 """Recovering a task-row write that a row lock made miss, by fault injection on SQLite.
 
-On a TimescaleDB 2.29+ hypertable, an UPDATE that waited on another transaction's row lock can
-match 0 rows although the row exists and still qualifies. SQLite never does that, so these tests
-inject it: a wrapper around the session's ``execute`` makes the next *k* UPDATEs of a chosen task
-report 0 matched rows without running, optionally committing another writer's change to the row
-first, as the transaction it waited on would. Every recovery path is driven in-process, as the
-server drives it (``Confirm.update_info``, ``Receiver.update_tasks``, ``Task.revert_orphaned``,
+On a TimescaleDB 2.28.1 through 2.31.0 hypertable, an UPDATE that waited on another transaction's
+row lock can match 0 rows although the row exists and still qualifies. SQLite never does that, so
+these tests inject it: a wrapper around the session's ``execute`` makes the next *k* UPDATEs of a
+chosen task report 0 matched rows without running, optionally committing another writer's change to
+the row first, as the transaction it waited on would. Every recovery path is driven in-process, as
+the server drives it (``Confirm.update_info``, ``Receiver.update_tasks``, ``Task.revert_orphaned``,
 ``Task.revert_staged``), and the wrapper's record of executed statements pins what an uncontended
 write costs. The Scheduler's ``retried`` mark and ``Task.cancel_all`` are made to miss at the
 driver instead (``DriverContention``), below the ORM, so a bulk update is reached as well as a
-per-row one. The real race, on a server database, is ``tests/test_contended_write.py``.
+per-row one. ``hs update`` runs in-process (``TaskUpdateApp.main``) on the same engine, with its
+writes by id made to miss at the driver too: the legacy single-task form, ``--limit`` and
+``--delete --limit``. The real race, on a server database, is ``tests/test_contended_write.py``.
 """
 
 
@@ -24,13 +26,16 @@ from pathlib import Path
 # Standard libs
 import io
 import re
+import json
 import logging
+from types import SimpleNamespace
 from datetime import datetime, timedelta
 from queue import Empty as QueueEmpty
 
 # External libs
 import pytest
 from pytest import mark, fixture
+from cmdkit.app import exit_status as cli_status
 from sqlalchemy import create_engine, event, text, update, delete
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm.exc import StaleDataError
@@ -44,6 +49,7 @@ from hypershell.data import model
 from hypershell.data.core import Session
 from hypershell.data.model import Entity, Task, ResultOutcome, CANCEL_STATUS, serialize_tasks, deserialize_tasks
 from hypershell.server import Confirm, ConfirmState, Receiver, ReceiverState
+from hypershell.task import TaskUpdateApp
 
 
 CLIENT_A = (uuid(), 'client-a')
@@ -817,25 +823,28 @@ LOST_UPDATE = 'UPDATE task SET id = id WHERE 0'
 
 
 class DriverContention:
-    """Makes the retry mark or the cancel of chosen tasks match no row, at the driver; records statements on `task`.
+    """Makes chosen writes of chosen tasks match no row, at the driver; records statements on `task`.
 
     Installed on the engine by the dialect's `do_execute` and `do_executemany` events, below the
-    ORM, so a bulk update (one executemany) is reached as well as a per-row UPDATE. A lost write
-    runs a 0-row UPDATE in its place; in an executemany, the lost task's parameter set is dropped
-    and the rest run. Only the retry mark (an UPDATE whose SET names `retried`) and the cancel (an
-    UPDATE whose SET is exactly the columns a cancel writes) are ever lost, so the dispatch stamp,
-    the result write and the reverts always land.
+    ORM, so a bulk update or delete (one executemany) is reached as well as a per-row one. A lost
+    write runs a 0-row UPDATE in its place; in an executemany, the lost task's parameter set is
+    dropped and the rest run. Only writes of the `kinds` given are ever lost or made to wait. The
+    default is the retry mark (an UPDATE whose SET names `retried`) and the cancel (an UPDATE whose
+    SET is exactly the columns a cancel writes), so the dispatch stamp, the result write and the
+    reverts always land; `hs update`'s tests add any other UPDATE ('UPDATE') and the DELETE by id
+    ('DELETE').
 
     Each statement on `task` is recorded once per parameter set as (kind, task id): the kind is
-    'mark', 'cancel', 'UPDATE', 'SELECT' or 'INSERT'; the task id is the parameter the WHERE clause
-    opens on (`task.id = ?`), else None. Another writer's change, run by `lose`, is neither
-    recorded nor lost. A write made to `wait` on another writer's change (`waits`) is not lost: the
-    change commits first and the write then runs as written, on the row as the change left it, as
-    PostgreSQL re-checks a row it waited on.
+    'mark', 'cancel', 'UPDATE', 'DELETE', 'SELECT' or 'INSERT'; the task id is the parameter the
+    WHERE clause opens on (`task.id = ?`), else None. Another writer's change, run by `lose`, is
+    neither recorded nor lost. A write made to `wait` on another writer's change (`waits`) is not
+    lost: the change commits first and the write then runs as written, on the row as the change
+    left it, as PostgreSQL re-checks a row it waited on.
     """
 
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, kinds: Tuple[str, ...] = ('mark', 'cancel')) -> None:
         self.engine = engine
+        self.lost_kinds = kinds
         self.losing: Dict[str, int] = {}
         self.meanwhile: Dict[str, Callable[[], None]] = {}
         self.executed: List[Tuple[str, Optional[str]]] = []
@@ -849,7 +858,7 @@ class DriverContention:
         event.remove(self.engine, 'do_executemany', self.do_executemany)
 
     def lose(self, task_id: str, count: int, meanwhile: Optional[Callable[[], None]] = None) -> None:
-        """Make the next `count` marks or cancels of task `task_id` match no row.
+        """Make the next `count` writes (of the kinds given) of task `task_id` match no row.
 
         A `meanwhile` callable runs once, at the first of them, before the 0-row UPDATE: the other
         transaction's change, committed while the write waited on its row lock.
@@ -859,7 +868,7 @@ class DriverContention:
             self.meanwhile[task_id] = meanwhile
 
     def waits(self, task_id: str, meanwhile: Callable[[], None]) -> None:
-        """Make the next mark or cancel of task `task_id` wait on another writer's change, then run as written.
+        """Make the next write (of the kinds given) of task `task_id` wait on another writer's change, then run it.
 
         `meanwhile` runs once, before that write: the other transaction's change, committed while the
         write waited on its row lock. The write itself is not lost, so its own row condition decides
@@ -878,6 +887,8 @@ class DriverContention:
         if sql.startswith('UPDATE task SET '):
             names = set(SET_COLUMN.findall(sql[len('UPDATE task SET '):where if where >= 0 else None]))
             kind = 'mark' if 'retried' in names else 'cancel' if names == CANCEL_COLUMNS else 'UPDATE'
+        elif sql.startswith('DELETE FROM task '):
+            kind = 'DELETE'
         elif sql.startswith('INSERT INTO task '):
             kind = 'INSERT'
         elif sql.startswith('SELECT ') and ' FROM task ' in f'{sql} ':
@@ -894,8 +905,8 @@ class DriverContention:
         return str(params[position])
 
     def take(self, kind: str, task_id: Optional[str]) -> bool:
-        """Whether this write is lost; runs the other writer's change at the first mark or cancel of the task."""
-        if kind not in ('mark', 'cancel'):
+        """Whether this write is lost; runs the other writer's change at the task's first write (of the kinds given)."""
+        if kind not in self.lost_kinds:
             return False
         if (change := self.meanwhile.pop(task_id, None)) is not None:
             self.passing = True
@@ -1233,3 +1244,277 @@ def test_cancel_of_gone_row_raises_and_cancels_nothing(task_db) -> None:
         Task.cancel_all(ids)
 
     assert cancelled_ids(task_db) == []
+
+
+# --- hs update, its writes by id lost at the driver ------------------------------------------------
+
+
+# The writes of `hs update` that can be lost: a field or tag change, a cancel, and a delete by id.
+UPDATE_KINDS = ('UPDATE', 'cancel', 'DELETE')
+
+
+@fixture
+def update_driver(task_db) -> Iterator[DriverContention]:
+    """A `DriverContention` on the per-test engine that can lose any write `hs update` makes by id."""
+    injector = DriverContention(task_db, kinds=UPDATE_KINDS)
+    try:
+        yield injector
+    finally:
+        injector.remove()
+
+
+@fixture
+def hs_update(task_db, monkeypatch, tmp_path) -> Callable[..., int]:
+    """Run `hs update ARGS... -f` in-process on the per-test engine; return its exit status.
+
+    The database is already initialized, so `ensuredb` is skipped; a traceback file, if one is
+    written, lands under the test's own directory. Each run starts from the parser's own defaults
+    (a filter alias appends to the `--where` list, which would otherwise be shared between runs).
+    """
+    monkeypatch.setattr('hypershell.task.ensuredb', lambda: None)
+    log_dir = tmp_path / 'log'
+    log_dir.mkdir()
+    monkeypatch.setattr('hypershell.core.exceptions.default_path', SimpleNamespace(log=str(log_dir)))
+    where = next(action for action in TaskUpdateApp.interface._actions  # noqa: SLF001
+                 if action.dest == 'where_clauses')
+
+    def run(*argv: str) -> int:
+        monkeypatch.setattr(where, 'default', [])
+        try:
+            return TaskUpdateApp.main([*argv, '-f'])
+        finally:
+            Session.remove()  # NOTE: the connection goes away with the process.
+
+    return run
+
+
+def submitted(count: int, tag: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Add `count` tasks (args ordered as their position, zero-padded); return their ids in that order."""
+    tasks = [Task.new(args=f'echo {n:03d}', tag=dict(tag or {})) for n in range(count)]
+    Task.add_all(tasks)
+    return [task.id for task in tasks]
+
+
+def rows(engine: Engine) -> Dict[str, Dict[str, Any]]:
+    """Every committed task row by id: group, exit status, completion time and tag."""
+    with engine.connect() as conn:
+        found = conn.execute(text('SELECT id, "group", exit_status, completion_time, tag FROM task')).mappings().all()
+    return {data['id']: {'group': data['group'], 'exit_status': data['exit_status'],
+                         'completion_time': data['completion_time'],
+                         'tag': json.loads(data['tag']) if isinstance(data['tag'], str) else data['tag']}
+            for data in found}
+
+
+def severe(logs: pytest.LogCaptureFixture) -> List[str]:
+    """Messages logged at ERROR or above."""
+    return [record.getMessage() for record in logs.records if record.levelno >= logging.ERROR]
+
+
+def contended_error(logs: pytest.LogCaptureFixture, task_id: str) -> List[str]:
+    """Messages at ERROR or above that name the task and say the update was contended and nothing was written."""
+    return [message for message in severe(logs)
+            if task_id in message and 'contended' in message.lower() and 'nothing was written' in message]
+
+
+def traceback_written(logs: pytest.LogCaptureFixture, tmp_path: Path) -> bool:
+    """A traceback file was written, or a line said so."""
+    return (any('traceback written' in record.getMessage() for record in logs.records)
+            or any((tmp_path / 'log').iterdir()))
+
+
+def any_rerun(logs: pytest.LogCaptureFixture, task_id: str) -> List[str]:
+    """The DEBUG lines for extra attempts of one task's write, on any path."""
+    return [message for message in messages(logs, logging.DEBUG, 'Re-running contended') if f'({task_id})' in message]
+
+
+NOT_MATCHED = '1 of the 4 tasks counted no longer matched and were left as they are'
+
+
+@mark.unit
+def test_update_legacy_contended_lands_on_rerun(task_db, update_driver, hs_update, logs) -> None:
+    """`hs update ID FIELD VALUE` on a task whose write missed the first time re-runs it and writes it, exit 0."""
+    task_id, other = submitted(2)
+    update_driver.lose(task_id, 1)
+
+    assert hs_update(task_id, 'group', '3') == cli_status.success
+
+    assert rows(task_db)[task_id]['group'] == 3
+    assert rows(task_db)[other]['group'] == 0
+    assert len(any_rerun(logs, task_id)) == 1
+    assert severe(logs) == []
+    assert messages(logs, logging.WARNING) == []
+
+
+@mark.unit
+def test_update_legacy_contended_exhausted_writes_nothing(task_db, update_driver, hs_update, logs, tmp_path) -> None:
+    """At the bound, the legacy form writes nothing, says the update was contended, and exits 5 without a traceback."""
+    task_id, = submitted(1)
+    before = rows(task_db)
+    update_driver.lose(task_id, ALWAYS)
+
+    assert hs_update(task_id, 'group', '3') == cli_status.runtime_error
+
+    assert rows(task_db) == before
+    assert contended_error(logs, task_id), severe(logs)
+    assert not any('not found' in message.lower() or 'NotFound' in message for message in severe(logs))
+    assert not traceback_written(logs, tmp_path)
+
+
+@mark.unit
+def test_update_legacy_missing_task_not_found(task_db, update_driver, hs_update, logs, tmp_path) -> None:
+    """The legacy form on an id with no row reports it not found and exits 5, without a traceback."""
+    submitted(1)
+    before = rows(task_db)
+    missing = uuid()
+
+    assert hs_update(missing, 'group', '3') == cli_status.runtime_error
+
+    assert rows(task_db) == before
+    assert any('NotFound' in message for message in severe(logs)), severe(logs)
+    assert not any('contended' in message.lower() for message in severe(logs))
+    assert not traceback_written(logs, tmp_path)
+
+
+@mark.unit
+def test_update_limit_contended_lands_on_rerun(task_db, update_driver, hs_update, logs) -> None:
+    """`--limit` with a field and a tag change: a row whose write missed once is re-run, and every row gets both."""
+    ids = submitted(4)
+    update_driver.lose(ids[1], 1)
+
+    assert hs_update('--limit', '4', '-s', 'args', '-R', 'group=7', 'color:red') == cli_status.success
+
+    after = rows(task_db)
+    assert {task_id: (after[task_id]['group'], after[task_id]['tag']) for task_id in ids} == \
+        {task_id: (7, {'color': 'red'}) for task_id in ids}
+    assert len(any_rerun(logs, ids[1])) == 1
+    assert messages(logs, logging.INFO, 'Updated 4 tasks')
+    assert severe(logs) == []
+
+
+@mark.unit
+def test_update_limit_contended_exhausted_writes_nothing(task_db, update_driver, hs_update, logs, tmp_path) -> None:
+    """At the bound, `--limit` over 150 rows writes none of them (not even those before the contended one),
+    says the update was contended, and exits 5 without a traceback."""
+    ids = submitted(150)
+    before = rows(task_db)
+    lost = ids[119]
+    update_driver.lose(lost, ALWAYS)
+
+    assert hs_update('--limit', '150', '-s', 'args', '-R', 'group=7') == cli_status.runtime_error
+
+    after = rows(task_db)
+    assert [task_id for task_id in ids if after[task_id] != before[task_id]] == []
+    assert contended_error(logs, lost), severe(logs)
+    assert not traceback_written(logs, tmp_path)
+
+
+@mark.unit
+def test_update_limit_skips_task_changed_out_of_filter(task_db, update_driver, hs_update, logs) -> None:
+    """A selected task that completed before its write no longer matches `-R`: `--limit` leaves it with its
+    result, does not count it, and says so; exit 0."""
+    ids = submitted(4)
+    update_driver.waits(ids[0], completed_as(task_db, ids[0]))
+
+    assert hs_update('--limit', '4', '-s', 'args', '-R', 'group=7') == cli_status.success
+
+    after = rows(task_db)
+    assert (after[ids[0]]['group'], after[ids[0]]['exit_status']) == (0, 0)
+    assert after[ids[0]]['completion_time'] is not None
+    assert [after[task_id]['group'] for task_id in ids[1:]] == [7, 7, 7]
+    assert messages(logs, logging.WARNING, NOT_MATCHED)
+    assert messages(logs, logging.INFO, 'Updated 3 tasks')
+    assert severe(logs) == []
+
+
+@mark.unit
+def test_update_limit_cancel_keeps_result_landed_meanwhile(task_db, update_driver, hs_update, logs) -> None:
+    """`--limit -R --cancel` leaves a selected task that completed before its write with its result."""
+    ids = submitted(4)
+    update_driver.waits(ids[0], completed_as(task_db, ids[0]))
+
+    assert hs_update('--limit', '4', '-s', 'args', '-R', '--cancel') == cli_status.success
+
+    after = rows(task_db)
+    assert after[ids[0]]['exit_status'] == 0
+    assert [after[task_id]['exit_status'] for task_id in ids[1:]] == [CANCEL_STATUS] * 3
+    assert messages(logs, logging.WARNING, NOT_MATCHED)
+    assert messages(logs, logging.INFO, 'Updated 3 tasks')
+    assert severe(logs) == []
+
+
+@mark.unit
+def test_update_limit_uncontended_costs_one_update_per_row(task_db, update_driver, hs_update, logs) -> None:
+    """An uncontended `--limit` update is one UPDATE per selected row, with nothing read back after them."""
+    ids = submitted(4)
+    update_driver.clear()
+
+    assert hs_update('--limit', '3', '-s', 'args', '-R', 'group=7') == cli_status.success
+
+    kinds = update_driver.kinds()
+    first = kinds.index('UPDATE')
+    assert kinds[first:] == ['UPDATE'] * 3
+    assert [task_id for _, task_id in update_driver.executed[first:]] == ids[:3]
+    assert [rows(task_db)[task_id]['group'] for task_id in ids] == [7, 7, 7, 0]
+    assert messages(logs, logging.DEBUG, 'Re-running contended') == []
+
+
+@mark.unit
+def test_update_delete_limit_contended_lands_on_rerun(task_db, update_driver, hs_update, logs) -> None:
+    """`--delete --limit`: a row whose delete missed once is re-run, and every selected row is deleted."""
+    ids = submitted(4)
+    update_driver.lose(ids[1], 1)
+
+    assert hs_update('--limit', '4', '-s', 'args', '-R', '--delete') == cli_status.success
+
+    assert rows(task_db) == {}
+    assert len(any_rerun(logs, ids[1])) == 1
+    assert messages(logs, logging.INFO, 'Deleted 4 tasks')
+    assert severe(logs) == []
+
+
+@mark.unit
+def test_update_delete_limit_contended_exhausted_deletes_nothing(task_db, update_driver, hs_update, logs,
+                                                                  tmp_path) -> None:
+    """At the bound, `--delete --limit` deletes nothing, says the update was contended, and exits 5."""
+    ids = submitted(4)
+    before = rows(task_db)
+    update_driver.lose(ids[2], ALWAYS)
+
+    assert hs_update('--limit', '4', '-s', 'args', '-R', '--delete') == cli_status.runtime_error
+
+    assert rows(task_db) == before
+    assert contended_error(logs, ids[2]), severe(logs)
+    assert not traceback_written(logs, tmp_path)
+
+
+@mark.unit
+def test_update_delete_limit_skips_task_changed_out_of_filter(task_db, update_driver, hs_update, logs) -> None:
+    """A selected task that completed before its delete no longer matches `-R`: `--delete --limit` leaves it,
+    does not count it, and says so; exit 0."""
+    ids = submitted(4)
+    update_driver.waits(ids[0], completed_as(task_db, ids[0]))
+
+    assert hs_update('--limit', '4', '-s', 'args', '-R', '--delete') == cli_status.success
+
+    after = rows(task_db)
+    assert list(after) == [ids[0]]
+    assert after[ids[0]]['exit_status'] == 0
+    assert messages(logs, logging.WARNING, NOT_MATCHED)
+    assert messages(logs, logging.INFO, 'Deleted 3 tasks')
+    assert severe(logs) == []
+
+
+@mark.unit
+def test_update_filtered_uncontended_is_one_statement(task_db, update_driver, hs_update, logs) -> None:
+    """Without `--limit`, a field change, a tag set and a tag removal are one UPDATE of `task`, for 5 rows
+    and for 30, and every row gets all three."""
+    for count in (5, 30):
+        ids = submitted(count, tag={'size': 'big'})
+        update_driver.clear()
+
+        assert hs_update('group=7', 'color:red', '--remove-tag', 'size', '-w', 'group==0') == cli_status.success
+
+        assert update_driver.kinds().count('UPDATE') == 1, update_driver.kinds()
+        after = rows(task_db)
+        assert {task_id: (after[task_id]['group'], after[task_id]['tag']) for task_id in ids} == \
+            {task_id: (7, {'color': 'red'}) for task_id in ids}

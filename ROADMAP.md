@@ -222,6 +222,16 @@ the input. It is committed and run eventually, so no stop depends on it. Pre-exi
 *Horizon: near-term · Depends on: — · Refs: `spec/task-input-fidelity/research/02-stream-stop.md`*
 **Seed:** [`issues/stream-bundlewait-commit-wait.md`](issues/stream-bundlewait-commit-wait.md) · *status: unshaped*
 
+## No test pins the re-count before a quiet stop when a failed group ends a stream run
+
+When the input has ended and a failed group holds no task in another group, the scheduler counts the
+remaining tasks once more before it stops quietly, so a row another writer commits in that instant
+is still scheduled or halts the run. The behaviour is right, but removing the re-count passes every
+test. A deterministic interleaving test should pin it. Filed after `task-input-fidelity` (#110).
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/task-input-fidelity/` (REVIEW cycle 3, N1)*
+**Seed:** [`issues/stream-failed-group-recount-test.md`](issues/stream-failed-group-recount-test.md) · *status: unshaped*
+
 ## An empty task file never finishes
 
 `hsx` given an empty task file on an empty database never exits: the server logs `Empty database -
@@ -243,6 +253,17 @@ and after `group-advance-strands-lower-group`. Pre-existing, and found by that c
 
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
 **Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
+
+## An autoscaler read that meets a locked SQLite database ends the cluster
+
+With failed-launch counting on (the default for `hs cluster`), the autoscaler reads client
+registrations on every check. On SQLite under a busy stream of submissions that read can fail with
+`database is locked`, and the autoscaler ends the run with a traceback file instead of treating it
+as transient. Seen once on CI; introduced with `cluster-launch-failures` (#107), not yet released.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/cluster-launch-failures/`; the submitter's
+side above*
+**Seed:** [`issues/autoscale-read-database-locked.md`](issues/autoscale-read-database-locked.md) · *status: unshaped*
 
 ## A non-integer task group is accepted at submit time
 
@@ -327,7 +348,7 @@ row updated. Split from `contended-writes` at its GOAL gate.
 
 *Horizon: near-term · Depends on: `contended-writes` · Refs: hypertable-update-retry (the pattern);
 `contended-writes` (the server half)*
-**Seed:** [`issues/hs-update-contended-writes.md`](issues/hs-update-contended-writes.md) · *status: unshaped*
+**Seed:** [`issues/hs-update-contended-writes.md`](issues/hs-update-contended-writes.md) · *status: adopted:hs-update-contended-writes*
 
 ## `hs cluster --no-db` still initializes a SQLite database it never uses
 
@@ -339,7 +360,7 @@ deferred work.
 
 *Horizon: near-term, small · Depends on: — · Refs: `spec/server-initdb/` (Non-goals; R5 for the
 server half)*
-**Seed:** [`issues/cluster-no-db-initializes-sqlite.md`](issues/cluster-no-db-initializes-sqlite.md) · *status: unshaped*
+**Seed:** [`issues/cluster-no-db-initializes-sqlite.md`](issues/cluster-no-db-initializes-sqlite.md) · *status: adopted:cluster-nodb-and-zero-period*
 
 ## Duration settings read only from configuration still take bare seconds only
 
@@ -444,7 +465,7 @@ Pre-existing in `develop` and on the 2.8 line.
 
 *Horizon: near-term, small · Depends on: — · Refs: `duration-units-remaining` (the parser behind
 `-P`); `cluster-launch-failures` planning*
-**Seed:** [`issues/autoscale-zero-period-spins.md`](issues/autoscale-zero-period-spins.md) · *status: unshaped*
+**Seed:** [`issues/autoscale-zero-period-spins.md`](issues/autoscale-zero-period-spins.md) · *status: adopted:cluster-nodb-and-zero-period*
 
 ## A `--no-db` cluster can report a failed run when a client dies just after its last result
 
@@ -695,6 +716,26 @@ developer's own database location. Split out of `relay`'s review.
 (landed, #103: the relay abort races and rough edges, each with its own tests)*
 **Seed:** [`issues/relay-test-strength.md`](issues/relay-test-strength.md) · *status: unshaped*
 
+## Two CI tests fail intermittently and pass on a re-run
+
+`test_queue_limits.py`'s open-file-limit test can wait forever for two distinct clients when one
+client takes every quick task, and the relay site-key test fails when a process it scans exits
+mid-read and psutil raises `AccessDenied`. Each has cost re-runs on recent pull requests; both are
+small test-side fixes.
+
+*Horizon: near-term, small · Depends on: — · Refs: CI on #104, #107 and #110*
+**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md),
+[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: unshaped*
+
+## `pytest -n auto` fails at collection
+
+`AGENTS.md` recommends a parallel local run, but some parametrized test ids differ between workers,
+so pytest-xdist refuses to start and every run is serial (about 25 minutes). Stable ids, or an
+honest `AGENTS.md`, would fix it.
+
+*Horizon: near-term, small · Depends on: — · Refs: `AGENTS.md` § Commands*
+**Seed:** [`issues/pytest-xdist-collection-ids.md`](issues/pytest-xdist-collection-ids.md) · *status: unshaped*
+
 # Part III — Turso follow-ons
 
 What the Turso provider's vacuum work left open. Turso's multi-process mode is experimental, and the
@@ -727,6 +768,26 @@ opens after an interrupted vacuum, or Turso supporting in-place `VACUUM` in its 
 *Horizon: when there is evidence or an upstream fix · Depends on: turso-upstream-repro, or a Turso
 release · Refs: `spec/turso/` P3, review cycles 4–6*
 **Seed:** [`issues/turso-vacuum-concurrent-recovery.md`](issues/turso-vacuum-concurrent-recovery.md) · *status: unshaped*
+
+---
+
+# Part IV — Beyond 2.9.0
+
+Candidates not scheduled for any release. Each may be taken up, reshaped or declined; an entry
+here records the idea and its open problems, and promises nothing.
+
+## `hs cluster` could bring up its own relays
+
+A single server serves each client connection on its own thread and tops out near 1,000 connected
+clients. Relays already lift that ceiling: one server with 100 relays of 100 clients each reaches
+10,000. Inside one allocation, though, every relay is brought up by hand. A relay count on
+`hs cluster` (and so on `hsx`) would start the whole tree and take it down. The open problems are
+splitting the allocation's nodes among the relays, handing each relay its keys the way clients get
+theirs, where each relay's database lives, and recovering the work of a relay that dies.
+
+*Horizon: after 2.9.0, maybe · Depends on: relay autoscaling (#100) · Refs: `hs relay` (#82), key
+hand-off (#80)*
+**Seed:** [`issues/cluster-relay-fanout.md`](issues/cluster-relay-fanout.md) · *status: unshaped*
 
 ---
 

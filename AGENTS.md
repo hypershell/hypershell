@@ -527,11 +527,12 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   constant `server_default`, and a new index must not be `UNIQUE`, or the step refuses to upgrade
   an existing table (`SchemaUpgradeError`). Python API callers bypass the CLI helpers and must
   call `ensuredb()` first.
-- **A 0-row UPDATE of a `task` row is not proof the row is gone or no longer qualifies.** Under the
-  `timescale` provider on TimescaleDB 2.29+, an UPDATE that waited on another transaction's row lock
-  can match 0 rows although the row exists and still satisfies the statement's condition (a plain
-  table, plain PostgreSQL and TimescaleDB before 2.29 re-check it and match 1). A new statement sees
-  the other transaction's commit and matches normally. So a task-row write that another writer can
+- **A 0-row UPDATE or DELETE of a `task` row is not proof the row is gone or no longer qualifies.**
+  Under the `timescale` provider on TimescaleDB 2.28.1 through 2.31.0 (upstream issue #10902, fixed
+  in 2.32.0), an UPDATE or DELETE that waited on another transaction's row lock can match 0 rows
+  although the row exists and still satisfies the statement's condition (a plain table, plain
+  PostgreSQL and the other TimescaleDB releases re-check it and match 1). A new statement sees the
+  other transaction's commit and matches normally. So a task-row write that another writer can
   contend checks its own matched count and, on 0, re-runs only while a fresh read says the row still
   qualifies, at most `CONTENDED_RERUNS` times, each extra attempt logged at DEBUG; at the bound it
   logs a WARNING naming the task and the path and takes a safe outcome (never a crash, a silently
@@ -548,13 +549,20 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   retry row, one not marked at the bound stays retryable with no retry row for a later round),
   `Task.cancel_all` (per-row UPDATE by id; returns the ids cancelled, leaving out a row not
   cancelled at the bound) and `Task.apply_results` (re-run behind the classifying SELECT,
-  `ResultOutcome.DEFERRED` at the bound, held by the Receiver) are the pattern. The conditional
+  `ResultOutcome.DEFERRED` at the bound, held by the Receiver) are the pattern, and so is every
+  `hs update` write: `Task.update` (the legacy form, by id), `Task.update_selected`/
+  `Task.delete_selected` (`--limit`: by id under the user's filter, a row no longer matching
+  skipped) and `Task.update_matching`/`Task.delete_matching` (no `--limit`: one set-based statement;
+  on PostgreSQL the UPDATE returns the ids it wrote and one residual read of the filter finds the
+  rows it missed, each then written by id under the filter, the one check made after a first-attempt
+  match, since a set-based statement has one count for all its rows; SQLite's write lock leaves
+  nothing to miss). Every `hs update` write is all-or-nothing at the bound: the one transaction is
+  rolled back and `Task.Contended` raised (logged, exit 5). The conditional
   writes (`revert_staged`, the eviction revert, the dispatch stamp, the retry mark) skip a row gone
   or no longer qualifying and never raise on it; `Task.confirm_all` (strict, the default),
-  `Task.revert_all` and `Task.cancel_all` still raise `StaleDataError` on a gone row, by design.
-  Never use `bulk_update_mappings` or an ORM flush for such a write: they assert the total and
-  raise `StaleDataError`. `hs update` does not follow it yet
-  (`issues/hs-update-contended-writes.md`).
+  `Task.revert_all`, `Task.cancel_all` and `Task.update` still raise `StaleDataError` on a gone row,
+  by design. Never use `bulk_update_mappings` or an ORM flush for such a write: they assert the total
+  and raise `StaleDataError`.
 
 ## Testing
 
@@ -616,8 +624,9 @@ compatibility until v3, but are never referenced.
   `completion_time` silently double-runs or resurrects tasks; one retry per failed row rests on
   the single Scheduler plus the `retried` filter, with each retry mark committing with its retry
   row, not on the schema (`previous_id`/`next_id` are not unique, except in pre-2.9 SQLite
-  databases); a contended `task`-row UPDATE can match 0 rows on a TimescaleDB 2.29+ hypertable,
-  so a new task-row write follows the `CONTENDED_RERUNS` rule in *Data layer specifics*.
+  databases); a contended `task`-row UPDATE or DELETE can match 0 rows on a TimescaleDB 2.28.1
+  through 2.31.0 hypertable, so a new task-row write follows the `CONTENDED_RERUNS` rule in *Data
+  layer specifics*, through `Task.__write_rows` and its conditions (the user's filter among them).
 - **`server.py`** — Scheduler FSM, HeartMonitor (Issue-#29 re-registration branch, `evict_after≥10`),
   and shutdown/sentinel ordering.
 - **`client.py`** — FSMs, process-global resource counters under `executor_lock`, sticky

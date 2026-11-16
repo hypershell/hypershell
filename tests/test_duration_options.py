@@ -226,10 +226,16 @@ SECONDS_OPTIONS: Final[List[tuple[type, List[str], str, str]]] = [
 ]
 
 
+# Each whole-second value and its seconds; a zero period is refused instead (tests/test_period_floor.py).
+SECONDS_PARSED: Final[List[tuple[str, int]]] = [('30s', 30), ('5m', 300), ('1h30m', 5400), ('1.5h', 5400), ('1:30', 90),
+                                                ('1:30:00', 5400), ('1-12', 129600), ('90', 90), ('0.5', 1), ('0', 0)]
+
+
 @mark.unit
-@mark.parametrize('app, args, option, dest', SECONDS_OPTIONS)
-@mark.parametrize('value, expected', [('30s', 30), ('5m', 300), ('1h30m', 5400), ('1.5h', 5400), ('1:30', 90),
-                                      ('1:30:00', 5400), ('1-12', 129600), ('90', 90), ('0.5', 1), ('0', 0)])
+@mark.parametrize('app, args, option, dest, value, expected', [
+    (*option, *case) for option in SECONDS_OPTIONS for case in SECONDS_PARSED
+    if not (option[3] == 'autoscaling_period' and case[1] == 0)
+])
 def test_seconds_option_parsed(app: type, args: List[str], option: str, dest: str, value: str, expected: int) -> None:
     """Every whole-second duration option reads seconds, units and Slurm times, rounded up."""
     assert getattr(app.interface.parse_args([*args, option, value]), dest) == expected
@@ -354,9 +360,9 @@ def test_cluster_launches_whole_seconds() -> None:
 
 
 @mark.unit
-@mark.parametrize('period, expected', [('5m', 300), ('1:30', 90), ('90', 90), ('0.5s', 1), (60, 60), (0.5, 0.5)])
+@mark.parametrize('period, expected', [('5m', 300), ('1:30', 90), ('90', 90), ('0.5s', 1), (60, 60), (0.5, 1)])
 def test_relay_site_period(monkeypatch, period: Any, expected: Any) -> None:
-    """The relay reads a period string in the duration forms and uses a number as given."""
+    """The relay reads a period string in the duration forms and a number as given, one second at the least."""
     monkeypatch.setitem(config['autoscale'], 'period', period)
     site_period = RelayApp.from_cmdline([]).site_period
     assert site_period == expected and type(site_period) is type(expected)

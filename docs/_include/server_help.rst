@@ -184,12 +184,13 @@ Options
     each zone's estimated time to completion against (its *task pressure*), as for the `cluster`.
 
 ``-P``, ``--period`` *SEC*
-    Scaling period (default: 60).
+    Scaling period, greater than zero (default: 60).
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,
     ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` or ``D-HH:MM:SS`` (e.g., ``1:30``). A fraction of a
-    second is rounded up to the next whole second.
+    second is rounded up to the next whole second. A period of zero or less, here or in
+    ``autoscale.period``, is refused.
 
     The server waits this long between checks and publishes a new topology only when it changes.
 

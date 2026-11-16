@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:cluster-nodb-and-zero-period
 kind: fix
 appetite: small
 lane: public

@@ -19,13 +19,14 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, select, bindparam, or_, cast, inspect
+from sqlalchemy import Column, Index, func, text, update, delete, select, bindparam, literal, or_, cast, inspect
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.sql.elements import ClauseElement, ColumnElement
 from sqlalchemy.types import Integer, Float, DateTime, Text, Boolean, JSON as JSON_TEXT
-from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES
+from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES, ARRAY
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -66,10 +67,10 @@ scheduler's failure and retry queries filter it out explicitly.
 CONTENDED_RERUNS: Final[int] = 3
 """Extra attempts for a task-row UPDATE that matched no row while the row still qualifies.
 
-On a TimescaleDB 2.29+ hypertable, an UPDATE that waited on another transaction's row lock can
-report 0 matched rows although the row exists and still satisfies the statement's condition. A
-new statement sees the other transaction's commit and matches normally, so a write that a fresh
-read shows still qualifies is re-run, at most this many times.
+On a TimescaleDB 2.28.1 through 2.31.0 hypertable, an UPDATE or DELETE that waited on another
+transaction's row lock can report 0 matched rows although the row exists and still satisfies the
+statement's condition. A new statement sees the other transaction's commit and matches normally,
+so a write that a fresh read shows still qualifies is re-run, at most this many times.
 """
 
 DIRECT_SOURCE_ID: Final[str] = '00000000-0000-7000-8000-000000000000'
@@ -136,6 +137,10 @@ class NotFound(DatabaseError):
 
 class NotDistinct(DatabaseError):
     """Exception specific to multiple records found when only one should have been."""
+
+
+class Contended(DatabaseError):
+    """Exception specific to a write that did not land after its re-runs, another writer holding the row."""
 
 
 class AlreadyExists(DatabaseError):
@@ -464,6 +469,9 @@ class Task(Entity):
         pass
 
     class AlreadyExists(AlreadyExists):
+        pass
+
+    class Contended(Contended):
         pass
 
     @property
@@ -1016,11 +1024,33 @@ class Task(Entity):
         return write, exists
 
     @classmethod
+    def __filter_statements(cls: Type[Task], values: Dict[str, Any], where: Tuple[ColumnElement, ...],
+                            remove: bool = False, prefix: str = 'r_') -> Tuple[Any, Any]:
+        """The UPDATE (or DELETE) of one row by `id` that still matches `where`, and the SELECT that looks it up.
+
+        Both match the row by `id` first, then the criteria; the SELECT reads the row's `id`, so it
+        finds nothing for a row that is gone or no longer matches. A value that is a SQL expression
+        is written as given; any other is a bind typed from the table and named with `prefix`.
+        """
+        table = cls.__table__
+        match = (table.c.id == bindparam(f'{prefix}id', type_=table.c.id.type), *where)
+        if remove:
+            write = delete(table).where(*match)
+        else:
+            write = update(table).where(*match).values({
+                name: value if isinstance(value, ClauseElement) else
+                bindparam(f'{prefix}{name}', type_=table.c[name].type)
+                for name, value in values.items()
+            })
+        return write, select(table.c.id).where(*match)
+
+    @classmethod
     def __write_rows(cls: Type[Task], ids: List[str], values: Dict[str, Any], path: str, consequence: str,
                      pending: bool = False, strict: bool = False, held_by: Optional[str] = None,
                      unscheduled: bool = False, retryable: bool = False,
                      each: Optional[Dict[str, Dict[str, Any]]] = None, commit: bool = True,
-                     prefix: str = 'r_') -> List[str]:
+                     abort: bool = False, where: Optional[Tuple[ColumnElement, ...]] = None,
+                     remove: bool = False, tried: int = 0, prefix: str = 'r_') -> List[str]:
         """Write `values` onto each task in `ids` by `id`, in one transaction; return the ids written.
 
         Each row is its own UPDATE, so each has its own matched count. A row matched on the first
@@ -1028,7 +1058,9 @@ class Task(Entity):
         raises `StaleDataError` and nothing of the call is committed, as for a bulk update; a row
         that still exists was missed because the write waited on another transaction's row lock,
         and the write is re-run, at most `CONTENDED_RERUNS` times. A row still not written after
-        that is logged as a warning with the `consequence` and left as it is.
+        that is logged as a warning with the `consequence` and left as it is; with `abort`, the
+        warning is followed by a rollback of the whole transaction (the caller's earlier writes
+        with it) and `Task.Contended` naming the task, so nothing of the call is written.
 
         With `pending`, the write requires that the row has no `completion_time`. A row that is
         completed or cancelled no longer qualifies: it is settled, never re-run and never an
@@ -1047,6 +1079,18 @@ class Task(Entity):
         (cancelled, marked retried by another writer, or no longer failed) is skipped, and only a
         row that still awaits retry is re-run.
 
+        With `where`, the write requires that the row still matches those criteria (a user's filter,
+        possibly none); a row that is gone or no longer matches is skipped, never raised on, and
+        only a row that still matches is re-run. A value may then be a SQL expression (of the row's
+        own columns), written as given. With `remove`, the write is a DELETE of the row under the
+        same condition, with the same count, lookup and re-run; `values` is ignored. Statements with
+        `where` are built for the call, not cached, since the criteria differ from call to call.
+
+        With `tried`, every task in `ids` has already had that many attempts (a set-based statement
+        that missed it), and they count toward the bound: each row gets at most `1 + CONTENDED_RERUNS
+        - tried` attempts here, the first of them logged as a re-run, and the warning and
+        `Task.Contended` give the total.
+
         With `each`, a task's own values (by id) are written over the shared `values`; every task
         in `ids` has an entry, all with the same columns, or a `ValueError` is raised before
         anything is written. Without `commit`, the transaction is left open for the caller to
@@ -1055,31 +1099,42 @@ class Task(Entity):
 
         The binds are named with `prefix`, so statements of different paths can be told apart.
         """
-        condition = ('held' if held_by is not None else 'unscheduled' if unscheduled else
-                     'retryable' if retryable else 'pending' if pending else None)
+        condition = ('filter' if where is not None else 'held' if held_by is not None else
+                     'unscheduled' if unscheduled else 'retryable' if retryable else 'pending' if pending else None)
         own: Tuple[str, ...] = ()
         if each is not None:
             own = tuple(each[ids[0]]) if ids and ids[0] in each else ()
             for id in ids:
                 if id not in each or each[id].keys() != set(own):
                     raise ValueError(f'Per-task values for {path} must name the same columns for every task')
-        write, exists = cls.__row_statements(tuple(values) + tuple(name for name in own if name not in values),
-                                             condition, prefix)
+        if condition == 'filter':
+            write, exists = cls.__filter_statements(values, where, remove, prefix)
+            values = {} if remove else {name: value for name, value in values.items()
+                                        if not isinstance(value, ClauseElement)}
+        else:
+            write, exists = cls.__row_statements(tuple(values) + tuple(name for name in own if name not in values),
+                                                 condition, prefix)
         key = f'{prefix}id'
         params = {f'{prefix}{name}': value for name, value in values.items()}
         lookup = {f'{prefix}held_by': held_by} if held_by is not None else {}
         attempts = 1 + CONTENDED_RERUNS
+        first = 1 + tried
         landed = []
         try:
             for id in ids:
                 row = {f'{prefix}{name}': value for name, value in each[id].items()} if each is not None else {}
-                for attempt in range(1, attempts + 1):
+                if first > 1:
+                    log.debug(f'Re-running contended {path} write for task ({id}) (attempt {first} of {attempts})')
+                for attempt in range(first, attempts + 1):
                     # NOTE: one parameter set, not a list; a list is an executemany, with no rowcount per row.
                     if Session.execute(write, {**params, **row, **lookup, key: id}).rowcount == 1:
                         landed.append(id)
                         break
                     found = Session.execute(exists, {**lookup, key: id}).first()
                     if found is None:
+                        if condition == 'filter':
+                            log.debug(f'Ignored {path} for task ({id}) - task gone or no longer matches')
+                            break
                         if condition == 'held':
                             log.debug(f'Ignored {path} for task ({id}) - task gone or no longer held by client')
                             break
@@ -1105,6 +1160,9 @@ class Task(Entity):
                 else:
                     log.warning(f'Contended {path} write did not land for task ({id}) '
                                 f'after {attempts} attempts - {consequence}')
+                    if abort:
+                        raise cls.Contended(f'Update of task ({id}) was contended after {attempts} attempts '
+                                            f'- nothing was written')
             if commit:
                 Session.commit()
         except Exception:
@@ -1112,6 +1170,145 @@ class Task(Entity):
             raise
         log.trace(f'Updated {len(landed)} {cls.__table__.name}s')
         return landed
+
+    @classmethod
+    def update(cls: Type[Task], id: str, **changes: Any) -> None:
+        """Write `changes` onto the task `id`, re-running the write while it is contended.
+
+        One UPDATE by `id`. A row that is gone raises `StaleDataError`. A row that matched nothing
+        but still exists was missed because the write waited on another transaction's row lock, and
+        the write is re-run, at most `CONTENDED_RERUNS` times; a row still not written after that
+        raises `Task.Contended`, with nothing written.
+        """
+        cls.__write_rows([id], changes, 'update', 'nothing written', abort=True, prefix='u_')
+
+    @classmethod
+    def __change(cls: Type[Task], values: Dict[str, Any], tags: Dict[str, Any], drop: List[str],
+                 dialect: str) -> Dict[str, Any]:
+        """The SET of an update: the field `values` as given, and one `tag` expression for every tag change.
+
+        The tag expression works on the row's own tag at the time of the write: `tags` are set,
+        then the names in `drop` are removed. On SQLite it is `json_remove(json_set(tag, ...), ...)`
+        with one bind per key and value (a boolean is stored 1/0 and a dotted key nests); on
+        PostgreSQL, `(tag || patch) - names`, two binds whatever the number of keys. A part with
+        nothing to do is left out. `dialect` is the dialect name of the session's bind.
+        """
+        change = dict(values)
+        if not tags and not drop:
+            return change
+        column = cls.__table__.c.tag
+        tag = literal(values['tag'], column.type) if 'tag' in values else column
+        if dialect == 'sqlite':
+            if tags:
+                pairs = [part for key, value in tags.items() for part in (literal(f'$.{key}', Text()), literal(value))]
+                tag = func.json_set(tag, *pairs, type_=JSON)
+            if drop:
+                tag = func.json_remove(tag, *[literal(f'$.{name}', Text()) for name in drop], type_=JSON)
+        else:
+            if tags:
+                patch = {key: to_json_type(value) for key, value in tags.items()}
+                tag = tag.op('||', return_type=JSON_BYTES())(literal(patch, JSON_BYTES()))
+            if drop:
+                tag = tag.op('-', return_type=JSON_BYTES())(literal(list(drop), ARRAY(Text())))
+        change['tag'] = tag
+        return change
+
+    @classmethod
+    def update_selected(cls: Type[Task], ids: List[str], criteria: Tuple[ColumnElement, ...],
+                        values: Dict[str, Any], tags: Dict[str, Any] = None, drop: List[str] = None) -> int:
+        """Write the change onto each task in `ids` that still matches `criteria`, in one transaction; return the count.
+
+        The change is the field `values`, the tag keys `tags` set and the tag names `drop` removed,
+        one UPDATE per row by `id` and the criteria, so a task that no longer matches at its write
+        (changed or deleted since it was selected) is left as it is and not counted. A row that
+        matched nothing but still matches was missed because the write waited on another
+        transaction's row lock, and the write is re-run, at most `CONTENDED_RERUNS` times; a row
+        still not written after that rolls the whole update back and raises `Task.Contended`.
+        Every row written stays locked until the one commit at the end (on SQLite, the database's
+        write lock is held from the first write to that commit).
+        """
+        change = cls.__change(values, tags or {}, drop or [], Session.get_bind().dialect.name)
+        written = cls.__write_rows(ids, change, 'update', 'nothing written', where=tuple(criteria),
+                                   abort=True, prefix='u_')
+        return len(written)
+
+    @classmethod
+    def delete_selected(cls: Type[Task], ids: List[str], criteria: Tuple[ColumnElement, ...]) -> int:
+        """Delete each task in `ids` that still matches `criteria`, in one transaction; return the count.
+
+        One DELETE per row by `id` and the criteria, re-run and aborted as for `update_selected`;
+        every row deleted stays locked until the one commit at the end.
+        """
+        deleted = cls.__write_rows(ids, {}, 'delete', 'nothing deleted', where=tuple(criteria),
+                                   remove=True, abort=True, prefix='u_')
+        return len(deleted)
+
+    @classmethod
+    def update_matching(cls: Type[Task], criteria: Tuple[ColumnElement, ...], values: Dict[str, Any],
+                        tags: Dict[str, Any] = None, drop: List[str] = None) -> int:
+        """Write the change onto every task that matches `criteria`, in one transaction; return the count.
+
+        The change is the field `values`, the tag keys `tags` set and the tag names `drop` removed,
+        in one UPDATE of every matching row. On SQLite its count is the number written: the write
+        transaction excludes every other writer, so no row can be missed. On PostgreSQL a row that
+        waited on another transaction's row lock can be missed although it still matches, so the
+        UPDATE returns the ids it wrote and one read of the ids still matching finds the rest. The
+        UPDATE is each such row's first attempt; it is written by `id` under the criteria, at most
+        `CONTENDED_RERUNS` more times, and a row still not written after that rolls the whole update
+        back and raises `Task.Contended`.
+        A row that came to match meanwhile is written and counted too. The returned ids are held in
+        memory until the read, and every row written that still matches is read back.
+        """
+        criteria = tuple(criteria)
+        dialect = Session.get_bind().dialect.name
+        change = cls.__change(values, tags or {}, drop or [], dialect)
+        table = cls.__table__
+        write = update(table).where(*criteria).values(change)
+        try:
+            if dialect == 'sqlite':
+                written = Session.execute(write).rowcount
+                Session.commit()
+                return written
+            landed = set(Session.execute(write.returning(table.c.id)).scalars())
+            missed = [id for id in Session.execute(select(table.c.id).where(*criteria)).scalars()
+                      if id not in landed]
+            if missed:
+                log.debug(f'Re-checking {len(missed)} tasks the update did not write')
+                rewritten = cls.__write_rows(missed, change, 'update', 'nothing written', where=criteria,
+                                             abort=True, commit=False, tried=1, prefix='u_')
+            else:
+                rewritten = []
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        return len(landed) + len(rewritten)
+
+    @classmethod
+    def delete_matching(cls: Type[Task], criteria: Tuple[ColumnElement, ...]) -> int:
+        """Delete every task that matches `criteria`, in one transaction; return the count.
+
+        One DELETE of every matching row; on SQLite its count is the number deleted. On PostgreSQL a
+        row that waited on another transaction's row lock can be missed although it still matches,
+        so one read of the ids still matching (a row deleted is gone for this transaction) finds
+        the rest; each is deleted by `id` under the criteria, the DELETE counting as its first
+        attempt, re-run and aborted as for `update_matching`.
+        """
+        criteria = tuple(criteria)
+        table = cls.__table__
+        try:
+            deleted = Session.execute(delete(table).where(*criteria)).rowcount
+            if Session.get_bind().dialect.name != 'sqlite':
+                missed = list(Session.execute(select(table.c.id).where(*criteria)).scalars())
+                if missed:
+                    log.debug(f'Re-checking {len(missed)} tasks the delete did not reach')
+                    deleted += len(cls.__write_rows(missed, {}, 'delete', 'nothing deleted', where=criteria,
+                                                    remove=True, abort=True, commit=False, tried=1, prefix='u_'))
+            Session.commit()
+        except Exception:
+            Session.rollback()
+            raise
+        return deleted
 
     @classmethod
     def confirm_all(cls: Type[Task], ids: List[str], client_id: str, client_host: str,
