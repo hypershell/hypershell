@@ -68,6 +68,5 @@ completion that makes the run finishable without waiting out a back-off.
 - `tail_run.py` and `tail_judge.py` are the measuring tools; the cluster script `tail_cluster.sh`
   was rehearsed on the laptop only and has never run on a cluster.
 - Related: `spec/relay-hardening/` (#103; its seed's slow finish is what this narrows),
-  [`hypertable-contended-scheduler-and-cli-writes.md`](hypertable-contended-scheduler-and-cli-writes.md)
-  (also changes the scheduler).
+  `spec/contended-writes/` (#109; it changed the Scheduler's `retried` mark).
 - Found by: `relay-hardening` R8, 2026-11-14.

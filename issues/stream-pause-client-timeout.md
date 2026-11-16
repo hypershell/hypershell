@@ -59,6 +59,7 @@ either keeps a client able to take the line, or ends with a clear outcome naming
 
 ## Notes
 
-- Related: `issues/cluster-waits-when-every-client-fails.md` (the non-zero counterpart, shipped by
-  `cluster-launch-failures`), `issues/stream-bundlewait-commit-wait.md`.
+- Related: `spec/cluster-launch-failures/` (#107, the non-zero counterpart: a cluster whose
+  launched clients have all exited, one non-zero, with work left stops),
+  `issues/stream-bundlewait-commit-wait.md`.
 - Found by: `task-input-fidelity` (GOAL Clarifications; PLAN § 5 probe), re-probed at build P4.

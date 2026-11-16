@@ -129,5 +129,12 @@ as a hazard. Operators see retries in the log as events, not as crashes.
   a pilot/follow-up split at shaping if it exceeds ~8–10 criteria.
 - Touches `core/queue.py`, `client.py`, `server.py`, `data/core.py` — the coupled, largely untested
   concurrency core. Research fan-out expected regardless of appetite.
+- **A pre-existing Confirm/Receiver deadlock on every PostgreSQL provider** belongs here. Confirm
+  locks its bundle's rows in bundle order, and the Receiver locks its result bundle's rows in
+  completion order and holds them all until one commit; interleaved, they can deadlock, and the
+  losing thread dies with `OperationalError`. Not reproduced. Found by the `hypertable-update-retry`
+  write-path audit (`spec/hypertable-update-retry/research/02-write-path-audit.md`, finding 4);
+  `contended-writes` (#109) left it to this seed (its GOAL *Non-goals*). Moved here from the
+  retired `hypertable-contended-scheduler-and-cli-writes` seed, 2026-11-16.
 - Found by: GNU Parallel comparison review, 2026-08 (H10, M5, M6, M14), scoped into one feature by
   the maintainer, 2026-08-07.

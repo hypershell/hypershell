@@ -49,16 +49,6 @@ already implements comment semantics correctly.
 *Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md)
 
-## Date-like task arguments are turned into datetimes on the wire
-
-The bundle decoder converts any string that parses as an ISO date into a datetime, whatever field
-it is in. A task whose argument line is `2026-11-02` or `20261102`, an ordinary `hsx` input, reaches
-the client as a datetime, template expansion fails on it, and the task is recorded as a template
-error without running. Decoding by declared column type, not by guessing, removes the class.
-
-*Horizon: near-term · Depends on: — · Refs: found by `writeback-scoped-conditional`'s research*
-**Seed:** [`issues/date-like-args-coerced.md`](issues/date-like-args-coerced.md) · *status: adopted:task-input-fidelity*
-
 ## Unguarded task start kills the executor and poisons the task
 
 An `OSError` while opening capture files or spawning the subprocess propagates out of the FSM and
@@ -186,19 +176,6 @@ a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
 `issues/ingest-robustness.md` (same ingest path)*
 **Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
 
-## A run fed by a pipe can stop before the pipe ends
-
-`hs cluster` and `hs server` given stream input can reach FINAL and exit 0 while the stream is
-still feeding tasks. Once the first bundle is scheduled, the stop branch no longer asks whether the
-submitter is still reading, so a pause in the input longer than the committed work ends the run
-and later tasks are never scheduled. `(echo 'echo a'; sleep 8; echo 'echo b') | hsx -N1` runs only
-`echo a`. File input is immune once it is submitted in full first. The likely fix is one conjunct
-on `develop`; 2.8.x lacks the submitter reference it needs. Pre-existing, and found by the plan of
-the group-order fix.
-
-*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (PLAN §5 risk 1)*
-**Seed:** [`issues/stream-run-stops-before-input-ends.md`](issues/stream-run-stops-before-input-ends.md) · *status: adopted:task-input-fidelity*
-
 ## A client that times out during a pause in a stream leaves a late line unrun
 
 A run fed by a stream now keeps scheduling until its input ends. A client whose `-T` is shorter
@@ -208,8 +185,8 @@ never comes: `(echo 'echo a'; sleep 8; echo 'echo b') | hsx -N1 -T 3` prints `a`
 is not affected. Before `task-input-fidelity` the same run dropped the line silently. Scheduled after
 the agreed pre-2.9.0 list.
 
-*Horizon: near-term · Depends on: `task-input-fidelity` · Refs: `spec/task-input-fidelity/` (GOAL
-Clarifications, plan-gate ruling 3)*
+*Horizon: near-term · Depends on: `task-input-fidelity` (landed, #110) · Refs:
+`spec/task-input-fidelity/` (GOAL Clarifications, plan-gate ruling 3)*
 **Seed:** [`issues/stream-pause-client-timeout.md`](issues/stream-pause-client-timeout.md) · *status: unshaped*
 
 ## With `-b N>1`, a line read before a pause waits for the next one
@@ -281,17 +258,6 @@ review.
 cycles 2 and 3); same committer death as `issues/database-locked-during-ingest-hangs.md`*
 **Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
 
-## Concurrent first submits can collide on the reserved source row
-
-`Source.reserved` gets or creates the fixed `<direct>`/`<stdin>` row with no conflict handling, so
-`hs submit`s started together against an empty `source` table can both insert it, and one exits
-rc=5 with a traceback and its tasks unsubmitted. Seen in 1 of 20 runs on `develop` and 2 of 10 on
-an upgraded 2.8.3 database, which starts with an empty `source` table. Pre-existing, and found by
-the review of the schema-upgrade fix.
-
-*Horizon: near-term · Depends on: — · Refs: `spec/schema-upgrade-step/` (review cycle 2)*
-**Seed:** [`issues/source-reserved-race.md`](issues/source-reserved-race.md) · *status: adopted:contended-writes*
-
 ## Docs and runtime surfacing
 
 Behaviour that is correct or deliberate but unannounced: `--no-confirm` silently disables orphan
@@ -324,43 +290,6 @@ confirmation then names the already-evicted client. Either way the row waits unt
 
 *Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
-
-## A contended `retried` mark or `Task.cancel_all` fails on a TimescaleDB hypertable
-
-On TimescaleDB 2.29+, a `task`-row UPDATE that waited on another writer's row lock matches 0 rows
-although the row still qualifies. The server's Confirm, revert, result and dispatch-stamp writes now
-re-run in that case; the Scheduler's `retried` mark and `Task.cancel_all` do not. A contended mark
-exits the server mid-run, and the unmarked failed row would be retried twice. Narrowed at the
-`contended-writes` GOAL gate to this server half; `hs update` moved to the entry below.
-
-*Horizon: near-term · Depends on: — · Refs: hypertable-update-retry (the pattern); `relay-hardening`
-(landed, #103: the dispatch stamp); resilience*
-**Seed:** [`issues/hypertable-contended-scheduler-and-cli-writes.md`](issues/hypertable-contended-scheduler-and-cli-writes.md) · *status: adopted:contended-writes*
-
-## `hs update` misreports or skips rows: contended on a hypertable, and when it combines changes
-
-Every `hs update` write treats a 0-row match on a TimescaleDB 2.29+ hypertable as proof the row is
-gone: the legacy form reports a false "not found", `--limit` commits partially and ends in a
-traceback, and the filtered paths skip contended rows while "Updated N" reports a count taken
-before the write. Two defects need no contention: under `--limit` only the first kind of change is
-applied, and a tag change misses rows a field change moved out of the filter, both reporting every
-row updated. Split from `contended-writes` at its GOAL gate.
-
-*Horizon: near-term · Depends on: `contended-writes` · Refs: hypertable-update-retry (the pattern);
-`contended-writes` (the server half)*
-**Seed:** [`issues/hs-update-contended-writes.md`](issues/hs-update-contended-writes.md) · *status: adopted:hs-update-contended-writes*
-
-## `hs cluster --no-db` still initializes a SQLite database it never uses
-
-Under `--no-db` the cluster's server never uses the database, but on SQLite `hs cluster` runs
-`initdb()` at start-up before it looks at `--no-db` (`src/hypershell/cluster/__init__.py:559-562`),
-so it creates or upgrades the user's site database for a run that never touches it. Since
-`server-initdb` (#105), `hs server --no-db` no longer does; that cycle left the cluster half as
-deferred work.
-
-*Horizon: near-term, small · Depends on: — · Refs: `spec/server-initdb/` (Non-goals; R5 for the
-server half)*
-**Seed:** [`issues/cluster-no-db-initializes-sqlite.md`](issues/cluster-no-db-initializes-sqlite.md) · *status: adopted:cluster-nodb-and-zero-period*
 
 ## Duration settings read only from configuration still take bare seconds only
 
@@ -401,32 +330,19 @@ key should be settable, with the text given. Pre-existing since 2.7.0.
 form of `auth_env`; the environment form stays here); relay (its zone tables add more keys)*
 **Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: unshaped*
 
-## `hs cluster` waits forever when every launched client fails
+## `hs relay` cannot name the address its site clients dial
 
-When every client a cluster launched exits early, from an authkey or TLS mismatch, an unreachable
-address or a bad remote executable, `hs cluster` ignores their exit statuses and joins a server
-that has work left and no one to run it (`src/hypershell/cluster/remote.py:309-310`,
-`src/hypershell/cluster/ssh.py:310-312`). It never exits and names no failure; under autoscaling it
-relaunches into the same failure instead. It should exit non-zero with a clear error once every
-client has gone and work remains. Pre-existing since 2.8.0.
+Every `hs cluster` launch mode now tells its clients one address: the bind address, the host's own
+name for a wildcard bind, or `--advertise` / `server.advertise` when given (#107). A relay's site
+clients follow the same default rule but have no override, and `relay.bind` defaults to `0.0.0.0`,
+so a relay whose site clients must dial another name, such as an internal-network address or the
+name on the site server's TLS certificate, cannot say so. An option and a relay key beside `--bind`
+would close it. Narrowed from the advertised-host fix, whose cycle deferred the relay override to
+keep clear of the relay hardening work, since landed.
 
-*Horizon: near-term · Depends on: — · Refs: the advertised-host fix below (one way every client
-fails); failure-budget halt policy (the autoscaling bound)*
-**Seed:** [`issues/cluster-waits-when-every-client-fails.md`](issues/cluster-waits-when-every-client-fails.md) · *status: adopted:cluster-launch-failures*
-
-## `--ssh` and autoscaling tell clients the host's own name, whatever `-H` binds
-
-Launcher and `--mpi` clusters tell their clients the bind address unless it is `0.0.0.0`
-(`src/hypershell/cluster/remote.py:286`), but `--ssh` (`src/hypershell/cluster/ssh.py:283`) and
-autoscaling (`src/hypershell/cluster/remote.py:816`) always pass the host's own name. A server bound
-to one interface on purpose then tells its clients a name that may not reach it, and there is no
-option to name the advertised address apart from the bind, which TLS certificate names also need.
-One rule for every mode, and an override such as `--advertise`, would also serve the relay's own
-downstream address.
-
-*Horizon: near-term, small · Depends on: — · Refs: relay (its downstream listener needs the same
-rule)*
-**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: adopted:cluster-launch-failures*
+*Horizon: near-term, small · Depends on: — · Refs: `cluster-launch-failures` (landed, #107: the rule
+and the cluster override); relay (#82, which left `--advertise` for later)*
+**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
 
 ## A relay run can still end up to about 5 s late
 
@@ -441,29 +357,16 @@ scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 
 (`relay-hardening` landed, #103)*
 **Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
 
-## A zero autoscaling period makes the autoscaler loop without waiting
-
-`-P 0` or `autoscale.period = 0` is accepted, and the autoscaler sleeps only while less than a period
-has passed since its last check, which with 0 is never: it goes from its wait to its check and back
-without sleeping (`src/hypershell/cluster/remote.py:430`, `:492-503`), cleaning up clients and reading the
-database on every pass. A probe logged 654 checks in 4 s, against one with `-P 2`. A relay's site
-autoscaler reads the same key. Refuse a period below a floor, or treat 0 as the smallest wait.
-Pre-existing in `develop` and on the 2.8 line.
-
-*Horizon: near-term, small · Depends on: — · Refs: `duration-units-remaining` (the parser behind
-`-P`); `cluster-launch-failures` planning*
-**Seed:** [`issues/autoscale-zero-period-spins.md`](issues/autoscale-zero-period-spins.md) · *status: adopted:cluster-nodb-and-zero-period*
-
 ## A `--no-db` cluster can report a failed run when a client dies just after its last result
 
-Once `cluster-launch-failures` lands, `hs cluster` exits non-zero when every launched client has
+Since `cluster-launch-failures` (#107), `hs cluster` exits non-zero when every launched client has
 gone, one of them non-zero, with work remaining. Without a database the server keeps no rows to
 count, so a client that returned every result and then died in the moment before its `FINISHED`
 heartbeat leaves a server waiting to evict it, which reads as work remaining: the run is reported
 failed although every result is recorded. An exact answer needs a result counter in the server's
 Receiver.
 
-*Horizon: near-term, small · Depends on: `cluster-launch-failures` (in flight) · Refs: its PLAN §2.3
+*Horizon: near-term, small · Depends on: `cluster-launch-failures` (landed, #107) · Refs: its PLAN §2.3
 and plan-gate ruling 3*
 **Seed:** [`issues/nodb-cluster-finish-race.md`](issues/nodb-cluster-finish-race.md) · *status: unshaped*
 
