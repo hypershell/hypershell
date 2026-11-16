@@ -747,6 +747,26 @@ release · Refs: `spec/turso/` P3, review cycles 4–6*
 
 ---
 
+# Part IV — Beyond 2.9.0
+
+Candidates not scheduled for any release. Each may be taken up, reshaped or declined; an entry
+here records the idea and its open problems, and promises nothing.
+
+## `hs cluster` could bring up its own relays
+
+A single server serves each client connection on its own thread and tops out near 1,000 connected
+clients. Relays already lift that ceiling: one server with 100 relays of 100 clients each reaches
+10,000. Inside one allocation, though, every relay is brought up by hand. A relay count on
+`hs cluster` (and so on `hsx`) would start the whole tree and take it down. The open problems are
+splitting the allocation's nodes among the relays, handing each relay its keys the way clients get
+theirs, where each relay's database lives, and recovering the work of a relay that dies.
+
+*Horizon: after 2.9.0, maybe · Depends on: relay autoscaling (#100) · Refs: `hs relay` (#82), key
+hand-off (#80)*
+**Seed:** [`issues/cluster-relay-fanout.md`](issues/cluster-relay-fanout.md) · *status: unshaped*
+
+---
+
 # Settled questions
 
 Recorded so they are not re-raised by the next review. These carry `status: declined` or
