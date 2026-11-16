@@ -15,8 +15,11 @@ stops its server and raises :class:`ClusterLaunchError`, naming every process, h
 the address the clients were told to dial. When every process exited 0 (a launcher that hands its
 clients to a scheduler and returns), or the server ends on its own, nothing is raised.
 
-A read of the database that fails because another connection holds it locked (:func:`database_locked`)
-is warned about and read again at the next poll; it never ends the run.
+With a database, the work is read from it; without one, from the count of results the server has
+written, compared with the tasks submitted once the input has ended, which is exact once every
+result already returned is written (:func:`results_written`). A read of the database that fails
+because another connection holds it locked (:func:`database_locked`) is warned about and read again
+at the next poll; it never ends the run.
 """
 
 
@@ -41,7 +44,7 @@ from hypershell.server import ServerThread
 
 # Public interface
 __all__ = ['ClusterLaunchError', 'exit_text', 'database_locked', 'work_remains', 'watch_launched',
-           'WATCH_INTERVAL', 'RESULTS_TIMEOUT', 'SCHEDULE_SETTLE', 'MEMORY_SETTLE']
+           'WATCH_INTERVAL', 'RESULTS_TIMEOUT', 'SCHEDULE_SETTLE']
 
 # Initialize logger
 log = Logger.with_name('hypershell.cluster')
@@ -55,9 +58,6 @@ RESULTS_TIMEOUT: Final[float] = 3.0
 
 SCHEDULE_SETTLE: Final[float] = 2.0
 """Seconds between the two reads of the database that must both find work remaining."""
-
-MEMORY_SETTLE: Final[float] = 3.0
-"""Seconds a server without a database is given to end on its own once every result is written."""
 
 
 class ClusterLaunchError(RuntimeError):
@@ -151,9 +151,7 @@ def scheduled_work(server: ServerThread) -> bool:
     return Task.count_retryable(machine.attempts, group=machine.current_group, eager=machine.eager) > 0
 
 
-def work_remains(server: ServerThread,
-                 schedule_settle: float = SCHEDULE_SETTLE,
-                 memory_settle: float = MEMORY_SETTLE) -> bool:
+def work_remains(server: ServerThread, schedule_settle: float = SCHEDULE_SETTLE) -> bool:
     """
     True if `server` would otherwise wait forever on work, once no client can connect to it again.
 
@@ -162,13 +160,13 @@ def work_remains(server: ServerThread,
     seconds apart, so a scheduler woken by its last clients leaving can reach its own end first. A
     read that finds the database locked (:func:`database_locked`) is warned about and decides
     nothing: False, so the watch reads again at its next poll.
-    Without one, the server must still be running `memory_settle` seconds later, with tasks submitted
-    or still being submitted: a server whose clients finished the work ends on its own within that
-    time, and a server given no tasks has nothing to wait on.
 
-    Without a database, a client that returned every result but exited non-zero before it told the
-    server it had finished is not told apart from one that failed with work left: the server ends
-    only once it evicts that client, so the work reads as remaining.
+    Without a database, the server's receiver counts the results it has written, and behind the
+    barrier of :func:`results_written` that count is exact. Input still being read is work; once
+    the input has ended, work remains while fewer results are written than tasks were submitted. A
+    server that has ended, or was given no input, has nothing to wait on. So a client that returned
+    every result and then exited non-zero, before it told the server it had finished, leaves no
+    work: the server ends on its own once it evicts that client.
     """
     if not results_written(server):
         return False
@@ -183,11 +181,12 @@ def work_remains(server: ServerThread,
                 raise
             log.warning('Could not read whether tasks remain: database was locked (reading again)')
             return False
-    server.join(timeout=memory_settle)
     submitter = server.submitter
     if not server.is_alive() or submitter is None:
         return False
-    return submitter.is_alive() or submitter.task_count > 0
+    if submitter.is_alive():
+        return True
+    return server.receiver.machine.written < submitter.task_count
 
 
 def watch_launched(server: ServerThread,

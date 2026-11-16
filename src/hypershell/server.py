@@ -605,6 +605,7 @@ class Receiver(StateMachine):
 
     in_memory: bool
     redirect_failures: IO
+    written: int  # Results applied since the receiver started; written by its own thread only.
 
     state = ReceiverState.START
     states = ReceiverState
@@ -617,6 +618,7 @@ class Receiver(StateMachine):
         self.bundle = None
         self.in_memory = in_memory
         self.redirect_failures = redirect_failures
+        self.written = 0
 
     @cached_property
     def actions(self: Receiver) -> Dict[ReceiverState, Callable[[], ReceiverState]]:
@@ -692,6 +694,7 @@ class Receiver(StateMachine):
                 log.warning(f'Non-zero exit status ({task.exit_status}) for task ({task.id})')
                 if self.redirect_failures:
                     print(task.args, file=self.redirect_failures)
+            self.written += 1
         return ReceiverState.UNLOAD
 
     @staticmethod

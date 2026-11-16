@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/cluster-launch-followups
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-16'
 phases:
 - id: P1
@@ -48,7 +48,7 @@ phases:
     src/hypershell/data src/hypershell/relay src/hypershell/cluster/topology.py
 - id: P3
   name: A --no-db cluster counts the results its server wrote
-  status: pending
+  status: done
   satisfies:
   - R5
   - R6
@@ -284,10 +284,10 @@ run as today.
 client that dies after its last result is warned about and the run ends as before #107; work left
 still raises within 10 s.
 
-- [ ] `server.py::Receiver`: `written: int` (annotation with a trailing comment, `0` in `__init__`);
+- [x] `server.py::Receiver`: `written: int` (annotation with a trailing comment, `0` in `__init__`);
       `self.written += 1` as the last statement of the APPLIED tail of `update_tasks`. Nothing else
       in `server.py`: no existing line changes (the verify counts 0 deletions).
-- [ ] `cluster/watch.py::work_remains`, no-database branch per PLAN §2.4 (`written <
+- [x] `cluster/watch.py::work_remains`, no-database branch per PLAN §2.4 (`written <
       submitter.task_count` once the input has ended; a live submitter is work; no server or no
       submitter is none). Remove `MEMORY_SETTLE`, the `memory_settle` parameter, its `__all__` entry
       and the known-gap paragraph; the module and function docstrings say the count is exact behind
