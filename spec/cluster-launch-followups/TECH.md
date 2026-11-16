@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/cluster-launch-followups
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-16'
 phases:
 - id: P1
@@ -28,7 +28,7 @@ phases:
 - id: P2
   name: The cluster's own checks skip a locked read, warn once and decide at their
     next pass
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -260,18 +260,18 @@ the guards pass. No source change.
 WARNING and a decision at the next pass; exits seen meanwhile still count; any other error ends the
 run as today.
 
-- [ ] `cluster/watch.py`: `database_locked(error)` (PLAN §2.1), exported; docstring with what it
+- [x] `cluster/watch.py`: `database_locked(error)` (PLAN §2.1), exported; docstring with what it
       accepts and why the mask.
-- [ ] `cluster/watch.py::work_remains`: both `scheduled_work` reads in one `try`; a locked read →
+- [x] `cluster/watch.py::work_remains`: both `scheduled_work` reads in one `try`; a locked read →
       WARNING `Could not read whether tasks remain: database was locked (reading again)`, `False`;
       anything else re-raised. Docstring: a locked read is read again at the next poll.
-- [ ] `cluster/remote.py::AutoScaler`: `unchecked` (class attribute annotation, `[]` in `__init__`);
+- [x] `cluster/remote.py::AutoScaler`: `unchecked` (class attribute annotation, `[]` in `__init__`);
       `check()` per PLAN §2.2 (`unchecked += clean()`, `last_check` set, `count_failures(unchecked)`
       under the catch, cleared after it returns); `check_fixed`/`check_dynamic` wrap `check_zones`
       the same way; `skip_check()` logs the WARNING and returns `WAIT`. Comment in `count_failures`:
       its read precedes every change to the run of failures. Class docstring: a check that meets a
       locked database is skipped, and exits it saw are counted at the next check.
-- [ ] No edit to `demand.py`, `AutoScalingCluster`, `AutoScalerThread`, `relay/`, `topology.py`.
+- [x] No edit to `demand.py`, `AutoScalingCluster`, `AutoScalerThread`, `relay/`, `topology.py`.
 - **Verify:** see frontmatter (P1's locked tests green with the autoscaling and relay suites; the
   four locked drive modes; `server.py`, `demand.py`, `data/`, `relay/`, `topology.py` unchanged).
   Dry-run at plan time: the pytest files other than the new one are green on the base; the four

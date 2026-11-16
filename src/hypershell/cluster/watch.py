@@ -14,6 +14,9 @@ server still holds work it would otherwise wait on forever (:func:`work_remains`
 stops its server and raises :class:`ClusterLaunchError`, naming every process, how it exited and
 the address the clients were told to dial. When every process exited 0 (a launcher that hands its
 clients to a scheduler and returns), or the server ends on its own, nothing is raised.
+
+A read of the database that fails because another connection holds it locked (:func:`database_locked`)
+is warned about and read again at the next poll; it never ends the run.
 """
 
 
@@ -24,8 +27,12 @@ from typing import List, Optional, Sequence, Tuple, Final
 # Standard libs
 import time
 import signal
+import sqlite3
 from queue import Full as QueueFull
 from subprocess import Popen
+
+# External libs
+from sqlalchemy.exc import OperationalError
 
 # Internal libs
 from hypershell.core.logging import Logger
@@ -33,7 +40,7 @@ from hypershell.data.model import Task, serialize_tasks
 from hypershell.server import ServerThread
 
 # Public interface
-__all__ = ['ClusterLaunchError', 'exit_text', 'work_remains', 'watch_launched',
+__all__ = ['ClusterLaunchError', 'exit_text', 'database_locked', 'work_remains', 'watch_launched',
            'WATCH_INTERVAL', 'RESULTS_TIMEOUT', 'SCHEDULE_SETTLE', 'MEMORY_SETTLE']
 
 # Initialize logger
@@ -73,6 +80,26 @@ def exit_text(code: int) -> str:
         return f'signal {-code} ({signal.Signals(-code).name})'
     except ValueError:
         return f'signal {-code}'
+
+
+def database_locked(error: BaseException) -> bool:
+    """
+    True if `error` is SQLite reporting the database, or a table in it, locked by another connection.
+
+    Only a SQLAlchemy :class:`~sqlalchemy.exc.OperationalError` raised for a
+    :class:`sqlite3.OperationalError` counts. SQLite's result code decides: `SQLITE_BUSY` or
+    `SQLITE_LOCKED`, after masking off the extended bits, so an extended code such as 262 (a table
+    locked through a shared cache) counts as the primary code it extends. An error that carries no
+    code (one not raised by SQLite itself) counts only if its message is SQLite's own, `database is
+    locked` or `database table is locked`. Every other error, from any other database or driver,
+    and every other SQLite error, is not a lock.
+    """
+    if not isinstance(error, OperationalError) or not isinstance(error.orig, sqlite3.OperationalError):
+        return False
+    code = getattr(error.orig, 'sqlite_errorcode', None)
+    if code is not None:
+        return (code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    return str(error.orig) in ('database is locked', 'database table is locked')
 
 
 def results_written(server: ServerThread, timeout: float = RESULTS_TIMEOUT) -> bool:
@@ -132,7 +159,9 @@ def work_remains(server: ServerThread,
 
     Every result already returned is written first (:func:`results_written`). With a database, the
     scheduler must still be running and find work (:func:`scheduled_work`) twice, `schedule_settle`
-    seconds apart, so a scheduler woken by its last clients leaving can reach its own end first.
+    seconds apart, so a scheduler woken by its last clients leaving can reach its own end first. A
+    read that finds the database locked (:func:`database_locked`) is warned about and decides
+    nothing: False, so the watch reads again at its next poll.
     Without one, the server must still be running `memory_settle` seconds later, with tasks submitted
     or still being submitted: a server whose clients finished the work ends on its own within that
     time, and a server given no tasks has nothing to wait on.
@@ -144,10 +173,16 @@ def work_remains(server: ServerThread,
     if not results_written(server):
         return False
     if server.scheduler is not None:
-        if not scheduled_work(server):
+        try:
+            if not scheduled_work(server):
+                return False
+            server.join(timeout=schedule_settle)
+            return server.is_alive() and scheduled_work(server)
+        except OperationalError as error:
+            if not database_locked(error):
+                raise
+            log.warning('Could not read whether tasks remain: database was locked (reading again)')
             return False
-        server.join(timeout=schedule_settle)
-        return server.is_alive() and scheduled_work(server)
     server.join(timeout=memory_settle)
     submitter = server.submitter
     if not server.is_alive() or submitter is None:
