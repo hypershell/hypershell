@@ -458,3 +458,7 @@ private notes, which the foreman hands to the builder directly.
   `tests/test_period_floor.py::test_period_key_refused` cases (`env-nan` and `env-neginf`) expect the
   "greater than zero" message, but the environment's `nan` and `-inf` now arrive as text and are
   refused as not a duration. Update those expectations; the behaviour stays a refusal with exit 2.
+- **GOAL Non-goals amended by these rulings** (foreman, 2026-11-16). GOAL § Non-goals says the
+  relay's site fence and `--ssh --env`'s handling of key variables are unchanged. The key-handling
+  ruling above supersedes that: both now recognise variables by the matcher. Everything else in that
+  Non-goal stands. GOAL.md stays locked as written; review cycle 2 grades against this amendment.
