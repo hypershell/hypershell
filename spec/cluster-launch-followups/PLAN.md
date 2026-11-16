@@ -224,3 +224,20 @@ touched; nothing in §1–§3 (no task query or retry change), §7–§10.
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-16)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+- **D1:** accepted. `MEMORY_SETTLE` goes; without a database, the launch error fires sooner, with the
+  same verdict.
+- **D2:** accepted. The working-launcher drive takes the lock only once the server is idle. A lock
+  held while clients work still ends the run through the server's own threads (a Non-goal; the
+  standing seed is `issues/coordinator-resilience-retry-backoff.md`). The PR's description says so
+  plainly.
+- **D3:** accepted. R6 rests on existing tests.
+- **D4:** accepted. The lock helper goes in `cluster/watch.py`, with two new test files.
+- **D5:** amended. Every phase uses a Python 3.14 environment, not the worktree's 3.15 `.venv`, which
+  is outside the supported range. P4 runs 3.14 and 3.11 as planned.
+- **`server.py`:** additions only (the `Receiver.written` counter), as P3's verify enforces. The
+  review's human gate applies as the rubric says.
