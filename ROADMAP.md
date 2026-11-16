@@ -242,6 +242,25 @@ as transient. Seen once on CI; introduced with `cluster-launch-failures` (#107),
 side above*
 **Seed:** [`issues/autoscale-read-database-locked.md`](issues/autoscale-read-database-locked.md) · *status: unshaped*
 
+## `hs update --delete` ignores field assignments and tag changes given with it
+
+`hs update --delete group=9` deletes the selected tasks and says nothing about `group=9`; a mistaken
+`--delete` in place of an update loses rows without a warning. `--delete` should refuse assignments,
+tag changes and `--remove-tag` as a usage error before the count. Pre-existing; out of scope for
+`hs-update-contended-writes` (#111).
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/hs-update-contended-writes/` (Non-goals)*
+**Seed:** [`issues/update-delete-ignores-assignments.md`](issues/update-delete-ignores-assignments.md) · *status: unshaped*
+
+## The legacy single-task tag edit can lose a concurrent tag change
+
+`hs update ID tag KEY:VALUE` reads the task's tags and writes back the merge, so a tag change
+committed in between is overwritten, on every database. The filtered form writes tag changes in one
+statement. Pre-existing; out of scope for `hs-update-contended-writes` (#111).
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/hs-update-contended-writes/` (Non-goals)*
+**Seed:** [`issues/update-legacy-tag-lost-write.md`](issues/update-legacy-tag-lost-write.md) · *status: unshaped*
+
 ## A non-integer task group is accepted at submit time
 
 The inline `group:` tag, `-t group:…` and a `--from-json` record's `group` key accept any value.
