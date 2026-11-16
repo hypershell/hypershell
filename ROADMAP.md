@@ -240,7 +240,7 @@ as transient. Seen once on CI; introduced with `cluster-launch-failures` (#107),
 
 *Horizon: near-term, small · Depends on: — · Refs: `spec/cluster-launch-failures/`; the submitter's
 side above*
-**Seed:** [`issues/autoscale-read-database-locked.md`](issues/autoscale-read-database-locked.md) · *status: unshaped*
+**Seed:** [`issues/autoscale-read-database-locked.md`](issues/autoscale-read-database-locked.md) · *status: adopted:cluster-launch-followups*
 
 ## A non-integer task group is accepted at submit time
 
@@ -368,7 +368,7 @@ Receiver.
 
 *Horizon: near-term, small · Depends on: `cluster-launch-failures` (landed, #107) · Refs: its PLAN §2.3
 and plan-gate ruling 3*
-**Seed:** [`issues/nodb-cluster-finish-race.md`](issues/nodb-cluster-finish-race.md) · *status: unshaped*
+**Seed:** [`issues/nodb-cluster-finish-race.md`](issues/nodb-cluster-finish-race.md) · *status: adopted:cluster-launch-followups*
 
 ## `rotatedb` lost-update window
 
