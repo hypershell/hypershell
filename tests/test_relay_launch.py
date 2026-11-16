@@ -16,12 +16,13 @@ without them. The key itself may be given in any of its documented forms.
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, List, Tuple
+from typing import Dict, Final, List, Tuple
 
 # Standard libs
 import os
 import sys
 import json
+import subprocess
 import time
 import stat
 import functools
@@ -90,6 +91,36 @@ def test_scrub_removes_relay_settings_and_anything_holding_the_key() -> None:
     assert environ == {'PATH': '/usr/bin:/bin', 'HOME': '/home/someone', 'HYPERSHELL_SITE': '/site',
                        'HYPERSHELL_DATABASE_FILE': '/site/primary.db', 'HYPERSHELL_LOGGING_LEVEL': 'DEBUG',
                        'HYPERSHELL_CONFIG_FILE': '', 'SITE_MARK': 'a'}
+
+
+RELAY_VARIABLES: Final[Dict[str, str]] = {
+    'HYPERSHELL_relay_upstream_auth_eval': 'cat upstream-keyfile',
+    'HYPERSHELL_Relay_Upstream_Auth_Env': 'MY_UPSTREAM_KEY_NAME',
+    'HYPERSHELL_relay_upstream_host': 'upstream.example',
+    'HYPERSHELL_Relay_Size': '2',
+    'HYPERSHELL_relay_zone_gpu_launcher': 'srun',
+}
+"""Relay settings named as the matcher reads them, none holding the key itself."""
+
+# Prints, as JSON, the names of its environment.
+PRINT_NAMES: Final[str] = 'import os, json; print(json.dumps(sorted(os.environ)))'
+
+
+@mark.unit
+def test_relay_fence_by_matcher(monkeypatch) -> None:
+    """Every name the matcher maps under `relay` is absent from a site client's environment; the rest is kept."""
+    for name, value in {**relay_environment(), **RELAY_VARIABLES}.items():
+        monkeypatch.setenv(name, value)
+    cluster = site_cluster(address=('127.0.0.1', free_port()))
+    removed = fence_site(cluster, KEY, exports={})
+    assert set(RELAY_VARIABLES) <= set(removed)
+    probe = ClientLaunch(argv=[sys.executable, '-c', PRINT_NAMES], env=site_launch(cluster).env)
+    proc = probe.start(stdout=subprocess.PIPE)
+    stdout, _ = proc.communicate(timeout=30)
+    names = json.loads(stdout)
+    assert not set(RELAY_VARIABLES) & set(names)
+    assert not any(name.upper().startswith('HYPERSHELL_RELAY_') for name in names)
+    assert 'SITE_MARK' in names and AUTH_ENV in names
 
 
 @mark.unit

@@ -27,6 +27,7 @@ from pytest import mark
 # The hand-maintained zsh completion shipped in the wheel (share/).
 REPO = Path(__file__).parent.parent
 ZSH_COMPLETION = REPO / 'share' / 'zsh' / 'site-functions' / '_hs'
+BASH_COMPLETION = REPO / 'share' / 'bash_completion.d' / 'hs'
 
 
 def iter_bad_arg_specs(text: str) -> Iterator[Tuple[int, str]]:
@@ -87,3 +88,16 @@ def test_lint_detects_known_defect() -> None:
     fixed = '''        '(1)--from-json[Read tasks from a JSON file ("FILE\\[@path\\]")]:json spec:_files' \\'''
     assert list(iter_bad_arg_specs(broken)), 'linter failed to flag the known defect'
     assert not list(iter_bad_arg_specs(fixed)), 'linter false-positived on the fixed form'
+
+
+@mark.unit
+def test_configuration_keys_one_candidate_per_line() -> None:
+    """Both shells read `hs config get --list-available` one key per line, each its own candidate.
+
+    Zsh splits the list on newlines (``${(f)...}``); bash gives it to ``compgen -W``, which splits
+    on any whitespace, newlines included.
+    """
+    zsh = [line for line in ZSH_COMPLETION.read_text().splitlines() if '--list-available' in line]
+    bash = [line for line in BASH_COMPLETION.read_text().splitlines() if '--list-available' in line]
+    assert zsh and all('${(f)"$(' in line for line in zsh), zsh
+    assert bash and all('compgen -W "' in line for line in bash), bash

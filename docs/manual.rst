@@ -274,13 +274,21 @@ Security
 Environment Variables
 ---------------------
 
-As stated for configuration, any environment variable prefixed as ``HYPERSHELL_``
-where the name aligns to the path to some option, delimited by underscores,
-will set that option. Example, ``HYPERSHELL_CLIENT_TIMEOUT`` maps to the
-corresponding configuration option.
+As stated for configuration, an environment variable named ``HYPERSHELL_`` followed by an
+option's path, with each ``.`` written as ``_``, sets that option; the rest of the name may be in
+any letter case. Example, ``HYPERSHELL_CLIENT_TIMEOUT`` sets ``client.timeout`` and
+``HYPERSHELL_SERVER_TLS_MIN_VERSION`` sets ``server.tls.min_version``. Past a table whose entries
+are named by the user (``database.connect_args``, ``database.pragmas``, ``ssh.nodelist``,
+``export``), the rest of the name is one entry; a relay zone is set by
+``HYPERSHELL_RELAY_ZONE_<ZONE>_<KEY>``. ``_ENV`` and ``_EVAL`` work as ``_env`` and ``_eval`` do
+in a file. A value is kept as written for an option that takes text, except that an empty value
+for an optional one (or a bind address) is not given, so its default applies; a whole number, a
+number or a boolean that does not convert stops the command with a configuration error naming the
+variable.
+The configuration guide gives the full rule and what cannot be reached from the environment.
 
 The following environment variables must be specified as such and cannot be configurable
-within files.
+within files; neither can ``HYPERSHELL_ZONE``, which a launched client is given.
 
 .. include:: _include/config_site_vars.rst
 

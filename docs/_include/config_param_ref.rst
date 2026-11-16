@@ -51,7 +51,16 @@
 
         As a shorthand, ``logging.file`` may be set directly to ``"enabled"`` (or ``true``) to
         log to the default per-process file, or to a path to log there; both forms disable
-        rotation and compression.
+        rotation and compression. From the environment, ``HYPERSHELL_LOGGING_FILE`` takes
+        ``enabled``, ``true``, ``yes``, ``on`` or ``1``, in any letter case, for the default file;
+        ``false``, ``no``, ``off`` and ``0`` are refused, since there is no form that disables it;
+        any other text is a path.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               ``HYPERSHELL_LOGGING_FILE`` takes ``enabled`` in any letter case and refuses the
+               false words.
 
         ``.path``
             Destination file path. Defaults to a per-process, host-scoped file in the site
@@ -299,16 +308,24 @@
         while it keeps sending them. When there are no more tasks to schedule the server sends a
         disconnect request to all registered clients, and waits until a confirmation is
         returned for each. If a client is defunct, this will hang the shutdown process.
+        Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+        and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+        fractions are kept. ``hs server`` and ``hs relay`` stop before they start if the value is
+        not a duration.
 
         .. only:: html
 
             .. versionchanged:: 2.9.0
                A heartbeat is aged from when the server received it, not by the client's clock.
 
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
+
     ``[tls]``
         Transport-layer security for queue connections. Enabled by default; every key below
-        is also exposed as an environment variable (e.g., ``HYPERSHELL_SERVER_TLS_ENABLED``)
-        with the usual precedence. See the :ref:`built-in TLS <builtin-tls>` section for the
+        is also exposed as an environment variable (e.g., ``HYPERSHELL_SERVER_TLS_ENABLED``,
+        ``HYPERSHELL_SERVER_TLS_MIN_VERSION``) with the usual precedence (see
+        :ref:`Environment Variables <config_env>`). See the :ref:`built-in TLS <builtin-tls>` section for the
         full model, including peer verification modes and limitations.
 
         ``.enabled``
@@ -408,6 +425,14 @@
         Interval in seconds between heartbeats sent to server (default `10`).
 
         Even on the largest scales the default interval should be fine.
+        Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+        and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+        fractions are kept. ``hs client`` stops before it starts if the value is not a duration.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
     ``.timeout``
         Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
@@ -740,16 +765,40 @@
     ``.bundlewait``
         Seconds the relay waits before returning finished tasks upstream regardless of
         `bundlesize` (default: `5`). Once nothing is left to run at the site, it returns what it
-        holds at once.
+        holds at once. The *clients* at the site are given it as ``-w``.
+        Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+        and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+        fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
     ``.poll``
         Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).
 
         Received tasks wait at most this long before the relay-local *server* hands them out.
+        Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+        and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+        fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
     ``.retention``
         Seconds a result is kept in the relay database after it has been returned upstream
         (default: `300`). Results not yet returned are always kept.
+        Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+        and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+        fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
     ``.zone``
         Zone or zones the relay serves (default: none, the default zone).
@@ -840,6 +889,15 @@
 
     ``.timeout``
         Seconds a *client* at the site waits for tasks before it exits (default: `0`, never).
+        Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+        and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+        rounded up to whole seconds, since each *client* is given it as ``-T``. ``hs relay`` stops
+        before it starts if the value is not a duration.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A string with units or a Slurm time.
 
     ``[upstream]``
         Connection to the upstream *server*. These settings are never read from ``[server]``,
@@ -873,6 +931,14 @@
 
         ``.heartrate``
             Seconds between heartbeats to the upstream *server* (default: `10`).
+            Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+            and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+            fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   A string with units or a Slurm time.
 
         ``.deadline``
             Seconds a call to the upstream *server* may take before the relay takes the connection
@@ -881,6 +947,14 @@
             While the upstream *server* cannot be reached, the site keeps running and finished
             tasks are kept in the relay database; the relay connects again, with backoff, and then
             returns them before it asks for more work.
+            Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+            and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+            fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   A string with units or a Slurm time.
 
         ``.backoff``
             Longest wait in seconds between attempts to reach the upstream *server* again
@@ -888,6 +962,14 @@
 
             Each wait is drawn at random up to a bound that starts at one second and doubles with
             each failed attempt, up to this value.
+            Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+            and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+            fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   A string with units or a Slurm time.
 
         ``.evict_hint``
             Seconds of lost contact after which the relay takes the upstream *server* to have
@@ -897,6 +979,14 @@
             holds will likely be refused as stale (the upstream *server* has put those tasks back
             for other *clients*), and it does not repeat a confirmation the outage cut off. The
             results are still returned when the connection comes back.
+            Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
+            and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
+            fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
+
+            .. only:: html
+
+                .. versionchanged:: 2.9.0
+                   A string with units or a Slurm time.
 
         ``[tls]``
             ``.enabled``

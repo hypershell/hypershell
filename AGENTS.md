@@ -409,12 +409,15 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   with `=`). `--ssh` writes it to ssh's standard input with a forced `-T` (a bare `-n` in the
   ssh args is dropped), and a remote `sh` step reads it into that variable and `exec`s the
   client; `--env` exports are built by `ssh_env_exports()` from the variables themselves,
-  `HYPERSHELL_SERVER_AUTH` dropped by name first and every value `shlex.quote`d, so they never
-  carry it. The launching process's own `os.environ` is never modified; `ClientLaunch.env`/
+  every key variable dropped by name first (`is_key_variable()`: every form of `server.auth` and
+  `relay.upstream.auth` recognised by the matcher) and every value `shlex.quote`d, so they never
+  carry it. Every launch (`ClientLaunch.start()`) drops every key variable from the launched
+  environment before it sets the run key. The launching process's
+  own `os.environ` is never modified; `ClientLaunch.env`/
   `stdin` are `repr=False` and `describe()` (redacted, including any word that, parsed as a
   shell parses it, assigns `HYPERSHELL_SERVER_AUTH`) is the only thing logged. The client
-  never passes `HYPERSHELL_SERVER_AUTH`, or its name in the Open MPI list, to a task's
-  environment (`task_env()`) or to a `{% %}` template command (`Template(shell_env=
+  never passes a key variable (by `is_key_variable()`), or its name in the Open MPI list, to a
+  task's environment (`task_env()`) or to a `{% %}` template command (`Template(shell_env=
   inherited_task_env)`). A task gets the key only explicitly: `config.export` (a key the
   operator holds; never a run's minted key), or a `{= =}` lambda, which is client-side Python
   with `os` exposed and reads the client's environment on purpose. Tasks run as the client's
@@ -491,6 +494,17 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
 
 - `_eval` / `_env` suffixes on any key resolve via a shell command / env var (cmdkit) — used
   to keep secrets out of the TOML.
+- The `HYPERSHELL_*` layer is read through `core/config_schema.py`, never split at every
+  underscore: `KEYS` declares every documented key with its kind and `TABLES` how a name past a
+  table is read (closed, open, zone, export). A name matches an exact key, then a key plus
+  `_ENV`/`_EVAL`, then the longest table; `HYPERSHELL_SITE`, `_CONFIG_FILE`, `_PYTHONPATH` and
+  `_ZONE` are process variables, not keys. Text is kept as written; whole numbers, numbers and
+  booleans convert or stop every command at import with exit 3 naming the variable; durations and
+  sizes stay as given for the command that reads them (`config_seconds` at the start check for
+  duration keys no option reads, exit 3). `ENV_VARIABLES` records the variable that set each key, so
+  `blame`, `hs config which` and completion name it. **A new documented key gets its kind in `KEYS`
+  and its entry in `docs/_include/config_param_ref.rst` in the same commit** —
+  `tests/test_config_schema.py` fails otherwise.
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means
   **`0` = unlimited/auto** for many numeric knobs.
 - Defaults agents care about: server `port`, `bundlesize`, `bundlewait`, `evict` (≥10s),
@@ -641,7 +655,8 @@ compatibility until v3, but are never referenced.
   server and each relay as separate processes. Site clients are launched only through
   `client_launch()` (every zone's via `relay/site.py::zone_launch`, the first zone's set as the
   `AutoScalingCluster`'s launch), behind `fence_site`, which keeps the upstream key
-  off every site command line and environment. Its signal handling is the carve-out under *Signals*.
+  off every site command line and environment and removes every relay variable
+  (`is_fenced()`: recognised by the matcher). Its signal handling is the carve-out under *Signals*.
 
 ## Working on this codebase as an agent
 
