@@ -6,7 +6,8 @@ The address every launch mode tells its clients to dial.
 
 Clients are told the bind address when the server binds one address and this host's own name when
 it binds every interface, unless `--advertise` or `server.advertise` names another. A relay's site
-clients follow the same rule, with no override.
+clients follow the same rule with the relay's own override, `hs relay --advertise` or `relay.advertise`
+(see tests/test_relay_advertise.py); `server.advertise` never reaches them.
 """
 
 

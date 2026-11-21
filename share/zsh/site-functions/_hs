@@ -539,6 +539,7 @@ function _hs_relay() {
         '--launcher[Command prefix that launches each client]:launcher:_command_names -e' \
         '--launcher-args[Extra arguments for the launcher]:arguments:' \
         '--bind[Bind address of relay-local server (default: 0.0.0.0)]:address:(0.0.0.0 localhost 127.0.0.1)' \
+        '--advertise[Address site clients dial (default: by --bind)]:address:_hosts' \
         '--port[Port of relay-local server (default: 50002)]:port:_hs_ports' \
         '--database[Path to relay database]:database file:_files'
 }

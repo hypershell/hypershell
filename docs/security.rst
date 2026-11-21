@@ -377,15 +377,16 @@ modes are supported, in decreasing strength:
 When both ``cafile`` and ``fingerprint`` are set, ``fingerprint`` takes precedence and
 ``cafile`` is ignored.
 
-A `cluster` tells the clients it launches which address to dial: its bind address, this host's
-own name when it binds every interface, or the address given by ``--advertise`` (or
-``server.advertise``). That address must be one the client's certificate check accepts. With the
-system CA bundle, clients check the certificate against the address they dial, so advertise a
-name the certificate carries, or set ``servername``. With CA verification the certificate is
-checked against ``servername`` instead, and fingerprint pinning checks no name.
+A `cluster` tells the clients it launches, and a `relay` its site clients, which address to dial:
+its bind address, this host's own name when it binds every interface, or the address given by
+``--advertise`` (or ``server.advertise``; for a `relay`, ``relay.advertise``, since
+``server.advertise`` does not reach a relay). That address must be one the client's certificate
+check accepts. With the system CA bundle, clients check the certificate against the address they
+dial, so advertise a name the certificate carries, or set ``servername``. With CA verification the
+certificate is checked against ``servername`` instead, and fingerprint pinning checks no name.
 
 .. versionadded:: 2.9.0
-   ``--advertise`` and ``server.advertise``.
+   ``--advertise``, ``server.advertise`` and ``relay.advertise``.
 
 |
 

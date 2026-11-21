@@ -231,9 +231,12 @@ subsystems.
 - In JSON mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
   expansion.
 - One rule gives the address every launch tells its clients (`cluster/launch.py::advertised_host`,
-  at each launch site incl. `relay/site.py::zone_launch`): `--advertise`/`server.advertise` (remote
-  `hs cluster` modes only; constructors take `advertise=` and never read configuration), else the
-  bind address, else `HOSTNAME` for a wildcard bind. It must be routable from clients. The
+  at each launch site): `--advertise`/`server.advertise` for remote `hs cluster` modes, and
+  `hs relay --advertise`/`relay.advertise` for a relay's site clients (never `server.advertise`),
+  else the bind address, else `HOSTNAME` for a wildcard bind. Constructors take `advertise=` and
+  never read configuration; only `ClusterApp`/`RelayApp` read the keys. A relay's site cluster
+  computes the address once (`AutoScalingCluster.advertised`) and every zone's
+  `relay/site.py::zone_launch` dials it, so no zone can diverge. It must be routable from clients. The
   autoscaler never terminates clients (they self-exit on idle) and ignores
   `no_confirm`/`in_memory`/`forever`/`restart`.
 - A cluster whose launched clients are all gone with work left exits 5 (`ClusterLaunchError`):

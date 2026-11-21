@@ -444,8 +444,12 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
   expansion. Every launch mode, and a relay's site clients, tells its clients the address
   `cluster/launch.py::advertised_host` gives: `--advertise`/`server.advertise` when given (remote
-  `hs cluster` modes only; the relay has no override), else the bind address, else this host's own
-  `HOSTNAME` for a wildcard (`0.0.0.0`) bind; whichever it is must be routable from clients. The
+  `hs cluster` modes only), or for a relay's site clients `hs relay --advertise`/`relay.advertise`
+  (never `server.advertise`), else the bind address, else this host's own `HOSTNAME` for a
+  wildcard (`0.0.0.0`) bind; whichever it is must be routable from clients. Only `ClusterApp` and
+  `RelayApp` read those keys; constructors take `advertise=`. A relay's site cluster computes the
+  address once (`AutoScalingCluster.advertised`), and every zone's `relay/site.py::zone_launch`
+  dials that, so no zone can be told another. The
   `AutoScaler` never terminates clients (they self-exit on idle) and silently ignores
   `no_confirm`/`in_memory`/`forever`/`restart`.
 - **A cluster with every launched client gone and work left exits 5** (`ClusterLaunchError`).
