@@ -32,3 +32,10 @@
 - **Skill cause:** As `spec/env-config-keys/META.md` F3: the `unshaped` bullet says to carry the evidence into Problem, not to reproduce it on current `develop` first, and "shaping only" discourages the probe.
 - **Recommended fix:** As recorded there; also check that each draft acceptance criterion fails on current `develop` before it becomes part of the contract.
 - **Confidence:** high · **Effort:** small
+
+## F4 — `verify:` guidance has no guard against a command that never returns · seen again
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The host has no `timeout(1)` and the suite has no per-test timeout, yet every verify here runs integration tests or `hs cluster`, which wait out a 60 s bundle wait or a 600 s back-off on the base. The plan wrote its own `drive/bounded.py` (process group; SIGINT, SIGTERM, SIGKILL; exit 124) and routed every verify through it; research brief 03 had meanwhile proposed a perl one-liner for the same job.
+- **Skill cause:** As `spec/group-advance-strands-lower-group/META.md` F3: Steps 4 and 6 steer verification to CLI drives and integration tests but say nothing about bounding them, and the factory has no helper, so each plan (and each research agent) reinvents one.
+- **Recommended fix:** As recorded there: a factory `bin/` bound helper (this cycle's `drive/bounded.py` is a candidate) and one line in Step 6 and the TECH template requiring it for every verify that runs integration tests or `hs`/`hsx`.
+- **Confidence:** high · **Effort:** small
