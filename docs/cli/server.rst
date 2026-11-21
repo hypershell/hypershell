@@ -40,6 +40,11 @@ Description
    ``-P``/``--period`` and ``autoscale.period`` must be greater than zero; zero or a negative
    value is refused.
 
+.. versionchanged:: 2.9.0
+   The result that finishes a run ends the scheduler's wait at once: a server whose input has ended
+   no longer waits out its back-off (up to ``-Q``/``--poll``) after the last task. With
+   ``--forever`` it keeps waiting, and nothing else about scheduling changes.
+
 .. include:: ../_include/server_help.rst
 
 .. _cli_server_sites:

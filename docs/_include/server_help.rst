@@ -58,7 +58,8 @@ Options
     This controls how frequently the scheduler checks the database for new tasks when idle.
     Lower values (e.g., 1-2 seconds) provide faster responsiveness but may increase database
     query load. Higher values (e.g., 10-30 seconds) reduce query frequency, useful for
-    workflows with infrequent task submission.
+    workflows with infrequent task submission. The result that finishes a run ends the
+    scheduler's wait at once.
 
 ``-r``, ``--max-retries`` *NUM*
     Auto-retry failed tasks (default: 0).

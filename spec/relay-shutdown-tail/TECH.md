@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -83,7 +83,7 @@ phases:
 - id: P5
   name: 'Docs: when results are returned and when a finishing server stops waiting
     (versionchanged 2.9.0); the invariant record'
-  status: pending
+  status: done
   satisfies:
   - R6
   depends_on:
@@ -319,19 +319,19 @@ the processes read. Test-only.
 **Satisfies:** R6 · **Depends on:** P2, P3
 **Goal:** the documentation says when results are returned and when a finishing server stops waiting.
 
-- [ ] `-w` help (`src/hypershell/client.py:1556`, `src/hypershell/cluster/__init__.py:87`) and the `-w`
+- [x] `-w` help (`src/hypershell/client.py:1556`, `src/hypershell/cluster/__init__.py:87`) and the `-w`
   paragraphs of `docs/_include/client_help.rst` and `docs/_include/cluster_help.rst`: "A client with
   nothing left to run returns what it holds at once." Keep `tests/test_main.py` green.
-- [ ] `docs/_include/config_param_ref.rst`: `client.bundlewait` (same sentence), `relay.bundlewait` (its
+- [x] `docs/_include/config_param_ref.rst`: `client.bundlewait` (same sentence), `relay.bundlewait` (its
   site clients, too, return what they hold at once when they have nothing left to run), `server.poll`
   ("The result that finishes a run ends the scheduler's wait at once."), each with an
   `.. only:: html` / `.. versionchanged:: 2.9.0` note; the `-Q` paragraphs of
   `docs/_include/server_help.rst` and `cluster_help.rst` get the `server.poll` sentence.
-- [ ] `.. versionchanged:: 2.9.0` notes in `docs/cli/client.rst`, `docs/cli/cluster.rst`,
+- [x] `.. versionchanged:: 2.9.0` notes in `docs/cli/client.rst`, `docs/cli/cluster.rst`,
   `docs/cli/server.rst`. Top-level commands only.
-- [ ] `AGENTS.md` and `.agents/factory/invariants.md` §3, in lockstep: the out-of-work stop also takes
+- [x] `AGENTS.md` and `.agents/factory/invariants.md` §3, in lockstep: the out-of-work stop also takes
   effect when the finishing result lands (the receiver wakes the scheduler), not only on the next pass.
-- [ ] Man pages: not regenerated (release rebuild); the verify checks the man builder's output.
+- [x] Man pages: not regenerated (release rebuild); the verify checks the man builder's output.
 - **Verify:** help tests, both docs builds with `-W`, the sentence greps in the sources and the man
   output, and no `hs task` added.
 - **Touches:** `src/hypershell/client.py`, `src/hypershell/cluster/__init__.py`, `docs/_include/*.rst`,

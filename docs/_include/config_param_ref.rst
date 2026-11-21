@@ -287,7 +287,7 @@
 
         The scheduler backs off exponentially from a small floor, doubling the wait after
         each empty query up to this ceiling. This waiting only occurs when no tasks are
-        returned by the query.
+        returned by the query. The result that finishes a run ends the scheduler's wait at once.
         A string takes the same forms as ``-Q``/``--poll``: units ``d``, ``h``, ``m`` and ``s``
         (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number is
         seconds.
@@ -298,6 +298,9 @@
 
             .. versionchanged:: 2.9.0
                A string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               The result that finishes a run ends the wait.
 
     ``.evict``
         Eviction period in seconds for clients (default: `600`).
@@ -415,11 +418,17 @@
 
         If this period of time expires since the previous bundle was returned to the server,
         the current group of finished tasks will be pushed regardless of `bundlesize`.
+        A client with nothing left to run returns what it holds at once.
 
         For larger distributed workflows it is a good idea to make this waiting period sufficiently
         long so that most bundles are returned whole.
 
         See also ``-w``/``--bundlewait`` command-line option.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A client with nothing left to run returns what it holds without waiting.
 
     ``.heartrate``
         Interval in seconds between heartbeats sent to server (default `10`).
@@ -765,7 +774,8 @@
     ``.bundlewait``
         Seconds the relay waits before returning finished tasks upstream regardless of
         `bundlesize` (default: `5`). Once nothing is left to run at the site, it returns what it
-        holds at once. The *clients* at the site are given it as ``-w``.
+        holds at once. The *clients* at the site are given it as ``-w``; each of them too, with
+        nothing left to run, returns what it holds at once.
         Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
@@ -774,6 +784,9 @@
 
             .. versionchanged:: 2.9.0
                A string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               A site client with nothing left to run returns what it holds without waiting.
 
     ``.poll``
         Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).

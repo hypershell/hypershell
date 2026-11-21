@@ -1595,7 +1595,7 @@ Options:
   -N, --num-threads   NUM   Number executor threads, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template      CMD   Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
   -b, --bundlesize    SIZE  Bundle size to request and return (default: server's).
-  -w, --bundlewait    SEC   Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
+  -w, --bundlewait    SEC   Wait before flushing tasks, none once idle; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --zone          NAME  Run only tasks of this zone (default: tasks without a zone).
   -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
