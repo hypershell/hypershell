@@ -27,4 +27,26 @@ count toward R5's budget or its judge.
 ## `head/` — the R5 runs (TECH P6)
 
 Written by the R5 phase on the committed head: `head-2004-NN` and `head-2000-NN`, judged by
-`../drive/tail_bound.py`, with the table beside the baseline in `tails.md`.
+`../drive/tail_bound.py`, with the table beside the baseline in [`tails.md`](tails.md).
+
+Laptop (macOS 27, loopback), 2026-11-21, commit `dd0b227d` (the P5 commit; `src_changed: false` in
+every record), the venv's `hs` on Python 3.14. Six runs in the planned order (2004, 2000, 2004, 2000,
+2004, 2000), every one complete; no spare was spent. `tail_bound.py`: PASS.
+
+| Size | Runs | Tail (s) | Baseline tail (s) |
+|------|------|----------|-------------------|
+| 2000 | 3 | 0.79, 0.72, 0.75 | 1.58–1.78 (6 runs) |
+| 2004 | 3 | 1.65, 0.81, 0.69 | 6.75, 7.45 (2 runs) |
+
+What the windows show:
+
+- No `Bundle wait exceeded` line in any relay window (the baseline's 2004-task windows had 4 each).
+- Each 2004-task relay window has one `Client idle - returning N tasks` line: the site client whose
+  last bundle was partial returned it at once. The 2000-task windows have none (every last site
+  bundle was full).
+- Each upstream server window has one `Result finished the run - waking scheduler` line: the last
+  result ended the scheduler's back-off. Segment s4 (the back-off after the last result) is 0.00 s
+  in every head run, against 0.60–2.71 s in the baseline.
+- What is left is s7 and s8 (the relay-local server's shutdown signal and the relay's final
+  heartbeat, out of scope), 0.61–1.45 s together. The slowest run, `head-2004-01` (1.65 s), is the
+  first of the drive and spent 0.95 s in s7.

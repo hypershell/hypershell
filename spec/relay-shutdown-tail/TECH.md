@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -108,7 +108,7 @@ phases:
 - id: P6
   name: 'R5 laptop drive on the committed head: at most 10 runs, at least 3 at 2000
     and at 2004 tasks'
-  status: pending
+  status: done
   satisfies:
   - R5
   depends_on:
@@ -341,7 +341,7 @@ the processes read. Test-only.
 **Satisfies:** R5 · **Depends on:** P5
 **Goal:** no relay tail over 3 s at 2000 or 2004 tasks, with every run's record kept beside the baseline.
 
-- [ ] On the committed head (clean `src/`), from the repository root, with the venv's `hs`:
+- [x] On the committed head (clean `src/`), from the repository root, with the venv's `hs`:
   `S=$TMPDIR/rst-head-sites; mkdir -p $S` (a scratch directory outside the tree) then, per run,
   `HS=/tmp/claude-501/venv314-rst/bin/hs TMPDIR=$S PYTHONDONTWRITEBYTECODE=1
   /tmp/claude-501/venv314-rst/bin/python spec/relay-shutdown-tail/drive/bounded.py 300
@@ -349,10 +349,10 @@ the processes read. Test-only.
   spec/relay-shutdown-tail/evidence/head head-2004-NN --label head-2004 --tasks 2004` (or
   `head-2000-NN --label head-2000 --tasks 2000`). The venv's Python directly, so the bound's SIGINT
   reaches `tail_run.py`, whose `finally` stops every process group it started.
-- [ ] Schedule: 2004, 2000, 2004, 2000, 2004, 2000 — six planned; four spares, spent only to replace a run
+- [x] Schedule: 2004, 2000, 2004, 2000, 2004, 2000 — six planned; four spares, spent only to replace a run
   that did not complete, at its size. Every started run counts; stop at 10. A tail over 3 s ends the
   drive: keep the record, do not re-roll, stop and escalate (R5 fails; the plan is wrong).
-- [ ] `tail_bound.py … --table spec/relay-shutdown-tail/evidence/tails.md`; update `evidence/README.md`'s
+- [x] `tail_bound.py … --table spec/relay-shutdown-tail/evidence/tails.md`; update `evidence/README.md`'s
   `head/` section (host, date, commit, what the windows show: no `Bundle wait exceeded`, the idle
   returns).
 - **Verify:** `tail_bound.py` on `evidence/head` with the baseline (exit 0).
