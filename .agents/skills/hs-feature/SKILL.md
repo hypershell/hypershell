@@ -136,6 +136,9 @@ still a *candidate*: **do not copy it into `GOAL.md` verbatim.** Read its `statu
   question gets re-litigated by accident; if the human wants it re-opened anyway, that is a
   deliberate `status:` change they make first.
 
+Carry the seed's `target:` (the release `ROADMAP.md` plans it for) into the GOAL header as
+`- **target:** …`, or record it in **Clarifications**.
+
 When the GOAL lands, leave the `issues/` file in place and set its `status:` to `adopted:{slug}`, so
 the `ROADMAP.md` index does not dangle; where that entry's `**Seed:**` line carries a `· *status: …*`
 marker, update it to `· *status: adopted:{slug}*` to match. Commit both edits alongside the GOAL. The
