@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -32,7 +32,7 @@ phases:
 - id: P2
   name: 'The result that finishes a run wakes the scheduler: a counted arm, the receiver''s
     check'
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -276,14 +276,14 @@ and must stay green: `[NoSuchProcess]`, `[ZombieProcess]`, `end_drive.sh nodb`, 
 **Goal:** a non-`--forever` server whose input has ended stops within 1 s of the result that finishes the
 run, however long its back-off; nothing else about scheduling changes.
 
-- [ ] `Scheduler`: `landed = 0`, `finishing = None`; in `load_bundle`, on a pass that loaded nothing,
+- [x] `Scheduler`: `landed = 0`, `finishing = None`; in `load_bundle`, on a pass that loaded nothing,
   arm `(landed, 0)` before the counts when not `forever_mode` and the input has ended, read
   `count_remaining()` once (only when `Task.count() > 0`, as today) and arm `(mark, remaining)`; keep the
   FINAL predicate and the failed-group branch as they are; a pass that loads disarms.
-- [ ] `Scheduler.results_landed(n)` (PLAN § 2): count, check the threshold, read
+- [x] `Scheduler.results_landed(n)` (PLAN § 2): count, check the threshold, read
   `count_remaining() == 0` then `count_retryable(attempts, group=current_group, eager=eager) == 0`,
   `wake()`.
-- [ ] `Receiver`/`ReceiverThread`: optional `scheduler=`; after a write, report the number of `APPLIED`
+- [x] `Receiver`/`ReceiverThread`: optional `scheduler=`; after a write, report the number of `APPLIED`
   outcomes. `ServerThread` passes `self.scheduler.machine` (or `None` in memory).
 - **Verify:** the server suites around the scheduler, receiver, dispatch and shutdown, plus
   `end_drive.sh finish` (≤ 13.5 s) and `nodb`.

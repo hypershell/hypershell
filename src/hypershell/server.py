@@ -146,6 +146,8 @@ class Scheduler(StateMachine):
     current_group: Optional[int]
     submitter: Optional[SubmitThread]
     halting: bool
+    landed: int
+    finishing: Optional[Tuple[int, int]]
 
     state = SchedulerState.START
     states = SchedulerState
@@ -175,6 +177,8 @@ class Scheduler(StateMachine):
         self.held = set()
         self.woken = False
         self.halting = False
+        self.landed = 0  # Results written back so far; only the receiver writes it.
+        self.finishing = None  # While the run may end on a landed result: (landed at the count, tasks remaining).
 
     @property
     def dispatcher(self: Scheduler) -> Dispatcher:
@@ -258,11 +262,23 @@ class Scheduler(StateMachine):
             self.mark_group_started()
             self.poll = SERVER_POLL_MIN
             self.woken = False
+            self.finishing = None
             return SchedulerState.PACK
         # The submitter is read before the counts: once it has ended, every row it read is committed
         # and the counts below see it.
         input_ended = self.submission_complete()
-        if (not self.forever_mode and Task.count() > 0 and Task.count_remaining() == 0
+        armed = input_ended and not self.forever_mode
+        if armed:
+            # Armed before the counts: a result landing from here on is checked by the receiver, and
+            # one landing earlier is seen by the counts.
+            mark = self.landed
+            self.finishing = (mark, 0)
+        remaining = None
+        if not self.forever_mode and Task.count() > 0:
+            remaining = Task.count_remaining()
+            if armed:
+                self.finishing = (mark, remaining)
+        if (remaining == 0
                 and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0):
             # Every task is terminal. A failure written back after Task.next() is still retried before
             # the run stops; retryable failures are counted after incomplete tasks so that write is seen.
@@ -332,6 +348,24 @@ class Scheduler(StateMachine):
     def wake(self: Scheduler) -> None:
         """End a back-off at once, so the next pass runs without waiting out the poll interval."""
         self.dispatcher.wake()
+
+    def results_landed(self: Scheduler, count: int) -> None:
+        """Count `count` results written back, and wake the scheduler if they finished the run.
+
+        Called by the receiver after each write. While a pass that found nothing to load is armed (the
+        input has ended, not in forever mode), the run can end only once as many results have landed
+        since its count as it found tasks remaining; only then are the stop predicate's counts read
+        here, and the scheduler is woken when nothing is left incomplete or retryable. The woken pass
+        reads the counts itself and stops.
+        """
+        self.landed += count
+        finishing = self.finishing
+        if finishing is None or self.landed - finishing[0] < finishing[1]:
+            return
+        if (Task.count_remaining() == 0
+                and Task.count_retryable(self.attempts, group=self.current_group, eager=self.eager) == 0):
+            log.trace('Result finished the run - waking scheduler')
+            self.wake()
 
     def next_tasks(self: Scheduler, refills: List[Tuple[str, int]]) -> List[Tuple[str, List[Task]]]:
         """Select the next tasks to schedule from the current group, for each zone that needs a refill."""
@@ -605,13 +639,16 @@ class Receiver(StateMachine):
 
     in_memory: bool
     redirect_failures: IO
+    scheduler: Optional[Scheduler]
 
     state = ReceiverState.START
     states = ReceiverState
 
-    def __init__(self: Receiver, queue: QueueServer, in_memory: bool = False, redirect_failures: IO = None) -> None:
-        """Initialize receiver."""
+    def __init__(self: Receiver, queue: QueueServer, in_memory: bool = False, redirect_failures: IO = None,
+                 scheduler: Optional[Scheduler] = None) -> None:
+        """Initialize receiver; results written back are reported to `scheduler` when given."""
         self.queue = queue
+        self.scheduler = scheduler
         self.tasks = []
         self.held = []  # Results whose row still qualifies but whose write did not land yet.
         self.bundle = None
@@ -692,6 +729,9 @@ class Receiver(StateMachine):
                 log.warning(f'Non-zero exit status ({task.exit_status}) for task ({task.id})')
                 if self.redirect_failures:
                     print(task.args, file=self.redirect_failures)
+        applied = outcomes.count(ResultOutcome.APPLIED)
+        if applied and self.scheduler is not None:
+            self.scheduler.results_landed(applied)
         return ReceiverState.UNLOAD
 
     @staticmethod
@@ -707,10 +747,12 @@ class ReceiverThread(Thread):
     def __init__(self: ReceiverThread,
                  queue: QueueServer,
                  in_memory: bool = False,
-                 redirect_failures: IO = None) -> None:
+                 redirect_failures: IO = None,
+                 scheduler: Optional[Scheduler] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-receiver')
-        self.machine = Receiver(queue=queue, in_memory=in_memory, redirect_failures=redirect_failures)
+        self.machine = Receiver(queue=queue, in_memory=in_memory, redirect_failures=redirect_failures,
+                                scheduler=scheduler)
 
     def run_with_exceptions(self: ReceiverThread) -> None:
         """Run machine."""
@@ -1208,7 +1250,8 @@ class ServerThread(Thread):
             self.confirm = None
         else:
             self.confirm = ConfirmThread(queue=self.queue, in_memory=self.in_memory)
-        self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures)
+        self.receiver = ReceiverThread(queue=self.queue, in_memory=self.in_memory, redirect_failures=redirect_failures,
+                                       scheduler=None if self.scheduler is None else self.scheduler.machine)
         self.heartmonitor = HeartMonitorThread(queue=self.queue, evict_after=evict_after,
                                                in_memory=self.in_memory, no_confirm=no_confirm, sites=sites)
         super().__init__(name='hypershell-server')
