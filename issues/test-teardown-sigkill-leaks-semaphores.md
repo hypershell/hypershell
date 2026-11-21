@@ -2,6 +2,7 @@
 status: unshaped
 kind: test
 appetite: small
+target: 2.9.x, 2.8.x
 lane: public
 ---
 

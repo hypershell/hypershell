@@ -2,6 +2,7 @@
 status: unshaped
 kind: feature
 appetite: small
+target: 2.10.0
 lane: public
 ---
 

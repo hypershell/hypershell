@@ -2,6 +2,7 @@
 status: adopted:relay-shutdown-tail
 kind: test
 appetite: small
+target: 2.9.0
 lane: public
 ---
 

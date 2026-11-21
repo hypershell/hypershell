@@ -117,9 +117,13 @@ describing the *set* of entries under it:
 
 ## Bare `#` silently truncates the submitted command      <- the entry: a sentence-style H2
 <one or two paragraphs of prose>
-*Horizon: near-term · Depends on: — · Refs: —*
+*Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md)
 ```
+
+The italic line opens with **Target**, the release the entry is planned for; it matches the
+`target:` in its seed's frontmatter, and the intro of `ROADMAP.md` defines the vocabulary (`2.9.0`,
+`2.9.x`, `2.10.0`, `2.8.x`, a combination such as `2.9.x, 2.8.x`, `unscheduled`).
 
 An entry's **block** is the `## ` heading through its `**Seed:**` line inclusive, plus the blank line
 that follows. Part II entries append ` · *status: shaped*` to the Seed line. Two trailing sections

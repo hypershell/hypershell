@@ -25,6 +25,14 @@ See the deferral table in [`AGENTS.md`](AGENTS.md) for which lane a deferral bel
 prerequisites the feature cycles depend on rather than merely being urgent — those dependencies are
 named in each entry. Horizons are indicative; the stated dependencies are the hard constraints.
 
+**Target** names the release an entry is planned for (the maintainer's ruling, 2026-11-21), and its
+seed carries the same value as `target:` in its frontmatter. `2.9.0` is work to land before the
+2.9.0 release; `2.9.x` a 2.9 patch release; `2.10.0` the next minor, developed as `2.10.0aN` alphas;
+`2.8.x` a patch on the 2.8 line; a combination such as `2.9.x, 2.8.x` a fix that is also backported;
+and `unscheduled` an idea no release is planned for (Part IV). An interface change (a new option or
+configuration key, refusing input accepted today, a changed default or changed output) goes to a
+minor release; an interface-neutral fix goes to a patch.
+
 Some seeds cite a maintainer-local record under `.local/`: `IMPROVEMENTS.md`, for the GNU Parallel
 comparison's finding ids (H\*, M\*, L\*). That directory is gitignored: the named review and the
 ids are stable, the path is not resolvable from a clone.
@@ -46,7 +54,7 @@ no error at submit time. Silent corruption at ingest is the one class of bug a m
 must not have, and it contradicts our own "the shell line is the contract" design — the shell
 already implements comment semantics correctly.
 
-*Horizon: near-term · Depends on: — · Refs: —*
+*Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md)
 
 ## Unguarded task start kills the executor and poisons the task
@@ -57,7 +65,7 @@ revert re-runs it into the same crash, and the client degrades executor-by-execu
 Template and resource errors are already handled gracefully in the same file — spawn failure just
 never got the same treatment.
 
-*Horizon: near-term · Depends on: — · Refs: —*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/task-start-spawn-guard.md`](issues/task-start-spawn-guard.md)
 
 ## No process-group ownership; SIGTERM and Ctrl-C tear down without cleanup
@@ -69,7 +77,7 @@ actually bound node usage for any task that is a pipeline or backgrounds childre
 on every node plus guaranteed duplicate re-execution on restart. The two must be fixed together:
 Ctrl-C currently kills tasks only *because* they share the client's process group.
 
-*Horizon: near-term · Depends on: — · Refs: —*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/process-group-signal-teardown.md`](issues/process-group-signal-teardown.md)
 
 ## Transient coordinator failures should degrade to retry, not process death
@@ -85,9 +93,9 @@ rather than documenting it as a hazard. The end goal is that any node (server, c
 be bounced without bringing the system down and recovers gracefully, behind one retry/backoff
 mechanism; not before SC26.
 
-*Horizon: after SC26 · Depends on: — · Refs: relay built the first instance of this machinery (#82:
-`core/reconnect.py`, the relay's upstream link); lift it into the shared mechanism here; shares the
-`data/core.py` provider seam with turso*
+*Target: 2.10.0 · Horizon: after SC26 · Depends on: — · Refs: relay built the first instance of this
+machinery (#82: `core/reconnect.py`, the relay's upstream link); lift it into the shared mechanism
+here; shares the `data/core.py` provider seam with turso*
 **Seed:** [`issues/coordinator-resilience-retry-backoff.md`](issues/coordinator-resilience-retry-backoff.md)
 
 ## A client cut off partway through connecting hangs until evicted
@@ -99,8 +107,8 @@ should exit promptly and non-zero so its tasks are recovered, or retry the conne
 bound. Seen at the open-file limit, where the server refuses new connections, with the same client
 behaviour on `b819de6`.
 
-*Horizon: near-term · Depends on: — · Refs: coordinator resilience (a reconnect path may subsume
-it); `spec/zone-queue-primitive/` (review cycle 2, C3)*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: coordinator resilience (a reconnect path
+may subsume it); `spec/zone-queue-primitive/` (review cycle 2, C3)*
 **Seed:** [`issues/client-partial-connect-hang.md`](issues/client-partial-connect-hang.md)
 
 ## Ingest robustness: all-or-nothing submission, no length awareness
@@ -109,7 +117,8 @@ One undecodable byte aborts a whole task file, and one malformed tag raises out 
 part of the file is already submitted — leaving a partial, unlabelled submission with no per-line
 diagnosis. A line too long to ever spawn is not caught until some node tries it.
 
-*Horizon: near-term · Depends on: sequence after the `#`-truncation fix (same path) · Refs: —*
+*Target: 2.10.0 · Horizon: near-term · Depends on: sequence after the `#`-truncation fix (same path)
+· Refs: —*
 **Seed:** [`issues/ingest-robustness.md`](issues/ingest-robustness.md)
 
 ## Client I/O hygiene
@@ -119,7 +128,7 @@ a `UnicodeDecodeError` though the file itself is byte-faithful; a full disk trun
 the task records success; tasks inherit the client's stdin and race fd 0; concurrent crash logs
 overwrite each other; and an uncalled transport in `core/remote.py` drops tail output and busy-spins.
 
-*Horizon: near-term · Depends on: — · Refs: —*
+*Target: 2.10.0 · Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/client-io-hygiene.md`](issues/client-io-hygiene.md)
 
 ## Templating and remote-env contract
@@ -129,7 +138,7 @@ forms stay by design, but a quoted token should exist and the contract should be
 `compile_env` builds environment assignments without shell quoting, so a value containing a space or
 `$` corrupts the remote launch line, and there is no dry run to preview what would actually execute.
 
-*Horizon: mid-term · Depends on: — · Refs: —*
+*Target: 2.10.0 · Horizon: mid-term · Depends on: — · Refs: —*
 **Seed:** [`issues/templating-and-remote-env-contract.md`](issues/templating-and-remote-env-contract.md)
 
 ## Deterministic sentinels retry to exhaustion, then stall the group
@@ -139,8 +148,8 @@ retry budget and then pins the group. Retry defaults also diverge between standa
 launch paths for no documented reason. The heterogeneous-fleet half of this finding — requeueing an
 over-large task to a fitter node — is answered by zones, not by fleet-capability introspection.
 
-*Horizon: mid-term · Depends on: — · Refs: zones, shipped by `zone-dispatch` (#78), for the routing
-half*
+*Target: 2.9.0 · Horizon: mid-term · Depends on: — · Refs: zones, shipped by `zone-dispatch` (#78),
+for the routing half*
 **Seed:** [`issues/resource-error-terminal-and-retry-defaults.md`](issues/resource-error-terminal-and-retry-defaults.md)
 
 ## A restarted run stops before a pending retry
@@ -150,7 +159,8 @@ because the "anything left?" check counts only incomplete rows. The retry is nev
 exits 0. LOAD now holds a run open for a pending retry; START does not. Pre-existing, and found by
 the review of the group-advance fix.
 
-*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/` (review P1)*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/` (review
+P1)*
 **Seed:** [`issues/restart-pending-retry.md`](issues/restart-pending-retry.md)
 
 ## Eager mode can bundle the same retry twice
@@ -160,7 +170,7 @@ creates the retry, then tops the bundle up with unscheduled rows, and the fresh 
 them. A client may receive the same task twice in one bundle. Whether it then runs twice is
 untested; the seed asks for that test first.
 
-*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
 
 ## Refuse a submission below the group the schedule has reached
@@ -172,8 +182,8 @@ error naming both groups. The same rule covers a task file run onto an advanced 
 (`--restart`, `--update`, `--repeat`). Pipes into `hs cluster`/`hs server` stay best effort. This is
 a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
 
-*Horizon: near-term · Depends on: `group-advance-strands-lower-group` (landed, #74) · Refs: overlaps
-`issues/ingest-robustness.md` (same ingest path)*
+*Target: 2.9.0 · Horizon: near-term · Depends on: `group-advance-strands-lower-group` (landed, #74)
+· Refs: overlaps `issues/ingest-robustness.md` (same ingest path)*
 **Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
 
 ## A client that times out during a pause in a stream leaves a late line unrun
@@ -185,7 +195,7 @@ never comes: `(echo 'echo a'; sleep 8; echo 'echo b') | hsx -N1 -T 3` prints `a`
 is not affected. Before `task-input-fidelity` the same run dropped the line silently. Scheduled after
 the agreed pre-2.9.0 list.
 
-*Horizon: near-term · Depends on: `task-input-fidelity` (landed, #110) · Refs:
+*Target: 2.9.x · Horizon: near-term · Depends on: `task-input-fidelity` (landed, #110) · Refs:
 `spec/task-input-fidelity/` (GOAL Clarifications, plan-gate ruling 3)*
 **Seed:** [`issues/stream-pause-client-timeout.md`](issues/stream-pause-client-timeout.md) · *status: unshaped*
 
@@ -196,7 +206,8 @@ one, a line read just before a pause in a stream stays uncommitted until the nex
 the input. It is committed and run eventually, so no stop depends on it. Pre-existing, also in
 `hs submit`, and found by the plan of `task-input-fidelity`.
 
-*Horizon: near-term · Depends on: — · Refs: `spec/task-input-fidelity/research/02-stream-stop.md`*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs:
+`spec/task-input-fidelity/research/02-stream-stop.md`*
 **Seed:** [`issues/stream-bundlewait-commit-wait.md`](issues/stream-bundlewait-commit-wait.md) · *status: unshaped*
 
 ## No test pins the re-count before a quiet stop when a failed group ends a stream run
@@ -206,8 +217,18 @@ remaining tasks once more before it stops quietly, so a row another writer commi
 is still scheduled or halts the run. The behaviour is right, but removing the re-count passes every
 test. A deterministic interleaving test should pin it. Filed after `task-input-fidelity` (#110).
 
-*Horizon: near-term, small · Depends on: — · Refs: `spec/task-input-fidelity/` (REVIEW cycle 3, N1)*
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/task-input-fidelity/`
+(REVIEW cycle 3, N1)*
 **Seed:** [`issues/stream-failed-group-recount-test.md`](issues/stream-failed-group-recount-test.md) · *status: unshaped*
+
+## `hs server --forever --no-db` exits once its only relay drains
+
+An in-memory server started with `--forever` should keep serving until signalled, but with one relay
+it exits 0 once that relay has drained; the same run on a database stays up. Found by the plan of
+`relay-advertise`; not yet narrowed to a cause.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-advertise/`*
+**Seed:** [`issues/forever-nodb-server-exits-when-relay-drains.md`](issues/forever-nodb-server-exits-when-relay-drains.md) · *status: unshaped*
 
 ## An empty task file never finishes
 
@@ -217,7 +238,8 @@ waiting for initial tasks` and waits for tasks that cannot arrive. The stop bran
 empty database never reaches FINAL. The same holds before and after
 `group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
 
-*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 1)*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs:
+`spec/group-advance-strands-lower-group/` (REVIEW cycle 1)*
 **Seed:** [`issues/empty-task-file-hangs.md`](issues/empty-task-file-hangs.md) · *status: unshaped*
 
 ## A "database is locked" error while a task file is read hangs the run
@@ -228,19 +250,9 @@ killed. The loader then blocks on its full queue, so the server never gets past 
 submitter, and nothing passes the committer's error on to the exit status. The same holds before
 and after `group-advance-strands-lower-group`. Pre-existing, and found by that cycle's review.
 
-*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs:
+`spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
 **Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
-
-## An autoscaler read that meets a locked SQLite database ends the cluster
-
-With failed-launch counting on (the default for `hs cluster`), the autoscaler reads client
-registrations on every check. On SQLite under a busy stream of submissions that read can fail with
-`database is locked`, and the autoscaler ends the run with a traceback file instead of treating it
-as transient. Seen once on CI; introduced with `cluster-launch-failures` (#107), not yet released.
-
-*Horizon: near-term, small · Depends on: — · Refs: `spec/cluster-launch-failures/`; the submitter's
-side above*
-**Seed:** [`issues/autoscale-read-database-locked.md`](issues/autoscale-read-database-locked.md) · *status: unshaped*
 
 ## `hs update --delete` ignores field assignments and tag changes given with it
 
@@ -249,7 +261,8 @@ side above*
 tag changes and `--remove-tag` as a usage error before the count. Pre-existing; out of scope for
 `hs-update-contended-writes` (#111).
 
-*Horizon: near-term, small · Depends on: — · Refs: `spec/hs-update-contended-writes/` (Non-goals)*
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
+`spec/hs-update-contended-writes/` (Non-goals)*
 **Seed:** [`issues/update-delete-ignores-assignments.md`](issues/update-delete-ignores-assignments.md) · *status: unshaped*
 
 ## The legacy single-task tag edit can lose a concurrent tag change
@@ -258,7 +271,8 @@ tag changes and `--remove-tag` as a usage error before the count. Pre-existing; 
 committed in between is overwritten, on every database. The filtered form writes tag changes in one
 statement. Pre-existing; out of scope for `hs-update-contended-writes` (#111).
 
-*Horizon: near-term, small · Depends on: — · Refs: `spec/hs-update-contended-writes/` (Non-goals)*
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
+`spec/hs-update-contended-writes/` (Non-goals)*
 **Seed:** [`issues/update-legacy-tag-lost-write.md`](issues/update-legacy-tag-lost-write.md) · *status: unshaped*
 
 ## A non-integer task group is accepted at submit time
@@ -269,12 +283,12 @@ insert. 2.8.3 runs text groups after every integer group. `group-advance-strands
 needed two guards in the scheduler against them, and `group:nan` is stored as NULL, which kills
 the committer on `NOT NULL` and hangs the run, before and after that fix. The maintainer wants an
 integer group enforced at submit time: a whole file read ahead and refused before anything is
-inserted, and on a pipe an error on just the offending line. This is a behaviour change, and
-whether it ships in a 2.8.x patch or 2.9 only is open. Pre-existing, and found by that cycle's
-review.
+inserted, and on a pipe an error on just the offending line. This is a behaviour change, so it
+ships in 2.9.0, not a 2.8.x patch. Pre-existing, and found by that cycle's review.
 
-*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW
-cycles 2 and 3); same committer death as `issues/database-locked-during-ingest-hangs.md`*
+*Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs:
+`spec/group-advance-strands-lower-group/` (REVIEW cycles 2 and 3); same committer death as
+`issues/database-locked-during-ingest-hangs.md`*
 **Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
 
 ## Docs and runtime surfacing
@@ -285,7 +299,7 @@ assumption, our `{.}` means *dirname* where GNU Parallel's strips the extension 
 porting trap worth settling before v3 freezes the token names), the absence of input combinators is
 a stance rather than an omission, and cross-host timing aggregates assume synchronised clocks.
 
-*Horizon: near-term · Depends on: — · Refs: —*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/docs-and-runtime-surfacing.md`](issues/docs-and-runtime-surfacing.md)
 
 ## Eviction and cancellation cannot reach a running client
@@ -296,8 +310,8 @@ elsewhere; and `hs update --cancel` marks rows terminal without touching the pro
 a server→client control path — and `zone-dispatch`'s request-return surface (#78) is meant to be
 that seam, so this waited rather than building one twice.
 
-*Horizon: mid-term · Depends on: `zone-dispatch`'s request path (landed, #78) · Refs: the corruption
-half was closed separately by `writeback-scoped-conditional` (#70)*
+*Target: 2.10.0 · Horizon: mid-term · Depends on: `zone-dispatch`'s request path (landed, #78) ·
+Refs: the corruption half was closed separately by `writeback-scoped-conditional` (#70)*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
 
 ## A task whose confirmation has not landed is invisible to orphan recovery
@@ -307,18 +321,9 @@ sets, and confirmations are not ordered against eviction. A client evicted befor
 is applied leaves its rows in flight with a NULL `client_id`, never reverted or redispatched; a late
 confirmation then names the already-evicted client. Either way the row waits until restart.
 
-*Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
+*Target: 2.9.x · Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same
+token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
-
-## Duration settings read only from configuration still take bare seconds only
-
-`server.evict`, `client.heartrate` and the relay's duration keys (`bundlewait`, `poll`,
-`retention`, `timeout`, and the upstream `heartrate`, `evict_hint`, `deadline` and `backoff`) have no
-command-line option and are read straight from configuration, so `evict = "10m"` is refused or
-misread while `autoscale.period = "5m"` works.
-
-*Horizon: near-term, small · Depends on: `duration-units-remaining` (landed, #106) · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: adopted:env-config-keys*
 
 ## On the 2.8 line, the queue key can still be given on a command line without a warning
 
@@ -330,24 +335,9 @@ compatibility, but warn each time, without the key, naming `HYPERSHELL_SERVER_AU
 `server.auth`, and mark it deprecated in the 2.8 docs. Whether and when to ship it is the
 maintainer's call. Pre-existing on the 2.8 line.
 
-*Horizon: maintainer's call (a 2.8.x hotfix against `master`) · Depends on: — · Refs:
-`key-option-refused` (landed, #104: the 2.9 half); the key hand-off hardening (#80, #81)*
+*Target: 2.8.x · Horizon: maintainer's call (a 2.8.x hotfix against `master`) · Depends on: — ·
+Refs: `key-option-refused` (landed, #104: the 2.9 half); the key hand-off hardening (#80, #81)*
 **Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: unshaped*
-
-## Environment variables cannot reach every configuration key
-
-The guide says every option can be set by a `HYPERSHELL_*` variable, but every underscore in the
-name is a level of nesting and every value is coerced (`src/hypershell/core/config.py:247-249`, by
-cmdkit). A key with an underscore of its own is out of reach: `server.tls.min_version`,
-`database.timescale.chunk_interval`, `connect_args`, and every `_env` / `_eval` variant, so
-`HYPERSHELL_SERVER_AUTH_ENV` makes `server.auth` a table. And a string key cannot be given `false`,
-`true`, `null`, an empty value or digits: an all-digit `HYPERSHELL_SERVER_AUTH` becomes an `int` and
-crashes `hs server`. `[export]` values reach tasks re-stringified (`007` becomes `7`). Every documented
-key should be settable, with the text given. Pre-existing since 2.7.0.
-
-*Horizon: near-term · Depends on: — · Refs: `server-auth-variant-collision` (landed, #97: the file
-form of `auth_env`; the environment form stays here); relay (its zone tables add more keys)*
-**Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: adopted:env-config-keys*
 
 ## `hs config set` writes text that looks like a number, boolean or null as that type
 
@@ -355,11 +345,11 @@ form of `auth_env`; the environment form stays here); relay (its zone tables add
 (`src/hypershell/config.py:284`): `hs config set autoscale.launcher false` writes the boolean, an
 all-digit `server.auth` loses its leading zeros and then fails the length check, and `null` fails with
 a traceback. A boolean key given `no` is written as text that reads as true. The same defect class
-`env-config-keys` fixes for `HYPERSHELL_*` variables; its key table and typed reader should serve
+`env-config-keys` (#113) fixed for `HYPERSHELL_*` variables; its key table and typed reader should serve
 this command too. Pre-existing.
 
-*Horizon: near-term, small · Depends on: `env-config-keys` (the key table) · Refs: its GOAL's
-Non-goals*
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: `env-config-keys` (landed, #113: the key
+table) · Refs: its GOAL's Non-goals*
 **Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: unshaped*
 
 ## `hs relay` cannot name the address its site clients dial
@@ -372,8 +362,8 @@ name on the site server's TLS certificate, cannot say so. An option and a relay 
 would close it. Narrowed from the advertised-host fix, whose cycle deferred the relay override to
 keep clear of the relay hardening work, since landed.
 
-*Horizon: near-term, small · Depends on: — · Refs: `cluster-launch-failures` (landed, #107: the rule
-and the cluster override); relay (#82, which left `--advertise` for later)*
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `cluster-launch-failures`
+(landed, #107: the rule and the cluster override); relay (#82, which left `--advertise` for later)*
 **Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
 
 ## A relay run can still end up to about 5 s late
@@ -385,22 +375,9 @@ in a site client until it expires: a client should flush when it holds nothing l
 relay should give site clients a shorter wait. Separately, a result landing does not wake the upstream
 scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 6 s to it.
 
-*Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and its laptop evidence
-(`relay-hardening` landed, #103)*
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and
+its laptop evidence (`relay-hardening` landed, #103)*
 **Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: adopted:relay-shutdown-tail*
-
-## A `--no-db` cluster can report a failed run when a client dies just after its last result
-
-Since `cluster-launch-failures` (#107), `hs cluster` exits non-zero when every launched client has
-gone, one of them non-zero, with work remaining. Without a database the server keeps no rows to
-count, so a client that returned every result and then died in the moment before its `FINISHED`
-heartbeat leaves a server waiting to evict it, which reads as work remaining: the run is reported
-failed although every result is recorded. An exact answer needs a result counter in the server's
-Receiver.
-
-*Horizon: near-term, small · Depends on: `cluster-launch-failures` (landed, #107) · Refs: its PLAN §2.3
-and plan-gate ruling 3*
-**Seed:** [`issues/nodb-cluster-finish-race.md`](issues/nodb-cluster-finish-race.md) · *status: unshaped*
 
 ## `rotatedb` lost-update window
 
@@ -408,7 +385,7 @@ The clone-then-delete rotation concedes its own race in a source comment, and a 
 `VACUUM INTO` and the delete leaves rows in both files or neither. Documenting it as offline-only is
 cheap now; the mechanism is reworked by the turso rotation work anyway.
 
-*Horizon: mid-term, low priority · Depends on: — · Refs: turso R8–R11*
+*Target: 2.9.x · Horizon: mid-term, low priority · Depends on: — · Refs: turso R8–R11*
 **Seed:** [`issues/rotatedb-lost-update-window.md`](issues/rotatedb-lost-update-window.md)
 
 ## A queue proxy keeps the stock decref finalizer until its constructor returns
@@ -418,8 +395,8 @@ after the stock proxy constructor returns. If a connection inside that construct
 server is alive, the half-made proxy keeps the stock finalizer, and a collection on the server's
 accept loop can then stall it. Seen only with an injected failure; the window predates the hand-off.
 
-*Horizon: mid-term, low priority · Depends on: the in-process queue server (`zone-queue-primitive`,
-landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4, P4)*
+*Target: 2.9.x · Horizon: mid-term, low priority · Depends on: the in-process queue server
+(`zone-queue-primitive`, landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4, P4)*
 **Seed:** [`issues/queue-proxy-finalizer-swap-window.md`](issues/queue-proxy-finalizer-swap-window.md)
 
 ## Handed-off decrefs can outlive their server and reach a same-port successor
@@ -428,8 +405,9 @@ A handed-off decref waits for the one sender thread, which under churn falls beh
 reach a successor server on the same port instead of its own and release a live client's queue.
 Seen statistically under same-port restart stress in one process; no CLI path restarts that way.
 
-*Horizon: mid-term, low priority · Depends on: the in-process queue server (`zone-queue-primitive`,
-landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4, P5); the same-port restart entry below*
+*Target: 2.9.x · Horizon: mid-term, low priority · Depends on: the in-process queue server
+(`zone-queue-primitive`, landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4, P5); the
+same-port restart entry below*
 **Seed:** [`issues/queue-decref-handoff-delay.md`](issues/queue-decref-handoff-delay.md)
 
 ## A same-key, same-port restart in one process receives the old server's decrefs
@@ -440,8 +418,9 @@ A client that dials the restarted server by another name than its bind host can 
 connection cached for the old server. It came with the in-process server's same-port restart; no
 CLI path uses the same key and port.
 
-*Horizon: mid-term, low priority · Depends on: the in-process queue server (`zone-queue-primitive`,
-landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4, Observations); the hand-off delay entry above*
+*Target: 2.9.x · Horizon: mid-term, low priority · Depends on: the in-process queue server
+(`zone-queue-primitive`, landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 4,
+Observations); the hand-off delay entry above*
 **Seed:** [`issues/queue-stale-decref-same-port-restart.md`](issues/queue-stale-decref-same-port-restart.md)
 
 ## A forked child of a serving process keeps the queue server's port
@@ -450,8 +429,9 @@ A child forked from a process that serves queues in-process inherits the listeni
 the server shuts down the port cannot be bound again and new clients hang until the child exits. No
 CLI path forks a serving process; only library use sees it.
 
-*Horizon: mid-term, low priority · Depends on: the in-process queue server (`zone-queue-primitive`,
-landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 5, Observations)*
+*Target: 2.9.x · Horizon: mid-term, low priority · Depends on: the in-process queue server
+(`zone-queue-primitive`, landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycle 5,
+Observations)*
 **Seed:** [`issues/queue-forked-child-keeps-listener.md`](issues/queue-forked-child-keeps-listener.md)
 
 ## Server-owned queue proxies without reference counting
@@ -463,8 +443,9 @@ never send a decref, which would make the stall impossible by construction and c
 hand-off machinery retire. It needs a check of server-side refcount bookkeeping across reconnects
 first.
 
-*Horizon: mid-term · Depends on: the in-process queue server (`zone-queue-primitive`, landed, #76) ·
-Refs: `spec/zone-queue-primitive/` (review cycles 3–6: C5, C7–C10)*
+*Target: 2.9.x · Horizon: mid-term · Depends on: the in-process queue server
+(`zone-queue-primitive`, landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycles 3–6: C5,
+C7–C10)*
 **Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
 
 ## `hs client -b` reads the submit section's key, not the client section's
@@ -474,8 +455,8 @@ configuration reference documents `[client]`. Since zone-dispatch a client adver
 `-b` as the size it requests, so a `submit.bundlesize` set for `hs submit` is advertised by every
 client too.
 
-*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) · Refs:
-`spec/zone-dispatch/` (plan gate ruling N4)*
+*Target: 2.9.0 · Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) ·
+Refs: `spec/zone-dispatch/` (plan gate ruling N4)*
 **Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
 
 ## Three documented keys are never read by the command they describe
@@ -485,8 +466,8 @@ client too.
 the undocumented `task.ratelimit` instead of `client.ratelimit`. The same class as the `-b` entry
 above. Pre-existing; found by `env-config-keys`' research, out of its scope.
 
-*Horizon: near-term, small · Depends on: — · Refs: `spec/env-config-keys/research/03-duration-keys.md`,
-`04-typed-readers.md`*
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
+`spec/env-config-keys/research/03-duration-keys.md`, `04-typed-readers.md`*
 **Seed:** [`issues/config-keys-unread.md`](issues/config-keys-unread.md) · *status: unshaped*
 
 ## `hs submit -q` cannot feed a server with a database
@@ -499,8 +480,8 @@ results were refused as stale. In zone-dispatch, before its review-1 remediation
 hung; it is now refused at once with a clear error. A host that can reach the server but not its
 database cannot add work to it.
 
-*Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) · Refs:
-`spec/zone-dispatch/REVIEW.md` (cycle 1, F4; cycle 2, F6)*
+*Target: 2.10.0 · Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) ·
+Refs: `spec/zone-dispatch/REVIEW.md` (cycle 1, F4; cycle 2, F6)*
 **Seed:** [`issues/queue-submit-database-server.md`](issues/queue-submit-database-server.md)
 
 ## The server cannot listen on IPv6
@@ -510,7 +491,7 @@ an IPv6 bind address fails. Not a fidelity defect, but recorded here because the
 fix aligns the client with the IPv4-only listener rather than widening it; dual-stack serving would
 have to move both ends together.
 
-*Horizon: long-term · Depends on: — · Refs: `spec/tls-client-address-family/`*
+*Target: 2.10.0 · Horizon: long-term · Depends on: — · Refs: `spec/tls-client-address-family/`*
 **Seed:** [`issues/ipv6-server-listener.md`](issues/ipv6-server-listener.md)
 
 ## Merged output is interleave-corruptible
@@ -521,7 +502,7 @@ last of the fidelity findings on purpose: unlike GNU Parallel, merged stdout is 
 product — the database and the per-task capture files are, and both are byte-faithful today.
 Document the current contract now; shape the emitter later.
 
-*Horizon: long-term · Depends on: — · Refs: —*
+*Target: 2.10.0 · Horizon: long-term · Depends on: — · Refs: —*
 **Seed:** [`issues/output-interleaving-line-atomic.md`](issues/output-interleaving-line-atomic.md)
 
 ## Failure-budget halt policy
@@ -531,8 +512,8 @@ no drain-versus-stop-now distinction, so a campaign whose first thousand tasks a
 environmental reason keeps burning allocation until a human notices. Of the unscheduled items this
 is the one most likely to be asked for first.
 
-*Horizon: long-term · Depends on: the stop-now variant needs the control path; drain-only does not ·
-Refs: —*
+*Target: 2.10.0 · Horizon: long-term · Depends on: the stop-now variant needs the control path;
+drain-only does not · Refs: —*
 **Seed:** [`issues/failure-budget-halt-policy.md`](issues/failure-budget-halt-policy.md)
 
 ## Live progress and ETA
@@ -541,7 +522,7 @@ Watching a campaign means polling `hs list --count` against the database the sch
 on. The numbers are already computed server-side for the autoscaler's pressure signal; a periodic log
 line costs almost nothing, and an `hs top`-style view is the larger version.
 
-*Horizon: long-term · Depends on: — · Refs: —*
+*Target: 2.10.0 · Horizon: long-term · Depends on: — · Refs: —*
 **Seed:** [`issues/progress-eta-surface.md`](issues/progress-eta-surface.md)
 
 ## Head-of-line blocking on unstartable tasks
@@ -550,7 +531,7 @@ An executor that cannot acquire resources for its current task retries that same
 yielding the slot, eroding throughput when declarations are mis-sized — and looking busy while it
 does. Zones reduce how often this happens without fixing the mechanism.
 
-*Horizon: long-term · Depends on: — · Refs: —*
+*Target: 2.9.x · Horizon: long-term · Depends on: — · Refs: —*
 **Seed:** [`issues/head-of-line-blocking.md`](issues/head-of-line-blocking.md)
 
 ## Server CPU per task bounds throughput at small bundle sizes
@@ -561,19 +542,21 @@ statements for every task, and the evidence points at its CPU as the throughput 
 scheduler and confirm paths may carry the same per-call cost, and batching results across bundles
 is a further option.
 
-*Horizon: mid-term · Depends on: `writeback-prebuilt-update` (landed, #73; the measurement method) ·
-Refs: —*
+*Target: 2.9.x · Horizon: mid-term · Depends on: `writeback-prebuilt-update` (landed, #73; the
+measurement method) · Refs: —*
 **Seed:** [`issues/server-per-task-statement-overhead.md`](issues/server-per-task-statement-overhead.md) · *status: unshaped*
 
 ---
 
-# Part II — The 2.9.0 feature cycle
+# Part II — The Turso feature cycle, and test infrastructure
 
 A shaped GOAL, already negotiated with dated clarifications, an agreed appetite, non-goals, and
 drafted R-IDs. It carries `status: shaped`: the shaping conversation happened, but acceptance into a
 cycle has not. Promotion should re-confirm scope against current `develop` and cite anything that has
-drifted, then adopt largely as written. The last four entries are `unshaped` test-infrastructure
-seeds: three split out of shipped cycles, one found out of cycle.
+drifted, then adopt largely as written. It was planned as 2.9.0's feature cycle; on 2026-11-21 the
+maintainer moved Turso to 2.10.0, so 2.9.0 ships without it. The entries after it are `unshaped`
+test-infrastructure seeds, split out of shipped cycles or found out of cycle, planned for 2.9.x
+patches unless their Target says otherwise.
 
 ## Turso provider, partition-attached listing, and S3 captured output
 
@@ -583,8 +566,8 @@ from our side of the code and removes that cap; the official dialect already shi
 adoption, validation, and the two capabilities it unlocks. Independently, the `[s3]` extra un-maroons
 captured output from the execution host.
 
-*Horizon: mid-term · Depends on: the sequencing after zone, cleared (zone shipped as
-`zone-autoscale`, #99; relay, the other half, in #82); R4's per-provider seam in `data/core.py`
+*Target: 2.10.0 · Horizon: mid-term · Depends on: the sequencing after zone, cleared (zone shipped
+as `zone-autoscale`, #99; relay, the other half, in #82); R4's per-provider seam in `data/core.py`
 shares ground with the resilience feature's pragma defaults · Refs: R13–R15 soften relay's
 cross-site output non-goal*
 **Seed:** [`issues/turso.md`](issues/turso.md) · *status: shaped*
@@ -600,7 +583,8 @@ an environment variable would run the whole suite against a server, isolated per
 SQLite-only tests marked and skipped. Split out of TimescaleDB's R9, which ships a dedicated
 TimescaleDB scenario module instead.
 
-*Horizon: mid-term · Depends on: — · Refs: split from `timescale` R9 (ruling 2026-11-02)*
+*Target: 2.9.x · Horizon: mid-term · Depends on: — · Refs: split from `timescale` R9 (ruling
+2026-11-02)*
 **Seed:** [`issues/server-db-test-suite.md`](issues/server-db-test-suite.md) · *status: unshaped*
 
 ## A hung integration test costs the whole CI job timeout
@@ -610,7 +594,8 @@ a hang runs the CI job to its `timeout-minutes` and the log names no failing tes
 `group-advance-strands-lower-group` hit this with a hang in about 1–3% of grouped runs under load.
 A subprocess or per-test timeout would turn a hang into a fast, named failure.
 
-*Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/`*
+*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs:
+`spec/group-advance-strands-lower-group/`*
 **Seed:** [`issues/integration-test-hang-timeout.md`](issues/integration-test-hang-timeout.md) · *status: unshaped*
 
 ## Test teardown by SIGKILL leaks a 2.8 server's named semaphores on macOS
@@ -622,8 +607,8 @@ server holds several, so on macOS each kill leaks them until reboot, and the poo
 so on `develop` the leak is live only in the bench's `skew` runs against a 2.8 build. Teardown should
 send SIGTERM first and SIGKILL only what is left.
 
-*Horizon: near-term, small · Depends on: — · Refs: `tests/test_cluster_launch.py`,
-`tests/bench/bench_queue.py`; the 2.8 line (backport)*
+*Target: 2.9.x, 2.8.x · Horizon: near-term, small · Depends on: — · Refs:
+`tests/test_cluster_launch.py`, `tests/bench/bench_queue.py`; the 2.8 line (backport)*
 **Seed:** [`issues/test-teardown-sigkill-leaks-semaphores.md`](issues/test-teardown-sigkill-leaks-semaphores.md) · *status: unshaped*
 
 ## Relay tests can pass a broken relay, and lose a port race to themselves
@@ -634,8 +619,8 @@ to a relay that binds it later, so a parallel copy can take it first. Smaller: t
 cancel and `retried` filters are unpinned, and one start-up test resolves a path under the
 developer's own database location. Split out of `relay`'s review.
 
-*Horizon: near-term, small · Depends on: — · Refs: `spec/relay/` C4-3, C4-4; `relay-hardening`
-(landed, #103: the relay abort races and rough edges, each with its own tests)*
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/relay/` C4-3, C4-4;
+`relay-hardening` (landed, #103: the relay abort races and rough edges, each with its own tests)*
 **Seed:** [`issues/relay-test-strength.md`](issues/relay-test-strength.md) · *status: unshaped*
 
 ## Two CI tests fail intermittently and pass on a re-run
@@ -645,7 +630,8 @@ client takes every quick task, and the relay site-key test fails when a process 
 mid-read and psutil raises `AccessDenied`. Each has cost re-runs on recent pull requests; both are
 small test-side fixes.
 
-*Horizon: near-term, small · Depends on: — · Refs: CI on #104, #107 and #110*
+*Target: 2.9.x (the relay site-key test: 2.9.0, with `relay-shutdown-tail`) · Horizon: near-term,
+small · Depends on: — · Refs: CI on #104, #107 and #110*
 **Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md) · *status: unshaped*;
 [`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: adopted:relay-shutdown-tail*
 
@@ -655,15 +641,15 @@ small test-side fixes.
 so pytest-xdist refuses to start and every run is serial (about 25 minutes). Stable ids, or an
 honest `AGENTS.md`, would fix it.
 
-*Horizon: near-term, small · Depends on: — · Refs: `AGENTS.md` § Commands*
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `AGENTS.md` § Commands*
 **Seed:** [`issues/pytest-xdist-collection-ids.md`](issues/pytest-xdist-collection-ids.md) · *status: unshaped*
 
 # Part III — Turso follow-ons
 
 What the Turso provider's vacuum work left open. Turso's multi-process mode is experimental, and the
-vacuum went through six review cycles. Each cycle exposed a deeper limit in the engine, and 2.9.0a7
-ships `hs initdb --vacuum` under Turso with one known risk flagged in the docs. The first entry
-gathers the evidence and the second acts on it.
+vacuum went through six review cycles. Each cycle exposed a deeper limit in the engine, and the
+`turso` cycle ships `hs initdb --vacuum` under Turso with one known risk flagged in the docs. Both
+entries move with Turso to 2.10.0. The first entry gathers the evidence and the second acts on it.
 
 ## Reproduce Turso's crash after a killed vacuum without HyperShell
 
@@ -675,8 +661,8 @@ script that uses only `pyturso`, run on macOS and Linux and checked by someone i
 what the claim is. That makes it the headline of the issue we file with the Turso team. The issue
 lists the other Turso findings in a table, with an offer to file each one separately.
 
-*Horizon: now · Depends on: — (the upstream draft it rewrites lands with `turso`) · Refs: feeds the
-entry below*
+*Target: 2.10.0 · Horizon: now · Depends on: — (the upstream draft it rewrites lands with `turso`) ·
+Refs: feeds the entry below*
 **Seed:** [`issues/turso-upstream-repro.md`](issues/turso-upstream-repro.md) · *status: shaped*
 
 ## A killed Turso vacuum must not crash the processes that open the database after it
@@ -687,16 +673,17 @@ that opens the database afterwards correct, with scheduling live. Depending on w
 reproduction shows, the route is a Turso release that fixes it, HyperShell serialising the first
 opens after an interrupted vacuum, or Turso supporting in-place `VACUUM` in its multi-process mode.
 
-*Horizon: when there is evidence or an upstream fix · Depends on: turso-upstream-repro, or a Turso
-release · Refs: `spec/turso/` P3, review cycles 4–6*
+*Target: 2.10.0 · Horizon: when there is evidence or an upstream fix · Depends on:
+turso-upstream-repro, or a Turso release · Refs: `spec/turso/` P3, review cycles 4–6*
 **Seed:** [`issues/turso-vacuum-concurrent-recovery.md`](issues/turso-vacuum-concurrent-recovery.md) · *status: unshaped*
 
 ---
 
 # Part IV — Beyond 2.9.0
 
-Candidates not scheduled for any release. Each may be taken up, reshaped or declined; an entry
-here records the idea and its open problems, and promises nothing.
+Candidates beyond 2.9.0. Each may be taken up, reshaped or declined; an entry here records the idea
+and its open problems, and promises nothing. Its Target says whether a release is planned for it:
+the submitter lease is planned for 2.10.0, and relays brought up by `hs cluster` are unscheduled.
 
 ## `hs cluster` could bring up its own relays
 
@@ -707,8 +694,8 @@ clients. Relays already lift that ceiling: one server with 100 relays of 100 cli
 splitting the allocation's nodes among the relays, handing each relay its keys the way clients get
 theirs, where each relay's database lives, and recovering the work of a relay that dies.
 
-*Horizon: after 2.9.0, maybe · Depends on: relay autoscaling (#100) · Refs: `hs relay` (#82), key
-hand-off (#80)*
+*Target: unscheduled · Horizon: after 2.9.0, maybe · Depends on: relay autoscaling (#100) · Refs:
+`hs relay` (#82), key hand-off (#80)*
 **Seed:** [`issues/cluster-relay-fanout.md`](issues/cluster-relay-fanout.md) · *status: unshaped*
 
 ## A shared site cannot tell a live submitter's tasks from a dead one's
@@ -723,9 +710,9 @@ recorded. A returning owner re-claims its key, with fencing so two live claimant
 Tasks without a lease behave as today. The open problems are whose clock judges expiry (SQLite
 stores naive local times), who sweeps, and reaching tasks already running or held by a relay.
 
-*Horizon: after 2.9.0, maybe · Depends on: a conditional `Task.cancel_all`; cancel reach for running
-tasks (`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs: `hypershell/hypershell-nextflow`
-attached mode*
+*Target: 2.10.0 · Horizon: after 2.9.0, maybe · Depends on: a conditional `Task.cancel_all`; cancel
+reach for running tasks (`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs:
+`hypershell/hypershell-nextflow` attached mode*
 **Seed:** [`issues/submitter-lease.md`](issues/submitter-lease.md) · *status: unshaped*
 
 ---

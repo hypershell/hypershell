@@ -18,6 +18,9 @@ from datetime import datetime, timedelta
 from functools import cached_property, partial
 from subprocess import Popen
 
+# External libs
+from sqlalchemy.exc import OperationalError
+
 # Internal libs
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.tls import TLSConfig
@@ -33,7 +36,7 @@ from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, D
 from hypershell.cluster.launch import ClientLaunch, LaunchActuator, advertised_host, client_launch, redact_secrets
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ZoneLoad, ScalingKnobs,
                                        read_zone_loads, fleet_demand)
-from hypershell.cluster.watch import ClusterLaunchError, exit_text, watch_launched
+from hypershell.cluster.watch import ClusterLaunchError, exit_text, watch_launched, database_locked
 
 # Public interface
 __all__ = ['run_cluster', 'RemoteCluster', 'AutoScalingCluster',
@@ -421,6 +424,11 @@ class AutoScaler(StateMachine):
     exits 0, a client connected now, or a registration since the last check ends the run of failures.
     Once the run reaches `failed_launches`, nothing more is launched, `exhausted` is set and the
     machine ends. With 0 (the default) launches are never counted and `registrations` is never called.
+
+    A check whose read of the database finds it locked by another connection is skipped with one
+    warning and made again one period later; the launched clients that exited meanwhile are kept in
+    `unchecked` and counted, in launch order, at the next check that reads. Any other error from a
+    read ends the machine as before.
     """
 
     policy: AutoScalerPolicy
@@ -443,6 +451,7 @@ class AutoScaler(StateMachine):
     wait_check: timedelta
     seen: int
     failures: List[Tuple[int, str, int]]
+    unchecked: List[Tuple[Popen, ZoneRef]]  # Exited launched clients not yet counted, in launch order
     exhausted: bool = False
 
     phase: AutoScalerPhase = AutoScalerPhase.INIT
@@ -482,6 +491,7 @@ class AutoScaler(StateMachine):
         self.registrations = registrations
         self.seen = 0
         self.failures = []
+        self.unchecked = []
         self.actuator = LaunchActuator(launch, own=self.own_zone, launch_for=launch_for)
         self.last_check = datetime.now()
         self.wait_check = timedelta(seconds=period)
@@ -561,9 +571,16 @@ class AutoScaler(StateMachine):
 
     def check(self: AutoScaler) -> AutoScalerState:
         """Check if we need to scale up (end once too many launched clients in a row have failed)."""
-        exited = self.clean()
+        self.unchecked += self.clean()
         self.last_check = datetime.now()
-        if self.count_failures(exited):
+        try:
+            exhausted = self.count_failures(self.unchecked)
+        except OperationalError as error:
+            if not database_locked(error):
+                raise
+            return self.skip_check()
+        self.unchecked = []
+        if exhausted:
             return AutoScalerState.FINAL
         if self.policy is AutoScalerPolicy.FIXED:
             return AutoScalerState.CHECK_FIXED
@@ -571,12 +588,28 @@ class AutoScaler(StateMachine):
             return AutoScalerState.CHECK_DYNAMIC
 
     def check_fixed(self: AutoScaler) -> AutoScalerState:
-        """Scaling procedure for a fixed policy cluster."""
-        return self.check_zones()
+        """Scaling procedure for a fixed policy cluster (skipped if the database is locked)."""
+        try:
+            return self.check_zones()
+        except OperationalError as error:
+            if not database_locked(error):
+                raise
+            return self.skip_check()
 
     def check_dynamic(self: AutoScaler) -> AutoScalerState:
-        """Scaling procedure for a dynamic policy cluster."""
-        return self.check_zones()
+        """Scaling procedure for a dynamic policy cluster (skipped if the database is locked)."""
+        try:
+            return self.check_zones()
+        except OperationalError as error:
+            if not database_locked(error):
+                raise
+            return self.skip_check()
+
+    def skip_check(self: AutoScaler) -> AutoScalerState:
+        """Warn that this check met a locked database, and wait one period for the next."""
+        period = timedelta(seconds=round(self.wait_check.total_seconds()))
+        log.warning(f'Autoscale check skipped: database was locked (checking again in {period})')
+        return AutoScalerState.WAIT
 
     def current_group(self: AutoScaler) -> int:
         """The task group the scheduler loads from: as it reports it, else the group it would start from."""
@@ -653,6 +686,7 @@ class AutoScaler(StateMachine):
         """Count the `exited` clients into the run of failures; True once it reaches `failed_launches` (see the class)."""
         if self.failed_launches <= 0:
             return False
+        # The read comes before any change to the run of failures, so a read that fails changes nothing.
         ever, now = (0, 0) if self.registrations is None else self.registrations()
         if now > 0 or ever > self.seen:
             # A client registered: the launches work, whatever this check's exits were.
