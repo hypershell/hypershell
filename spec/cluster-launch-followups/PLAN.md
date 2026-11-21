@@ -241,3 +241,19 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
   is outside the supported range. P4 runs 3.14 and 3.11 as planned.
 - **`server.py`:** additions only (the `Receiver.written` counter), as P3's verify enforces. The
   review's human gate applies as the rubric says.
+
+## Review-cycle-1 rulings (2026-11-21)
+
+Review cycle 1 approved at `836ae5bc` with no CONFIRMED finding; the human gate was not triggered.
+Foreman's triage of the two remaining items, under the maintainer's standing mandate:
+
+- **F2 (PLAUSIBLE, docs).** Fix it. Behaviour differs from the stable line, where a locked SQLite
+  database during an autoscaling check ended the run with a traceback, so `AGENTS.md` § Docs calls
+  for a marker. Add one `versionchanged:: 2.9.0` clause in `docs/cli/cluster.rst`, beside the
+  autoscaling include, saying that a check finding the database locked is skipped with a warning and
+  retried at the next period. `hs server --autoscaling` is untouched by this cycle (no change in
+  `demand.py`), so `docs/cli/server.rst` gets none. This is a marker, not a new page, so the GOAL's
+  "no doc page" stands.
+- **F1 (coverage note).** Add a command-line test for R2's working-launcher clause: a lock taken once
+  the server is idle, every task done, the run still serving, one WARNING, no traceback. It must be
+  red on `9c82842d`, or else name the base behaviour it pins.
