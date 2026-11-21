@@ -32,3 +32,17 @@
 - **Skill cause:** As `spec/env-config-keys/META.md` F3: the `unshaped` bullet does not ask for the seed's reproduction to be re-run on current `develop`.
 - **Recommended fix:** As recorded there; also allow a throwaway-site probe (`.agents/factory/bin/temp_site.sh`) in allowed-tools.
 - **Confidence:** high · **Effort:** small
+
+## F4 — No factory helper bounds a verify step, and macOS has no `timeout` · seen again
+`origin=hs-plan:step6 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** Every verify step had to be bounded (the foreman's brief), and the factory still has no helper: this plan copied `relay-advertise`'s perl `bound.sh` into `spec/config-set-and-unread/drive/`, a third per-cycle copy.
+- **Skill cause:** As `spec/relay-advertise/META.md` F2: Step 6 and the TECH template's examples are unbounded, and `.agents/factory/bin/` has no bounding helper.
+- **Recommended fix:** As recorded there: one `bound.sh` in `.agents/factory/bin/`, named by Step 6 and the template.
+- **Confidence:** high · **Effort:** small
+
+## F5 — The tests-first red-list tooling lives in other cycles' spec folders, unnamed by the skill · seen again
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The brief asked for a tests-first phase with a red list on the base; `red_check.sh` and `rest_green.sh` were again found in `spec/relay-hardening/` and `spec/contended-writes/`, and the prototype-under-`research/prototypes/` pattern in a sibling branch's TECH.md.
+- **Skill cause:** As `spec/relay-advertise/META.md` F3: Step 6 names neither the tests-first phase nor the shared scripts.
+- **Recommended fix:** As recorded there.
+- **Confidence:** high · **Effort:** small
