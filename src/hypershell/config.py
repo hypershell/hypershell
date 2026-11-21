@@ -30,7 +30,7 @@ from hypershell.core.platform import path
 from hypershell.core.types import smart_coerce
 from hypershell.core.logging import Logger
 from hypershell.core.exceptions import get_shared_exception_mapping
-from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth,
+from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth, env_variable,
                                     default as default_config, config as full_config)
 
 # Public interface
@@ -147,7 +147,7 @@ class ConfigGetApp(Application):
     list_available: bool = False
     list_console_themes: bool = False
     completion_interface = interface.add_mutually_exclusive_group()
-    completion_interface.add_argument('--list-available', action='version', version=' '.join(ACTIVE_CONFIG_VARS))
+    completion_interface.add_argument('--list-available', action='version', version='\n'.join(ACTIVE_CONFIG_VARS))
     completion_interface.add_argument('--list-console-themes', action='version',
                                       version=' '.join(list(CONSOLE_THEMES)))
 
@@ -380,12 +380,7 @@ class ConfigWhichApp(Application):
         if site in ('default', 'preload', 'logging', ):
             print(f'{value} ({site})')
         elif site == 'env':
-            env_varname = 'HYPERSHELL_' + self.varpath.upper().replace('.', '_')
-            if value == '[...]':
-                for name in full_config.namespaces.env.to_env().flatten(prefix='HYPERSHELL'):
-                    if name.startswith(env_varname):
-                        env_varname = name
-            print(f'{value} (env: {env_varname} | default: {default_value})')
+            print(f'{value} (env: {env_variable(*self.varpath.split("."))} | default: {default_value})')
         else:
             print(f'{value} ({site}: {path[site].config} | default: {default_value})')
 

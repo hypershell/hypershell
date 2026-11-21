@@ -61,7 +61,7 @@ import subprocess
 import tomlkit
 
 # Internal libs
-from hypershell.core.config import config, default, load_task_env
+from hypershell.core.config import config, default, load_task_env, is_relay_variable
 from hypershell.core.logging import Logger
 from hypershell.core.tls import TLSConfig
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
@@ -74,7 +74,8 @@ from hypershell.cluster.demand import ZoneRef
 # Public interface
 __all__ = ['site_cluster', 'site_launch', 'zone_launch', 'zone_fleet', 'SITE_POLICY', 'DEFAULT_SITE_PERIOD', 'fence_site',
            'scrub_environment', 'check_invocation', 'check_exports', 'CredentialFenceError', 'FENCED_PREFIX',
-           'site_config_copy', 'end_site_clients', 'TopologyView', 'SiteScaler', 'site_scaler', 'launched_now']
+           'is_fenced', 'site_config_copy', 'end_site_clients', 'TopologyView', 'SiteScaler', 'site_scaler',
+           'launched_now']
 
 # Initialize logger
 log = Logger.with_name(__name__)
@@ -89,7 +90,7 @@ DEFAULT_SITE_PERIOD: Final[int] = default.autoscale.period
 The relay passes the configured period (`autoscale.period`); this default never reads configuration.
 """
 
-DEFAULT_SITE_EVICT: Final[int] = config.server.evict
+DEFAULT_SITE_EVICT: Final[int] = default.server.evict
 """Default seconds the site server waits on a silent site client before evicting it (`[server] evict`)."""
 
 
@@ -405,7 +406,15 @@ def launched_now(machine: AutoScaler) -> int:
 
 
 FENCED_PREFIX: Final[str] = 'HYPERSHELL_RELAY_'
-"""Environment variables of relay settings, which never reach the site."""
+"""Prefix of the environment variables of relay settings, which never reach the site.
+
+Every other name the matcher maps under `relay` is fenced too (see `is_fenced`).
+"""
+
+
+def is_fenced(name: str) -> bool:
+    """True if the environment variable `name` sets a relay setting, by its prefix or as the matcher reads it."""
+    return name.startswith(FENCED_PREFIX) or is_relay_variable(name)
 
 CONFIG_FILE_VAR: Final[str] = 'HYPERSHELL_CONFIG_FILE'
 """Environment variable naming the one configuration file a process reads."""
@@ -469,16 +478,16 @@ def scrub_environment(key: str, environ: Optional[MutableMapping[str, str]] = No
                       site_config: Optional[str] = None) -> List[str]:
     """Remove from `environ` (the process environment by default) what must not reach the site.
 
-    Removed: every relay setting (`HYPERSHELL_RELAY_*`) and any variable whose name or value contains
-    the key. The configuration file variable, when the file it names holds relay settings or the key,
-    is pointed at a copy without them written to `site_config` (see `site_config_copy`); it is removed
-    only if no such copy can be made. Returns the names removed, sorted; values are never returned or
-    logged.
+    Removed: every relay setting (`HYPERSHELL_RELAY_*`, and any name the matcher maps under `relay`;
+    see `is_fenced`) and any variable whose name or value contains the key. The configuration file
+    variable, when the file it names holds relay settings or the key, is pointed at a copy without
+    them written to `site_config` (see `site_config_copy`); it is removed only if no such copy can be
+    made. Returns the names removed, sorted; values are never returned or logged.
     """
     environ = os.environ if environ is None else environ
     removed = []
     for name, value in list(environ.items()):
-        if name.startswith(FENCED_PREFIX) or (key and (key in name or key in value)):
+        if is_fenced(name) or (key and (key in name or key in value)):
             del environ[name]
             removed.append(name)
         elif name == CONFIG_FILE_VAR and value:

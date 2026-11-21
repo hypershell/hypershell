@@ -242,6 +242,25 @@ as transient. Seen once on CI; introduced with `cluster-launch-failures` (#107),
 side above*
 **Seed:** [`issues/autoscale-read-database-locked.md`](issues/autoscale-read-database-locked.md) · *status: adopted:cluster-launch-followups*
 
+## `hs update --delete` ignores field assignments and tag changes given with it
+
+`hs update --delete group=9` deletes the selected tasks and says nothing about `group=9`; a mistaken
+`--delete` in place of an update loses rows without a warning. `--delete` should refuse assignments,
+tag changes and `--remove-tag` as a usage error before the count. Pre-existing; out of scope for
+`hs-update-contended-writes` (#111).
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/hs-update-contended-writes/` (Non-goals)*
+**Seed:** [`issues/update-delete-ignores-assignments.md`](issues/update-delete-ignores-assignments.md) · *status: unshaped*
+
+## The legacy single-task tag edit can lose a concurrent tag change
+
+`hs update ID tag KEY:VALUE` reads the task's tags and writes back the merge, so a tag change
+committed in between is overwritten, on every database. The filtered form writes tag changes in one
+statement. Pre-existing; out of scope for `hs-update-contended-writes` (#111).
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/hs-update-contended-writes/` (Non-goals)*
+**Seed:** [`issues/update-legacy-tag-lost-write.md`](issues/update-legacy-tag-lost-write.md) · *status: unshaped*
+
 ## A non-integer task group is accepted at submit time
 
 The inline `group:` tag, `-t group:…` and a `--from-json` record's `group` key accept any value.
@@ -299,7 +318,7 @@ command-line option and are read straight from configuration, so `evict = "10m"`
 misread while `autoscale.period = "5m"` works.
 
 *Horizon: near-term, small · Depends on: `duration-units-remaining` (landed, #106) · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: unshaped*
+**Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: adopted:env-config-keys*
 
 ## On the 2.8 line, the queue key can still be given on a command line without a warning
 
@@ -328,7 +347,20 @@ key should be settable, with the text given. Pre-existing since 2.7.0.
 
 *Horizon: near-term · Depends on: — · Refs: `server-auth-variant-collision` (landed, #97: the file
 form of `auth_env`; the environment form stays here); relay (its zone tables add more keys)*
-**Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: unshaped*
+**Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: adopted:env-config-keys*
+
+## `hs config set` writes text that looks like a number, boolean or null as that type
+
+`hs config set` coerces its value by its look before writing it, whatever the key
+(`src/hypershell/config.py:284`): `hs config set autoscale.launcher false` writes the boolean, an
+all-digit `server.auth` loses its leading zeros and then fails the length check, and `null` fails with
+a traceback. A boolean key given `no` is written as text that reads as true. The same defect class
+`env-config-keys` fixes for `HYPERSHELL_*` variables; its key table and typed reader should serve
+this command too. Pre-existing.
+
+*Horizon: near-term, small · Depends on: `env-config-keys` (the key table) · Refs: its GOAL's
+Non-goals*
+**Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: unshaped*
 
 ## `hs relay` cannot name the address its site clients dial
 
@@ -445,6 +477,17 @@ client too.
 *Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) · Refs:
 `spec/zone-dispatch/` (plan gate ruling N4)*
 **Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
+
+## Three documented keys are never read by the command they describe
+
+`server.eager` never takes effect: `--eager`'s `store_true` default overwrites it in `hs server` and
+`hs cluster`. `hs cluster` ignores `server.evict` (it uses the built-in period), and its `-R` reads
+the undocumented `task.ratelimit` instead of `client.ratelimit`. The same class as the `-b` entry
+above. Pre-existing; found by `env-config-keys`' research, out of its scope.
+
+*Horizon: near-term, small · Depends on: — · Refs: `spec/env-config-keys/research/03-duration-keys.md`,
+`04-typed-readers.md`*
+**Seed:** [`issues/config-keys-unread.md`](issues/config-keys-unread.md) · *status: unshaped*
 
 ## `hs submit -q` cannot feed a server with a database
 

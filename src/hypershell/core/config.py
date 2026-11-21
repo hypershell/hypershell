@@ -6,12 +6,13 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Dict
+from typing import TypeVar, Union, List, Optional, Protocol, Final, Iterator, Dict, Tuple
 
 # Standard libs
 import os
 import re
 import sys
+import math
 import argparse
 import shutil
 import tomlkit
@@ -23,7 +24,7 @@ import subprocess
 from datetime import datetime
 
 # External libs
-from cmdkit.config import Namespace, Configuration, Environ, ConfigurationError
+from cmdkit.config import Namespace, Configuration, ConfigurationError
 from cmdkit.app import exit_status
 from cmdkit.cli import Interface, ArgumentError
 
@@ -31,13 +32,18 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.platform import path, home, default_path
 from hypershell.core.exceptions import write_traceback, display_critical
 from hypershell.core.sys import PATH_SEP
+from hypershell.core.types import TIME_FORMS, _match_seconds
+from hypershell.core.config_schema import KEYS, read_environment, match_name, variable_name, VariableError
 
 # Public interface
 __all__ = [
     'config', 'update', 'default', 'ConfigurationError', 'Namespace', 'blame',
-    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV',
+    'resolve_auth', 'check_auth_forms', 'AUTH_FORMS', 'AUTH_SECTIONS', 'AUTH_ENV', 'is_key_variable',
+    'is_relay_variable', 'env_variable',
+    'config_seconds',
     'KEY_OPTION_STRINGS', 'SERVER_KEY_SOURCES', 'RefuseKeyOption', 'refuse_key_option',
     'load', 'reload', 'reload_local', 'load_file', 'reload_file', 'load_env', 'reload_env', 'load_task_env',
+    'ENV_VARIABLES',
     'PARAM_UNSET', 'DEFAULT_DATABASE_NAME', 'DEFAULT_DATABASE_FILE',
     'DEFAULT_LOGGING_LEVEL', 'DEFAULT_LOGGING_STYLE', 'LOGGING_STYLES', 'ACTIVE_CONFIG_VARS', 'SSH_GROUPS',
     'AUTH_ALLOWED_CHARS', 'AUTH_MINIMUM_LENGTH', 'find_available_ports',
@@ -257,14 +263,28 @@ def load_file(filepath: str) -> Namespace:
     return reload_file(filepath)
 
 
-def reload_env() -> Environ:
-    """Force reloading environment variables and expanding hierarchy as namespace."""
-    return Environ(prefix='HYPERSHELL').expand()
+ENV_VARIABLES: Dict[Tuple[str, ...], str] = {}
+"""The variable, as written, that set each key path of the environment layer last read."""
+
+
+def reload_env() -> Namespace:
+    """Force reloading the environment layer: each `HYPERSHELL_*` variable at the key its name matches.
+
+    The names are matched against the documented keys and tables (`hypershell.core.config_schema`),
+    and each value is read by its key's kind. :data:`ENV_VARIABLES` is rebuilt to match.
+    """
+    try:
+        layer, variables = read_environment(os.environ)
+    except VariableError as error:
+        raise ConfigurationError(str(error)) from None
+    ENV_VARIABLES.clear()
+    ENV_VARIABLES.update(variables)
+    return Namespace(layer)
 
 
 @functools.lru_cache(maxsize=None)
-def load_env() -> Environ:
-    """Load environment variables and expand hierarchy as namespace."""
+def load_env() -> Namespace:
+    """Load the environment layer (see :func:`reload_env`)."""
     return reload_env()
 
 
@@ -296,6 +316,17 @@ def partial_reload(system: Optional[str] = path.system.config,
     })
 
 
+def env_variable(*varpath: str) -> str:
+    """The variable, as written, that set `varpath` in the environment layer (for a table, the first under it).
+
+    A path no variable set is named by the guide's rule (see `config_schema.variable_name`).
+    """
+    if (name := ENV_VARIABLES.get(varpath)) is not None:
+        return name
+    beneath = sorted(path for path in ENV_VARIABLES if path[:len(varpath)] == varpath)
+    return ENV_VARIABLES[beneath[0]] if beneath else variable_name('.'.join(varpath))
+
+
 def blame(base: Configuration, *varpath: str) -> Optional[str]:
     """Construct filename or variable assignment string based on precedent of `varpath`."""
     source = base.which(*varpath)
@@ -304,9 +335,42 @@ def blame(base: Configuration, *varpath: str) -> Optional[str]:
     if source in ('system', 'user', 'local'):
         return f'from: {path.get(source).config}'
     elif source == 'env':
-        return 'from: HYPERSHELL_' + '_'.join([node.upper() for node in varpath])
+        return f'from: {env_variable(*varpath)}'
     else:
         return f'from: <{source}>'
+
+
+def config_seconds(*varpath: str, base: Configuration = None, whole: bool = False) -> int | float:
+    """Seconds given by the duration key `varpath`, in any duration form; with `whole`, rounded up.
+
+    A number is used as given. Text takes the forms of the duration options, its exact value an `int`
+    when whole and a `float` otherwise. The key is read by attribute, so its `_env` and `_eval` forms
+    resolve. A value that is not a duration raises `ConfigurationError` naming the key, where it came
+    from, and the forms a duration takes.
+    """
+    base = config if base is None else base
+    key = '.'.join(varpath)
+    *section, name = varpath
+    table = functools.reduce(lambda parent, part: parent[part], section, base)
+    form = next((given for given in (name, f'{name}_env', f'{name}_eval') if given in table), name)
+    try:
+        value = getattr(table, name)
+    except Exception as error:
+        # Only the error's type is named: its text can carry part of a command's output.
+        raise ConfigurationError(f'{key} could not be resolved: {type(error).__name__} '
+                                 f'({blame(base, *section, form)})') from None
+    if value is None and form == f'{name}_env':
+        raise ConfigurationError(f'{key}_env names {table[form]}, which is not set ({blame(base, *section, form)})')
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    seconds = _match_seconds(value.strip()) if isinstance(value, str) else None
+    try:
+        if seconds is not None:
+            return math.ceil(seconds) if whole else int(seconds) if seconds.denominator == 1 else float(seconds)
+    except OverflowError:
+        pass
+    raise ConfigurationError(f'{key}: Duration {value!r} is not valid: expected {TIME_FORMS} '
+                             f'({blame(base, *section, form)})')
 
 
 def get_logging_style(base: Configuration) -> str:
@@ -396,6 +460,29 @@ def resolve_auth(*section: str, base: Configuration = None) -> str:
 
 AUTH_ENV: Final[str] = 'HYPERSHELL_SERVER_AUTH'
 """Environment variable that gives `server.auth`; `hs cluster` launchers hand the key over in it."""
+
+
+def is_key_variable(name: str, sections: tuple[tuple[str, ...], ...] = AUTH_SECTIONS) -> bool:
+    """True if the environment variable `name` gives a key: any form of `server.auth` or `relay.upstream.auth`.
+
+    A name is recognised by the matcher, as the environment layer reads it, so every form of the
+    key (:data:`AUTH_FORMS`) counts. `sections` narrows the keys considered (`(('server', ), )` for
+    `server.auth` alone).
+    """
+    try:
+        match = match_name(name)
+    except VariableError:
+        return False
+    return match is not None and match[0][:-1] in sections and match[0][-1] in AUTH_FORMS
+
+
+def is_relay_variable(name: str) -> bool:
+    """True if the environment variable `name` sets a relay setting: a key the matcher maps under `relay`."""
+    try:
+        match = match_name(name)
+    except VariableError:
+        return True  # Only a `relay.zone` name is refused by the matcher.
+    return match is not None and match[0][0] == 'relay'
 
 KEY_OPTION_STRINGS: Final[tuple[str, ...]] = ('-k', '--auth')
 """Option strings registered on the commands only to be refused (see :func:`refuse_key_option`)."""
@@ -550,10 +637,17 @@ if RELAY_PROCESS:
     config['database'] = relay_database_section(config)
 
 
-ACTIVE_CONFIG_VARS: Final[List[str]] = [
-    re.sub(r'_(?!(env|eval))', r'.', name.lower())
-    for name in Namespace(config).to_env().flatten()
-]
+def _leaf_paths(tree: dict, path: tuple = ()) -> Iterator[str]:
+    """The dotted path of each value in `tree` that is not a table (an empty table counts as one)."""
+    for name, value in tree.items():
+        if isinstance(value, dict) and value:
+            yield from _leaf_paths(value, (*path, name))
+        else:
+            yield '.'.join((*path, name))
+
+
+ACTIVE_CONFIG_VARS: Final[List[str]] = sorted({*KEYS, *_leaf_paths(config)})
+"""Every documented key and every key the configuration holds, by dotted path (for completion)."""
 
 
 SSH_GROUPS = []
@@ -637,6 +731,17 @@ def __collapse_lists(ns: Namespace) -> Namespace:
 
 
 @functools.cache
-def load_task_env() -> Environ:
-    """Export environment defined in `config.export`."""
-    return __collapse_lists(config.export).to_env().flatten()
+def load_task_env() -> Dict[str, str]:
+    """The variables `config.export` gives every task.
+
+    A configuration file's `[export]` names are upper-cased and its lists joined (tables merge
+    across files as any table does). Each `HYPERSHELL_EXPORT_<NAME>` variable is laid over them as
+    `<NAME>`, name and value as written, so for the same task variable the environment's wins.
+    """
+    files = Namespace()
+    for name, layer in config.namespaces.items():
+        if name != 'env' and isinstance(table := layer.get('export'), dict):
+            files.update(table)
+    table = config.namespaces.get('env', {}).get('export')
+    written = {name: str(value) for name, value in table.items()} if isinstance(table, dict) else {}
+    return {**__collapse_lists(files).to_env().flatten(), **written}
