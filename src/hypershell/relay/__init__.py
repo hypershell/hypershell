@@ -471,6 +471,11 @@ class RelayThread(Thread):
         evict (int, optional):
             Seconds the relay-local server waits on a silent site client before evicting it.
             See :const:`DEFAULT_SITE_EVICT`.
+
+        advertise (str, optional):
+            Address every site client, of every zone, is told to dial. Default: the bind address in
+            `address`, or this host's own name when it is 0.0.0.0
+            (see :func:`~hypershell.cluster.launch.advertised_host`).
     """
 
     cluster: AutoScalingCluster
@@ -522,7 +527,8 @@ class RelayThread(Thread):
                  zone_settings: Optional[Mapping[Optional[str], Mapping[str, Any]]] = None,
                  min_size: Optional[int] = None,
                  max_size: Optional[int] = None,
-                 init_size: Optional[int] = None) -> None:
+                 init_size: Optional[int] = None,
+                 advertise: Optional[str] = None) -> None:
         """Initialize the site and the upstream side."""
         bundlesize = site_bundlesize(bundlesize, num_threads)
         self.zones = list(zones) if zones else [zone]
@@ -540,7 +546,8 @@ class RelayThread(Thread):
                                     launcher_args=first['launcher_args'], num_threads=num_threads,
                                     template=template, client_timeout=client_timeout,
                                     period=period, evict_after=evict, init_size=fallback.init,
-                                    min_size=fallback.min, max_size=fallback.max, view=self.view)
+                                    min_size=fallback.min, max_size=fallback.max, view=self.view,
+                                    advertise=advertise)
         self.fleets = [zone_fleet(zone_launch(self.cluster, name, launcher=settings[name]['launcher'],
                                               launcher_args=settings[name]['launcher_args'],
                                               num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
@@ -992,7 +999,8 @@ APP_NAME = 'hs relay'
 APP_USAGE = f"""\
 Usage:
   hs relay [-h] [-H ADDR] [-p NUM] [--no-tls] [--zone NAME ...] [-N NUM] [--launcher CMD]
-           [--launcher-args ARGS] [--bind ADDR] [--port NUM] [--database PATH]
+           [--launcher-args ARGS] [--bind ADDR] [--advertise ADDR] [--port NUM]
+           [--database PATH]
 
   Run relay for one site.\
 """
@@ -1017,6 +1025,12 @@ APP_HELP = f"""\
   tasks inherit, and they are given the configuration file without the relay settings.
   Site clients receive the relay's own site key in their environment, never on their
   command line, so the launcher must pass the environment through.
+
+  Site clients dial the relay at its bind address, or at this host's name when it binds
+  every interface (0.0.0.0), unless --advertise ([relay] advertise) names another address
+  for them to dial; [server] advertise does not apply to a relay. With TLS verified against
+  the system CA bundle ([server.tls] cafile empty) and no servername, that name must be one
+  the relay-local server's certificate carries.
 
   A relay may serve several zones (--zone given more than once, or a list in [relay] zone):
   upstream it is one client per zone, and at the site it keeps one fleet of clients per zone,
@@ -1058,6 +1072,7 @@ Options:
       --launcher      CMD   Command prefix that launches each client (default: none).
       --launcher-args ARGS  Extra arguments for the launcher.
       --bind          ADDR  Bind address of relay-local server (default: {DEFAULT_RELAY_BIND}).
+      --advertise     ADDR  Address site clients dial instead (default: by --bind).
       --port          NUM   Port of relay-local server (default: {DEFAULT_RELAY_PORT}).
       --database      PATH  Path to relay database (default: <lib>/relay/<host>.db).
   -h, --help                Show this message and exit.\
@@ -1096,6 +1111,10 @@ class RelayApp(Application):
 
     bind: str = DEFAULT_RELAY_BIND
     interface.add_argument('--bind', default=bind)
+
+    # None when not given, so the option can be told from `relay.advertise` (see `advertise_host`).
+    advertise: Optional[str] = None
+    interface.add_argument('--advertise', default=advertise)
 
     port: int = config.relay.port
     interface.add_argument('--port', type=int, default=port)
@@ -1171,7 +1190,8 @@ class RelayApp(Application):
                              backoff=self.durations['relay.upstream.backoff'],
                              evict_hint=self.durations['relay.upstream.evict_hint'],
                              evict=self.durations['server.evict'],
-                             period=self.site_period)
+                             period=self.site_period,
+                             advertise=self.advertise_host)
         try:
             thread.start()
             join_waking(thread)
@@ -1185,6 +1205,8 @@ class RelayApp(Application):
         """Fail invalid arguments; warn of an insecure upstream connection."""
         if self.no_confirm:
             raise ArgumentError('A relay cannot run with --no-confirm (upstream failover rests on confirmation)')
+        if self.advertise is not None and not self.advertise.strip():
+            raise ArgumentError('Expected an address for --advertise (given an empty value)')
         if upstream_key() == DEFAULT_AUTH:
             log.warning('Using default upstream key - do not use this in production!')
         if self.no_tls or not config.relay.upstream.tls.get('enabled', True):
@@ -1211,6 +1233,19 @@ class RelayApp(Application):
                 handshake_seconds(config.server.tls.get('handshake', DEFAULT_HANDSHAKE))
             except TLSError as error:
                 raise ArgumentError(str(error)) from error
+
+    @functools.cached_property
+    def advertise_host(self: RelayApp) -> Optional[str]:
+        """Address site clients are told to dial: --advertise, else relay.advertise, else None (the bind rule).
+
+        `server.advertise` is never read: it names where a cluster's clients dial, not a relay's site clients.
+        """
+        if self.advertise is not None:
+            return self.advertise
+        value = config.relay.get('advertise', None)
+        if value is None or value == '' or value == PARAM_UNSET:
+            return None
+        return str(value)
 
     @functools.cached_property
     def site_period(self: RelayApp) -> int | float:
