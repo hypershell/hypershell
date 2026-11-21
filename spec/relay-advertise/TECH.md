@@ -3,7 +3,7 @@ slug: relay-advertise
 title: hs relay names the address its site clients dial
 kind: feature
 appetite: small
-status: in_review
+status: done
 branch: feature/relay-advertise
 base: develop
 current_phase: done

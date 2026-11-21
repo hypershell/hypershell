@@ -249,3 +249,8 @@ entry in `docs/_include/relay_help.rst` no longer implies that `--advertise` rem
 reachable bind. It now says the bind must be reachable from the site's nodes, and that
 `--advertise` changes only the address they are told to dial. `cluster_help.rst`'s `-H` passage is
 accurate (it states which address clients are told) and stays as is. Review cycle 2 is docs-only.
+
+## Review-cycle-2 ruling (2026-11-21)
+
+Review cycle 2 approved at `4a27eda3` with no finding. The human gate was not triggered in either
+cycle, so the cycle publishes and merges on green under the maintainer's standing mandate.
