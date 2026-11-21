@@ -3,10 +3,10 @@ slug: relay-shutdown-tail
 title: A relay run ends within seconds of its last result
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: P7
+current_phase: done
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -125,7 +125,7 @@ phases:
     --baseline spec/relay-shutdown-tail/evidence/baseline
 - id: P7
   name: Whole suite, serially; the red list re-proved on f3fb4dd2
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -369,7 +369,7 @@ the processes read. Test-only.
 **Satisfies:** R1–R7 · **Depends on:** P4, P6
 **Goal:** the whole suite green on Python 3.14, serially; the red list still red on the base; R5 judged.
 
-- [ ] Run the whole suite once, serially (no `-n`), bounded at 2 h. A failure outside this cycle's files
+- [x] Run the whole suite once, serially (no `-n`), bounded at 2 h. A failure outside this cycle's files
   that reproduces on `f3fb4dd2` is recorded, not fixed (name it in the phase commit).
 - **Verify:** whole suite, `red_check.sh` on `f3fb4dd2` (3 of 3 RED), `tail_bound.py`.
 - **Touches:** — (state only, unless a failure in this cycle's files needs a fix).
@@ -414,6 +414,9 @@ environment and to grep F1's wording.
     (sandbox off, `docs-venv-rst`, Python 3.12); every grep holds, F1's included; no `hs task` added.
   - Also: `test_client_return.py`, `test_client_request.py` and the R7 unit tests, 22 passed.
   - The new test, three runs alone: passed in 0.30–0.32 s each.
+  - P7 (sandbox off, on `dd450d86`): the whole suite serially, 3545 passed, 138 skipped in 24 min 26 s
+    (`test_waits_for_slow_peer_upgrade` passed in the run); `red_check.sh` on `f3fb4dd2` 2 of 2 RED
+    by assertion; `tail_bound.py` PASS on the six head records (tails 0.69–1.65 s).
   - R5 stands as recorded on `dd0b227d`: the merge brings no change to `client.py`, and in
     `server.py` only the receiver's `written` counter, so the laptop drive is not re-run.
 
