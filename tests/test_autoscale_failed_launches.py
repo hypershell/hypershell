@@ -275,17 +275,25 @@ class TestSetting:
         assert remote.configured_failed_launches() == 0
 
     def test_environment(self, monkeypatch: MonkeyPatch) -> None:
-        """The environment form arrives split at every underscore, and takes precedence over a file."""
+        """The environment form sets the key itself, and takes precedence over a file."""
         monkeypatch.setenv('HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES', '5')
         with_config(monkeypatch, user=Namespace({'autoscale': {'failed_launches': 1}}))
         assert remote.configured_failed_launches() == 5
 
-    @mark.parametrize('value', ['-1', 'true', 'abc', '1.5'])
-    def test_refused_from_environment(self, monkeypatch: MonkeyPatch, value: str) -> None:
-        monkeypatch.setenv('HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES', value)
+    def test_refused_from_environment(self, monkeypatch: MonkeyPatch) -> None:
+        """A whole number below zero is refused by the setting's reader, naming the variable."""
+        monkeypatch.setenv('HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES', '-1')
         with_config(monkeypatch)
         with pytest.raises(ConfigurationError, match='from: HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES'):
             remote.configured_failed_launches()
+
+    @mark.parametrize('value', ['true', 'abc', '1.5'])
+    def test_refused_when_read_from_environment(self, monkeypatch: MonkeyPatch, value: str) -> None:
+        """Text that is not a whole number is refused as the environment is read, naming the variable."""
+        monkeypatch.setenv('HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES', value)
+        with pytest.raises(ConfigurationError, match='autoscale.failed_launches: expected a whole number.*'
+                                                     r'\(from: HYPERSHELL_AUTOSCALE_FAILED_LAUNCHES\)'):
+            with_config(monkeypatch)
 
     @mark.parametrize('value', [-2, True, 'three'])
     def test_refused_from_a_file(self, monkeypatch: MonkeyPatch, value: Any) -> None:

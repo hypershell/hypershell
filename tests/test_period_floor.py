@@ -164,8 +164,8 @@ KEY_ROUTES: Final[Dict[str, Tuple[str, str, str, str]]] = {
     'file-neg5': ('file', '-5', 'autoscale.period', '-5'),
     'file-0s': ('file', '"0s"', '-P/--period', "'0s'"),
     'file-0.0': ('file', '0.0', 'autoscale.period', '0.0'),
-    'env-nan': ('env', 'nan', 'autoscale.period', 'nan'),
-    'env-neginf': ('env', '-inf', 'autoscale.period', '-inf'),
+    'env-nan': ('env', 'nan', '-P/--period', "'nan'"),
+    'env-neginf': ('env', '-inf', '-P/--period', "'-inf'"),
     'env-neg0.0': ('env', '-0.0', 'autoscale.period', '-0.0'),
     'file-nan': ('file', 'nan', 'autoscale.period', 'nan'),
     'file-neginf': ('file', '-inf', 'autoscale.period', '-inf'),
@@ -176,8 +176,17 @@ KEY_ROUTES: Final[Dict[str, Tuple[str, str, str, str]]] = {
 The configuration loader reads a number as a number, which no option type converts, so the error
 names the key; a string reaches the option's type as its default, so the error names the option.
 The relay has no option, so its error names the key either way. NaN, `-inf` and `-0.0` are not
-greater than zero, so a floor that tests `seconds <= 0` fails here.
+greater than zero, so a floor that tests `seconds <= 0` fails here. A variable's value is text, and
+`nan` and `-inf` as text are not durations: the refusal says so rather than giving the floor.
 """
+
+NOT_DURATIONS: Final[List[str]] = ['env-nan', 'env-neginf']
+"""The routes refused as not a duration rather than as not greater than zero."""
+
+
+def not_duration_line(message: str) -> str:
+    """The line of `message` that refuses a value as not a duration (empty if none does)."""
+    return next((line for line in message.splitlines() if 'is not valid' in line), '')
 
 
 def set_period(temp_site: Path, monkeypatch, where: str, text: str) -> None:
@@ -206,7 +215,7 @@ def run_recorded(temp_site: Path, monkeypatch, app: str, args: List[str]) -> Tup
 @mark.parametrize('route', list(KEY_ROUTES))
 @mark.parametrize('launch', list(KEY_LAUNCHES))
 def test_period_key_refused(temp_site: Path, monkeypatch, launch: str, route: str) -> None:
-    """An autoscale.period not greater than zero stops the command before it serves or launches anything."""
+    """A period not greater than zero, or not a duration, stops the command before it serves or launches anything."""
     where, text, name, value = KEY_ROUTES[route]
     set_period(temp_site, monkeypatch, where, text)
     app, args = KEY_LAUNCHES[launch]
@@ -214,7 +223,7 @@ def test_period_key_refused(temp_site: Path, monkeypatch, launch: str, route: st
     assert rc == exit_status.success, log  # The interpreter itself exits normally.
     assert report['status'] == exit_status.bad_argument, log
     assert report['recorded'] == []
-    line = refusal_line(log)
+    line = refusal_line(log) if route not in NOT_DURATIONS else not_duration_line(log)
     assert (name if app != 'relay' else 'autoscale.period') in line and names_value(line, value), log
 
 

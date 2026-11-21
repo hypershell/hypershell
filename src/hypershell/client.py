@@ -62,7 +62,7 @@ from hypershell.data.model import Task, serialize_tasks, deserialize_tasks, zone
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, resolve_auth, refuse_key_option,
-                                    AUTH_ENV)
+                                    AUTH_ENV, is_key_variable, config_seconds)
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
@@ -477,12 +477,14 @@ def inherited_task_env() -> Dict[str, str]:
     """
     The client's own environment as its tasks inherit it, without the authentication key.
 
-    :const:`AUTH_ENV` is left out, and its name is taken out of :const:`OMPI_ENV_LIST`, which
-    is left out too if no other name remains. The client's own environment is not modified.
+    Every variable that gives a key, in any form the matcher recognises (see
+    :func:`~hypershell.core.config.is_key_variable`), is left out, and its name is taken out of
+    :const:`OMPI_ENV_LIST`, which is left out too if no other name remains. The client's own
+    environment is not modified.
     """
-    env = {name: value for name, value in os.environ.items() if name != AUTH_ENV}
+    env = {name: value for name, value in os.environ.items() if not is_key_variable(name)}
     if OMPI_ENV_LIST in env:
-        names = [name for name in env.pop(OMPI_ENV_LIST).split(';') if name and name != AUTH_ENV]
+        names = [name for name in env.pop(OMPI_ENV_LIST).split(';') if name and not is_key_variable(name)]
         if names:
             env[OMPI_ENV_LIST] = ';'.join(names)
     return env
@@ -1651,6 +1653,9 @@ class ClientApp(Application):
     interface.add_argument('--available-cores', action='version', version=str(cpu_count()))
     interface.add_argument('--available-ssh-groups', action='version', version='\n'.join(SSH_GROUPS))
 
+    # Seconds from `client.heartrate` (any duration form), read when the arguments are checked.
+    heartrate: int | float = DEFAULT_HEARTRATE
+
     exceptions = {
         EOFError: functools.partial(handle_disconnect, logger=log),
         ConnectionResetError: functools.partial(handle_disconnect, logger=log),
@@ -1664,7 +1669,8 @@ class ClientApp(Application):
         """Run client."""
         self.auth = resolve_auth('server')
         # The hints below name a missing key only when none came from the environment or a configuration file.
-        no_key = AUTH_ENV not in os.environ and self.auth == DEFAULT_AUTH
+        no_key = (not any(is_key_variable(name, sections=(('server', ), )) for name in os.environ)
+                  and self.auth == DEFAULT_AUTH)
         try:
             self.check_args()
             self.enable_tls()
@@ -1682,7 +1688,7 @@ class ClientApp(Application):
                        memory=self.client_memory,
                        delay_start=self.delay_start,
                        no_confirm=self.no_confirm,
-                       heartrate=config.client.heartrate,
+                       heartrate=self.heartrate,
                        client_timeout=self.client_timeout,
                        task_timeout=self.task_timeout,
                        task_signalwait=self.task_signalwait,
@@ -1713,6 +1719,7 @@ class ClientApp(Application):
             raise ArgumentError('Client --timeout should be positive integer')
         if self.task_timeout is not None and self.task_timeout <= 0:
             raise ArgumentError('Client --task-timeout should be positive integer')
+        self.heartrate = config_seconds('client', 'heartrate')
         if self.auth == DEFAULT_AUTH:
             log.warning('Using default authentication key - do not use this in production!')
         if not self.tls_enabled:

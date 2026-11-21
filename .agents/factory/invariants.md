@@ -195,6 +195,16 @@ subsystems.
   unlimited/auto** for many numeric knobs.
 - `data/core.py` creates engine + `Session` at import and can `sys.exit(3)` on bad config; SQLite
   uses `check_same_thread=False`.
+- The `HYPERSHELL_*` layer is read through `core/config_schema.py` (`KEYS`, `TABLES`): a name is
+  matched against the declared keys and tables, never split at every underscore, and its value read
+  by the key's kind (text as written; typed keys convert or exit 3 at import naming the variable;
+  durations and sizes as given, for their readers). A new documented key gets its kind in `KEYS` and
+  its reference entry in the same commit (`tests/test_config_schema.py`). Key variables and relay
+  variables are recognised by the matcher wherever HyperShell handles them by name:
+  `is_key_variable()` (every form of `server.auth` and `relay.upstream.auth`) drives a task's
+  environment, `--ssh --env` exports and every launched client's environment;
+  `is_relay_variable()` drives the relay's site fence. An empty variable for a key of
+  `EMPTY_UNSET` is not given.
 - **Relay process:** `core/config.py` replaces the whole `[database]` section with the relay's private
   SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes;
   never rebind after import. Relay-only tables live on their own `MetaData`, never `Entity`.
@@ -206,9 +216,10 @@ subsystems.
   `autoscale` (`local` runs clients in-process): a change to launched-client arguments goes there.
   The key is never in a launched argv — environment (`HYPERSHELL_SERVER_AUTH`) for launcher modes,
   ssh's stdin (forced `-T`, bare `-n` dropped) for `--ssh`, whose `--env` exports are built from
-  the variables by name (`ssh_env_exports()`: the key variable dropped first, every value
-  `shlex.quote`d), never by filtering words — and only options a 2.9.0a4 client accepts may be
-  emitted (contract test). The Open MPI forwarding (`OMPI_MCA_mca_base_env_list`, or `-x` beside a
+  the variables by name (`ssh_env_exports()`: every key variable dropped first by
+  `is_key_variable()`, every value `shlex.quote`d), never by filtering words — and only options a
+  2.9.0a4 client accepts may be emitted (contract test). The Open MPI forwarding
+  (`OMPI_MCA_mca_base_env_list`, or `-x` beside a
   user's own `-x`/`--x`) is for Open MPI launchers only (`is_mpi_launcher()`: the first word, by
   base name; never `srun mpirun`). The client strips the key variable and its Open MPI entry from
   every task's environment and from every `{% %}` template command's; a task gets the key only

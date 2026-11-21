@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from subprocess import Popen, PIPE
 
 # Internal libs
-from hypershell.core.config import load_task_env
+from hypershell.core.config import load_task_env, is_key_variable
 from hypershell.core.logging import Logger, HOSTNAME
 from hypershell.client import AUTH_ENV, OMPI_ENV_LIST
 from hypershell.data.model import DEFAULT_ZONE_NAME
@@ -127,11 +127,16 @@ class ClientLaunch:
 
         The launched process gets the inherited environment, the task environment
         from configuration, and the additions in `env`, in that order; or, with
-        `inherit_env`, exactly the inherited environment. The environment of the
-        calling process is never modified. When there is `stdin`, it is written to
-        the process's standard input, which is then closed.
+        `inherit_env`, the inherited environment alone. Every variable that gives a key
+        (see :func:`~hypershell.core.config.is_key_variable`) is left out of the first two,
+        so the key this launch sets in `env` is the only one the process is given. The
+        environment of the calling process is never modified. When there is `stdin`, it is
+        written to the process's standard input, which is then closed.
         """
-        env = None if self.inherit_env else {**os.environ, **load_task_env(), **self.env}
+        given = os.environ if self.inherit_env else {**os.environ, **load_task_env()}
+        env = {name: value for name, value in given.items() if not is_key_variable(name)}
+        if not self.inherit_env:
+            env.update(self.env)
         if self.stdin is None:
             return Popen(self.argv, env=env, **popen_options)
         proc = Popen(self.argv, env=env, stdin=PIPE, **popen_options)
@@ -152,9 +157,9 @@ class ClientLaunch:
         """
         Shell-quoted command line for logging, with any key option value redacted.
 
-        A word that assigns :const:`AUTH_ENV` shows the name only: each word is parsed as a
-        shell would parse it, and any `NAME=value` it holds whose name is :const:`AUTH_ENV`
-        redacts the whole word, however the word is quoted. The last word of an SSH launch
+        A word that assigns a key variable is shown as `AUTH_ENV=***`: each word is parsed as a
+        shell would parse it, and any `NAME=value` it holds whose name gives a key
+        (:func:`assigns_key`) redacts the whole word, however the word is quoted. The last word of an SSH launch
         (the one with `stdin`) is already quoted for the remote shell and ssh sends it as it
         is, so it is shown as it is.
         """
@@ -204,8 +209,9 @@ def client_launch(remote_exe: str,
     With `ssh_host`, the command line is `launcher` and `launcher_args`, then `-T` (no
     remote terminal, whatever those arguments or the ssh configuration ask for), the host,
     one `NAME=value` word for each of `ssh_exports` (see :func:`ssh_env_exports`, which never
-    exports :const:`AUTH_ENV`), and a remote `sh -c` step (see :func:`ssh_remote_script`).
-    The key is the launch's standard input, and ssh gets the caller's environment unchanged.
+    exports a key variable), and a remote `sh -c` step (see :func:`ssh_remote_script`).
+    The key is the launch's standard input, and ssh gets the caller's environment without any
+    variable that gives a key.
     The launch owns that input, so a bare `-n` among the ssh arguments is dropped (see
     :func:`ssh_launch_args`).
 
@@ -384,9 +390,11 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
     """
     One `NAME=value` word per variable in `env`, for the remote shell of an SSH launch.
 
-    :const:`AUTH_ENV` is left out by name before anything is quoted. Each value is quoted
-    with :func:`shlex.quote`, so a POSIX shell reads it back as exactly that value, and
-    no value can join or split words. A name that a shell cannot assign is left out.
+    Every variable that gives a key, in any form the matcher recognises (see
+    :func:`~hypershell.core.config.is_key_variable`), is left out by name before anything is
+    quoted. Each value is quoted with :func:`shlex.quote`, so a POSIX shell reads it back as
+    exactly that value, and no value can join or split words. A name that a shell cannot assign
+    is left out.
 
     Example:
         >>> ssh_env_exports({'HYPERSHELL_A': 'a b', AUTH_ENV: 'secret', 'HYPERSHELL_B': 'b'})
@@ -394,7 +402,7 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
     """
     words = []
     for name, value in env.items():
-        if name == AUTH_ENV:
+        if is_key_variable(name):
             continue
         if not SHELL_NAME.fullmatch(name):
             log.warning(f'Not exporting {name!r} to remote clients: not a shell variable name')
@@ -404,12 +412,12 @@ def ssh_env_exports(env: Mapping[str, str]) -> List[str]:
 
 
 def assigns_key(word: str) -> bool:
-    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name is :const:`AUTH_ENV`."""
+    """True if `word`, parsed as a shell parses it, holds a `NAME=value` whose name gives a key (`is_key_variable`)."""
     try:
         tokens = shlex.split(word)
     except ValueError:  # Unbalanced quotes: look at the word as it is
         tokens = word.split()
-    return any(token.split('=', 1)[0] == AUTH_ENV and '=' in token for token in tokens)
+    return any('=' in token and is_key_variable(token.split('=', 1)[0]) for token in tokens)
 
 
 def ssh_launch_args(args: Sequence[str]) -> List[str]:
@@ -499,8 +507,8 @@ def client_options(address: Tuple[str, int],
                    zone: Optional[str]) -> List[str]:
     """The `hs client` options shared by every launch mode (never the key)."""
     host, port = address
-    options = ['-H', host, '-p', str(port), '-N', str(num_threads), '-b', str(bundlesize), '-w', str(bundlewait),
-               '-t', template, '-d', plain_seconds(delay_start), '-S', str(task_signalwait)]
+    options = ['-H', host, '-p', str(port), '-N', str(num_threads), '-b', str(bundlesize),
+               '-w', plain_seconds(bundlewait), '-t', template, '-d', plain_seconds(delay_start), '-S', str(task_signalwait)]
     if no_confirm:
         options.append('--no-confirm')
     if capture:
@@ -512,7 +520,7 @@ def client_options(address: Tuple[str, int],
     if client_memory is not None:
         options.extend(['-M', str(client_memory)])
     if client_timeout is not None:
-        options.extend(['-T', str(client_timeout)])
+        options.extend(['-T', plain_seconds(client_timeout)])
     if task_timeout is not None:
         options.extend(['-W', str(task_timeout)])
     if ratelimit is not None:
