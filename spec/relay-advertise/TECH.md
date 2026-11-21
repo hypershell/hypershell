@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: feature/relay-advertise
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -34,7 +34,7 @@ phases:
 - id: P2
   name: 'The option, the key and the launch: --advertise and relay.advertise reach
     every site client'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -191,25 +191,25 @@ in the touched test files passes.
 **Goal:** `hs relay --advertise ADDR` or `relay.advertise` names the address every site client of
 every zone dials; neither leaves develop's address; a blank option exits 2 before the database.
 
-- [ ] `relay/site.py`: `site_cluster(..., advertise: Optional[str] = None)` → `AutoScalingCluster(...,
+- [x] `relay/site.py`: `site_cluster(..., advertise: Optional[str] = None)` → `AutoScalingCluster(...,
       advertise=advertise)`; `zone_launch` dials `cluster.advertised` (not `advertised_host(queue.host)`);
       drop the unused `advertised_host` import; module, `site_cluster` and `zone_launch` docstrings
       state the rule (PLAN §2.1).
-- [ ] `relay/__init__.py` `RelayThread.__init__(..., advertise: Optional[str] = None)` →
+- [x] `relay/__init__.py` `RelayThread.__init__(..., advertise: Optional[str] = None)` →
       `site_cluster(..., advertise=advertise)`; the further zones' `zone_launch` calls unchanged.
-- [ ] `RelayApp`: `--advertise` (default `None`) after `--bind`; `advertise_host` cached property
+- [x] `RelayApp`: `--advertise` (default `None`) after `--bind`; `advertise_host` cached property
       (option, else `relay.advertise` unless `None`/`''`/`PARAM_UNSET`, else `None`; never
       `server.advertise`); `check_args` refuses an empty or blank option first, right after
       `--no-confirm`, `ArgumentError('Expected an address for --advertise (given an empty value)')`;
       `run()` passes `advertise=self.advertise_host`.
-- [ ] `APP_USAGE` (`[--bind ADDR] [--advertise ADDR]`, rewrapped) and `APP_HELP` (the option line
+- [x] `APP_USAGE` (`[--bind ADDR] [--advertise ADDR]`, rewrapped) and `APP_HELP` (the option line
       after `--bind`; the description paragraph with the rule and the TLS case, PLAN §2.3).
-- [ ] `core/config.py`: `'advertise': PARAM_UNSET` in `default['relay']` after `bind`.
+- [x] `core/config.py`: `'advertise': PARAM_UNSET` in `default['relay']` after `bind`.
       `core/config_schema.py`: `'relay.advertise': T` after `'relay.bind'` in `KEYS`; `'relay.advertise'`
       after `'relay.bind'` in `EMPTY_UNSET`.
-- [ ] `docs/_include/config_param_ref.rst`: `[relay]` `.advertise` after `.bind` (PLAN §2.4), and the
+- [x] `docs/_include/config_param_ref.rst`: `[relay]` `.advertise` after `.bind` (PLAN §2.4), and the
       `[server]` `.advertise` pointer to it — in this commit, with the key.
-- [ ] `tests/test_cluster_advertise.py` module docstring: a relay's site clients have their own
+- [x] `tests/test_cluster_advertise.py` module docstring: a relay's site clients have their own
       override (`hs relay --advertise`, `relay.advertise`).
 - **Verify:** see frontmatter (every new test but the two `documented_in` ones; the schema, env,
   cluster-advertise, relay-launch and relay-topology suites; `hs relay --help` lists `--advertise`

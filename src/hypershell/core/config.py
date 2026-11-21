@@ -208,6 +208,7 @@ default = Namespace({
     'relay': {
         'database': PARAM_UNSET,  # Path to the relay database (default: <lib>/relay/<host>.db)
         'bind': '0.0.0.0',        # Bind address of the relay-local server (site clients connect here)
+        'advertise': PARAM_UNSET,  # Address site clients dial (unset: the bind, or this host's name)
         'port': 50_002,           # Port of the relay-local server (distinct from the server default)
         'bundlesize': 1,          # Bundle size of the relay-local server
         'bundlewait': 5,          # Seconds the relay waits before returning results regardless of size
