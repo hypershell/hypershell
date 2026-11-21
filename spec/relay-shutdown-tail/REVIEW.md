@@ -375,3 +375,116 @@ test, and `spec/` commits.
    `submit.py`. Then rebuild the docs with `-W`.
 
 Cycle 3 can be scoped to F2.
+
+## Review cycle 3 — approved (2026-11-21)
+
+- **Reviewed commit:** `06ecb24f`  ·  **Base:** `origin/develop` `dfdbaed5` (#116), which is the
+  merge's second parent and the merge base.
+- **Verdict:** approved. F2 is fixed, and the merge of `origin/develop` is clean and coherent. No
+  finding.
+- **Cycle:** 3 of ≤3, the last. It mirrors `review.cycle` in `TECH.md`. The loop converges here.
+
+### How this cycle was run
+
+- **Mode:** scoped, as the review-cycle-2 ruling sets: F2's fix (`dad1df9b`, one passage in
+  `docs/_include/cluster_help.rst`) and the merge of `origin/develop` (`06ecb24f`, bringing #116
+  relay-advertise). The delta judged is `711ea5f8..06ecb24f`.
+- **Correctness pass:** run by this reviewer directly, blind in the same sense as the earlier
+  cycles. It graded against `GOAL.md`, cycle 2's F2 and the binding rulings at the end of `PLAN.md`
+  (plan gate, P7 gate, review cycles 1 and 2). It did not read `TECH.md` beyond its frontmatter, nor
+  `META.md` or `research/`.
+- **Contract drift:** none. `GOAL.md` still changes only in `d1a0fea8` and `6f4e809f`.
+- **Environments:** CPython 3.14.6 for the tests and drive, run serially. Docs used CPython 3.12.
+  The drive ran in `.agents/factory/bin/temp_site.sh`, bound to 127.0.0.1, with the key in
+  `HYPERSHELL_SERVER_AUTH` only.
+
+### Verification run
+
+- **F2 text against the source.** The passage now reads: "The `submit` thread does not: it checks
+  this period only when another task arrives, so it holds tasks until a bundle is full, a task
+  arrives after the period, or the input ends."
+  - `DatabaseCommitter.get_task` (`src/hypershell/submit.py:529–543`) and `QueueCommitter.get_task`
+    (`:771–785`) compare the time since the previous commit with the bundle wait only after a task
+    is taken from the queue; an empty queue loops back to GET; `None` (input ended) finalizes. Each
+    clause of the sentence matches.
+  - The old wording ("this period passes") appears nowhere else in `docs/`, `src/` or `share/`. The
+    `hs cluster` one-liner (F1) is unchanged.
+- **F2 drive** (scratch script, not committed): `hs cluster -N 1 -b 10 -w 2 -Q 30 -H 127.0.0.1`,
+  debug logging, a database in the throwaway site.
+  - Line 1 written at 0.31 s; nothing committed through 5.00 s, well past the 2 s period.
+  - Line 2 written at 5.00 s; "Submitted 2 tasks" at 5.01 s. A task arriving after the period frees
+    the held one, as the text says.
+  - Both tasks ran at 8.0 s (the scheduler's back-off); stdin closed at 9.00 s; exit 0 at 10.10 s.
+    The process exited on its own.
+- **Merge mechanics.**
+  - `06ecb24f`'s parents are `dad1df9b` (F2) and `dfdbaed5` (#116, `origin/develop` head).
+  - `git merge-tree --write-tree dad1df9b dfdbaed5` gives tree `8fc00eb3`, the merge commit's own
+    tree: no conflict, no hand resolution, no change made in the merge. `git show --cc` on it is
+    empty.
+  - `git merge-tree --write-tree origin/develop HEAD` is clean (`8fc00eb3`).
+- **Nothing else changed.** `git diff 711ea5f8 06ecb24f`, with `cluster_help.rst` and this cycle's
+  `PLAN.md` excluded, equals #116's own diff (`git diff d9901cf0 dfdbaed5`) line for line once blob
+  ids and hunk offsets are set aside (28 files, +1837 −43). The two excluded files carry only the F2
+  passage and the review-cycle-2 ruling.
+- **Shared files read on the merged tree.**
+  - `AGENTS.md`: this branch's §3 stop-and-wake sentence and #116's advertise rule in the launch
+    section are separate paragraphs; both read correctly.
+  - `.agents/factory/invariants.md`: likewise §3 against the launch-address bullet.
+  - `docs/_include/config_param_ref.rst`: `server.poll`, `client.bundlewait` and `relay.bundlewait`
+    carry this branch's sentences and markers; `server.advertise` and the new `relay.advertise`
+    carry #116's. Neither touches the other's entry.
+  - `ROADMAP.md`: this branch's two adopted statuses and #116's adopted status are on different
+    entries.
+- **`src/` after the merge.** #116 changes only `core/config.py`, `core/config_schema.py`,
+  `relay/__init__.py` and `relay/site.py`, all for the advertised address. This branch changes
+  `client.py`, `server.py` and the `cluster/__init__.py` help string. No file is touched by both, and
+  #116 does not touch the site clients' `-b`/`-w` launch values or bundling, so R5's records on
+  `dd0b227d` still stand for the relay path.
+- **Tests on HEAD, serial:** `test_relay_advertise`, `test_finish_wake`, `test_client_return`,
+  `test_relay_launch`, `test_config_schema`, `test_cluster_nodb_finish`, `test_cluster_advertise`,
+  `test_env_config`, `test_client_request` and `test_relay_workload` → 417 passed, exit 0. This
+  covers the foreman's 251-test set plus the relay workload, advertise and environment modules that
+  #116 and R7 share.
+- **Docs:** `sphinx-build -W --keep-going -q -E -b html` exited 0 at HEAD. The rendered
+  `cli/cluster.html` carries the new sentence.
+
+### Requirement → evidence (the delta)
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R1, R2 | `client.py` unchanged since cycle 2; `test_client_return` passes | ✅ |
+| R3, R4 | `server.py` unchanged since cycle 2; `test_finish_wake`, `test_cluster_nodb_finish` pass | ✅ |
+| R5 | Relay bundling paths untouched by #116; records stand as in cycle 2 | ✅ |
+| R6 | F2 fixed and driven; `-W` build clean | ✅ |
+| R7 | `test_relay_workload` passes on the merged tree | ✅ |
+
+Unmapped changes: none. Outside #116's own content, the delta is the F2 passage and a `PLAN.md`
+ruling.
+
+### Findings
+
+None. F2 is closed.
+
+**Considered and dropped:**
+- **"a task arrives after the period" leaves the period's start unstated.** The committers measure
+  from the previous commit (or from start), the same reference the sentence before it uses for the
+  client ("this period of time" since a bundle went out). The drive shows the text as written is
+  what a user sees. Not a correctness gap.
+
+### Merge status
+
+- **Against `origin/develop` `dfdbaed5`:** up to date; develop is the merge's second parent, and
+  `git merge-tree --write-tree origin/develop HEAD` is clean.
+
+### Human-gate triggers
+
+- **Not triggered.** No CONFIRMED finding this cycle. The delta touches no high-blast-radius file:
+  #116's `src/` changes are in `relay/` and `core/config*.py` and were reviewed in their own PR, and
+  this branch's `server.py` and `client.py` are unchanged since cycle 2.
+- GOAL.md's standing note still holds: R3 changes `server.py`'s scheduler, so the maintainer's
+  sign-off on the branch as a whole remains what the rubric asks for at publish.
+
+### Next step
+
+`/hs-publish`. The release note should state that every `hs client` with `-b` above 1 now returns
+what it holds once it has nothing to run (GOAL gate ruling).
