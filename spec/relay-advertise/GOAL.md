@@ -179,6 +179,17 @@ What `hs-review` should be able to run against the branch:
 - The test suite under Python 3.11 and 3.14; the Sphinx `-W` build; `hs relay --help` lists
   `--advertise` after `--bind`; the completion tests.
 
+**Ruled at the GOAL gate** (2026-11-21): approved by the foreman, gate judge under the maintainer's
+mandate. The five clarifications are confirmed as proposed:
+- the names `--advertise` and `relay.advertise`, unset by default, with `server.advertise` excluded;
+- no refused mode, only an empty or blank value;
+- no new version markers beyond the existing `versionadded:: 2.9.0` on the page and section;
+- the narrowed TLS motivation;
+- appetite small.
+
+`hs relay` and its keys are new in 2.9, so this completes the 2.9 interface; target 2.9.0. The
+contract is locked; `hs-plan` designs against it.
+
 ## Related materials
 
 - Issue: none yet (seeded out of cycle).
