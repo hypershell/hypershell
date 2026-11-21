@@ -54,3 +54,17 @@ is skipped by the parser):
 - **Skill cause:** For `unshaped` the skill says "Carry the evidence (`file:line`, mechanism, …) into **Problem**"; only the `shaped` branch says to re-confirm against current `develop`. With "no big code reads" beside it, nothing tells the shaper that each cited line and claim must be re-read first.
 - **Recommended fix:** In the `unshaped` bullet, add: re-read each cited `file:line` and claim on current `develop` before carrying it (a targeted read, not research), cite the current lines, and list any claim found false or drifted in the GOAL or the hand-off report.
 - **Confidence:** med · **Effort:** small
+
+## F2 — No factory helper bounds a verify step, and macOS has no `timeout`
+`origin=hs-plan:step6 severity=low category=tooling status=open target=.agents/factory/bin/temp_site.sh`
+- **What happened:** Every verify step had to be bounded (the foreman's standing rule), but the factory gives no way to do it: `timeout` and `gtimeout` are absent on the macOS hosts, so this plan wrote `spec/relay-advertise/drive/bound.sh` (a perl fork, SIGINT to the step's process group at the bound, SIGKILL 15 s later). Earlier cycles bounded steps ad hoc or not at all.
+- **Skill cause:** Step 6 asks for "a real `verify:` command" and the TECH template's examples are unbounded; nothing in `.agents/factory/bin/` or the skill says how to bound a step that can hang (a relay, a server, a whole suite).
+- **Recommended fix:** Move a bounding helper into `.agents/factory/bin/` (this cycle's `bound.sh` is a candidate) and have Step 6 and the TECH template say every long or process-starting `verify:` step runs under it with a stated bound.
+- **Confidence:** med · **Effort:** small
+
+## F3 — The tests-first red-list tooling lives in other cycles' spec folders, unnamed by the skill
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** The brief asked for a tests-first phase with a red list. The working pattern (a `red.txt`, `spec/relay-hardening/drive/red_check.sh` to prove each listed test fails on the base by an assertion or a named error, `spec/contended-writes/drive/rest_green.sh` for the rest, prototypes kept un-collected under `research/prototypes/`) had to be found by reading four earlier cycles' TECH files.
+- **Skill cause:** Step 6 describes phases only as vertical slices; it names neither the tests-first phase several cycles use nor the shared scripts, which sit in other specs' `drive/` folders where a planner would not look.
+- **Recommended fix:** Promote `red_check.sh`, its `red_outcome.py` plugin and `rest_green.sh` to `.agents/factory/bin/`, and add a Step 6 note: for a tests-first phase, write `red.txt`, run `red_check` on the base (prefer assertions; `raises=` only for the gap's own error), and keep prototypes named so the suite never collects them.
+- **Confidence:** med · **Effort:** small
