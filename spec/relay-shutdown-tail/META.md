@@ -39,3 +39,10 @@
 - **Skill cause:** As `spec/group-advance-strands-lower-group/META.md` F3: Steps 4 and 6 steer verification to CLI drives and integration tests but say nothing about bounding them, and the factory has no helper, so each plan (and each research agent) reinvents one.
 - **Recommended fix:** As recorded there: a factory `bin/` bound helper (this cycle's `drive/bounded.py` is a candidate) and one line in Step 6 and the TECH template requiring it for every verify that runs integration tests or `hs`/`hsx`.
 - **Confidence:** high · **Effort:** small
+
+## F5 — A red list that holds a test-only fix cannot be re-proved red after the fix lands
+`origin=hs-build:P7 severity=medium category=steering status=open target=.agents/skills/hs-plan/SKILL.md`
+- **What happened:** P7's verify re-runs `red_check.sh` on `f3fb4dd2` with `drive/red.txt`. The checker puts the base build's `src` first and runs *this tree's* tests. The R7 line's fix lives in the test file itself (`read_process` in `tests/test_relay_workload.py`, P4), so on the head the `[AccessDenied]` test passes on the base `src` (NOT RED, pytest exit 0) and the gate fails though nothing regressed. It was RED at P1 (3 of 3), before P4 moved the fix into the test file. The plan's dry-run placed the probes in `tests/` without the fix, so it could not see this.
+- **Skill cause:** The planning guidance puts every regression test on the red list and re-proves the list at the end, with no word on fixes that are themselves test code: for those the base build is not where the defect lives, and only the tests-first commit can show them red.
+- **Recommended fix:** In `hs-plan` Step 6 (and the TECH template): a test-only fix's red proof is taken at the tests-first phase only; the final phase's red list leaves those lines out (or `red_check.sh` grows a way to take the tests from a named commit). Not a weakening: the P1 proof stays the record.
+- **Confidence:** high · **Effort:** small

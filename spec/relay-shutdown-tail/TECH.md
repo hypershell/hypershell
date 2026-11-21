@@ -135,6 +135,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: python3 spec/relay-shutdown-tail/drive/bounded.py 7200 uv run pytest -q
     -p no:cacheprovider && RED_LIST=spec/relay-shutdown-tail/drive/red.txt RED_BASE_REV=f3fb4dd2
     python3 spec/relay-shutdown-tail/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
