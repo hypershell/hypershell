@@ -248,3 +248,20 @@ source, so the R7 test passes there once P4 lands. Nothing regressed. P7 re-prov
 fixes (R1, R3) from `drive/red-src.txt`, 2 of 2 red. R7's red proof stands at P1 (`94a45f6c`).
 The whole suite's pass at P7's recorded attempt stands, since no source has changed since then
 (3512 passed, 138 skipped). `tail_bound.py` passes.
+
+## Review-cycle-1 rulings (2026-11-21)
+
+Review cycle 1 was changes-requested at `8690deaf`. The human gate was not triggered. Foreman's
+rulings, under the maintainer's mandate:
+
+- **Merge develop first.** Bring the branch up to date with `origin/develop` in a signed merge
+  commit, keeping both sides:
+  - `server.py`: develop's `Receiver.written` counter (#114) and this branch's `scheduler` attribute
+    and `results_landed` call. Both count APPLIED results only.
+  - `ROADMAP.md`: develop's `Target` lines and this branch's adopted statuses.
+- **F1.** The `hs cluster` one-line help for `-w` credits the idle return to the clients only. The
+  submit side's bundle wait is unchanged (Non-goal).
+- **Coverage note.** Add a test for a finishing result that lands between `count_remaining` and the
+  assignment of `finishing`, if it can be made deterministic. Otherwise record why not.
+- **Review cycle 2** is scoped to F1, the merge resolution and the coverage test. The merge touches
+  `server.py`, so a CONFIRMED finding there triggers the human gate.
