@@ -8,7 +8,7 @@ status: in_review
 branch: fix/cluster-launch-followups
 base: develop
 current_phase: done
-last_updated: '2026-11-16'
+last_updated: '2026-11-21'
 phases:
 - id: P1
   name: Regression tests first, red on 9c82842d
@@ -90,10 +90,10 @@ phases:
     --python 3.14 pytest -p no:cacheprovider -q && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv311-clf
     uv run --python 3.11 pytest -p no:cacheprovider -q
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 836ae5bcad3c00c2bc423a496a46feb743717f69
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — A locked database delays a cluster's decision instead of ending the run; a `--no-db` cluster whose work is done never reports a failed launch
 

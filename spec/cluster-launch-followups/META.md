@@ -60,3 +60,10 @@ is skipped by the parser):
 - **Skill cause:** As `spec/zone-queue-primitive/META.md` F4: Step 3 names only `research/NN-topic.md` as research output, with no home or naming rule for runnable prototypes.
 - **Recommended fix:** As there, plus: prototypes kept under `spec/{slug}/research/prototypes/` must not match pytest's `test_*.py`/`*_test.py` or ship a `conftest.py`; run them with `-p tests.conftest`.
 - **Confidence:** high · **Effort:** small
+
+## F4 — A coverage-only finding: "non-blocking" by the severity table, blocking by the loop rules · seen again
+`origin=hs-review:step4 severity=high category=instruction status=open target=.agents/factory/review-rubric.md`
+- **What happened:** R2's working-launcher clause has no test, although its behaviour is correct (drive G). Grading it meant choosing between two earlier cycles: `task-input-fidelity` called such a gap a non-blocking note (CONFIRMED needs observed wrong behaviour), and `contended-writes` called it CONFIRMED and blocking. This cycle followed the first and said so in `REVIEW.md`.
+- **Skill cause:** As `spec/contended-writes/META.md` F8. The rubric's LOW row ("missing-but-non-blocking test coverage") and its rule that every CONFIRMED finding loops back still disagree. Step 4 does not settle which applies to a gap with no wrong behaviour.
+- **Recommended fix:** As there. Any wording that exempts coverage-only findings from blocking needs the maintainer's ruling.
+- **Confidence:** high · **Effort:** small
