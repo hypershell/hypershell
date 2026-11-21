@@ -3,10 +3,10 @@ slug: relay-shutdown-tail
 title: A relay run ends within seconds of its last result
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: P7
+current_phase: done
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -120,7 +120,7 @@ phases:
     --baseline spec/relay-shutdown-tail/evidence/baseline
 - id: P7
   name: Whole suite, serially; the red list re-proved on f3fb4dd2
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -137,7 +137,7 @@ phases:
   hill: uphill
   attempts: 1
   verify: python3 spec/relay-shutdown-tail/drive/bounded.py 7200 uv run pytest -q
-    -p no:cacheprovider && RED_LIST=spec/relay-shutdown-tail/drive/red.txt RED_BASE_REV=f3fb4dd2
+    -p no:cacheprovider && RED_LIST=spec/relay-shutdown-tail/drive/red-src.txt RED_BASE_REV=f3fb4dd2
     python3 spec/relay-shutdown-tail/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
     && python3 spec/relay-shutdown-tail/drive/tail_bound.py spec/relay-shutdown-tail/evidence/head
     --baseline spec/relay-shutdown-tail/evidence/baseline

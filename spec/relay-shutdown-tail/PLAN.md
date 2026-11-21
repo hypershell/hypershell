@@ -239,3 +239,12 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
   release note says so. The branch is red between P1 and P4 and is never pushed in between.
 - **High-blast files** (`client.py`, `server.py`): the review's human gate applies as the rubric
   says.
+
+## P7 gate ruling (2026-11-21)
+
+Foreman, under the maintainer's mandate. P7's re-proof on `f3fb4dd2` cannot pass for R7 by
+construction: R7's fix is test code, and `red_check` runs this tree's tests against the base
+source, so the R7 test passes there once P4 lands. Nothing regressed. P7 re-proves the source
+fixes (R1, R3) from `drive/red-src.txt`, 2 of 2 red. R7's red proof stands at P1 (`94a45f6c`).
+The whole suite's pass at P7's recorded attempt stands, since no source has changed since then
+(3512 passed, 138 skipped). `tail_bound.py` passes.
