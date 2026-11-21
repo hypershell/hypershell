@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:config-set-and-unread
 kind: fix
 appetite: small
 target: 2.9.0
