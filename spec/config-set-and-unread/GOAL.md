@@ -252,6 +252,20 @@ Each is a change from `develop` `d9901cf0` and from 2.8.x.
   existing `config_seconds` helper is the likely route); where `ServerApp`/`ClusterApp` stop the
   `store_true` default from replacing the key.
 
+**Ruled at the GOAL gate** (2026-11-21): approved by the foreman, gate judge under the maintainer's
+mandate. The seven clarifications are confirmed as proposed:
+- R6 (`hs cluster` reads `server.attempts`) is in scope, since `server.eager` has no effect without it;
+- a refused `hs config set` value exits 2;
+- `hs config set` does not check durations or sizes;
+- `-R` takes a number on `hs client` and `hs cluster`;
+- there is no `task.ratelimit` fallback;
+- there is no `--no-eager` option;
+- R7 covers local mode.
+
+The two candidate seeds in the Non-goals, an empty `logging.style` and `client.heartrate` under a
+local `hs cluster`, are filed by the foreman. Target 2.9.0. The contract is locked; `hs-plan` designs
+against it.
+
 ## Related materials
 
 - Seeds: [`issues/config-set-coerces-text.md`](../../issues/config-set-coerces-text.md),
