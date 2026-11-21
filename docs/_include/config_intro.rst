@@ -145,10 +145,12 @@ The value is read by the key's type:
   leading zeros and an exponent (``HYPERSHELL_SERVER_AUTH=0012345678901234`` is that key).
 - An empty value for an optional text key is not given, and the key's default applies, as if the
   variable were not set. The optional text keys are those with no default or one that means none
-  (``<none>``, ``<auto>``), such as ``logging.file`` and its ``path``, ``database.host``,
-  ``database.user`` and ``database.password``, the ``[server.tls]`` files and
-  ``server.advertise``; so are ``server.bind`` and ``relay.bind``, so an empty bind is the default
-  bind. In a file, an empty value is read as before.
+  (``<none>``, ``<auto>``), such as ``logging.file`` and its ``path``, ``database.user`` and
+  ``database.password``, the ``[server.tls]`` files and ``server.advertise``; so are
+  ``server.bind``, ``relay.bind``, ``database.host`` and ``task.cwd``, so an empty bind, host or
+  task directory is the default one. A text key with a default of its own holds an empty value as
+  written, as in a file: ``HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY=`` is ``segmentby = ""``. In a
+  file, an empty value is read as before.
 - A key that takes a whole number, a number or a boolean holds the converted value. A boolean takes
   ``true``/``false``, ``yes``/``no``, ``on``/``off`` or ``1``/``0``, in any letter case. A value
   that does not convert, an empty one included, stops the command with a configuration error naming

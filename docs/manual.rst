@@ -282,9 +282,9 @@ are named by the user (``database.connect_args``, ``database.pragmas``, ``ssh.no
 ``export``), the rest of the name is one entry; a relay zone is set by
 ``HYPERSHELL_RELAY_ZONE_<ZONE>_<KEY>``. ``_ENV`` and ``_EVAL`` work as ``_env`` and ``_eval`` do
 in a file. A value is kept as written for an option that takes text, except that an empty value
-for an optional one (or a bind address) is not given, so its default applies; a whole number, a
-number or a boolean that does not convert stops the command with a configuration error naming the
-variable.
+for an optional one (or a bind address, the database host or the task directory) is not given,
+so its default applies; a whole number, a number or a boolean that does not convert stops the
+command with a configuration error naming the variable.
 The configuration guide gives the full rule and what cannot be reached from the environment.
 
 The following environment variables must be specified as such and cannot be configurable

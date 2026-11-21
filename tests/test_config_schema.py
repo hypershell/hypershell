@@ -13,7 +13,7 @@ not know: the sync tests compare `hypershell.core.config_schema` with `default` 
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, Iterator, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 # Standard libs
 import re
@@ -339,25 +339,68 @@ def default_at(path: str) -> Any:
     return node
 
 
+EMPTY_IS_DEFAULT: Tuple[str, ...] = ('server.bind', 'relay.bind', 'database.host', 'task.cwd')
+"""Keys with a default of their own for which an empty variable is still not given (the default one)."""
+
+LITERAL = re.compile(r'`+(?P<value>[^`]*)`+|\'(?P<quoted>[^\']*)\'')
+"""A value written as a literal in the reference (in backticks, or quoted), as against words about one."""
+
+
+def documented_default(path: str, reference: Dict[str, Tuple[str, str]]) -> Optional[str]:
+    """The default the parameter reference gives `path` as a literal value, or None if it gives none.
+
+    A key's own entry gives it as `(default: <value>)`; a key named in its table's text
+    (:data:`PROSE_KEYS`) as `<name> (default <value>)` or `<name> (<value>)` there. A default
+    given in words (`none`, `by .bind`, a path pattern), `<none>` or `<auto>` is not a value.
+    """
+    if path in PROSE_KEYS:
+        table, name = path.rsplit('.', 1)
+        match = re.search(rf'``{name}``\s*\((?:default:?\s*)?(?P<text>[^)]*)\)', reference[table][1])
+    else:
+        match = re.search(r'\(default:?\s*(?P<text>[^)]*)\)', reference[path][1])
+    if match is None or not (literal := LITERAL.fullmatch(match['text'].strip())):
+        return None
+    value = (literal['value'] if literal['value'] is not None else literal['quoted']).strip('"\'')
+    return None if value in ('<none>', '<auto>') else value
+
+
+@mark.unit
+def test_documented_default() -> None:
+    """The reference gives a literal default for the timescale keys and the binds, and none in words."""
+    reference = parse_reference()
+    assert documented_default('database.timescale.segmentby', reference) == 'client_id'
+    assert documented_default('database.timescale.chunk_interval', reference) == '1 week'
+    assert documented_default('server.bind', reference) == 'localhost'
+    for path in ('server.tls.cert', 'server.tls.fingerprint', 'server.advertise', 'relay.database', 'relay.zone',
+                 'database.user', 'logging.file.format'):
+        assert documented_default(path, reference) is None, path
+
+
 @mark.unit
 def test_empty_unset_keys() -> None:
-    """The keys an empty variable leaves unset are the optional text keys, the scalar tables and the binds.
+    """The keys an empty variable leaves unset are the optional text keys, the scalar tables and four named keys.
 
-    An optional text key takes text and has no default, or a default that means none.
+    An optional text key takes text and has no default, or a default that means none, in both the
+    defaults table and the parameter reference. The four named keys have a default of their own,
+    which an empty variable gives: an empty bind, database host or task directory is the default one.
     """
-    optional = {path for path, kind in KEYS.items() if kind is Kind.TEXT
-                and default_at(path) in (None, '<none>', '<auto>')}
-    assert set(EMPTY_UNSET) == optional | set(SCALAR_TABLES) | {'server.bind', 'relay.bind'}
+    reference = parse_reference()
+    optional = {path for path, kind in KEYS.items() if kind is Kind.TEXT and path not in SCALAR_TABLES
+                and default_at(path) in (None, '<none>', '<auto>') and documented_default(path, reference) is None}
+    assert not optional & set(EMPTY_IS_DEFAULT)
+    assert set(EMPTY_UNSET) == optional | set(SCALAR_TABLES) | set(EMPTY_IS_DEFAULT)
     assert len(EMPTY_UNSET) == len(set(EMPTY_UNSET))
+    assert not {f'database.timescale.{name}' for name in TIMESCALE_KEYS} & set(EMPTY_UNSET)
 
 
 @mark.unit
 def test_read_environment_empty_unset() -> None:
     """An empty variable for an optional text key sets nothing; for another text key it is kept empty."""
     layer, variables = read_environment({'HYPERSHELL_DATABASE_HOST': '', 'HYPERSHELL_SERVER_BIND': '',
-                                         'HYPERSHELL_LOGGING_FILE': '', 'HYPERSHELL_LOGGING_DATEFMT': ''})
-    assert layer == {'logging': {'datefmt': ''}}
-    assert set(variables) == {('logging', 'datefmt')}
+                                         'HYPERSHELL_LOGGING_FILE': '', 'HYPERSHELL_LOGGING_DATEFMT': '',
+                                         'HYPERSHELL_TASK_CWD': '', 'HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY': ''})
+    assert layer == {'logging': {'datefmt': ''}, 'database': {'timescale': {'segmentby': ''}}}
+    assert set(variables) == {('logging', 'datefmt'), ('database', 'timescale', 'segmentby')}
 
 
 DURATION_KEYS: Tuple[str, ...] = (

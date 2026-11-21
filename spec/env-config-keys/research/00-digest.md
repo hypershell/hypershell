@@ -70,9 +70,9 @@ fields (`core/tls.py:472-477`), `logging.file.path`/`compress`, `database.user`/
 (`data/core.py:90-94`), `task.cwd`. The configuration holds `''` (R4); the reader keeps today's
 meaning, so `HYPERSHELL_DATABASE_PASSWORD=` is still refused rather than connecting as another role.
 
-**D9 — The key variable is recognised by the matcher, not by its exact spelling** (05 §2). Since R1
-makes any letter case set `server.auth`, the client's task environment and `--ssh --env` exports leave
-out every name the matcher maps to `server.auth`, not only `HYPERSHELL_SERVER_AUTH`.
+**D9 — Key variables are recognised by the matcher** (05 §2). Key variables and relay variables are
+recognised by the matcher wherever HyperShell handles them by name: the client's task environment,
+`--ssh --env` exports, each launched client's environment and the relay's site fence.
 
 **D10 — Open points the briefs left, settled in PLAN §2 and listed for sign-off:** a scalar and its
 table both set (`logging.file`, `ssh.nodelist`, `database`); a name equal to a table; two spellings

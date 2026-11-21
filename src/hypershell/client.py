@@ -509,7 +509,7 @@ def task_env(task: Task, slot: int = 0, slot_count: int = 1) -> Dict[str, str]:
         **load_task_env(),
         **Namespace.from_dict(task_data).to_env().flatten(prefix='TASK'),
         **tag_data,
-        'TASK_CWD': config.task.cwd or os.getcwd(),  # Empty text is unset: the client's own directory.
+        'TASK_CWD': config.task.cwd,
         'TASK_OUTPATH': os.path.join(default_path.lib, 'task', f'{task.id}.out'),
         'TASK_ERRPATH': os.path.join(default_path.lib, 'task', f'{task.id}.err'),
         'TASK_CSVPATH': os.path.join(default_path.lib, 'task', f'{task.id}.csv'),
@@ -831,7 +831,7 @@ class TaskExecutor(StateMachine):
         self.resource_limit_warned_memory = False
         self.process = Popen(self.task.command, shell=True,
                              stdout=self.redirect_output, stderr=self.redirect_errors,
-                             cwd=config.task.cwd or None, env=env)
+                             cwd=config.task.cwd, env=env)
         log.info(f'Running task ({self.task.id})')
         log.debug(f'Running task ({self.task.id})[{self.process.pid}]: {self.task.command}')
         return TaskState.WAIT_TASK

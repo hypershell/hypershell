@@ -150,13 +150,11 @@ fields (`database.password_env`), `hs config get server.auth`. R4 needs nothing 
 every command reads the key through `resolve_auth` ([05 §2](research/05-auth-export-blame.md)), whose
 `str(value)` becomes a no-op.
 
-**The key variable by the matcher (decision S6).** R1 documents that a variable may be written in any
-letter case. Every place that handles the key variable by name (the client's task environment,
-`client.py` `inherited_task_env`, and its no-key hint; `--ssh --env` exports and `assigns_key`,
-`cluster/launch.py`) recognises the same names the matcher maps to `server.auth`: one predicate,
-`is_key_variable(name)` in `core/config.py`, replaces the exact-name tests. Key variables and relay
-variables are recognised by the matcher wherever HyperShell handles them by name (Review-cycle-1
-rulings, below).
+**Key variables by the matcher (decision S6).** Key variables and relay variables are recognised by
+the matcher wherever HyperShell handles them by name (Review-cycle-1 rulings, below): the client's
+task environment (`client.py` `inherited_task_env`) and its no-key hint, `--ssh --env` exports,
+`assigns_key` and each launched client's environment (`cluster/launch.py`), and the relay's site
+fence (`relay/site.py`), through `is_key_variable` and `is_relay_variable` in `core/config.py`.
 
 ### 2.6 Duration keys — R6
 
@@ -220,6 +218,11 @@ R4 keeps `''` in the configuration; the readers that took the `None` cmdkit gave
 `core/logging.py` (`logging.file.path`, `compress`), `data/core.py` (`database.user`/`password` before
 `_validate_user_and_password`, so `HYPERSHELL_DATABASE_PASSWORD=` is still refused and never connects
 as the OS user), and `task.cwd`. `server.advertise` and `relay.zone` already do.
+
+*As built (review-cycle rulings F2, F3, N1, N2):* the environment layer gives no value for an empty
+variable of a key in `EMPTY_UNSET` (`core/config_schema.py`), so the key's default applies; every
+other text key holds `''`. The readers above (`core/tls.py`, `core/logging.py`, `data/core.py`,
+`client.py`'s `task.cwd`) are as on `develop`, so a file's `""` reads as before.
 
 ### 2.10 `autoscale.failed_launches` — R1
 
@@ -306,8 +309,8 @@ Checked against [`.agents/factory/invariants.md`](../../.agents/factory/invarian
 | A new module with a ~115-entry key table and a sync test | R1/R2 need the schema to match names; R5 needs a kind per key; R8 needs one rule for loader, `blame` and completion | Typing from the default is wrong for at least eleven keys (GOAL Clarifications); cmdkit's `converter` sees only values (GOAL Non-goals) |
 | Two typing moments: scalars at load, durations at the command's start | R5 asks the configuration to hold converted values; R6 asks the reading command to refuse at start | All at load would stop `hs list`/`hs config` on a bad file value and turn #106's text defaults into numbers before argparse sees them (breaks #106 tests and the sibling cycle) |
 | R6 refusals exit 3 while #106's duration keys exit 2 | R6 says "a configuration error"; `bad_config` is today's status for those | Raising `ArgumentError` (2) would call a configuration value an argument; #106's keys are left as they are because the sibling pins `hs relay`'s status |
-| Empty text read as unset in `core/tls.py`, logging, `data/core.py`, `task.cwd` | R4 keeps `''`; without this, an empty TLS path or fingerprint, or an empty password, changes meaning | Mapping `''` to `None` in the env layer contradicts R4 ("the configuration SHALL hold … an empty value") |
-| `is_key_variable` in `client.py`/`cluster/launch.py` | R1's "any letter case" makes a second spelling of the key variable documented; without it that spelling reaches tasks | Refusing other spellings of the key variable adds a new error and still leaves whatever spelling is accepted to strip |
+| An empty variable for a key of `EMPTY_UNSET` (the optional text keys, the scalar tables, the binds, `database.host`, `task.cwd`) is not given; every other text key holds `''` | The key's default applies, as with no variable (F2, F3, N1, N2 rulings); `core/tls.py`, `core/logging.py`, `data/core.py` and `client.py`'s `task.cwd` reader are as on `develop`, so a file's `""` reads as before | Reading `''` as unset in each reader changes what a file's `""` does; mapping every empty variable to `None` contradicts R4 ("the configuration SHALL hold … an empty value") |
+| `is_key_variable` and `is_relay_variable` (`core/config.py`), used by `client.py`, `cluster/launch.py` and `relay/site.py` | Key variables and relay variables are recognised by the matcher wherever HyperShell handles them by name (S6; review-cycle-1 rulings) | An exact-name test names one variable where the matcher maps several names to a key; one predicate keeps every place in step with the matcher |
 | `logging.file` scalar and entries merged in the env layer | Keeps today's `LOGGING_FILE=enabled` + `LOGGING_FILE_LEVEL` outcome and stops losing a path | "Table wins" (today) silently drops a path; refusing breaks a pinned test and a working combination |
 
 ## 4. Rabbit holes (resolved)
@@ -342,7 +345,7 @@ otherwise):
 - **S4** Empty text on a `bool`/`int`/`number` key is refused (`HYPERSHELL_SERVER_TLS_ENABLED=` no
   longer turns TLS off; release-note under change 4).
 - **S5** Empty text on an optional text key reads as unset in its reader (§2.9).
-- **S6** The key variable is recognised in any letter case for stripping (§2.5).
+- **S6** Key variables are recognised by the matcher wherever HyperShell handles them by name (§2.5).
 - **S7** `HYPERSHELL_EXPORT_foo` beside a file's `foo` gives two task variables, `foo` and `FOO`
   (release-note under change 5).
 - **S8** `logging.file` scalar and entries merge; for `ssh.nodelist` and `database` the table wins as
@@ -450,10 +453,9 @@ private notes, which the foreman hands to the builder directly.
   "empty means unset" applies to the environment layer only. A test pins the file case.
 - **F4.** The two new seeds cite line numbers as of this branch.
 - **Wording.** Docstrings, `AGENTS.md`, `invariants.md` and test names describe the outcome
-  ("recognised by the matcher") and do not single out letter case. Rename
-  `test_key_variable_any_case_not_inherited` and `test_key_variable_any_case_not_exported` to
-  `test_key_variable_forms_not_inherited` and `test_key_variable_forms_not_exported`, and update
-  `red.txt` to match.
+  ("recognised by the matcher"). The two key-variable tests are
+  `test_key_variable_forms_not_inherited` and `test_key_variable_forms_not_exported`, and `red.txt`
+  names them.
 - **Sibling #112** (`cluster-nodb-and-zero-period`) lands first. Rebase onto it. Eight
   `tests/test_period_floor.py::test_period_key_refused` cases (`env-nan` and `env-neginf`) expect the
   "greater than zero" message, but the environment's `nan` and `-inf` now arrive as text and are

@@ -4,11 +4,11 @@ title: Environment variables reach every configuration key with the value as wri
   the remaining duration keys take units
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/env-config-keys
 base: develop
 current_phase: done
-last_updated: '2026-11-16'
+last_updated: '2026-11-21'
 phases:
 - id: P1
   name: 'Tests first: the regression tests and the red list on 90ab2fc2 (tests only)'
@@ -124,6 +124,7 @@ phases:
     ''versionchanged:: 2.9.0'' docs/_include/config_param_ref.rst)" -ge 19 && ! grep
     -qs ''aligns to the path'' docs/_include/config_intro.rst docs/_include/config_intro_alt.rst
     docs/manual.rst && grep -q config_schema AGENTS.md && grep -q config_schema .agents/factory/invariants.md
+    && grep -q EMPTY_UNSET AGENTS.md && grep -q EMPTY_UNSET .agents/factory/invariants.md
     && grep -q ''recognised by the matcher'' AGENTS.md && grep -q ''recognised by
     the matcher'' .agents/factory/invariants.md && grep -q ''recognised by the matcher''
     docs/security.rst && grep -q ''optional text key'' docs/_include/config_intro.rst
@@ -527,6 +528,66 @@ retuned (P6 greps the matcher wording and the empty-text rule; P7 runs the suite
   flake. CLI drive in `temp_site.sh` (`hs cluster … --no-db --no-tls -N1 -H 127.0.0.1`, two tasks):
   `HYPERSHELL_SERVER_AUTH_ENV`, `_EVAL` and another spelling under `--launcher=env` and `--mpi` (an
   `mpirun` stand-in that runs its arguments) each print both tasks' output, exit 0.
+
+## Review-cycle-2 remediation (2026-11-21)
+
+`REVIEW.md` cycle 2 (changes-requested on `085538c8`, N1–N3) and the maintainer's rulings at the end
+of `PLAN.md` ("Review-cycle-2 rulings"). P2, P6 and P7 reopened; P6's gate also greps `EMPTY_UNSET`
+in `AGENTS.md` and `invariants.md`.
+
+- [x] **N2** — `client.py`: `task_env` gives `TASK_CWD` as `config.task.cwd` and `TaskExecutor`
+      starts a task with `cwd=config.task.cwd`, as on `develop`, so a file's `cwd = ""` reads as
+      before. `core/config_schema.py`: `task.cwd` is in `EMPTY_UNSET`, so an empty
+      `HYPERSHELL_TASK_CWD` is not given and tasks run in the client's own directory. Tests:
+      `test_env_config.py::test_empty_task_cwd_in_file_as_before` (`TASK_CWD` is `''`; `hs cluster`
+      stops on `FileNotFoundError` for `''`, no task output), `test_empty_task_cwd_from_environment_not_given`
+      (`TASK_CWD` as with no variable; `hs cluster` runs the task in the site), and
+      `test_empty_optional_text_not_given[task.cwd]`.
+- [x] **N1** — `core/config_schema.py`: `database.timescale.chunk_interval`, `segmentby`, `orderby`
+      and `compress_after` leave `EMPTY_UNSET`; the environment holds their empty text as a file does.
+      `HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY=` gives `segmentby = ""` (no segmenting), alone and over
+      a file's `segmentby = "id"`; an empty `chunk_interval`, `orderby` or `compress_after` is refused
+      by `Settings.from_config` with the file's message. `tests/test_config_schema.py`:
+      `documented_default` reads a literal default from the parameter reference (the key's
+      `(default: …)`, or a timescale key's `(default …)`/`(…)` in its table's text);
+      `test_empty_unset_keys` takes as optional a text key with no default, or one that means none, in
+      both the defaults table and the reference, plus the scalar tables and `EMPTY_IS_DEFAULT`
+      (`server.bind`, `relay.bind`, `database.host`, `task.cwd`: a default of their own, which an empty
+      variable gives, as the F2 and N2 rulings name). `test_documented_default` pins the reader.
+      Tests in `test_env_config.py`: `test_empty_segmentby_from_environment_no_segmenting[alone|over-file]`,
+      `test_empty_timescale_setting_as_in_file[chunk_interval|orderby|compress_after]`;
+      `test_read_environment_empty_unset` covers `segmentby` and `task.cwd`.
+- [x] **Every other `EMPTY_UNSET` member checked** against the rule: none moved. `database.host` has a
+      documented default (`localhost`) and stays, by the F2 ruling, beside the binds and `task.cwd`
+      (an empty host is the default host). The rest have no literal default in either place
+      (`<none>`, `<auto>`, or one given in words: `none`, `by .bind`, a path pattern, "the local
+      account").
+- [x] **N3** — `AGENTS.md` § Configuration: an empty variable for a key of `EMPTY_UNSET` is not
+      given; every other text key holds an empty variable as written, as it holds a file's `""`.
+- [x] **Guide** — `config_intro.rst` names `database.host` and `task.cwd` with the binds (an empty
+      bind, host or task directory is the default one) and gives
+      `HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY=` as a text key with a default of its own holding
+      `""`; `manual.rst` the same in short.
+- [x] **Wording** — `PLAN.md` (§2.5, S6, the deviation table, the review-cycle-1 wording note),
+      `research/00-digest.md` D9 and `research/05` §2: key variables and relay variables are
+      recognised by the matcher wherever HyperShell handles them by name. The deviation table's
+      empty-text row and an as-built note in PLAN §2.9 give the remediation as built;
+      `research/02` states what the base did with `HYPERSHELL_ZONE` as a finding.
+- [x] Red then green: on `085538c8`'s source (`RED_BASE_REV=085538c8 red_check.sh` with this tree's
+      tests) 9 of the 10 new or changed nodes are RED by assertion; the tenth,
+      `test_empty_task_cwd_from_environment_not_given`, is a must-keep guard (its outcome held on
+      `085538c8` through the old reader) and fails with `task.cwd` taken out of `EMPTY_UNSET` in a
+      scratch copy. All 10 green here.
+- Gates (on `fe7447cc` + this work, sandbox off): P2 1398 passed, 1 skipped (5m41s), drive modes
+  `keys`, `typed` ok; P6 124 passed, greps and `sphinx-build -W` clean; P7 (30m53s) full suite
+  serially 3488 passed, 138 skipped, red list 72 passed, Python 3.11 on the five new test files 249
+  passed, every drive mode ok, `red_check.sh` on `90ab2fc2` 72 of 72 RED, docs clean.
+  `test_upgrade_cli.py::test_waits_for_slow_peer_upgrade` passed in the full run; no flake. CLI
+  drive in `temp_site.sh` (`hs cluster tasks.in --no-db --no-tls -N1 -H 127.0.0.1`): with
+  `HYPERSHELL_TASK_CWD=` both tasks run in the site (`cat marker.txt` prints `here`), exit 0; with a
+  file's `cwd = ""` the client stops on `FileNotFoundError` for `''`, as on `develop`.
+  `HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY=` gives `Settings.segmentby == ''`; an empty `_ORDERBY`
+  is refused naming `database.timescale.orderby`.
 
 ---
 

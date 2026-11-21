@@ -87,7 +87,7 @@ shows up only in a drive comment noting the defect (`spec/relay/drive/relay_prob
 
 | Setter | Variables | Child reads as |
 |---|---|---|
-| `cluster/launch.py:243-247` `client_launch` | `HYPERSHELL_SERVER_AUTH` (`token_hex(64)`, `cluster/remote.py:273`, `ssh.py:267`, `local.py:216`), `HYPERSHELL_ZONE` | `server.auth` via `resolve_auth('server')` (`client.py:1665`); `ZONE` is read by no hypershell code, only by user launchers (`test_relay_topology.py:899`), and leaks into the client's layer as key `zone` (P) |
+| `cluster/launch.py:243-247` `client_launch` | `HYPERSHELL_SERVER_AUTH` (`token_hex(64)`, `cluster/remote.py:273`, `ssh.py:267`, `local.py:216`), `HYPERSHELL_ZONE` | `server.auth` via `resolve_auth('server')` (`client.py:1665`); `ZONE` is read by no hypershell code, only by user launchers (`test_relay_topology.py:899`), and on the base sets key `zone` in the client's layer (P) |
 | `cluster/launch.py:464` SSH remote script | `read -r HYPERSHELL_SERVER_AUTH; export` | same |
 | `cluster/launch.py:385-403` `ssh_env_exports` ← `ssh.py:291,430` `Namespace.from_env('HYPERSHELL')` | every raw `HYPERSHELL_*` name and string (not expanded), the key excepted | the far side's own loader, so the new mapping applies there, unchanged by this fix |
 | `cluster/launch.py:134,531` | `{**os.environ, **load_task_env(), **self.env}` | plain dict merge |

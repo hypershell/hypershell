@@ -85,11 +85,11 @@ Probe today: `HYPERSHELL_SERVER_AUTH=0012345678901234` → `config.server.auth =
 (int), `resolve_auth` `'12345678901234'`. With text kept, `str(value)` (core/config.py:394) is a
 no-op; nothing else needs changing for R4.
 
-**The key variable's spellings.** Once R1 documents that a key's variable may be written in any
-letter case, every place that handles the key variable by name (`inherited_task_env`, client.py;
-`ssh_env_exports` and `assigns_key`, cluster/launch.py; the client's no-key hint) should recognise
-the same set of names the matcher maps to `server.auth`, through one predicate from the matcher. The
-relay's site fence matches the key by value and needs no change (relay/site.py).
+**Key variables by the matcher.** Key variables and relay variables are recognised by the matcher
+wherever HyperShell handles them by name: `inherited_task_env` and the client's no-key hint
+(client.py); `ssh_env_exports`, `assigns_key` and `ClientLaunch.start` (cluster/launch.py); the
+relay's site fence (`is_fenced`, relay/site.py). Each place asks one predicate from the matcher
+(`is_key_variable`, `is_relay_variable` in core/config.py).
 
 ## 3. R7 — `[export]`
 

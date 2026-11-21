@@ -504,7 +504,9 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   duration keys no option reads, exit 3). `ENV_VARIABLES` records the variable that set each key, so
   `blame`, `hs config which` and completion name it. **A new documented key gets its kind in `KEYS`
   and its entry in `docs/_include/config_param_ref.rst` in the same commit** —
-  `tests/test_config_schema.py` fails otherwise.
+  `tests/test_config_schema.py` fails otherwise. An empty variable for a key of `EMPTY_UNSET` is
+  not given (the key's default applies); every other text key holds an empty variable as written,
+  as it holds a file's `""`.
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means
   **`0` = unlimited/auto** for many numeric knobs.
 - Defaults agents care about: server `port`, `bundlesize`, `bundlewait`, `evict` (≥10s),

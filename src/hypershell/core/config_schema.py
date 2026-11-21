@@ -149,17 +149,18 @@ SCALAR_TABLES: Final[Tuple[str, ...]] = ('logging.file', 'ssh.nodelist', 'databa
 EMPTY_UNSET: Final[Tuple[str, ...]] = (
     'logging.file', 'logging.file.path', 'logging.file.compress', 'logging.file.format',
     'database', 'database.url', 'database.file', 'database.database', 'database.schema', 'database.host',
-    'database.user', 'database.password', 'database.timescale.chunk_interval', 'database.timescale.segmentby',
-    'database.timescale.orderby', 'database.timescale.compress_after',
+    'database.user', 'database.password',
     'server.bind', 'server.advertise', 'server.tls.cert', 'server.tls.key', 'server.tls.cafile',
     'server.tls.fingerprint', 'server.tls.ciphers', 'server.tls.servername',
-    'ssh.args', 'ssh.nodelist', 'autoscale.sites',
+    'task.cwd', 'ssh.args', 'ssh.nodelist', 'autoscale.sites',
     'relay.database', 'relay.bind', 'relay.zone', 'relay.site',
     'relay.upstream.tls.cert', 'relay.upstream.tls.cafile', 'relay.upstream.tls.fingerprint',
 )
-"""Optional text keys, and the bind addresses: an empty variable for one is not given.
+"""Optional text keys, the bind addresses, the database host and the task directory: an empty variable
+for one is not given.
 
-The key's default applies, as it does when no variable is set (an empty bind is the default bind).
+The key's default applies, as it does when no variable is set (an empty bind, host or task directory
+is the default one). Every other text key holds an empty variable as written, as it holds a file's `""`.
 """
 
 VARIANTS: Final[Tuple[str, ...]] = ('_env', '_eval')

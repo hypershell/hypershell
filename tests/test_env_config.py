@@ -19,6 +19,7 @@ from typing import Any, Dict, Final, List, Optional, Tuple
 import os
 import sys
 import time
+from ast import literal_eval
 from pathlib import Path
 from signal import SIGTERM, SIGKILL
 from subprocess import Popen, PIPE, DEVNULL, TimeoutExpired, run
@@ -331,8 +332,9 @@ EMPTY_NOT_GIVEN: Final[Dict[str, Tuple[str, str]]] = {
     'server.bind': ('server.bind', 'HYPERSHELL_SERVER_BIND'),
     'relay.bind': ('relay.bind', 'HYPERSHELL_RELAY_BIND'),
     'server.tls.cert': ('server.tls.cert', 'HYPERSHELL_SERVER_TLS_CERT'),
+    'task.cwd': ('task.cwd', 'HYPERSHELL_TASK_CWD'),
 }
-"""Optional text keys (and the bind addresses): the key compared, and the variable given empty."""
+"""Optional text keys (and the binds and the task directory): the key compared, and the variable given empty."""
 
 
 @mark.integration
@@ -402,6 +404,115 @@ def test_empty_password_from_environment_not_given(temp_site: Path) -> None:
                        HYPERSHELL_DATABASE_USER='u', HYPERSHELL_DATABASE_PASSWORD='')
     assert rc == exit_status.bad_config, stderr
     assert "Must provide 'password' if 'user' provided" in stderr, stderr
+
+
+TIMESCALE_SHAPE: Final[str] = '''\
+from hypershell.data.timescale import Settings
+
+
+def shape():
+    """The timescale settings the configuration gives, or the refusal's message."""
+    try:
+        settings = Settings.from_config(config.database.get('timescale'))
+    except Exception as error:
+        return f'refused: {error}'
+    return settings.segmentby, settings.orderby, settings.chunk_interval, settings.compress_after
+'''
+"""Child imports defining `shape()`: the `[database.timescale]` settings, as `hs initdb` reads them."""
+
+
+@mark.integration
+@mark.parametrize('file', ['', '[database.timescale]\nsegmentby = "id"\n'], ids=['alone', 'over-file'])
+def test_empty_segmentby_from_environment_no_segmenting(temp_site: Path, file: str) -> None:
+    """An empty `HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY` is `segmentby = ""`: no segmenting, as in a file."""
+    site = Path(str(temp_site))
+    config_file = site / 'config.toml'
+    config_file.write_text(file, encoding='utf-8')
+    rc, seen, stderr = config_repr(site, 'shape()[0]', TIMESCALE_SHAPE, HYPERSHELL_CONFIG_FILE=str(config_file),
+                                   HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY='')
+    assert rc == exit_status.success, stderr
+    assert seen == repr('')
+
+
+@mark.integration
+@mark.parametrize('name', ['chunk_interval', 'orderby', 'compress_after'])
+def test_empty_timescale_setting_as_in_file(temp_site: Path, name: str) -> None:
+    """An empty `HYPERSHELL_DATABASE_TIMESCALE_<KEY>` is held as written and refused as the file's `""` is."""
+    site = Path(str(temp_site))
+    config_file = site / 'config.toml'
+    config_file.write_text(f'[database.timescale]\n{name} = ""\n', encoding='utf-8')
+    rc, from_file, stderr = config_repr(site, 'shape()', TIMESCALE_SHAPE, HYPERSHELL_CONFIG_FILE=str(config_file))
+    assert rc == exit_status.success, stderr
+    assert literal_eval(from_file).startswith(f"refused: Invalid database.timescale.{name} = ''"), from_file
+    rc, from_environment, stderr = config_repr(site, 'shape()', TIMESCALE_SHAPE,
+                                               **{f'HYPERSHELL_DATABASE_TIMESCALE_{name.upper()}': ''})
+    assert rc == exit_status.success, stderr
+    assert from_environment == from_file
+
+
+CWD_FILE: Final[str] = '[task]\ncwd = ""\n'
+"""A configuration file giving an empty task directory."""
+
+CWD_TASK_ENV: Final[str] = 'from hypershell.client import task_env\nfrom hypershell.data.model import Task'
+"""Child imports for the task variables a client gives a task."""
+
+
+def run_until(site: Path, argv: List[str], env: Dict[str, str], token: str) -> Tuple[Optional[int], str, str]:
+    """Run `argv` in its own process group until it exits or `token` is in its stderr; stop it if still running.
+
+    Returns its status (None if it was stopped), stdout and stderr. The test fails if neither happens
+    within the deadline.
+    """
+    out, err = site / 'until.out', site / 'until.err'
+    with open(out, mode='w') as stdout, open(err, mode='w') as stderr:
+        proc = Popen(argv, cwd=site, env=env, stdin=DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
+    deadline = time.monotonic() + DEADLINE
+    while proc.poll() is None and token not in err.read_text():
+        if time.monotonic() > deadline:
+            stop_group(proc)
+            pytest.fail(f'{" ".join(argv)} neither exited nor gave {token!r}: {err.read_text()[-2000:]}')
+        time.sleep(0.1)
+    status = proc.poll()
+    if status is None:
+        stop_group(proc)
+    return status, out.read_text().strip(), err.read_text().strip()
+
+
+@mark.integration
+def test_empty_task_cwd_in_file_as_before(temp_site: Path) -> None:
+    """A file's empty `task.cwd` is read as before: tasks are given it and cannot start in it."""
+    site = Path(str(temp_site))
+    config_file = site / 'config.toml'
+    config_file.write_text(CWD_FILE, encoding='utf-8')
+    rc, seen, stderr = config_repr(site, "task_env(Task.new(args='true'))['TASK_CWD']", CWD_TASK_ENV,
+                                   HYPERSHELL_CONFIG_FILE=str(config_file))
+    assert rc == exit_status.success, stderr
+    assert seen == repr('')
+    (site / 'marker.txt').write_text('here\n', encoding='utf-8')
+    taskfile = create_taskfile(site, ['cat marker.txt'])
+    env = child_env(site, HYPERSHELL_CONFIG_FILE=str(config_file))
+    _, stdout, stderr = run_until(site, ['hs', 'cluster', '--no-db', '--no-tls', '-N1', '-H', '127.0.0.1',
+                                              str(taskfile)], env, token="No such file or directory: ''")
+    assert "FileNotFoundError: [Errno 2] No such file or directory: ''" in stderr, stderr
+    assert 'here' not in stdout
+
+
+@mark.integration
+def test_empty_task_cwd_from_environment_not_given(temp_site: Path) -> None:
+    """An empty `HYPERSHELL_TASK_CWD` is not given: tasks run in the client's own directory."""
+    site = Path(str(temp_site))
+    rc, unset, stderr = config_repr(site, "task_env(Task.new(args='true'))['TASK_CWD']", CWD_TASK_ENV)
+    assert rc == exit_status.success, stderr
+    rc, seen, stderr = config_repr(site, "task_env(Task.new(args='true'))['TASK_CWD']", CWD_TASK_ENV,
+                                   HYPERSHELL_TASK_CWD='')
+    assert rc == exit_status.success, stderr
+    assert seen == unset != repr('')
+    (site / 'marker.txt').write_text('here\n', encoding='utf-8')
+    taskfile = create_taskfile(site, ['cat marker.txt'])
+    status, stdout, stderr = run_bounded(site, ['hs', 'cluster', '--no-db', '--no-tls', '-N1', '-H', '127.0.0.1',
+                                                str(taskfile)], child_env(site, HYPERSHELL_TASK_CWD=''))
+    assert status == exit_status.success, stderr
+    assert stdout == 'here'
 
 
 def start_server(site: Path, env: Dict[str, str], *args: str) -> Popen:
