@@ -3,7 +3,7 @@ slug: relay-shutdown-tail
 title: A relay run ends within seconds of its last result
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/relay-shutdown-tail
 base: develop
 current_phase: done

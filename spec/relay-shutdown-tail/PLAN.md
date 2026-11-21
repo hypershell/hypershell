@@ -274,3 +274,10 @@ now says the submit thread checks the period only when another task arrives, so 
 for a full bundle, a task arriving after the period, or the end of input. That behaviour is already
 seeded (`issues/stream-bundlewait-commit-wait.md`). develop (#116) is merged. Review cycle 3, the
 last, is scoped to F2 and the merge.
+
+## Review-cycle-3 ruling (2026-11-21)
+
+Review cycle 3 approved at `06ecb24f` with no finding; the loop converged at the last cycle. No cycle
+had a CONFIRMED finding in a high-blast-radius file or a security or DB-lifecycle invariant, so the
+human gate was never triggered. The cycle publishes and merges on green under the maintainer's
+standing mandate.
