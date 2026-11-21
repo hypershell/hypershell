@@ -231,17 +231,6 @@ and after `group-advance-strands-lower-group`. Pre-existing, and found by that c
 *Horizon: near-term · Depends on: — · Refs: `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
 **Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
 
-## An autoscaler read that meets a locked SQLite database ends the cluster
-
-With failed-launch counting on (the default for `hs cluster`), the autoscaler reads client
-registrations on every check. On SQLite under a busy stream of submissions that read can fail with
-`database is locked`, and the autoscaler ends the run with a traceback file instead of treating it
-as transient. Seen once on CI; introduced with `cluster-launch-failures` (#107), not yet released.
-
-*Horizon: near-term, small · Depends on: — · Refs: `spec/cluster-launch-failures/`; the submitter's
-side above*
-**Seed:** [`issues/autoscale-read-database-locked.md`](issues/autoscale-read-database-locked.md) · *status: adopted:cluster-launch-followups*
-
 ## `hs update --delete` ignores field assignments and tag changes given with it
 
 `hs update --delete group=9` deletes the selected tasks and says nothing about `group=9`; a mistaken
@@ -310,16 +299,6 @@ confirmation then names the already-evicted client. Either way the row waits unt
 *Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
-## Duration settings read only from configuration still take bare seconds only
-
-`server.evict`, `client.heartrate` and the relay's duration keys (`bundlewait`, `poll`,
-`retention`, `timeout`, and the upstream `heartrate`, `evict_hint`, `deadline` and `backoff`) have no
-command-line option and are read straight from configuration, so `evict = "10m"` is refused or
-misread while `autoscale.period = "5m"` works.
-
-*Horizon: near-term, small · Depends on: `duration-units-remaining` (landed, #106) · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/duration-units-config-keys.md`](issues/duration-units-config-keys.md) · *status: adopted:env-config-keys*
-
 ## On the 2.8 line, the queue key can still be given on a command line without a warning
 
 Since #104, 2.9 refuses `-k`/`--auth` on `hs client`, `hs server` and `hs submit -q`, and its docs
@@ -334,32 +313,17 @@ maintainer's call. Pre-existing on the 2.8 line.
 `key-option-refused` (landed, #104: the 2.9 half); the key hand-off hardening (#80, #81)*
 **Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: unshaped*
 
-## Environment variables cannot reach every configuration key
-
-The guide says every option can be set by a `HYPERSHELL_*` variable, but every underscore in the
-name is a level of nesting and every value is coerced (`src/hypershell/core/config.py:247-249`, by
-cmdkit). A key with an underscore of its own is out of reach: `server.tls.min_version`,
-`database.timescale.chunk_interval`, `connect_args`, and every `_env` / `_eval` variant, so
-`HYPERSHELL_SERVER_AUTH_ENV` makes `server.auth` a table. And a string key cannot be given `false`,
-`true`, `null`, an empty value or digits: an all-digit `HYPERSHELL_SERVER_AUTH` becomes an `int` and
-crashes `hs server`. `[export]` values reach tasks re-stringified (`007` becomes `7`). Every documented
-key should be settable, with the text given. Pre-existing since 2.7.0.
-
-*Horizon: near-term · Depends on: — · Refs: `server-auth-variant-collision` (landed, #97: the file
-form of `auth_env`; the environment form stays here); relay (its zone tables add more keys)*
-**Seed:** [`issues/env-config-key-mapping.md`](issues/env-config-key-mapping.md) · *status: adopted:env-config-keys*
-
 ## `hs config set` writes text that looks like a number, boolean or null as that type
 
 `hs config set` coerces its value by its look before writing it, whatever the key
 (`src/hypershell/config.py:284`): `hs config set autoscale.launcher false` writes the boolean, an
 all-digit `server.auth` loses its leading zeros and then fails the length check, and `null` fails with
 a traceback. A boolean key given `no` is written as text that reads as true. The same defect class
-`env-config-keys` fixes for `HYPERSHELL_*` variables; its key table and typed reader should serve
+`env-config-keys` (#113) fixed for `HYPERSHELL_*` variables; its key table and typed reader should serve
 this command too. Pre-existing.
 
-*Horizon: near-term, small · Depends on: `env-config-keys` (the key table) · Refs: its GOAL's
-Non-goals*
+*Horizon: near-term, small · Depends on: `env-config-keys` (landed, #113: the key table) · Refs:
+its GOAL's Non-goals*
 **Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: unshaped*
 
 ## `hs relay` cannot name the address its site clients dial
@@ -388,19 +352,6 @@ scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 
 *Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and its laptop evidence
 (`relay-hardening` landed, #103)*
 **Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
-
-## A `--no-db` cluster can report a failed run when a client dies just after its last result
-
-Since `cluster-launch-failures` (#107), `hs cluster` exits non-zero when every launched client has
-gone, one of them non-zero, with work remaining. Without a database the server keeps no rows to
-count, so a client that returned every result and then died in the moment before its `FINISHED`
-heartbeat leaves a server waiting to evict it, which reads as work remaining: the run is reported
-failed although every result is recorded. An exact answer needs a result counter in the server's
-Receiver.
-
-*Horizon: near-term, small · Depends on: `cluster-launch-failures` (landed, #107) · Refs: its PLAN §2.3
-and plan-gate ruling 3*
-**Seed:** [`issues/nodb-cluster-finish-race.md`](issues/nodb-cluster-finish-race.md) · *status: adopted:cluster-launch-followups*
 
 ## `rotatedb` lost-update window
 

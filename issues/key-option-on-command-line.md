@@ -65,7 +65,7 @@ the environment or the configuration.
 - Related: `spec/key-option-refused/` (#104: the 2.9 refusal, its GOAL *Non-goals* and
   `META.md` F2 on the split), `spec/server-auth-variant-collision/` (#97, also in 2.8.7: `auth_env`
   and `auth_eval` in a configuration file, the other way to keep a key out of a file),
-  [`env-config-key-mapping.md`](env-config-key-mapping.md) (which configuration keys an environment
-  variable can reach).
+  `spec/env-config-keys/` (#113: which configuration keys an environment variable can reach, and
+  how its value is typed).
 - Found by: the maintainer, reading the 2.9 release notes (2026-11-11); narrowed to the 2.8 half when
   `key-option-refused` landed (2026-11-14).
