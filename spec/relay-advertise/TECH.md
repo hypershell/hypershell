@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: feature/relay-advertise
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-21'
 phases:
 - id: P1
   name: 'Tests first: the red list on 08d867df (tests only)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -176,12 +176,12 @@ one atomic code+state commit.
 **Goal:** every new test is in the tree and fails on `08d867df` for what it checks; everything else
 in the touched test files passes.
 
-- [ ] `tests/test_relay_advertise.py` from the prototype (see above), unchanged otherwise.
-- [ ] `tests/test_config_schema.py` `MATCHES`: `'HYPERSHELL_RELAY_ADVERTISE': (('relay', 'advertise'), Kind.TEXT),`
+- [x] `tests/test_relay_advertise.py` from the prototype (see above), unchanged otherwise.
+- [x] `tests/test_config_schema.py` `MATCHES`: `'HYPERSHELL_RELAY_ADVERTISE': (('relay', 'advertise'), Kind.TEXT),`
       after `HYPERSHELL_RELAY_ZONE`.
-- [ ] `tests/test_env_config.py` `EMPTY_NOT_GIVEN`: `'relay.advertise': ('relay.advertise', 'HYPERSHELL_RELAY_ADVERTISE'),`
+- [x] `tests/test_env_config.py` `EMPTY_NOT_GIVEN`: `'relay.advertise': ('relay.advertise', 'HYPERSHELL_RELAY_ADVERTISE'),`
       after `relay.bind`.
-- [ ] Nothing outside `tests/` and `spec/` changes. A renamed test is renamed in `red.txt` too.
+- [x] Nothing outside `tests/` and `spec/` changes. A renamed test is renamed in `red.txt` too.
 - **Verify:** see frontmatter (the fence; `red.txt` holds 29 ids; `red_check` 29 of 29 red;
   `rest_green` over the five touched or neighbouring files). Dry-run at plan time: as stated.
 - **Touches:** `tests/test_relay_advertise.py`, `tests/test_config_schema.py`, `tests/test_env_config.py`.
