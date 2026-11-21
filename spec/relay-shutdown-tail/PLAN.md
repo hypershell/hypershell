@@ -265,3 +265,12 @@ rulings, under the maintainer's mandate:
   assignment of `finishing`, if it can be made deterministic. Otherwise record why not.
 - **Review cycle 2** is scoped to F1, the merge resolution and the coverage test. The merge touches
   `server.py`, so a CONFIRMED finding there triggers the human gate.
+
+## Review-cycle-2 ruling (2026-11-21)
+
+Review cycle 2 was changes-requested at `c9b41f95` on F2 alone (LOW, docs; the human gate was not
+triggered). Foreman's fix, under the maintainer's mandate: the `cluster_help.rst` `-w` passage
+now says the submit thread checks the period only when another task arrives, so a held task waits
+for a full bundle, a task arriving after the period, or the end of input. That behaviour is already
+seeded (`issues/stream-bundlewait-commit-wait.md`). develop (#116) is merged. Review cycle 3, the
+last, is scoped to F2 and the merge.
