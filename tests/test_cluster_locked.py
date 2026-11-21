@@ -21,10 +21,11 @@ module at import) on a tree without them.
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Final
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, Final
 
 # Standard libs
 import os
+import re
 import sys
 import time
 import logging
@@ -359,10 +360,16 @@ class LockHolder(threading.Thread):
 
     It waits (bounded) until `sync` is in the cluster's log at `log_path` and a task has been
     scheduled: with no client asking, the scheduler then waits on demand and reads nothing, so the
-    lock meets only the cluster's own reads. It then waits half a second more, takes the lock and
+    lock meets only the cluster's own reads. It then waits `delay` seconds more, takes the lock and
     touches `flag`, the gated launcher's signal. The monotonic times it took and released the lock
     are kept in `times`, with any error. `abort` ends a wait early.
     """
+
+    delay: float = 0.5
+    """Seconds between the cluster being ready and the lock being taken."""
+
+    condition: str = 'a scheduled task'
+    """What `ready` waits for in the database, as the error says it."""
 
     def __init__(self, path: Path, hold: float, flag: Path, log_path: Path, sync: str,
                  ready_timeout: float = 30) -> None:
@@ -381,10 +388,10 @@ class LockHolder(threading.Thread):
             deadline = time.monotonic() + self.ready_timeout
             while not self.ready():
                 if self.abort.is_set() or time.monotonic() > deadline:
-                    self.times['error'] = f'never saw {self.sync!r} with a scheduled task'
+                    self.times['error'] = f'never saw {self.sync!r} with {self.condition}'
                     return
                 time.sleep(0.02)
-            time.sleep(0.5)
+            time.sleep(self.delay)
             with exclusive(self.path):
                 self.times['locked_at'] = time.monotonic()
                 self.flag.touch()
@@ -399,13 +406,18 @@ def gated_launcher(flag: Path) -> str:
     return f"sh -c 'n=0; while [ ! -e {flag} ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n+1)); done; exit 1' sh"
 
 
-def start_cluster(site: Path, args: List[str], env: Dict[str, str] = None) -> Tuple[Popen, Path]:
-    """Start `hs cluster` on a task file of `TASKS` lines in `site`, in its own session; its log is returned."""
+def start_cluster(site: Path, args: List[str], env: Dict[str, str] = None,
+                  out_path: Optional[Path] = None) -> Tuple[Popen, Path]:
+    """
+    Start `hs cluster` on a task file of `TASKS` lines in `site`, in its own session; its log is returned.
+
+    Its standard output goes to `out_path` if given, else nowhere.
+    """
     (site / 'tasks.txt').write_text(''.join(f'echo {n}\n' for n in range(TASKS)))
     log_path = site / f'cluster-{time.monotonic_ns()}.log'
-    with open(log_path, mode='w') as log:
+    with open(log_path, mode='w') as log, open(out_path or os.devnull, mode='w') as out:
         proc = Popen([HS, 'cluster', 'tasks.txt', '--no-tls', '-H', ADDRESS, '-p', str(free_port()), *args],
-                     cwd=site, env={**os.environ, **(env or {})}, stdin=DEVNULL, stdout=DEVNULL, stderr=log,
+                     cwd=site, env={**os.environ, **(env or {})}, stdin=DEVNULL, stdout=out, stderr=log,
                      start_new_session=True)
     return proc, log_path
 
@@ -442,9 +454,36 @@ LAUNCH_HOLD: Final[float] = 7.5
 """Seconds the lock is held over a launcher-mode cluster: the watch sees the exit within 1 s and waits 5 s."""
 
 
-def hold_over(site: Path, log_path: Path, hold: float, sync: str) -> LockHolder:
+IDLE_SYNC: Final[str] = r'backing off (1[6-9]|[2-9][0-9]) seconds'
+"""The scheduler's trace line once its back-off has grown to 16 s or more, longer than any lock held here."""
+
+IDLE_READY: Final[float] = 45
+"""Seconds within which a working cluster must have finished its tasks and backed off that far."""
+
+
+class IdleLockHolder(LockHolder):
+    """
+    A lock holder that takes the lock at once when the cluster is idle.
+
+    Idle is every task complete and a line matching `sync` (a regular expression: the scheduler's
+    back-off) in the cluster's log. The scheduler then sleeps through the hold, so the lock meets
+    only the autoscaler's reads; the server's own threads meeting a locked database are outside what
+    the cluster promises.
+    """
+
+    delay = 0
+    condition = 'every task complete'
+
+    def ready(self) -> bool:
+        return (re.search(self.sync, self.log_path.read_text()) is not None and
+                count_rows(self.path, 'SELECT count(*) > 0 AND count(completion_time) = count(*) FROM task') == 1)
+
+
+def hold_over(site: Path, log_path: Path, hold: float, sync: str,
+              kind: Type[LockHolder] = LockHolder, ready_timeout: float = 30) -> LockHolder:
     """Start a lock holder on the site's database, signalling the gated launcher through `site/locked.flag`."""
-    holder = LockHolder(Path(os.environ['HYPERSHELL_DATABASE_FILE']), hold, site / 'locked.flag', log_path, sync)
+    holder = kind(Path(os.environ['HYPERSHELL_DATABASE_FILE']), hold, site / 'locked.flag', log_path, sync,
+                  ready_timeout=ready_timeout)
     holder.start()
     return holder
 
@@ -518,3 +557,31 @@ def test_launcher_cluster_with_a_locked_database_exits_with_the_launch_error(tem
     assert 'every launched client has exited with tasks remaining' in text, text[-4000:]
     assert locked_warnings(text), text[-4000:]
     assert ended - holder.times['released_at'] <= 10
+
+
+@mark.integration
+def test_autoscaling_cluster_with_working_clients_keeps_serving_after_a_lock(temp_site: Path) -> None:
+    """A lock held once the work is done: every task complete with its output, one warning, and still serving."""
+    site = Path(temp_site)
+    out_path = site / 'cluster.out'
+    proc, log_path = start_cluster(site, ['-Q', '60s', '-T', '1s', '--autoscaling', 'fixed', '-P', '1s',
+                                          '--launcher', 'env', '--remote-exe', HS],
+                                   env={'HYPERSHELL_LOGGING_LEVEL': 'TRACE'}, out_path=out_path)
+    holder = hold_over(site, log_path, AUTOSCALE_HOLD, IDLE_SYNC, kind=IdleLockHolder, ready_timeout=IDLE_READY)
+    try:
+        holder.join(timeout=IDLE_READY + AUTOSCALE_HOLD + 5)
+        ended = wait_for(proc, timeout=6)
+    finally:
+        holder.abort.set()
+        holder.join(timeout=15)
+        kill_group(proc)
+    text = log_path.read_text()
+    assert holder.times['error'] is None, holder.times
+    assert holder.times['released_at'] is not None, holder.times
+    assert ended is None, text[-4000:]
+    assert not tracebacks(site), text[-4000:]
+    assert not [line for line in text.splitlines() if 'CRITICAL' in line], text[-4000:]
+    assert len(locked_warnings(text)) == 1, locked_warnings(text)
+    assert sorted(out_path.read_text().split()) == [str(n) for n in range(TASKS)]
+    done = 'SELECT count(*) FROM task WHERE completion_time IS NOT NULL AND exit_status = 0'
+    assert count_rows(Path(os.environ['HYPERSHELL_DATABASE_FILE']), done) == TASKS

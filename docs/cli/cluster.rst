@@ -54,6 +54,10 @@ Description
    about naming the client's process id and zone.
 
 .. versionchanged:: 2.9.0
+   With ``--autoscaling``, a check that finds the SQLite database locked is skipped with a warning
+   and made again at the next period, instead of ending the run.
+
+.. versionchanged:: 2.9.0
    A run fed by a stream (standard input, a pipe or a named pipe) ends once that input ends and
    every task is done, not once the tasks read so far are done, so a line that arrives after a pause
    still runs. Input that is never closed keeps the run going until it is.

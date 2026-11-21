@@ -67,3 +67,10 @@ is skipped by the parser):
 - **Skill cause:** As `spec/contended-writes/META.md` F8. The rubric's LOW row ("missing-but-non-blocking test coverage") and its rule that every CONFIRMED finding loops back still disagree. Step 4 does not settle which applies to a gap with no wrong behaviour.
 - **Recommended fix:** As there. Any wording that exempts coverage-only findings from blocking needs the maintainer's ruling.
 - **Confidence:** high · **Effort:** small
+
+## F5 — Remediation re-runs a phase verify whose file fence a later phase legitimately broke
+`origin=hs-build:P2 severity=medium category=instruction status=open target=.claude/skills/hs-build/SKILL.md`
+- **What happened:** Remediation mode reopened P2 and re-ran its verify. Its tests and drives passed. Its last clause, `git diff --quiet 9c82842d -- src/hypershell/server.py …`, went red: P3's sanctioned `Receiver` counter changed `server.py` after P2. The gate was recorded red (`--record-attempt`) and retuned through `set_phase.py`, without the stale path.
+- **Skill cause:** Step 1 (remediation) says to reopen the phases covering the failing R-IDs and re-run their verifies. It does not warn that a phase's "unchanged since base" fence describes that phase's own commit, and a later phase may change the same files. So a reopened earlier phase's gate can fail for reasons unrelated to the fix, which also counts toward the circuit breaker.
+- **Recommended fix:** In remediation mode, have `hs-build` check each reopened phase's fence paths against later phases' `Touches` before running it, and retune the fence first. Alternatively, have `hs-plan` write fences as "unchanged since base, except files a later phase owns".
+- **Confidence:** high · **Effort:** small

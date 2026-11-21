@@ -39,12 +39,13 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: uv run pytest -q -p no:cacheprovider tests/test_cluster_locked.py tests/test_cluster_exit.py
     tests/test_autoscale_failed_launches.py tests/test_autoscale.py tests/test_zone_autoscale.py
     tests/test_relay_launch.py tests/test_relay_topology.py tests/test_topology_server.py
     && for m in locked-scale-fail locked-scale-off locked-scale-ok locked-launch;
     do .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-followups/drive/followups_drive.sh"
-    $m || exit 1; done && git diff --quiet 9c82842d -- src/hypershell/server.py src/hypershell/cluster/demand.py
+    $m || exit 1; done && git diff --quiet 9c82842d -- src/hypershell/cluster/demand.py
     src/hypershell/data src/hypershell/relay src/hypershell/cluster/topology.py
 - id: P3
   name: A --no-db cluster counts the results its server wrote
@@ -82,12 +83,15 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: git diff --quiet 9c82842d -- docs share tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py
-    src/hypershell/cluster/demand.py src/hypershell/data src/hypershell/submit.py
-    src/hypershell/core && for m in locked-scale-fail locked-scale-off locked-scale-ok
-    locked-launch nodb-crashy nodb-fail; do .agents/factory/bin/temp_site.sh sh "$PWD/spec/cluster-launch-followups/drive/followups_drive.sh"
-    $m || exit 1; done && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv314-clf uv run
-    --python 3.14 pytest -p no:cacheprovider -q && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv311-clf
+  verify: git diff --quiet 9c82842d -- docs ':(exclude)docs/cli/cluster.rst' share
+    tests/test_cluster_exit.py tests/test_autoscale_failed_launches.py src/hypershell/cluster/demand.py
+    src/hypershell/data src/hypershell/submit.py src/hypershell/core && d="$(git diff
+    --numstat 9c82842d -- docs/cli/cluster.rst)" && test "$(echo "$d" | cut -f2)"
+    = 0 && test "$(echo "$d" | cut -f1)" -le 4 && for m in locked-scale-fail locked-scale-off
+    locked-scale-ok locked-launch nodb-crashy nodb-fail; do .agents/factory/bin/temp_site.sh
+    sh "$PWD/spec/cluster-launch-followups/drive/followups_drive.sh" $m || exit 1;
+    done && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv314-clf uv run --python 3.14
+    pytest -p no:cacheprovider -q && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv311-clf
     uv run --python 3.11 pytest -p no:cacheprovider -q
 review:
   last_reviewed_commit: 836ae5bcad3c00c2bc423a496a46feb743717f69
@@ -146,7 +150,8 @@ one atomic code+state commit.
   `src/hypershell/cluster/watch.py`, plus `server.py`'s `Receiver` counter (P3 only, at most a few
   added lines, nothing removed). No edit to `cluster/demand.py`, `data/`, `submit.py`, `core/`,
   `relay/`, `cluster/topology.py`, docs, completions or configuration. A phase that finds it needs
-  one stops and escalates.
+  one stops and escalates. *Amended at review-cycle-1 remediation:* one `versionchanged:: 2.9.0`
+  clause in `docs/cli/cluster.rst` (PLAN, Review-cycle-1 rulings, F2); no other docs file.
 - Log wording the drive and tests match (keep the phrase `database was locked`):
   `Autoscale check skipped: database was locked (checking again in {period})` and
   `Could not read whether tasks remain: database was locked (reading again)`, both WARNING. The
@@ -272,6 +277,9 @@ run as today.
       its read precedes every change to the run of failures. Class docstring: a check that meets a
       locked database is skipped, and exits it saw are counted at the next check.
 - [x] No edit to `demand.py`, `AutoScalingCluster`, `AutoScalerThread`, `relay/`, `topology.py`.
+- [x] *Review-cycle-1 remediation (F1):* `tests/test_cluster_locked.py` gains
+      `test_autoscaling_cluster_with_working_clients_keeps_serving_after_a_lock`, the command-line
+      form of drive mode `locked-scale-ok` (see the remediation section below).
 - **Verify:** see frontmatter (P1's locked tests green with the autoscaling and relay suites; the
   four locked drive modes; `server.py`, `demand.py`, `data/`, `relay/`, `topology.py` unchanged).
   Dry-run at plan time: the pytest files other than the new one are green on the base; the four
@@ -307,9 +315,76 @@ still raises within 10 s.
       recorded in the commit body with its node id and both outcomes (the 3.11 suite had one such
       failure in an earlier cycle); one that fails twice stops the phase.
 - [x] Commit body: the drive results per mode and the suite totals per Python.
+- [x] *Review-cycle-1 remediation (F2):* one `versionchanged:: 2.9.0` clause in `docs/cli/cluster.rst`;
+      the fence check excludes that file and admits it only with no line removed and at most 4 added
+      (retuned through `set_phase.py`); the docs build passes with `-W`.
 - **Verify:** see frontmatter. Dry-run at plan time: the fence check passes and the whole suite on the
   base is green under both Pythons (totals in the plan commit); the drives as in P2/P3.
 - **Touches:** `spec/cluster-launch-followups/TECH.md` only.
+
+---
+
+## Review-cycle-1 remediation (2026-11-21)
+
+Under the rulings at the end of [`PLAN.md`](PLAN.md) (review cycle 1 approved at `836ae5bc`; F2 and
+F1 from [`REVIEW.md`](REVIEW.md)). P2 and P4 were reopened, amended and closed again through
+`set_phase.py`. P1 was not reopened: its verify asserts `src` equal to the base, which no longer
+holds on the branch, so the new test's red run on the base is recorded here instead.
+
+- **F2 — `versionchanged` marker.** `docs/cli/cluster.rst` gains one `.. versionchanged:: 2.9.0`
+  clause beside the other `--autoscaling` markers. It says that with `--autoscaling`, a check that
+  finds the SQLite database locked is skipped with a warning and made again at the next period,
+  instead of ending the run. No `:pr:` yet (`hs-release` adds it). `docs/cli/server.rst` is
+  unchanged: this cycle makes no change to `hs server --autoscaling`'s code path (`demand.py`).
+  The scope fence (Conventions) is amended to allow this one file.
+- **F1 — working-launcher coverage.** `tests/test_cluster_locked.py` gains
+  `test_autoscaling_cluster_with_working_clients_keeps_serving_after_a_lock` (integration), the
+  command-line form of drive mode `locked-scale-ok`:
+  - `hs cluster tasks.txt --no-tls -H 127.0.0.1 -p <free> -Q 60s -T 1s --autoscaling fixed -P 1s
+    --launcher env --remote-exe <this tree's hs>`, five tasks, `HYPERSHELL_LOGGING_LEVEL=TRACE`;
+  - an `IdleLockHolder` (a `LockHolder` with no delay and its own readiness test) takes
+    `BEGIN EXCLUSIVE` for `AUTOSCALE_HOLD` (8.5 s) once every task is complete and the scheduler's
+    trace says it is backing off 16 s or more. The scheduler then sleeps through the hold, so the lock
+    meets only the autoscaler's reads;
+  - asserts: still running 6 s after the release; no traceback file; no CRITICAL line; exactly one
+    `database was locked` WARNING; standard output `0`–`4`; every task complete with exit status 0;
+  - why exactly one: with `-P 1s` the first check under the lock starts within 1 s of taking it and
+    fails 5 s later (Python's busy wait). The next check is due at once, and its read waits less
+    than 5 s for the release at 8.5 s, so it succeeds;
+  - bounds: the holder waits at most `IDLE_READY` (45 s) for idle, the join is bounded, the cluster
+    is waited 6 s, then `kill_group`. About 33 s on this host.
+  - `start_cluster` takes an optional `out_path` for the cluster's standard output; `LockHolder`'s
+    delay and its error text are now class attributes (`delay`, `condition`), unchanged for the
+    existing tests.
+- **Red on `9c82842d`.** The base `src` was extracted to `/tmp/claude-501/clf-f1-base` (`git archive`),
+  the branch's test file was copied in, and the test was run with the base on `PYTHONPATH` (checked:
+  `hypershell.__file__` is the base copy and `MEMORY_SETTLE` is present). Result: 1 failed at
+  `assert ended is None`. The log shows the registration read (`client_registrations`, failed
+  launches at their default) failing with `database is locked`. The result was
+  `CRITICAL … Uncaught exception from <class 'hypershell.cluster.remote.AutoScaler'>`, an
+  `exception-*.log` file, and the cluster stopping. The test is red for the defect, so no base
+  behaviour needs naming.
+- **Gate retunes (through `set_phase.py`):**
+  - **P4:** the fence excludes `docs/cli/cluster.rst` and admits it only with 0 lines removed and
+    at most 4 added.
+  - **P2:** the fence drops `src/hypershell/server.py`. That clause was written for P2's own commit,
+    and P3's sanctioned `Receiver` counter (+3, 0 removed) makes it red on any later tree. P3's verify
+    already bounds `server.py`. The re-run went red on that clause alone and was recorded
+    (`--record-attempt`, attempts 1).
+- **Re-run here (3.14, `/tmp/claude-501/venv314-clf-review`, serial):**
+  - P2's verify: 339 passed in its eight files (7 min 55 s). Drives `locked-scale-fail` (exit 5 after
+    15 s), `locked-scale-off` (running at 40 s), `locked-scale-ok` (running at 60 s) and
+    `locked-launch` (exit 5 after 13 s) all ok. Then the stale fence clause failed (above); the
+    retuned fence passes;
+  - P4's retuned fence passes (`docs/cli/cluster.rst`: 4 added, 0 removed);
+  - `test_cluster_nodb_finish.py` with `test_cluster.py`, `test_cluster_advertise.py`,
+    `test_cluster_compare.py`, `test_cluster_launch.py`, `test_cluster_no_db.py` and `tests/cluster/`:
+    288 passed, 1 skipped;
+  - the new test three times in all: passed each time (32.5 s, 32.6 s, 32.5 s);
+  - docs: `sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-clf` under 3.12
+    exits 0, and the clause renders in `cli/cluster.html`.
+- **Not re-run:** the whole suite (P4's last two clauses), by the foreman's brief. The change is one
+  docs clause and one test file, plus additive edits to that file's helpers.
 
 ---
 
