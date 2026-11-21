@@ -216,3 +216,162 @@ CONFIRMED findings auto-loop to `hs-build`.
 
 Cycle 2 may be scoped to F1 and the merge resolution. If it is, it should still re-read the resolved
 `Receiver.update_tasks` against §3 and §6.
+
+## Review cycle 2 — changes-requested (2026-11-21)
+
+- **Reviewed commit:** `c9b41f95`  ·  **Base:** `origin/develop` `d9901cf0`, which is also the merge
+  base now that develop is merged in (`84768297`).
+- **Verdict:** changes-requested.
+  - The review-cycle-1 remediation holds on all three counts: F1's one-liner, the `server.py` merge
+    resolution, and the new coverage test.
+  - The remediation's new sentence in the `hs cluster` long help is wrong about the submit thread:
+    F2, LOW, CONFIRMED. The fix is wording only.
+- **Cycle:** 2 of ≤3. It mirrors `review.cycle` in `TECH.md`. This is the second cycle without
+  convergence, so a third cycle should be the last before the human is asked.
+
+### How this cycle was run
+
+- **Mode:** scoped, as the review-cycle-1 rulings set. It covered three things:
+  - F1;
+  - the merge resolution of `origin/develop` (#114) in `server.py`;
+  - the new test `test_result_landing_during_the_count_is_not_lost`.
+
+  It also took a fresh blind pass over the delta `8690deaf..c9b41f95`, and over every place where the
+  merge meets this cycle's code.
+- **Blind correctness pass:** one fresh reviewer. It was given:
+  - `GOAL.md` with its GOAL-gate block;
+  - the base copies of `invariants.md`, `review-rubric.md` and `AGENTS.md`;
+  - the diff with `spec/` excluded, both the whole branch against `origin/develop` and the delta
+    since `8690deaf`;
+  - cycle 1's F1 and its coverage note;
+  - the binding readings: the plan-gate rulings D1–D6, the P7 gate ruling, and the review-cycle-1
+    rulings.
+
+  It did not read `PLAN.md`, `TECH.md`, `META.md`, `REVIEW.md` or `research/`, and its searches
+  excluded `spec/` except this cycle's `evidence/` and `drive/`. It started no `tail_run.py` run.
+- **Orchestrator:**
+  - checked contract drift and merge status;
+  - checked the R5 claim;
+  - built the docs and read the help output;
+  - ran the new tests and #114's tests;
+  - drove F2 on its own, independently of the reviewer;
+  - re-graded every finding.
+- **Contract drift:** none. `GOAL.md` still changes only in `d1a0fea8` and `6f4e809f`.
+- **Environments:** CPython 3.14.6 for the tests and drives, run serially. Docs used CPython 3.12.
+  Every CLI drive ran in `.agents/factory/bin/temp_site.sh`, bound to 127.0.0.1, with the key in
+  the environment only.
+
+### Verification run
+
+- **Whole suite on HEAD, serial** (reviewer): 3545 passed, 138 skipped, exit 0.
+- **Targeted tests on HEAD** (orchestrator): `test_finish_wake`, `test_client_return`,
+  `test_client_request`, `test_cluster_nodb_finish`, `test_cluster_locked` and
+  `test_relay_workload.py::test_scans_skip_a_process_whose_read_is_refused` → 60 passed. #114's
+  tests and this cycle's tests both pass on the merged tree.
+- **Merge resolution in `server.py`:**
+  - `Receiver` on HEAD is develop's class plus this branch's additions and nothing else: the
+    `scheduler` attribute, its keyword argument, and the `results_landed` call.
+  - The branch's own `server.py` hunks are byte-identical before and after the merge (reviewer,
+    `cmp` of the two hunk sets).
+  - `written += 1` runs on the APPLIED path inside the loop (`server.py:734`). In-memory mode marks
+    every result APPLIED, so the `--no-db` finish in `cluster/watch.py:189` still counts.
+  - `results_landed(outcomes.count(APPLIED))` runs once per bundle, after the loop and before
+    UNLOAD (`:735–737`).
+  - The two counters are separate: nothing is counted twice, reordered or lost.
+  - The empty barrier bundle applies 0 results and makes no call.
+  - Barrier probe (reviewer, scratch). A stubbed `results_landed` that sleeps 1 s, followed by
+    #114's real `results_written()`, gives `results_written: True written: 3 landed calls: [3]`.
+    The barrier waits for the report.
+- **Coverage test (`tests/test_finish_wake.py:225`):**
+  - **Deterministic.** The result lands synchronously inside the pass's own `count_remaining` call,
+    with no sleeps; 8 of 8 repeated runs passed (reviewer).
+  - **Mutation.** In a scratch copy, `self.finishing = (mark, 0)` was removed, so the pass arms only
+    after its count. `test_finish_wake.py` then gives 1 failed, 8 passed. Only the new test fails
+    ("Pass still waiting after 15.0 s"); the older `test_result_landing_before_the_wait_is_not_lost`
+    does not catch this mutation. The test adds real coverage.
+- **F1 one-liner:**
+  - `hs cluster --help` prints "Wait before flushing tasks, none for an idle client". The idle
+    return is credited to the clients alone, as ruled.
+  - `hs client --help` is unchanged and accurate.
+  - Drive (reviewer): `hs cluster t.in -N2 -b 10 -w 30`, 3 tasks of `sleep 0.2`, ended in 1.81 s
+    with a database and 1.57 s with `--no-db`.
+- **R5 claim (orchestrator and reviewer):**
+  - `client.py` is the same blob at `dd0b227d` and HEAD, and `server.py` differs only by the three
+    `written` lines.
+  - The other source changes since `dd0b227d`:
+    - `cluster/__init__.py`: the help string;
+    - `cluster/watch.py`: used only by `RemoteCluster` and `SSHCluster`, not by a relay;
+    - `cluster/remote.py`: #114's `AutoScaler` branch for a locked SQLite read, an error path only.
+  - The records still stand for HEAD's code. `tail_bound.py` on `evidence/head/` → PASS (reviewer).
+- **Docs:** `sphinx-build -W --keep-going -q -E -b html` exited 0 at HEAD (orchestrator; reviewer
+  separately).
+
+### Requirement → evidence (the delta)
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R1, R2 | `client.py` unchanged since cycle 1 (same blob); `test_client_return` passes; `-w 30` idle drive | ✅ |
+| R3 | `test_finish_wake` passes, including the new test; mutation red; merge leaves `results_landed` on APPLIED results only | ✅ |
+| R4 | Work-left, retry-left, forever and input-open tests pass; whole suite green | ✅ |
+| R5 | Records on `dd0b227d`; relay and client paths unchanged since; `tail_bound.py` PASS | ✅ |
+| R6 | `hs cluster` one-liner accurate; `-W` build clean | ⚠️ F2 |
+| R7 | Unchanged since cycle 1; injection test passes | ✅ |
+
+Unmapped changes: none. Outside the merge, the delta is the F1 help string and prose, the coverage
+test, and `spec/` commits.
+
+### Findings
+
+#### F2 [LOW/CONFIRMED] The `hs cluster` long help says the submit thread lets go of tasks once `-w` passes; on a quiet stream it does not
+
+- **Where:** `docs/_include/cluster_help.rst:112–113`, new in `dd450d86`. It reads: "The `submit`
+  thread does not: it holds tasks until a bundle is full, this period passes or the input ends."
+- **The problem:**
+  - Both committers check the bundle wait only when a task arrives: `DatabaseCommitter.get_task`
+    (`src/hypershell/submit.py:529–543`, test at `:538`) and `QueueCommitter.get_task` (`:771–785`).
+  - On an empty queue they loop without looking at the clock. So once a stream pauses, the period
+    passing frees nothing: a line is held until the next line arrives or the input ends.
+  - The behaviour is old and already seeded (`issues/stream-bundlewait-commit-wait.md`). The new
+    sentence misstates it.
+- **Failure scenario:** a user streams lines into `hs cluster -b 10 -w 2` and expects a line to be
+  committed about 2 s after it is read. It is not committed until the stream moves on or ends.
+- **Evidence:**
+  - Orchestrator drive: `hs cluster -N 1 -b 10 -w 2 -Q 30 -H 127.0.0.1`, one line written at 0.31 s,
+    stdin closed at 8.02 s. The row was committed and scheduled at 8.12 s, about 6 s past the stated
+    period.
+  - Reviewer drive: `-w 1`, a 7 s pause. 0 rows after 4 s; "Submitted 2 tasks" logged only when the
+    second line arrived at +7 s.
+- **Touches:** R6's surrounding prose, not the client behaviour R6 requires. No source logic is
+  involved, and the submit side's bundling stays a Non-goal.
+- **Fix:** wording only. Drop "this period passes", or say that the period is checked when a task
+  arrives. The `hs cluster` one-liner and the client sentence stay as they are.
+
+**Considered and dropped:**
+- **The receiver's new count reads can raise on a locked SQLite database.** `Task.apply_results`
+  and the scheduler's own reads carry the same exposure, so this is not new to the branch. Cycle 1
+  dropped it for the same reason.
+
+### Merge status
+
+- **Against `origin/develop` `d9901cf0`:** develop has not moved since the merge.
+  `git merge-tree --write-tree origin/develop HEAD` is clean, because develop is the merge's second
+  parent.
+- **Against `feature/relay-advertise` `e7bc209f`** (now on `origin`, not yet merged):
+  - `git merge-tree --write-tree e7bc209f HEAD` is clean.
+  - Both branches touch `AGENTS.md`, `invariants.md`, `config_param_ref.rst` and `ROADMAP.md`, but
+    in different places: §3 against §11, `relay.bundlewait` against the new `relay.advertise`, and
+    different roadmap lines.
+  - The merged tree reads coherently around `client.py`, `server.py` and the relay docs.
+
+### Human-gate triggers
+
+- **Not triggered.** The one CONFIRMED finding (F2) is in `docs/_include/cluster_help.rst`.
+- No CONFIRMED finding touches `server.py`, `client.py`, another high-blast-radius file, or a
+  security or DB-lifecycle invariant. The `server.py` merge resolution was graded and holds.
+
+### Remediation for `hs-build`
+
+1. F2: reword the submit-thread sentence in `docs/_include/cluster_help.rst` so that it matches
+   `submit.py`. Then rebuild the docs with `-W`.
+
+Cycle 3 can be scoped to F2.
