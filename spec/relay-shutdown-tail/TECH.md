@@ -3,7 +3,7 @@ slug: relay-shutdown-tail
 title: A relay run ends within seconds of its last result
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/relay-shutdown-tail
 base: develop
 current_phase: done
@@ -142,10 +142,11 @@ phases:
     && python3 spec/relay-shutdown-tail/drive/tail_bound.py spec/relay-shutdown-tail/evidence/head
     --baseline spec/relay-shutdown-tail/evidence/baseline
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 8690deaf
+  verdict: changes-requested
+  blocked_reason: 'review: F1 hs cluster -w help overstates the idle return; branch
+    conflicts with develop (#114)'
+  cycle: 1
 ---
 # TECH.md — A relay run ends within seconds of its last result
 

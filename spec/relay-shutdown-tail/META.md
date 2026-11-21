@@ -46,3 +46,17 @@
 - **Skill cause:** The planning guidance puts every regression test on the red list and re-proves the list at the end, with no word on fixes that are themselves test code: for those the base build is not where the defect lives, and only the tests-first commit can show them red.
 - **Recommended fix:** In `hs-plan` Step 6 (and the TECH template): a test-only fix's red proof is taken at the tests-first phase only; the final phase's red list leaves those lines out (or `red_check.sh` grows a way to take the tests from a named commit). Not a weakening: the P1 proof stays the record.
 - **Confidence:** high · **Effort:** small
+
+## F6 — The blind reviewer's `spec/` exclusion has no carve-out for an R-ID graded from kept evidence
+`origin=hs-review:step2 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** R5 is graded from run records the GOAL requires under `spec/{slug}/evidence/` and judged by a tool in `spec/{slug}/drive/`. Step 2 and the rubric exclude all of `spec/` from the reviewer's diff and searches, so the orchestrator had to improvise an exception (evidence/ and drive/ only, plus the measuring tools the GOAL names in other cycles' `drive/`) and a rule against starting budgeted runs.
+- **Skill cause:** The blindness rule names what the reviewer must not see (PLAN, TECH, research, META) but expresses it as "exclude `spec/`", with no word on evidence a criterion itself places there.
+- **Recommended fix:** In Step 2 and the rubric's "What the reviewer sees": the reviewer may read `spec/{slug}/evidence/` and `spec/{slug}/drive/` (and tools the GOAL names) when an R-ID is graded from them, never PLAN/TECH/research/META; and a budgeted drive is not re-run by the reviewer. Not a weakening: author rationale stays out.
+- **Confidence:** high · **Effort:** small
+
+## F7 — Pre-flight has no merge check against the current base
+`origin=hs-review:step1 severity=medium category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** The branch was behind `origin/develop` with a content conflict in `server.py` (#114). Step 1 does not ask for a fetch or a merge check, and the injected diffstat reads local `develop`; the brief asked for it. Resolved after an approval, the conflict would land after the reviewed SHA and `/hs-publish`'s staleness gate would stop.
+- **Skill cause:** Step 1 checks contract drift but not base drift, and the routing says nothing about a conflict the remediation must carry.
+- **Recommended fix:** Step 1: `git fetch origin` and `git merge-tree --write-tree origin/{base} HEAD`; record the result in REVIEW.md; a conflict in a file outside `spec/` routes to `/hs-build` with the review (so the resolution is graded in the next cycle), and the reviewer is told of it. Inject the diffstat against `origin/{base}`.
+- **Confidence:** high · **Effort:** small
