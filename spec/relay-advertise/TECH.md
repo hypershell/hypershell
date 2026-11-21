@@ -98,10 +98,10 @@ phases:
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
     docs /tmp/claude-501/docs-html-rad
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 33b25dacf52c2c6bfad4e796d5ae36d5ea65049e
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — `hs relay` names the address its site clients dial
 

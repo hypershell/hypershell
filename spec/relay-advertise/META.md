@@ -68,3 +68,10 @@ is skipped by the parser):
 - **Skill cause:** Step 6 describes phases only as vertical slices; it names neither the tests-first phase several cycles use nor the shared scripts, which sit in other specs' `drive/` folders where a planner would not look.
 - **Recommended fix:** Promote `red_check.sh`, its `red_outcome.py` plugin and `rest_green.sh` to `.agents/factory/bin/`, and add a Step 6 note: for a tests-first phase, write `red.txt`, run `red_check` on the base (prefer assertions; `raises=` only for the gap's own error), and keep prototypes named so the suite never collects them.
 - **Confidence:** med · **Effort:** small
+
+## F4 — hs-review does not say which copy of `invariants.md` grades a diff that edits it
+`origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** This diff rewrites §11 of `invariants.md` and the matching `AGENTS.md` passage. Step 2 says to hand the reviewer "the full text of `invariants.md`" without saying which copy, so the branch's copy (the author's new rule) could have been the yardstick for the author's own code. The foreman's brief had to say "grade against the base copies".
+- **Skill cause:** Step 2 and the rubric's "What the reviewer sees" assume the invariants are fixed during a cycle; neither covers a diff that edits them, which grading against the edited copy turns into grading-its-own-homework.
+- **Recommended fix:** In Step 2, give the reviewer `git show {base}:.agents/factory/invariants.md` and `{base}:AGENTS.md` (not the working copies), and have it grade any edit to them as prose against the code: does the new text state what the diff does?
+- **Confidence:** high · **Effort:** small
