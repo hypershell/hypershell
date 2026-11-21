@@ -274,9 +274,8 @@ insert. 2.8.3 runs text groups after every integer group. `group-advance-strands
 needed two guards in the scheduler against them, and `group:nan` is stored as NULL, which kills
 the committer on `NOT NULL` and hangs the run, before and after that fix. The maintainer wants an
 integer group enforced at submit time: a whole file read ahead and refused before anything is
-inserted, and on a pipe an error on just the offending line. This is a behaviour change, and
-whether it ships in a 2.8.x patch or 2.9 only is open. Pre-existing, and found by that cycle's
-review.
+inserted, and on a pipe an error on just the offending line. This is a behaviour change, so it
+ships in 2.9.0, not a 2.8.x patch. Pre-existing, and found by that cycle's review.
 
 *Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs:
 `spec/group-advance-strands-lower-group/` (REVIEW cycles 2 and 3); same committer death as
