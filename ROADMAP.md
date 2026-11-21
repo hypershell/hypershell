@@ -387,7 +387,7 @@ scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 
 
 *Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and its laptop evidence
 (`relay-hardening` landed, #103)*
-**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
+**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: adopted:relay-shutdown-tail*
 
 ## A `--no-db` cluster can report a failed run when a client dies just after its last result
 
@@ -646,8 +646,8 @@ mid-read and psutil raises `AccessDenied`. Each has cost re-runs on recent pull 
 small test-side fixes.
 
 *Horizon: near-term, small · Depends on: — · Refs: CI on #104, #107 and #110*
-**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md),
-[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: unshaped*
+**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md) · *status: unshaped*;
+[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: adopted:relay-shutdown-tail*
 
 ## `pytest -n auto` fails at collection
 

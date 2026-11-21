@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:relay-shutdown-tail
 kind: fix
 appetite: small
 lane: public
