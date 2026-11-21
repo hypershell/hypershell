@@ -240,3 +240,12 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
   does.
 - **Out of scope:** `hs server --forever --no-db` exits once its only relay drains. The foreman files
   it as a seed on `develop`.
+
+## Review-cycle-1 ruling (2026-11-21)
+
+Review cycle 1 approved at `33b25dac` with no CONFIRMED finding. The human gate was not triggered.
+Foreman's triage of F1 (PLAUSIBLE, docs), under the maintainer's mandate: fix it. The `--bind`
+entry in `docs/_include/relay_help.rst` no longer implies that `--advertise` removes the need for a
+reachable bind. It now says the bind must be reachable from the site's nodes, and that
+`--advertise` changes only the address they are told to dial. `cluster_help.rst`'s `-H` passage is
+accurate (it states which address clients are told) and stays as is. Review cycle 2 is docs-only.

@@ -55,7 +55,7 @@ Options
     Bind address of the relay-local *server* (default: 0.0.0.0).
 
     The *clients* at the site connect to the relay here, so it must be reachable from the
-    nodes they run on, unless ``--advertise`` names another address for them to dial.
+    nodes they run on. ``--advertise`` changes only the address they are told to dial.
     See also ``relay.bind``.
 
 ``--advertise`` *ADDR*
