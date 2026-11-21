@@ -482,3 +482,7 @@ session (2026-11-21): "Base behaviour + fixes". Review cycle 3 is the last.
   variable's spelling, the old test names in the phase notes, and `research/05`'s framing. The same
   row's stale claim about `tls.py`, logging and `data/core.py` is corrected to the remediation as
   built.
+- **`database.host` (foreman, 2026-11-21).** It has a documented default, but the F2 ruling names it
+  among the keys where an empty variable is "not given", and the N1 ruling names only the four
+  timescale keys. It stays in `EMPTY_UNSET` (`EMPTY_IS_DEFAULT` in the schema test): an empty host
+  gives the default host.
