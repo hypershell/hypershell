@@ -138,34 +138,49 @@ tests stop failing on a process that exits while they look at it.
   test-only rider (its own `kind: test`, carried under this cycle's `fix`); both marked
   `adopted:relay-shutdown-tail`.
 - **Q:** Which fix for cause (a): every client returns what it holds once it has nothing to run, or
-  the relay alone starts its site clients with a shorter bundle wait? — **Proposed:** the first (R1).
+  the relay alone starts its site clients with a shorter bundle wait? — **Confirmed at the GOAL gate:** the first (R1).
   It removes the hold for every client and every bundle size with no new knob, and the bound does not
   depend on a wait. The second leaves a hold as long as the shorter wait (`-w` rounds a fraction up
   to a whole second, so at least 1 s), changes only the relay's launch line, and leaves plain clients
   with `-b` above 1 waiting at the end of their work. The first changes `hs client` for every user
   with a bundle size above 1, and also applies mid-run: a client waiting on the server for work
   returns what it holds instead of keeping it until the wait passes.
-- **Q:** Appetite, and what is cut if it does not fit? — **Proposed:** `small`, as both seeds say.
+- **Q:** Appetite, and what is cut if it does not fit? — **Confirmed at the GOAL gate:** `small`, as both seeds say.
   The risk is R3, which touches every server's scheduler. IF `hs-plan` finds that R3 cannot be met
   without a database read for every landed result bundle on every server, or without changing the
   back-off for runs with work left, THEN R3 goes back to a narrowed seed and the cycle ships R1, R2,
   R4, R6 (less its `server.poll` line) and R7, with R5's bound restated as "no tail over 3 s, except
   where the upstream scheduler was backing off when the last result landed". Without R3 there is no
   honest upper bound: the back-off can reach `server.poll`.
-- **Q:** The bound and the drive (R5)? — **Proposed:** 3 s on the laptop at both sizes. The seed's R3
+- **Q:** The bound and the drive (R5)? — **Confirmed at the GOAL gate:** 3 s on the laptop at both sizes. The seed's R3
   ("no tail over 5 s at the R8 size") already holds on `develop` (6 of 6 runs at 1.6–1.8 s), so it
   cannot show the fix; the 2004-task size showed (a) in both runs (6.75 and 7.45 s). With (a) and (b)
   fixed, what is left is s7 and s8 (about 1–1.6 s) plus small segments, so 3 s leaves margin without
   hiding a 5 s hold. The shaping baseline above stands as the "before"; the plan need not re-run it.
-- **Q:** The 1 s bounds in R1 and R3? — **Proposed:** 1 s each, observable in a unit or harness
+- **Q:** The 1 s bounds in R1 and R3? — **Confirmed at the GOAL gate:** 1 s each, observable in a unit or harness
   test; the client already polls its finished-task queue once a second.
 - **Q:** `relay-hardening`'s P8 verify (`tail_judge.py --outcome`) requires its seed to be
-  `status: unshaped`; adopting it makes that landed check fail if re-run. — **Proposed:** accept it.
+  `status: unshaped`; adopting it makes that landed check fail if re-run. — **Confirmed at the GOAL gate:** accept it.
   It is a landed cycle's record, not run by CI, and `/hs-roadmap` retires the seed when this cycle
   lands, which fails the same check anyway. No edit to `spec/relay-hardening/`.
 
 Each **Proposed** answer above awaits the foreman's ruling at the GOAL gate; until then `hs-plan` does
 not start.
+
+**Ruled at the GOAL gate** (2026-11-21): approved by the foreman, gate judge under the maintainer's
+mandate. Every **Proposed** answer is confirmed:
+- the client-wide flush when idle (R1), a behaviour change for every `hs client` with `-b` above 1,
+  stated in the release note;
+- appetite small, with the defined cut: if `hs-plan` finds R3 needs a database read per landed
+  result bundle on every server, or a back-off change while work remains, R3 returns to a narrowed
+  seed and the cycle ships R1, R2, R4, R6 and R7 with R5's narrowed bound;
+- R5's 3 s bound at 2000 and 2004 tasks;
+- the two 1 s bounds;
+- `relay-hardening`'s landed P8 check is allowed to fail if re-run.
+
+R3 touches the server's scheduler (`server.py`, high-blast-radius), so the review's human gate
+applies as the rubric says. This cycle targets 2.9.0. The contract is locked; `hs-plan` designs
+against it.
 
 ## Related materials
 
