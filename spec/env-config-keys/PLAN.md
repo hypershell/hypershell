@@ -486,3 +486,11 @@ session (2026-11-21): "Base behaviour + fixes". Review cycle 3 is the last.
   among the keys where an empty variable is "not given", and the N1 ruling names only the four
   timescale keys. It stays in `EMPTY_UNSET` (`EMPTY_IS_DEFAULT` in the schema test): an empty host
   gives the default host.
+
+## Review-cycle-3 ruling (2026-11-21)
+
+Review cycle 3 approved at `cb5e122b`; the loop converged at the last allowed cycle. The rubric's
+pre-publish human approval, for the cycle-1 and cycle-2 findings in high-blast-radius files, was
+given by the maintainer in session (2026-11-21): "Approve; add G1 test, merge". G1 (LOW, coverage)
+is closed by `tests/test_env_duration.py::test_relay_passes_duration_seconds`, which kills the
+mutant the review used. It is test-only and needs no further review cycle.

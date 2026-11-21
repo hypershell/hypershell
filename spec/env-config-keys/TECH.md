@@ -4,7 +4,7 @@ title: Environment variables reach every configuration key with the value as wri
   the remaining duration keys take units
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/env-config-keys
 base: develop
 current_phase: done
