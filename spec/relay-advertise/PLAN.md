@@ -226,3 +226,17 @@ Gate #2 (post-design):
   no database.
 - **Drive** (`temp_site.sh`): `told`, `empty`, `healthy` modes (GOAL evidence plan, one to one).
 - **Gate:** the suite serially under 3.14 and 3.11, the Sphinx `-W` build, `hs relay --help`.
+
+## Plan-gate rulings (2026-11-21)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+- **D1:** keep the phase split. The option lands in P2, its help snippets and completions in P3. The
+  squash at publish restores §12's single commit.
+- **D2:** accepted. The drive and test prototype are committed at plan time, and the builder may
+  amend them.
+- **D3:** accepted. Use the cycle's own docs venv (`docs-venv-rad`).
+- **D4:** accepted. `hs config get relay.advertise` prints `<none>` when unset, as `server.advertise`
+  does.
+- **Out of scope:** `hs server --forever --no-db` exits once its only relay drains. The foreman files
+  it as a seed on `develop`.
