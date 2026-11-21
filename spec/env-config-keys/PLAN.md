@@ -462,3 +462,21 @@ private notes, which the foreman hands to the builder directly.
   relay's site fence and `--ssh --env`'s handling of key variables are unchanged. The key-handling
   ruling above supersedes that: both now recognise variables by the matcher. Everything else in that
   Non-goal stands. GOAL.md stays locked as written; review cycle 2 grades against this amendment.
+
+## Review-cycle-2 rulings (2026-11-21)
+
+The review's human gate was triggered by N2, whose locus is `client.py`. The maintainer ruled in
+session (2026-11-21): "Base behaviour + fixes". Review cycle 3 is the last.
+
+- **N2.** The client's `task.cwd` reader is as on base, so a file's `cwd = ""` behaves as before. An
+  empty `HYPERSHELL_TASK_CWD=` from the environment means "not given" (`task.cwd` joins
+  `EMPTY_UNSET`), matching the F3 ruling's environment-only rule. A test pins both layers.
+- **N1.** A key with a documented default keeps empty text from the environment, as in a file:
+  `database.timescale.segmentby`, `orderby`, `chunk_interval` and `compress_after` leave
+  `EMPTY_UNSET`. `HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY=` turns segmenting off as `segmentby = ""`
+  does. The test that decides "optional" uses the documented defaults, not only the defaults table.
+- **N3.** `AGENTS.md` states the empty-value rule alongside `invariants.md`.
+- **Wording.** Current spec prose states outcomes only: the PLAN deviation-table row on the key
+  variable's spelling, the old test names in the phase notes, and `research/05`'s framing. The same
+  row's stale claim about `tls.py`, logging and `data/core.py` is corrected to the remediation as
+  built.
