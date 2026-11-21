@@ -711,6 +711,23 @@ theirs, where each relay's database lives, and recovering the work of a relay th
 hand-off (#80)*
 **Seed:** [`issues/cluster-relay-fanout.md`](issues/cluster-relay-fanout.md) · *status: unshaped*
 
+## A shared site cannot tell a live submitter's tasks from a dead one's
+
+Programs that submit tasks and stay to act on them (the Nextflow executor, hypershell-mcp, agents)
+own those tasks, and when one dies its unfinished tasks run on: results nobody will read,
+allocations held, and the same work run twice if the owner comes back. A tag can name the owner but
+not say whether it is alive, so nothing can clean up unattended on a database many users share. A
+*lease* would: a row the submitter claims (kind, key, time to live) and keeps renewing, referenced by
+its tasks. A lapsed lease is swept (its unfinished tasks cancelled, never a completed one) and
+recorded. A returning owner re-claims its key, with fencing so two live claimants never both own it.
+Tasks without a lease behave as today. The open problems are whose clock judges expiry (SQLite
+stores naive local times), who sweeps, and reaching tasks already running or held by a relay.
+
+*Horizon: after 2.9.0, maybe · Depends on: a conditional `Task.cancel_all`; cancel reach for running
+tasks (`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs: `hypershell/hypershell-nextflow`
+attached mode*
+**Seed:** [`issues/submitter-lease.md`](issues/submitter-lease.md) · *status: unshaped*
+
 ---
 
 # Settled questions
