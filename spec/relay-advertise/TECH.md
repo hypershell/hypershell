@@ -3,10 +3,10 @@ slug: relay-advertise
 title: hs relay names the address its site clients dial
 kind: feature
 appetite: small
-status: in_progress
+status: in_review
 branch: feature/relay-advertise
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -75,7 +75,7 @@ phases:
 - id: P4
   name: 'Gate: every drive mode, the whole suite serially under 3.14 and 3.11, the
     docs'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -251,8 +251,8 @@ every zone dials; neither leaves develop's address; a blank option exits 2 befor
 **Goal:** the change holds together: the drive, the whole suite (the red list now green within it),
 both Pythons, the docs build.
 
-- [ ] Create `/tmp/claude-501/venv311-rad` on first use (the verify's `uv run --python 3.11` does).
-- [ ] Commit body: each drive mode's result and the suite totals per Python. A flaky failure is
+- [x] Create `/tmp/claude-501/venv311-rad` on first use (the verify's `uv run --python 3.11` does).
+- [x] Commit body: each drive mode's result and the suite totals per Python. A flaky failure is
       re-run once and recorded with its node id and both outcomes.
 - **Verify:** see frontmatter. Dry-run at plan time: the whole suite on `08d867df` under both
   Pythons, serially, bounded (totals in the plan commit body); the drive and docs as in P2/P3.
