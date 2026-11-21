@@ -110,6 +110,21 @@ def test_tasks_are_unpacked_and_confirmed() -> None:
 
 
 @mark.unit
+def test_reply_with_tasks_raises_the_count_in_flight() -> None:
+    """A reply with tasks raises the client's count of tasks in flight by their number; an empty one does not."""
+    from hypershell.client import TaskCount  # Looked up here: the name is new with the idle return
+    count = TaskCount()
+    fake = FakeDispatcher({'protocol': 1, 'tasks': tasks('echo a', 'echo b'), 'shutdown': False},
+                          {'protocol': 1, 'tasks': [], 'shutdown': False})
+    scheduler = ClientScheduler(queue=SimpleNamespace(dispatcher=fake, confirmed=Queue()), local=Queue(),
+                                inflight=count)
+    assert scheduler.request_bundle() is SchedulerState.UNPACK
+    assert count.value == 2
+    assert scheduler.request_bundle() is SchedulerState.REQUEST
+    assert count.value == 2
+
+
+@mark.unit
 def test_shutdown_reply_is_final() -> None:
     """A shutdown reply ends the request loop."""
     fake = FakeDispatcher({'protocol': 1, 'tasks': [], 'shutdown': True})

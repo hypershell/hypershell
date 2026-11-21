@@ -1,128 +1,151 @@
 ---
 slug: relay-shutdown-tail
-title: "A relay run ends within seconds of its last result"
+title: A relay run ends within seconds of its last result
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: P1
-last_updated: "2026-11-21"
+current_phase: P2
+last_updated: '2026-11-21'
 phases:
-  - id: P1
-    name: "Tests first: the red list on f3fb4dd2 (R1, R3, R7) and the new tests' guards"
-    status: pending
-    satisfies: [R1, R3, R7]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      RED_LIST=spec/relay-shutdown-tail/drive/red.txt RED_BASE_REV=f3fb4dd2
-      python3 spec/relay-shutdown-tail/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
-      && python3 spec/relay-shutdown-tail/drive/bounded.py 300 uv run pytest -q -p no:cacheprovider
-      'tests/test_relay_workload.py::test_scans_skip_a_process_whose_read_is_refused[NoSuchProcess]'
-      'tests/test_relay_workload.py::test_scans_skip_a_process_whose_read_is_refused[ZombieProcess]'
-      && python3 spec/relay-shutdown-tail/drive/bounded.py 120 uv run pytest -q -p no:cacheprovider
-      --collect-only tests/test_client_return.py tests/test_finish_wake.py tests/test_relay_workload.py
-      && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" nodb
-  - id: P2
-    name: "The result that finishes a run wakes the scheduler: a counted arm, the receiver's check"
-    status: pending
-    satisfies: [R3, R4]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      python3 spec/relay-shutdown-tail/drive/bounded.py 1500 uv run pytest -q -p no:cacheprovider
-      tests/test_finish_wake.py tests/test_stream_input.py tests/test_group_order.py tests/test_server_fsm.py
-      tests/test_writeback.py tests/test_writeback_statement.py tests/test_retry_gate.py tests/test_dispatch.py
-      tests/test_dispatch_workload.py tests/test_restart.py tests/test_cluster_exit.py tests/test_contended_recovery.py
-      && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" finish
-      && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" nodb
-  - id: P3
-    name: "A client with nothing left to run returns what it holds: the in-flight count"
-    status: pending
-    satisfies: [R1, R2]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      python3 spec/relay-shutdown-tail/drive/bounded.py 1500 uv run pytest -q -p no:cacheprovider
-      tests/test_client_return.py tests/test_client_request.py tests/test_relay_return.py tests/test_relay_fsm.py
-      tests/test_signal_wake.py tests/test_stream_input.py tests/test_main.py
-      && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" idle
-      && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" nodb
-      && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" finish
-  - id: P4
-    name: "Rider: the relay workload scans skip a process they cannot read (test-only)"
-    status: pending
-    satisfies: [R7]
-    depends_on: [P1]
-    parallel: true
-    hammerable: false
-    hill: uphill
-    verify: >-
-      python3 spec/relay-shutdown-tail/drive/bounded.py 120 uv run pytest -q -p no:cacheprovider
-      -m unit tests/test_relay_workload.py
-      && python3 spec/relay-shutdown-tail/drive/bounded.py 2400 uv run pytest -q -p no:cacheprovider
-      tests/test_relay_workload.py tests/test_relay_outage.py
-  - id: P5
-    name: "Docs: when results are returned and when a finishing server stops waiting (versionchanged 2.9.0); the invariant record"
-    status: pending
-    satisfies: [R6]
-    depends_on: [P2, P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      python3 spec/relay-shutdown-tail/drive/bounded.py 300 uv run pytest -q -p no:cacheprovider
-      tests/test_main.py tests/test_config_schema.py
-      && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv python3 spec/relay-shutdown-tail/drive/bounded.py 900
-      uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-rst
-      && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv python3 spec/relay-shutdown-tail/drive/bounded.py 900
-      uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b man docs /tmp/claude-501/docs-man-rst
-      && grep -q 'nothing left to run' docs/_include/client_help.rst
-      && grep -q 'nothing left to run' docs/_include/cluster_help.rst
-      && test "$(grep -c 'nothing left to run' docs/_include/config_param_ref.rst)" -ge 2
-      && grep -q 'finishes a run' docs/_include/config_param_ref.rst
-      && grep -q 'nothing left to run' /tmp/claude-501/docs-man-rst/hs.1
-      && grep -q 'finishes a run' /tmp/claude-501/docs-man-rst/hs.1
-      && test "$(git diff f3fb4dd2 -- docs src AGENTS.md .agents | grep -c '^+.*hs task ')" -eq 0
-  - id: P6
-    name: "R5 laptop drive on the committed head: at most 10 runs, at least 3 at 2000 and at 2004 tasks"
-    status: pending
-    satisfies: [R5]
-    depends_on: [P5]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      python3 spec/relay-shutdown-tail/drive/tail_bound.py spec/relay-shutdown-tail/evidence/head
-      --baseline spec/relay-shutdown-tail/evidence/baseline
-  - id: P7
-    name: "Whole suite, serially; the red list re-proved on f3fb4dd2"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R7]
-    depends_on: [P4, P6]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: >-
-      python3 spec/relay-shutdown-tail/drive/bounded.py 7200 uv run pytest -q -p no:cacheprovider
-      && RED_LIST=spec/relay-shutdown-tail/drive/red.txt RED_BASE_REV=f3fb4dd2
-      python3 spec/relay-shutdown-tail/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
-      && python3 spec/relay-shutdown-tail/drive/tail_bound.py spec/relay-shutdown-tail/evidence/head
-      --baseline spec/relay-shutdown-tail/evidence/baseline
+- id: P1
+  name: 'Tests first: the red list on f3fb4dd2 (R1, R3, R7) and the new tests'' guards'
+  status: done
+  satisfies:
+  - R1
+  - R3
+  - R7
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: RED_LIST=spec/relay-shutdown-tail/drive/red.txt RED_BASE_REV=f3fb4dd2 python3
+    spec/relay-shutdown-tail/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
+    && python3 spec/relay-shutdown-tail/drive/bounded.py 300 uv run pytest -q -p no:cacheprovider
+    'tests/test_relay_workload.py::test_scans_skip_a_process_whose_read_is_refused[NoSuchProcess]'
+    'tests/test_relay_workload.py::test_scans_skip_a_process_whose_read_is_refused[ZombieProcess]'
+    && python3 spec/relay-shutdown-tail/drive/bounded.py 120 uv run pytest -q -p no:cacheprovider
+    --collect-only tests/test_client_return.py tests/test_finish_wake.py tests/test_relay_workload.py
+    && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh"
+    nodb
+- id: P2
+  name: 'The result that finishes a run wakes the scheduler: a counted arm, the receiver''s
+    check'
+  status: pending
+  satisfies:
+  - R3
+  - R4
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: python3 spec/relay-shutdown-tail/drive/bounded.py 1500 uv run pytest -q
+    -p no:cacheprovider tests/test_finish_wake.py tests/test_stream_input.py tests/test_group_order.py
+    tests/test_server_fsm.py tests/test_writeback.py tests/test_writeback_statement.py
+    tests/test_retry_gate.py tests/test_dispatch.py tests/test_dispatch_workload.py
+    tests/test_restart.py tests/test_cluster_exit.py tests/test_contended_recovery.py
+    && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh"
+    finish && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh"
+    nodb
+- id: P3
+  name: 'A client with nothing left to run returns what it holds: the in-flight count'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: python3 spec/relay-shutdown-tail/drive/bounded.py 1500 uv run pytest -q
+    -p no:cacheprovider tests/test_client_return.py tests/test_client_request.py tests/test_relay_return.py
+    tests/test_relay_fsm.py tests/test_signal_wake.py tests/test_stream_input.py tests/test_main.py
+    && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh"
+    idle && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh"
+    nodb && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh"
+    finish
+- id: P4
+  name: 'Rider: the relay workload scans skip a process they cannot read (test-only)'
+  status: pending
+  satisfies:
+  - R7
+  depends_on:
+  - P1
+  parallel: true
+  hammerable: false
+  hill: uphill
+  verify: python3 spec/relay-shutdown-tail/drive/bounded.py 120 uv run pytest -q -p
+    no:cacheprovider -m unit tests/test_relay_workload.py && python3 spec/relay-shutdown-tail/drive/bounded.py
+    2400 uv run pytest -q -p no:cacheprovider tests/test_relay_workload.py tests/test_relay_outage.py
+- id: P5
+  name: 'Docs: when results are returned and when a finishing server stops waiting
+    (versionchanged 2.9.0); the invariant record'
+  status: pending
+  satisfies:
+  - R6
+  depends_on:
+  - P2
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: python3 spec/relay-shutdown-tail/drive/bounded.py 300 uv run pytest -q -p
+    no:cacheprovider tests/test_main.py tests/test_config_schema.py && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv
+    python3 spec/relay-shutdown-tail/drive/bounded.py 900 uv run --python 3.12 --group
+    docs sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-rst
+    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv python3 spec/relay-shutdown-tail/drive/bounded.py
+    900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b man
+    docs /tmp/claude-501/docs-man-rst && grep -q 'nothing left to run' docs/_include/client_help.rst
+    && grep -q 'nothing left to run' docs/_include/cluster_help.rst && test "$(grep
+    -c 'nothing left to run' docs/_include/config_param_ref.rst)" -ge 2 && grep -q
+    'finishes a run' docs/_include/config_param_ref.rst && grep -q 'nothing left to
+    run' /tmp/claude-501/docs-man-rst/hs.1 && grep -q 'finishes a run' /tmp/claude-501/docs-man-rst/hs.1
+    && test "$(git diff f3fb4dd2 -- docs src AGENTS.md .agents | grep -c '^+.*hs task
+    ')" -eq 0
+- id: P6
+  name: 'R5 laptop drive on the committed head: at most 10 runs, at least 3 at 2000
+    and at 2004 tasks'
+  status: pending
+  satisfies:
+  - R5
+  depends_on:
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: python3 spec/relay-shutdown-tail/drive/tail_bound.py spec/relay-shutdown-tail/evidence/head
+    --baseline spec/relay-shutdown-tail/evidence/baseline
+- id: P7
+  name: Whole suite, serially; the red list re-proved on f3fb4dd2
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  depends_on:
+  - P4
+  - P6
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: python3 spec/relay-shutdown-tail/drive/bounded.py 7200 uv run pytest -q
+    -p no:cacheprovider && RED_LIST=spec/relay-shutdown-tail/drive/red.txt RED_BASE_REV=f3fb4dd2
+    python3 spec/relay-shutdown-tail/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
+    && python3 spec/relay-shutdown-tail/drive/tail_bound.py spec/relay-shutdown-tail/evidence/head
+    --baseline spec/relay-shutdown-tail/evidence/baseline
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — A relay run ends within seconds of its last result
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is the
@@ -212,7 +235,7 @@ and must stay green: `[NoSuchProcess]`, `[ZombieProcess]`, `end_drive.sh nodb`, 
 **Satisfies:** R1, R3, R7 · **Depends on:** —
 **Goal:** every new test written, the three red-list tests failing on `f3fb4dd2` for what they check.
 
-- [ ] `tests/test_client_return.py` (new):
+- [x] `tests/test_client_return.py` (new):
   - `test_idle_client_returns_what_it_holds` (`integration`): `LocalCluster(source=['true'] * 3,
     num_threads=2, bundlesize=8, bundlewait=60, poll=1, max_retries=0, port=free_port())` on the
     `task_db` fixture (`tests/test_group_order.py`), `DATABASE_ENABLED` patched on; wrap
@@ -225,7 +248,7 @@ and must stay green: `[NoSuchProcess]`, `[ZombieProcess]`, `end_drive.sh nodb`, 
     held, never as an empty bundle; `inflight=None` behaves as today; `finalize` returns everything
     held (a guard, green on the base). A `ClientScheduler` unit test in `tests/test_client_request.py`'s
     style: a reply with tasks raises the count by their number.
-- [ ] `tests/test_finish_wake.py` (new):
+- [x] `tests/test_finish_wake.py` (new):
   - `test_finishing_result_ends_a_long_back_off` (`integration`): `LocalCluster(source=['sleep 1'],
     num_threads=1, bundlesize=1, bundlewait=1, poll=600, max_retries=0)`; patch `Scheduler.back_off` so a
     `No tasks available` back-off is the full 600 s (`poll, woken = poll_max, True`, as
@@ -237,12 +260,12 @@ and must stay green: `[NoSuchProcess]`, `[ZombieProcess]`, `end_drive.sh nodb`, 
     failure with a retry left does not wake; a `--forever` scheduler is never armed; a result landing
     after the pass's counts and before its wait is not lost (patch `Task.count_retryable` to land and
     report the result, as `test_wake_before_the_wait_is_not_lost`); an in-memory receiver has no scheduler.
-- [ ] `tests/test_relay_workload.py`: `test_scans_skip_a_process_whose_read_is_refused` (`unit`,
+- [x] `tests/test_relay_workload.py`: `test_scans_skip_a_process_whose_read_is_refused` (`unit`,
   parametrized `AccessDenied` / `NoSuchProcess` / `ZombieProcess`, fake processes through a patched
   `site_processes`; asserts `scan_site` and `scan_site_key` counts over the readable processes, as in
   [`research/03`](research/03-relay-tests-and-drive.md)); `test_client_environments_skip_a_refused_read`
   (`unit`, the `:1058` read; looks `client_environments` up at call time).
-- [ ] Commit `drive/red.txt` as is (or amend its node ids if a test name changes).
+- [x] Commit `drive/red.txt` as is (or amend its node ids if a test name changes).
 - **Verify:** `red_check.sh` on `f3fb4dd2` (3 of 3 RED), the two guard ids pass, the new files collect,
   `end_drive.sh nodb` passes.
 - **Touches:** `tests/test_client_return.py`, `tests/test_finish_wake.py`, `tests/test_relay_workload.py`,

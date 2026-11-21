@@ -33,7 +33,7 @@ task of both zones goes back unscheduled.
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Callable, Dict, Iterator, List, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 # Standard libs
 import os
@@ -520,6 +520,59 @@ def scan_site_key(relay: Any, barrier: Path) -> Dict[str, Any]:
             'argv': sum(1 for cmdline, _ in procs if any(k in arg for k in keys for arg in cmdline)),
             'task_hits': sum(1 for environ in tasks
                              if AUTH_ENV in environ or any(k in v for k in keys for v in environ.values()))}
+
+
+class SiteProcess:
+    """A stand-in for a process a relay launched; `refuse` is raised by its environment read, as by an exiting process."""
+
+    def __init__(self, cmdline: List[str], environ: Dict[str, str], refuse: Optional[Exception] = None) -> None:
+        self._cmdline, self._environ, self._refuse = cmdline, environ, refuse
+
+    def cmdline(self) -> List[str]:
+        return self._cmdline
+
+    def environ(self) -> Dict[str, str]:
+        if self._refuse is not None:
+            raise self._refuse
+        return self._environ
+
+
+REFUSALS = [psutil.AccessDenied(pid=1), psutil.NoSuchProcess(pid=1), psutil.ZombieProcess(pid=1)]
+"""What reading an exiting process can raise."""
+
+
+def refused_site(barrier: Path, site_key: str, refuse: Exception) -> List[SiteProcess]:
+    """A site client and a task whose reads succeed, around a site client whose environment read is refused."""
+    return [SiteProcess(['hyper-shell', 'client'], {AUTH_ENV: site_key, 'SITE_MARK': 'a'}),
+            SiteProcess(['hyper-shell', 'client'], {AUTH_ENV: site_key}, refuse=refuse),
+            SiteProcess(['python', 'waiter.py', str(barrier)], {'SITE_MARK': 'a'})]
+
+
+@mark.unit
+@mark.parametrize('refuse', REFUSALS, ids=['AccessDenied', 'NoSuchProcess', 'ZombieProcess'])
+def test_scans_skip_a_process_whose_read_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                    refuse: Exception) -> None:
+    """A process whose read is refused is skipped; the counts are those of the processes read."""
+    barrier, site_key = tmp_path / 'barrier', 'k' * 128
+    monkeypatch.setattr(sys.modules[__name__], 'site_processes',
+                        lambda relay: refused_site(barrier, site_key, refuse))
+    found = scan_site(None, 'upstream-key', barrier)
+    assert (found['read'], found['clients'], found['tasks'], found['hits']) == (2, 1, 1, 0)
+    assert found['names'] == {AUTH_ENV, 'SITE_MARK'}
+    assert scan_site_key(None, barrier) == {'clients': 1, 'keyed_clients': 1, 'keys': {site_key}, 'tasks': 1,
+                                            'argv': 0, 'task_hits': 0}
+
+
+@mark.unit
+@mark.parametrize('refuse', REFUSALS, ids=['AccessDenied', 'NoSuchProcess', 'ZombieProcess'])
+def test_client_environments_skip_a_refused_read(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                 refuse: Exception) -> None:
+    """The site client environments are those that could be read; one withheld (empty) is kept."""
+    barrier, site_key = tmp_path / 'barrier', 'k' * 128
+    procs = refused_site(barrier, site_key, refuse) + [SiteProcess(['hyper-shell', 'client'], {})]
+    monkeypatch.setattr(sys.modules[__name__], 'site_processes', lambda relay: procs)
+    client_environments = getattr(sys.modules[__name__], 'client_environments')  # Looked up here: a new helper
+    assert client_environments(None) == [{AUTH_ENV: site_key, 'SITE_MARK': 'a'}, {}]
 
 
 @mark.integration
