@@ -222,3 +222,20 @@ stop condition, R1 a new return trigger beside the existing ones) and again afte
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-21)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+- **D1 (the cut): not taken.** The GOAL's cut applies to a database read per landed result bundle on
+  every server, or a back-off change while work remains. The counted arm reads the stop predicate's
+  two counts only once landed results reach the remaining count, about once per run, and the
+  back-off is unchanged while work remains. R3 stays in, with R5's full bound.
+- **D2 (`hs update` during the final back-off):** accepted as recorded in §5. The run ends when that
+  back-off runs out, as today.
+- **D3 (man pages):** accepted. Sources change and the builder's output is checked; `share/man`
+  pages are regenerated at release, as every cycle does.
+- **D4–D6:** accepted. No completion change. R1 reaches every `hs client` with `-b` above 1, and the
+  release note says so. The branch is red between P1 and P4 and is never pushed in between.
+- **High-blast files** (`client.py`, `server.py`): the review's human gate applies as the rubric
+  says.
