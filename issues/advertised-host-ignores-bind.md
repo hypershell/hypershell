@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:relay-advertise
 kind: feature
 appetite: small
 target: 2.9.0

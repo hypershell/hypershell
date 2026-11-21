@@ -355,7 +355,7 @@ keep clear of the relay hardening work, since landed.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `cluster-launch-failures`
 (landed, #107: the rule and the cluster override); relay (#82, which left `--advertise` for later)*
-**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
+**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: adopted:relay-advertise*
 
 ## A relay run can still end up to about 5 s late
 
