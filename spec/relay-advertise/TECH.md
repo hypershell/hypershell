@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: feature/relay-advertise
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -56,7 +56,7 @@ phases:
     sh "$PWD/spec/relay-advertise/drive/advertise_drive.sh" $m || exit 1; done
 - id: P3
   name: Docs, completions and the agent docs
-  status: pending
+  status: done
   satisfies:
   - R6
   depends_on:
@@ -225,17 +225,17 @@ every zone dials; neither leaves develop's address; a blank option exits 2 befor
 **Goal:** the relay's help pages, the security page and both completions offer and explain
 `--advertise`; every passage stating the site clients' address rule states the new one.
 
-- [ ] `docs/_include/relay_usage.rst`: ``[--advertise ADDR]`` after ``[--bind ADDR]``.
-- [ ] `docs/_include/relay_help.rst`: the `--launcher` entry's address sentence; ``--bind`` gains
+- [x] `docs/_include/relay_usage.rst`: ``[--advertise ADDR]`` after ``[--bind ADDR]``.
+- [x] `docs/_include/relay_help.rst`: the `--launcher` entry's address sentence; ``--bind`` gains
       "unless ``--advertise`` names another"; a new ``--advertise`` *ADDR* entry between ``--bind`` and
       ``--port`` (PLAN §2.5: precedence over ``relay.advertise``, ``server.advertise`` does not reach a
       relay, passed on as given, the TLS sentence, not the bounds a zone advertises, "See also
       ``relay.advertise``").
-- [ ] `docs/security.rst` (the advertised-address paragraph and its `versionadded:: 2.9.0` body):
+- [x] `docs/security.rst` (the advertised-address paragraph and its `versionadded:: 2.9.0` body):
       a relay's site clients and ``relay.advertise``. `docs/_include/config_intro.rst`: ``relay.advertise``
       beside ``server.advertise`` among the optional text keys.
-- [ ] `share/bash_completion.d/hs` and `share/zsh/site-functions/_hs`, `_hs_relay` (PLAN §2.5).
-- [ ] `AGENTS.md` (the `client_launch()` bullet's "the relay has no override", and the `relay/`
+- [x] `share/bash_completion.d/hs` and `share/zsh/site-functions/_hs`, `_hs_relay` (PLAN §2.5).
+- [x] `AGENTS.md` (the `client_launch()` bullet's "the relay has no override", and the `relay/`
       bullet if it states the address) and `.agents/factory/invariants.md` §11 (the one-rule bullet),
       in lockstep.
 - **Verify:** see frontmatter (the whole new test file, completions and schema suites; `bash -n` and

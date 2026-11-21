@@ -40,7 +40,8 @@ Options
     ``CMD [ARGS...] hyper-shell client ...`` (e.g., ``srun``). A ``{zone}`` in the launcher or
     its arguments is replaced by the zone the *client* serves, and the launched process has it in
     ``HYPERSHELL_ZONE``. The *clients* connect back to the relay at its bind address (``--bind``),
-    or by its host name when it binds every interface (*0.0.0.0*, the default). The launcher must
+    or by its host name when it binds every interface (*0.0.0.0*, the default), unless
+    ``--advertise`` names another address for them to dial. The launcher must
     pass the environment through: each *client* receives the site key there
     (``HYPERSHELL_SERVER_AUTH``), never on its command line.
     See also ``relay.launcher``.
@@ -54,7 +55,21 @@ Options
     Bind address of the relay-local *server* (default: 0.0.0.0).
 
     The *clients* at the site connect to the relay here, so it must be reachable from the
-    nodes they run on. See also ``relay.bind``.
+    nodes they run on, unless ``--advertise`` names another address for them to dial.
+    See also ``relay.bind``.
+
+``--advertise`` *ADDR*
+    Address the *clients* at the site are told to dial (default: by ``--bind``).
+
+    By default the *clients* of every zone dial the relay at its bind address, or by this host's
+    name when it binds every interface (*0.0.0.0*). Give another address when they must use a
+    different name, such as one the site's compute nodes resolve to this host while the relay
+    listens on every interface. It is passed on as given, never resolved or checked, and must be
+    reachable from the nodes the *clients* run on. With TLS verified against the system CA bundle
+    (``[server.tls] cafile`` empty) and no ``servername``, it must be a name the relay-local
+    *server*'s certificate carries. This is the address the site's *clients* dial, not the client
+    bounds a zone advertises upstream. It takes precedence over ``relay.advertise``;
+    ``server.advertise`` does not reach a relay. See also ``relay.advertise``.
 
 ``--port`` *NUM*
     Port of the relay-local *server* (default: 50002).
