@@ -257,3 +257,9 @@ Foreman's triage of the two remaining items, under the maintainer's standing man
 - **F1 (coverage note).** Add a command-line test for R2's working-launcher clause: a lock taken once
   the server is idle, every task done, the run still serving, one WARNING, no traceback. It must be
   red on `9c82842d`, or else name the base behaviour it pins.
+
+## Review-cycle-2 ruling (2026-11-21)
+
+Review cycle 2 approved at `729dc347` with no CONFIRMED and no PLAUSIBLE finding. The human gate was
+not triggered in either cycle, so the cycle publishes and merges on green under the maintainer's
+standing mandate (2026-11-13).

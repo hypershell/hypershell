@@ -4,7 +4,7 @@ title: A locked database delays a cluster's decision instead of ending the run; 
   --no-db cluster whose work is done never reports a failed launch
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/cluster-launch-followups
 base: develop
 current_phase: done
