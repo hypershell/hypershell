@@ -587,6 +587,7 @@ in `AGENTS.md` and `invariants.md`.
   file's `cwd = ""` the client stops on `FileNotFoundError` for `''`, as on `develop`.
   `HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY=` gives `Settings.segmentby == ''`; an empty `_ORDERBY`
   is refused naming `database.timescale.orderby`.
+- Review cycle 3, G1 (maintainer ruling 2026-11-21): `test_env_duration.py::test_relay_passes_duration_seconds[file|environment]` pins the seconds `RelayThread` receives for the nine relay duration keys given in units; with `evict` and `bundlewait` passed as read in a scratch copy both nodes fail (`'10m' != 600`, `'1.5s' != 1.5`), green on this tree.
 
 ---
 

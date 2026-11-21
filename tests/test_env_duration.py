@@ -148,3 +148,73 @@ def test_duration_refused_at_start(temp_site: Path, path: str) -> None:
     status, _, stderr = run_bounded(site, argv, env, bound=BOUND)
     source = name or str(site / 'config.toml')
     assert_refused(status, stderr, path, source, 'Duration')
+
+
+RELAY_UNITS: Final[Dict[str, Tuple[str, str, Any]]] = {
+    'server.evict': ('10m', 'evict', 600),
+    'relay.bundlewait': ('1.5s', 'bundlewait', 1.5),
+    'relay.poll': ('2.5s', 'poll', 2.5),
+    'relay.retention': ('2h', 'retention', 7200),
+    'relay.timeout': ('1.2s', 'client_timeout', 2),
+    'relay.upstream.heartrate': ('1m30s', 'heartrate', 90),
+    'relay.upstream.evict_hint': ('3m', 'evict_hint', 180),
+    'relay.upstream.deadline': ('2.25s', 'deadline', 2.25),
+    'relay.upstream.backoff': ('0.75s', 'backoff', 0.75),
+}
+"""For each relay duration key: the value given in units, the `RelayThread` argument it becomes, and its seconds.
+
+Only `relay.timeout` is rounded up to whole seconds; the others keep fractions.
+"""
+
+RELAY_RECORDER: Final[str] = '''\
+import json
+from types import SimpleNamespace
+import hypershell.relay as relay_module
+from hypershell.relay import RelayApp
+
+built = []
+thread = SimpleNamespace(start=lambda: None, stop=lambda: None, release=lambda: None)
+RelayApp.bind_database = lambda self: None
+for name in ('lock_database', 'store_utc', 'ensuredb', 'ensure_tables', 'join_waking',
+             'install_drain_handlers', 'install_terminate_handler'):
+    setattr(relay_module, name, lambda *args, **kwargs: None)
+relay_module.RelayThread = lambda **options: built.append(options) or thread
+RelayApp.from_cmdline([]).run()
+print(json.dumps([{{name: options.get(name) for name in {names!r}}} for options in built]))
+'''
+"""Program a child interpreter runs to start `RelayApp` with `RelayThread` recorded, not built (nothing is served)."""
+
+
+def relay_units_file(site: Path) -> Path:
+    """Write a configuration file giving every relay duration key of `RELAY_UNITS` in units."""
+    tables: Dict[str, List[str]] = {}
+    for path, (value, _, _) in RELAY_UNITS.items():
+        *section, name = path.split('.')
+        tables.setdefault('.'.join(section), []).append(f'{name} = "{value}"')
+    return write_config(site, ''.join(f'[{section}]\n' + '\n'.join(lines) + '\n'
+                                      for section, lines in tables.items()))
+
+
+@mark.integration
+@mark.parametrize('source', ['file', 'environment'])
+def test_relay_passes_duration_seconds(temp_site: Path, source: str) -> None:
+    """The relay hands its parts the seconds of each duration key given in units, not the text as read."""
+    import json
+    import sys
+    site = Path(str(temp_site))
+    if source == 'file':
+        variables = {'HYPERSHELL_CONFIG_FILE': str(relay_units_file(site))}
+    else:
+        variables = {'HYPERSHELL_' + path.replace('.', '_').upper(): value
+                     for path, (value, _, _) in RELAY_UNITS.items()}
+    env = relay_env(site, **variables)
+    names = [name for _, name, _ in RELAY_UNITS.values()]
+    status, stdout, stderr = run_bounded(site, [sys.executable, '-c', RELAY_RECORDER.format(names=names)],
+                                         env, bound=BOUND)
+    assert status == exit_status.success, stderr
+    built = json.loads(stdout.splitlines()[-1])
+    assert len(built) == 1
+    expected = {name: seconds for _, name, seconds in RELAY_UNITS.values()}
+    assert built[0] == expected
+    assert {name: type(value) for name, value in built[0].items()} == {
+        name: type(seconds) for name, seconds in expected.items()}
