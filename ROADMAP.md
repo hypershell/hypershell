@@ -221,6 +221,15 @@ test. A deterministic interleaving test should pin it. Filed after `task-input-f
 (REVIEW cycle 3, N1)*
 **Seed:** [`issues/stream-failed-group-recount-test.md`](issues/stream-failed-group-recount-test.md) · *status: unshaped*
 
+## `hs server --forever --no-db` exits once its only relay drains
+
+An in-memory server started with `--forever` should keep serving until signalled, but with one relay
+it exits 0 once that relay has drained; the same run on a database stays up. Found by the plan of
+`relay-advertise`; not yet narrowed to a cause.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-advertise/`*
+**Seed:** [`issues/forever-nodb-server-exits-when-relay-drains.md`](issues/forever-nodb-server-exits-when-relay-drains.md) · *status: unshaped*
+
 ## An empty task file never finishes
 
 `hsx` given an empty task file on an empty database never exits: the server logs `Empty database -
