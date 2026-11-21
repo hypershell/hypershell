@@ -320,3 +320,133 @@ Unmapped: N2. The `hs config edit` paragraph moved into `config_intro.rst` (same
 ### Optional completeness sub-pass
 
 - Not run (not requested).
+
+## Review cycle 3 — approved (2026-11-21)
+
+- **Reviewed commit:** cb5e122b7c6c7e7471d30a98a2ff4771dff14d0b  ·  **Base:** `origin/develop` bf03942d (merge base 91c5aa9a)  ·  **Date:** 2026-11-21
+- **Verdict:** approved
+- **Cycle:** 3 of ≤3 — mirrors `review.cycle` in `TECH.md`
+- **Mode:** the default for a later cycle: a grade of cycle 2's N1–N3 remediation, then a fresh
+  blind pass over the whole spec-excluded diff (`git diff origin/develop...HEAD -- . ':(exclude)spec/'`).
+
+The blind reviewer was given `GOAL.md` (with its GOAL-gate block), the base copies of
+`review-rubric.md`, `invariants.md` and `AGENTS.md`, cycle 2's findings by failure scenario, and as
+contract readings every ruling at the end of `PLAN.md` (plan gate; review-cycle-1 with the Non-goal
+amendment; review-cycle-2; the `database.host` note), copied out of `spec/` so that it read nothing
+there. It did not read PLAN, TECH, research, META, this file or `red.txt`. The orchestrator read
+TECH's "Review-cycle-2 remediation" only to judge the builder's deviations (below). The
+contract-drift check found only the shaping commit (2e92b87c) and the GOAL-gate commit (94319cdb)
+on `GOAL.md`.
+
+### Verification run
+
+- Full suite, serial, at cb5e122b (`.venv/bin/python -m pytest -q -p no:cacheprovider`, sandbox
+  off) → **3488 passed, 138 skipped** (25m40s); `test_waits_for_slow_peer_upgrade` passed in the run.
+- Reviewer's targeted runs: the schema, environment, blame, duration, export, completion,
+  failed-launch and period-floor files → 432 passed; the launch, `--ssh` and relay key-handling
+  tests → 94 passed.
+- Mutation check: 28 mutants in scratch copies on `PYTHONPATH` (worktree untouched) → 24 killed;
+  of the 4 that survive, two are equivalent and one near-equivalent (no difference a user or a task
+  can see), and one is G1.
+- A side-by-side environment-layer sweep, base vs branch: 173 `HYPERSHELL_*` names (every key in
+  the table and every name the repo, docs, tests, `share/`, Dockerfile, Apptainer recipe and CI use)
+  × 6 values (1038 cases). Every variable that set a key on the base sets the same key; the
+  underscore keys land at their own path; the other differences are the ruled changes.
+- CLI drives in throwaway sites (`temp_site.sh`, `-H 127.0.0.1`): `task.cwd` from a file and from
+  the environment (6 runs, both trees); 19 empty variables on both trees; the all-digit key through
+  `hs server`, `hs submit --queue` and `hs client`; `hs relay` with every relay duration key in
+  units; `[export]` and task-environment drives; `hs config which`/`get` and the completion list.
+- Orchestrator probe (both trees): `HYPERSHELL_TASK_CWD=` with `HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY=`
+  and `HYPERSHELL_DATABASE_HOST=` → branch: `task.cwd` the default, `segmentby` `''`, `host` unset
+  (base: `None` for all three); a file's `cwd = ""` → `''` on both.
+- `sphinx-build -W --keep-going -q -E -b html docs …` (Python 3.12 docs environment) → exit 0, no warnings.
+- Merge checks (`git merge-tree --write-tree`) and a test run on the merged tree, see **Merge status**.
+
+### Cycle-2 findings
+
+| Finding | Status | Evidence |
+|---|---|---|
+| N2 — a file's empty `task.cwd` changed behaviour | **Remediated** | `client.py` reads `task.cwd` as on the base (`:512`, `:834`; no `cwd` hunk in its diff). `hs cluster tasks.in --no-db --no-tls -N1`: a file's `cwd = ""` gives the base's `FileNotFoundError` for `''` on both trees; `HYPERSHELL_TASK_CWD=` runs the tasks in the client's directory, exit 0 (base: `TypeError`); a file's `cwd = "/tmp"` with the empty variable runs in `/tmp`. Mutants on either layer are killed. |
+| N1 — empty `database.timescale` variables dropped | **Remediated** | The four keys are out of `EMPTY_UNSET`. `HYPERSHELL_DATABASE_TIMESCALE_SEGMENTBY=` gives `segmentby = ''` (no segmenting), alone and over a file's value, as a file's `segmentby = ""` does; an empty `orderby` (and `chunk_interval`, `compress_after`) is refused by `Settings.from_config` with the file's message (base: "expected a string"). `test_empty_unset_keys` decides "optional" from the documented defaults; putting the keys back fails 8 tests. |
+| N3 — `AGENTS.md` lacked the empty-value rule | **Remediated** | `AGENTS.md` § Configuration states it beside `invariants.md` § 10; both agree with `config_intro.rst` and `manual.rst`. |
+
+**Builder deviations judged** (TECH "Review-cycle-2 remediation"): `EMPTY_IS_DEFAULT` in the schema
+test (`server.bind`, `relay.bind`, `database.host`, `task.cwd`) — as ruled. The reference-reading
+`documented_default` helper — sound; it is what the N1 ruling asks the test to use. The orchestrator
+checked every remaining `EMPTY_UNSET` member against the defaults table and the reference: each has
+no default, one that means none (`<none>`, `<auto>`), or one given only in words (a provider's
+schema, a path pattern, the style's format), so the classification matches the guide's rule.
+
+### Requirement → evidence matrix
+
+| R-ID / ruling | Status | Evidence (cycle 3) |
+|---|---|---|
+| R1 | ✅ | 1038-case sweep; `server.tls.min_version`, `database.timescale.chunk_interval`/`compress_after`, `relay.launcher_args`, `relay.num_threads`, `relay.upstream.evict_hint`, `autoscale.failed_launches` land at their own path; `hs config which autoscale.failed_launches` names its variable |
+| R2 | ✅ | `database.pragmas.journal_mode`, `ssh.nodelist.my_group`, zone `gpu_a100` `launcher_args`; a zone variable with no zone key, and zone + zone table, refused naming the variables |
+| R3 | ✅ | `hs config get server.auth` via `_ENV` shows the resolved key (base: a table); `_EVAL` resolves; two forms in the environment layer exit 3 for `server.auth` and `relay.upstream.auth` |
+| R4 | ✅ | key `0012345678901234`: branch `hs server` serves, `hs submit --queue` submits, `hs client` runs the tasks; base `hs server` refuses it as too short |
+| R5 | ✅ | `HYPERSHELL_SERVER_PORT=abc` exits 3 naming the variable and form; `HYPERSHELL_SERVER_EAGER=no` reads false |
+| R6 | ✅ | bad `server.evict` (file, environment), `client.heartrate`, `relay.poll` exit 3 before binding, naming key, source and forms; `hs relay` with the relay keys in units runs (base: `TypeError`, exit 5); #106's options keep exit 2. Coverage gap: G1 |
+| R7 | ✅ | a task sees `RUN_ID=007`, `MyVar=x`, an empty value as empty, `1e3` as written; the environment wins over a file; a file's table as before |
+| R8 | ✅ | `hs config which` names the variable as written; the completion list has the underscore keys and no `site`, `config.file`, `pythonpath`, `zone` or dotted non-keys |
+| R9 | ✅ | docs build clean; the guide, reference, task-environment, manual and security pages checked against the drives; `versionchanged:: 2.9.0` markers present |
+| Plan-gate S1–S13 | ✅ | the ten keys exit 3, #106's exit 2; typed values refused at import; an empty number variable refused |
+| Cycle-1 rulings (F1 key handling, the Non-goal amendment, F2–F4, wording, #112) | ✅ | no form of the key reaches a launched client's environment beside the run key, an `--env` export or a task; F3's file case pinned; seed citations hold at HEAD; `test_period_floor` passes |
+| Cycle-2 rulings (N1–N3, wording) and the `database.host` note | ✅ | above |
+
+Unmapped changes: none. `hs config --list-available` printing one key per line (R8), the `hs config edit`
+paragraph moved into `config_intro.rst` (R9 layout), `plain_seconds` for `-w`/`-T` and the relay's
+`DEFAULT_*` constants reading `default` (R6), and the two seeds are all accounted for.
+
+### Findings
+
+#### G1 [LOW/CONFIRMED, coverage only] No test pins the relay handing its converted durations to its parts (R6)
+- **Where:** `src/hypershell/relay/__init__.py:1149-1173` (`RelayApp` builds `RelayThread` from
+  `self.durations[…]`).
+- **Scenario:** a later edit that passes a relay duration key to `RelayThread` as read
+  (`evict=config.server.evict` in place of `self.durations['server.evict']`) would bring back the
+  base's `TypeError` for a unit value, and no test would fail. The tests pin `config_seconds` and the
+  refusal at start, but none starts the relay with a valid unit value.
+- **Evidence:** that mutant in a scratch copy on `PYTHONPATH` → `tests/test_env_duration.py` passes
+  in full. The code itself is correct: `hs relay` with `server.evict = "10m"` and the other relay
+  keys in units runs until stopped (base: `TypeError: '>=' not supported between instances of 'str'
+  and 'int'`, exit 5).
+- **Grading:** LOW is the rubric's row for "missing-but-non-blocking test coverage of an R-ID", and
+  no behaviour is wrong, so it does not block. Suggested follow-up: one test that starts the relay
+  (or `RelayApp`) with each relay duration key in units and checks the seconds its parts receive.
+- **Touches:** R6 (test strength only). Not a high-blast-radius file.
+
+**Considered and dropped:** an empty variable for a duration key that has an option
+(`HYPERSHELL_SERVER_POLL=`, `_SUBMIT_BUNDLEWAIT=`, `_TASK_SIGNALWAIT=`) is now refused by the option's
+parser with exit 2, where the base read it as `None`. This is the ruled rule (a key with a default
+of its own holds an empty value as written, and a duration is checked by the command that reads it),
+and it matches a file's `""` on both trees.
+
+### Merge status
+
+- **`origin/develop` (bf03942d):** merges cleanly (`git merge-tree --write-tree origin/develop HEAD`,
+  exit 0). Develop moved past the merge base only in `ROADMAP.md` and `issues/`.
+- **`fix/cluster-launch-followups`:** not on `origin`; checked against the local branch (c29f75a0,
+  based on develop 9c82842d). It merges cleanly with this branch, and the three-way tree (develop,
+  that branch, this one) is clean. The overlapping files (`ROADMAP.md`, `cluster/remote.py`,
+  `server.py`) change disjoint code: that branch skips an autoscale check on a locked database and
+  counts the receiver's writes; this one reads `autoscale.failed_launches` from its own key and
+  `server.evict`/`client.heartrate` through `config_seconds`. On the three-way tree, both branches'
+  new and touched test files (`test_cluster_locked`, `test_cluster_nodb_finish`, `test_cluster_no_db`,
+  `test_cluster_launch`, `test_autoscale_failed_launches`, `test_period_floor`, `test_relay_launch`,
+  `test_config_schema` and the four `test_env_*` files) → 697 passed, 4 skipped.
+
+### Human-gate triggers
+
+- **Not triggered this cycle.** The only CONFIRMED finding, G1, is a coverage gap in
+  `relay/__init__.py`, which is not a high-blast-radius file, and touches no security or
+  DB-lifecycle invariant. The high-blast-radius hunks (`client.py`, `server.py`, `cluster/remote.py`)
+  were re-examined and driven; nothing was found in them.
+- Cycle 2's trigger (N2, `client.py`) was discharged by the maintainer's sign-off on the
+  review-cycle-2 rulings, given before the remediation; N2 is remediated with the reader as on the
+  base. Cycle 1's trigger (F1) was discharged in cycle 2.
+- **Loop bound:** cycle 3 of at most 3, and it converged.
+
+### Optional completeness sub-pass
+
+- Not run (not requested).

@@ -160,11 +160,10 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     $TMPDIR/docs-html-eck
 review:
-  last_reviewed_commit: 085538c81869b4617fdbe8821dcb675c0227ee29
-  verdict: changes-requested
-  blocked_reason: 'review cycle 2: N2 task.cwd file change undocumented (client.py,
-    human gate); N1 empty timescale variables dropped; N3 AGENTS/invariants lockstep'
-  cycle: 2
+  last_reviewed_commit: cb5e122b7c6c7e7471d30a98a2ff4771dff14d0b
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — Environment variables reach every configuration key with the value as written; the remaining duration keys take units
 

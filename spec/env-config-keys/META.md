@@ -62,3 +62,10 @@
 - **Skill cause:** Step 1.3 says how to reopen phases but not how to prove a remediation test red, nor that `red.txt` is red-on-base only; the precedent (`cluster-nodb-and-zero-period`) records its red run in TECH prose the same ad hoc way.
 - **Recommended fix:** In Step 1.3, say: a remediation test is proven red on `review.last_reviewed_commit` (`RED_BASE_REV=<that commit>`), recorded in the TECH remediation section; only a test also red on the cycle's base joins `red.txt`.
 - **Confidence:** med · **Effort:** small
+
+## F8 — A CONFIRMED LOW coverage gap: Step 4 routes it to changes-requested, the rubric calls it non-blocking
+`origin=hs-review:step4 severity=medium category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** Cycle 3, the last allowed, found one finding: a missing test (a mutant survives) over correct behaviour. Step 4 routes on "Clean (no CONFIRMED)" versus "CONFIRMED findings", whatever the severity; the rubric's severity table defines LOW as "missing-but-non-blocking test coverage of an R-ID". The orchestrator approved on the rubric's reading and recorded why, but on a last cycle the other reading forces an escalation.
+- **Skill cause:** The two documents disagree on whether a CONFIRMED LOW coverage gap blocks, and neither says which wins; "CONFIRMED" (reproduced wrong behaviour) also fits a surviving mutant awkwardly, since nothing behaves wrongly.
+- **Recommended fix:** In Step 4 and the rubric's *Verdict & loop*, say that a LOW finding that is coverage only (behaviour verified correct by an executed drive) is recorded and does not block, and that every other CONFIRMED finding blocks. This does not weaken the executed-evidence spine: the behaviour must still be shown correct by execution.
+- **Confidence:** high · **Effort:** small
