@@ -84,3 +84,43 @@ environment, but it is not a relay variable and site clients do not read it.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Review cycle 2 — approved (2026-11-21)
+
+- **Reviewed commit:** 4a27eda33589dd8234d3321093a0cb63c030a6c5  ·  **Base:** `origin/develop` (d9901cf0; merge-base 08d867df)
+- **Mode:** remediation-scoped, docs-only, per the binding "Review-cycle-1 ruling" in `PLAN.md`.
+  Scope is `33b25dac..4a27eda3`; its one build commit (4a27eda3) changes
+  `docs/_include/relay_help.rst` (one sentence, the `--bind` entry) and appends the ruling to
+  `PLAN.md`. No `src/` or `tests/` change (`git diff --stat 33b25dac..4a27eda3 -- src tests` empty),
+  so no test suite was run. `GOAL.md` unchanged since its gate commit.
+
+### Verification run
+
+- F1 remediation: the `--bind` entry now reads "…so it must be reachable from the nodes they run
+  on. ``--advertise`` changes only the address they are told to dial." The "unless `--advertise`…"
+  clause is gone; nothing in the entry suggests `--advertise` substitutes for a reachable bind.
+- Accuracy against the code: `site_cluster` passes `address` to `AutoScalingCluster(bind=…)` and
+  `advertise` only into `advertised_host` (`relay/site.py:125-146`, `cluster/remote.py:1015`);
+  `zone_launch` dials `cluster.advertised` (`relay/site.py:181`). Executed in a `temp_site.sh` site
+  (Python 3.12): `site_cluster(address=("127.0.0.1", 50402), size=1, advertise="head.site")` →
+  server binds `('127.0.0.1', 50402)`, clients dial `('head.site', 50402)`. The bind and the port
+  are untouched; only the dialed host changes, as the sentence says.
+- Consistency: reads with the `--advertise` entry ("must be reachable from the nodes the *clients*
+  run on"), the same file's `--launcher` passage and `APP_HELP` (both state which address clients
+  are told, not reachability), `config_param_ref.rst` `[relay] .bind` ("The *clients* at the site
+  connect here") and `.advertise`, and `cluster_help.rst`'s `-H`/`--advertise` passages, which the
+  ruling keeps as is. No contradiction found.
+- Docs: `sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-radrv2` → exit 0,
+  no Sphinx warnings (only the docs environment's `pkg_resources` import warning and the
+  matplotlib social-cards notice, neither a build warning). The sentence renders in `cli/relay.html`
+  and `manual.html`.
+- Merge: `git fetch origin`; `git merge-tree --write-tree origin/develop HEAD` → clean (tree
+  c5b2daac). `origin/develop` still d9901cf0.
+
+### Findings
+
+No CONFIRMED findings. F1 (LOW/PLAUSIBLE, cycle 1): **resolved** at 4a27eda3.
+
+### Human-gate triggers
+
+- Not triggered. Docs-only delta; no high-blast-radius file, no security or DB-lifecycle invariant.
