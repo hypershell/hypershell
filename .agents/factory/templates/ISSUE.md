@@ -2,6 +2,7 @@
 status: unshaped | shaped | adopted:{slug} | declined | accepted-behaviour
 kind: feature | fix | refactor | docs
 appetite: small | big
+target: 2.9.0 | 2.9.x | 2.10.0 | 2.8.x | unscheduled   # release planned; see ROADMAP.md (Target)
 lane: public
 ---
 
