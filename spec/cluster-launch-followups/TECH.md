@@ -94,10 +94,10 @@ phases:
     pytest -p no:cacheprovider -q && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv311-clf
     uv run --python 3.11 pytest -p no:cacheprovider -q
 review:
-  last_reviewed_commit: 836ae5bcad3c00c2bc423a496a46feb743717f69
+  last_reviewed_commit: 729dc3477e1c1af05d69291d69973237ae29f2f9
   verdict: approved
   blocked_reason: ''
-  cycle: 1
+  cycle: 2
 ---
 # TECH.md — A locked database delays a cluster's decision instead of ending the run; a `--no-db` cluster whose work is done never reports a failed launch
 

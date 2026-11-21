@@ -74,3 +74,10 @@ is skipped by the parser):
 - **Skill cause:** Step 1 (remediation) says to reopen the phases covering the failing R-IDs and re-run their verifies. It does not warn that a phase's "unchanged since base" fence describes that phase's own commit, and a later phase may change the same files. So a reopened earlier phase's gate can fail for reasons unrelated to the fix, which also counts toward the circuit breaker.
 - **Recommended fix:** In remediation mode, have `hs-build` check each reopened phase's fence paths against later phases' `Touches` before running it, and retune the fence first. Alternatively, have `hs-plan` write fences as "unchanged since base, except files a later phase owns".
 - **Confidence:** high · **Effort:** small
+
+## F6 — Binding gate rulings live in `PLAN.md`, which Step 2 forbids passing to the blind reviewer · seen again
+`origin=hs-review:step2 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** Review cycle 2 had to grade F2 and F1 under the review-cycle-1 rulings, and R2's working-launcher test under plan-gate D2. Both rulings are recorded in `PLAN.md`. The orchestrator restated them in the reviewer's prompt as the brief directed, although Step 2 lists only `GOAL.md`, the diff, `invariants.md` and the rubric.
+- **Skill cause:** As `spec/key-option-refused/META.md` F5 and `spec/hs-update-contended-writes/META.md` F4.
+- **Recommended fix:** As there.
+- **Confidence:** high · **Effort:** small

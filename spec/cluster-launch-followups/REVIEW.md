@@ -215,3 +215,215 @@ CONFIRMED findings auto-loop to `hs-build`.
 ## Optional completeness sub-pass
 
 Not run (not requested).
+
+## Review cycle 2 — approved (2026-11-21)
+
+- **Reviewed commit:** `729dc347`  ·  **Base:** `origin/develop` (`bf03942d`; merge base `9c82842d`)
+  ·  **Delta since cycle 1:** `836ae5bc..729dc347`
+- **Verdict:** approved. No finding, CONFIRMED or PLAUSIBLE. F2 and F1 are remediated.
+- **Mode:** scoped to remediation, on the foreman's brief. This cycle graded F2 and F1 and made a
+  fresh blind pass over the delta (`docs/cli/cluster.rst`, `tests/test_cluster_locked.py`). The full
+  spec-excluded diff was re-checked only where the delta touches it. `src/` is unchanged since
+  `836ae5bc` (`git diff --quiet 836ae5bc..HEAD -- src`).
+
+### How this cycle was run
+
+- **Blind pass:** one fresh reviewer.
+  - **Inputs:** `GOAL.md` with its GOAL-gate block; the delta and the full diff, both with `spec/`
+    excluded; and the base copies of `invariants.md`, `review-rubric.md` and `AGENTS.md`.
+  - **Binding readings:**
+    - the GOAL-gate rulings;
+    - the plan-gate rulings, including D2: the working-launcher case takes the lock only once the
+      server is idle;
+    - the review-cycle-1 rulings. F2 is one `versionchanged:: 2.9.0` clause in
+      `docs/cli/cluster.rst` and none in `server.rst`. F1 is a command-line test of R2's
+      working-launcher clause, red on `9c82842d` or naming the base behaviour it pins.
+  - **Not read:** `PLAN.md`, `TECH.md`, `META.md` or `research/`. Its searches excluded `spec/`.
+- **Orchestrator:** checked contract drift and merge status, and ran its own:
+  - a red run on the base;
+  - a merged-tree run;
+  - a stable-line drive;
+  - the docs build and the phase fences.
+
+  It also judged the builder's two recorded deviations.
+- **Contract drift:** `GOAL.md` changed only in `17ef8123` (shaping) and `ffdd53cb` (GOAL gate).
+- **Environment:** CPython 3.14.6 (`/tmp/claude-501/venv314-clf-review`, an editable install of this
+  worktree). Tests ran serially. Every drive used `.agents/factory/bin/temp_site.sh`, `-H 127.0.0.1`,
+  an explicit free port and `--no-tls`.
+
+### Verification run
+
+- **The new test on the branch** (`test_autoscaling_cluster_with_working_clients_keeps_serving_after_a_lock`):
+  passed, in 32.5 s for the reviewer and 32.2 s on the orchestrator's merged tree.
+- **Red on the base (R7):** reproduced by the reviewer and the orchestrator independently.
+  - **Setup:** `git archive 9c82842d` into a scratch directory, the branch's test file copied in,
+    and the base `src` on `PYTHONPATH`. Checked: `hypershell.__file__` is the base copy, and
+    `MEMORY_SETTLE` is present.
+  - **Result:** 1 failed, at `assert ended is None` (`tests/test_cluster_locked.py:581`).
+  - **Log:** `CRITICAL … Uncaught exception from <class 'hypershell.cluster.remote.AutoScaler'>`; an
+    `OperationalError … database is locked` on the `client` registration SELECT
+    (`client_registrations`, with failed launches at their default); and an `exception-*.log` file.
+    It is red for the defect.
+- **Timing probe (reviewer):** a timestamped copy of the test, run 9 times. Five runs were under 12
+  `yes` processes and three under 30 (load average 28 on 10 CPUs), while the orchestrator's runs
+  were also going. Every run passed with exactly one warning.
+  - The lock lands 6–30 ms after the scheduler's 16 s back-off begins. The scheduler next wakes about
+    7.5 s after the release, and the test has ended by then.
+  - Checks come about 1.01 s apart. The first check to meet the lock starts 0.7–1.3 s after it. Its
+    warning lands at lock + 5.7–6.3 s, and the release comes 2.2–2.8 s after the warning.
+  - **Zero warnings** would need the first locked read to start after lock + 3.5 s. **Two** would
+    need the release more than 5 s after the first warning. The margin is at least 2.2 s either way.
+- **The whole module:** `tests/test_cluster_locked.py` → 25 passed (82.7 s, reviewer).
+- **Merged-tree run (orchestrator):**
+  - **Tree:** a scratch merge of `origin/develop`, `origin/fix/env-config-keys` (`cb5e122b`) and
+    this branch.
+  - **Result:** `test_cluster_locked.py` and `test_autoscale_failed_launches.py` → 54 passed (126 s).
+  - **Why it matters:** the run used that branch's typed environment layer, and the new test relies
+    on `HYPERSHELL_LOGGING_LEVEL=TRACE`.
+- **Mutant (reviewer):** `skip_check` changed to return FINAL. The new test passes, and the six
+  `test_locked_check_is_skipped_with_one_warning` cases fail. See the dropped candidates below.
+- **Stable line, 2.8.7 (orchestrator):**
+  - **Command:** `hs cluster tasks.txt --no-tls -H 127.0.0.1 --autoscaling fixed -P 2 --launcher
+    false`, with the 2.8.7 `src` on `PYTHONPATH` and the lock held from 3 s to 12 s.
+  - **Result:** exit 5 at 10.2 s, with `CRITICAL … Uncaught exception from … AutoScaler`, `database
+    is locked` on the current-group SELECT, and a traceback file.
+  - **Reviewer:** its own 2.8.7 drive (`-P 1`, the lock held from 3 s for 9 s) gave the same.
+- **Docs:** `sphinx-build -W --keep-going -q -E -b html docs …` under 3.12 → exit 0 (orchestrator
+  and reviewer). The clause renders in `cli/cluster.html`.
+- **Phase fences on `HEAD`:**
+  - P2's retuned fence passes. Its old clause is red only on `server.py` (+3/−0).
+  - P3's bound on `server.py` (0 removed, 2–8 added) passes at +3/−0, and `MEMORY_SETTLE` is absent.
+  - P4's fence passes, with `docs/cli/cluster.rst` at +4/−0.
+
+### Merge status
+
+`git merge-tree --write-tree` gives a clean merge in each case:
+- onto `origin/develop` (`bf03942d`);
+- onto `origin/fix/env-config-keys` (`cb5e122b`, which has moved since cycle 1's `085538c8`);
+- onto the merge of both.
+
+That branch changes `cluster/remote.py` (`configured_failed_launches`), `server.py`
+(`evict_after`), `cluster/launch.py` and `tests/test_autoscale_failed_launches.py`. This delta
+touches none of them. The merged-tree run above found no semantic conflict.
+
+### Remediation grades
+
+**F2 (the `versionchanged` marker): remediated.** It is at `docs/cli/cluster.rst:56-58`: "With
+`--autoscaling`, a check that finds the SQLite database locked is skipped with a warning and made
+again at the next period, instead of ending the run."
+- **Accurate and complete for a check.** The guards cover every read a check makes:
+  - `check` wraps `count_failures`, the `client_registrations` read;
+  - `check_fixed` and `check_dynamic` wrap `check_zones`, whose reads are `Task.current_group` and
+    `starting_group`, `Client.count_connected`, and every read in `read_zone_loads`.
+
+  START, INIT, SCALE and WAIT touch no database. `scheduler_group` and `registered` read server
+  state in memory.
+- **No overclaim.** The clause names "a check" only. The server's own threads still end the run on a
+  lock: the scheduler's load, the heartbeat monitor's `Client` writes and the receiver. The GOAL's
+  Non-goals exclude them, and the clause does not claim them. Plan-gate D2 puts that limit in the
+  PR's description.
+- **"The next period" is accurate.** `check` sets `last_check` before it reads, and `skip_check`
+  returns WAIT. So the next check comes one period after the skipped one began, or at once when
+  `-P` is shorter than the 5 s busy wait. The wording matches `--period`'s help ("waits for this
+  period of time in between checks").
+- **"Instead of ending the run" holds on the stable line.** The 2.8.7 drive above shows it.
+- **`docs/cli/server.rst` correctly has no marker.**
+  - `hs server --autoscaling` runs `TopologyPublisher` (`cluster/topology.py`), not `AutoScaler`,
+    and that path is new in 2.9.0.
+  - Relay site fleets (`SiteScaler`) do inherit the skip, but `hs relay` is new in 2.9.0 (not in
+    2.8.7), so it needs no marker either.
+- **Placement follows `AGENTS.md` § Docs.** The clause is one sentence, beside the other 2.9.0
+  `--autoscaling` markers between the description and help includes, so no generated snippet is
+  hand-marked. It has no `:pr:` yet (`hs-release` adds it), and no `_include` file changed. It is a
+  marker, not a page, so the GOAL's "no doc page" stands.
+
+**F1 (a command-line test of R2's working-launcher clause): remediated.** The test is at
+`tests/test_cluster_locked.py:562-587`, with its helpers at `:457-488`.
+- **What it asserts:**
+  - every task is complete with exit status 0 (a database count);
+  - standard output is `0`–`4`, as in an unlocked run;
+  - the cluster is still running 6 s after the release;
+  - exactly one `database was locked` WARNING;
+  - no CRITICAL line and no traceback file.
+- **It is red on `9c82842d` for the defect,** as shown above.
+- **Only the autoscaler's reads meet the lock.** The lock is taken once every task is complete and
+  the scheduler has logged a back-off of 16 s or more. That is longer than the 8.5 s hold, and
+  nothing wakes the dispatcher while no client is connected. The heartbeat monitor, receiver and
+  confirmer touch the database only on events. No client is relaunched during the hold: `size.min`
+  is 0, there is no work, and `-T 1s` has retired the clients.
+- **Deterministic and bounded.**
+  - The readiness wait is at most `IDLE_READY` (45 s), and `BEGIN EXCLUSIVE` waits at most 10 s.
+  - The joins are bounded at 58.5 s and 15 s, the cluster is waited 6 s, then `kill_group`.
+  - "Exactly one WARNING" has the measured margin above, including under load.
+- **The refactor leaves the earlier tests unchanged.**
+  - `LockHolder.delay` keeps the old 0.5 s, and `condition` keeps the old error text.
+  - `ready_timeout` still defaults to 30, and `hold_over` still defaults to `LockHolder`.
+  - `start_cluster` without `out_path` writes to `os.devnull`, the same as `DEVNULL`.
+  - The module's other 24 tests pass, on the branch and on the merged tree.
+
+### The builder's recorded deviations
+
+- **P2's fence drops `server.py`: accepted.**
+  - The clause described P2's own commit (`7edac8cd`). P3's sanctioned `Receiver` counter (+3/−0)
+    makes it red on every later tree, so re-running P2 for the remediation could never pass it.
+  - Dropping it weakens nothing: P3's verify still bounds `server.py`, and it passes on `HEAD`. The
+    friction is recorded as `META.md` F5.
+  - A loose end in `spec/` (not graded): P2's prose "Verify" line in `TECH.md` still lists
+    `server.py` among the files left unchanged.
+- **P1 not reopened: accepted.**
+  - P1's verify asserts `src` equal to the base, which cannot hold once P2 and P3 have landed.
+  - R7 asks that each of R1, R2, R3 and R5 is pinned by a test red on the base. The new test's red
+    run was reproduced here by two independent runs. The R2 test P1 already pinned
+    (`test_exits_during_a_skipped_check_are_counted`) is unchanged.
+
+### Requirement → evidence matrix (delta)
+
+| R-ID | Delta change | Verified how | Status |
+|------|--------------|--------------|--------|
+| R1 | The marker documents the skip. The new test checks it on the command line: the registration read, with failed launches at their default. | The log shows one `Autoscale check skipped: database was locked (checking again in 0:00:01)`, no CRITICAL line and no traceback. The six unit cases (fixed and dynamic × registrations, sizing at the limit, sizing with the limit off) pass. | ✅ |
+| R2 (working-launcher clause) | The new command-line test | Red on the base, green on the branch; 9 of 9 probe runs passed, under load too; passes on the merged tree | ✅ (closes cycle-1 F1) |
+| R7 | The new test fails on `9c82842d` and passes on the branch. A second connection's `BEGIN EXCLUSIVE` holds the lock. | The two base red runs above | ✅ |
+| §12 docs | One `versionchanged:: 2.9.0` clause | The docs build passes with `-W`; checked against 2.8.7 by the drive | ✅ (closes cycle-1 F2) |
+
+R3 through R6 are untouched by the delta (`src` and `tests/test_cluster_nodb_finish.py` are unchanged
+since `836ae5bc`), so cycle 1's evidence stands. Unmapped changes: none. The changes to
+`LockHolder`, `hold_over` and `start_cluster` support the R2/R7 test, and they change no existing
+test's behaviour.
+
+### Findings
+
+None.
+
+### Candidates tried and dropped
+
+- **Zero or two warnings under load.** The measured margin is at least 2.2 s on each side, and it
+  held at load average 28.
+- **The scheduler, or a relaunched client, meeting the lock during the hold.** The scheduler is in
+  a back-off of 16 s or more and wakes about 7.5 s after the release. With no work and `size.min`
+  at 0, no client is launched.
+- **"Still serving" is only "process alive".** The mutant in which the autoscaler halts after a
+  skip passes the new test.
+  - That behaviour (R1's "check again at its next period") is pinned by the six unit skip cases,
+    which fail on the mutant, and, by reading, by the limit-off command-line test.
+  - R2's clause, keep serving, holds either way, since `--autoscaling` implies `--forever`.
+  - So this is not a gap in what F1 asked for.
+- **The marker landing in a later commit than the code.** The PR squash-merges into one commit, and
+  the cycle-1 ruling directed the marker.
+- **The warning's "checking again in {period}"** reads a few seconds long when the busy wait takes
+  up part of the period. That text predates the delta and is accurate enough for its purpose.
+- **`hs server --autoscaling` (`TopologyPublisher`) still ends on a locked read.** The GOAL's
+  "may inherit" makes that a Non-goal. It is new in 2.9.0, so there is no stable-line change to
+  mark.
+
+### Human-gate triggers
+
+- **Not triggered.** There is no CONFIRMED finding.
+- The delta touches only `docs/cli/cluster.rst` and a test file. `src/` (including `server.py` and
+  `cluster/remote.py`) is unchanged since cycle 1, which approved it without triggering the gate.
+- No security or DB-lifecycle invariant is touched.
+
+### Routing
+
+- **Verdict:** approved. Cycle 2 of ≤3; the loop has converged.
+- **Next:** `/hs-publish`. Per plan-gate D2, the PR's description should say plainly that a lock held
+  while clients work still ends the run through the server's own threads.
