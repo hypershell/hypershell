@@ -2,6 +2,7 @@
 status: shaped
 kind: research
 appetite: small
+target: 2.10.0
 lane: public
 shaped-as: turso-upstream-repro
 ---

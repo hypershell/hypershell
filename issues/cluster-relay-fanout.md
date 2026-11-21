@@ -2,6 +2,7 @@
 status: unshaped
 kind: feature
 appetite: big
+target: unscheduled
 lane: public
 ---
 
