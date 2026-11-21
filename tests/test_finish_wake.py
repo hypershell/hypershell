@@ -32,6 +32,7 @@ from pytest import mark
 from sqlalchemy.engine import Engine
 
 # Internal libs
+import hypershell.client
 import hypershell.server
 from hypershell.data.core import Session
 from hypershell.data.model import Task
@@ -236,6 +237,8 @@ def test_finishing_result_ends_a_long_back_off(task_db: Engine, monkeypatch: pyt
                                                tmp_path: Path) -> None:
     """A run whose last result lands in a 600 s back-off finishes within a second of that result."""
     monkeypatch.setattr(hypershell.server, 'DATABASE_ENABLED', True)
+    # A local cluster sets the client's module-wide mode; it is restored for the tests that follow.
+    monkeypatch.setattr(hypershell.client, 'CLIENT_STANDALONE_MODE', hypershell.client.CLIENT_STANDALONE_MODE)
     backing_off = threading.Event()
     marks: Dict[str, float] = {}
     back_off = Scheduler.back_off

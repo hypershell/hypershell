@@ -160,6 +160,8 @@ def test_finalize_returns_everything_held(short_local_timeout: None) -> None:
 def test_idle_client_returns_what_it_holds(task_db: Engine, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A client with a bundle of 8 and a 60 s wait returns its 3 results within a second of each finishing."""
     monkeypatch.setattr(hypershell.server, 'DATABASE_ENABLED', True)
+    # A local cluster sets the client's module-wide mode; it is restored for the tests that follow.
+    monkeypatch.setattr(hypershell.client, 'CLIENT_STANDALONE_MODE', hypershell.client.CLIENT_STANDALONE_MODE)
     apply_results = Task.apply_results
     landed: Dict[str, datetime] = {}
 

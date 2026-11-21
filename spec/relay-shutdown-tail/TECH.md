@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -51,7 +51,7 @@ phases:
     nodb
 - id: P3
   name: 'A client with nothing left to run returns what it holds: the in-flight count'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -294,9 +294,9 @@ run, however long its back-off; nothing else about scheduling changes.
 **Goal:** every client returns a partial bundle at once when it has no task running or waiting, and
 bundles exactly as today otherwise.
 
-- [ ] `TaskCount` in `client.py`; `ClientThread` makes one and passes `inflight=` to the scheduler and
+- [x] `TaskCount` in `client.py`; `ClientThread` makes one and passes `inflight=` to the scheduler and
   collector machines (and their threads).
-- [ ] `ClientScheduler.request_bundle` raises it by a reply's task count; `ClientCollector.get_local`
+- [x] `ClientScheduler.request_bundle` raises it by a reply's task count; `ClientCollector.get_local`
   lowers it per task taken; `check_bundle` returns a non-empty bundle at 0, after the size test, before
   the wait test, with a TRACE line.
 - **Verify:** client, relay-return and stream suites, `tests/test_main.py` (help unchanged here), and
