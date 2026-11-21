@@ -3,10 +3,10 @@ slug: relay-shutdown-tail
 title: A relay run ends within seconds of its last result
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: done
+current_phase: P7
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -41,14 +41,16 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: python3 spec/relay-shutdown-tail/drive/bounded.py 1500 uv run pytest -q
+  verify: python3 spec/relay-shutdown-tail/drive/bounded.py 1800 uv run pytest -q
     -p no:cacheprovider tests/test_finish_wake.py tests/test_stream_input.py tests/test_group_order.py
     tests/test_server_fsm.py tests/test_writeback.py tests/test_writeback_statement.py
-    tests/test_retry_gate.py tests/test_dispatch.py tests/test_dispatch_workload.py
-    tests/test_restart.py tests/test_cluster_exit.py tests/test_contended_recovery.py
-    && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh"
-    finish && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh"
-    nodb
+    tests/test_writeback_postgres.py tests/test_retry_gate.py tests/test_dispatch.py
+    tests/test_dispatch_workload.py tests/test_zone_dispatch.py tests/test_restart.py
+    tests/test_contended_recovery.py tests/test_contended_write.py tests/test_cluster_exit.py
+    tests/test_cluster_locked.py tests/test_cluster_nodb_finish.py && .agents/factory/bin/temp_site.sh
+    uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" finish && .agents/factory/bin/temp_site.sh
+    uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" nodb && .agents/factory/bin/temp_site.sh
+    uv run sh "$PWD/spec/relay-shutdown-tail/drive/end_drive.sh" idle
 - id: P3
   name: 'A client with nothing left to run returns what it holds: the in-flight count'
   status: done
@@ -93,16 +95,19 @@ phases:
   hammerable: false
   hill: uphill
   verify: python3 spec/relay-shutdown-tail/drive/bounded.py 300 uv run pytest -q -p
-    no:cacheprovider tests/test_main.py tests/test_config_schema.py && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv
+    no:cacheprovider tests/test_main.py tests/test_config_schema.py && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-rst
     python3 spec/relay-shutdown-tail/drive/bounded.py 900 uv run --python 3.12 --group
     docs sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-rst
-    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv python3 spec/relay-shutdown-tail/drive/bounded.py
+    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-rst python3 spec/relay-shutdown-tail/drive/bounded.py
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b man
     docs /tmp/claude-501/docs-man-rst && grep -q 'nothing left to run' docs/_include/client_help.rst
     && grep -q 'nothing left to run' docs/_include/cluster_help.rst && test "$(grep
     -c 'nothing left to run' docs/_include/config_param_ref.rst)" -ge 2 && grep -q
     'finishes a run' docs/_include/config_param_ref.rst && grep -q 'nothing left to
     run' /tmp/claude-501/docs-man-rst/hs.1 && grep -q 'finishes a run' /tmp/claude-501/docs-man-rst/hs.1
+    && grep -q 'none for an idle client' src/hypershell/cluster/__init__.py && ! grep
+    -q 'none once idle' src/hypershell/cluster/__init__.py && grep -q 'none once idle'
+    src/hypershell/client.py && grep -q 'The `submit` thread does not' docs/_include/cluster_help.rst
     && test "$(git diff f3fb4dd2 -- docs src AGENTS.md .agents | grep -c '^+.*hs task
     ')" -eq 0
 - id: P6
@@ -120,7 +125,7 @@ phases:
     --baseline spec/relay-shutdown-tail/evidence/baseline
 - id: P7
   name: Whole suite, serially; the red list re-proved on f3fb4dd2
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -368,6 +373,49 @@ the processes read. Test-only.
   that reproduces on `f3fb4dd2` is recorded, not fixed (name it in the phase commit).
 - **Verify:** whole suite, `red_check.sh` on `f3fb4dd2` (3 of 3 RED), `tail_bound.py`.
 - **Touches:** — (state only, unless a failure in this cycle's files needs a fix).
+
+## Review-cycle-1 remediation (2026-11-21)
+
+`REVIEW.md` cycle 1 (changes-requested on `8690deaf`: F1, the merge with `develop`, a coverage note)
+and the rulings at the end of `PLAN.md` ("Review-cycle-1 rulings"). P2, P5 and P7 reopened. P2's gate
+retuned to add the receiver's other readers and suites (`test_cluster_locked.py`,
+`test_cluster_nodb_finish.py`, `test_contended_write.py`, `test_zone_dispatch.py`,
+`test_writeback_postgres.py`) and the `idle` drive; P5's gate retuned to the `docs-venv-rst`
+environment and to grep F1's wording.
+
+- [x] **Merge** — `origin/develop` (`d9901cf0`, with #114 `52828325` and the roadmap `Target` labels)
+      merged in a signed merge commit (`84768297`), keeping both sides:
+  - `src/hypershell/server.py` `Receiver`: develop's `written` counter beside this branch's
+    `scheduler` attribute. In `update_tasks`, `written` is raised in the loop past the DEFERRED,
+    STALE and DUPLICATE `continue`s, and the APPLIED count goes to `results_landed` after the loop,
+    before UNLOAD: both count APPLIED results only, #114's one-bundle-at-a-time barrier holds, and its
+    empty barrier bundle applies nothing and reports nothing.
+  - `ROADMAP.md`: develop's `*Target: …*` lines with this branch's `adopted:relay-shutdown-tail`
+    statuses; the queue-limits seed stays `unshaped`.
+  - Auto-merged and read: `docs/cli/cluster.rst` (develop's locked-read note beside this branch's
+    two notes), the two adopted seeds (develop's `target: 2.9.0` beside `status: adopted:…`).
+- [x] **F1** — `src/hypershell/cluster/__init__.py:87`: `-w` reads "Wait before flushing tasks, none
+      for an idle client; …", so the idle return is credited to the clients only. The long help
+      (`docs/_include/cluster_help.rst`, `-w`) adds that the `submit` thread does not: it holds tasks
+      until a bundle is full, the period passes or the input ends. `hs client`'s line is unchanged.
+- [x] **Coverage** — `tests/test_finish_wake.py::test_result_landing_during_the_count_is_not_lost`
+      (`unit`): `Task.count_remaining` is wrapped so that the pass's own count is read, then the
+      finishing result lands through the receiver, then the stale count (1) is returned, so the result
+      lands after the count and before `finishing` takes it. Asserts the arm in force at the landing
+      is `(0, 0)`, the pass ends its 600 s back-off within 1 s, `landed == 1`,
+      `finishing == (0, 1)` after the pass, and the next pass is FINAL. Deterministic: the landing is
+      run in the scheduler's own thread at a fixed point, no timing. With the provisional `(mark, 0)`
+      arm removed (scratch mutation, reverted) it fails: "Pass still waiting after 15.0 s".
+- Gates (on `84768297` + this work, Python 3.14, serial):
+  - P2: 312 passed, 71 skipped (the PostgreSQL cases) in 6 min 45 s, including #114's
+    `test_cluster_locked.py`, `test_cluster_exit.py` and `test_cluster_nodb_finish.py`; `end_drive.sh`
+    `finish` 10.81 s (bound 13.5 s), `nodb` 1.72 s, `idle` 2.08 s, all PASS.
+  - P5: `test_main.py` and `test_config_schema.py` 185 passed; html and man builds with `-W` exit 0
+    (sandbox off, `docs-venv-rst`, Python 3.12); every grep holds, F1's included; no `hs task` added.
+  - Also: `test_client_return.py`, `test_client_request.py` and the R7 unit tests, 22 passed.
+  - The new test, three runs alone: passed in 0.30–0.32 s each.
+  - R5 stands as recorded on `dd0b227d`: the merge brings no change to `client.py`, and in
+    `server.py` only the receiver's `written` counter, so the laptop drive is not re-run.
 
 ---
 

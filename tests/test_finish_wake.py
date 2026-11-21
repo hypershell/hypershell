@@ -222,6 +222,34 @@ def test_result_landing_before_the_wait_is_not_lost(task_db: Engine, monkeypatch
 
 
 @mark.unit
+def test_result_landing_during_the_count_is_not_lost(task_db: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A finishing result that lands after the pass reads its remaining count, before that count arms the
+    pass, still ends the pass's wait: the pass is armed for any landing before it counts."""
+    task_id, = commit_tasks(0)
+    scheduler = started_scheduler(task_id)
+    machine = receiver(scheduler)
+    finishing = result(task_id)
+    count_remaining = Task.count_remaining
+    seen: Dict[str, Any] = {}
+
+    def count_then_land(*args: Any, **kwargs: Any) -> int:
+        remaining = count_remaining(*args, **kwargs)
+        if not seen:
+            # The pass's own count: the result lands once it is read and before the pass arms with it.
+            seen.update(remaining=remaining, armed=scheduler.finishing)
+            land(machine, finishing)
+        return remaining
+
+    monkeypatch.setattr(Task, 'count_remaining', staticmethod(count_then_land))
+    run = Pass(scheduler).start()
+    assert run.join(JOIN_BOUND) < WAKE_BOUND
+    assert seen == {'remaining': 1, 'armed': (0, 0)}
+    assert scheduler.landed == 1 and scheduler.finishing == (0, 1)
+    assert run.states == [SchedulerState.LOAD]
+    assert scheduler.load_bundle() is SchedulerState.FINAL
+
+
+@mark.unit
 def test_receiver_reports_to_the_server_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
     """A server with a database hands its scheduler to its receiver; an in-memory one has none to hand."""
     in_memory = ServerThread(in_memory=True, address=('127.0.0.1', free_port()), auth='test')

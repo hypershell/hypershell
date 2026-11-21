@@ -109,7 +109,8 @@ Options
     This is used by both the `submit` thread and forwarded to each `client`. The `client` collector
     thread that accumulates finished task bundles to return to the `server` will push out a bundle
     after this period of time regardless of whether it has reached the preferred bundle size.
-    A client with nothing left to run returns what it holds at once.
+    A client with nothing left to run returns what it holds at once. The `submit` thread does not:
+    it holds tasks until a bundle is full, this period passes or the input ends.
 
     See also ``--bundlesize``.
 
