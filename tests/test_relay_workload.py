@@ -272,6 +272,18 @@ def running_tasks(relay: Any, barrier: Path) -> int:
     return count
 
 
+UNREADABLE = (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess)
+"""What reading a process that exited, or is exiting, raises: it exited between the listing and the read."""
+
+
+def read_process(proc: psutil.Process) -> Optional[Tuple[List[str], Dict[str, str]]]:
+    """A process's command line and environment, or None when they cannot be read (it exited or is exiting)."""
+    try:
+        return proc.cmdline(), proc.environ()
+    except UNREADABLE:
+        return None
+
+
 def scan_site(relay: Any, key: str, barrier: Path) -> Dict[str, Any]:
     """Scan the command line and environment of every process a relay launched for the upstream key.
 
@@ -279,11 +291,10 @@ def scan_site(relay: Any, key: str, barrier: Path) -> Dict[str, Any]:
     all of them, and the variable `names` they hold.
     """
     found = {'read': 0, 'clients': 0, 'tasks': 0, 'hits': 0, 'names': set()}
-    for proc in site_processes(relay):
-        try:
-            cmdline, environ = proc.cmdline(), proc.environ()
-        except (psutil.NoSuchProcess, psutil.ZombieProcess):
-            continue  # Exited between the listing and the read.
+    for read in map(read_process, site_processes(relay)):
+        if read is None:
+            continue
+        cmdline, environ = read
         if not environ:
             continue  # Withheld by the platform.
         found['read'] += 1
@@ -505,13 +516,8 @@ def scan_site_key(relay: Any, barrier: Path) -> Dict[str, Any]:
     one of them on their command line, `tasks` the running tasks scanned, and `task_hits` those holding
     the key variable or a key in their environment.
     """
-    procs = []
-    for proc in site_processes(relay):
-        try:
-            procs.append((proc.cmdline(), proc.environ()))
-        except (psutil.NoSuchProcess, psutil.ZombieProcess):
-            continue
-    procs = [(cmdline, environ) for cmdline, environ in procs if environ]
+    procs = [(cmdline, environ) for cmdline, environ in filter(None, map(read_process, site_processes(relay)))
+             if environ]
     clients = [environ for cmdline, environ in procs if 'client' in cmdline]
     keys = {environ[AUTH_ENV] for environ in clients if environ.get(AUTH_ENV)}
     tasks = [environ for cmdline, environ in procs if any(str(barrier) in arg for arg in cmdline)]
@@ -631,6 +637,12 @@ def site_clients(relay: Any) -> List[psutil.Process]:
         except psutil.Error:
             pass
     return found
+
+
+def client_environments(relay: Any) -> List[Dict[str, str]]:
+    """The environments of the site clients a relay launched that could be read (one withheld reads empty)."""
+    return [environ for cmdline, environ in filter(None, map(read_process, site_processes(relay)))
+            if 'client' in cmdline]
 
 
 def release(group: Group, relay: Any, barrier: Path) -> None:
@@ -1108,7 +1120,8 @@ def test_site_clients_keep_the_relay_config_file_without_relay_settings(group: G
     relay = start_relay(group, 'relay', port, key, 1, '--no-tls', HYPERSHELL_CONFIG_FILE=str(config))
     try:
         until(lambda: running_tasks(relay, barrier), time.monotonic() + 60, 'a site task running')
-        environ = [proc.environ() for proc in site_clients(relay)]
+        environ = until(lambda: client_environments(relay), time.monotonic() + 60,
+                        'a readable site client environment')
         assert environ and all(env.get('HYPERSHELL_CONFIG_FILE') == str(copy) for env in environ)
         assert stat.S_IMODE(copy.stat().st_mode) == 0o600
         text = copy.read_text()

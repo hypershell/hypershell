@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/relay-shutdown-tail
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -69,7 +69,7 @@ phases:
     finish
 - id: P4
   name: 'Rider: the relay workload scans skip a process they cannot read (test-only)'
-  status: pending
+  status: done
   satisfies:
   - R7
   depends_on:
@@ -308,7 +308,7 @@ bundles exactly as today otherwise.
 **Goal:** a process that exits mid-read is skipped by every scan, with the same counts and checks over
 the processes read. Test-only.
 
-- [ ] `read_process()`, used by `scan_site` and `scan_site_key`; `client_environments()` read inside
+- [x] `read_process()`, used by `scan_site` and `scan_site_key`; `client_environments()` read inside
   `until(...)` at the `:1058` site; `Optional`/`Tuple` imports. Leave `running_tasks`, `site_clients` and
   the names `tests/test_relay_outage.py` imports as they are.
 - **Verify:** the unit tests of the file, then the whole file and `tests/test_relay_outage.py`
