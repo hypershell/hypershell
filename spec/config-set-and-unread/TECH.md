@@ -4,7 +4,7 @@ title: hs config set writes each key by its type, and hs server and hs cluster r
   the keys they document
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/config-set-and-unread
 base: develop
 current_phase: done
@@ -151,12 +151,13 @@ phases:
     spec/config-set-and-unread/drive/bound.sh 900 uv run --python 3.12 --group docs
     sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-csu
 review:
-  last_reviewed_commit: f829330335f247702bf44bb9aa379bf00c3cc258
+  last_reviewed_commit: d6d83afa2bf604de9c8c411303f59abde0889451
   verdict: changes-requested
-  blocked_reason: 'Review cycle 1: F1 (R4) non-UTF-8 VALUE truncates config with traceback;
-    F2 (R8) non-finite file rate breaks launched clients; F3 (R7/S2) evict past timedelta
-    range crashes; F5, F6 (R9) docs. Human gate: F3 in server.py'
-  cycle: 1
+  blocked_reason: 'Review cycle 2: F7 (R1/R4) non-UTF-8 locale truncates or mis-encodes
+    the config file; F8 (R7/F3) integer evict past float range crashes; F9 (R8) rate
+    under ~1e-14/s kills the executor and hangs hs cluster; F10 PLAUSIBLE spec ids
+    in tests. Human gate: F8 server.py, F9 client.py'
+  cycle: 2
 ---
 # TECH.md — `hs config set` writes each key by its type, and `hs server` and `hs cluster` read the keys they document
 
