@@ -336,6 +336,18 @@ statement. Pre-existing; out of scope for `hs-update-contended-writes` (#111).
 `spec/hs-update-contended-writes/` (Non-goals)*
 **Seed:** [`issues/update-legacy-tag-lost-write.md`](issues/update-legacy-tag-lost-write.md) · *status: unshaped*
 
+## Every numeric setting has one declared range, one parser and one error
+
+Bounds on numeric input were added one cycle at a time (a period above zero, an evict cap, a rate
+floor, 32-bit groups), and each review finds the next absurd value that slips through. One table of
+ranges beside each key's kind, one parser per kind for options, files and the environment, one
+error, and a start-up backstop that turns any stray numeric error into a clean refusal would end
+that. It absorbs the absurd-input seeds filed during the 2.9.0 cycles.
+
+*Target: 2.9.0 · Horizon: near-term · Depends on: `config-set-and-unread`, `submit-input-checks`,
+`update-client-retry` · Refs: `core/config_schema.py`; review rubric (Scope)*
+**Seed:** [`issues/bounded-inputs.md`](issues/bounded-inputs.md) · *status: unshaped*
+
 ## A non-integer task group is accepted at submit time
 
 The inline `group:` tag, `-t group:…` and a `--from-json` record's `group` key accept any value.
