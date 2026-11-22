@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -84,7 +84,7 @@ phases:
 - id: P5
   name: 'The reached group: Task.reached_group, hs submit''s all-or-nothing refusal,
     the C9 default'
-  status: pending
+  status: done
   satisfies:
   - R6
   depends_on:
@@ -448,10 +448,26 @@ an ERROR naming the value and line; nothing hangs (PLAN § 2.4).
 **Goal:** `hs submit` with a database refuses a group below the reached group, all or nothing; a plain
 submission takes the reached group (PLAN § 2.5).
 
-- [ ] `Task.reached_group(in_flight=True)`: one statement, U computed once; the `typeof` filter on
+- [x] `Task.reached_group(in_flight=True)`: one statement, U computed once; the `typeof` filter on
       SQLite; the `CANCEL_STATUS` filter.
-- [ ] `SubmitApp`: the C9 default; the R6 check after the scan and the gate decision, before any
+- [x] `SubmitApp`: the C9 default; the R6 check after the scan and the gate decision, before any
       write; `ArgumentError` naming the lowest offending group, the reached group and the workarounds.
+- **Built:** `Task.reached_group` is one `SELECT max("group")` joined to a one-row CTE `pass_start`
+  (U = `min(submit_time)` over incomplete rows), so PostgreSQL scans for U once. With
+  `in_flight=False` the scheduled branch counts only completed rows (`completion_time IS NOT NULL
+  AND (schedule_time >= U OR completion_time >= U)`), per the P1 amendment; the retry-row branch is
+  unchanged. The `typeof` filter is chosen from `Session.get_bind().dialect.name`.
+  `submit.py::refuse_below_reached_group(groups, reached)` raises the `ArgumentError` (`Task group
+  {lowest} is below the reached group {R} of the database (nothing submitted); submit at group {R}
+  or higher, wait for the run to finish, or use a fresh database`); a `None` group (queue mode) is
+  not checked. `SubmitApp.reached_group` (a cached property, read once), `default_group()` (C9;
+  logs `reached group; most recently scheduled group G is below it` or `... is not an integer`),
+  `task_groups()` (the scan's groups; for arguments the inline group, else `-t`, else the default;
+  for `--from-json` each record's `group`, else `-t`, else the default). The check runs after the
+  scan and before `Zone.ensure`/`prepare_source`. The gate is not split yet (P6), so in P5 an
+  `--update` skip set is not yet excluded; P6 moves the check after the gate decision.
+- **Verified (2026-11-21):** suites 154 passed, 1 skipped (the SQLite-only text-group test on
+  PostgreSQL; PostgreSQL on); guards 19 passed; `input_drive.sh reached` PASS 5 of 5.
 - **Verify:** `test_reached_group.py` and the group, submit, zone-on-PostgreSQL and signal suites;
   guards; `input_drive.sh reached`.
 - **Touches:** `src/hypershell/data/model.py`, `src/hypershell/submit.py`.

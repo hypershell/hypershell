@@ -19,7 +19,8 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, delete, select, bindparam, literal, or_, cast, inspect
+from sqlalchemy import (Column, Index, func, text, update, delete, select, bindparam, literal, or_, and_, true,
+                        cast, inspect)
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
@@ -832,6 +833,44 @@ class Task(Entity):
     def lowest_incomplete_group(cls: Type[Task]) -> Optional[int]:
         """The smallest group holding a task that has not completed, or None."""
         return Session.query(func.min(cls.group)).filter(cls.completion_time.is_(None)).scalar()
+
+    @classmethod
+    def reached_group(cls: Type[Task], in_flight: bool = True) -> Optional[int]:
+        """
+        The highest group the current pass has scheduled, or None when no task is incomplete.
+
+        The current pass is the run of work since the database last held no incomplete task. Its
+        start is not stored, so the earliest submit time of an incomplete task stands in for it: a
+        row counts when it was scheduled and was still incomplete at or after that time (in flight,
+        or scheduled or completed since then), or when it is a retry row submitted since then.
+        Every row counted was therefore scheduled in the current pass, and the value never exceeds
+        the group the schedule has truly reached. Cancelled rows do not count (a cancel stamps the
+        schedule time), and on SQLite a group an earlier release stored as text or real is ignored.
+
+        With `in_flight=False` a task still in flight does not count: a server reverts in-flight
+        tasks when it starts, so they do not hold a lower group back for a run about to start.
+        """
+        pass_start = (
+            select(func.min(cls.submit_time).label('submit_time'))
+            .where(cls.completion_time.is_(None))
+            .cte('pass_start')
+        )
+        since_start = or_(cls.schedule_time >= pass_start.c.submit_time,
+                          cls.completion_time >= pass_start.c.submit_time)
+        if in_flight:
+            scheduled = and_(cls.schedule_time.isnot(None), or_(cls.completion_time.is_(None), since_start))
+        else:
+            scheduled = and_(cls.schedule_time.isnot(None), cls.completion_time.isnot(None), since_start)
+        retry = and_(cls.previous_id.isnot(None), cls.submit_time >= pass_start.c.submit_time)
+        query = (
+            select(func.max(cls.group))
+            .select_from(cls.__table__.join(pass_start, true()))
+            .where(or_(cls.exit_status.is_(None), cls.exit_status != CANCEL_STATUS))
+            .where(or_(scheduled, retry))
+        )
+        if Session.get_bind().dialect.name == 'sqlite':
+            query = query.where(func.typeof(cls.group) == 'integer')
+        return Session.execute(query).scalar()
 
     @classmethod
     def _filter_zone(cls: Type[Task], query: Query, zone: Optional[str]) -> Query:

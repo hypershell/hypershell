@@ -78,7 +78,8 @@ from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
-                                   TaskGroupError, ensure_group, parse_group, tag_text, serialize_tasks, zone_name)
+                                   TaskGroupInfo, TaskGroupError, ensure_group, parse_group, tag_text,
+                                   serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
@@ -86,7 +87,7 @@ __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 
            'validate_json_expansion', 'validate_json_groups',
            'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint', 'is_file_input',
            'source_name',
-           'source_fingerprint_and_count', 'apply_source_gate',
+           'source_fingerprint_and_count', 'apply_source_gate', 'refuse_below_reached_group',
            'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
@@ -1397,6 +1398,23 @@ def group_option(text: str) -> int:
         raise ArgumentTypeError(str(error)) from error
 
 
+def refuse_below_reached_group(groups: Iterable[Optional[int]], reached: Optional[int]) -> None:
+    """Refuse a submission holding a task below the database's reached group, all or nothing.
+
+    `groups` are the groups of the tasks to be inserted and `reached` is
+    :meth:`~hypershell.data.model.Task.reached_group` (None: any group is accepted). Raises
+    :class:`~cmdkit.cli.ArgumentError` (exit 2) naming the lowest offending group, the reached
+    group and the ways forward. A task with no group of its own (None) is not checked.
+    """
+    if reached is None:
+        return
+    below = [group for group in groups if isinstance(group, int) and group < reached]
+    if below:
+        raise ArgumentError(f'Task group {min(below)} is below the reached group {reached} of the database '
+                            f'(nothing submitted); submit at group {reached} or higher, wait for the run '
+                            f'to finish, or use a fresh database')
+
+
 DEFAULT_HOST: Final[str] = QueueConfig.host
 """Default host for server connection."""
 
@@ -1564,7 +1582,8 @@ class SubmitApp(Application):
         """Run submit thread.
 
         Input read in full is checked whole before anything is written: tags (exit 2) before any
-        input is read, then the input (exit 5); only then the zone, the source and the tasks.
+        input is read, then the input (exit 5), then each task's group against the database's
+        reached group (exit 2); only then the zone, the source and the tasks.
         """
         self.check_arguments()
         self.check_tags()
@@ -1583,10 +1602,9 @@ class SubmitApp(Application):
             self.check_database()
             self.read_source()
             if self.group is None:
-                group = Task.current_group()
-                self.group = group.value
-                log.info(f'Auto-selected task group {group.value} ({group.reason})')
+                self.group = self.default_group()
             self.scan_source()
+            refuse_below_reached_group(self.task_groups(), self.reached_group)
             if self.zone is not None:
                 self.zone_id = Zone.ensure(self.zone)
             self.prepare_source()
@@ -1594,6 +1612,36 @@ class SubmitApp(Application):
             self.submit_all()
         else:
             self.submit_one()
+
+    @functools.cached_property
+    def reached_group(self: SubmitApp) -> Optional[int]:
+        """The database's reached group (:meth:`~hypershell.data.model.Task.reached_group`), read once."""
+        return Task.reached_group()
+
+    def default_group(self: SubmitApp) -> int:
+        """The task group of a submission that names none.
+
+        This is the most recently scheduled group, unless that is below the reached group (a late
+        lower group is running) or is not an integer; then it is the reached group, so a submission
+        that names no group is never refused for it.
+        """
+        group = Task.current_group()
+        reached = self.reached_group
+        if reached is not None and (not isinstance(group.value, int) or group.value < reached):
+            reason = 'below it' if isinstance(group.value, int) else 'not an integer'
+            group = TaskGroupInfo(reached, f'reached group; most recently scheduled group {group.value} is {reason}')
+        log.info(f'Auto-selected task group {group.value} ({group.reason})')
+        return group.value
+
+    def task_groups(self: SubmitApp) -> List[Optional[int]]:
+        """The group of every task this submission would insert, checked whole before any write."""
+        if self.from_json:
+            default = self.tags.get('group', self.group)
+            return [record.get('group', default) for record in self.source]
+        if self.source is None:
+            _, inline_tags = Task.split_argline(self.direct_args)
+            return [inline_tags.get('group', self.tags.get('group', self.group))]
+        return self.scan.groups
 
     def submit_all(self: SubmitApp) -> None:
         """Submit multiple tasks from file-like source."""
