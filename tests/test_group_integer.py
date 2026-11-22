@@ -18,6 +18,7 @@ from pathlib import Path
 
 # Standard libs
 import os
+import json
 
 # External libs
 import pytest
@@ -27,7 +28,7 @@ from sqlalchemy.engine import Engine
 # Internal libs
 from hypershell.data.model import Task
 from tests import create_taskfile, create_json_taskfile
-from tests.input_checks import bounded, db_site, sqlite_engine, stored_groups, count, submit, ADDRESS  # noqa: F401
+from tests.input_checks import bounded, db_site, sqlite_engine, stored_groups, count, rows, submit, ADDRESS  # noqa: F401
 from tests.test_timescale import admin, ts_database, ts_site  # noqa: F401 (fixtures db_site asks for)
 from tests.test_cluster_exit import HS
 
@@ -294,3 +295,51 @@ def test_server_file_refuses_group(temp_site: Path) -> None:
     assert rc == 5, stderr[-4000:]
     assert_refused(stderr, 'x', 'line 2')
     assert count(sqlite_engine(), 'task') == 0
+
+
+# --- Retries -------------------------------------------------------------------------------------
+
+@mark.integration
+@mark.parametrize('text', ['x', '3'], ids=['text', 'integer'])
+def test_cluster_json_retry_keeps_command_and_group(temp_site: Path, text: str) -> None:
+    """A retry keeps its failed task's command as stored and its group; the command's marker text is not re-read.
+
+    A `--from-json` record's args are stored as written, `# HYPERSHELL:` text included. Its retry is
+    the same command in the same group, whatever group that text names, and the run goes on.
+    """
+    site = Path(str(temp_site))
+    command = f'false # HYPERSHELL: group:{text}'
+    path = create_json_taskfile(site, [{'args': command}, {'args': 'echo fine'}])
+    rc, stdout, stderr = bounded([HS, 'cluster', '--from-json', str(path), '--max-retries', '1', '-N1', '-b', '1',
+                                  '--no-tls', '-H', ADDRESS], cwd=site, timeout=60)
+    assert rc == 0, stderr[-4000:]
+    assert 'fine' in stdout.split()
+    engine = sqlite_engine()
+    try:
+        tasks = rows(engine, 'SELECT id, args, "group", attempt, previous_id, exit_status FROM task '
+                             'WHERE args != :fine ORDER BY attempt', fine='echo fine')
+    finally:
+        engine.dispose()
+    assert [(args, attempt) for _, args, _, attempt, _, _ in tasks] == [(command, 1), (command, 2)]
+    (first_id, _, first_group, _, _, first_status), (_, _, retry_group, _, previous_id, retry_status) = tasks
+    assert first_group == 0 and retry_group == first_group
+    assert previous_id == first_id
+    assert first_status == retry_status == 1
+
+
+@mark.integration
+def test_cluster_json_retry_keeps_tags(temp_site: Path) -> None:
+    """A retry copies its failed task's tags as stored: a `--from-json` tag outside the inline tag grammar is kept."""
+    site = Path(str(temp_site))
+    path = create_json_taskfile(site, [{'args': 'false', 'input': 'data/a b.txt'}, {'args': 'echo fine'}])
+    rc, stdout, stderr = bounded([HS, 'cluster', '--from-json', str(path), '--max-retries', '1', '-N1', '-b', '1',
+                                  '--no-tls', '-H', ADDRESS], cwd=site, timeout=60)
+    assert rc == 0, stderr[-4000:]
+    assert 'fine' in stdout.split()
+    engine = sqlite_engine()
+    try:
+        tasks = rows(engine, 'SELECT attempt, tag FROM task WHERE args = :args ORDER BY attempt', args='false')
+    finally:
+        engine.dispose()
+    assert [(attempt, json.loads(tag) if isinstance(tag, str) else tag) for attempt, tag in tasks] == [
+        (1, {'input': 'data/a b.txt'}), (2, {'input': 'data/a b.txt'})]

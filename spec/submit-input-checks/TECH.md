@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P3
+current_phase: P7
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -49,7 +49,7 @@ phases:
 - id: P3
   name: The integer rule; read-in-full input scanned before any write (hs submit incl.
     stdin, hs cluster incl. --no-db, hs server FILE, --from-json, -t, -g)
-  status: in_progress
+  status: done
   satisfies:
   - R3
   - R4
@@ -587,7 +587,7 @@ P7 and P8 gates with `set_phase.py --verify`, and closed each again after its ga
       each run once. New test `test_reached_group.py::test_reached_group_at_scale` (SQLite, 20 000 rows:
       a finished group 0 and a queued group 1) reads the reached group in a subprocess bounded at 10 s
       and then runs `hs submit -g 0` under the same bound; it asserts `0 0` and exit 0.
-- [ ] **F2 (P3).** The retry in `__schedule_next_failed_tasks` passes `parse_inline=False` and
+- [x] **F2 (P3).** The retry in `__schedule_next_failed_tasks` passes `parse_inline=False` and
       `strict_tag=False`: the retry's command is the failed task's stored command, its group the task's
       group and its tags the task's tags, none read again. New tests in `test_group_integer.py`:
       `test_cluster_json_retry_keeps_command_and_group[text|integer]` (a `--from-json` record
@@ -600,6 +600,9 @@ P7 and P8 gates with `set_phase.py --verify`, and closed each again after its ga
       record's `args` are never read for tags. The strict tag re-check on a retry is an older bug of
       the same construction (the run exits 5 when it retries such a task, on `dfdbaed5` too); the
       ruling's "copies the failed task's tags" covers it.
+- **Verified, P3 (2026-11-22):** suites 281 passed (PostgreSQL on); guards 19 passed;
+  `input_drive.sh group` PASS 6 of 6. The three retry tests fail on `44e177b4` by assertion (exit 5
+  on the text group and on the relaxed tag; the command cut to `false` on the integer group).
 - [ ] **Retry window (P7).** `task_groups_alt.rst` already says it twice: "a failure counts as
       finished unless its retry has been created" and, among the under-estimates, "while a failure
       waits for its retry to be created". No change.

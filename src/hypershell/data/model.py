@@ -1008,6 +1008,8 @@ class Task(Entity):
             return []
         log.trace(f'Selected {len(failed_tasks)} previously failed tasks')
         retries = {task.id: cls.new(args=task.args,
+                                    parse_inline=False,            # The command as stored, its tags copied:
+                                    strict_tag=False,              # they were checked when it was submitted.
                                     attempt=task.attempt + 1,
                                     previous_id=task.id,
                                     tag=task.tag,
