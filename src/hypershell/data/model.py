@@ -1007,17 +1007,24 @@ class Task(Entity):
         if not failed_tasks:
             return []
         log.trace(f'Selected {len(failed_tasks)} previously failed tasks')
-        retries = {task.id: cls.new(args=task.args,
-                                    parse_inline=False,            # The command as stored, its tags copied:
-                                    strict_tag=False,              # they were checked when it was submitted.
-                                    attempt=task.attempt + 1,
-                                    previous_id=task.id,
-                                    tag=task.tag,
-                                    group=task.group,
-                                    fingerprint=task.fingerprint,  # A retry is the same logical task.
-                                    source=task.source,            # Keep the retry chain linked to its source.
-                                    zone=task.zone)                # A retry runs in its task's zone.
-                   for task in failed_tasks}
+        retries = {}
+        for task in failed_tasks:
+            # A retry runs in its task's group column: a `group` tag (written by `hs update`) is copied
+            # with the other tags but is not read as the group, so it can neither move nor stop the retry.
+            tag = dict(task.tag or {})
+            group_tag = {'group': tag.pop('group')} if 'group' in tag else {}
+            retry = cls.new(args=task.args,
+                            parse_inline=False,            # The command as stored, its tags copied:
+                            strict_tag=False,              # they were checked when it was submitted.
+                            attempt=task.attempt + 1,
+                            previous_id=task.id,
+                            tag=tag,
+                            group=task.group,
+                            fingerprint=task.fingerprint,  # A retry is the same logical task.
+                            source=task.source,            # Keep the retry chain linked to its source.
+                            zone=task.zone)                # A retry runs in its task's zone.
+            retry.tag = {**retry.tag, **group_tag}
+            retries[task.id] = retry
         next_ids = {id: {'next_id': task.id} for id, task in retries.items()}
         try:
             # NOTE: marks first: the retry rows are added only for the marks that landed.

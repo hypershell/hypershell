@@ -343,3 +343,28 @@ def test_cluster_json_retry_keeps_tags(temp_site: Path) -> None:
         engine.dispose()
     assert [(attempt, json.loads(tag) if isinstance(tag, str) else tag) for attempt, tag in tasks] == [
         (1, {'input': 'data/a b.txt'}), (2, {'input': 'data/a b.txt'})]
+
+
+@mark.integration
+@mark.parametrize('text, stored', [('x', 'x'), ('7', 7)], ids=['text', 'integer'])
+def test_cluster_retry_ignores_group_tag(db_site: Tuple[Path, Engine], text: str, stored: Any) -> None:
+    """A retry runs in its failed task's group column; a `group` tag written by `hs update` is copied, not read.
+
+    `hs update group:VALUE` stores the tag as given. A text value does not stop the run when the task
+    is retried, and an integer one does not move the retry out of the task's group.
+    """
+    site, engine = db_site
+    rc, _, stderr = submit('--', 'false', cwd=site)
+    assert rc == 0, stderr
+    rc, _, stderr = bounded([HS, 'update', f'group:{text}', '-R', '-f'], cwd=site)
+    assert rc == 0, stderr
+    rc, _, stderr = bounded([HS, 'cluster', '--restart', '--max-retries', '1', '-N1', '--no-tls', '-H', ADDRESS],
+                            cwd=site, timeout=60)
+    assert rc == 0, stderr[-4000:]
+    tasks = rows(engine, 'SELECT id, "group", attempt, previous_id, exit_status, tag FROM task ORDER BY attempt')
+    assert [(group, attempt) for _, group, attempt, _, _, _ in tasks] == [(0, 1), (0, 2)]
+    (first_id, _, _, _, first_status, first_tag), (_, _, _, previous_id, retry_status, retry_tag) = tasks
+    assert previous_id == first_id
+    assert first_status == retry_status == 1
+    assert [json.loads(tag) if isinstance(tag, str) else tag for tag in (first_tag, retry_tag)] == [
+        {'group': stored}, {'group': stored}]

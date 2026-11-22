@@ -4,10 +4,10 @@ title: 'Submitted input is checked: # is part of the command, a group is an inte
   and a group below the reached one is refused'
 kind: fix
 appetite: big
-status: blocked
+status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: done
+current_phase: P8
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -147,7 +147,7 @@ phases:
 - id: P8
   name: Whole suite, serially; the PostgreSQL-aware files with PostgreSQL; the red
     list re-proved on dfdbaed5; the four drives
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -173,6 +173,8 @@ phases:
     tests/test_group_order.py && RED_LIST=spec/submit-input-checks/drive/red.txt RED_BASE_REV=dfdbaed5
     python3 spec/submit-input-checks/drive/bounded.py 2700 sh spec/relay-hardening/drive/red_check.sh
     && RED_LIST=spec/submit-input-checks/drive/red-cycle1.txt RED_BASE_REV=44e177b4
+    python3 spec/submit-input-checks/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
+    && RED_LIST=spec/submit-input-checks/drive/red-cycle2.txt RED_BASE_REV=3dd066a4
     python3 spec/submit-input-checks/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
     && for mode in hash group stream reached; do .agents/factory/bin/temp_site.sh
     uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh" $mode || exit 1;
@@ -630,6 +632,37 @@ P7 and P8 gates with `set_phase.py --verify`, and closed each again after its ga
   (U computed once by each) where it had a materialized one-row join; at 100 000 rows 13 ms after
   against 16 ms before, and at 1 000 000 rows 95–120 ms against 123–137 ms (both runs alongside
   test load).
+
+## Review cycle 2 — remediation (2026-11-22)
+
+[`REVIEW.md`](REVIEW.md) cycle 2 asked for one change (G1 MEDIUM, `data/model.py`); the maintainer
+signed the fix off ([`PLAN.md`](PLAN.md) § *Review-cycle-2 rulings*). `hs-build` reopened P3 (G1, R3)
+and P8 (the whole suite), tightened P8's gate with `set_phase.py --verify` to add this cycle's red
+list, and closed each again after its gate held. In `data/model.py` only the retry construction
+changed; `Task.new` is unchanged.
+
+- [x] **G1 (P3).** The retry in `__schedule_next_failed_tasks` is built in a loop instead of a dict
+      comprehension: a `group` key is taken out of the copied tags before `Task.new` sees them, so the
+      retry's group is the failed task's `group` column (passed as `group=`) and the tag is neither
+      read as the group nor checked; the key is put back on the retry's tags afterwards, so the tags
+      are still copied whole. Every other argument is as before. New test in `test_group_integer.py`:
+      `test_cluster_retry_ignores_group_tag[sqlite|postgres-text|integer]` (`hs submit -- false`,
+      `hs update group:x -R -f` or `group:7`, then `hs cluster --restart --max-retries 1 -N1 --no-tls
+      -H 127.0.0.1`: exit 0, two rows in group 0 at attempts 1 and 2 linked by `previous_id`, both with
+      the tag `{"group": "x"}` or `{"group": 7}`).
+      **Base behaviour checked:** on `3dd066a4` (whose `src` equals the parent of this commit) the text
+      case exits 5 (`TaskGroupError` in the scheduler, `EOFError` at the cluster) and the integer case
+      moves the retry to group 7 and drops the tag, on SQLite and PostgreSQL alike.
+- **Verified, P3 (2026-11-22):** suites 285 passed (PostgreSQL on; the 281 of cycle 1 and the four
+  new ids); guards 19 passed; `input_drive.sh group` PASS 6 of 6. With the source change set aside
+  (`src` as on `3dd066a4`) the four new ids fail by assertion (`assert 5 == 0` on text, `[(0, 1),
+  (7, 2)]` on integer, both dialects); with it, all four pass. The CLI drive above with the tag values
+  `x`, `7` and `1.5` on SQLite: exit 0, retry in group 0 with the tag kept, each.
+- [x] **Docs.** `submit_desc.rst`'s sentence ("a failed task's retry runs that same command in the
+      task's group, with its tags") is now true in G1's case as well; no word changed.
+- [x] **Red list for this cycle.** [`drive/red-cycle2.txt`](drive/red-cycle2.txt) (2 SQLite ids, 2
+      `pg:` ids) is checked against `3dd066a4` by the landed `red_check.sh`; P8's gate runs it after
+      the `44e177b4` list.
 
 ---
 
