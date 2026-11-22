@@ -351,6 +351,18 @@ ships in 2.9.0, not a 2.8.x patch. Pre-existing, and found by that cycle's revie
 `issues/database-locked-during-ingest-hangs.md`*
 **Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
 
+## On PostgreSQL, a task cannot ask for 2 GB of memory or more
+
+`memory` is a byte count in an `INTEGER` column: 64-bit on SQLite, 32-bit on PostgreSQL. So on
+PostgreSQL `hs submit -m 4GB` is refused at insert, and then hangs (the committer death above). A
+retry is then refused as "already submitted", though nothing was stored. Every submitter that sets
+memory meets it, `hypershell-mcp` and `nf-hypershell` included. The fix is `BIGINT` and an upgrade
+step that retypes the column in place, which the upgrade step does not do yet.
+
+*Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs: same committer death as
+`issues/database-locked-during-ingest-hangs.md`; `issues/ingest-robustness.md`*
+**Seed:** [`issues/memory-column-overflows-postgres.md`](issues/memory-column-overflows-postgres.md) · *status: unshaped*
+
 ## Docs and runtime surfacing
 
 Behaviour that is correct or deliberate but unannounced: `--no-confirm` silently disables orphan
