@@ -236,3 +236,54 @@ def test_scope(temp_site, scope: str) -> None:
                 capture_output=True, text=True, timeout=DEADLINE).stdout.strip()
     assert Path(where).is_relative_to(site), where
     assert same(written(Path(where), 'export.RUN_ID'), '007')
+
+
+def scope_file(site: Path, scope: str, **extra: str) -> Path:
+    """The configuration file `hs config set` writes for `scope` in `site`."""
+    return Path(run(['hs', 'config', scope], cwd=site, env=set_env(site, **extra), stdin=DEVNULL,
+                    capture_output=True, text=True, timeout=DEADLINE).stdout.strip())
+
+
+NOT_UTF8: Final[Dict[str, Tuple[str, str]]] = {
+    'untyped': ('database.pragmas.x', 'a\udcff'),
+    'text': ('logging.datefmt', 'a\udcff'),
+    'variant': ('server.auth_env', '\udcffKEY'),
+    'export': ('export.RUN_ID', '0\udcff7'),
+}
+"""A key of each kind that takes text, and a VALUE with a byte that is not UTF-8 (a child receives 0xFF)."""
+
+
+@mark.integration
+@mark.parametrize('scope', ['--local', '--user'])
+@mark.parametrize('case', list(NOT_UTF8))
+def test_not_utf8_refused(temp_site, scope: str, case: str) -> None:
+    """A VALUE that cannot be written as UTF-8 exits 2 naming the key; the file and its backups are as before (R4)."""
+    site = Path(str(temp_site))
+    home = site / 'home'
+    home.mkdir()
+    file = scope_file(site, scope, HOME=str(home))
+    assert file.is_relative_to(site), file
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(SEED)
+    before = sorted(p.name for p in file.parent.glob('.config.*.toml'))
+    path, value = NOT_UTF8[case]
+    rc, stderr = config_set(site, path, value, scope, HOME=str(home))
+    assert rc == exit_status.bad_argument, stderr
+    assert f'{path}: expected text that can be written as UTF-8' in stderr, stderr
+    assert 'traceback' not in stderr.lower(), stderr
+    assert file.read_bytes() == SEED.encode()
+    assert sorted(p.name for p in file.parent.glob('.config.*.toml')) == before
+    assert not list(site.rglob('exception-*.log'))
+
+
+@mark.integration
+def test_not_utf8_path_refused(temp_site) -> None:
+    """A path that cannot be written as UTF-8 exits 2 and leaves the file as it was (R4)."""
+    site = Path(str(temp_site))
+    (site / 'config.toml').write_text(SEED)
+    rc, stderr = config_set(site, 'database.pragmas.\udcff', 'x')
+    assert rc == exit_status.bad_argument, stderr
+    assert 'cannot be written as UTF-8' in stderr and 'traceback' not in stderr.lower(), stderr
+    assert (site / 'config.toml').read_bytes() == SEED.encode()
+    assert not list(site.glob('.config.*.toml'))
+    assert not list(site.rglob('exception-*.log'))

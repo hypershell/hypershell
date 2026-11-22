@@ -13,7 +13,8 @@
 # that does not (its output says which).
 #
 #   set    hs config set: a digit key kept as text, a typed value converted, a refusal (exit 2) that
-#          leaves the file as it was, an untyped TOML integer (R1, R2, R4)
+#          leaves the file as it was, an untyped TOML integer, a value that is not UTF-8 refused
+#          (exit 2) with the file and its backups as they were (R1, R2, R4)
 #   eager  server.eager: a file's "no" runs, an unreadable value stops hs cluster with exit 3 (R5)
 #   evict  server.evict under hs cluster: under the floor exits 5 before listening; 1m30s runs (R7)
 #   rate   -R and client.ratelimit: a launched client takes -R 0.5 and is throttled; task.ratelimit
@@ -45,6 +46,15 @@ set)
     hs config set database.pragmas.cache_size 007 --local || fail 'pragma refused'
     grep -qx 'cache_size = "007"' config.toml || fail "untyped 007 not text: $(cat config.toml)"
     pass 'untyped 007 kept as text'
+    cp config.toml before.toml
+    backups=$(ls -a | grep -c '^\.config\.')
+    hs config set database.pragmas.x "$(printf 'a\377')" --local 2> refused.err; status=$?
+    [ "$status" -eq 2 ] || fail "a value that is not UTF-8 exited $status, not 2: $(cat refused.err)"
+    grep -q 'database.pragmas.x: expected text that can be written as UTF-8' refused.err || fail "message: $(cat refused.err)"
+    grep -qi traceback refused.err && fail "traceback: $(cat refused.err)"
+    cmp -s config.toml before.toml || fail 'a value that is not UTF-8 changed the file'
+    [ "$(ls -a | grep -c '^\.config\.')" -eq "$backups" ] || fail 'a value that is not UTF-8 made a backup'
+    pass 'a value that is not UTF-8 refused with exit 2, file and backups unchanged'
     ;;
 eager)
     printf '[server]\neager = "no"\n' > config.toml

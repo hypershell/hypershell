@@ -272,6 +272,15 @@ Options:
 """
 
 
+def is_utf8(text: str) -> bool:
+    """True if `text` can be written as UTF-8 (a byte that is not UTF-8 arrives as a lone surrogate)."""
+    try:
+        text.encode('utf-8')
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 class ConfigSetApp(Application):
     """Set configuration option."""
 
@@ -298,6 +307,13 @@ class ConfigSetApp(Application):
 
         if '.' not in self.varpath:
             raise ArgumentError('Missing section in variable path')
+
+        # The file is written as UTF-8: a path or value that cannot be is refused before anything is written.
+        if not is_utf8(self.varpath):
+            raise ArgumentError(f'Variable path {self.varpath!r} cannot be written as UTF-8')
+        if not is_utf8(self.value):
+            raise ArgumentError(f'{self.varpath}: expected text that can be written as UTF-8, '
+                                f'given {self.value!r}')
 
         # The value is read by the key's kind, and refused before anything is written.
         try:

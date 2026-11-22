@@ -4,10 +4,10 @@ title: hs config set writes each key by its type, and hs server and hs cluster r
   the keys they document
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: done
+current_phase: P3
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -56,7 +56,7 @@ phases:
     $m || exit 1; done
 - id: P3
   name: server.eager, server.attempts and server.evict reach hs server and hs cluster
-  status: done
+  status: in_progress
   satisfies:
   - R5
   - R6
@@ -75,7 +75,7 @@ phases:
     uv run sh "$PWD/spec/config-set-and-unread/drive/csu_drive.sh" $m || exit 1; done
 - id: P4
   name: -R takes a number, and hs cluster reads client.ratelimit
-  status: done
+  status: in_progress
   satisfies:
   - R8
   depends_on:
@@ -90,7 +90,7 @@ phases:
     $m || exit 1; done
 - id: P5
   name: Docs, help snippets and markers; AGENTS.md and invariants in lockstep
-  status: done
+  status: in_progress
   satisfies:
   - R9
   depends_on:
@@ -119,7 +119,7 @@ phases:
     docs /tmp/claude-501/docs-html-csu'
 - id: P6
   name: 'Gate: the whole suite serially, the red list, the drive, the docs'
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -255,6 +255,8 @@ that does not convert exits 2, naming key, form and value, with nothing written.
       `''` among the `read_value` refusals. Not red-listed (they import the new name).
 - **Verify:** `tests/test_config_set_types.py`, `test_config_schema.py`, `test_env_config.py`,
   `test_main.py`; drive mode `set`.
+- [x] Review cycle 1, F1: a path or VALUE that cannot be written as UTF-8 is refused (exit 2) before
+      anything is written (see the remediation section).
 - **Touches:** `src/hypershell/core/config_schema.py`, `src/hypershell/config.py`, `tests/test_config_schema.py`.
 
 ## Phase P3 — `server.eager`, `server.attempts` and `server.evict` reach `hs server` and `hs cluster` (R5–R7)
@@ -349,6 +351,32 @@ docs state the two new rules.
 - [x] Every drive mode; the docs build.
 - **Verify:** see frontmatter.
 - **Touches:** nothing (fixes found here go back to the phase that owns them, noted in the commit).
+
+## Review-cycle-1 remediation (2026-11-21)
+
+Under the rulings at the end of [`PLAN.md`](PLAN.md) (maintainer sign-off for the human gate F3 raised;
+F1, F2, F3, F5 and F6 from [`REVIEW.md`](REVIEW.md), and the ruling on the `server.eager` message).
+P2–P6 were reopened together through `set_phase.py` and each closed again with its own commit. P1 was
+not reopened: its verify fences `src` to `d9901cf0`, which no longer holds on the branch, and its red
+list proves the defects of that base. Each new test's red run is on `f8293303` instead (the reviewed
+commit; the branch's `src`, `tests` and `docs` are unchanged since it), shown by putting the source
+change aside in the worktree, running the new tests, and restoring it. `red.txt` stays at 99.
+
+- **F1 (P2) — a VALUE that is not UTF-8.** `hs config set` refuses a path or a VALUE that cannot be
+  written as UTF-8 (a byte that is not UTF-8 arrives as a lone surrogate) before it reads the value
+  by its key's kind, with exit 2: `<path>: expected text that can be written as UTF-8, given <repr>`,
+  or `Variable path <repr> cannot be written as UTF-8`. Nothing is written and no backup is made
+  (`src/hypershell/config.py`, `is_utf8` and `ConfigSetApp.run`). The path check goes past the
+  ruling's VALUE, since a path with such a byte truncated the file the same way.
+  - Tests, `tests/test_config_set_types.py`: `test_not_utf8_refused` (a text key, a variant, an
+    `[export]` entry and an untyped path, each under `--local` and `--user`: exit 2, the message, no
+    traceback, the file byte for byte and its backups as before, no exception log) and
+    `test_not_utf8_path_refused`.
+  - Red on `f8293303`: 9 of 9 failed, each at exit 5 for 2 (`UnicodeEncodeError`, an exception log,
+    a backup made). Green: 9 passed (the file: 72 passed).
+  - Drive mode `set` gains the check (`printf 'a\377'` under `database.pragmas.x`: exit 2, the
+    message, the file and the backup count unchanged); on the base source it fails there at exit 5.
+  - P2's verify: 373 passed; drive `set` ok.
 
 ---
 
