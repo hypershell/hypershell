@@ -364,3 +364,17 @@ is the last.
 - **Refusal messages (maintainer, same session).** A refusal in `hs config set` names the key and
   does not repeat the value when the key is one of the key-variable forms. Public text states only
   that the message names the key.
+
+## Review-cycle-3 escalation ruling (2026-11-22)
+
+Review cycle 3, the last, was changes-requested at `4ae6a324`. Every earlier finding is fixed.
+The maintainer ruled in session (2026-11-22):
+
+- **N2** ("Waive N2, merge now"). An evict value of more than 4,300 digits makes the refusal
+  message itself raise. This is absurd input. It is waived and filed as a 2.9.x seed together with
+  `config_seconds`' matching case.
+- **N1** ("Seed for 2.9.x"). `hs client` reading a sub-floor or non-finite `client.ratelimit` from a
+  file or the environment behaves as on `develop`. It is filed as a 2.9.x seed, together with an
+  integer rate wider than a float.
+
+The cycle publishes and merges on green.

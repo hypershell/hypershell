@@ -4,7 +4,7 @@ title: hs config set writes each key by its type, and hs server and hs cluster r
   the keys they document
 kind: fix
 appetite: small
-status: blocked
+status: done
 branch: fix/config-set-and-unread
 base: develop
 current_phase: done
