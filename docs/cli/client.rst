@@ -41,4 +41,9 @@ Description
    it holds at once, instead of waiting out ``-w``/``--bundlewait``. With work in hand it bundles as
    before.
 
+.. versionchanged:: 2.9.0
+   ``hs client`` reads ``client.bundlesize`` (or ``HYPERSHELL_CLIENT_BUNDLESIZE``) and
+   ``client.bundlewait`` for its ``-b`` and ``-w`` defaults; ``submit.bundlesize`` and
+   ``submit.bundlewait`` no longer reach it (move them to ``[client]``).
+
 .. include:: ../_include/client_help.rst

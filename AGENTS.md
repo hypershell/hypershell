@@ -524,8 +524,10 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means
   **`0` = unlimited/auto** for many numeric knobs.
 - Defaults agents care about: server `port`, `bundlesize`, `bundlewait`, `evict` (≥10s),
-  `attempts`, and `tls.enabled = True`. Note `bundlesize`/`bundlewait` are read from
-  `config.submit.*` for CLI defaults but `config.client.*` for module defaults — two sections.
+  `attempts`, and `tls.enabled = True`. `hs client` reads `client.bundlesize` (advertised only
+  when a layer above the built-in default sets it, in any form) and `client.bundlewait`;
+  `hs submit` reads `submit.*`; `hs server`/`hs cluster` read `submit.bundlewait` and
+  `server.bundlesize` — separate sections.
 
 ## Data layer specifics
 

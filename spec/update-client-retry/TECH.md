@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/update-client-retry
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -64,7 +64,7 @@ phases:
 - id: P3
   name: hs client reads client.bundlesize and client.bundlewait, not submit.* (R3,
     R4, their docs)
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -304,18 +304,18 @@ exit 2 before the database is opened; the `hs update` page says so.
 (any form) and waits `client.bundlewait`; `[submit]` no longer reaches it; the reference, help and
 page say so.
 
-- [ ] `client.py` `advertised_size`: PLAN §2.2 — the first form of `client.bundlesize` set above the
+- [x] `client.py` `advertised_size`: PLAN §2.2 — the first form of `client.bundlesize` set above the
       built-in default (each `which` in `try`/`except KeyError`), the value as is when an `int`, else
       `read_value(Kind.INT, str(value))`; a `ValueError` or an unset `_env` variable raises
       `ConfigurationError(f'client.bundlesize: expected a whole number ({blame(base, "client", form)})')`.
       Imports: `blame` from `core.config`, `Kind`/`read_value` from `core.config_schema`,
       `ConfigurationError` from `cmdkit.config`. Docstring: the `client` key, its forms, the error.
-- [ ] `ClientApp`: `bundlewait: int = config.client.bundlewait`; `HELP`'s `-b`/`-w` lines name
+- [x] `ClientApp`: `bundlewait: int = config.client.bundlewait`; `HELP`'s `-b`/`-w` lines name
       `client.bundlesize`/`HYPERSHELL_CLIENT_BUNDLESIZE` and `client.bundlewait`.
-- [ ] `docs/_include/client_help.rst`: the `-b` paragraph's `HYPERSHELL_SUBMIT_BUNDLESIZE` /
+- [x] `docs/_include/client_help.rst`: the `-b` paragraph's `HYPERSHELL_SUBMIT_BUNDLESIZE` /
       `submit.bundlesize` → `HYPERSHELL_CLIENT_BUNDLESIZE` / `client.bundlesize`; `-w` names
       `client.bundlewait`.
-- [ ] `docs/_include/config_param_ref.rst`: `[client].bundlesize` gains "Read by ``hs client``" and the
+- [x] `docs/_include/config_param_ref.rst`: `[client].bundlesize` gains "Read by ``hs client``" and the
       advertise rule moved from `[submit].bundlesize` (set in a file, by `HYPERSHELL_CLIENT_BUNDLESIZE`
       or its `_env`/`_eval` forms → advertised and returned in bundles of that size; left at the
       built-in default → no size, the server's own), plus a new html-only `.. versionchanged:: 2.9.0`
@@ -325,10 +325,10 @@ page say so.
       "Read by ``hs submit`` only."; its `:pr:`78`` marker rewritten (unreleased: no client wording).
       `[submit].bundlewait`: "Read by ``hs submit``, ``hs server`` and ``hs cluster`` (which hands it
       to its clients as ``-w``)." (PLAN §5 S3).
-- [ ] `docs/cli/client.rst`: one new `.. versionchanged:: 2.9.0` with the others: `hs client` reads
+- [x] `docs/cli/client.rst`: one new `.. versionchanged:: 2.9.0` with the others: `hs client` reads
       `client.bundlesize` and `client.bundlewait`; `submit.*` no longer reach it (move them to
       `[client]`).
-- [ ] `AGENTS.md` § Configuration: the "`bundlesize`/`bundlewait` are read from `config.submit.*` for
+- [x] `AGENTS.md` § Configuration: the "`bundlesize`/`bundlewait` are read from `config.submit.*` for
       CLI defaults but `config.client.*` for module defaults" sentence becomes: `hs client` reads
       `client.bundlesize` (advertised only when set above the built-in default) and
       `client.bundlewait`; `hs submit` reads `submit.*`; `hs server`/`hs cluster` read
