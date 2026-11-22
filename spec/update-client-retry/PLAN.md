@@ -334,3 +334,18 @@ Retune the verify through `set_phase.py` and record it. Before that, merge `deve
 as `2af6a734`). Resolve the retry block as `cls.new_retry(task)`, keep both sides' prose and docs
 markers, add "and its cores, memory and walltime" to `submit_desc.rst`, and run #118's three retry
 tests on both dialects.
+
+## Review-cycle-1 rulings (2026-11-22)
+
+Review cycle 1 was changes-requested at `0bea846e`. The human gate was not triggered. Foreman's
+rulings, under the maintainer's mandate:
+
+- **F1.** `tests/test_retry_defaults.py`'s `ENTRY_POINTS` gains `AutoScalingServer`, so R8's pin
+  covers every entry point S1 named. The new case must fail when `topology.py`'s
+  `configured_retries()` is replaced by a constant.
+- **F2.** `docs/api/server.rst` and `docs/api/cluster.rst` stop calling `server.attempts` the one
+  configuration exception. They say which settings the library reads (`server.attempts`, and
+  `ServerThread`'s queue size and bundle maximum) and that everything else is passed by the caller,
+  checked against the code.
+- **Notes (not findings).** `cores:100000` overflowing SMALLINT on PostgreSQL is absurd input
+  (`bounded-inputs`). `-m 4GB` overflowing INTEGER is `memory-column-overflows-postgres`.
