@@ -306,6 +306,29 @@ From the seed `group-tag-integer-validation`:
 - **Release. Resolved 2026-11-21** (maintainer, `ROADMAP.md` commit `50148373`): 2.9.0, not a 2.8.x
   patch.
 
+**Ruled at the GOAL gate** (2026-11-21). Approved by the foreman, gate judge under the maintainer's
+mandate, with the maintainer's own rulings on C4 and C6.
+
+- **C1:** one cycle, appetite big, with the stated fallback split (seed 3 to a follow-up if the plan
+  finds the reached group or stdin buffering heavier than expected).
+- **C2:** kind `fix`; the release note names all four changes as behaviour changes.
+- **C3:** a line starting with `#` stays a comment.
+- **C4 (maintainer, in session, 2026-11-21: "Accept and document"):** the task-identity drift is
+  accepted. There is no shim. The release note states it and how to audit old task files.
+- **C5:** the integer rule is `-g` text or a JSON integer only.
+- **C6 (maintainer, in session, 2026-11-21: "Whole stdin refused"):** `hs submit` with a database
+  reads stdin in full and refuses it whole on a bad group, as for a file. Streams into `hs cluster`
+  and `hs server` refuse only the offending line.
+- **C7:** exit statuses as proposed (5 for a bad group in the input, 2 for `-t`, 2 for R6 and R7). A
+  stream run's exit status is unchanged.
+- **C8:** R3 also applies without a database.
+- **C9:** the plan fixes `hs submit`'s default group, so that a plain submission is never refused by
+  its own default.
+- **C10:** seed 3's scope is re-confirmed.
+
+`hs update group=…` storing text groups is filed as a follow-up seed by the foreman. Target 2.9.0.
+The contract is locked; `hs-plan` designs against it.
+
 ## Related materials
 
 - Seeds: [`issues/submit-comment-truncation.md`](../../issues/submit-comment-truncation.md),
