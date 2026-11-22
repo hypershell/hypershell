@@ -4,7 +4,7 @@ title: hs update --delete refuses changes it would ignore, hs client reads its o
   bundle keys, and a task that never ran is not retried
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/update-client-retry
 base: develop
 current_phase: done
@@ -120,13 +120,14 @@ phases:
     do grep -q ''never retried'' $f && grep -q ''cores, memory and walltime'' $f ||
     exit 1; done && grep -q -- ''-1001'' docs/_include/server_desc.rst && grep -q
     -- ''-1002'' docs/_include/server_desc.rst && for f in docs/api/server.rst docs/api/cluster.rst;
-    do grep -q ''server.attempts'' $f || exit 1; done && test "$(grep -c ''versionchanged::
-    2.9.0'' docs/api/server.rst)" -ge 2 && test "$(grep -c ''versionchanged:: 2.9.0''
-    docs/api/cluster.rst)" -ge 3 && test "$(grep -c ''versionchanged:: 2.9.0'' docs/cli/server.rst)"
-    -ge 10 && test "$(grep -c ''versionchanged:: 2.9.0'' docs/cli/cluster.rst)" -ge
-    16 && for f in AGENTS.md .agents/factory/invariants.md; do grep -q NO_RETRY_STATUSES
-    $f && grep -q new_retry $f && grep -q configured_retries $f || exit 1; done &&
-    ! grep -rn ''hs task '' docs/_include/server_desc.rst docs/_include/config_param_ref.rst
+    do grep -q ''server.attempts'' $f && grep -q ''server.queuesize'' $f && grep -q
+    ''server.bundlemax'' $f && ! grep -q ''one exception'' $f || exit 1; done && test
+    "$(grep -c ''versionchanged:: 2.9.0'' docs/api/server.rst)" -ge 2 && test "$(grep
+    -c ''versionchanged:: 2.9.0'' docs/api/cluster.rst)" -ge 3 && test "$(grep -c
+    ''versionchanged:: 2.9.0'' docs/cli/server.rst)" -ge 10 && test "$(grep -c ''versionchanged::
+    2.9.0'' docs/cli/cluster.rst)" -ge 16 && for f in AGENTS.md .agents/factory/invariants.md;
+    do grep -q NO_RETRY_STATUSES $f && grep -q new_retry $f && grep -q configured_retries
+    $f || exit 1; done && ! grep -rn ''hs task '' docs/_include/server_desc.rst docs/_include/config_param_ref.rst
     docs/api/server.rst docs/api/cluster.rst && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr
     sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
     sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucr'
@@ -401,6 +402,12 @@ One commit: §3's "change them together" members move as one.
       gains the set; a retry is `new_retry`), §10 (`server.attempts` read when an entry point is
       built), §11 (the constructor sentence narrowed to `advertise=`/`evict_after=`;
       `max_retries=None` resolves through `configured_retries()`) — PLAN §3 deviation row 2.
+- [x] Review cycle 1, F1: `tests/test_retry_defaults.py`'s `ENTRY_POINTS` gains `AutoScalingServer`
+      (its scheduler's and its topology publisher's attempts), and the environment test reads both
+      too. See §"Review-cycle-1 remediation".
+- [x] Review cycle 1, F2: `docs/api/server.rst` and `docs/api/cluster.rst` name the settings the
+      library reads (no "one exception"); the verify's API-page grep now also requires
+      `server.queuesize` and `server.bundlemax` and refuses `one exception`.
 - **Verify:** see frontmatter: `HS_TEST_POSTGRES` set; the three retry files, the gate, group,
   zone, autoscale, restart, writeback and cluster neighbours (both dialects); drive `retry` and
   `defaults`; the doc and constitution greps; the docs build.
@@ -454,3 +461,47 @@ in the `submit-input-checks` worktree):
 - `run_local` from Python on a fresh SQLite site fails (`no such table: task`: the library never
   creates the schema; the commands do) and then hangs in `stop()`. Pre-existing and outside this
   cycle; the drive runs `hs initdb` first. Candidate seed.
+
+---
+
+## Review-cycle-1 remediation (2026-11-22)
+
+Under the review-cycle-1 rulings at the end of [`PLAN.md`](PLAN.md) (F1 and F2 from
+[`REVIEW.md`](REVIEW.md); the human gate was not triggered). P4, whose `satisfies` covers R8 and R9,
+was reopened and closed again through `set_phase.py`, in one commit. P1 stays closed: its verify
+fences `src` and `docs` to `1f688c7c`, which no longer holds on the branch, and its red list proves
+that base's defects. `red.txt` stays at 79: the two new `AutoScalingServer` ids are not added, since
+P1's verify counts the list. P5 stays closed and its whole-suite gate was not re-run: on the
+foreman's brief, a test addition and two docs passages need only the targeted runs below.
+
+- **F1 (P4) — `AutoScalingServer` pinned.** `tests/test_retry_defaults.py`: `autoscaling_server`
+  builds `AutoScalingServer` (never started) and returns its scheduler's attempts and its topology
+  publisher's (`publisher.machine.attempts`); `ENTRY_POINTS` gains it, so
+  `test_default_retries_follow_configuration` checks it with the built-in default and with
+  `server.attempts = 3`. `READ_ATTEMPTS` builds one as well, so
+  `test_default_retries_from_environment` checks it with `HYPERSHELL_SERVER_ATTEMPTS=3` in a fresh
+  interpreter (`[3, 3, 3, 3]`). That test is red-listed; it still fails on `1f688c7c` by its
+  assertion, since the list it compares only grows.
+  - Mutation, `configured_retries()` at `cluster/topology.py:601` replaced by a constant, each
+    reverted (`git checkout`), the tree clean after: with `0`,
+    `tests/test_retry_defaults.py tests/test_topology_server.py` → 2 failed (`[AutoScalingServer-3]`,
+    `test_default_retries_from_environment`), 54 passed; with `1` (the review's mutation, 54 passed
+    then) → 3 failed (`[AutoScalingServer-default]`, `[AutoScalingServer-3]`, the environment test),
+    53 passed.
+  - Green: the same two files → 56 passed.
+- **F2 (P4) — what the library reads from configuration.** Both API pages drop the "one exception"
+  sentence and name, as the code reads them: `server.attempts` (a `max_retries` not given,
+  `configured_retries()`); `ServerThread`'s queue size, `server.queuesize` (`server.py:1283`), and
+  its dispatcher's bundle maximum, `server.bundlemax` (`core/queue.py:1207`), which no parameter
+  sets; and the database connection. `docs/api/cluster.rst` adds what its classes read beyond the
+  server: `task.cwd` and the `[export]` task environment for the clients `LocalCluster` runs
+  in-process (`client.py` `task_env` and the task's working directory), and `ssh.args` for an
+  `SSHCluster` given no `launcher_args` (`cluster/ssh.py:300`). Everything else is passed by the
+  caller. `AutoScalingServer` (`autoscale.distribution`, `autoscale.sites`) is not on that page,
+  so the page does not name them. The `versionchanged:: 2.9.0` markers are unchanged.
+  - P4's verify retuned (`set_phase.py --verify`): the API-page loop also requires
+    `server.queuesize` and `server.bundlemax` and refuses `one exception`; on the reviewed pages it
+    fails for both. The doc and constitution greps pass; the docs build (`sphinx-build -W`,
+    `/tmp/claude-501/docs-venv-ucr`, sandbox off) exits 0.
+- **Not re-run** (foreman's brief): P4's full verify (its PostgreSQL files and drives) and P5's
+  gate. The change touches no `src` file.

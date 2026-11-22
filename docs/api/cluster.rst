@@ -15,10 +15,14 @@ or by using one of the provided high-level functions
 (:meth:`~hypershell.cluster.local.run_local`, :meth:`~hypershell.cluster.remote.run_cluster`,
 or :meth:`~hypershell.cluster.ssh.run_ssh`).
 
-All of the parameters used below are largely the same in each instance. Configuration files have
-no impact when using the library; i.e., default values are not overridden by configuration. The
-one exception is ``server.attempts``: a ``max_retries`` not given is ``server.attempts`` - 1, read
-when the function is called or the cluster built.
+All of the parameters used below are largely the same in each instance. The library reads only
+these settings from configuration (files or environment): ``server.attempts``, as a ``max_retries``
+not given is ``server.attempts`` - 1, read when the function is called or the cluster built; the
+server's queue size (``server.queuesize``) and bundle maximum (``server.bundlemax``), which no
+parameter sets; for the clients a local cluster runs in-process, the task working directory
+(``task.cwd``) and the task environment (``[export]``); for an SSH cluster given no
+``launcher_args``, ``ssh.args``; and the database connection (see below). Everything else is
+passed by the caller, and configuration does not override the defaults below.
 
 .. versionchanged:: 2.9.0
    A ``max_retries`` not given follows ``server.attempts`` (none with the built-in default);

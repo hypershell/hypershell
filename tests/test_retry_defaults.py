@@ -4,10 +4,10 @@
 """Every Python API entry point that takes `max_retries` defaults to the commands' rule,
 `server.attempts - 1` (none with the built-in configuration).
 
-Each entry point is built, never started: the server's scheduler (and the autoscaler's) records
-the attempts it allows. The database is reported enabled so a scheduler is built. The `run_*` and
-`serve_*` functions build their thread through `.new` and wait in `join_waking`; both are replaced
-so the function returns the thread it built without starting it.
+Each entry point is built, never started: the server's scheduler (and the autoscaler's, or the
+topology publisher's) records the attempts it allows. The database is reported enabled so a
+scheduler is built. The `run_*` and `serve_*` functions build their thread through `.new` and wait
+in `join_waking`; both are replaced so the function returns the thread it built without starting it.
 """
 
 
@@ -34,6 +34,7 @@ from hypershell.core.config import config
 from hypershell.server import ServerThread, serve_from, serve_file, serve_forever
 from hypershell.cluster import (LocalCluster, RemoteCluster, SSHCluster, AutoScalingCluster,
                                 run_local, run_cluster, run_ssh)
+from hypershell.cluster.topology import AutoScalingServer
 from tests import main
 from tests.conftest import free_port
 
@@ -105,6 +106,11 @@ def autoscaling_cluster(mp: pytest.MonkeyPatch, tmp: Path) -> List[int]:
     return [server_attempts(cluster), cluster.autoscaler.machine.attempts]
 
 
+def autoscaling_server(mp: pytest.MonkeyPatch, tmp: Path) -> List[int]:
+    server = AutoScalingServer(address=loopback(), auth='test')
+    return [server_attempts(server), server.publisher.machine.attempts]
+
+
 def via_run_local(mp: pytest.MonkeyPatch, tmp: Path) -> List[int]:
     thread = capture(mp, hypershell.cluster.local, LocalCluster, lambda: run_local(['echo 1'], port=free_port()))
     return [server_attempts(thread)]
@@ -137,6 +143,7 @@ ENTRY_POINTS: Dict[str, Callable[[pytest.MonkeyPatch, Path], List[int]]] = {
     'RemoteCluster': remote_cluster,
     'SSHCluster': ssh_cluster,
     'AutoScalingCluster': autoscaling_cluster,
+    'AutoScalingServer': autoscaling_server,
     'run_local': via_run_local,
     'run_cluster': via_run_cluster,
     'run_cluster-autoscaling': via_run_cluster_autoscaling,
@@ -186,13 +193,16 @@ import hypershell.server
 hypershell.server.DATABASE_ENABLED = True
 from hypershell.server import ServerThread
 from hypershell.cluster import LocalCluster
+from hypershell.cluster.topology import AutoScalingServer
 import socket
 def free_port():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+autoscaling = AutoScalingServer(address=('127.0.0.1', free_port()), auth='test')
 print(json.dumps([ServerThread(address=('127.0.0.1', free_port()), auth='test').scheduler.machine.attempts,
-                  LocalCluster(source=['echo 1'], port=free_port()).server.scheduler.machine.attempts]))
+                  LocalCluster(source=['echo 1'], port=free_port()).server.scheduler.machine.attempts,
+                  autoscaling.server.scheduler.machine.attempts, autoscaling.publisher.machine.attempts]))
 """
 
 
@@ -202,4 +212,4 @@ def test_default_retries_from_environment(temp_site: Path, monkeypatch: pytest.M
     monkeypatch.setenv('HYPERSHELL_SERVER_ATTEMPTS', '3')
     rc, stdout, stderr = main([sys.executable, '-c', READ_ATTEMPTS])
     assert rc == exit_status.success, stderr
-    assert stdout.splitlines()[-1] == '[3, 3]'
+    assert stdout.splitlines()[-1] == '[3, 3, 3, 3]'
