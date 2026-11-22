@@ -4,10 +4,10 @@ title: hs config set writes each key by its type, and hs server and hs cluster r
   the keys they document
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -119,7 +119,7 @@ phases:
     docs /tmp/claude-501/docs-html-csu'
 - id: P6
   name: 'Gate: the whole suite serially, the red list, the drive, the docs'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -342,9 +342,9 @@ docs state the two new rules.
 **Goal:** nothing else broke; every red test is green; the red list still proves the defects on
 `d9901cf0`.
 
-- [ ] The whole suite under Python 3.14, serially (no `-n`).
-- [ ] The 99 red ids pass; `red_check` still reports 99 of 99 red on `d9901cf0`.
-- [ ] Every drive mode; the docs build.
+- [x] The whole suite under Python 3.14, serially (no `-n`).
+- [x] The 99 red ids pass; `red_check` still reports 99 of 99 red on `d9901cf0`.
+- [x] Every drive mode; the docs build.
 - **Verify:** see frontmatter.
 - **Touches:** nothing (fixes found here go back to the phase that owns them, noted in the commit).
 
