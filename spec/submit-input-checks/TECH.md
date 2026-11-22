@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -31,7 +31,7 @@ phases:
 - id: P2
   name: 'The # parser: no bare cut, comment rule on the raw line, split before the
     template, the Loader''s tags copy'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -364,11 +364,19 @@ there for what it checks (the red list) or passes there (the guards).
 **Goal:** a `#` after a line's first non-blank character is part of the command everywhere; comments
 and the marker keep their meaning, under `--template` too (PLAN § 2.1).
 
-- [ ] `Task.split_argline`: comment rule on the stripped line, marker found anywhere as today, no
+- [x] `Task.split_argline`: comment rule on the stripped line, marker found anywhere as today, no
       other cut; `TaskGroupError` not wrapped (it is added in P3; keep the `except` ready for it).
-- [ ] `Loader.load_line_task` and `line_is_task`: split the raw line, then expand the template on the
+- [x] `Loader.load_line_task` and `line_is_task`: split the raw line, then expand the template on the
       command; `Task.new(..., raw_args=command, parse_inline=False, tag={**running, **inline})`.
-- [ ] `Loader.__init__`: `self.tags = dict(tags or {})`.
+- [x] `Loader.__init__`: `self.tags = dict(tags or {})`.
+- **Built:** the marker is the module constant `TAG_MARKER`; the shared split is
+  `submit.py::split_task_line(line, template) -> (command, expanded, inline_tags)`, used by
+  `line_is_task` and the Loader (and the P3 scan). A tag-only line no longer builds a throwaway
+  `Task`. **Test fix (P1 slip):** `test_submit_stdin_keeps_hash` and the stdin step of
+  `test_submit_default_group_is_reached_group` ran `hs submit` with no argument, which prints usage
+  and exits 1; they now pass `-f -`. Both re-proved RED on `dfdbaed5` by assertion (3 of 3).
+- **Verified (2026-11-21):** suites 105 passed (PostgreSQL on); guards 19 passed; `input_drive.sh
+  hash` PASS 4 of 4.
 - **Verify:** `test_command_hash.py`, the model test and the suites around the parser (both
   dialects); guards; `input_drive.sh hash`.
 - **Touches:** `src/hypershell/data/model.py`, `src/hypershell/submit.py`.

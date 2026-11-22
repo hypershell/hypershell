@@ -55,6 +55,9 @@ log = Logger.with_name(__name__)
 DEFAULT_TASK_GROUP: Final[int] = 0
 """Default task group for backwards compatibility."""
 
+TAG_MARKER: Final[re.Pattern] = re.compile(r'#\s*HYPERSHELL:?')
+"""The inline tag marker: found anywhere on a line, with or without its colon."""
+
 CANCEL_STATUS: Final[int] = -1
 """Sentinel `exit_status` marking a cancelled task.
 
@@ -590,21 +593,24 @@ class Task(Entity):
 
     @classmethod
     def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONData]]:
-        """Separate input args from possible inline tag comment."""
+        """Separate a command from its inline tags.
+
+        A line whose first non-blank character is ``#`` is a comment (``''`` and no tags) unless it
+        starts with the ``# HYPERSHELL:`` marker. The marker is found anywhere on a line, in quotes
+        too: the command is the text before it and the tags are parsed from the text after it. Any
+        other ``#`` is part of the command, left for the shell.
+        """
         args = str(args).strip()
-        if match := re.search(r'#\s*HYPERSHELL:?', args):
+        if args.startswith('#') and not TAG_MARKER.match(args):
+            return '', {}
+        if match := TAG_MARKER.search(args):
             try:
                 tags = Tag.parse_cmdline_list(args[match.end():].strip().split())
                 cls.ensure_valid_tag(tags)
             except (ValueError, TypeError) as error:
                 raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error
-            args = args[:match.start()]
-            return args.strip(), tags
-        elif match := re.search(r'#', args):
-            args = args[:match.start()]
-            return args.strip(), {}
-        else:
-            return args.strip(), {}
+            return args[:match.start()].strip(), tags
+        return args, {}
 
     @staticmethod
     def ensure_valid_tag(tag: Optional[Dict[str, JSONData]], *, strict: bool = True) -> None:

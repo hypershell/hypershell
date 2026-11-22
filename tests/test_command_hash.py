@@ -113,7 +113,7 @@ def test_submit_args_keep_hash(db_site: Tuple[Path, Engine]) -> None:
 def test_submit_stdin_keeps_hash(db_site: Tuple[Path, Engine]) -> None:
     """Commands read from standard input keep their `#`."""
     site, engine = db_site
-    rc, _, stderr = submit(stdin='\n'.join(['# a comment line', *HASH_LINES]) + '\n', cwd=site)
+    rc, _, stderr = submit('-f', '-', stdin='\n'.join(['# a comment line', *HASH_LINES]) + '\n', cwd=site)
     assert rc == 0, stderr
     assert stored_args(engine) == HASH_LINES
 

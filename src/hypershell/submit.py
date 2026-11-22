@@ -127,16 +127,25 @@ class GatedSource:
         return iter(self.iterable)
 
 
+def split_task_line(line: str, template: Template) -> Tuple[str, str, Dict[str, JSONData]]:
+    """Split a raw text `line` into its command, the command expanded by `template`, and its inline tags.
+
+    The raw line is split before the template is applied, so a comment line, a blank line and a
+    tag-only line are never tasks, and a ``#`` in the template text stays in the command. The
+    expanded command is empty for a line that is not a task.
+    """
+    command, inline_tags = Task.split_argline(str(line).strip())
+    return command, (template.expand(command).strip() if command else ''), inline_tags
+
+
 def line_is_task(line: str, template: Template) -> bool:
     """True if `line` yields a task under `template`.
 
-    A raw text line becomes a task iff, after template expansion and inline-comment
-    stripping, the command is non-empty. This mirrors the :class:`Loader`'s own
-    task/non-task split (blank, comment-only, and inline-tag-only lines are *not* tasks),
-    so an upfront count matches exactly what the Loader will submit.
+    This is the :class:`Loader`'s own task/non-task split (:func:`split_task_line`): blank,
+    comment and tag-only lines are not tasks, so an upfront count matches exactly what the
+    Loader will submit.
     """
-    args, _ = Task.split_argline(template.expand(str(line).strip()))
-    return bool(args)
+    return bool(split_task_line(line, template)[1])
 
 
 def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) -> Tuple[str, int]:
@@ -321,7 +330,7 @@ class Loader(StateMachine):
         self.memory = memory
         self.timeout = timeout
         self.group = group
-        self.tags = tags
+        self.tags = dict(tags or {})  # A copy: a tag-only line updates the Loader's tags, never the caller's.
         self.count = 0
         self.present = 0
 
@@ -352,29 +361,29 @@ class Loader(StateMachine):
             return self.load_line_task(item)
 
     def load_line_task(self: Loader, line: str) -> LoaderState:
-        """Build the next task from a command-line string in the text source."""
-        raw = str(line).strip()
-        args = self.template.expand(raw)
-        self.task = Task.new(args=args, raw_args=raw, source=self.source_id, zone=self.zone_id,
-                             cores=self.cores, memory=self.memory, timeout=self.timeout,
-                             group=self.group, tag=self.tags)
-        if self.task.args:
+        """Build the next task from a command-line string in the text source.
+
+        The raw line is split first (:func:`split_task_line`) and the template expands only its
+        command. A tag-only line sets its tags for the lines after it; group, cores, memory and
+        timeout are carried as tags and taken out again by :meth:`Task.new`.
+        """
+        command, args, inline_tags = split_task_line(line, self.template)
+        if args:
+            self.task = Task.new(args=args, raw_args=command, parse_inline=False,
+                                 source=self.source_id, zone=self.zone_id,
+                                 cores=self.cores, memory=self.memory, timeout=self.timeout,
+                                 group=self.group, tag={**self.tags, **inline_tags})
             if self.skip_task():
                 return LoaderState.GET
             log.trace(f'Loaded task ({self.task.args})')
             return LoaderState.PUT
+        if not command and inline_tags:
+            tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
+            log.debug(f'Setting global attribute or tag: {tagline}')
+            self.tags.update(inline_tags)
         else:
-            # NOTE: group, cores, memory, etc. are processed as "tags" here,
-            # Though passed as 'tag' they are re-extracted in Task.new()
-            _, inline_tags = Task.split_argline(args)  # Simpler to just reprocess
-            if inline_tags:
-                tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
-                log.debug(f'Setting global attribute or tag: {tagline}')
-                for k, v in inline_tags.items():
-                    self.tags[k] = v
-            else:
-                log.trace(f'Skipping empty line')
-            return LoaderState.GET
+            log.trace(f'Skipping empty line')
+        return LoaderState.GET
 
     def load_json_task(self: Loader, record: dict) -> LoaderState:
         """Build the next task from a JSON record (named `{key}` expansion + tags)."""

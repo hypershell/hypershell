@@ -285,6 +285,6 @@ def test_submit_default_group_is_reached_group(db_site: Tuple[Path, Engine]) -> 
     rc, _, stderr = submit('--', 'echo', 'plain', cwd=site)
     assert rc == 0, stderr[-4000:]
     assert stored_groups(engine)['echo plain'] == 5
-    rc, _, stderr = submit(stdin='echo piped\n', cwd=site)
+    rc, _, stderr = submit('-f', '-', stdin='echo piped\n', cwd=site)
     assert rc == 0, stderr[-4000:]
     assert stored_groups(engine)['echo piped'] == 5
