@@ -4,10 +4,10 @@ title: hs update --delete refuses changes it would ignore, hs client reads its o
   bundle keys, and a task that never ran is not retried
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/update-client-retry
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -133,7 +133,7 @@ phases:
 - id: P5
   name: 'Gate: the whole suite serially, the red list, PostgreSQL, the drive, the
     docs'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -150,8 +150,14 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
+  verify: test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES sh spec/update-client-retry/drive/bound.sh
     5400 uv run --python 3.14 pytest -p no:cacheprovider -q && sh spec/update-client-retry/drive/bound.sh
+    2400 uv run pytest -q -p no:cacheprovider tests/test_command_hash.py tests/test_contended_write.py
+    tests/test_group_integer.py tests/test_group_stream.py tests/test_reached_group.py
+    tests/test_resubmit_lower_group.py tests/test_retry_declarations.py tests/test_retry_terminal.py
+    tests/test_server_initdb.py tests/test_timescale.py tests/test_writeback_postgres.py
+    tests/test_zone_postgres.py --deselect tests/test_timescale.py::test_server_matches_entry
+    --deselect tests/test_timescale.py::test_absent_fails_before_schema && sh spec/update-client-retry/drive/bound.sh
     900 uv run pytest -q -p no:cacheprovider $(sed -e '/^#/d' -e '/^$/d' -e 's/^pg://'
     -e 's/ raises=.*$//' spec/update-client-retry/red.txt) && RED_BASE_REV=1f688c7c
     RED_LIST="$PWD/spec/update-client-retry/red.txt" sh spec/update-client-retry/drive/bound.sh
@@ -408,9 +414,14 @@ One commit: §3's "change them together" members move as one.
 **Goal:** nothing else broke; every red test is green; the red list is still red on `1f688c7c`; every
 drive mode passes; the docs build with `-W`.
 
-- [ ] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported). Record the whole
+- [x] Run the frontmatter verify (sandbox off, `HS_TEST_POSTGRES` exported). Record the whole
       suite's counts and time in the commit body.
-- [ ] Release note: nothing to write here; `hs-publish` drafts the squash body from GOAL.md's six
+- [x] Verify retuned per PLAN's P5 gate ruling (2026-11-22): the whole suite with `HS_TEST_POSTGRES`
+      unset; then the PostgreSQL-aware files with it set, without `tests/test_upgrade_postgres.py`
+      (upgrade templates need Docker) and the two TimescaleDB version-match tests
+      (`test_server_matches_entry`, `test_absent_fails_before_schema`), which CI covers; then the
+      rest of the gate as written. Run after the signed merge of `develop` with #118.
+- [x] Release note: nothing to write here; `hs-publish` drafts the squash body from GOAL.md's six
       user-visible changes, adding to change 5 that a `cores`/`memory`/`timeout` tag written by
       `hs update` stays a tag on a retry (PLAN §5 S2).
 - **Touches:** `spec/update-client-retry/TECH.md` only.
