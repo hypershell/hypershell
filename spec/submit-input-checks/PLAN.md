@@ -284,3 +284,20 @@ all three seeds ship. D1–D9 are accepted:
 
 `server.py` is high-blast-radius: if the design touches it, change only what TECH names. The
 review's human gate applies as the rubric says.
+
+## Review-cycle-1 rulings (2026-11-22)
+
+The review's human gate was triggered: F1 and F2 are both in `data/model.py`. The maintainer
+ruled in session (2026-11-22) "Approve both", approving review cycle 2 and a merge on approval.
+
+- **F1.** `Task.reached_group` takes the pass start as an uncorrelated scalar subquery instead of
+  a CTE joined `ON true`, so SQLite computes it once. A bounded test pins the cost at scale (at least
+  10k rows on SQLite) and is red on `44e177b4`. PostgreSQL keeps its result.
+- **F2.** A retry copies the failed task's group and tags and does not re-parse the command's inline
+  tags. A retry of a task whose command carries `# HYPERSHELL:` text keeps its command and group,
+  and the run goes on. Tests are red on `44e177b4`.
+- **Retry window (maintainer, same session: "Accept, documented").** A failed task whose retry row
+  does not yet exist counts as finished for the reached group. The docs say so, and the late-group
+  warning covers it.
+- **Release note.** `RELEASE-NOTE.md` names D2: an old file can be refused on `--restart` or
+  `--update`.
