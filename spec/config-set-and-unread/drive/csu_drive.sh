@@ -20,7 +20,7 @@
 #   evict  server.evict under hs cluster: under the floor exits 5 before listening; 1m30s runs; a
 #          file's 1e300 exits 5 before listening, with no traceback (R7)
 #   rate   -R and client.ratelimit: a launched client takes -R 0.5 and is throttled; task.ratelimit
-#          is not read (R8)
+#          is not read; a file's ratelimit = inf stops a launching hs cluster with exit 2 (R8)
 
 set -u
 mode=${1:?usage: csu_drive.sh set|eager|evict|rate}
@@ -108,6 +108,14 @@ rate)
         || fail "task.ratelimit was read: $(tail -3 err.txt)"
     [ "$(wc -l < out.txt)" -eq 3 ] || fail "expected 3 task outputs: $(cat out.txt)"
     pass 'task.ratelimit is not read'
+    printf '[client]\nratelimit = inf\n' > config.toml
+    HYPERSHELL_CONFIG_FILE=$PWD/config.toml hs cluster t.in --no-db --no-tls -H 127.0.0.1 --launcher=env -N 1 \
+        > out.txt 2> err.txt; status=$?
+    [ "$status" -eq 2 ] || fail "ratelimit = inf exited $status, not 2: $(tail -3 err.txt)"
+    grep -q 'client.ratelimit: Rate inf is not valid: expected a finite number' err.txt || fail "message: $(cat err.txt)"
+    grep -q 'listening' err.txt && fail 'server started listening before the refusal'
+    [ -s out.txt ] && fail "tasks ran: $(cat out.txt)"
+    pass 'a file'"'"'s ratelimit = inf stops a launching hs cluster with exit 2 before listening'
     ;;
 *)
     echo "usage: csu_drive.sh set|eager|evict|rate" >&2

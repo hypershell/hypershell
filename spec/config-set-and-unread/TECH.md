@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -75,7 +75,7 @@ phases:
     uv run sh "$PWD/spec/config-set-and-unread/drive/csu_drive.sh" $m || exit 1; done
 - id: P4
   name: -R takes a number, and hs cluster reads client.ratelimit
-  status: in_progress
+  status: done
   satisfies:
   - R8
   depends_on:
@@ -312,6 +312,8 @@ integer word and a fraction as a plain decimal.
       sanctioned bend (a fractional rate needs a client of this release; PLAN §3).
 - **Verify:** `tests/test_config_unread.py` (all of it now), `test_duration_options.py`,
   `test_cluster_launch.py`, `test_client.py`, `test_relay_launch.py`; drive mode `rate`.
+- [x] Review cycle 1, F2: `hs cluster` refuses a `client.ratelimit` that is a number but not finite at
+      its start check, exit 2, as `-R` refuses one (see the remediation section).
 - **Touches:** `src/hypershell/core/types.py`, `src/hypershell/client.py`, `src/hypershell/cluster/__init__.py`,
   `src/hypershell/cluster/launch.py`, `src/hypershell/cluster/local.py`, `src/hypershell/cluster/remote.py`,
   `src/hypershell/cluster/ssh.py`, `tests/test_cluster_launch.py`.
@@ -414,6 +416,29 @@ change aside in the worktree, running the new tests, and restoring it. `red.txt`
   (exit 5 with the `KeyError`; the `OverflowError` message).
   - P3's verify: 26 passed (`-k 'eager or attempts'`), then 516 passed, 1 skipped (6 min 14 s); drives
     `eager` and `evict` ok.
+
+- **F2 (P4) — a non-finite `client.ratelimit`.** `ClusterApp.check_arguments`, after the eager
+  check, refuses a rate that is a number but not finite, with exit 2 as `-R` refuses one:
+  `client.ratelimit: Rate inf is not valid: expected a finite number (from: …)`. Such a number can
+  only come from a file's TOML float (`inf`, `nan`, `-inf`); a rate given as text, from a file, a
+  variable, or an `_env` or `_eval` form, is already read by `-R`'s own type as its default, and
+  refused there with exit 2. So every source is refused at start, before a database, a port, a
+  server or a launch, in every mode. `hs client` is unchanged (the ruling names `hs cluster`).
+  - Tests, `tests/test_config_unread.py`: `test_cluster_rate_not_finite_refused` (a file's `inf`,
+    `nan`, `-inf`, in local and `--launcher` modes: exit 2, the message, the file named, nothing
+    run or launched, no traceback file). Guards, green on the base too:
+    `test_cluster_rate_text_not_finite_refused` (text `"inf"` in a file, `ratelimit_env` to `inf`,
+    `HYPERSHELL_CLIENT_RATELIMIT_EVAL` printing `nan`: exit 2 from the option, nothing launched),
+    `test_cluster_rate_option_over_not_finite_key` (`-R` still overrides such a key and the run
+    completes) and `test_cluster_rate_file_text` (a file's `"0.5"`/`"5"` reads as `0.5`/`5`).
+  - Red on `f8293303` (its `cluster/__init__.py`): the 6 `not_finite_refused` cases failed: local
+    `inf` and `nan` ran with no limit (exit 0), local `-inf` exited 5, and each `--launcher` case
+    was still running at the 60 s bound (its client refused `-R Infinity`), so `run_bounded` stopped
+    it and failed the test. The 9 guards passed. Green: 15 passed.
+  - Drive mode `rate` gains a file's `ratelimit = inf` under `--launcher=env` (exit 2, the message,
+    never listening, no task output); on the base source it fails there (exit 5,
+    `ClusterLaunchError: every launched client has exited with tasks remaining`).
+  - P4's verify: 688 passed, 1 skipped (2 min 40 s); drive `rate` ok.
 
 ---
 

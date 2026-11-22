@@ -12,6 +12,7 @@ from types import TracebackType
 # Standard libs
 import os
 import sys
+import math
 import shlex
 from functools import cached_property
 
@@ -384,6 +385,10 @@ class ClusterApp(Application):
             raise ArgumentError(f'autoscale.period: {error}') from error
         self.evict_after = check_evict(config_seconds('server', 'evict'))
         self.eager_mode = configured_eager(self.eager_mode)
+        if isinstance(self.ratelimit, float) and not math.isfinite(self.ratelimit):
+            # The option reads a rate given as text; a number from a file is refused here, as the option refuses it.
+            raise ArgumentError(f'client.ratelimit: Rate {self.ratelimit!r} is not valid: expected a finite number '
+                                f'({blame(config, "client", "ratelimit")})')
         given_filepath = self.filepath is not None
         if self.from_json:
             if given_filepath:

@@ -305,3 +305,93 @@ def test_rate_option_over_key(temp_site) -> None:
     rc, rates, stderr = read_rates(Path(str(temp_site)), ['-R', '0.5'], HYPERSHELL_CLIENT_RATELIMIT='5')
     assert rc == exit_status.success, stderr
     assert rates == [0.5, 0.5]
+
+
+RATE_REFUSED: Final[Dict[str, Tuple[str, Dict[str, str], str]]] = {
+    'file-inf': ('[client]\nratelimit = inf\n', {},
+                 'client.ratelimit: Rate inf is not valid: expected a finite number'),
+    'file-nan': ('[client]\nratelimit = nan\n', {},
+                 'client.ratelimit: Rate nan is not valid: expected a finite number'),
+    'file-minus-inf': ('[client]\nratelimit = -inf\n', {},
+                       'client.ratelimit: Rate -inf is not valid: expected a finite number'),
+}
+"""A file's `client.ratelimit` that is a TOML number but not finite: the file text, its variables and the message."""
+
+RATE_TEXT_REFUSED: Final[Dict[str, Tuple[str, Dict[str, str]]]] = {
+    'file-text-inf': ('[client]\nratelimit = "inf"\n', {}),
+    'file-env': ('[client]\nratelimit_env = "RATE_WORD"\n', {'RATE_WORD': 'inf'}),
+    'env-eval': ('', {'HYPERSHELL_CLIENT_RATELIMIT_EVAL': 'echo nan'}),
+}
+"""A `client.ratelimit` given as text that is no finite number: the file text (or none) and the variables."""
+
+
+def run_rate_cluster(site: Path, mode: str, text: str, variables: Dict[str, str]) -> Tuple[int, str, str, Path]:
+    """Run `hs cluster` in `mode` ('local' or 'launcher') with the rate's file `text` and `variables`.
+
+    Its status, standard output and error, and the file a launch would have made.
+    """
+    if text:
+        variables = {**variables, **file_layer(site, text)}
+    create_taskfile(site, ['echo hi'], 't.in')
+    marker = site / 'launched'
+    launch = ['--launcher', f'touch {marker}'] if mode == 'launcher' else []
+    argv = ['hs', 'cluster', 't.in', '--no-db', '--no-tls', '-H', '127.0.0.1', '-p', str(free_port()), *launch]
+    status, stdout, stderr = run_bounded(site, argv, child_env(site, **variables))
+    return status, stdout, stderr, marker
+
+
+@mark.integration
+@mark.parametrize('mode', ['local', 'launcher'])
+@mark.parametrize('case', list(RATE_REFUSED))
+def test_cluster_rate_not_finite_refused(temp_site, case: str, mode: str) -> None:
+    """A file's `client.ratelimit` that is a number but not finite stops `hs cluster` with exit 2 before anything
+    is launched, naming the key and the file, as `-R` refuses it (R8)."""
+    site = Path(str(temp_site))
+    text, variables, message = RATE_REFUSED[case]
+    status, stdout, stderr, marker = run_rate_cluster(site, mode, text, variables)
+    assert status == exit_status.bad_argument, stderr
+    assert message in stderr and 'config.toml' in stderr, stderr
+    assert 'Server listening' not in stderr and stdout == '' and not marker.exists(), stderr
+    assert 'Traceback' not in stderr and not list(site.rglob('exception-*.log')), stderr
+
+
+@mark.integration
+@mark.parametrize('mode', ['local', 'launcher'])
+@mark.parametrize('case', list(RATE_TEXT_REFUSED))
+def test_cluster_rate_text_not_finite_refused(temp_site, case: str, mode: str) -> None:
+    """A `client.ratelimit` given as text that is no finite number, from any source, is refused by `-R` itself,
+    exit 2, before anything is launched (R8)."""
+    site = Path(str(temp_site))
+    text, variables = RATE_TEXT_REFUSED[case]
+    status, stdout, stderr, marker = run_rate_cluster(site, mode, text, variables)
+    assert status == exit_status.bad_argument, stderr
+    assert 'is not valid: expected a number' in stderr, stderr
+    assert 'Server listening' not in stderr and stdout == '' and not marker.exists(), stderr
+    assert 'Traceback' not in stderr and not list(site.rglob('exception-*.log')), stderr
+
+
+@mark.integration
+def test_cluster_rate_option_over_not_finite_key(temp_site) -> None:
+    """`-R` given on the command line is used, and a file's non-finite `client.ratelimit` is not read (R8)."""
+    site = Path(str(temp_site))
+    rc, rates, stderr = read_rates(site, ['-R', '0.5'], **file_layer(site, '[client]\nratelimit = inf\n'))
+    assert rc == exit_status.success, stderr
+    assert rates == [0.5, 0.5]
+    create_taskfile(site, ['echo hi'], 't.in')
+    argv = ['hs', 'cluster', 't.in', '--no-db', '--no-tls', '-H', '127.0.0.1', '-p', str(free_port()), '-R', '50']
+    variables = file_layer(site, '[client]\nratelimit = inf\n')
+    status, stdout, stderr = run_bounded(site, argv, child_env(site, **variables))
+    assert status == exit_status.success and stdout == 'hi', stderr
+
+
+@mark.integration
+@mark.parametrize('text, rate', [('"0.5"', 0.5), ('"5"', 5)])
+def test_cluster_rate_file_text(temp_site, text: str, rate: float) -> None:
+    """A file's `client.ratelimit` written as text is read as `-R` reads its word, at the start check (R8)."""
+    site = Path(str(temp_site))
+    create_taskfile(site, ['echo hi'], 't.in')
+    rc, seen, stderr = config_repr(site, '(lambda a: (a.check_arguments(), a.ratelimit)[1])'
+                                         '(ClusterApp.from_cmdline(["t.in", "--no-db"]))',
+                                   APPS, **file_layer(site, f'[client]\nratelimit = {text}\n'))
+    assert rc == exit_status.success, stderr
+    assert eval(seen) == rate and type(eval(seen)) is type(rate)
