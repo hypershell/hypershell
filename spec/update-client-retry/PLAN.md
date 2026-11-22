@@ -297,3 +297,23 @@ filter and the retry chain, R6 keeps the gate's design) and again on this design
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-22)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned.
+
+- **S1:** `AutoScalingServer` joins R8.
+- **S2:** a retry is built from the stored columns by `Task.new_retry`. A `cores`, `memory` or
+  `timeout` tag written by `hs update` stays a tag and does not set the retry's column, the same
+  rule as #118's G1 for `group`.
+- **S3:** the reference names `hs cluster` among the readers of `submit.bundlewait`.
+- **S4:** messages say "single-task form".
+- **S5:** a `client.bundlesize` that is not a whole number exits 3 at client start.
+- **Bends accepted:** docs land with each phase, and §11's "constructors never read configuration" is
+  narrowed for `max_retries`.
+- **#118** (`submit-input-checks`) is in its last review. If it lands first, merge `develop` before
+  P4 and resolve the retry block as `cls.new_retry(task)`, keeping both sides' prose. Otherwise #118
+  resolves it.
+- **Absurd input:** the review rubric's rule applies. Ranges belong to `bounded-inputs`; do not add
+  handlers for absurd values here.
+- The `run_local` fresh-SQLite failure is filed as a seed by the foreman.
