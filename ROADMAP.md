@@ -789,13 +789,29 @@ turso-upstream-repro, or a Turso release · Refs: `spec/turso/` P3, review cycle
 
 # Part IV — Clients that do not have to trust their server
 
-A paired 2.10.0 feature set (the maintainer's ruling, 2026-11-22). Today a client runs whatever
-command it is handed, so whoever controls the server or its database runs code, as the user, on every
-connected client. `docs/security.rst` states this, and it is the design's trust model, not a defect,
-so the pair is planned here and not in the security lane. Signing stops a server from authoring
-work; sandboxing bounds what a signed task can still do. Either can ship first. Neither holds fully
-against a compromised server until the queue transport stops deserializing objects from the server.
-That replacement is tracked in the security lane, and both seeds say so.
+Three entries, ruled on by the maintainer 2026-11-22. Today a client runs whatever command it is
+handed, so whoever controls the server or its database runs code, as the user, on every connected
+client. `docs/security.rst` says so: it is the design's trust model, not a hidden defect, so this
+work is planned here, not in the security lane. The first entry is the prerequisite, planned for
+2.9.0a10: a queue envelope that carries data, not pickled objects, so that a client can distrust its
+server at all. Then a 2.10.0 pair, which can ship in either order: signing stops a server from
+authoring work, and sandboxing bounds what a signed task can still do.
+
+## The queue's RPC envelope is pickled in both directions
+
+The queue is a `multiprocessing` manager, and every request and reply around HyperShell's own JSON
+payloads is pickled. Unpickling can run code chosen by whoever produced the bytes, so each end of a
+connection trusts the other with its process. The manager serializes only through its connection's
+`send`/`recv`, the standard library already swaps those for its XML-RPC serializer, and HyperShell
+owns both connection pairs. So a codec for a closed vocabulary of plain values (requests, five reply
+kinds, proxy tokens, `queue.Empty`) replaces pickle with no change to the queues, the dispatcher or
+any FSM. A pre-codec peer is refused with a clear error, and there is no pickle fallback. Open for
+shaping: whether the envelope is JSON or msgpack. Payloads stay JSON.
+
+*Target: 2.9.0 (2.9.0a10) · Horizon: near-term, big · Depends on: — · Refs: prerequisite of both
+entries below; `docs/security.rst` ("Pickle-serialized RPC"); `tests/bench/bench_queue.py` (format
+choice and the no-regression check)*
+**Seed:** [`issues/queue-wire-codec.md`](issues/queue-wire-codec.md) · *status: unshaped*
 
 ## A sandbox template around each task confines nothing
 
@@ -809,7 +825,8 @@ Landlock and Apptainer, a baseline credential-denying policy, and the whole-clie
 
 *Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the templating contract's
 quoted token (R1 of `issues/templating-and-remote-env-contract.md`; this cycle pulls it in if it
-has not shipped) · Refs: pairs with task signing below*
+has not shipped); the queue envelope above, for the client process itself · Refs: pairs with task
+signing below*
 **Seed:** [`issues/untrusted-server-client-sandbox.md`](issues/untrusted-server-client-sandbox.md) · *status: unshaped*
 
 ## Clients cannot tell a submitter's command from one the server made up
@@ -818,12 +835,13 @@ Neither credential HyperShell has speaks to where a task came from: the authkey 
 server, and TLS authenticates the server, which is the party in question. The submitter would sign
 each task with an Ed25519 key the server never holds. The server and database carry the signature
 untouched, and a client under `--require-signed` runs only what verifies against its own local trust
-file, before its expiry and for its audience. Open for shaping: the terminal state of a refused task,
-which today's failure and retry queries must not pick up, and how much replay of a signed command
-under retry to allow.
+file, before its expiry and for its audience. `hs update --sign` signs again, but only a command
+given with it or a row whose current signature still verifies, never `args` read back from the
+database. Open for shaping: the terminal state of a refused task, which today's failure and retry
+queries must not pick up, and how much replay of a signed command under retry to allow.
 
-*Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: holds against a compromised
-server only once the queue transport stops trusting the server (security lane) · Refs: pairs with
+*Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the queue envelope above,
+to hold against a compromised server · Refs: pairs with
 client-side sandboxing above; `issues/resource-error-terminal-and-retry-defaults.md` (never-ran
 sentinels and retries)*
 **Seed:** [`issues/untrusted-server-task-signing.md`](issues/untrusted-server-task-signing.md) · *status: unshaped*

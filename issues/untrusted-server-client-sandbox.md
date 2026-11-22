@@ -113,9 +113,9 @@ check at startup that the sandbox actually confines.
 ## Notes
 
 - **Per-task wrapping confines tasks, not the client process.** The queue's RPC framing is pickle in
-  both directions (`docs/security.rst`, "Pickle-serialized RPC"), and its replacement is tracked in
-  the security lane. Until that lands, this seed does not fully hold against a compromised server, and
-  the docs should say so. Of the patterns here, only the whole-client container sits outside that
+  both directions (`docs/security.rst`, "Pickle-serialized RPC"), and its replacement is
+  `issues/queue-wire-codec.md` (planned for 2.9.0a10). Until that lands, this seed does not fully
+  hold against a compromised server, and the docs should say so. Of the patterns here, only the whole-client container sits outside that
   gap.
 - Measure per-task startup overhead for each documented backend; HyperShell tasks can be very short,
   and the docs should quote the cost.

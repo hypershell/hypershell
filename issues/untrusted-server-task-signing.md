@@ -15,10 +15,9 @@ lane: public
 > compromised server. This one stops the server from authoring tasks; the sandbox seed bounds the
 > damage from tasks that were legitimately signed and still turn out harmful. Either can ship first.
 >
-> **Depends on:** a queue transport that carries data, not objects, from server to client. The RPC
-> framing is pickle in both directions (`docs/security.rst`, "Pickle-serialized RPC"); its
-> replacement is tracked in the security lane. Signing can be built first, but it does not hold
-> against a compromised server until that lands, and the docs must not claim it does.
+> **Depends on:** `issues/queue-wire-codec.md`, a queue transport that carries data, not pickled
+> objects (planned for 2.9.0a10). Until it lands, signing does not hold against a compromised
+> server, and the docs must not claim it does.
 
 ## Problem
 
@@ -69,6 +68,22 @@ submitter set.
 - **Cost:** Ed25519 verification takes microseconds per task and does not affect throughput.
 - **Fail closed:** under `--require-signed`, a missing trust file stops the client from starting, and
   a bad task is refused with its own status.
+- **Signing again through `hs update --sign`** (Geoffrey, 2026-11-22). A task whose signature has
+  expired, whose signing key has been rotated, or whose command must change gets a new signature
+  from `hs update`, run where the signing key is. The trap is that `hs update` reads rows from the
+  database, which is the party signing exists to distrust. Signing whatever `args` it finds would
+  give a tampered command a valid signature. So `--sign` signs only what the signer can vouch for:
+  - **A new command:** `hs update <filter> args='…' --sign` signs the value given on the command
+    line, never one read back, and writes `args` and the signature in one statement.
+  - **Same command, new signature:** a row whose current signature still verifies against the
+    signer's own trust file, ignoring expiry, gets a fresh one (new `not_after`, or the new key).
+    That a valid signature exists proves `args` is what was signed. A row that was never signed, or
+    whose signature fails, is refused and named, and the signer must give its `args` explicitly.
+  - The write is conditional on `args` still holding the value that was verified or given, through
+    the contended-write path every `hs update` write already uses. Otherwise another writer can
+    change `args` between the check and the write.
+  - The new signature binds the signed task ID carried in the signature column, so it covers retry
+    rows as the original did.
 - **Open for shaping: what a refused task becomes.** There is no status enum. A row's state comes from
   its columns, and today's "never ran" outcomes are `exit_status` sentinels below `-1000`
   (`TASK_TEMPLATE_ERROR`, `TASK_RESOURCE_ERROR`, `client.py:717`). A refused task needs a terminal
@@ -95,6 +110,10 @@ submitter set.
   today.
 - **R8** — The docs SHALL state what signing protects against and what it does not, including the
   `hs cluster` case below.
+- **R9** — `hs update --sign` SHALL sign a command given in the same invocation, or sign again a row
+  whose current signature verifies against the signer's trust file (expiry aside). It SHALL refuse,
+  and name, any selected row that meets neither condition, and SHALL never sign `args` it only read
+  from the database.
 
 ## Notes
 
@@ -120,8 +139,9 @@ submitter set.
   (`hs submit -q` into a `--no-db` server); and a relay, which stores each task as JSON and clears
   `LOCAL_STAMP_COLUMNS` before re-serving it to its site (`relay/store.py`). The signature must not
   be on that cleared list.
-- **`hs update` on `args`** changes a signed row. R5 refuses it, and the docs should say that editing
-  a signed task's command makes it unrunnable under `--require-signed`.
+- **`hs update` on `args`** without `--sign` changes a signed row, and R5 refuses it at the client.
+  The docs should say that editing a signed task's command without `--sign` makes it unrunnable
+  under `--require-signed`.
 - **Wire format, open.** SSHSIG (`ssh-keygen -Y sign`) would give interop with OpenSSH tooling. Raw
   Ed25519 over the canonical payload is smaller and faster to verify. The namespace and the
   `allowed_signers`-style trust file already mirror SSHSIG's semantics; lean raw.
