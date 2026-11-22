@@ -147,3 +147,110 @@ else falls outside an R-ID.
 - The diff itself changes `data/model.py`, `server.py`, `client.py`, `cluster/remote.py` and
   `cluster/ssh.py`, and the coupled retry selection, gate and demand queries. The review found them
   correct and in step, on SQLite and PostgreSQL (M1, M3 and M5 show the tests bind each side).
+
+## Review cycle 2 — changes-requested (2026-11-22)
+
+- **Reviewed commit:** `568d35e7` (`568d35e770eb69f5a72589d746add0b6ba1c7255`) · **Base:** `origin/develop`
+  `67019c7f` · **Delta graded:** `0bea846e..568d35e7` with `spec/` excluded: one test entry in
+  `tests/test_retry_defaults.py` and one paragraph each in `docs/api/server.rst` and
+  `docs/api/cluster.rst`. No `src/` change.
+- **Verdict:** changes-requested. F1 and F2 are fixed. One new CONFIRMED finding, F3 (LOW): the
+  rewritten paragraph in `docs/api/cluster.rst` is still false for the cluster classes that launch
+  clients. Route: `/hs-build` for F3. This is cycle 2 of ≤3.
+- **Mode:** scoped remediation check, not a fresh blind pass over the full diff. The foreman scoped
+  it to the review-cycle-1 rulings. One reviewer did the pass, with no subagent. Its inputs were
+  `GOAL.md`, this file's cycle 1, the delta, the runnable repo, and the "Review-cycle-1 rulings"
+  section of `PLAN.md`, which binds this cycle. It read no other `PLAN.md` content, only
+  `TECH.md`'s metadata, and neither `research/` nor `META.md`'s findings.
+- **Merge:** `git fetch origin develop` leaves `origin/develop` at `67019c7f`, unchanged since
+  cycle 1. `git merge-tree --write-tree HEAD origin/develop` exits 0: it merges cleanly. The branch
+  matches `origin/fix/update-client-retry`.
+- **Contract drift:** none since cycle 1. `GOAL.md`'s only commits are still `4df71265` and
+  `b52d6734`.
+
+### Verification run
+
+Every run was serial, on Python 3.14 (`UV_PROJECT_ENVIRONMENT=/tmp/claude-501/venv314-ucr`), from
+the worktree.
+
+- `uv run pytest -p no:cacheprovider -q tests/test_retry_defaults.py tests/test_topology_server.py`
+  → **56 passed**. That is cycle 1's 54 plus `AutoScalingServer-default` and `AutoScalingServer-3`.
+- **Mutations**, each reverted with `git restore`, leaving `git status --porcelain` empty afterwards:
+  - `topology.py:601` `configured_retries()` → `1`: **3 failed**:
+    `[AutoScalingServer-default]`, `[AutoScalingServer-3]` and `test_default_retries_from_environment`.
+  - The same line → `0`: **2 failed**: `[AutoScalingServer-3]` and the environment test.
+  - The publisher's `attempts=max_retries + 1` (`topology.py:615`) → `1`: **2 failed**, the same
+    two. The new entry reads both the server's attempts and the publisher's.
+- **Docs:** `UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr uv run --python 3.12 --group docs
+  sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucrrv2` → exit 0,
+  no Sphinx warnings.
+- **F2 claims, probe 1**, run in a throwaway site (`temp_site.sh`) with a site `config.toml`
+  setting `server.queuesize = 7`, `server.bundlemax = 3`, `ssh.args = "-p 2222"`, `task.cwd` and
+  `[export] probe_file`. Each named read holds:
+  - `ServerThread` and `LocalCluster` report queue size 7 and bundle maximum 3.
+  - `task_env` gives `TASK_CWD` from `task.cwd` and `PROBE_FILE=from-file`.
+  - `SSHCluster` without `launcher_args` launches `ssh -p 2222 -T node-1 …`, and with
+    `launcher_args=[]` launches `ssh -T node-1 …`.
+  - The code agrees: `server.py:1283`, `core/queue.py:1207`, `client.py:574`, `:577` and `:899`,
+    and `cluster/ssh.py:299-300`. `server.attempts` is pinned by F1's tests.
+- **F3, probe 2**, run in a throwaway site with `[export] probe_file = "from-file"` and
+  `[task] timeout = 1` in its `config.toml`:
+  - A `RemoteCluster` whose launcher prints its environment shows `PROBE_FILE=from-file`, while the
+    calling process's `os.environ` has no `PROBE_FILE`.
+  - `sleep 3` under `LocalCluster(source=…, port=…)` → exit status `0`.
+  - The same task under `RemoteCluster(source=…, launcher='env', bind=…)` → the launched client logs
+    "Walltime limit exceeded … > 1", and the task's exit status is `-2`.
+
+### Remediation of cycle 1
+
+| Finding | Ruling | Evidence | Status |
+|---------|--------|----------|--------|
+| F1 | `ENTRY_POINTS` gains `AutoScalingServer`; the case fails when `configured_retries()` is a constant | Entry `autoscaling_server` reads `[server attempts, publisher attempts]`; the environment test now expects `[3, 3, 3, 3]`; mutations to `1` and `0` each fail the new cases | ✅ fixed |
+| F2 | The pages stop calling `server.attempts` the one exception and name the settings the library reads | The "one exception" claim is gone from both pages. Every setting named is read where the page says (probe 1). `server.rst` is accurate. `cluster.rst` misses the clients the cluster launches (F3). | ✅ fixed, F3 new |
+
+**Unmapped changes:** none. The test docstring edit only describes the new entry.
+
+### Findings
+
+#### [LOW/CONFIRMED] F3 — `cluster.rst` says configuration does not reach the cluster classes, but their launched clients read it
+- **Where:** `docs/api/cluster.rst:18-25`. The behaviour is at `cluster/launch.py:136` and `:554`,
+  `cluster/launch.py:533-542` (`client_options`), and `client.py:1681-1683` and `:1704-1705`.
+- **Failure scenario:** the paragraph says the library reads only the settings it lists. It names
+  `[export]` only "for the clients a local cluster runs in-process", and it ends "configuration
+  does not override the defaults below". Neither holds for `RemoteCluster`, `AutoScalingCluster` or
+  `SSHCluster`:
+  - In the calling process, `ClientLaunch.start` lays `load_task_env()` (`[export]`) over each
+    launcher-mode client's environment (`launch.py:136`). `ompi_env_list` reads it too (`:554`).
+  - Each class launches `hs client` without `-C`, `-M`, `-T`, `-W` or `-R` when the matching
+    parameter is left at its default. The launched client then takes `client.cores`,
+    `client.memory`, `client.timeout`, `task.timeout` and `client.ratelimit` from its own
+    configuration, and `task.cwd` and `[export]` as well.
+  - So a Python caller whose configuration sets `task.timeout` for command-line use has the tasks
+    of a `RemoteCluster` killed at that walltime. The class documents `task_timeout` as "(default:
+    none)".
+- **Evidence:** probe 2, above. `LocalCluster` runs `sleep 3` to exit 0; `RemoteCluster`, under the
+  same configuration, kills it at 1 s with exit status `-2`. Its launcher's environment carries
+  `PROBE_FILE` from the configuration file.
+- **Pre-existing in part:** the behaviour predates the diff, and `develop`'s paragraph made the
+  same "not overridden by configuration" claim (cycle 1 called it "already inexact"). The diff
+  rewrote the paragraph into an exhaustive list, which the ruling says must be checked against the
+  code. The false part is now the diff's own text, and it can be fixed this cycle without breaking
+  any criterion, so the deferral exception does not apply.
+- **Touches:** R9 accuracy (docs graded as prose), the same class as F2. The build is clean and the
+  marker present, so this is not a §12 finding.
+- **Remedy target:** `docs/api/cluster.rst` only. Limit the in-process clause to `LocalCluster`.
+  Add one sentence saying that `RemoteCluster`, `AutoScalingCluster` and `SSHCluster` start
+  `hs client` processes, which read their own configuration for every option the cluster does not
+  pass, and that the launcher-mode classes also give each launch the `[export]` environment.
+  `docs/api/server.rst` needs no change.
+
+### Notes (not findings)
+- `AutoScalingServer` (`cluster/topology.py`) reads `[autoscale] distribution` and `sites` when
+  they are not given, as its own docstring says. It is not documented on `cluster.rst` and not in
+  `hypershell.cluster.__all__`, so the page's list does not cover it.
+- Cycle 1's notes stand, as the rulings record: `cores:100000` overflowing PostgreSQL's
+  `SMALLINT` is for `bounded-inputs`, and `-m 4GB` is `memory-column-overflows-postgres`.
+
+### Human-gate triggers
+- **Not triggered.** F3 is in `docs/api/cluster.rst`. The delta touches no high-blast-radius file
+  and no security or DB-lifecycle invariant.
