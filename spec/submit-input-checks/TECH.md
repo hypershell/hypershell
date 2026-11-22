@@ -4,10 +4,10 @@ title: 'Submitted input is checked: # is part of the command, a group is an inte
   and a group below the reached one is refused'
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/submit-input-checks
 base: develop
-current_phase: P8
+current_phase: done
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -147,7 +147,7 @@ phases:
 - id: P8
   name: Whole suite, serially; the PostgreSQL-aware files with PostgreSQL; the red
     list re-proved on dfdbaed5; the four drives
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -663,6 +663,12 @@ changed; `Task.new` is unchanged.
 - [x] **Red list for this cycle.** [`drive/red-cycle2.txt`](drive/red-cycle2.txt) (2 SQLite ids, 2
       `pg:` ids) is checked against `3dd066a4` by the landed `red_check.sh`; P8's gate runs it after
       the `44e177b4` list.
+- **Verified, P8 (2026-11-22, the gate as tightened):** whole suite with `HS_TEST_POSTGRES` unset
+  **3729 passed, 188 skipped in 26 min 15 s** (the two new SQLite ids pass, the two PostgreSQL ids
+  skip; two `DeprecationWarning`s from `os.fork()` in `test_logging.py`, unrelated); the
+  PostgreSQL-aware files **395 passed, 6 skipped** (5 min 55 s); red check **56 of 56 RED** on
+  `dfdbaed5`, **4 of 4 RED** on `44e177b4` and **4 of 4 RED** on `3dd066a4` (each by
+  `AssertionError`); drives `hash` 4/4, `group` 6/6, `stream` 6/6, `reached` 5/5.
 
 ---
 
