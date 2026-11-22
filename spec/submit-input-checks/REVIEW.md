@@ -402,3 +402,186 @@ Unmapped changes in the delta: none. Every change maps to the F1 or F2 ruling.
   - Cycle 1's trigger was discharged by the maintainer's sign-off on the review-cycle-1 rulings. This
     one needs a new sign-off before `/hs-build` remediates G1 and review cycle 3, the last before
     escalation, grades it.
+
+## Review cycle 3 — approved (2026-11-22)
+
+- **Reviewed commit:** f699c6f8  ·  **Base:** develop (`origin/develop` at 1f688c7c)  ·  **Date:** 2026-11-22
+- **Verdict:** approved
+- **Cycle:** 3 of ≤3, the last. The loop converged.
+- **Mode:**
+  - The remediation of G1 is graded.
+  - A fresh blind pass covers the delta `3dd066a4..b1a086db`, spec excluded: the retry construction in
+    `Task.__schedule_next_failed_tasks` and one test. Wherever the delta touches the full diff, the
+    pass covers that too: `Task.new`, `ensure_group`, and the retry mark and commit in `Task.next`.
+  - The orchestrator checked the merge with develop (#117).
+  - The foreman's brief set this scope.
+
+### Pre-flight
+
+- **Contract drift:** none since cycle 1. `GOAL.md` still has two commits on the branch, the shaping
+  commit (8e047b2f) and the GOAL gate (46dcb430).
+- **Contract readings given to the reviewer:**
+  - the GOAL-gate block with the maintainer's C4 and C6;
+  - plan-gate D1–D9;
+  - the review-cycle-1 rulings: the scalar-subquery pass start; retries copy group and tags without
+    re-parsing; the accepted retry window; D2 in the release note;
+  - the review-cycle-2 rulings: G1; N2 triaged; the retry's missing cores, memory and timeout belong
+    to another cycle. The builder's choice to keep the group tag on the retry's tags without reading
+    it was given to the reviewer to judge.
+- **Rules:** graded against the base copies (`git show origin/develop:…`, now 1f688c7c) of
+  `.agents/factory/invariants.md`, `AGENTS.md` and `.agents/factory/review-rubric.md`. The base
+  rubric's "Absurd input is not a finding" was applied. No candidate this cycle turned on it.
+- **Blindness:** the brief named the rulings only. Unlike cycle 2, the orchestrator suggested no
+  defect to the reviewer.
+
+### Merge status
+
+- **Position:** HEAD f699c6f8 is a signed merge of `origin/develop` 1f688c7c (#117,
+  config-set-and-unread) onto b1a086db. After a fresh fetch, `origin/develop` is still 1f688c7c, and
+  the branch is 24 commits ahead and 0 behind.
+- **No hand resolution:** `git merge-tree --write-tree b1a086db 1f688c7c` exits 0 with no conflicts.
+  Its tree, 5eff472f, is the tree of f699c6f8.
+- **Files both sides changed since 6a0c28ea:** `server.py`, `cluster/__init__.py`, `AGENTS.md`,
+  `invariants.md`, `docs/cli/cluster.rst`, `docs/cli/server.rst` and `ROADMAP.md`. Each composes:
+  - `server.py`:
+    - The branch moved `is_file_input` to `submit.py` (D9) and imports `os`. #117 added
+      `import math`, `check_evict` and `configured_eager`. All of these sit side by side.
+    - `is_file_input` is imported from `submit.py` and still exported. `io` is neither imported nor
+      used.
+  - `cluster/__init__.py`:
+    - One import block takes both sides' names.
+    - In `check_arguments`, #117's evict, eager and rate checks run before the branch's JSON group
+      check. Both run before any input is read.
+  - `AGENTS.md` and `invariants.md`: against base, they differ only by the branch's §3 group text and
+    the `AGENTS.md` queue-mode note. #117's §10 text is intact.
+  - Docs: #117's `versionchanged` passages and the branch's are separate and do not contradict.
+  - `ROADMAP.md`: #117's new memory-column entry sits beside the branch's `adopted:submit-input-checks`
+    status.
+- **Static check:** the four merged modules (`server.py`, `cluster/__init__.py`, `submit.py`,
+  `data/model.py`) import cleanly. A symtable check finds no undefined global name in them.
+- **Tests:** the merged tree passes the whole suite, #117's tests included (below).
+
+### Verification run
+
+- **Whole suite (SQLite, serial, PostgreSQL unset):** **4010 passed, 188 skipped** in 30 min 33 s
+  (`pytest -q -p no:cacheprovider tests`, Python 3.14, merged HEAD).
+- **PostgreSQL-aware files** (`HS_TEST_POSTGRES` set, `HS_TEST_TIMESCALE` empty): **426 passed,
+  6 skipped, 1 failed** in 7 min 33 s.
+  - The files: test_command_hash, test_group_integer, test_group_stream, test_reached_group,
+    test_resubmit_lower_group, test_submit, test_groups, test_zone_postgres, test_contended_write,
+    test_server_initdb, test_writeback_postgres, test_data/test_model, test_group_order and
+    test_relay_advertise.
+  - The failure: `test_server_initdb.py::test_postgres_initdb_forever`. A `--forever` server that had
+    run its one task did not exit within 60 s of SIGINT, and was killed (status -9, expected 4). The
+    whole SQLite suite and the reviewer's drives were running alongside it.
+  - Reruns: the test alone passed 3 of 3, and the whole file 5 of 5 (53 passed, 4 skipped each).
+  - It is not attributed to the delta: that test fails no task and builds no retry. It is recorded
+    as a load flake, not a finding.
+- **Docs:** `sphinx-build -W --keep-going -q -E -b html docs …` (Python 3.12, docs group) exits 0
+  with no warnings; 63 pages were rebuilt.
+- **Reviewer's targeted runs:**
+  - `test_cluster_retry_ignores_group_tag` on HEAD and on 3dd066a4, both dialects (the red check
+    below);
+  - the three earlier retry tests in `test_group_integer.py`, which pass on HEAD.
+- **Process and database hygiene:**
+  - The orchestrator's two pytest runs ran to completion. The reviewer recorded 128 PIDs and stopped
+    each by its process group.
+  - The reviewer created 19 scratch PostgreSQL databases (`rv3r_*`) and dropped all 19. A listing
+    after the runs shows no database but the defaults.
+  - The out-of-sandbox `ps` checks show none of these processes left.
+
+### Remediation of cycle 2
+
+**G1: fixed as ruled.**
+- **The code** (`model.py:1010-1027`):
+  - The retry pops a `group` key from a copy of the failed task's tags before `Task.new`. So
+    `Task.new` takes `group=task.group`, the column, and never calls `ensure_group` on the tag.
+  - The popped tag is put back on the retry's tags after construction (`:1026`).
+  - The fingerprint is copied, as before.
+- **Drives (reviewer, SQLite and PostgreSQL):** each ran `hs submit [-g N] -- false`, then
+  `hs update group:V -R -f`, then the run:
+  - `hs cluster --restart --max-retries 1 -N1 --no-tls -H 127.0.0.1`, with `x` and `7`: exit 0, both
+    rows in group 0.
+  - `hs server --restart -r 1` with an `hs client`, with `x` and `7`: server and client exit 0, both
+    rows in group 0.
+  - `--max-retries 2` after `-g 3`, and `--max-retries 2 --eager` after `-g 4`, with `x` and `7`:
+    exit 0, three rows, all in the task's group.
+  - `1.5`, empty, `nan`, `99999999999`, `-5` and `true`: exit 0, both rows in group 0. On PostgreSQL
+    `hs update` itself refuses `nan` (exit 5), so that tag never reaches a retry.
+  - In every drive the chain is consistent: `retried`, `next_id`, `previous_id`, attempt + 1 and one
+    fingerprint throughout. Every attempt carries the same tag. On SQLite the group is
+    `typeof integer`.
+- **Red check:** `test_cluster_retry_ignores_group_tag` has four cases: sqlite and postgres, each
+  with text and integer.
+  - On 3dd066a4 (a `git archive` on `PYTHONPATH`; the subprocess `hs` was confirmed to import it), all
+    four fail. Text: the cluster exits 5. Integer: the retry moves to group 7.
+  - On HEAD, all four pass. The ruling's "tests for both are red on 3dd066a4" holds.
+- **Docs:** `submit_desc.rst:57-63` says a retry runs the stored command "in the task's group, with
+  its tags". Its `versionchanged:: 2.9.0` says the same. Both are now true in G1's case as well.
+
+**Builder choice, the group tag kept on the retry but never read: accepted.**
+- **Code search (spec excluded):** only `Task.new` and `split_argline` read a `group` tag key.
+  - The client builds tasks with `Task.from_json`, with no group check.
+  - The relay reads no tags.
+  - `reached_group`, `increment_group`, `select_failed`, `count_retryable` and `mark_group_started`
+    read the column.
+  - The fingerprint is copied, so the tag does not enter it.
+- **Executed on both dialects (reviewer):**
+  - A task line with `# HYPERSHELL: group:2`, then `hs update group:x`.
+  - The client's environment: `TASK_GROUP=2` and `TASK_TAG_GROUP=x` on attempts 1 and 2 alike.
+  - The re-submission gate: a same-file `--restart`, and `--restart --update`, find the task present,
+    insert nothing and exit 0. There is no R7 refusal.
+  - `hs list -t group:x` returns both attempts, and `hs info` shows `group: 2` with `tags: group:x`.
+  - Once the run has finished, `hs submit -g 0` is accepted.
+- **Why it holds:** keeping the tag matches the F2 ruling ("copies the failed task's … tags"), so a
+  tag filter matches every attempt of a chain.
+
+### Requirement → evidence matrix (cycle 3)
+
+| R-ID | Delta | Verified how | Status |
+|------|-------|--------------|--------|
+| R1, R2 | untouched | Not re-graded. Their tests pass on the merged tree, on both dialects. | ✅ (cycle 1) |
+| R3 | retry construction | Submission checks are unchanged. A retry takes the group column, which was checked at submit, and never reads a group tag. The drives cover 8 tag values on both dialects. | ✅ |
+| R4, R5 | untouched | Not re-graded. Their tests pass on the merged tree. | ✅ (cycle 1) |
+| R6, R7 | untouched | Not re-graded. test_reached_group and test_resubmit_lower_group pass on both dialects on the merged tree. | ✅ (cycle 2) |
+| R8 | one test | `test_cluster_retry_ignores_group_tag` covers text and integer tags on SQLite and PostgreSQL: red on 3dd066a4, green on HEAD. | ✅ |
+| R9 | none (docs untouched) | The `submit_desc.rst` retry sentence is now true. `AGENTS.md` and `invariants.md` say "a retry copies a legacy text group", meaning the column, which still holds. The docs build is clean under `-W`. | ✅ |
+
+Unmapped changes in the delta: none. Every change maps to the G1 ruling. The merge brings #117,
+already on develop, whose code is graded in its own cycle's record, not here. This cycle checked
+only that the merge composes.
+
+### Findings
+
+None. No finding is CONFIRMED or PLAUSIBLE.
+
+### Triaged, not findings
+
+- **The group key ends up last in the retry's tags** (reviewer). Because of
+  `{**retry.tag, **group_tag}`, the retry's JSON text orders its keys differently from the failed
+  task's on SQLite. Nothing compares a whole tag: every tag filter works by key. Cosmetic.
+- **`hs update timeout:x` or `memory:x` stopping a retry.** This dissolves: `hs update` refuses both
+  with exit 5 (UnitError), on HEAD and on base, so no such tag reaches a retry.
+
+### Outside the diff (not graded)
+
+- **`hs update cores:x`, then a retry, on PostgreSQL** (reviewer):
+  - The Scheduler's insert fails with `DataError: invalid input syntax for type smallint: "x"`, and
+    `hs cluster --restart --max-retries 1` exits 5. No retry row is committed.
+  - `origin/develop` behaves the same.
+  - This is the family of the retry reading `cores`, `memory` and `timeout` from its tags, which the
+    review-cycle-2 rulings place in `update-client-retry` (its R7).
+  - For the foreman: a candidate note for that cycle.
+- **The `--forever` SIGINT flake** in test_server_initdb, above. It passed 8 of 8 reruns.
+
+### Human-gate triggers
+
+- **Not triggered.** This cycle has no CONFIRMED finding.
+  - F1, F2 and G1 triggered the gate in cycles 1 and 2. The maintainer discharged each trigger by
+    signing off the cycle's rulings before its remediation. The review-cycle-2 sign-off ("Approve
+    the fix") also approved a merge on approval.
+  - The G1 fix is in `data/model.py`, a high-blast-radius file, and it is the change that sign-off
+    approved. The develop merge brings #117's edits to `server.py` and `cluster/__init__.py`. They
+    are already on develop, and the merge adds no change of its own to them.
+  - Nothing in this cycle asks for a new sign-off.
+- **Next step:** `/hs-publish`.
