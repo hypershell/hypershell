@@ -821,9 +821,9 @@ def check_evict(seconds: int | float) -> int | float:
     """The eviction period `seconds`, refused with `RuntimeError` under the floor, when not finite, or over the cap."""
     if not seconds >= EVICT_MINIMUM:
         raise RuntimeError(f'Evict period must be greater than {EVICT_MINIMUM} seconds: given {seconds}')
-    if not math.isfinite(seconds):
-        raise RuntimeError(f'Evict period must be a finite number of seconds: given {seconds}')
-    if seconds > EVICT_MAXIMUM:
+    if seconds > EVICT_MAXIMUM:  # Compared exactly, so an integer wider than a float is refused here too.
+        if seconds == math.inf:
+            raise RuntimeError(f'Evict period must be a finite number of seconds: given {seconds}')
         raise RuntimeError(f'Evict period must be at most {EVICT_MAXIMUM} seconds: given {seconds}')
     return seconds
 

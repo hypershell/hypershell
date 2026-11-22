@@ -115,6 +115,9 @@ def test_cluster_evict_default(temp_site, mode: str) -> None:
 EVICT_CAP: Final[int] = timedelta.max.days * 86_400
 """Longest period the heartbeat monitor's intervals hold, in whole days of seconds."""
 
+WIDE: Final[str] = '1' + '0' * 400
+"""A whole number of seconds wider than a float."""
+
 REFUSALS: Final[Dict[str, Any]] = {
     'abc': ('env', 'abc', exit_status.bad_config, "server.evict: Duration 'abc' is not valid"),
     'under-floor': ('env', '5', exit_status.runtime_error, 'Evict period must be greater than 10 seconds: given 5'),
@@ -126,6 +129,11 @@ REFUSALS: Final[Dict[str, Any]] = {
                  f'Evict period must be at most {EVICT_CAP} seconds: given {EVICT_CAP + 1}'),
     'file-float-huge': ('toml', '1e300', exit_status.runtime_error,
                         f'Evict period must be at most {EVICT_CAP} seconds: given 1e+300'),
+    'int-huge': ('env', WIDE, exit_status.runtime_error, f'Evict period must be at most {EVICT_CAP} seconds: given {WIDE}'),
+    'file-int-huge': ('file', WIDE, exit_status.runtime_error,
+                      f'Evict period must be at most {EVICT_CAP} seconds: given {WIDE}'),
+    'days-huge': ('env', f'{WIDE}d', exit_status.runtime_error,
+                  f'Evict period must be at most {EVICT_CAP} seconds: given {int(WIDE) * 86_400}'),
 }
 """A value `hs server` refuses: its layer, value, exit status and message."""
 

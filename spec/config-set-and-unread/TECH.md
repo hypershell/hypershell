@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -56,7 +56,7 @@ phases:
     $m || exit 1; done
 - id: P3
   name: server.eager, server.attempts and server.evict reach hs server and hs cluster
-  status: in_progress
+  status: done
   satisfies:
   - R5
   - R6
@@ -298,8 +298,11 @@ to the server in every mode.
 - [x] Review cycle 1, F3: `check_evict` refuses a period over `EVICT_MAXIMUM`; and the `server.eager`
       refusal names the key and its source, the value only for the direct form (see the remediation
       section).
+- [x] Review cycle 2, F8: `check_evict` compares against `EVICT_MAXIMUM` before anything that converts
+      to a float (see the cycle-2 remediation section).
 - **Touches:** `src/hypershell/server.py`, `src/hypershell/cluster/__init__.py`,
-  `src/hypershell/cluster/local.py`, `src/hypershell/cluster/remote.py`, `src/hypershell/cluster/ssh.py`.
+  `src/hypershell/cluster/local.py`, `src/hypershell/cluster/remote.py`, `src/hypershell/cluster/ssh.py`;
+  cycle 2: `tests/test_cluster_evict.py`.
 
 ## Phase P4 — `-R` takes a number, and `hs cluster` reads `client.ratelimit` (R8)
 **Satisfies:** R8 · **Depends on:** P3
@@ -525,6 +528,24 @@ file as of `d6d83afa`), running the new tests, and restoring it. `red.txt` stays
   message; on its `core/config.py` the second fails at the set (exit 5).
 - P2's verify: 380 passed (1 min 29 s); drive `set` ok.
 
+- **F8 (P3) — an integer eviction period wider than a float.** `check_evict`
+  (`src/hypershell/server.py`) called `math.isfinite` before its cap check, and `math.isfinite`
+  raises `OverflowError` for an integer wider than a float. It now compares against `EVICT_MAXIMUM`
+  right after the floor check, exactly for an integer of any width; a period over the cap is refused
+  with the cap's message, or with the finite-number message when it is infinite (a comparison with
+  `math.inf`, which converts nothing). So `hs server` and `hs cluster` exit 5 cleanly, before a
+  database, a port or a server. The floor's message and the messages for `inf`, `nan` and `-inf` are
+  unchanged. Only `check_evict` changes.
+  - Tests, `tests/test_cluster_evict.py`: `REFUSALS` gains `int-huge` (`HYPERSHELL_SERVER_EVICT` a
+    401-digit integer), `file-int-huge` (the same as a file's TOML integer) and `days-huge` (the same
+    number of days as a duration), so `test_cluster_evict_refused` covers them in every mode and
+    `test_server_evict_refused` for `hs server`.
+  - Red on `d6d83afa` (its `server.py`): 18 of 18 failed at the message (`OverflowError: int too
+    large to convert to float`, an exception log). Green: 18 passed.
+  - Drive mode `evict` gains the 401-digit integer under `hs cluster` (exit 5, the message, never
+    listening, no exception log); on `d6d83afa`'s `server.py` it fails at the message.
+  - P3's verify: 26 passed (`-k 'eager or attempts'`), then 534 passed, 1 skipped (6 min 20 s); drives
+    `eager` and `evict` ok.
 ---
 
 ## How `hs-build` drives this

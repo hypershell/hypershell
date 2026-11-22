@@ -19,7 +19,7 @@
 #   eager  server.eager: a file's "no" runs, an unreadable value stops hs cluster with exit 3, and so
 #          does one from eager_env, its message naming the key and source but not the value (R5)
 #   evict  server.evict under hs cluster: under the floor exits 5 before listening; 1m30s runs; a
-#          file's 1e300 exits 5 before listening, with no traceback (R7)
+#          file's 1e300 and a 401-digit integer exit 5 before listening, with no traceback (R7)
 #   rate   -R and client.ratelimit: a launched client takes -R 0.5 and is throttled; task.ratelimit
 #          is not read; a file's ratelimit = inf stops a launching hs cluster with exit 2 (R8)
 
@@ -112,6 +112,13 @@ evict)
     grep -q 'listening' err.txt && fail 'server started listening before the refusal'
     ls Logs/exception-* > /dev/null 2>&1 && fail "exception log written: $(ls Logs)"
     pass 'server.evict 1e300 refused with exit 5 before listening, no traceback'
+    wide=1$(printf '%0400d' 0)
+    HYPERSHELL_SERVER_EVICT=$wide hs cluster t.in --no-db --no-tls -H 127.0.0.1 > out.txt 2> err.txt; status=$?
+    [ "$status" -eq 5 ] || fail "a 401-digit evict exited $status, not 5: $(cat err.txt)"
+    grep -q "Evict period must be at most 86399999913600 seconds: given $wide" err.txt || fail "message: $(cat err.txt)"
+    grep -q 'listening' err.txt && fail 'server started listening before the refusal'
+    ls Logs/exception-* > /dev/null 2>&1 && fail "exception log written: $(ls Logs)"
+    pass 'a 401-digit server.evict refused with exit 5 before listening, no traceback'
     ;;
 rate)
     start=$(date +%s)
