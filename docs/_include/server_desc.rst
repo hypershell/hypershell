@@ -8,6 +8,9 @@ the ``-w``/``--bundlewait`` and ``-b``/``--bundlesize`` options are the same as 
 
 With ``--max-retries`` greater than zero, the scheduler will check for a non-zero exit status
 for tasks and re-submit them if their previous number of attempts is less.
+A task whose template does not expand (``-1001``) or that needs more cores or memory than its
+client has (``-1002``) is never retried: it did not run, and its group fails at once.
+A retry keeps its task's cores, memory and walltime.
 
 Tasks are bundled for each client at the size it asks for, or at the server's ``-b``/``--bundlesize``
 when it asks for none. By default the bundle size is one, meaning that at small scales there is

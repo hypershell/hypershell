@@ -269,8 +269,16 @@
         task is considered to have failed if it has a non-zero exit status. The original is not over-written,
         a new task is submitted and later scheduled.
 
+        A task whose template does not expand (``-1001``) or that needs more cores or memory than its
+        client has (``-1002``) is never retried: it did not run. Its group fails at once, as for a task
+        with no retries left.
+        A retry keeps its task's cores, memory and walltime.
+
         Read by ``hs server`` and ``hs cluster``, as the counterpart to the ``-r``/``--max-retries``
         command-line option. Setting ``--max-retries 1`` is equivalent to setting ``.attempts`` to 2.
+        Also read by the Python API's entry points (``ServerThread``, ``serve_from``, ``serve_file``,
+        ``serve_forever``, the cluster classes and ``run_local``, ``run_cluster``, ``run_ssh``) when
+        they are not given ``max_retries``.
 
         See also ``.eager``.
 
@@ -278,6 +286,12 @@
 
             .. versionchanged:: 2.9.0
                ``hs cluster`` reads it; before, it retried no task unless given ``-r``.
+
+            .. versionchanged:: 2.9.0
+               A task that did not run (``-1001``, ``-1002``) is never retried, and a retry keeps its
+               task's cores, memory and walltime. The Python API reads it for a ``max_retries`` not
+               given; before, the cluster classes retried each failed task once and the server
+               functions never.
 
     ``.eager``
         Schedule failed tasks before new tasks (default: `false`).

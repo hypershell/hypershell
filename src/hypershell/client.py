@@ -58,7 +58,8 @@ from cmdkit.cli import Interface, ArgumentError
 from cmdkit.config import Namespace, Configuration, ConfigurationError
 
 # Internal libs
-from hypershell.data.model import Task, serialize_tasks, deserialize_tasks, zone_name
+from hypershell.data.model import (Task, serialize_tasks, deserialize_tasks, zone_name,
+                                   TASK_TEMPLATE_ERROR, TASK_RESOURCE_ERROR)
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, resolve_auth, refuse_key_option,
@@ -737,8 +738,8 @@ class TaskState(State, Enum):
 # so the range -1..-64 can collide with real signal deaths (e.g. SIGHUP=-1, SIGINT=-2, SIGTERM=-15).
 # We reserve codes below -1000 for HyperShell-internal conditions to stay clear of that range.
 # (The cancel sentinel -1 is an intentional exception - see model.CANCEL_STATUS / SIGHUP cancel.)
-TASK_TEMPLATE_ERROR: Final[int] = -1001  # Template expansion failed (task never ran)
-TASK_RESOURCE_ERROR: Final[int] = -1002  # Insufficient local resources (task never ran)
+# TASK_TEMPLATE_ERROR (-1001, template expansion failed) and TASK_RESOURCE_ERROR (-1002, insufficient
+# local resources) are defined in `hypershell.data.model` with NO_RETRY_STATUSES: never retried.
 
 
 class TaskExecutor(StateMachine):
@@ -847,14 +848,14 @@ class TaskExecutor(StateMachine):
             self.task.command = self.template.expand(
                 self.task.args, context={'slot': self.slot, 'slot_count': self.slot_count})
         except Exception as error:
-            log.error(f'Template expansion failed for task ({self.task.id}): {error} (cancelled)')
+            log.error(f'Template expansion failed for task ({self.task.id}): {error} (task did not run)')
             self.task.start_time = datetime.now().astimezone()
             self.task.completion_time = datetime.now().astimezone()
             self.task.exit_status = TASK_TEMPLATE_ERROR
             return TaskState.PUT_LOCAL
         eligible, reason = insufficient_resources(self.task)
         if not eligible:
-            log.error(f'Insufficient resources for task ({self.task.id}): {reason} (cancelled)')
+            log.error(f'Insufficient resources for task ({self.task.id}): {reason} (task did not run)')
             self.task.start_time = datetime.now().astimezone()
             self.task.completion_time = datetime.now().astimezone()
             self.task.exit_status = TASK_RESOURCE_ERROR

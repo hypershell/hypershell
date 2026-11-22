@@ -19,7 +19,7 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, delete, select, bindparam, literal, or_, cast, inspect
+from sqlalchemy import Column, Index, func, text, update, delete, select, bindparam, literal, or_, cast, inspect, case
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
@@ -43,7 +43,8 @@ from hypershell.data.core import schema, Session
 __all__ = [
     'Task', 'Client', 'Source', 'Zone', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
-    'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
+    'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'TASK_TEMPLATE_ERROR', 'TASK_RESOURCE_ERROR', 'NO_RETRY_STATUSES',
+    'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
     'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id', 'zone_name',
 ]
 
@@ -60,8 +61,21 @@ CANCEL_STATUS: Final[int] = -1
 
 A cancelled task is terminal: it must never be scheduled, retried, or counted as an
 unrecoverable failure. It is distinguished from a genuine failure (positive exit codes,
-or the negative template/resource sentinels in `client.py`) solely by this value, so the
+or the negative template/resource sentinels below) solely by this value, so the
 scheduler's failure and retry queries filter it out explicitly.
+"""
+
+TASK_TEMPLATE_ERROR: Final[int] = -1001
+"""Sentinel `exit_status` of a task whose command template did not expand on its client (never ran)."""
+
+TASK_RESOURCE_ERROR: Final[int] = -1002
+"""Sentinel `exit_status` of a task declaring more cores or memory than its client has in total (never ran)."""
+
+NO_RETRY_STATUSES: Final[Tuple[int, ...]] = (TASK_TEMPLATE_ERROR, TASK_RESOURCE_ERROR)
+"""The `exit_status` values of a task that never ran on its client and would fail the same way there.
+
+Such a task is never retried, whatever the retries allowed: it is not selected, marked or counted as
+awaiting retry, its row stays its last attempt, and its group is held as failed on any attempt.
 """
 
 CONTENDED_RERUNS: Final[int] = 3
@@ -445,6 +459,19 @@ class Task(Entity):
         'memory_max',
     )
 
+    # The columns a retry copies from its failed task, as stored: never re-parsed or re-checked.
+    retry_columns: Final[Tuple[str, ...]] = (
+        'args',
+        'tag',
+        'group',
+        'fingerprint',
+        'source',
+        'zone',
+        'cores',
+        'memory',
+        'timeout',
+    )
+
     # The columns a revert clears, so the task reads as new again.
     revert_columns: Final[Tuple[str, ...]] = (
         'schedule_time',
@@ -564,6 +591,23 @@ class Task(Entity):
         return Task(id=uuid(), args=args, source=source, fingerprint=fingerprint,
                     submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
                     attempt=attempt, retried=retried, tag=tag, **other)
+
+    @classmethod
+    def new_retry(cls: Type[Task], task: Task) -> Task:
+        """The retry of a failed `task`: its declaration columns as stored, with a new identity.
+
+        Every column of `retry_columns` is copied as stored (the tag as a new dict): the command,
+        tags, group, fingerprint (a retry is the same logical task), source (the retry chain stays
+        linked to it), zone, and the declared cores, memory and walltime, so a retry runs where and
+        as its first attempt did. Nothing is parsed: the stored command is not read for inline tags,
+        the stored tag is not checked again, and no tag (`group`, `cores`, `memory` or `timeout`
+        among them) sets a column. The id and the submit stamps are fresh, and the attempt is the
+        next.
+        """
+        declared = {name: getattr(task, name) for name in cls.retry_columns}
+        declared['tag'] = dict(task.tag or {})
+        return Task(id=uuid(), submit_id=INSTANCE, submit_host=HOSTNAME, submit_time=datetime.now().astimezone(),
+                    attempt=task.attempt + 1, retried=False, previous_id=task.id, **declared)
 
     @classmethod
     def compute_fingerprint(cls: Type[Task], raw_command: str, group: int,
@@ -686,9 +730,10 @@ class Task(Entity):
         This should only be called if no tasks are returned by Task.next().
         Check the current group and increment if necessary with explanation.
         We assume all tasks in `previous_group` have already been scheduled (see Task.next()).
-        A group is held while it has incomplete tasks or failures still awaiting retry.
-        The next group is the lowest group holding incomplete tasks, which may be lower than
-        `previous_group` when tasks are submitted late.
+        A group is held while it has incomplete tasks or failures still awaiting retry, and fails
+        on a failure with no retries left or a task that never ran (`NO_RETRY_STATUSES`), on any
+        attempt. The next group is the lowest group holding incomplete tasks, which may be lower
+        than `previous_group` when tasks are submitted late.
         """
         # Incomplete tasks are counted before retryable failures, so a result written back between
         # the two checks is always seen by the second. Retryable failures are counted before
@@ -704,23 +749,31 @@ class Task(Entity):
         retryable = cls.count_retryable(attempts, previous_group, eager=eager)
         if retryable > 0:
             return TaskGroupInfo(previous_group, f'waiting on {retryable} failed tasks to be retried')
-        # The count and the example are one statement: a row deleted after it was counted (a relay's
+        # The counts and the example are one statement: a row deleted after it was counted (a relay's
         # completed rows leave for its outbox) can never leave a count with no example. The example is
-        # the least id as text: PostgreSQL's native uuid has no `min`.
-        failed, example = (
-            Session.query(func.count(cls.id), func.min(cast(cls.id, Text)))
+        # the least id as text: PostgreSQL's native uuid has no `min`. A task that never ran fails the
+        # group on any attempt; it is counted as not run, whatever its attempt.
+        never_ran = cls.exit_status.in_(NO_RETRY_STATUSES)
+        failed, unrun, example = (
+            Session.query(func.count(cls.id), func.count(case((never_ran, cls.id))), func.min(cast(cls.id, Text)))
             .filter(Task.group == previous_group)
             .filter(cls.exit_status.isnot(None))
             .filter(cls.exit_status != 0)
             .filter(cls.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
-            .filter(cls.attempt >= attempts)
+            .filter(or_(cls.attempt >= attempts, never_ran))
             .filter(cls.retried.is_(False))
             .one()
         )
         if failed > 0:
-            return TaskGroupInfo(previous_group,
-                                 f'at least {failed} tasks exceeding allowed retries, example: {example}',
-                                 False)
+            exhausted = failed - unrun
+            if not unrun:
+                reason = f'at least {exhausted} tasks exceeding allowed retries'
+            elif not exhausted:
+                reason = f'at least {unrun} tasks not retried because they did not run'
+            else:
+                reason = (f'at least {exhausted} tasks exceeding allowed retries and '
+                          f'{unrun} not retried because they did not run')
+            return TaskGroupInfo(previous_group, f'{reason}, example: {example}', False)
         # The next group is chosen in one query, so rows committed while the checks above ran are
         # never skipped; it is lower than the previous group when tasks were submitted late.
         next_group = cls.lowest_incomplete_group()
@@ -776,14 +829,16 @@ class Task(Entity):
     def __awaiting_retry(cls: Type[Task]) -> Tuple[Tuple[Any, ...], Any]:
         """The row-state filters of a failed task still awaiting retry, from the table's columns.
 
-        Returns the failure filters (an exit status, neither success nor a cancel) and the filter
-        that the row is not yet retried. The retry selection and the retry mark both use them, so
-        a row the selection finds is exactly a row the mark may still write.
+        Returns the failure filters (an exit status, neither success nor a cancel, nor one of
+        `NO_RETRY_STATUSES`: a task that never ran never awaits retry) and the filter that the row
+        is not yet retried. The retry selection, the retry counts and the retry mark all use them,
+        so a row the selection finds is exactly a row the mark may still write.
         """
         table = cls.__table__
         failed = (table.c.exit_status.isnot(None),
                   table.c.exit_status != 0,
-                  table.c.exit_status != CANCEL_STATUS)  # NOTE: cancelled is terminal, not a failure
+                  table.c.exit_status != CANCEL_STATUS,  # NOTE: cancelled is terminal, not a failure
+                  table.c.exit_status.not_in(NO_RETRY_STATUSES))  # NOTE: never ran, never retried
         return failed, table.c.retried.is_(False)
 
     @classmethod
@@ -887,15 +942,7 @@ class Task(Entity):
         if not failed_tasks:
             return []
         log.trace(f'Selected {len(failed_tasks)} previously failed tasks')
-        retries = {task.id: cls.new(args=task.args,
-                                    attempt=task.attempt + 1,
-                                    previous_id=task.id,
-                                    tag=task.tag,
-                                    group=task.group,
-                                    fingerprint=task.fingerprint,  # A retry is the same logical task.
-                                    source=task.source,            # Keep the retry chain linked to its source.
-                                    zone=task.zone)                # A retry runs in its task's zone.
-                   for task in failed_tasks}
+        retries = {task.id: cls.new_retry(task) for task in failed_tasks}
         next_ids = {id: {'next_id': task.id} for id, task in retries.items()}
         try:
             # NOTE: marks first: the retry rows are added only for the marks that landed.

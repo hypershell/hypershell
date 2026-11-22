@@ -16,7 +16,13 @@ or by using one of the provided high-level functions
 or :meth:`~hypershell.cluster.ssh.run_ssh`).
 
 All of the parameters used below are largely the same in each instance. Configuration files have
-no impact when using the library; i.e., default values are not overridden by configuration.
+no impact when using the library; i.e., default values are not overridden by configuration. The
+one exception is ``server.attempts``: a ``max_retries`` not given is ``server.attempts`` - 1, read
+when the function is called or the cluster built.
+
+.. versionchanged:: 2.9.0
+   A ``max_retries`` not given follows ``server.attempts`` (none with the built-in default);
+   before, each cluster class retried every failed task once, whatever the configuration.
 
 |
 

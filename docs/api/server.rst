@@ -12,7 +12,12 @@ Directly embed the server either as a dedicated :class:`ServerThread` or using o
 high-level functions, :meth:`serve_from`, :meth:`serve_file`, or :meth:`serve_forever`.
 
 All of the parameters used below are largely the same in each instance. Configuration files have
-no impact when using the library; i.e., default values are not overridden by configuration.
+no impact when using the library; i.e., default values are not overridden by configuration. The
+one exception is ``server.attempts``: a ``max_retries`` not given is ``server.attempts`` - 1, read
+when the function is called or the thread built.
+
+.. versionchanged:: 2.9.0
+   A ``max_retries`` not given follows ``server.attempts`` (none with the built-in default).
 
 |
 

@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/update-client-retry
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -94,7 +94,7 @@ phases:
 - id: P4
   name: Never-ran statuses are not retried and fail their group; a retry keeps its
     declarations; one retry default (R5-R8, their docs)
-  status: pending
+  status: done
   satisfies:
   - R5
   - R6
@@ -345,33 +345,37 @@ autoscaler demand together, both dialects); a retry carries cores, memory and wa
 entry point defaults `max_retries` from `server.attempts`; the retry docs and the constitution say so.
 One commit: §3's "change them together" members move as one.
 
-- [ ] `data/model.py`: `TASK_TEMPLATE_ERROR`, `TASK_RESOURCE_ERROR`, `NO_RETRY_STATUSES` beside
+- [x] `data/model.py`: `TASK_TEMPLATE_ERROR`, `TASK_RESOURCE_ERROR`, `NO_RETRY_STATUSES` beside
       `CANCEL_STATUS` (docstrings; `__all__`). `__awaiting_retry`'s tuple gains
       `table.c.exit_status.not_in(NO_RETRY_STATUSES)` (docstring: never-ran rows never await retry).
       `increment_group`: `case` import; the failed-count statement per PLAN §2.3 (one statement,
       `or_(attempt >= attempts, never_ran)`, a second count under `case`) and the three reason forms;
       update its comment and docstring.
-- [ ] `data/model.py`: `Task.retry_columns` beside `result_columns` (docstring: copied as stored,
+- [x] `data/model.py`: `Task.retry_columns` beside `result_columns` (docstring: copied as stored,
       never re-parsed); `Task.new_retry(task)` (PLAN §2.4); `__schedule_next_failed_tasks` builds
       `retries = {task.id: cls.new_retry(task) for task in failed_tasks}`.
-- [ ] `client.py`: drop the two constant definitions, import them from `hypershell.data.model`
+- [x] `client.py`: drop the two constant definitions, import them from `hypershell.data.model`
       (keep the comment above them); both `create_task` error lines end `(task did not run)`.
-- [ ] `server.py`: `configured_retries()` after `DEFAULT_ATTEMPTS` (in `__all__`); `ServerThread`,
+- [x] `server.py`: `configured_retries()` after `DEFAULT_ATTEMPTS` (in `__all__`); `ServerThread`,
       `serve_from`, `serve_file`, `serve_forever`: `max_retries: Optional[int] = None`, `ServerThread`
       resolving first thing in `__init__` (before the in-memory warning); `ServerApp.max_retries =
       configured_retries()`. Docstrings: "Default: ``server.attempts`` - 1, read when called".
-- [ ] `cluster/local.py`, `cluster/remote.py` (`RemoteCluster`, `AutoScalingCluster`), `cluster/ssh.py`,
+- [x] `cluster/local.py`, `cluster/remote.py` (`RemoteCluster`, `AutoScalingCluster`), `cluster/ssh.py`,
       `cluster/topology.py` (`AutoScalingServer`, PLAN §5 S1): `max_retries: Optional[int] = None`;
       `AutoScalingCluster`/`AutoScalingServer` resolve `configured_retries()` before their
       `max_retries + 1`; imports; docstrings. `cluster/__init__.py`: `ClusterApp.max_retries =
       configured_retries()`.
-- [ ] `tests/test_retry_declarations.py`, appended, not red-listed (it names the new attribute):
+- [x] `tests/test_retry_declarations.py`, appended, not red-listed (it names the new attribute):
       `test_retry_columns_are_fixed` (`@mark.unit`, modelled on
       `tests/test_writeback.py::test_result_columns_are_fixed`): `Task.retry_columns`,
       `Task.result_columns` and the fresh set (`id`, `submit_id`, `submit_host`, `submit_time`,
       `attempt`, `retried`, `previous_id`, `next_id`, `server_id`, `server_host`, `schedule_time`,
       `part`) are disjoint and cover `Task.columns`.
-- [ ] Docs, each phrase on one line: `[server].attempts` in `config_param_ref.rst` ("A task whose
+- [x] `tests/test_retry_declarations.py::test_retry_text_cores_tag_postgres` (build amendment, on
+      the foreman's note from #118's review): on PostgreSQL a `cores:x` tag, as `hs update cores:x`
+      writes it, stays a tag and the retry row is inserted with the stored columns. Not red-listed
+      (it fails on `1f688c7c` by the defect's `DataError`, not an assertion); green here.
+- [x] Docs, each phrase on one line: `[server].attempts` in `config_param_ref.rst` ("A task whose
       template does not expand (``-1001``) or that needs more cores or memory than its client has
       (``-1002``) is never retried: it did not run." / "A retry keeps its task's cores, memory and
       walltime." / read by the Python API's entry points when they are not given ``max_retries``) with
@@ -382,7 +386,7 @@ One commit: §3's "change them together" members move as one.
       "Configuration files have no impact…" sentence excepts `server.attempts` (the `max_retries`
       default), with a marker each. If #118 has landed: `submit_desc.rst`'s retry sentence gains
       "and its cores, memory and walltime".
-- [ ] `AGENTS.md` (status table rows for `-1001`/`-1002`: never retried; § Retry model: the never-ran
+- [x] `AGENTS.md` (status table rows for `-1001`/`-1002`: never retried; § Retry model: the never-ran
       exclusion in the selection, the gate counting them on any attempt, `new_retry`/`retry_columns`,
       `configured_retries`) and `.agents/factory/invariants.md` §2 (the table and the MUST-filter
       rule: retry selection also excludes `NO_RETRY_STATUSES`), §3 (the "change them together" list

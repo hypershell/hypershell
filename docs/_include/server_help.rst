@@ -69,6 +69,10 @@ Options
     than zero defines the number of attempts for the task. The original is not over-written, a new
     task is submitted and later scheduled.
 
+    A task whose template does not expand (-1001) or that needs more cores or memory than its
+    client has (-1002) is never retried: it did not run, and its group fails at once.
+    A retry keeps its task's cores, memory and walltime.
+
     See also ``--eager``.
 
 ``--eager``

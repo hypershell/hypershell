@@ -49,6 +49,12 @@ Description
    no longer waits out its back-off (up to ``-Q``/``--poll``) after the last task. With
    ``--forever`` it keeps waiting, and nothing else about scheduling changes.
 
+.. versionchanged:: 2.9.0
+   A task that did not run, its template not expanding (``-1001``) or it needing more cores or
+   memory than its client has (``-1002``), is never retried, and its group fails at once, as for a
+   task with no retries left; before, with retries, it was retried until they ran out. A retry
+   keeps its task's cores, memory and walltime; before, it ran with none of them.
+
 .. include:: ../_include/server_help.rst
 
 .. _cli_server_sites:

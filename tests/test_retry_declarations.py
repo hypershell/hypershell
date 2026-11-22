@@ -82,6 +82,25 @@ def test_retry_reads_columns_not_tags(task_db: Engine) -> None:
     assert stored.tag == {'cores': '8', 'memory': '2GB', 'timeout': '60', 'k': 'v'}
 
 
+@mark.integration
+@mark.skipif(not ADMIN_URL, reason='set HS_TEST_POSTGRES to a PostgreSQL admin URL to run these tests')
+def test_retry_text_cores_tag_postgres(pg_engine: Engine) -> None:
+    """On PostgreSQL, a `cores:x` tag (as `hs update cores:x` writes it) never reaches the retry's integer column.
+
+    The retry row is inserted with the stored columns and the tag kept whole; a scheduler that read
+    the tag into the column failed the insert, and the run.
+    """
+    task = Task.new(args='echo tagged', cores=1)
+    task.tag = {'cores': 'x', 'k': 'v'}
+    Task.add(task)
+    (scheduled, ) = Task.next(limit=10, attempts=2)
+    fail(scheduled.id, exit_status=1)
+    (retry, ) = Task.next(limit=10, attempts=2)
+    assert declarations(retry.id) == (1, None, None)
+    stored = Task.query(caching=False).filter(Task.id == retry.id).one()
+    assert stored.tag == {'cores': 'x', 'k': 'v'} and stored.previous_id == task.id
+
+
 def stored_rows() -> List[tuple]:
     """Attempt, exit status, duration, cores, memory, timeout and previous id of every row, by attempt."""
     conn = sqlite3.connect(f'file:{os.environ["HYPERSHELL_DATABASE_FILE"]}?mode=ro', uri=True)
@@ -105,3 +124,15 @@ def test_cluster_retry_keeps_walltime(temp_site: Path) -> None:
     assert retry[1] < 0 and retry[1] not in (-1001, -1002)
     assert retry[2] < 6
     assert retry[3:6] == first[3:6] and first[3] == 1 and first[5] == 2
+
+
+@mark.unit
+def test_retry_columns_are_fixed() -> None:
+    """Every column is copied to a retry, written by a result, or fresh on the retry: exactly one of them."""
+    fresh = {'id', 'submit_id', 'submit_host', 'submit_time', 'attempt', 'retried', 'previous_id', 'next_id',
+             'server_id', 'server_host', 'schedule_time', 'part'}
+    retry, result = set(Task.retry_columns), set(Task.result_columns)
+    assert len(retry) == len(Task.retry_columns)
+    assert not retry & result and not retry & fresh and not result & fresh
+    assert retry | result | fresh == set(Task.columns)
+    assert {'cores', 'memory', 'timeout'} <= retry

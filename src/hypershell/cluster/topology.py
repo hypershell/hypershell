@@ -40,7 +40,7 @@ from hypershell.core.topology import Bounds, Entry, Topology, SiteRecord, SiteRe
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ZoneLoad, ScalingKnobs, zone_demand,
                                        scheduler_group, read_zone_loads)
 from hypershell.server import (ServerThread, DEFAULT_BIND, DEFAULT_PORT, DEFAULT_AUTH, DEFAULT_BUNDLESIZE,
-                               DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_EVICT)
+                               DEFAULT_SERVER_POLL, DEFAULT_EVICT, configured_retries)
 
 # Public interface
 __all__ = ['Distribution', 'parse_distribution', 'parse_sites',
@@ -587,7 +587,7 @@ class AutoScalingServer(Thread):
                  auth: str = DEFAULT_AUTH,
                  bundlesize: int = DEFAULT_BUNDLESIZE,
                  poll: int = DEFAULT_SERVER_POLL,
-                 max_retries: int = DEFAULT_ATTEMPTS - 1,
+                 max_retries: Optional[int] = None,
                  eager: bool = False,
                  redirect_failures: IO = None,
                  evict_after: int = DEFAULT_EVICT,
@@ -598,6 +598,7 @@ class AutoScalingServer(Thread):
                  distribution: Optional[Any] = None,
                  sites: Optional[Any] = None) -> None:
         """Initialize server and topology publisher."""
+        max_retries = configured_retries() if max_retries is None else max_retries
         distribution = configured_distribution() if distribution is None else parse_distribution(distribution)
         order = configured_sites() if sites is None else parse_sites(sites)
         self.registry = SiteRegistry()
