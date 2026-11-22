@@ -4,7 +4,7 @@ title: hs update --delete refuses changes it would ignore, hs client reads its o
   bundle keys, and a task that never ran is not retried
 kind: fix
 appetite: big
-status: blocked
+status: in_review
 branch: fix/update-client-retry
 base: develop
 current_phase: done
@@ -169,11 +169,10 @@ phases:
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
     docs /tmp/claude-501/docs-html-ucr
 review:
-  last_reviewed_commit: 568d35e770eb69f5a72589d746add0b6ba1c7255
-  verdict: changes-requested
-  blocked_reason: 'Review cycle 2: F3 docs/api/cluster.rst says configuration does
-    not reach the launching cluster classes; their clients read it'
-  cycle: 2
+  last_reviewed_commit: 4e495e3cd0d86b9f520b601ca8c1d8095f54c536
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 # TECH.md — `hs update --delete` refuses changes it would ignore, `hs client` reads its own bundle keys, and a task that never ran is not retried
 

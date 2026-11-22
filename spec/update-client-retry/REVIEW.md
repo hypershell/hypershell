@@ -254,3 +254,74 @@ the worktree.
 ### Human-gate triggers
 - **Not triggered.** F3 is in `docs/api/cluster.rst`. The delta touches no high-blast-radius file
   and no security or DB-lifecycle invariant.
+
+## Review cycle 3 — approved (2026-11-22)
+
+- **Reviewed commit:** `4e495e3c` (`4e495e3cd0d86b9f520b601ca8c1d8095f54c536`) · **Base:** `origin/develop`
+  `67019c7f` · **Delta graded:** `568d35e7..4e495e3c` with `spec/` excluded: one paragraph in
+  `docs/api/cluster.rst`. No `src/`, `tests/` or other docs change.
+- **Verdict:** approved. F3 is fixed, and nothing in the paragraph is false. No new finding.
+  Route: `/hs-publish`. This is cycle 3 of ≤3, the last allowed, and it converged.
+- **Mode:** scoped remediation check, not a fresh blind pass over the full diff. The foreman scoped
+  it to the "Review-cycle-2 ruling" at the end of `PLAN.md`, which binds this cycle. One reviewer
+  did the pass, with no subagent. Its inputs were `GOAL.md`, this file's cycle 2 (F3), the delta,
+  the runnable repo and that ruling. It read no other `PLAN.md` content, only `TECH.md`'s
+  metadata, and neither `research/` nor `META.md`.
+- **Merge:** `git fetch origin develop fix/update-client-retry` leaves `origin/develop` at
+  `67019c7f`, unchanged since cycle 1, and `origin/fix/update-client-retry` at `4e495e3c`, the
+  reviewed commit. `git merge-tree --write-tree HEAD origin/develop` exits 0: it merges cleanly.
+- **Contract drift:** none. `GOAL.md`'s only commits are still `4df71265` and `b52d6734`.
+
+### Verification run
+
+- **Docs:** `UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr uv run --python 3.12 --group docs
+  sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucrrv3` → exit 0, no
+  Sphinx warnings.
+- **Probe 3**, run in a throwaway site (`temp_site.sh`, Python 3.14, server bound to `127.0.0.1`,
+  no key on any command line) with `[export] probe_file = "from-file"` and `[task] timeout = 1` in
+  its `config.toml`, one SQLite database per class, and the calling process's `os.environ` without
+  `PROBE_FILE`. Each class ran two tasks, one writing the task's `$PROBE_FILE` to a file and
+  `sleep 3`. Launcher-mode classes used a stand-in launcher that records its own `$PROBE_FILE`
+  and then runs the client; `SSHCluster` used a stand-in for `ssh` that records the same, drops
+  `-T host` and runs the remote step locally, as a host on a shared filesystem would.
+
+  | Class | Task sees `PROBE_FILE` | Launch's own `PROBE_FILE` | `sleep 3` |
+  |---|---|---|---|
+  | `LocalCluster(source, port)` | `from-file` | (no launch) | exit 0 after 3.0 s; no walltime |
+  | `RemoteCluster(launcher=…)` | `from-file` | `from-file` | exit `-2` after 1.0 s; "Walltime limit exceeded … > 1" |
+  | `AutoScalingCluster(launcher=…, policy='fixed', init_size=1)` | `from-file` | `from-file` | exit `-2` after 1.0 s; same log line |
+  | `SSHCluster(nodelist=['nohost'], launcher=<ssh stand-in>)` | `from-file` | empty | exit `-2` after 1.0 s; same log line |
+
+  The `AutoScalingCluster` was stopped after 20 s, as an autoscaling cluster runs until stopped.
+  No probe process or launched client was left running.
+- **Code agrees with each clause:** the in-process client reads `task.cwd` and `[export]`
+  (`client.py:574`, `:577`, `:899`) and no `client.*` or `task.timeout` key. Launcher mode lays
+  `load_task_env()` over each launch's environment (`cluster/launch.py:136`). An SSH launch takes
+  the caller's environment as it is (`inherit_env=True`, `launch.py:246-248`), and `export_env`
+  forwards only `HYPERSHELL_*` variables (`cluster/ssh.py:298`). Every launch passes `-C`, `-M`,
+  `-T`, `-W` and `-R` only when given (`launch.py:533-542`), and `hs client` defaults each from
+  its own configuration (`client.py:1681-1683`, `:1704-1705`).
+
+### Remediation of cycle 2
+
+| Finding | Ruling | Evidence | Status |
+|---------|--------|----------|--------|
+| F3 | Limit the in-process clause to `LocalCluster`; say the other classes start `hs client` processes that read their own configuration for any option not passed, and that the launcher-mode classes give each launch the `[export]` environment | The clause now names `LocalCluster`. The new sentence holds for all three launching classes (probe 3: walltime from `task.timeout`, `[export]` from the client's own configuration). Only the launcher-mode launches carry `[export]` themselves; the SSH launch does not, as the sentence implies. The closing claim is now "Otherwise everything is passed by the caller", true with the launched clients carved out. | ✅ fixed |
+
+**Unmapped changes:** none.
+
+### Findings
+
+None.
+
+### Notes (not findings)
+- "Launcher-mode classes" is not defined on this page. It is the docs' own term for `--launcher`,
+  `--mpi` and `--autoscaling` (`docs/security.rst`, "Launcher modes"), that is `RemoteCluster`
+  and `AutoScalingCluster`, and the paragraph sets it against "an SSH cluster". `SSHCluster` also
+  takes a `launcher` parameter (`ssh`), so a reader could stretch the term to it, but on a shared
+  filesystem its remote client reads the same `[export]` anyway (probe 3). Not a misleading
+  omission.
+
+### Human-gate triggers
+- **Not triggered.** No finding. The delta touches only `docs/api/cluster.rst`, no
+  high-blast-radius file and no security or DB-lifecycle invariant.
