@@ -5,7 +5,7 @@ SECTION[...].VAR
     Path to variable.
 
 VALUE
-    Value to be set.
+    Value to be set, written by the key's type.
 
 Options
 ^^^^^^^

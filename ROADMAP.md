@@ -446,7 +446,7 @@ this command too. Pre-existing.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: `env-config-keys` (landed, #113: the key
 table) · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: unshaped*
+**Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: adopted:config-set-and-unread*
 
 ## `hs relay` cannot name the address its site clients dial
 
@@ -564,7 +564,7 @@ above. Pre-existing; found by `env-config-keys`' research, out of its scope.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
 `spec/env-config-keys/research/03-duration-keys.md`, `04-typed-readers.md`*
-**Seed:** [`issues/config-keys-unread.md`](issues/config-keys-unread.md) · *status: unshaped*
+**Seed:** [`issues/config-keys-unread.md`](issues/config-keys-unread.md) · *status: adopted:config-set-and-unread*
 
 ## `hs submit -q` cannot feed a server with a database
 

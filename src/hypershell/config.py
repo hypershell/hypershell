@@ -27,11 +27,11 @@ from rich.syntax import Syntax
 
 # Internal libs
 from hypershell.core.platform import path
-from hypershell.core.types import smart_coerce
 from hypershell.core.logging import Logger
+from hypershell.core.config_schema import match_path, read_value
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth, env_variable,
-                                    default as default_config, config as full_config)
+                                    is_key_variable, default as default_config, config as full_config)
 
 # Public interface
 __all__ = ['ConfigApp', ]
@@ -262,7 +262,7 @@ SET_HELP = f"""\
 
 Arguments:
   SECTION[...].VAR        Path to variable.
-  VALUE                   Value to be set.
+  VALUE                   Value to be set, written by the key's type.
 
 Options:
       --system            Apply to system configuration.
@@ -270,6 +270,15 @@ Options:
       --local             Apply to local configuration.
   -h, --help              Show this message and exit.\
 """
+
+
+def is_utf8(text: str) -> bool:
+    """True if `text` can be written as UTF-8 (a byte that is not UTF-8 arrives as a lone surrogate)."""
+    try:
+        text.encode('utf-8')
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 class ConfigSetApp(Application):
@@ -281,7 +290,7 @@ class ConfigSetApp(Application):
     interface.add_argument('varpath', metavar='VAR')
 
     value: str = None
-    interface.add_argument('value', type=smart_coerce)
+    interface.add_argument('value')
 
     site_name: str = 'user'
     site_interface = interface.add_mutually_exclusive_group()
@@ -299,6 +308,21 @@ class ConfigSetApp(Application):
         if '.' not in self.varpath:
             raise ArgumentError('Missing section in variable path')
 
+        # The file is written as UTF-8: a path or value that cannot be is refused before anything is written.
+        if not is_utf8(self.varpath):
+            raise ArgumentError(f'Variable path {self.varpath!r} cannot be written as UTF-8')
+
+        # A refusal names the key.
+        given = '' if is_key_variable(env_variable(*self.varpath.split('.'))) else f', given {self.value!r}'
+        if not is_utf8(self.value):
+            raise ArgumentError(f'{self.varpath}: expected text that can be written as UTF-8{given}')
+
+        # The value is read by the key's kind, and refused before anything is written.
+        try:
+            value = read_value(match_path(self.varpath), self.value)
+        except ValueError as error:
+            raise ArgumentError(f'{self.varpath}: expected {error}{given}') from None
+
         section, *subsections, variable = self.varpath.split('.')
 
         config = {section: {}}
@@ -308,7 +332,7 @@ class ConfigSetApp(Application):
                 config_section[subsection] = dict()
             config_section = config_section[subsection]
 
-        config_section[variable] = self.value
+        config_section[variable] = value
         update(self.site_name, config)
 
 
