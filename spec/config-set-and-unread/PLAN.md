@@ -346,3 +346,21 @@ session (2026-11-21): "Approve, fix all five", and approved review cycle 2 and m
 - **Error messages (maintainer, same session).** The exit-3 message for a bad `server.eager` names
   the key and its source, but does not repeat a value resolved from an `_env` or `_eval` form.
   Public text states this outcome only.
+
+## Review-cycle-2 rulings (2026-11-22)
+
+Review cycle 2 was changes-requested at `d6d83afa`. The human gate was triggered by F8
+(`server.py`) and F9 (`client.py`). The maintainer ruled in session: "Fix all four". Review cycle 3
+is the last.
+
+- **F7.** `hs config set` writes the configuration file, and its backups, as UTF-8 whatever the
+  locale, matching every reader. Tests run under a Latin-1 locale and are red on `d6d83afa`.
+- **F8.** `check_evict` compares against the maximum before any float conversion, so an integer
+  wider than a float gets the same clean exit 5.
+- **F9.** `-R` and `client.ratelimit` refuse a rate below a floor, with exit 2 naming the option or
+  key. The floor is low enough that the executor's interval arithmetic never overflows and no real
+  rate is affected. The plan picks the value and records it.
+- **F10.** Spec ids such as `(R4)` are removed from the branch's test docstrings, per `AGENTS.md`.
+- **Refusal messages (maintainer, same session).** A refusal in `hs config set` names the key and
+  does not repeat the value when the key is one of the key-variable forms. Public text states only
+  that the message names the key.
