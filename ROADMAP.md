@@ -256,7 +256,7 @@ Under a local `hs cluster`, the in-process client uses the built-in heartrate ra
 The `LocalCluster`/`RemoteCluster`/`SSHCluster` constructors default `max_retries` differently from `ServerThread`, so the Python API and the commands can retry differently for the same configuration. Use one default, derived from `server.attempts`, everywhere; pin it with a test of each constructor.
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/research/`*
-**Seed:** [`issues/cluster-max-retries-defaults.md`](issues/cluster-max-retries-defaults.md) · *status: unshaped*
+**Seed:** [`issues/cluster-max-retries-defaults.md`](issues/cluster-max-retries-defaults.md) · *status: adopted:update-client-retry*
 
 ## A text `attempts = "3"` in a file crashes every command at import
 

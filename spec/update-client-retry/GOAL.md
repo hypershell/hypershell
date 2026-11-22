@@ -277,6 +277,22 @@ one dependency: #117 edits the `ClientApp` option block (`-R`, a few lines below
 constructors (`evict_after`); R8 builds on #117's R6 (`hs cluster` reads `server.attempts`).
 `/hs-plan` should plan against `develop` with #117 merged and the build rebase onto it.
 
+**Ruled at the GOAL gate** (2026-11-22): approved by the foreman, gate judge under the maintainer's
+mandate. The maintainer ruled the retry-defaults change into 2.9.0 (2026-11-21, "retry defaults
+in"). The ten clarifications are confirmed as proposed:
+- appetite big, with one cycle in three phases (R1–R2, then R3–R4, then R5–R8, with R9 alongside
+  each);
+- `-1002` is terminal as well as `-1001`, and every `-1001` is treated as deterministic;
+- R2 and R7 are in scope;
+- R8 is in scope, and `issues/cluster-max-retries-defaults.md` is adopted here (marked by the
+  foreman), with `ServerThread` and `serve_*` reading `server.attempts`;
+- there is no `submit.*` fallback for `hs client`; the release note serves as the deprecation note;
+- R1 and R2 exit with status 2.
+
+The plan builds on `develop` with #117 merged. The candidate seed for the legacy form combined
+with filters is filed by the foreman. Target 2.9.0. The contract is locked; `hs-plan` designs
+against it.
+
 ## Related materials
 
 - Seeds: [`issues/update-delete-ignores-assignments.md`](../../issues/update-delete-ignores-assignments.md),
