@@ -10,6 +10,21 @@ Assign a group at submit time with ``-g``/``--group``, or per task with an inlin
     echo 'stage-one.sh  # HYPERSHELL: group:0' | hs submit
     echo 'stage-two.sh  # HYPERSHELL: group:1' | hs submit
 
+A group is an integer from -2147483648 to 2147483647, written as ``-g``/``--group`` takes it
+(``7``, ``-3``, ``+5`` and ``07`` are accepted). Any other value is refused wherever it arrives: an
+inline ``group:`` tag, ``-t group:...`` or the ``group`` key of a ``--from-json`` record, which must
+be a JSON integer (``"7"``, ``3.0``, ``true`` and ``null`` are refused). Input read in full (a task
+file given to ``hs submit``, ``hs cluster`` or ``hs server``, a ``--from-json`` source, a command given
+as arguments, and standard input to ``hs submit`` with the database) is refused whole, with nothing
+submitted or run, exit status 5 and an error naming the value and its line or record. On a stream
+into ``hs cluster``, ``hs server`` or ``hs submit --queue``, only the offending line is refused, with
+an error naming its value and line; the lines after it run as they would without it, so a refused
+tag-only line sets nothing. ``-t group:x`` exits with status 2 before any input is read.
+
+.. versionchanged:: 2.9.0
+   A group that is not an integer is refused. Earlier releases stored such values as given on
+   SQLite and ran them in an undocumented order, and ``group:nan`` hung the run.
+
 The server advances through groups automatically as each one completes. If a group cannot be
 completed because it still holds failed tasks (after any ``--max-retries`` attempts are
 exhausted), scheduling halts with a critical message; under ``--forever`` the scheduler instead
@@ -27,6 +42,39 @@ timeout and exits before any task is scheduled, and the server then waits for ne
 A run fed by a stream keeps scheduling until that input ends, so a stream with long pauses wants
 clients with no ``-T``/``--timeout`` (or autoscaling): a client that times out during a pause is
 not there to run the lines that follow it.
+
+The *reached group* is the highest group the current run has started, read from the tasks in the
+database: a run is the work since the database last held no unfinished task, so once every task has
+finished there is no reached group and any group is accepted. Cancelled tasks do not count, and a
+failure counts as finished unless its retry has been created. With the database, ``hs submit``
+refuses a submission holding a task below the reached group, all or nothing, with exit status 2 and
+an error naming the lowest such group and the reached group; it reads standard input in full first.
+A submission that names no group takes the reached group when the most recently scheduled group is
+below it. ``hs cluster`` and ``hs server`` refuse a task file the same way when the database has a
+reached group (with ``--restart``, ``--update`` or ``--repeat``, or a database kept from an earlier
+run), before anything is submitted or run. For them, tasks still in flight from an interrupted run
+do not count, because the server returns them to the queue when it starts, and tasks the
+re-submission gate skips as already present are not checked, so a same-file ``--restart`` of a run
+that was interrupted is never refused. A stream is not refused: its late lower group runs, with the
+warning above. To go on, submit at the reached group or higher, wait for the run to finish, or use a
+fresh database.
+
+The reached group is read from the tasks' own times, so it can fall short of the group a live server
+has truly started (for example when every task of a higher group finished before the oldest task
+still open was submitted, or while a failure waits for its retry to be created); a lower group
+accepted then runs late, with the warning above. It can overshoot only when those times mislead:
+after ``hs update --revert`` of a finished task, across clocks that disagree between hosts, or on
+SQLite across the hour a daylight-saving change repeats.
+
+A line holding a ``#`` after its first non-blank character is a different task in 2.9.0 than it was
+before (earlier releases cut the command there), so ``--restart`` or ``--update`` of a file first
+submitted by an earlier release submits such lines again, and on a database with a reached group a
+file whose such line is in a lower group is refused. An old task stored cut that failed keeps its
+group failed until it is cancelled or updated with ``hs update``.
+
+.. versionchanged:: 2.9.0
+   A task below the reached group is refused by ``hs submit``, and a task file holding one by
+   ``hs cluster`` and ``hs server``; ``hs submit`` reads standard input in full before submitting.
 
 Filter or update tasks by group with the ``-g``/``--group`` option of ``hs list`` and
 ``hs update``.

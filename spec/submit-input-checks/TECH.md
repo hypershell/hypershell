@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P7
+current_phase: P8
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -117,7 +117,7 @@ phases:
 - id: P7
   name: Docs (versionchanged 2.9.0), AGENTS.md and invariants.md, the release-note
     draft
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on:
@@ -510,20 +510,33 @@ inserted or dispatched; skipped tasks never trigger it; streams are unchanged (P
 **Goal:** every user-visible change is documented where users look, marked `.. versionchanged:: 2.9.0`,
 and the constitution says the new rules.
 
-- [ ] `docs/_include/submit_desc.rst`: a line beginning with `#` is a comment, a `#` elsewhere is part
+- [x] `docs/_include/submit_desc.rst`: a line beginning with `#` is a comment, a `#` elsewhere is part
       of the command, the marker is found anywhere (break it with `echo '#'' HYPERSHELL:'`); a
       non-integer group refuses the input; with a database stdin is read in full before anything is
       inserted; the reached-group refusal.
-- [ ] `docs/cli/cluster.rst`, `docs/cli/server.rst`: beside the description includes, the same `#`
+- [x] `docs/cli/cluster.rst`, `docs/cli/server.rst`: beside the description includes, the same `#`
       rule, file versus stream for a bad group, and the reached-group refusal of a file.
-- [ ] `docs/_include/task_groups_alt.rst`: a group is an integer (the forms), file versus stream, what
+- [x] `docs/_include/task_groups_alt.rst`: a group is an integer (the forms), file versus stream, what
       the reached group is and when it counts (the current pass; under-estimates fall back to the
       late-group warning), and the `--restart`/`--update` notes (C4 drift, an old failed cut row).
-- [ ] `AGENTS.md` (group gating, `submit.py` notes) and `.agents/factory/invariants.md` §3 in lockstep:
+- [x] `AGENTS.md` (group gating, `submit.py` notes) and `.agents/factory/invariants.md` §3 in lockstep:
       a group must be an integer (R3), the reached group and its refusal (R6/R7), the Loader's stream
       policy.
-- [ ] `spec/submit-input-checks/RELEASE-NOTE.md`: the squash-body draft for `hs-publish`, naming the
+- [x] `spec/submit-input-checks/RELEASE-NOTE.md`: the squash-body draft for `hs-publish`, naming the
       four GOAL changes as behaviour changes plus the `--template` line split and the tag-only fix.
+- **Built:** `submit_desc.rst` gains the `#` rule (with `--template`'s split) and the integer and
+  reached-group rules (stdin read in full and held in memory, the C9 default, `--update`'s skipped
+  tasks), each with its own `versionchanged`. `task_groups_alt.rst` gains the integer rule (forms,
+  range, file versus stream, exit statuses), the reached group (definition, `hs submit` refusal and
+  default, `hs cluster`/`hs server` refusal with in-flight and skipped tasks left out, streams
+  unchanged), its under- and over-estimates (PLAN § 5 risk 4) and the C4/D2 `--restart`/`--update`
+  note with the old failed cut row, plus two `versionchanged` markers. `cluster.rst` and `server.rst`
+  each get one `versionchanged` beside the description include. `AGENTS.md` (group-gating paragraph;
+  the `submit.py` footgun now says `-t` is checked in queue mode and lines split before the
+  template) and `invariants.md` § 3 (two bullets: the integer rule, the reached group and the gate
+  split) say the same rules. `RELEASE-NOTE.md` holds the squash-body draft.
+- **Verified (2026-11-21):** help and completion tests 66 passed; html and man builds with `-W`
+  clean; every grep holds; no legacy `task` group command added.
 - **Verify:** help and completion tests; html and man builds with `-W`; the greps; no legacy `task` group command added.
 - **Touches:** `docs/`, `AGENTS.md`, `.agents/factory/invariants.md`, `spec/submit-input-checks/`.
 
