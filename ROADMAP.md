@@ -805,12 +805,13 @@ connection trusts the other with its process. The manager serializes only throug
 `send`/`recv`, the standard library already swaps those for its XML-RPC serializer, and HyperShell
 owns both connection pairs. So a codec for a closed vocabulary of plain values (requests, five reply
 kinds, proxy tokens, `queue.Empty`) replaces pickle with no change to the queues, the dispatcher or
-any FSM. A pre-codec peer is refused with a clear error, and there is no pickle fallback. Open for
-shaping: whether the envelope is JSON or msgpack. Payloads stay JSON.
+any FSM. A pre-codec peer is refused with a clear error, and there is no pickle fallback. The envelope
+is JSON, like the payloads. It adds microseconds per task, against milliseconds for the database, so
+msgpack's extra dependency buys nothing.
 
 *Target: 2.9.0 (2.9.0a10) · Horizon: near-term, big · Depends on: — · Refs: prerequisite of both
-entries below; `docs/security.rst` ("Pickle-serialized RPC"); `tests/bench/bench_queue.py` (format
-choice and the no-regression check)*
+entries below; `docs/security.rst` ("Pickle-serialized RPC"); `tests/bench/bench_queue.py` (the
+no-regression check)*
 **Seed:** [`issues/queue-wire-codec.md`](issues/queue-wire-codec.md) · *status: unshaped*
 
 ## A sandbox template around each task confines nothing

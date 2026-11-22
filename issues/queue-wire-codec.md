@@ -80,48 +80,37 @@ a peer.
 - **Target 2.9.0, as 2.9.0a10, appetite big.** Landing it before 2.9.0 final means the 2.9 line ships
   one framing, and the compatibility break falls inside the alphas.
 
-## Open for shaping: the wire format
+## The envelope is JSON (settled with Geoffrey, 2026-11-22)
 
-There are two layers, and they can make different choices:
+Encoding does not limit throughput in production. With a database, the database does: the server
+runs its own statements for every task, and `nf-hypershell` measured about 150 tasks/s on a laptop,
+77/s with SQLite on home, and 38/s on Lustre (`issues/server-per-task-statement-overhead.md`). That is
+roughly 7 to 26 ms per task.
 
-- **The envelope** above is private to HyperShell, and both ends always ship together, so its
-  format can be whatever serves us best.
-- **The payloads** (task records, results, heartbeats) are where interoperability matters, and they
-  are expensive to change. The dispatcher keeps each staged task as encoded JSON text and joins those
-  texts into its reply without encoding them again (`core/dispatch.py:148`, `:307`). The relay stores
-  records as JSON, and `Entity.from_json` decodes fields by their declared column type. They stay
-  JSON in this cycle.
+A micro-benchmark of the envelope alone (CPython 3.12, records shaped like `Task.to_json`, a
+round trip, 2026-11-22):
 
-The options for the envelope:
+| Bundle | pickle | JSON, payload as text | JSON, payload as base64 |
+|---|---|---|---|
+| 1 task (733 B) | 0.4 µs | 4.4 µs | 6.6 µs |
+| 100 tasks (73 KB) | 0.06 µs/task | 2.2 µs/task | 4.1 µs/task |
+| 1000 tasks (735 KB) | 0.02 µs/task | 2.2 µs/task | 4.0 µs/task |
 
-- **JSON.** No new dependency. Payloads are `bytes`, which JSON cannot hold, so they would need base64
-  (a third larger, plus the encoding cost) or a change to `str`. A JSON payload inside a JSON string
-  is escaped a second time. Readability is not a real advantage, because the default wire is TLS.
-- **msgpack.** Holds `str` and `bytes` natively, so a JSON payload passes through as an opaque blob
-  with no second escaping. Tagged values (`Token`, exceptions) fit its extension types, decoded only
-  by our own hook. Its decoder takes explicit limits (`max_buffer_size`, `max_str_len`,
-  `max_bin_len`, `max_array_len`, `max_map_len`, `strict_map_key`). The costs are below.
-- **Both, with msgpack an opt-in extra.** The `uuid7` extra works because that choice is local and
-  nothing else has to agree with it. A wire format is a choice two processes must share: an extra on
-  one host and not the other needs negotiation and fallback rules, and doubles the test matrix. That
-  is the same mixed-fleet problem R4 exists to make clean.
+A JSON envelope adds 2 to 7 µs per task, under 0.1% of the per-task database cost. It's the same
+order as the payload's own JSON encoding, which every run already pays (about 6 µs per task). Even
+without a database, the envelope alone would allow over 200,000 tasks/s, far above the rate clients
+can start subprocesses. The frame grows about 10% when the payload goes as text, or 33% as base64.
 
-msgpack's costs:
-- It becomes a hard dependency: a C extension with a pure-Python fallback. Check its availability in
-  EPEL/RHEL (EL8 to EL10) against the low-floors policy. If it is missing there, that settles the
-  question.
-- Its defaults changed at 1.0 (`raw=False`, `use_bin_type=True`, `strict_map_key=True`), so floor at
-  1.0 and pass every option explicitly.
-- An integer wider than 64 bits fails to pack, where JSON would carry it. Nothing in the vocabulary
-  needs one, but the encoder must refuse one cleanly.
-- Tuples decode as lists, which is harmless, because the receiver rebuilds tuples from the closed
-  vocabulary anyway.
+So the envelope is JSON: no new dependency, one format, nothing to negotiate. msgpack was
+considered. It would carry `bytes` natively and avoid escaping a JSON payload a second time, but it
+would add a hard dependency (whose EPEL/RHEL availability is unverified) to save microseconds.
+Payloads stay JSON as well. That keeps the dispatcher's encoded staged rows, the relay's JSON store
+and `Entity.from_json` as they are.
 
-**Recommendation (agent, 2026-11-22):** one envelope format, no negotiation. Prefer msgpack if it
-passes the EPEL check, otherwise JSON. Settle it in the plan phase by benchmarking both envelopes with
-`tests/bench/bench_queue.py` at bundle size 1 and at the default size. Payloads in msgpack are a
-separate, later performance question. At small bundles the measured ceiling is the server's per-task
-SQL (`issues/server-per-task-statement-overhead.md`), not encoding.
+**Left for the plan:** how `bytes` crosses the envelope. Every payload is UTF-8 JSON text, so either
+the codec carries a `bytes` value as a tagged UTF-8 string and refuses bytes that are not UTF-8
+(cheaper, as in the table), or payload producers and consumers switch to `str`, leaving no `bytes`
+in the vocabulary. Base64 works too, but costs the most and makes the frame largest.
 
 ## Sketch of the acceptance criteria
 
