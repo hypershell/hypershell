@@ -88,7 +88,7 @@ def evict_layer(site: Path, layer: str, value: str) -> Dict[str, str]:
 @mark.parametrize('mode', list(MODES))
 @mark.parametrize('layer', ['env', 'file'])
 def test_cluster_evict_reaches_server(temp_site, layer: str, mode: str) -> None:
-    """`server.evict` (any duration form) is the period of the server `hs cluster` runs, in every mode (R7)."""
+    """`server.evict` (any duration form) is the period of the server `hs cluster` runs, in every mode."""
     site = Path(str(temp_site))
     seen = recorded(site, mode, **evict_layer(site, layer, '1m30s'))
     assert seen['evict'] == [90], seen['stderr']
@@ -97,7 +97,7 @@ def test_cluster_evict_reaches_server(temp_site, layer: str, mode: str) -> None:
 @mark.integration
 @mark.parametrize('value, seconds', [('10', 10), ('10.5', 10.5)])
 def test_cluster_evict_exact(temp_site, value: str, seconds: float) -> None:
-    """The period is used as given: the 10-second floor is inclusive, and a fraction is kept (R7)."""
+    """The period is used as given: the 10-second floor is inclusive, and a fraction is kept."""
     site = Path(str(temp_site))
     seen = recorded(site, 'local', HYPERSHELL_SERVER_EVICT=value)
     assert seen['evict'] == [seconds] and type(seen['evict'][0]) is type(seconds), seen['stderr']
@@ -106,7 +106,7 @@ def test_cluster_evict_exact(temp_site, value: str, seconds: float) -> None:
 @mark.integration
 @mark.parametrize('mode', list(MODES))
 def test_cluster_evict_default(temp_site, mode: str) -> None:
-    """With no `server.evict` the server keeps the built-in 600 seconds (R7)."""
+    """With no `server.evict` the server keeps the built-in 600 seconds."""
     site = Path(str(temp_site))
     seen = recorded(site, mode, HYPERSHELL_SERVER_EVICT=None)
     assert seen['evict'] == [600], seen['stderr']
@@ -143,7 +143,7 @@ REFUSALS: Final[Dict[str, Any]] = {
 @mark.parametrize('case', list(REFUSALS))
 def test_cluster_evict_refused(temp_site, case: str, mode: str) -> None:
     """A value `hs server` refuses stops `hs cluster` with its message and status before any database,
-    port or server (R7)."""
+    port or server."""
     site = Path(str(temp_site))
     layer, value, status, message = REFUSALS[case]
     seen = recorded(site, mode, HYPERSHELL_SERVER_PORT=None, **evict_layer(site, layer, value))
@@ -169,7 +169,7 @@ def test_server_evict_refused(temp_site, case: str) -> None:
 
 @mark.integration
 def test_cluster_evict_floor_cli(temp_site) -> None:
-    """A real `hs cluster` with `server.evict` under the floor exits as `hs server` does, never listening (R7)."""
+    """A real `hs cluster` with `server.evict` under the floor exits as `hs server` does, never listening."""
     site = Path(str(temp_site))
     create_taskfile(site, ['echo hi'], 't.in')
     env = child_env(site, HYPERSHELL_SERVER_EVICT='5')
@@ -184,7 +184,7 @@ def test_cluster_evict_floor_cli(temp_site) -> None:
 @mark.parametrize('command', ['server', 'cluster'])
 def test_evict_over_cap_cli(temp_site, command: str) -> None:
     """A file's `evict = 1e300` stops a real `hs server` or `hs cluster` with exit 5 and the refusal,
-    no traceback written, never listening (R7, S2)."""
+    no traceback written, never listening."""
     site = Path(str(temp_site))
     create_taskfile(site, ['echo hi'], 't.in')
     env = child_env(site, HYPERSHELL_SERVER_AUTH=KEY, **evict_layer(site, 'toml', '1e300'))

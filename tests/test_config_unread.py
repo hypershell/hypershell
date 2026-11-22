@@ -41,7 +41,7 @@ def file_layer(site: Path, text: str) -> Dict[str, str]:
 
 
 # --------------------------------------------------------------------------------------------------
-# server.eager and server.attempts (R5, R6)
+# server.eager and server.attempts
 
 APPS: Final[str] = 'from hypershell.server import ServerApp\nfrom hypershell.cluster import ClusterApp'
 """Imports a child needs to build the two apps."""
@@ -64,7 +64,7 @@ def read_retry(site: Path, **variables: str) -> List[Tuple[Any, int]]:
 @mark.integration
 @mark.parametrize('layer', ['file', 'env'])
 def test_eager_attempts_read(temp_site, layer: str) -> None:
-    """`server.eager` and `server.attempts` take effect in both commands; `--eager` and `-r` still apply (R5, R6)."""
+    """`server.eager` and `server.attempts` take effect in both commands; `--eager` and `-r` still apply."""
     variables = (file_layer(temp_site, '[server]\neager = true\nattempts = 3\n') if layer == 'file' else
                  {'HYPERSHELL_SERVER_EAGER': 'true', 'HYPERSHELL_SERVER_ATTEMPTS': '3'})
     assert read_retry(temp_site, **variables) == [(True, 2), (True, 2), (True, 5)] * 2
@@ -72,13 +72,13 @@ def test_eager_attempts_read(temp_site, layer: str) -> None:
 
 @mark.integration
 def test_eager_attempts_unset_as_today(temp_site) -> None:
-    """With neither key set both commands behave as before (R5, R6)."""
+    """With neither key set both commands behave as before."""
     assert read_retry(temp_site) == AS_TODAY
 
 
 @mark.integration
 def test_eager_env_false_over_file(temp_site) -> None:
-    """`HYPERSHELL_SERVER_EAGER=false` turns a file's `eager = true` off for one run (R5, change 4)."""
+    """`HYPERSHELL_SERVER_EAGER=false` turns a file's `eager = true` off for one run."""
     variables = file_layer(temp_site, '[server]\neager = true\n')
     assert read_retry(temp_site, HYPERSHELL_SERVER_EAGER='false', **variables) == AS_TODAY
 
@@ -86,7 +86,7 @@ def test_eager_env_false_over_file(temp_site) -> None:
 @mark.integration
 @mark.parametrize('layer', ['file', 'env'])
 def test_attempts_alone_cluster(temp_site, layer: str) -> None:
-    """`server.attempts` alone gives `hs cluster` its retries, as `hs server` (R6)."""
+    """`server.attempts` alone gives `hs cluster` its retries, as `hs server`."""
     variables = (file_layer(temp_site, '[server]\nattempts = 3\n') if layer == 'file' else
                  {'HYPERSHELL_SERVER_ATTEMPTS': '3'})
     rc, seen, stderr = config_repr(temp_site, '(ClusterApp.from_cmdline([]).max_retries, '
@@ -109,7 +109,7 @@ EAGER_CHECKED: Final[str] = ('[(lambda a: (setattr(a, "auth", resolve_auth("serv
                                      pytest.param('"yes"', True, id='yes'), pytest.param('"On"', True, id='On'),
                                      pytest.param('1', True, id='1')])
 def test_eager_file_words(temp_site, text: str, expected: bool) -> None:
-    """A file's `eager` written as a word or 0/1 is read by the environment's boolean words (R5)."""
+    """A file's `eager` written as a word or 0/1 is read by the environment's boolean words."""
     variables = file_layer(temp_site, f'[server]\neager = {text}\n')
     create_taskfile(Path(str(temp_site)), ['echo hi'], 't.in')
     rc, seen, stderr = config_repr(temp_site, EAGER_CHECKED, APPS + '\nfrom hypershell.core.config import resolve_auth',
@@ -122,7 +122,7 @@ def test_eager_file_words(temp_site, text: str, expected: bool) -> None:
 @mark.parametrize('text', [pytest.param('"maybe"', id='maybe'), pytest.param('2.5', id='2.5'),
                             pytest.param('""', id='empty')])
 def test_eager_unreadable_refused(temp_site, text: str) -> None:
-    """A file's `eager` that is no boolean stops `hs cluster` at its start check, exit 3, naming the key (R5)."""
+    """A file's `eager` that is no boolean stops `hs cluster` at its start check, exit 3, naming the key."""
     variables = file_layer(temp_site, f'[server]\neager = {text}\n')
     site = Path(str(temp_site))
     create_taskfile(site, ['echo hi'], 't.in')
@@ -149,7 +149,7 @@ EAGER_VARIANTS: Final[Dict[str, Tuple[str, str, Dict[str, str]]]] = {
 @mark.parametrize('case', list(EAGER_VARIANTS))
 def test_eager_variant_refused(temp_site, case: str, command: str) -> None:
     """A `server.eager` from its `_env` or `_eval` form that is no boolean stops the command with exit 3; the
-    message names the key and its source, not the value (R5)."""
+    message names the key and its source, not the value."""
     site = Path(str(temp_site))
     form, text, variables = EAGER_VARIANTS[case]
     if text:
@@ -168,7 +168,7 @@ def test_eager_variant_refused(temp_site, case: str, command: str) -> None:
 @mark.integration
 @mark.parametrize('command', ['server', 'cluster'])
 def test_eager_env_unset_refused(temp_site, command: str) -> None:
-    """A `server.eager_env` naming a variable that is not set stops the command with exit 3, naming both (R5)."""
+    """A `server.eager_env` naming a variable that is not set stops the command with exit 3, naming both."""
     site = Path(str(temp_site))
     variables = file_layer(site, '[server]\neager_env = "EAGER_WORD"\n')
     create_taskfile(site, ['echo hi'], 't.in')
@@ -181,7 +181,7 @@ def test_eager_env_unset_refused(temp_site, command: str) -> None:
 
 
 # --------------------------------------------------------------------------------------------------
-# client.ratelimit and -R (R8)
+# client.ratelimit and -R
 
 def parsed_rate(app: Type[Application], word: str) -> Any:
     """The rate `-R word` parses to on `app`, or the error text when it is refused."""
@@ -199,7 +199,7 @@ RATE_APPS: Final[Dict[str, Type[Application]]] = {'client': ClientApp, 'cluster'
 @mark.parametrize('word, rate', [('0.5', 0.5), ('2.5', 2.5), ('1e-3', 0.001), ('5', 5), ('0', 0), ('-1', -1),
                                  ('1e-6', 1e-06)])
 def test_rate_option_takes_number(app: str, word: str, rate: Any) -> None:
-    """`-R` takes a whole or decimal number on both commands; a whole word stays an integer (R8, change 8)."""
+    """`-R` takes a whole or decimal number on both commands; a whole word stays an integer."""
     value = parsed_rate(RATE_APPS[app], word)
     assert value == rate and type(value) is type(rate), value
 
@@ -208,7 +208,7 @@ def test_rate_option_takes_number(app: str, word: str, rate: Any) -> None:
 @mark.parametrize('app', list(RATE_APPS))
 @mark.parametrize('word', ['abc', 'inf', 'nan', '1e400', ''])
 def test_rate_option_refused(app: str, word: str) -> None:
-    """`-R` refuses what is not a finite number, as a usage error naming the option (R8)."""
+    """`-R` refuses what is not a finite number, as a usage error naming the option."""
     value = parsed_rate(RATE_APPS[app], word)
     assert isinstance(value, str) and value.startswith('error: ') and '-R/--ratelimit' in value, value
 
@@ -241,7 +241,7 @@ def launched_rate(rate: Optional[float]) -> Optional[str]:
 @mark.parametrize('rate, word', [(5, '5'), (5.0, '5'), (0, '0'), (0.5, '0.5'), (2.5, '2.5'), (1e-05, '0.00001'),
                                  (1 / 3, '0.3333333333333333')])
 def test_launched_rate_word(rate: float, word: str) -> None:
-    """A whole rate is launched as an integer word (a 2.9.0a4 client reads it); any other as a plain decimal (R8)."""
+    """A whole rate is launched as an integer word (a 2.9.0a4 client reads it); any other as a plain decimal."""
     assert launched_rate(rate) == word
     assert 'e' not in word.lower() and float(word) == rate
     if float(rate).is_integer():
@@ -251,7 +251,7 @@ def test_launched_rate_word(rate: float, word: str) -> None:
 @mark.unit
 @mark.parametrize('rate', [0.5, 1e-05, 1 / 3])
 def test_launched_rate_read_back(rate: float) -> None:
-    """A launched client of this release reads a fractional rate back exactly (R8)."""
+    """A launched client of this release reads a fractional rate back exactly."""
     assert parsed_rate(ClientApp, launched_rate(rate)) == rate
 
 
@@ -283,7 +283,7 @@ def read_rates(site: Path, argv: List[str], **variables: str) -> Tuple[int, Any,
 @mark.parametrize('layer, text, rate', [('env', '5', 5), ('env', '0.5', 0.5), ('file', '2.5', 2.5),
                                         ('file', '5', 5)])
 def test_cluster_reads_client_ratelimit(temp_site, layer: str, text: str, rate: float) -> None:
-    """`hs cluster` takes its `-R` default from `client.ratelimit`, as `hs client` does (R8)."""
+    """`hs cluster` takes its `-R` default from `client.ratelimit`, as `hs client` does."""
     variables = (file_layer(temp_site, f'[client]\nratelimit = {text}\n') if layer == 'file' else
                  {'HYPERSHELL_CLIENT_RATELIMIT': text})
     rc, rates, stderr = read_rates(Path(str(temp_site)), [], **variables)
@@ -294,7 +294,7 @@ def test_cluster_reads_client_ratelimit(temp_site, layer: str, text: str, rate: 
 @mark.integration
 @mark.parametrize('layer', ['file', 'env'])
 def test_cluster_ignores_task_ratelimit(temp_site, layer: str) -> None:
-    """`hs cluster` no longer reads the undocumented `task.ratelimit` (R8, change 7)."""
+    """`hs cluster` no longer reads the undocumented `task.ratelimit`."""
     variables = (file_layer(temp_site, '[task]\nratelimit = 7\n') if layer == 'file' else
                  {'HYPERSHELL_TASK_RATELIMIT': '7'})
     rc, rates, stderr = read_rates(Path(str(temp_site)), [], **variables)
@@ -304,7 +304,7 @@ def test_cluster_ignores_task_ratelimit(temp_site, layer: str) -> None:
 
 @mark.integration
 def test_rate_zero_is_no_limit(temp_site) -> None:
-    """A `client.ratelimit` of 0 is no limit for both commands (R8)."""
+    """A `client.ratelimit` of 0 is no limit for both commands."""
     rc, rates, stderr = read_rates(Path(str(temp_site)), [], HYPERSHELL_CLIENT_RATELIMIT='0')
     assert rc == exit_status.success, stderr
     assert rates == [None, None]
@@ -312,7 +312,7 @@ def test_rate_zero_is_no_limit(temp_site) -> None:
 
 @mark.integration
 def test_rate_option_over_key(temp_site) -> None:
-    """`-R` overrides `client.ratelimit` on both commands, a fraction included (R8)."""
+    """`-R` overrides `client.ratelimit` on both commands, a fraction included."""
     rc, rates, stderr = read_rates(Path(str(temp_site)), ['-R', '0.5'], HYPERSHELL_CLIENT_RATELIMIT='5')
     assert rc == exit_status.success, stderr
     assert rates == [0.5, 0.5]
@@ -356,7 +356,7 @@ def run_rate_cluster(site: Path, mode: str, text: str, variables: Dict[str, str]
 @mark.parametrize('case', list(RATE_REFUSED))
 def test_cluster_rate_not_finite_refused(temp_site, case: str, mode: str) -> None:
     """A file's `client.ratelimit` that is a number but not finite stops `hs cluster` with exit 2 before anything
-    is launched, naming the key and the file, as `-R` refuses it (R8)."""
+    is launched, naming the key and the file, as `-R` refuses it."""
     site = Path(str(temp_site))
     text, variables, message = RATE_REFUSED[case]
     status, stdout, stderr, marker = run_rate_cluster(site, mode, text, variables)
@@ -371,7 +371,7 @@ def test_cluster_rate_not_finite_refused(temp_site, case: str, mode: str) -> Non
 @mark.parametrize('case', list(RATE_TEXT_REFUSED))
 def test_cluster_rate_text_not_finite_refused(temp_site, case: str, mode: str) -> None:
     """A `client.ratelimit` given as text that is no finite number, from any source, is refused by `-R` itself,
-    exit 2, before anything is launched (R8)."""
+    exit 2, before anything is launched."""
     site = Path(str(temp_site))
     text, variables = RATE_TEXT_REFUSED[case]
     status, stdout, stderr, marker = run_rate_cluster(site, mode, text, variables)
@@ -383,7 +383,7 @@ def test_cluster_rate_text_not_finite_refused(temp_site, case: str, mode: str) -
 
 @mark.integration
 def test_cluster_rate_option_over_not_finite_key(temp_site) -> None:
-    """`-R` given on the command line is used, and a file's non-finite `client.ratelimit` is not read (R8)."""
+    """`-R` given on the command line is used, and a file's non-finite `client.ratelimit` is not read."""
     site = Path(str(temp_site))
     rc, rates, stderr = read_rates(site, ['-R', '0.5'], **file_layer(site, '[client]\nratelimit = inf\n'))
     assert rc == exit_status.success, stderr
@@ -398,7 +398,7 @@ def test_cluster_rate_option_over_not_finite_key(temp_site) -> None:
 @mark.integration
 @mark.parametrize('text, rate', [('"0.5"', 0.5), ('"5"', 5)])
 def test_cluster_rate_file_text(temp_site, text: str, rate: float) -> None:
-    """A file's `client.ratelimit` written as text is read as `-R` reads its word, at the start check (R8)."""
+    """A file's `client.ratelimit` written as text is read as `-R` reads its word, at the start check."""
     site = Path(str(temp_site))
     create_taskfile(site, ['echo hi'], 't.in')
     rc, seen, stderr = config_repr(site, '(lambda a: (a.check_arguments(), a.ratelimit)[1])'

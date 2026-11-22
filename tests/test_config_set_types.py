@@ -88,7 +88,7 @@ TEXT: Final[Dict[str, Tuple[str, str]]] = {
 @mark.integration
 @mark.parametrize('case', list(TEXT))
 def test_text_kept(temp_site, case: str) -> None:
-    """A key that takes text holds VALUE as a TOML string exactly as given (R1)."""
+    """A key that takes text holds VALUE as a TOML string exactly as given."""
     site = Path(str(temp_site))
     path, value = TEXT[case]
     rc, stderr = config_set(site, path, value)
@@ -117,7 +117,7 @@ TYPED: Final[Dict[str, Tuple[str, str, Any]]] = {
 @mark.integration
 @mark.parametrize('case', list(TYPED))
 def test_typed_converted(temp_site, case: str) -> None:
-    """A whole-number, number, boolean, `relay.min`, zone-size or `logging.file` key holds the value as read (R2)."""
+    """A whole-number, number, boolean, `relay.min`, zone-size or `logging.file` key holds the value as read."""
     site = Path(str(temp_site))
     path, value, expected = TYPED[case]
     rc, stderr = config_set(site, path, value)
@@ -143,7 +143,7 @@ REFUSED: Final[Dict[str, Tuple[str, str, str]]] = {
 @mark.integration
 @mark.parametrize('case', list(REFUSED))
 def test_typed_refused(temp_site, case: str) -> None:
-    """A value that does not convert exits 2 naming the key, the form and the value, and writes nothing (R2)."""
+    """A value that does not convert exits 2 naming the key, the form and the value, and writes nothing."""
     site = Path(str(temp_site))
     path, value, form = REFUSED[case]
     (site / 'config.toml').write_text(SEED)
@@ -171,7 +171,7 @@ SIZED: Final[Dict[str, Tuple[str, str, Any]]] = {
 @mark.integration
 @mark.parametrize('case', list(SIZED))
 def test_duration_size(temp_site, case: str) -> None:
-    """A duration or size key holds a TOML number for a finite number and the text otherwise (R3)."""
+    """A duration or size key holds a TOML number for a finite number and the text otherwise."""
     site = Path(str(temp_site))
     path, value, expected = SIZED[case]
     rc, stderr = config_set(site, path, value)
@@ -200,7 +200,7 @@ UNTYPED: Final[Dict[str, Tuple[str, str, Any]]] = {
 @mark.integration
 @mark.parametrize('case', list(UNTYPED))
 def test_untyped(temp_site, case: str) -> None:
-    """A path with no type of its own holds a TOML integer, float or boolean when VALUE is one, else text (R4)."""
+    """A path with no type of its own holds a TOML integer, float or boolean when VALUE is one, else text."""
     site = Path(str(temp_site))
     path, value, expected = UNTYPED[case]
     rc, stderr = config_set(site, path, value)
@@ -210,7 +210,7 @@ def test_untyped(temp_site, case: str) -> None:
 
 @mark.integration
 def test_one_word_path_refused(temp_site) -> None:
-    """A one-word path is still refused as before, and writes nothing (Non-goals)."""
+    """A one-word path is still refused as before, and writes nothing."""
     site = Path(str(temp_site))
     rc, stderr = config_set(site, 'database', 'x')
     assert rc == exit_status.bad_argument and 'Missing section in variable path' in stderr, stderr
@@ -219,7 +219,7 @@ def test_one_word_path_refused(temp_site) -> None:
 
 @mark.integration
 def test_auth_digits_read_back(temp_site) -> None:
-    """An all-digit key written by `hs config set` reads back as written, leading zeros kept (R1)."""
+    """An all-digit key written by `hs config set` reads back as written, leading zeros kept."""
     site = Path(str(temp_site))
     rc, stderr = config_set(site, 'server.auth', '0012345678901234')
     assert rc == exit_status.success, stderr
@@ -262,7 +262,7 @@ NOT_UTF8: Final[Dict[str, Tuple[str, str]]] = {
 @mark.parametrize('scope', ['--local', '--user'])
 @mark.parametrize('case', list(NOT_UTF8))
 def test_not_utf8_refused(temp_site, scope: str, case: str) -> None:
-    """A VALUE that cannot be written as UTF-8 exits 2 naming the key; the file and its backups are as before (R4)."""
+    """A VALUE that cannot be written as UTF-8 exits 2 naming the key; the file and its backups are as before."""
     site = Path(str(temp_site))
     home = site / 'home'
     home.mkdir()
@@ -283,7 +283,7 @@ def test_not_utf8_refused(temp_site, scope: str, case: str) -> None:
 
 @mark.integration
 def test_not_utf8_path_refused(temp_site) -> None:
-    """A path that cannot be written as UTF-8 exits 2 and leaves the file as it was (R4)."""
+    """A path that cannot be written as UTF-8 exits 2 and leaves the file as it was."""
     site = Path(str(temp_site))
     (site / 'config.toml').write_text(SEED)
     rc, stderr = config_set(site, 'database.pragmas.\udcff', 'x')

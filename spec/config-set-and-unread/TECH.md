@@ -4,10 +4,10 @@ title: hs config set writes each key by its type, and hs server and hs cluster r
   the keys they document
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -127,7 +127,7 @@ phases:
     docs sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-csu'
 - id: P6
   name: 'Gate: the whole suite serially, the red list, the drive, the docs'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -378,6 +378,8 @@ docs state the two new rules.
 - [x] Every drive mode; the docs build.
 - **Verify:** see frontmatter.
 - [x] Review cycle 1: the whole gate re-run after P2–P5's fixes (see the remediation section).
+- [x] Review cycle 2: F10, the spec ids out of the branch's test docstrings; the whole gate re-run
+      after P2–P5's fixes (see the cycle-2 remediation section).
 - **Touches:** nothing (fixes found here go back to the phase that owns them, noted in the commit).
 
 ## Review-cycle-1 remediation (2026-11-21)
@@ -599,6 +601,24 @@ file as of `d6d83afa`), running the new tests, and restoring it. `red.txt` stays
   - P5's verify (sandbox off, for the docs build): 239 passed; `sphinx-build -W` under 3.12 exits 0,
     and the new sentences render in `config.html`, `cli/client.html`, `cli/cluster.html` and
     `cli/config_set.html`.
+- **F10 (P6) — spec ids in the branch's test docstrings.** Every parenthesized id the branch added to
+  a test docstring or comment is removed: 37 in all, 22 in `tests/test_config_unread.py`, 9 in
+  `tests/test_config_set_types.py` (its `(Non-goals)` included) and 6 in
+  `tests/test_cluster_evict.py`, forms `(R7)`, `(R7, S2)`, `(R5, R6)` and `(R8, change 8)`. The
+  branch's other two edited test files, `tests/test_cluster_launch.py` and
+  `tests/test_config_schema.py`, added none; the base's own ids (`tests/test_logging.py`) are left as
+  they are. Only the ids change: each edited line, with its id taken out, is the line it replaces.
+  The new tests of this cycle carry none. No test is renamed, so `red.txt` is unchanged.
+- **P6 re-run (the whole gate, here, Python 3.14, serial):** the whole suite 3860 passed, 138
+  skipped (26 min 2 s; 2 warnings, both the base's `test_logging.py` fork tests); the 99 red ids
+  passed; `red_check` 99 of 99 red on `d9901cf0`; every drive mode ok (`set`, `eager`, `evict`,
+  `rate`, each with its new checks); the docs build `-W` exits 0. The suite and drives ran in the
+  sandbox (28 min 14 s), the docs build with it off.
+- **Gaps left as they were:** `hs client` reading a TOML number under the floor (or not finite) from
+  a file still runs with it, and its executor fails as before (the rulings name `-R` and
+  `hs cluster`'s start check). An integer rate wider than a float still fails at a client's start in
+  `client.py`'s per-thread division, as it did on the base for `-R`; the ruling asks for a floor
+  only, and `client.py` is unchanged.
 ---
 
 ## How `hs-build` drives this

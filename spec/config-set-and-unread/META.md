@@ -67,3 +67,17 @@
 - **Skill cause:** As `spec/relay-topology/META.md` F7.
 - **Recommended fix:** As there.
 - **Confidence:** high · **Effort:** small
+
+## F9 — Remediation mode says to reopen the phase covering the R-IDs, but the tests-first phase cannot be
+`origin=hs-build:P6 severity=low category=missing-guidance status=open target=.claude/skills/hs-build/SKILL.md`
+- **What happened:** in both review cycles the failing R-IDs were covered by P1 (tests first), whose
+  verify fences `src` to the plan-time base and proves its red list there. Reopening it can never pass
+  on the branch, so each cycle had to decide by hand where test-only work (cycle 2's F10) and the new
+  tests' red runs go (against the reviewed commit, by putting the source change aside).
+- **Skill cause:** Step 1.3 says "prefer reopening the existing phase(s) whose `satisfies` covers the
+  failing R-IDs" with no exception for a tests-first phase or a gate phase, and says nothing about
+  which commit a remediation test must be red on.
+- **Recommended fix:** in Step 1.3, say that a tests-first phase stays closed; its R-IDs' fixes go to
+  the code phase that owns the source, and a remediation test is shown red on the reviewed commit by
+  putting that phase's source change aside. Test-only findings ride with the gate phase.
+- **Confidence:** med · **Effort:** small
