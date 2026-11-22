@@ -30,3 +30,19 @@
 - **Skill cause:** Same as `spec/cluster-launch-failures/META.md` F2: the steps predate the worktree practice.
 - **Recommended fix:** As there.
 - **Confidence:** high · **Effort:** small
+
+## F3 — No shared red-on-base harness; this plan reuses another cycle's `drive/red_check.sh` · seen again
+`origin=hs-plan:step6 severity=low category=tooling status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The tests-first phase proves its red list with `spec/relay-hardening/drive/red_check.sh` and copies `bounded.py` from `spec/relay-shutdown-tail/drive/` into this cycle's `drive/`; the PostgreSQL lines rely on that script's `pg:` prefix, found by reading it.
+- **Skill cause:** Same as the earlier F4 findings of this name: Step 6 names neither tool, so each plan finds, copies or cross-references another cycle's spec folder.
+- **Recommended fix:** As there: move `red_check.sh`, `red_outcome.py` and `bounded.py` into `.agents/factory/bin/` and name them in Step 6 and the TECH template.
+- **Confidence:** high · **Effort:** small
+
+## F4 — `verify:` guidance has no guard against a command that never returns · seen again
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** The base build hangs on two of this cycle's inputs (`group:nan` on SQLite, `group:x` on PostgreSQL), so every verify and every new test needed an explicit bound; the skill says nothing about bounding or dry-running verifies, which the invocation supplied.
+- **Skill cause:** Same as the earlier findings of this name.
+- **Recommended fix:** As there: Step 6 requires every `verify:` to run under a wall-clock bound and to be dry-run on the base before the commit, with the bound helper named.
+- **Confidence:** high · **Effort:** small
+
+**What worked well:** Step 3's numbered research paths let five briefs run in parallel with no write conflicts, and the digest step settled the briefs' disagreements in one place.

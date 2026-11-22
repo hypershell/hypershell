@@ -1,0 +1,77 @@
+# submit-input-checks: regression tests that must fail on the base build (dfdbaed5) for what they check.
+# Checked by the landed checker, read-only, from the repository root (PostgreSQL lines need the sandbox off):
+#   RED_LIST=spec/submit-input-checks/drive/red.txt RED_BASE_REV=dfdbaed5 sh spec/relay-hardening/drive/red_check.sh
+# One pytest node id per line; `pg:` lines run only with HS_TEST_POSTGRES set. Tests of new names
+# (ensure_group, TaskGroupError, scan_task_lines, Task.reached_group, Loader line policy) fail on the base by
+# their absence, not by the defect, and are not listed. A test bounded at its subprocess deadline fails by
+# pytest.fail, which the checker counts as RED (the base hangs).
+# The node ids below are the contract P1 writes to; the ids in brackets are the fixture's database
+# (sqlite, postgres) and the test's own parameter ids.
+
+# R1: a `#` after the first non-blank character stays in the command.
+tests/test_data/test_model.py::TestTask::test_split_argline
+tests/test_command_hash.py::test_submit_file_keeps_hash[sqlite]
+pg:tests/test_command_hash.py::test_submit_file_keeps_hash[postgres]
+tests/test_command_hash.py::test_submit_args_keep_hash[sqlite]
+pg:tests/test_command_hash.py::test_submit_args_keep_hash[postgres]
+tests/test_command_hash.py::test_submit_stdin_keeps_hash[sqlite]
+tests/test_command_hash.py::test_submit_template_keeps_hash[sqlite]
+tests/test_command_hash.py::test_cluster_stream_runs_hash_as_written
+tests/test_command_hash.py::test_cluster_file_runs_hash_as_written
+tests/test_command_hash.py::test_queue_submit_keeps_hash
+
+# R2: a comment line is not a task under --template; a tag-only line sets the group for hs cluster.
+tests/test_command_hash.py::test_template_comment_line_is_not_a_task[sqlite]
+tests/test_command_hash.py::test_cluster_tag_only_line_sets_group[file]
+tests/test_command_hash.py::test_cluster_tag_only_line_sets_group[stream]
+
+# R3, R4: a non-integer group refuses read-in-full input whole (exit 5); -t and -g exit 2.
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-x]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-empty]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-float]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-exp]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-hex]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-true]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-null]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-nan]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-inf]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-huge]
+tests/test_group_integer.py::test_submit_file_refuses_group[sqlite-tagline]
+pg:tests/test_group_integer.py::test_submit_file_refuses_group[postgres-x]
+pg:tests/test_group_integer.py::test_submit_file_refuses_group[postgres-exp]
+pg:tests/test_group_integer.py::test_submit_file_refuses_group[postgres-true]
+pg:tests/test_group_integer.py::test_submit_file_refuses_group[postgres-nan]
+tests/test_group_integer.py::test_submit_stdin_refuses_group_whole[sqlite]
+tests/test_group_integer.py::test_submit_json_refuses_group[string]
+tests/test_group_integer.py::test_submit_json_refuses_group[float]
+tests/test_group_integer.py::test_submit_json_refuses_group[bool]
+tests/test_group_integer.py::test_submit_json_refuses_group[null]
+tests/test_group_integer.py::test_submit_tag_option_refuses_group[database]
+tests/test_group_integer.py::test_submit_tag_option_refuses_group[queue]
+tests/test_group_integer.py::test_submit_group_option_out_of_range
+tests/test_group_integer.py::test_cluster_file_refuses_group[database]
+tests/test_group_integer.py::test_cluster_file_refuses_group[no-db]
+tests/test_group_integer.py::test_server_file_refuses_group
+tests/test_group_order.py::test_cluster_refuses_group_stored_as_text
+
+# R5: a stream into hs cluster / hs server / hs submit --queue refuses only the bad line; nan never hangs.
+tests/test_group_stream.py::test_cluster_stream_refuses_one_line[sqlite-x]
+tests/test_group_stream.py::test_cluster_stream_refuses_one_line[sqlite-nan]
+pg:tests/test_group_stream.py::test_cluster_stream_refuses_one_line[postgres-x]
+tests/test_group_stream.py::test_cluster_nodb_stream_refuses_one_line
+tests/test_group_stream.py::test_stream_refused_tag_only_line_sets_nothing
+tests/test_group_stream.py::test_queue_stream_refuses_one_line
+
+# R6, C9: hs submit refuses a group below the reached group, all or nothing; a plain submission takes it.
+tests/test_reached_group.py::test_submit_below_reached_group_refused[sqlite]
+pg:tests/test_reached_group.py::test_submit_below_reached_group_refused[postgres]
+tests/test_reached_group.py::test_submit_file_below_reached_group_refused_whole[sqlite]
+tests/test_reached_group.py::test_submit_stdin_below_reached_group_refused_whole[sqlite]
+pg:tests/test_reached_group.py::test_submit_stdin_below_reached_group_refused_whole[postgres]
+tests/test_reached_group.py::test_submit_default_group_is_reached_group[sqlite]
+pg:tests/test_reached_group.py::test_submit_default_group_is_reached_group[postgres]
+
+# R7: hs cluster FILE / hs server FILE refuse a lower group on an advanced database.
+tests/test_resubmit_lower_group.py::test_cluster_update_below_reached_group_refused[sqlite]
+pg:tests/test_resubmit_lower_group.py::test_cluster_update_below_reached_group_refused[postgres]
+tests/test_resubmit_lower_group.py::test_server_file_below_reached_group_refused[sqlite]
