@@ -4,7 +4,7 @@ title: 'Submitted input is checked: # is part of the command, a group is an inte
   and a group below the reached one is refused'
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/submit-input-checks
 base: develop
 current_phase: done

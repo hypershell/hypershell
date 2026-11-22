@@ -313,3 +313,9 @@ The review's human gate was triggered by G1 (`data/model.py`). The maintainer ru
 - **N2 (triaged).** On PostgreSQL, a table where every task has finished is read in linear time,
   slower than before (results identical). It is filed as a 2.9.x seed by the foreman. A retry not
   carrying cores, memory or walltime is R7 of `update-client-retry`.
+
+## Review-cycle-3 ruling (2026-11-22)
+
+Review cycle 3 approved at `f699c6f8` with no finding; the loop converged at the last cycle. The
+maintainer's review-cycle-2 sign-off approved merging on approval. The cycle publishes and merges
+on green.
