@@ -27,7 +27,8 @@ from pytest import mark
 from hypershell.core.config import default
 from hypershell.core.config_schema import (Kind, TableKind, KEYS, TABLES, ZONE_KEYS, TIMESCALE_KEYS, PROSE_KEYS,
                                            SCALAR_TABLES, PROCESS_VARIABLES, VARIANTS, EMPTY_UNSET, VariableError,
-                                           read_value, read_untyped, match_name, read_environment, variable_name)
+                                           read_value, read_untyped, match_name, match_path, read_environment,
+                                           variable_name)
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -187,6 +188,7 @@ REFUSED: Dict[str, Tuple[Kind, str]] = {
     'int-or-none-none-case': (Kind.INT_OR_NONE, '<NONE>'),
     'logging-file-false': (Kind.LOGGING_FILE, 'false'),
     'logging-file-off': (Kind.LOGGING_FILE, 'off'),
+    'logging-file-empty': (Kind.LOGGING_FILE, ''),
 }
 
 
@@ -419,3 +421,57 @@ def test_duration_keys_documented(path: str) -> None:
     assert 'units ``d``, ``h``, ``m``' in text and 'Slurm time' in text, path
     assert ('rounded up to whole seconds' if path == 'relay.timeout' else 'fractions are kept') in text, path
     assert 'not a duration' in text and 'versionchanged:: 2.9.0' in text, path
+
+
+PATHS: Dict[str, Kind] = {
+    'server.port': Kind.INT,
+    'server.auth': Kind.TEXT,
+    'server.eager': Kind.BOOL,
+    'server.evict': Kind.DURATION,
+    'client.memory': Kind.SIZE,
+    'client.ratelimit': Kind.NUMBER,
+    'relay.min': Kind.INT_OR_NONE,
+    'logging.file': Kind.LOGGING_FILE,
+    'logging.file.level': Kind.TEXT,
+    'ssh.nodelist': Kind.TEXT,
+    'server.auth_env': Kind.TEXT,
+    'server.port_env': Kind.TEXT,
+    'database.password_eval': Kind.TEXT,
+    'export.RUN_ID': Kind.TEXT,
+    'ssh.nodelist.gpu': Kind.TEXT,
+    'relay.zone.gpu.launcher': Kind.TEXT,
+    'relay.zone.gpu.launcher_args': Kind.TEXT,
+    'relay.zone.gpu.size': Kind.INT,
+    'relay.zone.gpu.min': Kind.INT,
+    'relay.zone.gpu.color': Kind.UNTYPED,
+    'relay.zone.gpu': Kind.UNTYPED,
+    'relay.zone.gpu.launcher_eval': Kind.UNTYPED,
+    'database.connect_args.x': Kind.UNTYPED,
+    'database.pragmas.x': Kind.UNTYPED,
+    'database.sslmode': Kind.UNTYPED,
+    'server.nothing': Kind.UNTYPED,
+    'logging.file.foo': Kind.UNTYPED,
+    'foo.bar': Kind.UNTYPED,
+    'Server.eager': Kind.UNTYPED,
+    'relay.zone.GPU.SIZE': Kind.UNTYPED,
+    'server.port.x': Kind.UNTYPED,
+    'export.A.B': Kind.UNTYPED,
+    'ssh.nodelist.a.b': Kind.UNTYPED,
+}
+"""Dotted paths as `hs config set` is given them, and the kind each value is read as."""
+
+
+@mark.unit
+@mark.parametrize('path', list(PATHS))
+def test_match_path(path: str) -> None:
+    """A path is matched as written: documented keys by their kind, text tables as text, the rest untyped."""
+    assert match_path(path) is PATHS[path]
+
+
+@mark.unit
+def test_match_path_every_key() -> None:
+    """Every documented key, and its `_env` and `_eval` forms, is read as the environment layer reads it."""
+    for path, kind in KEYS.items():
+        assert match_path(path) is kind, path
+        for variant in VARIANTS:
+            assert match_path(path + variant) is Kind.TEXT, path + variant

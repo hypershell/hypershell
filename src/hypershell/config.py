@@ -27,8 +27,8 @@ from rich.syntax import Syntax
 
 # Internal libs
 from hypershell.core.platform import path
-from hypershell.core.types import smart_coerce
 from hypershell.core.logging import Logger
+from hypershell.core.config_schema import match_path, read_value
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth, env_variable,
                                     default as default_config, config as full_config)
@@ -281,7 +281,7 @@ class ConfigSetApp(Application):
     interface.add_argument('varpath', metavar='VAR')
 
     value: str = None
-    interface.add_argument('value', type=smart_coerce)
+    interface.add_argument('value')
 
     site_name: str = 'user'
     site_interface = interface.add_mutually_exclusive_group()
@@ -299,6 +299,12 @@ class ConfigSetApp(Application):
         if '.' not in self.varpath:
             raise ArgumentError('Missing section in variable path')
 
+        # The value is read by the key's kind, and refused before anything is written.
+        try:
+            value = read_value(match_path(self.varpath), self.value)
+        except ValueError as error:
+            raise ArgumentError(f'{self.varpath}: expected {error}, given {self.value!r}') from None
+
         section, *subsections, variable = self.varpath.split('.')
 
         config = {section: {}}
@@ -308,7 +314,7 @@ class ConfigSetApp(Application):
                 config_section[subsection] = dict()
             config_section = config_section[subsection]
 
-        config_section[variable] = self.value
+        config_section[variable] = value
         update(self.site_name, config)
 
 

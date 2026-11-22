@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -38,7 +38,7 @@ phases:
     tests/test_key_option.py tests/test_main.py
 - id: P2
   name: hs config set writes each value by its key's type
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -239,14 +239,14 @@ the touched and neighbouring test files passes.
 **Goal:** `hs config set` reads VALUE by the key's kind through `match_path` + `read_value`; a value
 that does not convert exits 2, naming key, form and value, with nothing written.
 
-- [ ] `core/config_schema.py`: `match_path(path) -> Kind` after `match_name` (PLAN §2.1 order), in
+- [x] `core/config_schema.py`: `match_path(path) -> Kind` after `match_name` (PLAN §2.1 order), in
       `__all__`; `read_value`'s `LOGGING_FILE` path branch refuses `''` (`text != ''`). Do not touch
       `KEYS`/`EMPTY_UNSET` (#116 edited them).
-- [ ] `config.py` `ConfigSetApp`: drop `type=smart_coerce` and its import; in `run()`, after the
+- [x] `config.py` `ConfigSetApp`: drop `type=smart_coerce` and its import; in `run()`, after the
       one-word check, `value = read_value(match_path(self.varpath), self.value)`, a `ValueError` raised
       as `ArgumentError(f'{self.varpath}: expected {error}, given {self.value!r}') from None`; write
       `value`. Anchor in `ConfigSetApp.run`, not `ConfigGetApp.run` (same `split` line).
-- [ ] `tests/test_config_schema.py`, **appended at the end**: a `@mark.unit` `match_path` table covering
+- [x] `tests/test_config_schema.py`, **appended at the end**: a `@mark.unit` `match_path` table covering
       every PLAN §2.1 case (documented keys of each kind, both variants, `export.RUN_ID`,
       `ssh.nodelist.gpu`, zone keys known and unknown, `database.connect_args.x`, `database.pragmas.x`,
       `database.sslmode`, `server.nothing`, `foo.bar`, `Server.eager`, `server.port.x`); `logging.file`
