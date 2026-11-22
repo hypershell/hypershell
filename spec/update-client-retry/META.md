@@ -13,6 +13,9 @@
 - `hs-feature` Step 4's `kind: fix` rule (criteria as observable broken→fixed behaviour, not the
   suspected mechanism) kept R6 free of `increment_group`'s `attempt >= attempts` detail, which the
   plan owns.
+- `hs-plan` Step 3's one-brief-per-rabbit-hole fan-out found two defects the GOAL did not name: cmdkit's
+  `KeyError` on a displaced `submit.bundlesize_env` (a live `hs client` crash), and a declaration-named
+  tag overriding a retry's column, which shaped R7's design.
 
 ## Friction findings
 
@@ -44,4 +47,25 @@
 - **What happened:** Of the three adopted seeds' `ROADMAP.md` entries, one `**Seed:**` line carried `· *status: unshaped*` and two carried no marker. The skill says to update the marker "where that entry's Seed line carries" one, which reads as leaving the other two unmarked, so the index would show one of three seeds adopted. The marker was added to all three, on the brief's "update their ROADMAP markers".
 - **Skill cause:** The rule is conditional on a marker the `/hs-roadmap` convention does not always write, so adoption is visible in the index only for some seeds.
 - **Recommended fix:** Say "set the entry's `**Seed:**` line marker to `· *status: adopted:{slug}*`, adding it when absent", and have `/hs-roadmap` write the marker on every new Seed line.
+- **Confidence:** high · **Effort:** small
+
+## F5 — No factory helper bounds a verify step, and macOS has no `timeout` · seen again
+`origin=hs-plan:step6 severity=low category=tooling status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** As `spec/config-set-and-unread/META.md` F4: this plan copies that cycle's `drive/bound.sh`; all five research briefs found no `timeout(1)` on the host and fell back to `perl -e 'alarm …'`.
+- **Skill cause:** As recorded there.
+- **Recommended fix:** As recorded there.
+- **Confidence:** high · **Effort:** small
+
+## F6 — The tests-first red-list tooling lives in other cycles' spec folders, unnamed by the skill · seen again
+`origin=hs-plan:step6 severity=low category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** As `spec/config-set-and-unread/META.md` F5: P1 and P5 run `spec/relay-hardening/drive/red_check.sh` and `spec/contended-writes/drive/rest_green.sh`.
+- **Skill cause:** As recorded there.
+- **Recommended fix:** As recorded there.
+- **Confidence:** high · **Effort:** small
+
+## F7 — No method for dry-running a fix phase's verify before its code exists · seen again
+`origin=hs-plan:step6 severity=medium category=missing-guidance status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** As `spec/listener-handshake-deadline/META.md` F5 (drives dry-run only on the base). Here every later-phase verify was emulated on a scratch copy of the tree with the design applied to a scratch `src` ahead of the editable install on `PYTHONPATH`. The drive's `uv run` from that scratch tree tried to build the scratch project (network refused, nothing installed), so the emulation ran the drive through `sh` instead; the docs build needed its own scratch venv for the same reason.
+- **Skill cause:** Step 6 requires "a real `verify:` command" and the brief asks for every verify to be dry-run, but the skill gives no procedure for the green side of a phase that has no code yet, and its `uv run`-based examples break in a scratch tree.
+- **Recommended fix:** Add the scratch-`src` emulation to Step 6 (export the tree with `git archive`, apply the design to the copy, put its `src` first on `PYTHONPATH`, run the drive through `sh` and the docs build with a scratch venv), and require both outcomes (red on base, green on the emulation) in `TECH.md`'s plan-time evidence.
 - **Confidence:** high · **Effort:** small
