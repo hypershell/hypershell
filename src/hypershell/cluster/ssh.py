@@ -26,7 +26,8 @@ from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL
+from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL,
+                               DEFAULT_EVICT)
 from hypershell.cluster.launch import ClientLaunch, advertised_host, client_launch, ssh_env_exports, ssh_launch_args
 from hypershell.cluster.watch import watch_launched
 
@@ -206,6 +207,10 @@ class SSHCluster(Thread):
         advertise (str, optional):
             Address the clients are told to dial, whatever the bind (default: the bind rule above).
 
+        evict_after (int, optional):
+            Period in seconds the server waits on a client's heartbeat before evicting it.
+            See :const:`~hypershell.server.DEFAULT_EVICT`.
+
     Example:
         >>> from hypershell.cluster import SSHCluster
         >>> cluster = SSHCluster.new(
@@ -260,7 +265,8 @@ class SSHCluster(Thread):
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
                  zone: Optional[str] = None,
-                 advertise: Optional[str] = None) -> None:
+                 advertise: Optional[str] = None,
+                 evict_after: int = DEFAULT_EVICT) -> None:
         """Initialize server and client threads."""
         if nodelist is None:
             raise AttributeError('Expected nodelist')
@@ -286,6 +292,7 @@ class SSHCluster(Thread):
                                    redirect_failures=redirect_failures,
                                    template=template,
                                    from_json=from_json,
+                                   evict_after=evict_after,
                                    tls=tls)
         launcher = shlex.split(launcher)
         launcher_env = dict(Namespace.from_env('HYPERSHELL')) if export_env else {}

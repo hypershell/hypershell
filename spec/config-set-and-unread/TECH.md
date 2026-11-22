@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -56,7 +56,7 @@ phases:
     $m || exit 1; done
 - id: P3
   name: server.eager, server.attempts and server.evict reach hs server and hs cluster
-  status: pending
+  status: done
   satisfies:
   - R5
   - R6
@@ -262,7 +262,7 @@ start check; `hs cluster` takes `-r` from `server.attempts`; `hs cluster` reads 
 start check, refuses it as `hs server` does before any database, port or server, and hands the period
 to the server in every mode.
 
-- [ ] `server.py`: `configured_eager(value) -> bool` beside `DEFAULT_EAGER_MODE` (a `bool` as is, else
+- [x] `server.py`: `configured_eager(value) -> bool` beside `DEFAULT_EAGER_MODE` (a `bool` as is, else
       `read_value(Kind.BOOL, str(value))`, else `ConfigurationError` naming `server.eager`, the form,
       the value and `blame(config, 'server', 'eager')`); `EVICT_MINIMUM = 10` and
       `check_evict(seconds)` beside `DEFAULT_EVICT` (PLAN §2.4 messages; non-finite refused);
@@ -271,13 +271,13 @@ to the server in every mode.
       `self.evict_after = check_evict(config_seconds('server', 'evict'))` and
       `self.eager_mode = configured_eager(self.eager_mode)`. Imports: `math`, `ConfigurationError`,
       `blame`, `Kind`/`FORMS`/`read_value`. Do not edit 1213–1215.
-- [ ] `cluster/__init__.py` `ClusterApp`: `max_retries = config.server.attempts - 1`; `--eager`
+- [x] `cluster/__init__.py` `ClusterApp`: `max_retries = config.server.attempts - 1`; `--eager`
       `default=eager_mode`; class attribute `evict_after: int | float = DEFAULT_EVICT`;
       `check_arguments`, right after the `autoscale.period` block:
       `self.evict_after = check_evict(config_seconds('server', 'evict'))` and
       `self.eager_mode = configured_eager(self.eager_mode)`; `run` passes `evict_after=self.evict_after`.
       Do not edit 86–88.
-- [ ] `cluster/local.py`, `cluster/remote.py` (`RemoteCluster`), `cluster/ssh.py`: a last keyword
+- [x] `cluster/local.py`, `cluster/remote.py` (`RemoteCluster`), `cluster/ssh.py`: a last keyword
       `evict_after: int = DEFAULT_EVICT` passed to `ServerThread(...)`, a docstring Args entry, the
       import where missing. `AutoScalingCluster` unchanged.
 - **Verify:** `tests/test_config_unread.py -k 'eager or attempts'`, `test_cluster_evict.py` and the

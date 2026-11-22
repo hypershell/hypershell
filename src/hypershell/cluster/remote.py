@@ -221,6 +221,10 @@ class RemoteCluster(Thread):
         advertise (str, optional):
             Address the clients are told to dial, whatever the bind (default: the bind rule above).
 
+        evict_after (int, optional):
+            Period in seconds the server waits on a client's heartbeat before evicting it.
+            See :const:`~hypershell.server.DEFAULT_EVICT`.
+
     Example:
         >>> from hypershell.cluster import RemoteCluster
         >>> cluster = RemoteCluster.new(
@@ -271,7 +275,8 @@ class RemoteCluster(Thread):
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
                  zone: Optional[str] = None,
-                 advertise: Optional[str] = None) -> None:
+                 advertise: Optional[str] = None,
+                 evict_after: int = DEFAULT_EVICT) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         # In JSON mode the template is expanded submit-side by the server; remote clients
@@ -295,6 +300,7 @@ class RemoteCluster(Thread):
                                    redirect_failures=redirect_failures,
                                    template=template,
                                    from_json=from_json,
+                                   evict_after=evict_after,
                                    tls=tls)
         if launcher_args is None:
             launcher_args = []

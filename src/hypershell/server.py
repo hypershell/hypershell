@@ -49,6 +49,7 @@ from types import TracebackType
 import io
 import sys
 import json
+import math
 import time
 from enum import Enum
 from numbers import Real
@@ -65,7 +66,9 @@ from sqlalchemy import func
 # Internal libs
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import (config, default, find_available_ports, AUTH_ALLOWED_CHARS, AUTH_MINIMUM_LENGTH,
-                                    AUTH_ENV, resolve_auth, refuse_key_option, config_seconds)
+                                    AUTH_ENV, resolve_auth, refuse_key_option, config_seconds, blame,
+                                    ConfigurationError)
+from hypershell.core.config_schema import Kind, FORMS, read_value
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
 from hypershell.core.types import parse_bytes, parse_time, parse_period, UnitError
@@ -86,7 +89,8 @@ from hypershell.client import ClientInfo
 # Public interface
 __all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp', 'is_file_input',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
-           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL',
+           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL', 'EVICT_MINIMUM',
+           'check_evict', 'configured_eager',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
 
 # Initialize logger
@@ -110,6 +114,23 @@ DEFAULT_ATTEMPTS: Final[int] = default.server.attempts
 
 DEFAULT_EAGER_MODE: Final[bool] = default.server.eager
 """When enabled tasks are retried immediately ahead scheduling new tasks."""
+
+
+def configured_eager(value: bool | int | float | str) -> bool:
+    """The eager mode `server.eager` gives, read by the boolean words the environment layer takes.
+
+    A boolean is used as given. Any other value (a file's text or number) must be one of the boolean
+    words in any letter case, or `ConfigurationError` names the key, the form, the value and where it
+    came from.
+    """
+    if isinstance(value, bool):
+        return value
+    try:
+        return read_value(Kind.BOOL, str(value))
+    except ValueError:
+        source = blame(config, 'server', 'eager')
+        raise ConfigurationError(f'server.eager: expected {FORMS[Kind.BOOL]}, given {value!r}'
+                                 + (f' ({source})' if source else '')) from None
 
 DEFAULT_QUERY_PAUSE: Final[int] = default.server.poll  # Backwards compatibility
 DEFAULT_SERVER_POLL: Final[int] = default.server.poll
@@ -741,6 +762,18 @@ class HeartbeatState(State, Enum):
 DEFAULT_EVICT: Final[int] = default.server.evict
 """Default client eviction period in seconds."""
 
+EVICT_MINIMUM: Final[int] = 10
+"""Shortest client eviction period in seconds."""
+
+
+def check_evict(seconds: int | float) -> int | float:
+    """The eviction period `seconds`, refused with `RuntimeError` under the floor or when not finite."""
+    if not seconds >= EVICT_MINIMUM:
+        raise RuntimeError(f'Evict period must be greater than {EVICT_MINIMUM} seconds: given {seconds}')
+    if not math.isfinite(seconds):
+        raise RuntimeError(f'Evict period must be a finite number of seconds: given {seconds}')
+    return seconds
+
 
 class HeartMonitor(StateMachine):
     """
@@ -794,11 +827,9 @@ class HeartMonitor(StateMachine):
         self.ignored_sites = set()
         self.in_memory = in_memory
         self.no_confirm = no_confirm
-        if evict_after >= 10:
-            self.wait_check = timedelta(seconds=int(evict_after / 10))
-            self.evict_after = timedelta(seconds=evict_after)
-        else:
-            raise RuntimeError(f'Evict period must be greater than 10 seconds: given {evict_after}')
+        check_evict(evict_after)
+        self.wait_check = timedelta(seconds=int(evict_after / 10))
+        self.evict_after = timedelta(seconds=evict_after)
 
     @cached_property
     def actions(self: HeartMonitor) -> Dict[HeartbeatState, Callable[[], HeartbeatState]]:
@@ -1769,7 +1800,7 @@ class ServerApp(Application):
     eager_mode: bool = config.server.eager
     max_retries: int = config.server.attempts - 1
     interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
-    interface.add_argument('--eager', action='store_true', dest='eager_mode')
+    interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 
     forever_mode: bool = False
     interface.add_argument('--forever', action='store_true', dest='forever_mode')
@@ -1910,7 +1941,8 @@ class ServerApp(Application):
             raise ArgumentError(f'Authentication key must be at least {AUTH_MINIMUM_LENGTH} characters')
         if not AUTH_ALLOWED_CHARS.fullmatch(self.auth):
             raise ArgumentError(f'Authentication key must contain only "{AUTH_ALLOWED_CHARS.pattern}"')
-        self.evict_after = config_seconds('server', 'evict')
+        self.evict_after = check_evict(config_seconds('server', 'evict'))
+        self.eager_mode = configured_eager(self.eager_mode)
         if not self.tls_enabled:
             log.warning('TLS is disabled - this is not recommended for production!')
 

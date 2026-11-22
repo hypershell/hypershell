@@ -20,7 +20,7 @@ from cmdkit.app import Application
 from cmdkit.cli import Interface, ArgumentError
 
 # Internal libs
-from hypershell.core.config import config, blame, find_available_ports, PARAM_UNSET
+from hypershell.core.config import config, blame, find_available_ports, config_seconds, PARAM_UNSET
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
 from hypershell.core.types import parse_bytes, parse_time, parse_delay, parse_period, UnitError
@@ -30,7 +30,8 @@ from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 from hypershell.data.model import Source, Zone, STDIN_SOURCE_ID, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
-from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, is_file_input
+from hypershell.server import (DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, DEFAULT_EVICT,
+                               is_file_input, check_evict, configured_eager)
 from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
                                GatedSource, source_fingerprint_and_count, apply_source_gate)
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
@@ -160,9 +161,9 @@ class ClusterApp(Application):
     interface.add_argument('--zone', default=None)
 
     eager_mode: bool = config.server.eager
-    max_retries: int = DEFAULT_ATTEMPTS - 1
+    max_retries: int = config.server.attempts - 1
     interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
-    interface.add_argument('--eager', action='store_true', dest='eager_mode')
+    interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 
     in_memory: bool = False
     auto_initdb: bool = False
@@ -275,6 +276,9 @@ class ClusterApp(Application):
     interface.add_argument('--tls-cert', default=tls_cert)
     interface.add_argument('--tls-ca', default=tls_ca)
 
+    # Seconds from `server.evict` (any duration form), read when the arguments are checked.
+    evict_after: int | float = DEFAULT_EVICT
+
     exceptions = {
         **get_shared_exception_mapping(__name__)
     }
@@ -292,7 +296,7 @@ class ClusterApp(Application):
                  task_timeout=self.task_timeout, task_signalwait=self.task_signalwait,
                  cores=self.cores, memory=self.memory, client_cores=self.client_cores,
                  client_memory=self.client_memory, ratelimit=self.ratelimit,
-                 from_json=bool(self.from_json), tls=self.tls, zone=self.zone)
+                 from_json=bool(self.from_json), tls=self.tls, zone=self.zone, evict_after=self.evict_after)
 
     def run_local(self: ClusterApp, **options) -> None:
         """Run local cluster."""
@@ -378,6 +382,8 @@ class ClusterApp(Application):
             self.autoscaling_period = parse_period(self.autoscaling_period)
         except UnitError as error:
             raise ArgumentError(f'autoscale.period: {error}') from error
+        self.evict_after = check_evict(config_seconds('server', 'evict'))
+        self.eager_mode = configured_eager(self.eager_mode)
         given_filepath = self.filepath is not None
         if self.from_json:
             if given_filepath:
