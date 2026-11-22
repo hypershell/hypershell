@@ -76,3 +76,17 @@
 - **Skill cause:** `hs-plan` Step 6 asks for every verify to be dry-run but does not require the dry run to use the verify's own environment preconditions (here `HS_TEST_POSTGRES`), and TECH's "Running the verify commands here" names no setting for the suite's other PostgreSQL knobs (`HS_TEST_POSTGRES_TEMPLATES`, `HS_TEST_TIMESCALE`).
 - **Recommended fix:** Require the whole-suite gate's dry run under the exact environment the verify asserts, and have TECH list every `HS_TEST_*` variable the suite reads with its value on the build host (or deselect, by name in the verify, the tests that host cannot run).
 - **Confidence:** high · **Effort:** small
+
+## F9 — Binding plan-gate rulings live in `PLAN.md`, which Step 2 forbids passing to the blind reviewer · seen again (other cycles)
+`origin=hs-review:step2 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** S1–S5, the §11 bend for `max_retries` and the P5 gate ruling bind how R7, R8 and R9 are read. They are recorded only at the end of `PLAN.md`. The orchestrator extracted those two blocks alone and gave them to the reviewer as contract readings, as the brief directed, although Step 2 lists only `GOAL.md`, the diff, `invariants.md` and the rubric. This is the same finding as `spec/config-set-and-unread/META.md` F6 and `spec/env-config-keys/META.md` F6.
+- **Skill cause:** no skill says where a gate ruling that changes a contract reading must live for the blind pass to see it.
+- **Recommended fix:** require `hs-plan`'s gate to write each ruling that changes a reading into `GOAL.md` Clarifications, or sanction a verbatim "Plan-gate rulings" block as a Step 2 input. A fix that passes more of `PLAN.md` than the rulings would weaken blind-review integrity, and would be severity high.
+- **Confidence:** high · **Effort:** small
+
+## F10 — Step 2 does not say which copy of `invariants.md`/`AGENTS.md` grades a branch that edits them · seen again (other cycles)
+`origin=hs-review:step2 severity=medium category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** this diff edits §2, §3, §10 and §11 of `invariants.md` and the matching `AGENTS.md` passages. The reviewer was given the base copies only because the brief said so. This is the same finding as `spec/submit-input-checks/META.md`, `spec/relay-advertise/META.md` and `spec/zone-autoscale/META.md` F4.
+- **Skill cause:** Step 2 says to give the reviewer "the full text of `invariants.md`" and does not say which copy, so the branch's own rule could become the yardstick for its code. That would weaken blind-review integrity, which is why this finding is severity medium.
+- **Recommended fix:** say "the base copies (`git show {base}:…`) of `invariants.md`, `review-rubric.md` and `AGENTS.md`; the branch's edits to them are graded as diff".
+- **Confidence:** high · **Effort:** small
