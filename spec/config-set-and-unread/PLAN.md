@@ -326,3 +326,23 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned, with S1
 - **Candidate seeds** from research are filed by the foreman: the cluster classes' `max_retries`
   defaults, a text `attempts` crashing at import, integers wider than 64 bits written to TOML, and
   the `--eager` help wording.
+
+## Review-cycle-1 rulings (2026-11-21)
+
+The review's human gate was triggered by F3 (`server.py`, `check_evict`). The maintainer ruled in
+session (2026-11-21): "Approve, fix all five", and approved review cycle 2 and merging on approval.
+
+- **F1.** `hs config set` refuses a VALUE that cannot be written as UTF-8 before anything is
+  written (exit 2, naming the key). The file and its backups are left as they were. Tests show it
+  red on `f8293303`.
+- **F2.** `hs cluster` refuses a non-finite `client.ratelimit` from any source at start, as `-R`
+  does, before anything is launched.
+- **F3.** `check_evict` also refuses a value too large for the heartbeat monitor's interval
+  arithmetic, with the same clean exit 5 as S2's infinite case. Tests cover `hs server` and
+  `hs cluster`.
+- **F5.** The `hs config set` page says that an empty variable does not override a key of the
+  empty-means-not-given set. It does not claim this for every text key.
+- **F6.** The `.eager` entry lists every accepted word, `1` and `0` included.
+- **Error messages (maintainer, same session).** The exit-3 message for a bad `server.eager` names
+  the key and its source, but does not repeat a value resolved from an `_env` or `_eval` form.
+  Public text states this outcome only.
