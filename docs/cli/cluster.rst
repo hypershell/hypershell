@@ -100,4 +100,16 @@ Description
    task with no retries left; before, with retries, it was retried until they ran out. A retry
    keeps its task's cores, memory and walltime; before, it ran with none of them.
 
+.. versionchanged:: 2.9.0
+   A line whose first non-blank character is ``#`` is a comment, and a ``#`` anywhere else is part
+   of the command, run as written; earlier releases cut the command at the first ``#``. The
+   ``# HYPERSHELL:`` marker is recognised anywhere on a line, so a command that must contain that
+   text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be an
+   integer: a *FILE* holding any other group value is refused whole, with nothing run, naming the
+   value and its line, while on a stream only the offending line is refused, with an error naming
+   it. A *FILE* that would submit a task below the database's reached group (with ``--restart``,
+   ``--update`` or ``--repeat``, or a database kept from an earlier run) is refused before
+   anything runs; tasks still in flight from an interrupted run do not count, and tasks skipped as
+   already present are not checked. A stream's late lower group still runs, with a warning.
+
 .. include:: ../_include/cluster_help.rst

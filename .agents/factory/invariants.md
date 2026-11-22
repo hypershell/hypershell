@@ -113,6 +113,28 @@ subsystems.
   tasks arrive late. File input to `hs cluster`/`hs server` is submitted in full (the whole file)
   before the scheduler starts, so its groups run in order. Stream input is best effort: a late
   lower group runs after the current one, with a warning.
+- **A task group must be an integer** (`ensure_group`: an `int`, not a `bool`, in PostgreSQL's
+  32-bit range) wherever input sets it: an inline or tag-only `group:` tag, `-t group:…` (exit 2,
+  before any input is read), a `--from-json` `group` key. Anything else raises `TaskGroupError`
+  (exit 5) naming the value and its line or record. `Task.new(group=…)` stays unchecked (queue mode
+  passes None), and a retry (`Task.new_retry`) copies the stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`,
+  `hs cluster` or `hs server`, `--from-json`, arguments, and `hs submit` stdin with a database) is
+  scanned whole (`scan_task_lines`) before any write, with or without a database; a stream's
+  `Loader` (`refuse_lines`) refuses only the offending line with an ERROR and reads on, the run's
+  exit status untouched. No refused value may reach `Task.add_all`: a NULL or out-of-range group
+  kills the committer and hangs the run.
+- **The reached group** (`Task.reached_group()`) is the highest group the current pass has
+  scheduled, read from task columns: U = the earliest `submit_time` of an incomplete row (none: no
+  reached group); a row counts when not cancelled (`CANCEL_STATUS`), integer-typed on SQLite, and
+  either scheduled and incomplete at or after U, or a retry row submitted since U. It may
+  under-estimate (the late-group warning covers it) and must never over-estimate from the columns:
+  an over-estimate refuses users. With a database, `hs submit` refuses a task below it, all or
+  nothing (exit 2), and without `-g` defaults to it when the most recently scheduled group is below
+  it. `hs cluster FILE`/`hs server FILE` refuse the same way with `in_flight=False` (their scheduler
+  reverts in-flight rows at start), read before `ServerThread` exists; `hs cluster` leaves out the
+  re-submission gate's skip set, which is why the gate is split into `decide_source_gate` (reads)
+  and `GateDecision.commit` (writes the Source row), with every check between them. Streams into
+  `hs cluster`/`hs server` are never refused for it.
 - **A non-`forever` scheduler stops for having run out of work only once its submitter has ended
   and every task is terminal** (`Scheduler.load_bundle`). It also stops, input open or not, when a
   group fails permanently while a task waits in another group (the halt above), and on

@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, IO, Optional, Iterable, Callable, Type, Tuple
+from typing import Dict, IO, List, Optional, Iterable, Callable, Type, Tuple
 from types import TracebackType
 
 # Standard libs
@@ -30,12 +30,14 @@ from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
-from hypershell.data.model import Source, Zone, STDIN_SOURCE_ID, zone_name
+from hypershell.data.model import Task, Source, Zone, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import (DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, DEFAULT_EVICT,
                                is_file_input, check_evict, configured_eager, configured_retries)
 from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
-                               GatedSource, source_fingerprint_and_count, apply_source_gate)
+                               validate_json_groups, scan_task_lines, source_fingerprint, GatedSource,
+                               decide_source_gate, refuse_below_reached_group, task_fingerprints,
+                               json_fingerprints)
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
 from hypershell.cluster.watch import ClusterLaunchError
@@ -401,6 +403,7 @@ class ClusterApp(Application):
             if given_filepath:
                 raise ArgumentError('Cannot combine --from-json with a positional task file')
             validate_json_expansion(self.json_records, self.template)
+            validate_json_groups(self.json_records)
         elif self.filepath is None and not self.restart_mode:
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.in_memory:
@@ -550,10 +553,12 @@ class ClusterApp(Application):
         """Resolve the task Source, apply the re-submission gate, and wrap the stream.
 
         Mirrors :meth:`hypershell.submit.SubmitApp.prepare_source` for the cluster entry
-        point. A named file passes through :func:`~hypershell.submit.apply_source_gate`:
+        point. A named file passes through :func:`~hypershell.submit.decide_source_gate`:
         a duplicate or changed-content re-submission is refused unless
-        ``--restart``/``--repeat``/``--update`` relaxes it, and the resolved :class:`Source`
-        records the upfront-counted expectation *before* any task is scheduled.
+        ``--restart``/``--repeat``/``--update`` relaxes it. A file that would insert a task
+        below the database's reached group is then refused (exit 2); tasks the gate skips are
+        not checked. Only then does the resolved :class:`Source` record the upfront-counted
+        expectation, *before* any task is scheduled.
         Explicit ``<stdin>`` and non-seekable inputs carry the reserved ``<stdin>`` source and
         are exempt; ``--no-db``/non-persistent runs gate nothing (invariant §4).
 
@@ -563,6 +568,11 @@ class ClusterApp(Application):
         stable per-task fingerprint is template-independent by construction, so the
         de-dup set matches whether tasks were first ingested by ``hs submit`` or ``hsx``.
         """
+        if is_file_input(stream):
+            # A named file is checked whole before anything is dispatched, with a database or
+            # without one; the server ingests raw lines, so the scan uses DEFAULT_TEMPLATE.
+            with open(os.path.abspath(self.filepath), mode='r') as text_stream:
+                scan = scan_task_lines(text_stream, name=os.path.abspath(self.filepath))
         if self.in_memory or not DATABASE_ENABLED:
             return stream  # no persistent database to gate against (invariant §4)
         if stream is sys.stdin or not stream.seekable():
@@ -574,18 +584,26 @@ class ClusterApp(Application):
             name = '<stdin>' if stream is sys.stdin else os.path.abspath(self.filepath)
             return GatedSource(stream, source_id, name=name, zone_id=self.zone_id)
         path = os.path.abspath(self.filepath)
-        fingerprint, count = source_fingerprint_and_count(path)  # DEFAULT_TEMPLATE (raw-line split)
+        fingerprint, count = source_fingerprint(path), scan.count
         log.info(f'Found {count} tasks in {path} (md5={fingerprint})')
-        source_id, skip = apply_source_gate(path, fingerprint, count, repeat=self.repeat_mode,
-                                            update=self.update_mode, restart=self.restart_mode)
+        gate = decide_source_gate(path, fingerprint, count, repeat=self.repeat_mode,
+                                  update=self.update_mode, restart=self.restart_mode)
+
+        def fingerprints() -> List[str]:
+            with open(path, mode='r') as text_stream:
+                return task_fingerprints(text_stream)
+
+        self.refuse_below_reached_group(scan.groups, gate.skip, fingerprints)
+        source_id, skip = gate.commit()
         return GatedSource(stream, source_id, skip_fingerprints=skip, name=path, zone_id=self.zone_id)
 
     def prepare_json_source(self: ClusterApp) -> Iterable[dict]:
         """Resolve the Source and apply the re-submission gate to a ``--from-json`` source.
 
         The JSON analogue of :meth:`prepare_source`: the file's content md5
-        and record count feed :func:`~hypershell.submit.apply_source_gate`, keyed by
-        ``abspath(FILE)[@node]`` so distinct node selections are distinct sources. The
+        and record count feed :func:`~hypershell.submit.decide_source_gate`, keyed by
+        ``abspath(FILE)[@node]`` so distinct node selections are distinct sources, and a record
+        below the database's reached group refuses the file before anything is recorded. The
         per-task fingerprint keys off the pre-template ``args``/tags, so de-dup matches
         whether the tasks were first ingested by ``hs submit`` or ``hsx``. ``--from-json -``
         (stdin JSON) carries the reserved ``<stdin>`` source and is exempt;
@@ -600,9 +618,22 @@ class ClusterApp(Application):
             source_id = Source.reserved(STDIN_SOURCE_ID).id
             return GatedSource(records, source_id, name='<stdin>', zone_id=self.zone_id)
         log.info(f'Found {len(records)} tasks in {key} (md5={fingerprint})')
-        source_id, skip = apply_source_gate(key, fingerprint, len(records), repeat=self.repeat_mode,
-                                            update=self.update_mode, restart=self.restart_mode)
+        gate = decide_source_gate(key, fingerprint, len(records), repeat=self.repeat_mode,
+                                  update=self.update_mode, restart=self.restart_mode)
+        self.refuse_below_reached_group([record.get('group', DEFAULT_TASK_GROUP) for record in records],
+                                        gate.skip, lambda: json_fingerprints(records))
+        source_id, skip = gate.commit()
         return GatedSource(records, source_id, skip_fingerprints=skip, name=key, zone_id=self.zone_id)
+
+    @staticmethod
+    def refuse_below_reached_group(groups: List[Optional[int]], skip: Optional[set],
+                                   fingerprints: Callable[[], List[str]]) -> None:
+        """Refuse a named file (exit 2) holding a task below the reached group that the gate does not skip.
+
+        Tasks in flight do not count toward the reached group: the server reverts them when it
+        starts, before anything is scheduled.
+        """
+        refuse_below_reached_group(groups, Task.reached_group(in_flight=False), skip=skip, fingerprints=fingerprints)
 
     @cached_property
     def zone_id(self: ClusterApp) -> Optional[str]:

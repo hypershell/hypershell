@@ -19,7 +19,8 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import Column, Index, func, text, update, delete, select, bindparam, literal, or_, cast, inspect, case
+from sqlalchemy import (Column, Index, func, text, update, delete, select, bindparam, literal, or_, and_, cast,
+                        inspect, case)
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
@@ -45,6 +46,7 @@ __all__ = [
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
     'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'TASK_TEMPLATE_ERROR', 'TASK_RESOURCE_ERROR', 'NO_RETRY_STATUSES',
     'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
+    'GROUP_MIN', 'GROUP_MAX', 'TaskGroupError', 'ensure_group', 'parse_group', 'tag_text',
     'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id', 'zone_name',
 ]
 
@@ -55,6 +57,77 @@ log = Logger.with_name(__name__)
 # Constants
 DEFAULT_TASK_GROUP: Final[int] = 0
 """Default task group for backwards compatibility."""
+
+TAG_MARKER: Final[re.Pattern] = re.compile(r'#\s*HYPERSHELL:?')
+"""The inline tag marker: found anywhere on a line, with or without its colon."""
+
+GROUP_MIN: Final[int] = -2**31
+"""Lowest task group: the range of PostgreSQL's `INTEGER`, held on every database."""
+
+GROUP_MAX: Final[int] = 2**31 - 1
+"""Highest task group."""
+
+
+class TaskGroupError(RuntimeError):
+    """A task group taken from input that is not an integer in range.
+
+    `value` is the group as written when it came from text (``1e3``, not ``1000.0``), else the value
+    itself (a JSON value); `origin` names where it came from (``tasks.in, line 7``, ``record 3``)
+    once that is known (:meth:`at`). A `RuntimeError`, so a command refused for it exits 5.
+    """
+
+    def __init__(self: TaskGroupError, value: Any, origin: Optional[str] = None, *, out_of_range: bool = False) -> None:
+        """Initialize with the refused `value`, where it came from, and whether it is an integer out of range."""
+        self.value = value
+        self.origin = origin
+        self.out_of_range = out_of_range
+        shown = f'"{value}"' if isinstance(value, str) else json.dumps(value)
+        rule = f'an integer from {GROUP_MIN} to {GROUP_MAX}' if out_of_range else 'an integer'
+        message = f'task group must be {rule}, not {shown}'
+        super().__init__(message if origin is None else f'{message} ({origin})')
+
+    def at(self: TaskGroupError, origin: str) -> TaskGroupError:
+        """The same refusal, naming where the value came from."""
+        return TaskGroupError(self.value, origin, out_of_range=self.out_of_range)
+
+
+def ensure_group(value: Any, text: Optional[str] = None) -> int:
+    """The task group `value`: an integer (not a boolean) from `GROUP_MIN` to `GROUP_MAX`, else :class:`TaskGroupError`.
+
+    A tag value arrives typed by `smart_coerce`, which gives an `int` exactly when `int()` takes the
+    text, as `-g/--group` does; `text` is that text as written, which the refusal names. A JSON value
+    is a group only when it is a JSON integer.
+    """
+    shown = value if text is None else text
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TaskGroupError(shown)
+    if not GROUP_MIN <= value <= GROUP_MAX:
+        raise TaskGroupError(shown, out_of_range=True)
+    return value
+
+
+def parse_group(text: str) -> int:
+    """The task group written as `text`, by the rule of `-g/--group`: what `int()` takes, within range."""
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        raise TaskGroupError(text) from None
+    return ensure_group(value, text=text)
+
+
+def tag_text(tokens: List[str], name: str) -> Optional[str]:
+    """The value of tag `name` as written among command-line `tokens` (``key:value``), or None if absent.
+
+    The last token for `name` wins, as it does when the tokens are parsed; a bare ``key`` has the
+    empty value.
+    """
+    text = None
+    for token in tokens:
+        key, _, value = token.strip().partition(':')
+        if key.strip() == name:
+            text = value.strip()
+    return text
+
 
 CANCEL_STATUS: Final[int] = -1
 """Sentinel `exit_status` marking a cancelled task.
@@ -561,7 +634,9 @@ class Task(Entity):
         else:
             args, inline_tags = str(args).strip(), {}
         tag = {**(tag or {}), **inline_tags}
-        other['group'] = tag.pop('group', group)
+        # A group from tags is input and must be an integer; the `group` argument is the caller's
+        # (queue mode passes None, and a retry copies its parent's group as stored).
+        other['group'] = ensure_group(tag.pop('group')) if 'group' in tag else group
         other['cores'] = tag.pop('cores', other.get('cores', None))
         # A memory value may arrive as a unit-bearing string ('2GB') from an inline
         # `memory:` tag (parsed by smart_coerce, which leaves units alone) — parse it to
@@ -601,8 +676,9 @@ class Task(Entity):
         linked to it), zone, and the declared cores, memory and walltime, so a retry runs where and
         as its first attempt did. Nothing is parsed: the stored command is not read for inline tags,
         the stored tag is not checked again, and no tag (`group`, `cores`, `memory` or `timeout`
-        among them) sets a column. The id and the submit stamps are fresh, and the attempt is the
-        next.
+        among them) sets a column: a `group` tag written by `hs update` is copied with the other
+        tags and can neither move nor stop the retry. The group is copied as stored, a legacy text
+        group too. The id and the submit stamps are fresh, and the attempt is the next.
         """
         declared = {name: getattr(task, name) for name in cls.retry_columns}
         declared['tag'] = dict(task.tag or {})
@@ -634,21 +710,27 @@ class Task(Entity):
 
     @classmethod
     def split_argline(cls: Type[Task], args: str) -> Tuple[str, Dict[str, JSONData]]:
-        """Separate input args from possible inline tag comment."""
+        """Separate a command from its inline tags.
+
+        A line whose first non-blank character is ``#`` is a comment (``''`` and no tags) unless it
+        starts with the ``# HYPERSHELL:`` marker. The marker is found anywhere on a line, in quotes
+        too: the command is the text before it and the tags are parsed from the text after it. Any
+        other ``#`` is part of the command, left for the shell.
+        """
         args = str(args).strip()
-        if match := re.search(r'#\s*HYPERSHELL:?', args):
+        if args.startswith('#') and not TAG_MARKER.match(args):
+            return '', {}
+        if match := TAG_MARKER.search(args):
+            tokens = args[match.end():].strip().split()
             try:
-                tags = Tag.parse_cmdline_list(args[match.end():].strip().split())
+                tags = Tag.parse_cmdline_list(tokens)
                 cls.ensure_valid_tag(tags)
             except (ValueError, TypeError) as error:
                 raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error
-            args = args[:match.start()]
-            return args.strip(), tags
-        elif match := re.search(r'#', args):
-            args = args[:match.start()]
-            return args.strip(), {}
-        else:
-            return args.strip(), {}
+            if 'group' in tags:
+                tags['group'] = ensure_group(tags['group'], text=tag_text(tokens, 'group'))
+            return args[:match.start()].strip(), tags
+        return args, {}
 
     @staticmethod
     def ensure_valid_tag(tag: Optional[Dict[str, JSONData]], *, strict: bool = True) -> None:
@@ -805,6 +887,45 @@ class Task(Entity):
     def lowest_incomplete_group(cls: Type[Task]) -> Optional[int]:
         """The smallest group holding a task that has not completed, or None."""
         return Session.query(func.min(cls.group)).filter(cls.completion_time.is_(None)).scalar()
+
+    @classmethod
+    def reached_group(cls: Type[Task], in_flight: bool = True) -> Optional[int]:
+        """
+        The highest group the current pass has scheduled, or None when no task is incomplete.
+
+        The current pass is the run of work since the database last held no incomplete task. Its
+        start is not stored, so the earliest submit time of an incomplete task stands in for it: a
+        row counts when it was scheduled and was still incomplete at or after that time (in flight,
+        or scheduled or completed since then), or when it is a retry row submitted since then.
+        Every row counted was therefore scheduled in the current pass, and the value never exceeds
+        the group the schedule has truly reached. Cancelled rows do not count (a cancel stamps the
+        schedule time), and on SQLite a group an earlier release stored as text or real is ignored.
+
+        With `in_flight=False` a task still in flight does not count: a server reverts in-flight
+        tasks when it starts, so they do not hold a lower group back for a run about to start.
+
+        The pass start is an uncorrelated scalar subquery, so each dialect computes it once per
+        statement rather than once per row scanned.
+        """
+        pass_start = (
+            select(func.min(cls.submit_time))
+            .where(cls.completion_time.is_(None))
+            .scalar_subquery()
+        )
+        since_start = or_(cls.schedule_time >= pass_start, cls.completion_time >= pass_start)
+        if in_flight:
+            scheduled = and_(cls.schedule_time.isnot(None), or_(cls.completion_time.is_(None), since_start))
+        else:
+            scheduled = and_(cls.schedule_time.isnot(None), cls.completion_time.isnot(None), since_start)
+        retry = and_(cls.previous_id.isnot(None), cls.submit_time >= pass_start)
+        query = (
+            select(func.max(cls.group))
+            .where(or_(cls.exit_status.is_(None), cls.exit_status != CANCEL_STATUS))
+            .where(or_(scheduled, retry))
+        )
+        if Session.get_bind().dialect.name == 'sqlite':
+            query = query.where(func.typeof(cls.group) == 'integer')
+        return Session.execute(query).scalar()
 
     @classmethod
     def _filter_zone(cls: Type[Task], query: Query, zone: Optional[str]) -> Query:

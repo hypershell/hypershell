@@ -271,7 +271,25 @@ group (and, in non-`forever` mode, the server). This is intended; don't "fix" it
 understanding it. Once the group clears, the next group is the smallest one with incomplete
 tasks, which may be lower when tasks arrive late. File input to `hs cluster`/`hs server` is
 submitted in full (the whole file) before the scheduler starts, so its groups run in order. Stream
-input is best effort: a late lower group runs after the current one, with a warning. **A
+input is best effort: a late lower group runs after the current one, with a warning. A task group
+must be an integer: `ensure_group` accepts an `int` (not a `bool`) in PostgreSQL's 32-bit range,
+from an inline or tag-only `group:` tag, `-t group:…` (exit 2, before any input is read) or a
+`--from-json` `group` key, and anything else raises `TaskGroupError` (exit 5) naming the value and
+its line or record; `Task.new(group=…)` is the caller's and stays unchecked, and a retry
+(`Task.new_retry`) copies its task's stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`, `hs cluster` or `hs server`,
+`--from-json`, arguments, and `hs submit` stdin with a database, read by `read_in_full`) is scanned
+whole by `scan_task_lines` before any write, with or without a database; on a stream the `Loader`
+(`refuse_lines`) logs an ERROR for the offending line and reads on, leaving the run's exit status
+alone. With a database, `hs submit` refuses a task below the **reached group**
+(`Task.reached_group()`: the highest group the current pass has scheduled, read from task columns;
+none once every task has finished), all or nothing with exit 2, and without `-g` it takes the
+reached group when the most recently scheduled group is below it. `hs cluster FILE` and
+`hs server FILE` refuse the same way before anything is inserted, with
+`Task.reached_group(in_flight=False)` (their scheduler reverts in-flight rows at start) and, for
+`hs cluster`, the re-submission gate's skip set left out: the gate decides (`decide_source_gate`,
+reads only), the reached group is checked, and only then `GateDecision.commit` writes the Source
+row. The reached group may under-estimate (the late-group warning covers it) but never
+over-estimates from the columns alone; keep it that way. **A
 non-`forever` scheduler stops for having run out of work only once its submitter has ended and
 every task is terminal** (`Scheduler.load_bundle`). It also stops, input open or not, when a group
 fails permanently while a task waits in another group (above), and on SIGUSR1/SIGUSR2; each takes
@@ -672,8 +690,10 @@ compatibility until v3, but are never referenced.
   auth token; the advertised address (`advertised_host`) routable from clients; autoscaler never
   terminates clients; every client gone with work left exits 5 (`cluster/watch.py`,
   `autoscale.failed_launches`, off for relay fleets).
-- `submit.py` queue-mode silently ignores `-t/--tag` (leaves `group=None`) — asymmetric vs DB
-  mode; tag/attribute resolution actually happens in `Task.new`.
+- `submit.py` queue-mode checks `-t/--tag` (a group that is not an integer exits 2) but does not
+  apply it (leaves `group=None`) — asymmetric vs DB mode; tag/attribute resolution actually happens
+  in `Task.new`. A line is split (`split_task_line`: a line starting with `#` is a comment, the
+  `# HYPERSHELL:` marker is found anywhere, no other `#` is cut) before `--template` expands it.
 - **`relay/`** — **one relay per process**: `core/config.py` swaps the whole `[database]` section
   for the relay's private SQLite file **at import** (`RELAY_PROCESS`), before `data/core.py` builds
   the engine, so `RelayApp` re-executes the interpreter when started after import or with another
