@@ -84,7 +84,8 @@ from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 'json_source_key',
            'validate_json_expansion', 'validate_json_groups',
-           'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint',
+           'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint', 'is_file_input',
+           'source_name',
            'source_fingerprint_and_count', 'apply_source_gate',
            'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
@@ -128,6 +129,36 @@ class GatedSource:
     def __iter__(self: GatedSource) -> Iterator[str | dict]:
         """Delegate iteration to the wrapped source."""
         return iter(self.iterable)
+
+
+def is_file_input(source: Iterable[str | dict]) -> bool:
+    """True if `source` is a whole task file: a seekable file (not standard input), or a list or tuple.
+
+    Standard input, pipes, FIFOs, process substitution and other iterables are streams, which
+    are scheduled as they arrive.
+    """
+    # A gated source carries the stream it wraps as `iterable`.
+    inner = getattr(source, 'iterable', source)
+    if isinstance(inner, (list, tuple)):
+        return True
+    if isinstance(inner, io.IOBase) and inner is not sys.stdin:
+        try:
+            return inner.seekable()
+        except (OSError, ValueError):
+            return False
+    return False
+
+
+def source_name(source: Iterable[str | dict]) -> str:
+    """Name of a task source for messages: a gated source's name, ``<stdin>``, a file's name, or ``<iterable>``."""
+    if isinstance(source, GatedSource):
+        return source.name or '<iterable>'
+    elif source is sys.stdin:
+        return '<stdin>'
+    elif isinstance(source, io.TextIOWrapper):
+        return source.name
+    else:
+        return '<iterable>'
 
 
 def split_task_line(line: str, template: Template) -> Tuple[str, str, Dict[str, JSONData]]:
@@ -363,6 +394,9 @@ class Loader(StateMachine):
     count: int
     present: int
     tags: Dict[str, str]
+    name: str
+    line: int
+    refuse_lines: bool
 
     state = LoaderState.START
     states = LoaderState
@@ -381,6 +415,9 @@ class Loader(StateMachine):
         A :class:`GatedSource` is unwrapped here: its ``source_id`` is stamped onto every
         task and its ``skip_fingerprints`` (if any) drive de-dup. A plain iterable leaves
         both unset (no stamping, no de-dup) — unchanged behavior for every legacy caller.
+
+        A stream (:func:`is_file_input` is false) refuses a line whose group is not an integer and
+        reads on; whole input raises instead, since it is checked whole before it reaches the Loader.
         """
         if isinstance(source, GatedSource):
             self.source_id = source.source_id
@@ -400,6 +437,9 @@ class Loader(StateMachine):
         self.tags = dict(tags or {})  # A copy: a tag-only line updates the Loader's tags, never the caller's.
         self.count = 0
         self.present = 0
+        self.name = source_name(source)
+        self.line = 0
+        self.refuse_lines = not is_file_input(source)
 
     @functools.cached_property
     def actions(self: Loader) -> Dict[LoaderState, Callable[[], LoaderState]]:
@@ -417,15 +457,26 @@ class Loader(StateMachine):
         return LoaderState.GET
 
     def get_task(self: Loader) -> LoaderState:
-        """Get the next item from the source and dispatch by its kind."""
+        """Get the next item from the source and dispatch by its kind.
+
+        Text lines are numbered from 1, every physical line counted. On a stream, a line whose group
+        is not an integer is refused alone: an ERROR names it and the Loader reads on, and a refused
+        tag-only line sets nothing. Any other error still ends the input.
+        """
         try:
             item = next(self.source)
         except StopIteration:
             return LoaderState.FINAL
         if isinstance(item, dict):
             return self.load_json_task(item)
-        else:
+        self.line += 1
+        try:
             return self.load_line_task(item)
+        except TaskGroupError as error:
+            if not self.refuse_lines:
+                raise error.at(f'{self.name}, line {self.line}') from error
+            log.error(f'Refused line {self.line} of {self.name}: {error}')
+            return LoaderState.GET
 
     def load_line_task(self: Loader, line: str) -> LoaderState:
         """Build the next task from a command-line string in the text source.
@@ -731,25 +782,13 @@ class SubmitThread(Thread):
 
     def run_with_exceptions(self: SubmitThread) -> None:
         """Start child threads, wait."""
-        log.debug(f'Started ({self.source_name})')
+        log.debug(f'Started ({source_name(self.source)})')
         self.loader.start()
         self.committer.start()
         self.loader.join_unless_left()
         self.put_end()
         self.committer.join()
         log.debug('Done')
-
-    @functools.cached_property
-    def source_name(self: SubmitThread) -> str:
-        """Log details of source."""
-        if isinstance(self.source, GatedSource):
-            return self.source.name or '<iterable>'
-        elif self.source is sys.stdin:
-            return '<stdin>'
-        elif isinstance(self.source, io.TextIOWrapper):
-            return self.source.name
-        else:
-            return '<iterable>'
 
     def stop(self: SubmitThread, wait: bool = False, timeout: int = None, leave_input: bool = False) -> None:
         """Stop child threads before main thread.
@@ -1003,7 +1042,7 @@ class LiveSubmitThread(Thread):
 
     def run_with_exceptions(self: LiveSubmitThread) -> None:
         """Start child threads, wait."""
-        log.debug(f'Started ({self.source_name})')
+        log.debug(f'Started ({source_name(self.source)})')
         with self.client:
             self.check_server()
             self.loader.start()
@@ -1021,18 +1060,6 @@ class LiveSubmitThread(Thread):
             raise QueueSubmitRefused(f'Server at {self.client.config.host}:{self.client.config.port} schedules '
                                      f'from its database and does not serve tasks submitted with --queue; '
                                      f'submit without --queue, or start the server with --no-db')
-
-    @functools.cached_property
-    def source_name(self: LiveSubmitThread) -> str:
-        """Log details of source."""
-        if isinstance(self.source, GatedSource):
-            return self.source.name or '<iterable>'
-        elif self.source is sys.stdin:
-            return '<stdin>'
-        elif isinstance(self.source, io.TextIOWrapper):
-            return self.source.name
-        else:
-            return '<iterable>'
 
     def stop(self: LiveSubmitThread, wait: bool = False, timeout: int = None, leave_input: bool = False) -> None:
         """Stop child threads before main thread.
@@ -1084,6 +1111,11 @@ def submit_from(source: Iterable[str | dict],
     If `queue_config` is provided, the :class:`LiveSubmitThread` is used to submit
     task bundles directly to the shared queue hosted by the server. Otherwise,
     the :class:`SubmitThread` submits tasks to the database.
+
+    A list or a seekable file is whole input: a line whose task group is not an integer raises
+    :class:`~hypershell.data.model.TaskGroupError`, after any earlier bundles were committed (the
+    command line checks the whole input first with :func:`scan_task_lines`). Any other iterable is
+    a stream, which refuses such a line alone, with an ERROR, and reads on.
 
     Args:
         source (Iterable[str]):

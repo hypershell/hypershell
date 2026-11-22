@@ -46,7 +46,6 @@ from typing import List, Dict, Tuple, Iterable, IO, Optional, Callable, Type, Fi
 from types import TracebackType
 
 # Standard libs
-import io
 import os
 import sys
 import json
@@ -81,7 +80,8 @@ from hypershell.core.topology import SiteRegistry
 from hypershell.data.model import (Task, Client, Zone, ResultOutcome, CONTENDED_RERUNS, serialize_tasks,
                                    deserialize_tasks, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
-from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE, scan_task_lines
+from hypershell.submit import (SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE, scan_task_lines,
+                               is_file_input)
 from hypershell.client import ClientInfo
 
 # Public interface
@@ -1395,24 +1395,6 @@ class ServerThread(Thread):
             self.queue.confirmed.put(make_sentinel())
             self.confirm.stop(wait=wait, timeout=timeout)
         super().stop(wait=wait, timeout=timeout)
-
-
-def is_file_input(source: Iterable[str | dict]) -> bool:
-    """True if `source` is a whole task file: a seekable file (not standard input), or a list or tuple.
-
-    Standard input, pipes, FIFOs, process substitution and other iterables are streams, which
-    are scheduled as they arrive.
-    """
-    # A gated source carries the stream it wraps as `iterable`.
-    inner = getattr(source, 'iterable', source)
-    if isinstance(inner, (list, tuple)):
-        return True
-    if isinstance(inner, io.IOBase) and inner is not sys.stdin:
-        try:
-            return inner.seekable()
-        except (OSError, ValueError):
-            return False
-    return False
 
 
 def serve_from(source: Iterable[str],

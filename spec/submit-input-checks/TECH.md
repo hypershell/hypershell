@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -67,7 +67,7 @@ phases:
     group
 - id: P4
   name: 'Streams refuse one line: the Loader''s line count and stream policy'
-  status: pending
+  status: done
   satisfies:
   - R5
   depends_on:
@@ -429,9 +429,16 @@ arguments or `hs submit` stdin is refused whole with nothing written (PLAN § 2.
 **Goal:** a stream into `hs cluster`, `hs server` or `hs submit --queue` drops only the bad line with
 an ERROR naming the value and line; nothing hangs (PLAN § 2.4).
 
-- [ ] Move `is_file_input` to `submit.py` (re-export from `server.py`); a module `source_name()`
+- [x] Move `is_file_input` to `submit.py` (re-export from `server.py`); a module `source_name()`
       shared by `SubmitThread`/`LiveSubmitThread` and the Loader.
-- [ ] `Loader`: `self.line`, `self.refuse_lines`; `get_task` catches `TaskGroupError` per policy.
+- [x] `Loader`: `self.line`, `self.refuse_lines`; `get_task` catches `TaskGroupError` per policy.
+- **Built:** `submit.py::source_name(source)` replaces both threads' `source_name` properties; the
+  Loader keeps `self.name`. On whole input the Loader re-raises with the origin added
+  (`{name}, line {n}`). `server.py` no longer imports `io`. `submit_from`'s docstring states the API
+  policy (a list raises after earlier bundles committed; a stream refuses the line).
+- **Verified (2026-11-21):** suites 192 passed (PostgreSQL on); guards 19 passed; `input_drive.sh
+  stream` PASS 6 of 6; also `test_server.py` and `test_main.py` 93 passed. The red list on this tree:
+  46 of 56 pass; the 10 left are the R6/R7 tests for P5 and P6.
 - **Verify:** `test_group_stream.py` and the stream, cluster-exit and queue suites; guards;
   `input_drive.sh stream`.
 - **Touches:** `src/hypershell/submit.py`, `src/hypershell/server.py` (the import only).
