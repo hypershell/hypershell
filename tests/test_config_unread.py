@@ -184,9 +184,13 @@ def test_eager_env_unset_refused(temp_site, command: str) -> None:
 # client.ratelimit and -R
 
 def parsed_rate(app: Type[Application], word: str) -> Any:
-    """The rate `-R word` parses to on `app`, or the error text when it is refused."""
+    """The rate `-R word` parses to on `app`, or the error text when it is refused.
+
+    Given as `--ratelimit=word`: before Python 3.14 argparse reads an exponent form such as
+    `-1e-300` as an option, not a negative number.
+    """
     try:
-        return app.interface.parse_args(['-R', word]).ratelimit
+        return app.interface.parse_args([f'--ratelimit={word}']).ratelimit
     except ArgumentError as error:
         return f'error: {error}'
 
