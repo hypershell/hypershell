@@ -587,6 +587,17 @@ is the one most likely to be asked for first.
 drain-only does not · Refs: —*
 **Seed:** [`issues/failure-budget-halt-policy.md`](issues/failure-budget-halt-policy.md)
 
+## A submitter that owns its retries cannot opt its tasks out of the server's
+
+Retries are one setting per server. A submitter that retries for itself (Nextflow, an agent) gets
+its failed tasks run twice: once by HyperShell, in the old work directory, and once by itself. It
+can attach only to a site run with `--max-retries 0`, which takes retries away from every other task
+there. A per-task mark (a column or a reserved tag) would let it opt out alone.
+
+*Target: 2.10.0 · Horizon: mid-term, small · Depends on: — · Refs: `hypershell/hypershell-nextflow`
+(`DESIGN.md` item 9)*
+**Seed:** [`issues/per-task-retry-opt-out.md`](issues/per-task-retry-opt-out.md) · *status: unshaped*
+
 ## Live progress and ETA
 
 Watching a campaign means polling `hs list --count` against the database the scheduler is contending
