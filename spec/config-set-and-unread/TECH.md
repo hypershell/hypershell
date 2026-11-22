@@ -7,12 +7,12 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-21'
 phases:
 - id: P1
   name: 'Tests first: the red list on d9901cf0 (tests only)'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -226,9 +226,9 @@ code+state commit.
 **Goal:** every new test is in the tree and fails on `d9901cf0` for what it checks; everything else in
 the touched and neighbouring test files passes.
 
-- [ ] `tests/test_config_set_types.py`, `tests/test_config_unread.py`, `tests/test_cluster_evict.py` from
+- [x] `tests/test_config_set_types.py`, `tests/test_config_unread.py`, `tests/test_cluster_evict.py` from
       the prototypes (see above), otherwise unchanged.
-- [ ] Nothing outside `tests/` and `spec/` changes. A renamed or split test is renamed in `red.txt` too
+- [x] Nothing outside `tests/` and `spec/` changes. A renamed or split test is renamed in `red.txt` too
       (never dropped without a PLAN note).
 - **Verify:** see frontmatter: the fence; `red.txt` holds 99 ids; `red_check` 99 of 99 red;
   `rest_green` over the three files and their neighbours. Dry-run at plan time: as stated above.
