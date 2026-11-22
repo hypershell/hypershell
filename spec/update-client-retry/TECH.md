@@ -149,6 +149,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
     5400 uv run --python 3.14 pytest -p no:cacheprovider -q && sh spec/update-client-retry/drive/bound.sh
     900 uv run pytest -q -p no:cacheprovider $(sed -e '/^#/d' -e '/^$/d' -e 's/^pg://'
