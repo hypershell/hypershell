@@ -210,7 +210,8 @@ subsystems.
   `EMPTY_UNSET` is not given.
 - `hs config set` reads its value by the same rule (`match_path`, the dotted path matched as
   written, then `read_value`): a value that does not convert exits 2 before `update()`, and nothing
-  is written. `server.eager` and `server.evict` are read at each command's start check
+  is written; `update()` reads and writes the file as UTF-8 whatever the locale. `server.eager` and
+  `server.evict` are read at each command's start check
   (`configured_eager`, `check_evict`), never at import.
 - **Relay process:** `core/config.py` replaces the whole `[database]` section with the relay's private
   SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes;

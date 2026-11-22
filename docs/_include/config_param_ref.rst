@@ -492,7 +492,9 @@
         A number (e.g., ``0.5``, one task every two seconds), read by ``hs client`` and by
         ``hs cluster`` for each of its clients. A value of ``0`` disables rate limiting. Useful to
         throttle very short tasks so that task launch does not overwhelm a shared resource.
-        ``hs cluster`` stops before it launches a client if the value is not a finite number.
+        ``-R`` refuses a rate other than ``0`` under ``0.000001`` (one task in about 11.6 days), and
+        ``hs cluster`` stops before it launches a client if the value is not a finite number or is
+        such a rate.
 
         See also ``-R``/``--ratelimit`` command-line option.
 

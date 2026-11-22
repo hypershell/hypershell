@@ -28,7 +28,7 @@ Description
 
 .. versionchanged:: 2.9.0
    ``-R``/``--ratelimit`` takes a number (e.g., ``-R 0.5``, one task every two seconds), as
-   ``client.ratelimit`` does.
+   ``client.ratelimit`` does. A rate other than ``0`` under ``0.000001`` is refused.
 
 .. versionchanged:: 2.9.0
    ``-w``/``--bundlewait``, ``-S``/``--signalwait`` and ``-d``/``--delay-start`` take a duration

@@ -11,5 +11,5 @@ command that reads it. A key with no type of its own (an entry of ``database.con
 holds a TOML integer, float or boolean when the value is exactly one (``5``, ``2.5``, ``true``), and
 the text otherwise. An empty value for a key that takes text is written as ``""`` and overrides the
 key in a lower file. For an optional text key, such as ``database.user`` or ``server.bind``, an empty
-variable would not: it is read as not given. A path or value that cannot be written as UTF-8 is
-refused with exit status 2, and nothing is written.
+variable would not: it is read as not given. The file is written as UTF-8, whatever the locale; a
+path or value that cannot be is refused with exit status 2, and nothing is written.

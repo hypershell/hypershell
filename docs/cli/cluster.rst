@@ -74,7 +74,8 @@ Description
 .. versionchanged:: 2.9.0
    ``-R``/``--ratelimit`` takes a number (e.g., ``-R 0.5``), and defaults to ``client.ratelimit``
    in every mode; the undocumented ``task.ratelimit`` is no longer read. A fractional rate is
-   passed to launched clients, which must be of this release or later.
+   passed to launched clients, which must be of this release or later. A rate other than ``0``
+   under ``0.000001`` is refused before anything starts.
 
 .. versionchanged:: 2.9.0
    ``--no-db`` leaves the configured database alone: it is not opened, created or initialized.

@@ -520,6 +520,7 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   written (no letter-case folding; a path with no type of its own takes TOML's own scalars) and
   `read_value` converts the value. A value that does not convert is refused with exit 2
   (`ArgumentError`) before `update()`, so the file and its backups are left as they were.
+  `update()` reads and writes the file as UTF-8 whatever the locale, as every reader decodes it.
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means
   **`0` = unlimited/auto** for many numeric knobs.
 - Defaults agents care about: server `port`, `bundlesize`, `bundlewait`, `evict` (≥10s),

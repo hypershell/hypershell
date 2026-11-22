@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -90,7 +90,7 @@ phases:
     $m || exit 1; done
 - id: P5
   name: Docs, help snippets and markers; AGENTS.md and invariants in lockstep
-  status: in_progress
+  status: done
   satisfies:
   - R9
   depends_on:
@@ -117,11 +117,14 @@ phases:
     as a number or as'' && grep -q ''For an optional text key'' docs/_include/config_set_desc.rst
     && ! grep -q ''where an empty variable would not\.$'' docs/_include/config_set_desc.rst
     && test "$(grep -c ''``1``/``0`` included'' docs/cli/server.rst docs/cli/cluster.rst
-    | grep -c '':1$'')" -eq 2 && sh spec/config-set-and-unread/drive/bound.sh 600
-    uv run pytest -q -p no:cacheprovider tests/test_config_schema.py tests/test_config_set_types.py
-    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-csu sh spec/config-set-and-unread/drive/bound.sh
-    900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
-    docs /tmp/claude-501/docs-html-csu'
+    | grep -c '':1$'')" -eq 2 && grep -q ''under ``0.000001`` (one task in about 11.6
+    days)'' docs/_include/config_param_ref.rst && test "$(grep -c ''under ``0.000001``''
+    docs/cli/client.rst docs/cli/cluster.rst | grep -c '':1$'')" -eq 2 && grep -q
+    ''The file is written as UTF-8, whatever the locale'' docs/_include/config_set_desc.rst
+    && sh spec/config-set-and-unread/drive/bound.sh 600 uv run pytest -q -p no:cacheprovider
+    tests/test_config_schema.py tests/test_config_set_types.py && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-csu
+    sh spec/config-set-and-unread/drive/bound.sh 900 uv run --python 3.12 --group
+    docs sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-csu'
 - id: P6
   name: 'Gate: the whole suite serially, the red list, the drive, the docs'
   status: in_progress
@@ -358,6 +361,8 @@ docs state the two new rules.
 - [x] Review cycle 1, F5 and F6: the empty-variable sentence names only the optional text keys;
       `.eager` and the two `server.eager` markers list `1`/`0`; one sentence each for F1–F3 (see the
       remediation section).
+- [x] Review cycle 2: one sentence each for F7 and F9 on the pages, and F7's rule in AGENTS.md and
+      invariants §10 (see the cycle-2 remediation section).
 - **Verify:** greps for each edit, `tests/test_config_schema.py`, the docs build with `-W`.
 - **Touches:** `src/hypershell/config.py`, `src/hypershell/client.py`, `src/hypershell/cluster/__init__.py`,
   `docs/_include/*.rst`, `docs/cli/{config_set,client,server,cluster}.rst`, `AGENTS.md`,
@@ -578,6 +583,22 @@ file as of `d6d83afa`), running the new tests, and restoring it. `red.txt` stays
     message, never listening, no task output) and `-R 1e-300` (exit 2, naming the option). On
     `d6d83afa`'s two files the drive hangs at the first, as the review found, until its bound.
   - P4's verify: 699 passed, 1 skipped (2 min 39 s); drive `rate` ok.
+- **Docs (P5) for F7 and F9.**
+  - `docs/_include/config_set_desc.rst`: "The file is written as UTF-8, whatever the locale; a path
+    or value that cannot be is refused with exit status 2, and nothing is written."
+  - `docs/_include/config_param_ref.rst` `[client] .ratelimit`: `-R` refuses a rate other than `0`
+    under `0.000001` (one task in about 11.6 days), and `hs cluster` stops before it launches a
+    client if the value is not a finite number or is such a rate. The existing 2.9.0 marker covers it.
+  - The `-R` markers in `docs/cli/client.rst` and `docs/cli/cluster.rst` each gain one sentence
+    saying such a rate is refused. F8 changes no page: the cap was documented in cycle 1.
+  - `AGENTS.md` § Configuration and invariants §10: `update()` reads and writes the file as UTF-8
+    whatever the locale.
+  - Gate retune (`set_phase.py --phase P5 --verify`): three greps before the tests, for the
+    `.ratelimit` sentence, the sentence once in each of the two `-R` markers, and the UTF-8 sentence.
+    Each fails on `d6d83afa`'s pages.
+  - P5's verify (sandbox off, for the docs build): 239 passed; `sphinx-build -W` under 3.12 exits 0,
+    and the new sentences render in `config.html`, `cli/client.html`, `cli/cluster.html` and
+    `cli/config_set.html`.
 ---
 
 ## How `hs-build` drives this
