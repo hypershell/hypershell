@@ -13,15 +13,20 @@ back with `tomllib`.
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Dict, Final, Tuple
+from typing import Any, Dict, Final, Optional, Tuple
 
 # Standard libs
 import os
+import sys
+import json
+import codecs
 import tomllib
+import functools
 from pathlib import Path
 from subprocess import run, DEVNULL
 
 # External libs
+import pytest
 from pytest import mark
 from cmdkit.app import exit_status
 
@@ -287,3 +292,94 @@ def test_not_utf8_path_refused(temp_site) -> None:
     assert (site / 'config.toml').read_bytes() == SEED.encode()
     assert not list(site.glob('.config.*.toml'))
     assert not list(site.rglob('exception-*.log'))
+
+
+KEY_FORMS: Final[Tuple[str, ...]] = ('server.auth', 'server.auth_env', 'relay.upstream.auth', 'relay.upstream.auth_eval')
+"""Paths that give a key, by any of its forms."""
+
+UNSEEN: Final[str] = 'Wq7unseenword'
+"""Text in a refused VALUE for a key."""
+
+
+@mark.integration
+@mark.parametrize('path', KEY_FORMS)
+def test_key_refusal_names_key(temp_site, path: str) -> None:
+    """A refused VALUE for a key exits 2, and the message names the key; the file is as before."""
+    site = Path(str(temp_site))
+    (site / 'config.toml').write_text(SEED)
+    rc, stderr = config_set(site, path, f'{UNSEEN}\udcff')
+    assert rc == exit_status.bad_argument, stderr
+    assert f'{path}: expected text that can be written as UTF-8' in stderr, stderr
+    assert UNSEEN not in stderr and 'traceback' not in stderr.lower(), stderr
+    assert (site / 'config.toml').read_bytes() == SEED.encode()
+
+
+@mark.integration
+def test_other_refusal_names_value(temp_site) -> None:
+    """A refused VALUE for any other key is named in the message."""
+    site = Path(str(temp_site))
+    rc, stderr = config_set(site, 'logging.datefmt', f'{UNSEEN}\udcff')
+    assert rc == exit_status.bad_argument and UNSEEN in stderr, stderr
+
+
+LATIN1_LOCALES: Final[Tuple[str, ...]] = ('en_US.ISO8859-1', 'en_US.ISO-8859-1', 'en_US.iso88591', 'de_DE.ISO8859-1',
+                                          'de_DE.iso88591', 'C.ISO-8859-1')
+"""Names a Latin-1 locale goes by on common platforms."""
+
+
+@functools.cache
+def latin1_locale() -> Optional[str]:
+    """A locale under which a child interpreter opens files as Latin-1, or None if this host has none."""
+    for name in LATIN1_LOCALES:
+        result = run([sys.executable, '-c', 'import locale; print(locale.getencoding())'], stdin=DEVNULL,
+                     env={**os.environ, 'LC_ALL': name, 'PYTHONUTF8': '0'}, capture_output=True, text=True,
+                     timeout=DEADLINE)
+        try:
+            if result.returncode == 0 and codecs.lookup(result.stdout.strip()).name == 'iso8859-1':
+                return name
+        except LookupError:
+            pass
+    return None
+
+
+SET_IN_CHILD: Final[str] = 'import sys, json, hypershell; sys.exit(hypershell.main(json.loads(sys.argv[1])))'
+"""Program a child runs: `hs` with the arguments given as JSON, so a VALUE reaches it as text on any platform."""
+
+
+def config_set_latin1(site: Path, path: str, value: str) -> Tuple[int, str]:
+    """Run `hs config set PATH VALUE --local` in `site` under a Latin-1 locale; return its status and stderr."""
+    if (name := latin1_locale()) is None:
+        pytest.skip('no Latin-1 locale on this host')
+    argv = json.dumps(['config', 'set', path, value, '--local'])
+    result = run([sys.executable, '-c', SET_IN_CHILD, argv], cwd=site, stdin=DEVNULL, capture_output=True,
+                 env=set_env(site, LC_ALL=name, PYTHONUTF8='0'), timeout=DEADLINE)
+    return result.returncode, result.stderr.decode('latin-1').strip()
+
+
+@mark.integration
+def test_latin1_locale_written_as_utf8(temp_site) -> None:
+    """Under a Latin-1 locale a value Latin-1 cannot encode is written as UTF-8; nothing else in the file is lost."""
+    site = Path(str(temp_site))
+    (site / 'config.toml').write_text(SEED)
+    rc, stderr = config_set_latin1(site, 'logging.datefmt', '\u20ac')
+    assert rc == exit_status.success, stderr
+    assert tomllib.loads((site / 'config.toml').read_bytes().decode('utf-8')) == {
+        'server': {'port': 54321}, 'logging': {'datefmt': '\u20ac'}}
+    assert [p.read_bytes() for p in site.glob('.config.*.toml')] == [SEED.encode()]
+    assert not list(site.rglob('exception-*.log'))
+
+
+@mark.integration
+def test_latin1_locale_read_back(temp_site) -> None:
+    """A value Latin-1 can encode, set under a Latin-1 locale, is read by later commands as given."""
+    site = Path(str(temp_site))
+    (site / 'config.toml').write_text(SEED)
+    rc, stderr = config_set_latin1(site, 'logging.datefmt', '\u00e9')
+    assert rc == exit_status.success, stderr
+    rc, stderr = config_set_latin1(site, 'database.pragmas.journal_mode', 'wal')
+    assert rc == exit_status.success, stderr
+    for path, expected in (('logging.datefmt', '\u00e9'), ('database.pragmas.journal_mode', 'wal')):
+        result = run(['hs', 'config', 'get', '-r', path], cwd=site, env=set_env(site), stdin=DEVNULL,
+                     capture_output=True, text=True, timeout=DEADLINE)
+        assert result.returncode == exit_status.success, result.stderr
+        assert json.loads(f'"{result.stdout.strip()}"') == expected, result.stdout  # printed as JSON text

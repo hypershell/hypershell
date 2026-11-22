@@ -14,7 +14,8 @@
 #
 #   set    hs config set: a digit key kept as text, a typed value converted, a refusal (exit 2) that
 #          leaves the file as it was, an untyped TOML integer, a value that is not UTF-8 refused
-#          (exit 2) with the file and its backups as they were (R1, R2, R4)
+#          (exit 2) with the file and its backups as they were, a refused value for a key form
+#          whose message names the key, and a euro sign set under a Latin-1 locale written as UTF-8 (R1, R2, R4)
 #   eager  server.eager: a file's "no" runs, an unreadable value stops hs cluster with exit 3, and so
 #          does one from eager_env, its message naming the key and source but not the value (R5)
 #   evict  server.evict under hs cluster: under the floor exits 5 before listening; 1m30s runs; a
@@ -57,6 +58,22 @@ set)
     cmp -s config.toml before.toml || fail 'a value that is not UTF-8 changed the file'
     [ "$(ls -a | grep -c '^\.config\.')" -eq "$backups" ] || fail 'a value that is not UTF-8 made a backup'
     pass 'a value that is not UTF-8 refused with exit 2, file and backups unchanged'
+    hs config set server.auth_env "$(printf 'Wq7unseen\377')" --local 2> refused.err; status=$?
+    [ "$status" -eq 2 ] || fail "a key form's refused value exited $status, not 2: $(cat refused.err)"
+    grep -q 'server.auth_env: expected text that can be written as UTF-8' refused.err || fail "message: $(cat refused.err)"
+    grep -q Wq7unseen refused.err && fail "message: $(cat refused.err)"
+    pass 'a refused value for server.auth_env exits 2, and the message names the key'
+    if locale -a | grep -qx en_US.ISO8859-1; then
+        euro=$(printf '\342\202\254')
+        LC_ALL=en_US.ISO8859-1 PYTHONUTF8=0 hs config set logging.datefmt "$euro" --local 2> latin1.err \
+            || fail "a Latin-1 locale set failed: $(cat latin1.err)"
+        grep -q "^datefmt = \"$euro\"\$" config.toml || fail "not written as UTF-8: $(od -c config.toml | tail -4)"
+        grep -qx 'cache_size = "007"' config.toml || fail "the rest of the file was lost: $(cat config.toml)"
+        [ "$(hs config get -r database.pragmas.cache_size)" = 007 ] || fail 'a later command cannot read the file'
+        pass 'under a Latin-1 locale a euro sign is written as UTF-8 and the file stays whole and readable'
+    else
+        echo "skip [$mode] no en_US.ISO8859-1 locale on this host"
+    fi
     ;;
 eager)
     printf '[server]\neager = "no"\n' > config.toml

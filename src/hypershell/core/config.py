@@ -679,7 +679,12 @@ DEFAULT_CONFIG_HEADERS: Final[str] = f"""\
 
 
 def update(scope: str, partial: dict) -> None:
-    """Extend the current configuration and commit it to disk."""
+    """Extend the current configuration and commit it to disk.
+
+    The file is read and written as UTF-8 whatever the locale, as every reader decodes it (a backup
+    is a byte-for-byte copy). The new text is made before the file is opened for writing, so a
+    failure to make it leaves the file as it was.
+    """
     config_path = path[scope].config
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     if os.path.exists(config_path):
@@ -689,13 +694,14 @@ def update(scope: str, partial: dict) -> None:
         shutil.copystat(config_path, config_backup_path)
         log.debug(f'Created backup file ({config_backup_path})')
     else:
-        with open(config_path, mode='w') as stream:
+        with open(config_path, mode='w', encoding='utf-8') as stream:
             stream.write(DEFAULT_CONFIG_HEADERS)
-    with open(config_path, mode='r') as stream:
+    with open(config_path, mode='r', encoding='utf-8') as stream:
         new_config = tomlkit.parse(stream.read())
     _inplace_update(new_config, partial)
-    with open(config_path, mode='w') as stream:
-        tomlkit.dump(new_config, stream)
+    text = tomlkit.dumps(new_config)
+    with open(config_path, mode='w', encoding='utf-8') as stream:
+        stream.write(text)
 
 
 # Re-implemented from `cmdkit.config.Namespace` (but works with `tomlkit`)

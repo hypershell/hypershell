@@ -4,11 +4,11 @@ title: hs config set writes each key by its type, and hs server and hs cluster r
   the keys they document
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: done
-last_updated: '2026-11-21'
+current_phase: P3
+last_updated: '2026-11-22'
 phases:
 - id: P1
   name: 'Tests first: the red list on d9901cf0 (tests only)'
@@ -56,7 +56,7 @@ phases:
     $m || exit 1; done
 - id: P3
   name: server.eager, server.attempts and server.evict reach hs server and hs cluster
-  status: done
+  status: in_progress
   satisfies:
   - R5
   - R6
@@ -75,7 +75,7 @@ phases:
     uv run sh "$PWD/spec/config-set-and-unread/drive/csu_drive.sh" $m || exit 1; done
 - id: P4
   name: -R takes a number, and hs cluster reads client.ratelimit
-  status: done
+  status: in_progress
   satisfies:
   - R8
   depends_on:
@@ -90,7 +90,7 @@ phases:
     $m || exit 1; done
 - id: P5
   name: Docs, help snippets and markers; AGENTS.md and invariants in lockstep
-  status: done
+  status: in_progress
   satisfies:
   - R9
   depends_on:
@@ -124,7 +124,7 @@ phases:
     docs /tmp/claude-501/docs-html-csu'
 - id: P6
   name: 'Gate: the whole suite serially, the red list, the drive, the docs'
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -263,7 +263,10 @@ that does not convert exits 2, naming key, form and value, with nothing written.
   `test_main.py`; drive mode `set`.
 - [x] Review cycle 1, F1: a path or VALUE that cannot be written as UTF-8 is refused (exit 2) before
       anything is written (see the remediation section).
-- **Touches:** `src/hypershell/core/config_schema.py`, `src/hypershell/config.py`, `tests/test_config_schema.py`.
+- [x] Review cycle 2, F7: `update()` reads and writes the file as UTF-8 whatever the locale; and the
+      message ruling: a refusal names the key (see the cycle-2 remediation section).
+- **Touches:** `src/hypershell/core/config_schema.py`, `src/hypershell/config.py`, `tests/test_config_schema.py`;
+  cycle 2: `src/hypershell/core/config.py`, `tests/test_config_set_types.py`.
 
 ## Phase P3 — `server.eager`, `server.attempts` and `server.evict` reach `hs server` and `hs cluster` (R5–R7)
 **Satisfies:** R5, R6, R7 · **Depends on:** P2
@@ -481,6 +484,46 @@ change aside in the worktree, running the new tests, and restoring it. `red.txt`
   runs with no limit (the ruling names `hs cluster` only). A `client.ratelimit` given as text from
   an `_env` or `_eval` form that is no number is refused by `-R`'s own type, whose message names
   the option and repeats the text; the `server.eager` message ruling does not reach it.
+
+## Review-cycle-2 remediation (2026-11-22)
+
+Under the review-cycle-2 rulings at the end of [`PLAN.md`](PLAN.md) (maintainer sign-off for the human
+gate F8 and F9 raised; F7, F8, F9 and F10 from [`REVIEW.md`](REVIEW.md), and the ruling on
+`hs config set`'s refusal messages). P2–P6 were reopened together through `set_phase.py` and each
+closed again with its own commit; P1 stays closed, as in cycle 1. Each new test's red run is on
+`d6d83afa` (the reviewed commit), shown by putting the source change aside in the worktree (the
+file as of `d6d83afa`), running the new tests, and restoring it. `red.txt` stays at 99.
+
+- **F7 (P2) — a locale whose encoding is not UTF-8.** `update()` (`src/hypershell/core/config.py`)
+  opened the file with no `encoding=`, so it read and wrote in the locale's encoding while every
+  reader decodes UTF-8. It now reads and writes the file as UTF-8 whatever the locale (the three
+  `open()` calls of the write path; a backup is a byte-for-byte `shutil.copy` of the file, so it is
+  UTF-8 as the file is), and makes the new text before it opens the file for writing.
+  `ConfigSetApp.run` and `update()` are the whole write path; no other `open()` is in it.
+  - Tests, `tests/test_config_set_types.py`: `test_latin1_locale_written_as_utf8` (under a Latin-1
+    locale, `logging.datefmt` set to a euro sign: exit 0; the file decodes as UTF-8 and holds the
+    seed's `server.port` and the value; the one backup holds the seed; no exception log) and
+    `test_latin1_locale_read_back` (an `é` set under a Latin-1 locale, then a second set there, then
+    `hs config get -r` of both keys under the test's own locale gives them back). The child runs
+    `hs` with its arguments as JSON, so the value reaches it as text whatever the platform's argv
+    decoding, with `LC_ALL` set to the first Latin-1 locale the host has (`PYTHONUTF8=0`); a host
+    with none skips the two tests.
+  - Red on `d6d83afa`: both failed: the euro sign at exit 5 for 0 (`UnicodeEncodeError`, an exception
+    log, the file truncated), the `é` at the second set, exit 3 for 0 (`UnicodeDecodeError` reading
+    the Latin-1 byte back).
+- **Refusal messages (P2, the maintainer's ruling).** A refusal in `hs config set` names the key
+  (`src/hypershell/config.py`, `ConfigSetApp.run`, for the UTF-8 refusal and the key's-kind
+  refusal; a key form is recognised by `is_key_variable` on the key's variable).
+  - Tests, `tests/test_config_set_types.py`: `test_key_refusal_names_key` (`server.auth`,
+    `server.auth_env`, `relay.upstream.auth`, `relay.upstream.auth_eval`: exit 2, the key named, the
+    file as before) and the guard `test_other_refusal_names_value` (`logging.datefmt`).
+  - Red on `d6d83afa`: the 4 `names_key` cases failed at the message; the guard passed. Green: 7
+    passed.
+- Drive mode `set` gains both checks (`server.auth_env` refused, exit 2, the key named; under
+  `en_US.ISO8859-1`, when the host has it, a euro sign is written as UTF-8, the rest of the file
+  kept, and a later `hs config get` reads it). On `d6d83afa`'s `config.py` the first fails at the
+  message; on its `core/config.py` the second fails at the set (exit 5).
+- P2's verify: 380 passed (1 min 29 s); drive `set` ok.
 
 ---
 

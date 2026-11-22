@@ -31,7 +31,7 @@ from hypershell.core.logging import Logger
 from hypershell.core.config_schema import match_path, read_value
 from hypershell.core.exceptions import get_shared_exception_mapping
 from hypershell.core.config import (load_file, update, ACTIVE_CONFIG_VARS, AUTH_SECTIONS, resolve_auth, env_variable,
-                                    default as default_config, config as full_config)
+                                    is_key_variable, default as default_config, config as full_config)
 
 # Public interface
 __all__ = ['ConfigApp', ]
@@ -311,15 +311,17 @@ class ConfigSetApp(Application):
         # The file is written as UTF-8: a path or value that cannot be is refused before anything is written.
         if not is_utf8(self.varpath):
             raise ArgumentError(f'Variable path {self.varpath!r} cannot be written as UTF-8')
+
+        # A refusal names the key.
+        given = '' if is_key_variable(env_variable(*self.varpath.split('.'))) else f', given {self.value!r}'
         if not is_utf8(self.value):
-            raise ArgumentError(f'{self.varpath}: expected text that can be written as UTF-8, '
-                                f'given {self.value!r}')
+            raise ArgumentError(f'{self.varpath}: expected text that can be written as UTF-8{given}')
 
         # The value is read by the key's kind, and refused before anything is written.
         try:
             value = read_value(match_path(self.varpath), self.value)
         except ValueError as error:
-            raise ArgumentError(f'{self.varpath}: expected {error}, given {self.value!r}') from None
+            raise ArgumentError(f'{self.varpath}: expected {error}{given}') from None
 
         section, *subsections, variable = self.varpath.split('.')
 
