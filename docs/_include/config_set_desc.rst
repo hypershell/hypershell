@@ -9,5 +9,7 @@ is written as a number when the value is one and as the text otherwise, and is c
 command that reads it. A key with no type of its own (an entry of ``database.connect_args`` or
 ``database.pragmas``, a ``[database]`` provider argument, or a path that names no documented key)
 holds a TOML integer, float or boolean when the value is exactly one (``5``, ``2.5``, ``true``), and
-the text otherwise. An empty value for a key that takes text is written as ``""``, so it overrides
-the key in a lower file, where an empty variable would not.
+the text otherwise. An empty value for a key that takes text is written as ``""`` and overrides the
+key in a lower file. For an optional text key, such as ``database.user`` or ``server.bind``, an empty
+variable would not: it is read as not given. A path or value that cannot be written as UTF-8 is
+refused with exit status 2, and nothing is written.

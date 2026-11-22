@@ -286,9 +286,10 @@
         failed tasks. By default, failed tasks will only be scheduled when there are no more
         remaining novel tasks.
 
-        Read by ``hs server`` and ``hs cluster``; ``--eager`` turns it on for one run. Text in a file
-        takes the boolean words (``"yes"``/``"no"``, ``"on"``/``"off"``, ``"true"``/``"false"``, in
-        any letter case), and any other value stops the command before it starts.
+        Read by ``hs server`` and ``hs cluster``; ``--eager`` turns it on for one run. A value in a
+        file other than ``true`` or ``false`` takes the boolean words: ``"yes"``/``"no"``,
+        ``"on"``/``"off"``, ``"true"``/``"false"`` in any letter case, or ``1``/``0`` as a number or as
+        text. Any other value stops the command before it starts.
 
         .. only:: html
 
@@ -328,8 +329,8 @@
         Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs server``, ``hs cluster`` and ``hs relay`` stop before they start if
-        the value is not a duration; ``hs server`` and ``hs cluster`` also if it is under 10 seconds
-        or not finite.
+        the value is not a duration; ``hs server`` and ``hs cluster`` also if it is under 10 seconds,
+        not finite, or over 999,999,999 days.
 
         .. only:: html
 
@@ -491,6 +492,7 @@
         A number (e.g., ``0.5``, one task every two seconds), read by ``hs client`` and by
         ``hs cluster`` for each of its clients. A value of ``0`` disables rate limiting. Useful to
         throttle very short tasks so that task launch does not overwhelm a shared resource.
+        ``hs cluster`` stops before it launches a client if the value is not a finite number.
 
         See also ``-R``/``--ratelimit`` command-line option.
 

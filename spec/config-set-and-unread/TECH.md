@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -90,7 +90,7 @@ phases:
     $m || exit 1; done
 - id: P5
   name: Docs, help snippets and markers; AGENTS.md and invariants in lockstep
-  status: in_progress
+  status: done
   satisfies:
   - R9
   depends_on:
@@ -112,8 +112,13 @@ phases:
     docs/_include/client_help.rst docs/_include/cluster_help.rst; do grep -q ''e.g.
     0.5'' $f || exit 1; done && for f in AGENTS.md .agents/factory/invariants.md;
     do grep -q match_path $f && grep -q plain_rate $f || exit 1; done && ! grep -rn
-    ''hs task '' docs/_include/config_set_desc.rst docs/cli/config_set.rst && sh spec/config-set-and-unread/drive/bound.sh
-    600 uv run pytest -q -p no:cacheprovider tests/test_config_schema.py tests/test_config_set_types.py
+    ''hs task '' docs/_include/config_set_desc.rst docs/cli/config_set.rst && grep
+    -A10 ''^    ``.eager``'' docs/_include/config_param_ref.rst | grep -q ''``1``/``0``
+    as a number or as'' && grep -q ''For an optional text key'' docs/_include/config_set_desc.rst
+    && ! grep -q ''where an empty variable would not\.$'' docs/_include/config_set_desc.rst
+    && test "$(grep -c ''``1``/``0`` included'' docs/cli/server.rst docs/cli/cluster.rst
+    | grep -c '':1$'')" -eq 2 && sh spec/config-set-and-unread/drive/bound.sh 600
+    uv run pytest -q -p no:cacheprovider tests/test_config_schema.py tests/test_config_set_types.py
     && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-csu sh spec/config-set-and-unread/drive/bound.sh
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
     docs /tmp/claude-501/docs-html-csu'
@@ -341,6 +346,9 @@ docs state the two new rules.
 - [x] AGENTS.md § Configuration and invariants §10: `hs config set` writes by the key's kind
       (`match_path` + `read_value`; exit 2; nothing written). AGENTS.md's `client_launch` paragraph and
       invariants §11: a whole `-R` is an integer word; a fractional one needs a client of this release.
+- [x] Review cycle 1, F5 and F6: the empty-variable sentence names only the optional text keys;
+      `.eager` and the two `server.eager` markers list `1`/`0`; one sentence each for F1–F3 (see the
+      remediation section).
 - **Verify:** greps for each edit, `tests/test_config_schema.py`, the docs build with `-W`.
 - **Touches:** `src/hypershell/config.py`, `src/hypershell/client.py`, `src/hypershell/cluster/__init__.py`,
   `docs/_include/*.rst`, `docs/cli/{config_set,client,server,cluster}.rst`, `AGENTS.md`,
@@ -439,6 +447,28 @@ change aside in the worktree, running the new tests, and restoring it. `red.txt`
     never listening, no task output); on the base source it fails there (exit 5,
     `ClusterLaunchError: every launched client has exited with tasks remaining`).
   - P4's verify: 688 passed, 1 skipped (2 min 40 s); drive `rate` ok.
+
+- **F5 and F6 (P5) — docs.**
+  - `docs/_include/config_set_desc.rst`: an empty value for a key that takes text is written as
+    `""` and overrides the key in a lower file; the page says only of an optional text key (such
+    as `database.user` or `server.bind`) that an empty variable would not, being read as not given.
+    It also says a path or value that cannot be written as UTF-8 is refused with exit 2 (F1).
+  - `docs/_include/config_param_ref.rst`: `.eager` lists every accepted word, `1`/`0` included
+    (as a number or as text), for a value other than TOML `true`/`false` (F6); `.evict` adds "or
+    over 999,999,999 days" to the refusals of `hs server` and `hs cluster` (F3); `[client]
+    .ratelimit` says `hs cluster` stops before it launches a client if the value is not a finite
+    number (F2). The existing `versionchanged:: 2.9.0` markers cover these entries.
+  - `docs/cli/server.rst` and `docs/cli/cluster.rst`: the `server.eager` markers said "Text in a
+    file takes the boolean words, and any other value stops…", F6's omission in a second place;
+    each now says "A value in a file … takes the boolean words, `1`/`0` included".
+  - Gate retune (`set_phase.py --phase P5 --verify`): four greps before the tests, that `.eager`
+    lists `1`/`0` "as a number or as" text, that `config_set_desc.rst` holds "For an optional text
+    key" and no longer ends a line on "where an empty variable would not.", and that each of
+    `docs/cli/server.rst` and `docs/cli/cluster.rst` says "`1`/`0` included" once. On
+    `f8293303`'s four files the greps fail (the `.eager` clause and the F5 sentence absent, the old
+    sentence present, neither page saying "included"); here they pass.
+  - P5's verify (sandbox off, for the docs build): 232 passed; `sphinx-build -W` under 3.12 exits 0,
+    and the new sentences render in `cli/config_set.html`, `cli/cluster.html` and `config.html`.
 
 ---
 

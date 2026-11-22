@@ -64,8 +64,8 @@ Description
 
 .. versionchanged:: 2.9.0
    ``server.eager`` takes effect without ``--eager``, and ``server.attempts`` sets the retries
-   without ``-r``; before, both keys were ignored. Text in a file for ``server.eager`` takes the
-   boolean words, and any other value stops the cluster before it starts.
+   without ``-r``; before, both keys were ignored. A value in a file for ``server.eager`` takes the
+   boolean words, ``1``/``0`` included, and any other value stops the cluster before it starts.
 
 .. versionchanged:: 2.9.0
    ``server.evict`` sets the eviction period in every mode; before, it was always 600 seconds. A
