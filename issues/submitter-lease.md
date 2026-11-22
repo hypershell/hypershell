@@ -106,7 +106,8 @@ Draft R-IDs, to be firmed up at promotion.
 - **Depends on a conditional cancel.** `Task.cancel_all` writes every row "whatever state it is in"
   (`src/hypershell/data/model.py:1436`), so a result that lands between a sweep's read and its write
   would be overwritten with `-1`. R4 needs `completion_time IS NULL` on the write itself.
-  `nf-hypershell`'s bridge already does this outside the model.
+  `nf-hypershell`'s bridge already does this outside the model. Seeded as
+  `issues/cancel-all-conditional.md`.
 - **Depends on cancel reach for running work.** Until
   [`evicted-client-fencing-and-cancel-reach`](evicted-client-fencing-and-cancel-reach.md) lands, a
   sweep stops what is queued and staged, not what a client is already running.

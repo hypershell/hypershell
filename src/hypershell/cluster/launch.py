@@ -190,7 +190,7 @@ def client_launch(remote_exe: str,
                   client_memory: int = None,
                   client_timeout: int = None,
                   task_timeout: int = None,
-                  ratelimit: int = None,
+                  ratelimit: float = None,
                   tls_enabled: bool = True,
                   zone: Optional[str] = None,
                   expose_zone: bool = False) -> ClientLaunch:
@@ -487,6 +487,21 @@ def plain_seconds(value: float) -> str:
     return format(Decimal(repr(value)), 'f')
 
 
+def plain_rate(value: int | float) -> str:
+    """
+    Tasks per second as a word a client reads back exactly: a whole rate as an integer, any other as
+    a plain decimal.
+
+    A client of an earlier release reads the word with int(), so a whole rate keeps that form; a
+    fractional rate needs a client of this release.
+
+    Example:
+        >>> plain_rate(5), plain_rate(5.0), plain_rate(0), plain_rate(0.5), plain_rate(1e-05)
+        ('5', '5', '0', '0.5', '0.00001')
+    """
+    return str(int(value)) if float(value).is_integer() else plain_seconds(float(value))
+
+
 def client_options(address: Tuple[str, int],
                    *,
                    num_threads: int,
@@ -502,7 +517,7 @@ def client_options(address: Tuple[str, int],
                    client_memory: Optional[int],
                    client_timeout: Optional[int],
                    task_timeout: Optional[int],
-                   ratelimit: Optional[int],
+                   ratelimit: Optional[float],
                    tls_enabled: bool,
                    zone: Optional[str]) -> List[str]:
     """The `hs client` options shared by every launch mode (never the key)."""
@@ -524,7 +539,7 @@ def client_options(address: Tuple[str, int],
     if task_timeout is not None:
         options.extend(['-W', str(task_timeout)])
     if ratelimit is not None:
-        options.extend(['-R', str(ratelimit)])
+        options.extend(['-R', plain_rate(ratelimit)])
     if not tls_enabled:
         # TLS material is resolved by each client from its own site/config (identical to
         # the server's on a shared filesystem); only the disabled state must be propagated.

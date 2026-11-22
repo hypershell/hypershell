@@ -230,6 +230,11 @@ subsystems.
   environment, `--ssh --env` exports and every launched client's environment;
   `is_relay_variable()` drives the relay's site fence. An empty variable for a key of
   `EMPTY_UNSET` is not given.
+- `hs config set` reads its value by the same rule (`match_path`, the dotted path matched as
+  written, then `read_value`): a value that does not convert exits 2 before `update()`, and nothing
+  is written; `update()` reads and writes the file as UTF-8 whatever the locale. `server.eager` and
+  `server.evict` are read at each command's start check
+  (`configured_eager`, `check_evict`), never at import.
 - **Relay process:** `core/config.py` replaces the whole `[database]` section with the relay's private
   SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes;
   never rebind after import. Relay-only tables live on their own `MetaData`, never `Entity`.
@@ -243,7 +248,9 @@ subsystems.
   ssh's stdin (forced `-T`, bare `-n` dropped) for `--ssh`, whose `--env` exports are built from
   the variables by name (`ssh_env_exports()`: every key variable dropped first by
   `is_key_variable()`, every value `shlex.quote`d), never by filtering words — and only options a
-  2.9.0a4 client accepts may be emitted (contract test). The Open MPI forwarding
+  2.9.0a4 client accepts may be emitted (contract test); the one sanctioned bend is a fractional
+  `-R` rate (`plain_rate`: a whole rate is an integer word, a fraction a plain decimal that needs a
+  client of 2.9.0 or later). The Open MPI forwarding
   (`OMPI_MCA_mca_base_env_list`, or `-x` beside a
   user's own `-x`/`--x`) is for Open MPI launchers only (`is_mpi_launcher()`: the first word, by
   base name; never `srun mpirun`). The client strips the key variable and its Open MPI entry from

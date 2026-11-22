@@ -17,7 +17,8 @@ from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.tls import TLSConfig
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT
+from hypershell.server import (ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT,
+                               DEFAULT_EVICT)
 from hypershell.client import ClientThread, DEFAULT_DELAY, DEFAULT_SIGNALWAIT, set_client_standalone
 
 # Public interface
@@ -151,7 +152,7 @@ class LocalCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second (default: none).
             There is no limit on task throughput unless specified.
 
@@ -163,6 +164,10 @@ class LocalCluster(Thread):
         zone (str, optional):
             Zone whose tasks the clients run (default: the default zone).
             Tasks this cluster submits are placed in the same zone.
+
+        evict_after (int, optional):
+            Period in seconds the server waits on a client's heartbeat before evicting it.
+            See :const:`~hypershell.server.DEFAULT_EVICT`.
 
     Example:
         >>> from hypershell.cluster import LocalCluster
@@ -208,10 +213,11 @@ class LocalCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None,
+                 ratelimit: float = None,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
-                 zone: Optional[str] = None) -> None:
+                 zone: Optional[str] = None,
+                 evict_after: int = DEFAULT_EVICT) -> None:
         """Initialize with server and single client thread."""
         auth = secrets.token_hex(64)
         # In JSON mode the server expands the template submit-side; the client
@@ -235,6 +241,7 @@ class LocalCluster(Thread):
                                    redirect_failures=redirect_failures,
                                    template=template,
                                    from_json=from_json,
+                                   evict_after=evict_after,
                                    tls=tls)
         self.client = ClientThread(num_threads=num_threads,
                                    template=client_template,
