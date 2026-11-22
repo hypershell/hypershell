@@ -4,10 +4,10 @@ title: hs config set writes each key by its type, and hs server and hs cluster r
   the keys they document
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -124,7 +124,7 @@ phases:
     docs /tmp/claude-501/docs-html-csu'
 - id: P6
   name: 'Gate: the whole suite serially, the red list, the drive, the docs'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -363,6 +363,7 @@ docs state the two new rules.
 - [x] The 99 red ids pass; `red_check` still reports 99 of 99 red on `d9901cf0`.
 - [x] Every drive mode; the docs build.
 - **Verify:** see frontmatter.
+- [x] Review cycle 1: the whole gate re-run after P2–P5's fixes (see the remediation section).
 - **Touches:** nothing (fixes found here go back to the phase that owns them, noted in the commit).
 
 ## Review-cycle-1 remediation (2026-11-21)
@@ -469,6 +470,16 @@ change aside in the worktree, running the new tests, and restoring it. `red.txt`
     sentence present, neither page saying "included"); here they pass.
   - P5's verify (sandbox off, for the docs build): 232 passed; `sphinx-build -W` under 3.12 exits 0,
     and the new sentences render in `cli/config_set.html`, `cli/cluster.html` and `config.html`.
+
+- **P6 re-run (the whole gate, here, Python 3.14, serial):** the whole suite 3824 passed, 138
+  skipped (25 min 53 s); the 99 red ids passed; `red_check` 99 of 99 red on `d9901cf0`; every
+  drive mode ok (`set`, `eager`, `evict`, `rate`, each with its new check); the docs build `-W`
+  exits 0. The suite and drives ran in the sandbox, the docs build with it off. 28 min 5 s for the
+  sandboxed part.
+- **Gaps left as they were:** `hs client` reading a non-finite `client.ratelimit` from a file still
+  runs with no limit (the ruling names `hs cluster` only). A `client.ratelimit` given as text from
+  an `_env` or `_eval` form that is no number is refused by `-R`'s own type, whose message names
+  the option and repeats the text; the `server.eager` message ruling does not reach it.
 
 ---
 
