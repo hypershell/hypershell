@@ -53,6 +53,8 @@ import functools
 import threading
 from enum import Enum
 from datetime import datetime
+from argparse import ArgumentTypeError
+from dataclasses import dataclass
 from queue import Queue, Empty as QueueEmpty, Full as QueueFull
 from multiprocessing import AuthenticationError
 
@@ -76,13 +78,14 @@ from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
-                                   serialize_tasks, zone_name)
+                                   TaskGroupError, ensure_group, parse_group, tag_text, serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 'json_source_key',
-           'validate_json_expansion',
-           'GatedSource', 'source_fingerprint_and_count', 'apply_source_gate',
+           'validate_json_expansion', 'validate_json_groups',
+           'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint',
+           'source_fingerprint_and_count', 'apply_source_gate',
            'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
@@ -148,29 +151,93 @@ def line_is_task(line: str, template: Template) -> bool:
     return bool(split_task_line(line, template)[1])
 
 
-def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) -> Tuple[str, int]:
-    """Read a named file upfront: content md5 (raw bytes) + task count.
+@dataclass
+class InputScan:
+    """What input read in full holds: its task count and the group of each task, in order.
 
-    The md5 is over the raw file bytes (parsing-independent). The count is taken over a
-    *text-mode* read — the same universal-newline decoding the Loader uses — replaying the
-    shared :func:`line_is_task` predicate, so blank/comment/inline-tag-only lines are
-    excluded and the recorded count matches exactly what the Loader will submit, for any
-    newline convention (LF, CRLF, or bare CR). Both reads stream (no whole-file buffering).
-    Callers must route only seekable, re-readable files here; non-seekable inputs (pipes,
-    FIFOs, piped ``/dev/stdin``) are handled upstream (streamed like ``<stdin>``), because a
-    second independent read would drain them.
+    The count is exactly the Loader's (:func:`line_is_task`). A task's group is its inline group,
+    else the group a tag-only line or the submission's tags set before it, else the submission's
+    default group (None in queue mode, where the server has no database to choose one).
+    """
+
+    count: int
+    groups: List[Optional[int]]
+
+
+def scan_task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
+                    group: Optional[int] = DEFAULT_TASK_GROUP, tags: Optional[Dict[str, JSONData]] = None,
+                    name: str = '<input>') -> InputScan:
+    """Check every line of input read in full before anything is written, and count its tasks.
+
+    The Loader's own line rules (:func:`split_task_line`) are replayed over `lines`, numbered from 1
+    as physical lines: a tag-only line updates a running copy of `tags`, and only after its group is
+    accepted. A group that is not an integer raises :class:`~hypershell.data.model.TaskGroupError`
+    naming the value as written and ``{name}, line {n}``. Nothing is read from or written to the
+    database.
     """
     engine = Template(template)
+    running = dict(tags or {})
+    groups: List[Optional[int]] = []
+    for number, line in enumerate(lines, start=1):
+        try:
+            command, args, inline_tags = split_task_line(line, engine)
+        except TaskGroupError as error:
+            raise error.at(f'{name}, line {number}') from error
+        if args:
+            groups.append(inline_tags.get('group', running.get('group', group)))
+        elif not command and inline_tags:
+            running.update(inline_tags)
+    return InputScan(count=len(groups), groups=groups)
+
+
+def source_fingerprint(path: str) -> str:
+    """The content md5 of a named file, over its raw bytes (parsing-independent), read in chunks."""
     digest = hashlib.md5()
     with open(path, mode='rb') as raw_stream:
         for chunk in iter(lambda: raw_stream.read(1 << 20), b''):
             digest.update(chunk)
-    count = 0
-    with open(path, mode='r') as text_stream:  # text mode == the Loader's universal-newline split
-        for line in text_stream:
-            if line_is_task(line, engine):
-                count += 1
-    return digest.hexdigest(), count
+    return digest.hexdigest()
+
+
+def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) -> Tuple[str, int]:
+    """Read a named file upfront: content md5 (raw bytes) + task count.
+
+    The count is :func:`scan_task_lines` over a *text-mode* read, the same universal-newline
+    decoding the Loader uses, so it matches exactly what the Loader will submit for any newline
+    convention (LF, CRLF, or bare CR), and a group that is not an integer is refused first. Callers
+    must route only seekable, re-readable files here; non-seekable inputs (pipes, FIFOs, piped
+    ``/dev/stdin``) are handled upstream, because a second independent read would drain them.
+    """
+    with open(path, mode='r') as text_stream:
+        scan = scan_task_lines(text_stream, template=template, name=path)
+    return source_fingerprint(path), scan.count
+
+
+def read_in_full(stream: Iterable[str]) -> List[str]:
+    """Every line of `stream`, one element per physical line, read to its end before anything is inserted.
+
+    The read runs in a worker thread and the main thread waits for it in bounded steps
+    (:func:`~hypershell.core.thread.join_waking`), so a signal taken by any thread is still handled
+    while the input stays open. The lines are held in memory.
+    """
+    reader = StreamReader(stream)
+    reader.start()
+    join_waking(reader)
+    return reader.lines
+
+
+class StreamReader(Thread):
+    """Read a stream to its end in a dedicated thread."""
+
+    def __init__(self: StreamReader, stream: Iterable[str]) -> None:
+        """Initialize with the stream to read."""
+        super().__init__(name='hypershell-submit-reader')
+        self.stream = stream
+        self.lines: List[str] = []
+
+    def run_with_exceptions(self: StreamReader) -> None:
+        """Read every line."""
+        self.lines = list(self.stream)
 
 
 def _new_source_id(path: str, fingerprint: str, count: int) -> str:
@@ -1275,6 +1342,29 @@ def validate_json_expansion(records: List[dict], template: str = DEFAULT_TEMPLAT
                                 f'(provide an "args" field or a --template with fields)')
 
 
+def validate_json_groups(records: List[dict]) -> None:
+    """Fail-fast pre-flight: ensure the ``group`` of every record in `records` is a JSON integer in range.
+
+    Raises :class:`~hypershell.data.model.TaskGroupError` naming the value and its record (numbered
+    from 0, as :func:`validate_json_expansion` does) on the first refusal, before any task is
+    committed.
+    """
+    for index, record in enumerate(records):
+        if 'group' in record:
+            try:
+                ensure_group(record['group'])
+            except TaskGroupError as error:
+                raise error.at(f'record {index}') from error
+
+
+def group_option(text: str) -> int:
+    """The `-g/--group` option's type: a task group by :func:`~hypershell.data.model.parse_group` (else exit 2)."""
+    try:
+        return parse_group(text)
+    except TaskGroupError as error:
+        raise ArgumentTypeError(str(error)) from error
+
+
 DEFAULT_HOST: Final[str] = QueueConfig.host
 """Default host for server connection."""
 
@@ -1349,6 +1439,8 @@ class SubmitApp(Application):
 
     source: IO | List[str] | None = None
     source_path: Optional[str] = None       # absolute path of a named task file (else None)
+    source_name: Optional[str] = None       # name of a stream read in full ('<stdin>' or its path)
+    scan: Optional[InputScan] = None        # what input read in full holds, checked before any write
     source_id: Optional[str] = None         # resolved Source.id stamped onto submitted tasks
     json_fingerprint: Optional[str] = None  # content md5 of a --from-json file (else None)
     task_args: List[str] = []
@@ -1376,7 +1468,7 @@ class SubmitApp(Application):
     interface.add_argument('-W', '--timeout', type=parse_time, default=timeout)
 
     group: Optional[int] = None
-    interface.add_argument('-g', '--group', type=int, default=group)
+    interface.add_argument('-g', '--group', type=group_option, default=group)
 
     repeat_mode: bool = False
     interface.add_argument('--repeat', action='store_true', dest='repeat_mode')
@@ -1437,8 +1529,13 @@ class SubmitApp(Application):
                 raise ArgumentError(str(error)) from error
 
     def run(self: SubmitApp) -> None:
-        """Run submit thread."""
+        """Run submit thread.
+
+        Input read in full is checked whole before anything is written: tags (exit 2) before any
+        input is read, then the input (exit 5); only then the zone, the source and the tasks.
+        """
         self.check_arguments()
+        self.check_tags()
         self.check_source()
         self.queue = None
         if self.queue_mode:
@@ -1449,15 +1546,17 @@ class SubmitApp(Application):
                 log.warning('Using default authentication key - do not use this in production!')
             if not self.tls_enabled:
                 log.warning('TLS is disabled - this is not recommended for production!')
+            self.scan_source()
         else:
             self.check_database()
-            self.check_tags()
-            if self.zone is not None:
-                self.zone_id = Zone.ensure(self.zone)
+            self.read_source()
             if self.group is None:
                 group = Task.current_group()
                 self.group = group.value
                 log.info(f'Auto-selected task group {group.value} ({group.reason})')
+            self.scan_source()
+            if self.zone is not None:
+                self.zone_id = Zone.ensure(self.zone)
             self.prepare_source()
         if self.source is not None:
             self.submit_all()
@@ -1471,9 +1570,14 @@ class SubmitApp(Application):
                             bundlesize=self.bundlesize, bundlewait=self.bundlewait, tags=self.tags)
         log.info(f'Submitted {count} tasks')
 
+    @functools.cached_property
+    def direct_args(self: SubmitApp) -> str:
+        """The one task given as arguments, joined as a command line."""
+        return ' '.join([self.quote_arg(arg) for arg in self.task_args])
+
     def submit_one(self: SubmitApp) -> None:
         """Submit one task from arguments."""
-        args = ' '.join([self.quote_arg(arg) for arg in self.task_args])
+        args = self.direct_args
         if self.queue_mode:
             submit_from([args, ], queue_config=self.queue,
                         cores=self.cores, memory=self.memory, timeout=self.timeout, group=self.group,
@@ -1495,12 +1599,20 @@ class SubmitApp(Application):
             checkdb()
 
     def check_tags(self: SubmitApp) -> None:
-        """Ensure valid tags."""
-        self.tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
+        """Ensure valid tags, before any input is read: a group among them must be an integer (else exit 2).
+
+        Tags are checked in both modes, but only a submission to the database applies them: queue
+        mode leaves them unset, as it always has.
+        """
+        tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
         try:
-            Task.ensure_valid_tag(self.tags)
-        except (ValueError, TypeError) as error:
+            Task.ensure_valid_tag(tags)
+            if 'group' in tags:
+                tags['group'] = ensure_group(tags['group'], text=tag_text(self.taglist, 'group'))
+        except (ValueError, TypeError, TaskGroupError) as error:
             raise ArgumentError(str(error)) from error
+        if not self.queue_mode:
+            self.tags = tags
 
     def check_source(self: SubmitApp) -> None:
         """Determine task submission mode."""
@@ -1509,6 +1621,7 @@ class SubmitApp(Application):
                 raise ArgumentError('Cannot combine --from-json with -f/--task-file or positional arguments')
             records, self.json_fingerprint = load_json_source(self.from_json)
             validate_json_expansion(records, self.template)
+            validate_json_groups(records)
             log.debug(f'Loaded {len(records)} tasks from JSON ({self.from_json})')
             self.source = records
             return
@@ -1544,6 +1657,45 @@ class SubmitApp(Application):
             log.debug(f'Submitted single task (explicit)')
             self.source = None
 
+    def read_source(self: SubmitApp) -> None:
+        """Read a stream in full (standard input, a FIFO, a process substitution), with a database.
+
+        Nothing is inserted until the input has ended and been checked whole. The stream becomes
+        a list of its lines, submitted under the reserved ``<stdin>`` source.
+        """
+        if self.from_json or self.source is None or isinstance(self.source, list):
+            return
+        if self.source is sys.stdin or not self.source.seekable():
+            stream = self.source
+            self.source_name = '<stdin>' if stream is sys.stdin else self.source_path
+            self.source = read_in_full(stream)
+            if stream is not sys.stdin:
+                stream.close()
+            log.info(f'Read {len(self.source)} lines from {self.source_name}')
+
+    def scan_source(self: SubmitApp) -> None:
+        """Check every group of input read in full before anything is written (exit 5, naming value and line).
+
+        A named file, a stream read in full and the arguments are scanned with the template, the
+        default group and the tags the submission uses; a ``--from-json`` source was checked as it
+        was loaded. A stream in queue mode is checked line by line as it arrives.
+        """
+        if self.from_json:
+            return
+        if self.source is None:
+            try:
+                Task.split_argline(self.direct_args)
+            except TaskGroupError as error:
+                raise error.at('arguments') from error
+            return
+        if isinstance(self.source, list):
+            self.scan = scan_task_lines(self.source, template=self.template, group=self.group,
+                                        tags=self.tags, name=self.source_name)
+        elif self.source is not sys.stdin and self.source.seekable():
+            with open(self.source_path, mode='r') as stream:
+                self.scan = scan_task_lines(stream, template=self.template, group=self.group,
+                                            tags=self.tags, name=self.source_path)
+
     def prepare_source(self: SubmitApp) -> None:
         """Resolve the task Source, apply the re-submission gate, and wrap the stream (DB mode only).
 
@@ -1563,17 +1715,15 @@ class SubmitApp(Application):
         if self.source is None:
             self.warn_gating_no_effect('<direct>')
             self.source_id = Source.reserved(DIRECT_SOURCE_ID).id
-        elif self.source is sys.stdin or not self.source.seekable():
+        elif isinstance(self.source, list):
             # Real <stdin> and non-seekable named inputs (process substitution, FIFOs, a
-            # piped /dev/stdin) have no stable identity and cannot be re-read for an upfront
-            # count — stream them under the reserved <stdin> source, exempt from gating. A
-            # second read would drain the pipe and silently drop every task.
+            # piped /dev/stdin) have no stable identity and cannot be re-read: they were read
+            # in full (read_source) and go under the reserved <stdin> source, exempt from gating.
             self.warn_gating_no_effect('<stdin>')
             self.source_id = Source.reserved(STDIN_SOURCE_ID).id
-            name = '<stdin>' if self.source is sys.stdin else self.source_path
-            self.source = GatedSource(self.source, self.source_id, name=name, zone_id=self.zone_id)
+            self.source = GatedSource(self.source, self.source_id, name=self.source_name, zone_id=self.zone_id)
         else:
-            fingerprint, count = source_fingerprint_and_count(self.source_path, self.template)
+            fingerprint, count = source_fingerprint(self.source_path), self.scan.count
             log.info(f'Found {count} tasks in {self.source_path} (md5={fingerprint})')
             self.source_id, skip = apply_source_gate(self.source_path, fingerprint, count,
                                                      repeat=self.repeat_mode, update=self.update_mode)

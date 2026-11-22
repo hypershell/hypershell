@@ -136,6 +136,11 @@ def test_group_error_names_origin() -> None:
 
 # --- hs submit, read in full -----------------------------------------------------------------------
 
+def initdb(site: Path) -> None:
+    """Initialize the site's database, so a refusal before the database is opened can be checked."""
+    rc, _, stderr = bounded(['hs', 'initdb', '--yes'], cwd=site)
+    assert rc == 0, stderr
+
 def assert_refused(stderr: str, value: str, origin: str) -> None:
     """The error names the value as written and where it came from."""
     lines = [line for line in stderr.splitlines() if 'must be an integer' in line]
@@ -198,6 +203,7 @@ JSON_REFUSED = [('string', '7'), ('float', 1.5), ('bool', True), ('null', None)]
 def test_submit_json_refuses_group(temp_site: Path, name: str, value: Any) -> None:
     """A `--from-json` record whose group is not a JSON integer inserts nothing and exits 5, naming the record."""
     site = Path(str(temp_site))
+    initdb(site)
     path = create_json_taskfile(site, [{'args': 'echo a'}, {'args': 'echo b', 'group': value}])
     rc, _, stderr = submit('-b', '1', '-w', '1', '--from-json', str(path), cwd=site)
     assert rc == 5, stderr[-4000:]
@@ -225,6 +231,7 @@ def test_submit_json_accepts_integer_group(temp_site: Path) -> None:
 def test_submit_tag_option_refuses_group(temp_site: Path, mode: str) -> None:
     """`-t group:x` exits 2 before any input is read, with a database and with `--queue`."""
     site = Path(str(temp_site))
+    initdb(site)
     options = ['--queue', '--no-tls', '-H', ADDRESS] if mode == 'queue' else []
     rc, _, stderr = submit(*options, '-t', 'group:x', '--', 'echo', 'a', cwd=site)
     assert rc == 2, stderr[-4000:]
@@ -247,6 +254,7 @@ def test_submit_tag_option_accepts_group(temp_site: Path, text: str, value: int)
 def test_submit_group_option_out_of_range(temp_site: Path) -> None:
     """`-g` outside PostgreSQL's 32-bit range exits 2, on SQLite too, and inserts nothing."""
     site = Path(str(temp_site))
+    initdb(site)
     rc, _, stderr = submit('-g', '3000000000', '--', 'echo', 'a', cwd=site)
     assert rc == 2, stderr[-4000:]
     assert count(sqlite_engine(), 'task') == 0

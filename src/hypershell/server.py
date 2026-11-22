@@ -47,6 +47,7 @@ from types import TracebackType
 
 # Standard libs
 import io
+import os
 import sys
 import json
 import time
@@ -80,7 +81,7 @@ from hypershell.core.topology import SiteRegistry
 from hypershell.data.model import (Task, Client, Zone, ResultOutcome, CONTENDED_RERUNS, serialize_tasks,
                                    deserialize_tasks, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
-from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE
+from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE, scan_task_lines
 from hypershell.client import ClientInfo
 
 # Public interface
@@ -1884,6 +1885,7 @@ class ServerApp(Application):
         self.check_args()
         self.enable_tls()
         self.check_database()
+        self.prepare_source()
         if self.autoscaling_policy is not None:
             # Imported here: the cluster package imports this module.
             from hypershell.cluster.topology import serve_with_sites
@@ -1976,6 +1978,17 @@ class ServerApp(Application):
         """Initialize the database with --initdb, else check (and upgrade) it; never open it with --no-db."""
         if not self.in_memory:
             ensuredb(auto_init=self.auto_initdb)
+
+    def prepare_source(self: ServerApp) -> None:
+        """Check a named task file whole before anything is inserted or dispatched, with a database or without.
+
+        A group that is not an integer refuses the file (exit 5). The server ingests raw lines, so
+        the scan uses the default template. A stream is checked line by line as it arrives.
+        """
+        if self.input_stream is not None and is_file_input(self.input_stream):
+            path = os.path.abspath(self.filepath)
+            with open(path, mode='r') as stream:
+                scan_task_lines(stream, name=path)
 
     def special_options(self: ServerApp) -> bool:
         """Special terminating options print information lazily (not import time)."""

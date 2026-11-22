@@ -32,7 +32,8 @@ from hypershell.data.model import Source, Zone, STDIN_SOURCE_ID, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, is_file_input
 from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
-                               GatedSource, source_fingerprint_and_count, apply_source_gate)
+                               validate_json_groups, scan_task_lines, source_fingerprint, GatedSource,
+                               apply_source_gate)
 from hypershell.cluster.ssh import run_ssh, SSHCluster, NodeList, DEFAULT_REMOTE_EXE
 from hypershell.cluster.local import run_local, LocalCluster
 from hypershell.cluster.watch import ClusterLaunchError
@@ -383,6 +384,7 @@ class ClusterApp(Application):
             if given_filepath:
                 raise ArgumentError('Cannot combine --from-json with a positional task file')
             validate_json_expansion(self.json_records, self.template)
+            validate_json_groups(self.json_records)
         elif self.filepath is None and not self.restart_mode:
             self.filepath = '-'  # NOTE: assume STDIN
         if self.restart_mode and self.in_memory:
@@ -545,6 +547,11 @@ class ClusterApp(Application):
         stable per-task fingerprint is template-independent by construction, so the
         de-dup set matches whether tasks were first ingested by ``hs submit`` or ``hsx``.
         """
+        if is_file_input(stream):
+            # A named file is checked whole before anything is dispatched, with a database or
+            # without one; the server ingests raw lines, so the scan uses DEFAULT_TEMPLATE.
+            with open(os.path.abspath(self.filepath), mode='r') as text_stream:
+                scan = scan_task_lines(text_stream, name=os.path.abspath(self.filepath))
         if self.in_memory or not DATABASE_ENABLED:
             return stream  # no persistent database to gate against (invariant §4)
         if stream is sys.stdin or not stream.seekable():
@@ -556,7 +563,7 @@ class ClusterApp(Application):
             name = '<stdin>' if stream is sys.stdin else os.path.abspath(self.filepath)
             return GatedSource(stream, source_id, name=name, zone_id=self.zone_id)
         path = os.path.abspath(self.filepath)
-        fingerprint, count = source_fingerprint_and_count(path)  # DEFAULT_TEMPLATE (raw-line split)
+        fingerprint, count = source_fingerprint(path), scan.count
         log.info(f'Found {count} tasks in {path} (md5={fingerprint})')
         source_id, skip = apply_source_gate(path, fingerprint, count, repeat=self.repeat_mode,
                                             update=self.update_mode, restart=self.restart_mode)

@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -49,7 +49,7 @@ phases:
 - id: P3
   name: The integer rule; read-in-full input scanned before any write (hs submit incl.
     stdin, hs cluster incl. --no-db, hs server FILE, --from-json, -t, -g)
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -386,16 +386,39 @@ and the marker keep their meaning, under `--template` too (PLAN § 2.1).
 **Goal:** a non-integer or out-of-range group is refused wherever it arrives; a file, JSON source,
 arguments or `hs submit` stdin is refused whole with nothing written (PLAN § 2.2, § 2.3).
 
-- [ ] `data/model.py`: `GROUP_MIN`/`GROUP_MAX`, `TaskGroupError`, `ensure_group`, `parse_group`; the
+- [x] `data/model.py`: `GROUP_MIN`/`GROUP_MAX`, `TaskGroupError`, `ensure_group`, `parse_group`; the
       check in `split_argline` (keep the text token for the message) and in `Task.new` for a tag group.
-- [ ] `submit.py`: `scan_task_lines`, `validate_json_groups`, `read_in_full`; `source_fingerprint_and_count`
+- [x] `submit.py`: `scan_task_lines`, `validate_json_groups`, `read_in_full`; `source_fingerprint_and_count`
       takes its count from the scan; `SubmitApp`: `-g` `type=parse_group`, `check_tags` first and in both
       modes (`TaskGroupError` → `ArgumentError`), stream read in full with a database, the scan before
       any write; move `Zone.ensure` and the reserved-source writes after the checks.
-- [ ] `cluster/__init__.py`: scan a seekable file before the `--no-db` return; `validate_json_groups`
+- [x] `cluster/__init__.py`: scan a seekable file before the `--no-db` return; `validate_json_groups`
       in `check_arguments`.
-- [ ] `server.py`: `ServerApp.prepare_source` scanning `hs server FILE` (both modes), called in `run`
+- [x] `server.py`: `ServerApp.prepare_source` scanning `hs server FILE` (both modes), called in `run`
       before `serve_from`.
+- **Built (for P5/P6):** `TaskGroupError(value, origin=None, *, out_of_range=False)`, `.at(origin)`;
+  message `task group must be an integer, not "x"` (text quoted as written, a JSON value as JSON:
+  `true`, `null`, `1.5`, `"7"`), or `... an integer from -2147483648 to 2147483647, not "…"` when out
+  of range. `ensure_group(value, text=None)`, `parse_group(text)`, `tag_text(tokens, name)` in
+  `model.py`. **Deviation:** argparse only turns `ValueError`/`TypeError`/`ArgumentTypeError` from a
+  `type` into a usage error, so `-g` uses `submit.py::group_option`, which wraps `parse_group` into
+  `ArgumentTypeError` (exit 2). `submit.py`: `InputScan(count, groups)` (`groups` is each task's
+  group in order, `None` in queue mode for untagged lines), `scan_task_lines(lines, *, template,
+  group, tags, name)`, `source_fingerprint(path)` (the md5 half; `source_fingerprint_and_count`
+  stays as a wrapper over both), `read_in_full(stream)` (a `StreamReader` thread under
+  `join_waking`), `validate_json_groups(records)`, `split_task_line`. `SubmitApp.run`:
+  `check_arguments` → `check_tags` (both modes; queue mode validates but still does not apply tags)
+  → `check_source` (JSON groups checked here, both modes) → queue: `scan_source` / database:
+  `check_database` → `read_source` (stdin, `-`, FIFO, process substitution become a list;
+  `self.source_name`) → default group → `scan_source` (`self.scan`) → `Zone.ensure` →
+  `prepare_source` (a list goes under the reserved `<stdin>` source; a file's count is
+  `self.scan.count`). Arguments are checked by `split_argline` with origin `arguments`.
+  `ClusterApp.prepare_source` keeps the scan in a local `scan` before the `--no-db` return; P6's
+  R7 check goes after the gate decision there. **Test fix:** four `temp_site` tests in
+  `test_group_integer.py` that count rows after a refusal made before the database is opened now
+  run `hs initdb --yes` first; re-proved RED on `dfdbaed5` (7 of 7).
+- **Verified (2026-11-21):** suites 278 passed (PostgreSQL on); guards 19 passed; `input_drive.sh
+  group` PASS 6 of 6.
 - **Verify:** `test_group_integer.py` and the suites around submit, JSON, restart and source gating;
   guards; `input_drive.sh group`.
 - **Touches:** `src/hypershell/data/model.py`, `src/hypershell/submit.py`,

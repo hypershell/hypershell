@@ -44,6 +44,7 @@ __all__ = [
     'Task', 'Client', 'Source', 'Zone', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
     'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
     'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
+    'GROUP_MIN', 'GROUP_MAX', 'TaskGroupError', 'ensure_group', 'parse_group', 'tag_text',
     'DEFAULT_ZONE_ID', 'DEFAULT_ZONE_NAME', 'ZONE_NAMESPACE', 'zone_id', 'zone_name',
 ]
 
@@ -57,6 +58,74 @@ DEFAULT_TASK_GROUP: Final[int] = 0
 
 TAG_MARKER: Final[re.Pattern] = re.compile(r'#\s*HYPERSHELL:?')
 """The inline tag marker: found anywhere on a line, with or without its colon."""
+
+GROUP_MIN: Final[int] = -2**31
+"""Lowest task group: the range of PostgreSQL's `INTEGER`, held on every database."""
+
+GROUP_MAX: Final[int] = 2**31 - 1
+"""Highest task group."""
+
+
+class TaskGroupError(RuntimeError):
+    """A task group taken from input that is not an integer in range.
+
+    `value` is the group as written when it came from text (``1e3``, not ``1000.0``), else the value
+    itself (a JSON value); `origin` names where it came from (``tasks.in, line 7``, ``record 3``)
+    once that is known (:meth:`at`). A `RuntimeError`, so a command refused for it exits 5.
+    """
+
+    def __init__(self: TaskGroupError, value: Any, origin: Optional[str] = None, *, out_of_range: bool = False) -> None:
+        """Initialize with the refused `value`, where it came from, and whether it is an integer out of range."""
+        self.value = value
+        self.origin = origin
+        self.out_of_range = out_of_range
+        shown = f'"{value}"' if isinstance(value, str) else json.dumps(value)
+        rule = f'an integer from {GROUP_MIN} to {GROUP_MAX}' if out_of_range else 'an integer'
+        message = f'task group must be {rule}, not {shown}'
+        super().__init__(message if origin is None else f'{message} ({origin})')
+
+    def at(self: TaskGroupError, origin: str) -> TaskGroupError:
+        """The same refusal, naming where the value came from."""
+        return TaskGroupError(self.value, origin, out_of_range=self.out_of_range)
+
+
+def ensure_group(value: Any, text: Optional[str] = None) -> int:
+    """The task group `value`: an integer (not a boolean) from `GROUP_MIN` to `GROUP_MAX`, else :class:`TaskGroupError`.
+
+    A tag value arrives typed by `smart_coerce`, which gives an `int` exactly when `int()` takes the
+    text, as `-g/--group` does; `text` is that text as written, which the refusal names. A JSON value
+    is a group only when it is a JSON integer.
+    """
+    shown = value if text is None else text
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TaskGroupError(shown)
+    if not GROUP_MIN <= value <= GROUP_MAX:
+        raise TaskGroupError(shown, out_of_range=True)
+    return value
+
+
+def parse_group(text: str) -> int:
+    """The task group written as `text`, by the rule of `-g/--group`: what `int()` takes, within range."""
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        raise TaskGroupError(text) from None
+    return ensure_group(value, text=text)
+
+
+def tag_text(tokens: List[str], name: str) -> Optional[str]:
+    """The value of tag `name` as written among command-line `tokens` (``key:value``), or None if absent.
+
+    The last token for `name` wins, as it does when the tokens are parsed; a bare ``key`` has the
+    empty value.
+    """
+    text = None
+    for token in tokens:
+        key, _, value = token.strip().partition(':')
+        if key.strip() == name:
+            text = value.strip()
+    return text
+
 
 CANCEL_STATUS: Final[int] = -1
 """Sentinel `exit_status` marking a cancelled task.
@@ -537,7 +606,9 @@ class Task(Entity):
         else:
             args, inline_tags = str(args).strip(), {}
         tag = {**(tag or {}), **inline_tags}
-        other['group'] = tag.pop('group', group)
+        # A group from tags is input and must be an integer; the `group` argument is the caller's
+        # (queue mode passes None, and a retry copies its parent's group as stored).
+        other['group'] = ensure_group(tag.pop('group')) if 'group' in tag else group
         other['cores'] = tag.pop('cores', other.get('cores', None))
         # A memory value may arrive as a unit-bearing string ('2GB') from an inline
         # `memory:` tag (parsed by smart_coerce, which leaves units alone) — parse it to
@@ -604,11 +675,14 @@ class Task(Entity):
         if args.startswith('#') and not TAG_MARKER.match(args):
             return '', {}
         if match := TAG_MARKER.search(args):
+            tokens = args[match.end():].strip().split()
             try:
-                tags = Tag.parse_cmdline_list(args[match.end():].strip().split())
+                tags = Tag.parse_cmdline_list(tokens)
                 cls.ensure_valid_tag(tags)
             except (ValueError, TypeError) as error:
                 raise RuntimeError(f'Failed to parse inline tags ({error}, from: "{args}")') from error
+            if 'group' in tags:
+                tags['group'] = ensure_group(tags['group'], text=tag_text(tokens, 'group'))
             return args[:match.start()].strip(), tags
         return args, {}
 
