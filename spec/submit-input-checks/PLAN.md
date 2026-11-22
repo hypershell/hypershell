@@ -259,3 +259,26 @@ Each needs the foreman's sign-off at the plan gate (listed in the report):
 - **Each phase** runs its new tests and the existing suites around the code it touches, with
   `HS_TEST_POSTGRES` set; the last phase runs the whole suite serially (bounded 7200 s) and re-proves
   the red list. Docs build with `-W` (html and man).
+
+## Plan-gate rulings (2026-11-21)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned. The C1 split is not taken;
+all three seeds ship. D1–D9 are accepted:
+
+- **D1:** a stream whose every line is refused, on a fresh database, still hangs. That is the
+  existing empty-input hang, and it stays with `issues/empty-task-file-hangs.md`. R8's stream tests
+  always include an accepted line.
+- **D2:** an old task file whose `#` lines changed identity can be refused on `--restart` or
+  `--update` by R7. The docs and release note say so, beside C4's drift note.
+- **D3:** the integer check also covers lines the source gate skips.
+- **D4:** groups are limited to PostgreSQL's 32-bit range, `-g` included.
+- **D5:** `hs submit --template` stops turning blank, comment and tag-only lines into tasks. The
+  release note names this.
+- **D6:** `-t` is checked in queue mode, but queue mode does not apply tags (unchanged).
+- **D7:** JSON errors number records from 0.
+- **D8:** P1 merges the current `origin/develop`, which now holds #115 and #116. The red list is
+  proved against `dfdbaed5`.
+- **D9:** the tag-only crash fix and moving `is_file_input` are accepted deviations.
+
+`server.py` is high-blast-radius: if the design touches it, change only what TECH names. The
+review's human gate applies as the rubric says.
