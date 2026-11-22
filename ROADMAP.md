@@ -46,17 +46,6 @@ failure modes dangerous to task fidelity. Triaged rather than adopted wholesale:
 answered by feature work further down this file, two were judged not to be defects at all, and one
 was declined (see *Settled questions*).
 
-## Bare `#` silently truncates the submitted command
-
-Inline-tag parsing falls through to a quoting-blind `#` strip, so `echo 'issue #42'` is stored and
-executed as `echo 'issue`. URL fragments, awk scripts, and hex literals corrupt the same way, with
-no error at submit time. Silent corruption at ingest is the one class of bug a many-task engine
-must not have, and it contradicts our own "the shell line is the contract" design — the shell
-already implements comment semantics correctly.
-
-*Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs: —*
-**Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md) · *status: adopted:submit-input-checks*
-
 ## Unguarded task start kills the executor and poisons the task
 
 An `OSError` while opening capture files or spawning the subprocess propagates out of the FSM and
@@ -114,11 +103,14 @@ may subsume it); `spec/zone-queue-primitive/` (review cycle 2, C3)*
 ## Ingest robustness: all-or-nothing submission, no length awareness
 
 One undecodable byte aborts a whole task file, and one malformed tag raises out of the loader after
-part of the file is already submitted — leaving a partial, unlabelled submission with no per-line
-diagnosis. A line too long to ever spawn is not caught until some node tries it.
+part of the input is already submitted — leaving a partial, unlabelled submission with no per-line
+diagnosis. Since `submit-input-checks` (#118), input read in full (a named file, or anything
+`hs submit` takes with a database) is checked before anything is inserted, so the partial
+submission remains where input is streamed, as into `hs cluster` or `hs server`. A line too long to
+ever spawn is not caught until some node tries it.
 
-*Target: 2.10.0 · Horizon: near-term · Depends on: sequence after the `#`-truncation fix (same path)
-· Refs: —*
+*Target: 2.10.0 · Horizon: near-term · Depends on: sequence after the `#`-truncation fix (same path;
+cleared: it landed in `submit-input-checks`, #118) · Refs: —*
 **Seed:** [`issues/ingest-robustness.md`](issues/ingest-robustness.md)
 
 ## Client I/O hygiene
@@ -173,19 +165,6 @@ untested; the seed asks for that test first.
 
 *Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: `spec/group-advance-retry-gate/`*
 **Seed:** [`issues/eager-retry-double-bundle.md`](issues/eager-retry-double-bundle.md)
-
-## Refuse a submission below the group the schedule has reached
-
-A `hs submit` into a group lower than the one an active schedule has already reached cannot keep
-the documented ascending order. After `group-advance-strands-lower-group`, such tasks run late with
-a warning. The maintainer wants them refused at submit time instead, all or nothing and with an
-error naming both groups. The same rule covers a task file run onto an advanced database
-(`--restart`, `--update`, `--repeat`). Pipes into `hs cluster`/`hs server` stay best effort. This is
-a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
-
-*Target: 2.9.0 · Horizon: near-term · Depends on: `group-advance-strands-lower-group` (landed, #74)
-· Refs: overlaps `issues/ingest-robustness.md` (same ingest path)*
-**Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: adopted:submit-input-checks*
 
 ## A client that times out during a pause in a stream leaves a late line unrun
 
@@ -344,25 +323,10 @@ ranges beside each key's kind, one parser per kind for options, files and the en
 error, and a start-up backstop that turns any stray numeric error into a clean refusal would end
 that. It absorbs the absurd-input seeds filed during the 2.9.0 cycles.
 
-*Target: 2.9.0 · Horizon: near-term · Depends on: `config-set-and-unread`, `submit-input-checks`,
-`update-client-retry` · Refs: `core/config_schema.py`; review rubric (Scope)*
+*Target: 2.9.0 · Horizon: near-term · Depends on: `config-set-and-unread` (landed, #117),
+`submit-input-checks` (landed, #118), `update-client-retry` · Refs: `core/config_schema.py`;
+review rubric (Scope)*
 **Seed:** [`issues/bounded-inputs.md`](issues/bounded-inputs.md) · *status: unshaped*
-
-## A non-integer task group is accepted at submit time
-
-The inline `group:` tag, `-t group:…` and a `--from-json` record's `group` key accept any value.
-SQLite stores a non-integer one as text in the integer column, while PostgreSQL rejects it at
-insert. 2.8.3 runs text groups after every integer group. `group-advance-strands-lower-group`
-needed two guards in the scheduler against them, and `group:nan` is stored as NULL, which kills
-the committer on `NOT NULL` and hangs the run, before and after that fix. The maintainer wants an
-integer group enforced at submit time: a whole file read ahead and refused before anything is
-inserted, and on a pipe an error on just the offending line. This is a behaviour change, so it
-ships in 2.9.0, not a 2.8.x patch. Pre-existing, and found by that cycle's review.
-
-*Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs:
-`spec/group-advance-strands-lower-group/` (REVIEW cycles 2 and 3); same committer death as
-`issues/database-locked-during-ingest-hangs.md`*
-**Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: adopted:submit-input-checks*
 
 ## On PostgreSQL, a task cannot ask for 2 GB of memory or more
 
@@ -434,46 +398,6 @@ maintainer's call. Pre-existing on the 2.8 line.
 *Target: 2.8.x · Horizon: maintainer's call (a 2.8.x hotfix against `master`) · Depends on: — ·
 Refs: `key-option-refused` (landed, #104: the 2.9 half); the key hand-off hardening (#80, #81)*
 **Seed:** [`issues/key-option-on-command-line.md`](issues/key-option-on-command-line.md) · *status: unshaped*
-
-## `hs config set` writes text that looks like a number, boolean or null as that type
-
-`hs config set` coerces its value by its look before writing it, whatever the key
-(`src/hypershell/config.py:284`): `hs config set autoscale.launcher false` writes the boolean, an
-all-digit `server.auth` loses its leading zeros and then fails the length check, and `null` fails with
-a traceback. A boolean key given `no` is written as text that reads as true. The same defect class
-`env-config-keys` (#113) fixed for `HYPERSHELL_*` variables; its key table and typed reader should serve
-this command too. Pre-existing.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: `env-config-keys` (landed, #113: the key
-table) · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: adopted:config-set-and-unread*
-
-## `hs relay` cannot name the address its site clients dial
-
-Every `hs cluster` launch mode now tells its clients one address: the bind address, the host's own
-name for a wildcard bind, or `--advertise` / `server.advertise` when given (#107). A relay's site
-clients follow the same default rule but have no override, and `relay.bind` defaults to `0.0.0.0`,
-so a relay whose site clients must dial another name, such as an internal-network address or the
-name on the site server's TLS certificate, cannot say so. An option and a relay key beside `--bind`
-would close it. Narrowed from the advertised-host fix, whose cycle deferred the relay override to
-keep clear of the relay hardening work, since landed.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `cluster-launch-failures`
-(landed, #107: the rule and the cluster override); relay (#82, which left `--advertise` for later)*
-**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: adopted:relay-advertise*
-
-## A relay run can still end up to about 5 s late
-
-After the relay hardening fixes, a relay run's tail (last completion to upstream exit) is about 1.7 s
-when nothing waits, but three of five runs on the fixed head ended about 7 s late. The relay launches
-its site clients with `relay.bundlewait` as their own result bundle wait, so the last results can sit
-in a site client until it expires: a client should flush when it holds nothing left to run, or the
-relay should give site clients a shorter wait. Separately, a result landing does not wake the upstream
-scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 6 s to it.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and
-its laptop evidence (`relay-hardening` landed, #103)*
-**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: adopted:relay-shutdown-tail*
 
 ## `rotatedb` lost-update window
 
@@ -554,17 +478,6 @@ client too.
 *Target: 2.9.0 · Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) ·
 Refs: `spec/zone-dispatch/` (plan gate ruling N4)*
 **Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
-
-## Three documented keys are never read by the command they describe
-
-`server.eager` never takes effect: `--eager`'s `store_true` default overwrites it in `hs server` and
-`hs cluster`. `hs cluster` ignores `server.evict` (it uses the built-in period), and its `-R` reads
-the undocumented `task.ratelimit` instead of `client.ratelimit`. The same class as the `-b` entry
-above. Pre-existing; found by `env-config-keys`' research, out of its scope.
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
-`spec/env-config-keys/research/03-duration-keys.md`, `04-typed-readers.md`*
-**Seed:** [`issues/config-keys-unread.md`](issues/config-keys-unread.md) · *status: adopted:config-set-and-unread*
 
 ## `hs submit -q` cannot feed a server with a database
 
@@ -743,17 +656,14 @@ developer's own database location. Split out of `relay`'s review.
 `relay-hardening` (landed, #103: the relay abort races and rough edges, each with its own tests)*
 **Seed:** [`issues/relay-test-strength.md`](issues/relay-test-strength.md) · *status: unshaped*
 
-## Two CI tests fail intermittently and pass on a re-run
+## The open-file-limit test fails intermittently and passes on a re-run
 
 `test_queue_limits.py`'s open-file-limit test can wait forever for two distinct clients when one
-client takes every quick task, and the relay site-key test fails when a process it scans exits
-mid-read and psutil raises `AccessDenied`. Each has cost re-runs on recent pull requests; both are
-small test-side fixes.
+client takes every quick task. It has cost re-runs on recent pull requests; the fix is small and
+test-side. The relay site-key test that shared this entry was fixed by `relay-shutdown-tail` (#115).
 
-*Target: 2.9.x (the relay site-key test: 2.9.0, with `relay-shutdown-tail`) · Horizon: near-term,
-small · Depends on: — · Refs: CI on #104, #107 and #110*
-**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md) · *status: unshaped*;
-[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: adopted:relay-shutdown-tail*
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: CI on #104 and #110*
+**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md) · *status: unshaped*
 
 ## `pytest -n auto` fails at collection
 

@@ -68,8 +68,9 @@ Shaping questions, none agreed:
   a dead relay as a relay relaunches a client.
 - **The next bottleneck.** With 100 upstream connections in place of 10,000, the upstream database
   becomes the limit, since every task's state still lands there. Measure on PostgreSQL or
-  TimescaleDB; SQLite is unlikely to hold at this scale. The end-of-run tail
-  (`issues/relay-shutdown-tail.md`) adds up across relays.
+  TimescaleDB; SQLite is unlikely to hold at this scale. The end-of-run tail adds
+  up across relays; `relay-shutdown-tail` (#115) brought one relay's under 2 s in laptop runs
+  (`spec/relay-shutdown-tail/evidence/tails.md`).
 
 ## Sketch of the acceptance criteria
 
@@ -85,6 +86,6 @@ Draft R-IDs, to be firmed up at promotion.
 
 ## Notes
 
-- Related: `issues/relay-shutdown-tail.md`, `issues/relay-test-strength.md`; `hs relay` (#82),
+- Related: `spec/relay-shutdown-tail/` (#115), `issues/relay-test-strength.md`; `hs relay` (#82),
   autoscaling per zone (#99) and across relay sites (#100), key hand-off (#80).
 - Found by: out-of-cycle; maintainer request, SC26, 2026-11-15.
