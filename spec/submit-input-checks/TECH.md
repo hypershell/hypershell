@@ -4,7 +4,7 @@ title: 'Submitted input is checked: # is part of the command, a group is an inte
   and a group below the reached one is refused'
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/submit-input-checks
 base: develop
 current_phase: done
@@ -178,11 +178,11 @@ phases:
     uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh" $mode || exit 1;
     done
 review:
-  last_reviewed_commit: 44e177b4
+  last_reviewed_commit: 3dd066a4
   verdict: changes-requested
-  blocked_reason: 'review cycle 1: F1 reached_group quadratic on SQLite (HIGH), F2
-    retry re-parse crash (MEDIUM); human gate (data/model.py)'
-  cycle: 1
+  blocked_reason: 'review cycle 2: G1 retry still crashes on a non-integer group held
+    in stored tags (MEDIUM); human gate (data/model.py)'
+  cycle: 2
 ---
 # TECH.md — Submitted input is checked: `#` is part of the command, a group is an integer, and a group below the reached one is refused
 

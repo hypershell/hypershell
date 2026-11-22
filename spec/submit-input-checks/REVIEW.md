@@ -180,3 +180,225 @@ CONFIRMED findings auto-loop to `hs-build`.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Review cycle 2 — changes-requested (2026-11-22)
+
+- **Reviewed commit:** 3dd066a4  ·  **Base:** develop (`origin/develop` at 6a0c28ea)  ·  **Date:** 2026-11-22
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3. One more build and review are left before the loop escalates to the human.
+- **Mode:** remediation of F1 and F2 graded, plus a fresh blind pass over the delta `44e177b4..3dd066a4`
+  and over the full diff wherever the delta touches it. The delta touches `Task.reached_group` and its
+  callers, the retry construction in `Task.__schedule_next_failed_tasks` and the `Task.new` it calls,
+  and the `--from-json` passage of `submit_desc.rst`. That scope was set by the foreman's brief.
+
+### Pre-flight
+
+- **Contract drift:** none since cycle 1. `GOAL.md` still has two commits on the branch, the shaping
+  commit (8e047b2f) and the GOAL gate (46dcb430).
+- **Contract readings given to the reviewer:**
+  - the GOAL-gate block with the maintainer's C4 and C6;
+  - plan-gate D1–D9, and the cycle-1 acceptance of `reached_group(in_flight=False)`;
+  - the review-cycle-1 rulings: the scalar-subquery pass start; retries copy group and tags without
+    re-parsing; the accepted retry window; D2 in the release note.
+- **Invariants:** graded against the base copies (`git show origin/develop:…`) of
+  `.agents/factory/invariants.md` and `AGENTS.md`.
+- **Merge status:**
+  - Develop: `origin/develop` is still 6a0c28ea after a fresh fetch. The branch is 19 ahead and
+    0 behind, and `git merge-tree` is clean.
+  - #117: `origin/fix/config-set-and-unread` is unchanged at 28117f27 and has not landed on develop.
+    `git merge-tree --write-tree HEAD origin/fix/config-set-and-unread` is clean (tree 747da2b0).
+- **Disclosure:** the orchestrator found G1 by reading the code before the reviewer returned, and
+  the brief told the reviewer "`hs update` can write tags". The reviewer's N1 therefore confirms G1
+  by its own executed drives; it is not an independent discovery.
+
+### Verification run
+
+- **Whole suite (SQLite, serial, PostgreSQL unset):** **3727 passed, 186 skipped** in 26 min 17 s
+  (`pytest -q -p no:cacheprovider tests`, Python 3.14).
+- **PostgreSQL-aware files** (`HS_TEST_POSTGRES` set, `HS_TEST_TIMESCALE` empty): **391 passed,
+  6 skipped** in 5 min 46 s. The files: test_command_hash, test_group_integer, test_group_stream,
+  test_reached_group, test_resubmit_lower_group, test_submit, test_groups, test_zone_postgres,
+  test_contended_write, test_server_initdb, test_writeback_postgres, test_data/test_model and
+  test_group_order.
+- **Docs:** `sphinx-build -W --keep-going -q -E -b html docs …` (Python 3.12, docs group) exits 0
+  with no warnings.
+- **Red check:** the four new tests run against the 44e177b4 source (`PYTHONPATH` set to a
+  `git archive` of it) give **4 failed**. The scale test fails by its 10 s bound, and the three
+  retry tests fail by assertion (exit 5, or the command cut to `false` in group 3). All four pass on
+  HEAD. Against the base source, `test_cluster_json_retry_keeps_tags` fails too (exit 5, `ValueError:
+  Tag value must only contain…`).
+- **Reviewer's targeted runs:**
+  - the four new tests on HEAD, c1 and base;
+  - test_reached_group, test_group_integer and test_retry_gate with PostgreSQL: 161 passed, 1 skipped;
+  - test_contended_write, test_model and test_group_order: 67 passed, 1 skipped;
+  - test_resubmit_lower_group and test_group_stream: 23 passed;
+  - the docs build, exit 0.
+- **Process and database hygiene:** every server, cluster and client started was stopped by its
+  recorded PID or process group. Every scratch PostgreSQL database (`rv2o_*` and `rv2r_*`) was
+  dropped. The out-of-sandbox `ps` check shows none left.
+
+### Remediation of cycle 1
+
+**F1 — fixed.**
+- **Results identical.** The orchestrator's randomized comparison of HEAD's `reached_group` with
+  the 44e177b4 CTE form, both run in one process with both `in_flight` values:
+  - SQLite: 1500 tables, text and real groups included, no mismatch;
+  - PostgreSQL: 1000 tables, no mismatch.
+  - The reviewer's 10 edge scenarios and 400 random tables per dialect, 820 comparisons each, also
+    gave 0 mismatches.
+- **The cycle-1 drive** (a 10k-line file, then `hs submit -- echo again`): HEAD 0.37 s, c1 8.43 s,
+  base 0.38 s. The reviewer measured 0.4, 8.7 and 0.4 s.
+- **SQLite at scale (HEAD, in-process):**
+  - The orchestrator's four table shapes at 10k, 20k, 50k and 100k rows: at most 58 ms per call at
+    100k. Growth is linear.
+  - The plan is `SCALAR SUBQUERY 1/2/3`, each one search of `task`, run once.
+  - The reviewer measured the c1 form at 4–8 s per call at 10k rows and 15–33 s at 20k, and HEAD at
+    about 0.49 s at 1M.
+- **PostgreSQL:**
+  - 100k rows: HEAD 1–29 ms, c1 6–61 ms.
+  - 1M rows, mixed shape, alternating calls: HEAD 10–195 ms, c1 380–778 ms.
+  - All-finished table, where the pass start is NULL: HEAD 234–260 ms, c1 143–153 ms
+    (orchestrator). The reviewer measured 0.67–0.79 s against 0.15 s, and at 3M rows about 2.0 s
+    against 0.42 s.
+- **The bound test** `test_reached_group_at_scale` is red on c1 and green on HEAD; the read takes
+  milliseconds against a 10 s bound.
+
+**F2 — fixed as ruled, with a residual path (G1).**
+- The cycle-1 drive now exits 0. The retry row keeps `false # HYPERSHELL: group:x` in group 0,
+  attempt 2, linked by `previous_id`. The first row is `retried` and names the retry as `next_id`.
+- **Other input routes, by the orchestrator:**
+  - `hs submit --template '{} # HYPERSHELL: group:x'` and `hs cluster --restart -r 1`: HEAD keeps the
+    command and group 0, exit 0. c1 exits 5.
+  - `--from-json` in two groups with `--eager -r 2`: the retries stay in group 0 with their command.
+    The group then fails permanently and halts group 1, which is the documented group gate.
+- **Other input routes, by the reviewer:** file, file with `--eager`, stdin to `hs cluster`,
+  arguments, `--template` and `--from-json`. Every retry kept its args, group and fingerprint. The
+  `retried`, `next_id` and `previous_id` chain was consistent on 4 databases.
+- **The residual path:** a retry still takes a `group` from the failed task's stored tags and checks
+  it. That is G1.
+
+**Builder deviations (TECH, review cycle 1 remediation):**
+- **`strict_tag=False` on the retry: accepted.** `strict_tag` only gates `ensure_valid_tag` on the
+  `tag` argument of `Task.new`. The retry at `model.py:1010` is the only caller the delta changed:
+  - Every first-submission caller (`submit.py:241/257/563/587/1765`, `task.py:114/445`) is unchanged.
+    The JSON path was already relaxed on base.
+  - A retry only copies tags that were checked when they were stored: strictly for inline tags,
+    `-t` and `hs update`, relaxed for JSON.
+  - It fixes a pre-existing crash. On base, the retry of a `--from-json` task whose tag value holds a
+    space exits 5, as shown in the red check above. The ruling's "copies the failed task's tags"
+    covers it.
+- **Three InitPlans on PostgreSQL: accepted.** Results are identical, and each InitPlan runs at most
+  once. The cost is equal or lower in every shape measured except a table with every task finished,
+  which is linear and under a second at 1M rows (see *Triaged*).
+- **The retry sentence in the docs: accepted.** `submit_desc.rst:57-63` says, with its own
+  `versionchanged:: 2.9.0`, that a retry runs the stored command in the task's group with its tags.
+  The docs build is clean. The sentence is wrong only in G1's case; a fix to G1 makes it true.
+
+### Requirement → evidence matrix (cycle 2)
+
+| R-ID | Delta | Verified how | Status |
+|------|-------|--------------|--------|
+| R1, R2 | untouched | Not re-graded. Retries now keep `#` and marker text on every route (drives above). | ✅ (cycle 1) |
+| R3 | retry construction | Submission is unchanged. The retry no longer re-reads the command's marker text, but it still checks a `group` held in the stored tags (G1). | ⚠️ G1 |
+| R4, R5 | untouched | Not re-graded. | ✅ (cycle 1) |
+| R6, R7 | `reached_group` | Values identical on both dialects (randomized and edge scenarios). Cost is linear: 58 ms or less at 100k on SQLite, and under a second at 1M on PostgreSQL. The PostgreSQL files pass. | ✅ |
+| R8 | two test files | The four new tests are red on 44e177b4 and green on HEAD. A per-row pass start or a re-parsing retry would fail them. Both are SQLite-only, as the rulings ask. No test covers G1. | ✅ (G1 needs one) |
+| R9 | `submit_desc.rst` | The retry passage has `versionchanged:: 2.9.0`, and the build is clean under `-W`. The retry window is documented twice in `task_groups_alt.rst`. `RELEASE-NOTE.md` names D2 (not graded). | ✅ (sentence wrong only in G1's case) |
+
+Unmapped changes in the delta: none. Every change maps to the F1 or F2 ruling.
+
+### Findings
+
+#### G1 [MEDIUM/CONFIRMED] A retry still crashes the run when the failed task's stored tags hold a non-integer `group`
+
+- **Where:**
+  - `src/hypershell/data/model.py:612`:
+    `other['group'] = ensure_group(tag.pop('group')) if 'group' in tag else group`
+  - It is reached from the retry construction at `model.py:1010-1020` (`tag=task.tag`,
+    `group=task.group`).
+- **Failure scenario:**
+  - `hs update group:x` is the tag form, documented as "tag KEY:VALUE". It writes `{"group": "x"}`
+    into a task's tags, passing `ensure_valid_tag`.
+  - When that task fails and is retried, `Task.new` pops the copied tag and checks it.
+    `TaskGroupError` is raised in the Scheduler, the sole `Task.next` caller, and the run dies.
+  - It dies again on every `--restart` with retries on, until the user removes the tag.
+  - The retry does not copy the task's group either: an integer tag (`hs update group:7`) moves the
+    retry to group 7 and drops the tag. That predates the diff, but it contradicts the F2 ruling
+    ("copies the failed task's group and tags") and the new docs sentence.
+- **Evidence (orchestrator):**
+  - The drive, in a throwaway site:
+
+    ```
+    hs submit -- false
+    hs update group:x -R -f
+    hs cluster --restart --max-retries 1 -N1 --no-tls -H 127.0.0.1 -p $PORT
+    ```
+
+  - HEAD and 44e177b4: exit 5, `CRITICAL … EOFError`, and no retry row.
+  - Base on SQLite: exit 0, with a retry row `false` in the text group `x`, attempt 2.
+  - In-process on HEAD, `Task.next(limit=10, attempts=2)` on that failed row raises
+    `TaskGroupError: task group must be an integer, not "x"`.
+  - PostgreSQL, same drive: HEAD exits 5 the same way. Base also exits 5, with `DataError: invalid
+    input syntax for type integer: "x"` from the Scheduler's insert.
+- **Evidence (reviewer, N1):**
+  - The same drive with a group-1 task waiting: `echo later` never runs, and every later `--restart`
+    exits 5 in 0.4 s with `CRITICAL [hypershell.cluster] TaskGroupError`.
+  - `hs server --restart -r 1` with a client exits 5 with `CRITICAL [hypershell.server]
+    TaskGroupError`.
+  - In-process, HEAD and c1 raise for the tag values `"x"`, `1.5` and `""` on both dialects.
+  - Base stores them on SQLite. On PostgreSQL, base refuses `x` and `""` at insert and stores `1.5`
+    as 2.
+- **Predates the diff?**
+  - No, on SQLite for every non-integer value, and on PostgreSQL for `1.5`. On PostgreSQL, base
+    already crashed for `x` and `""`.
+  - It was introduced by the diff's R3 check in `Task.new` and is present at 44e177b4. The delta
+    rerouted the retry around the command's marker text but not around the stored tags.
+- **Why it is in scope:**
+  - It is the F2 class: a retry built from stored data raises in the scheduler.
+  - The cycle-1 ruling says a retry copies the failed task's group and tags and "the run goes on".
+  - The GOAL's non-goals keep rows already in a database unrefused, and the cycle is submit time
+    only.
+  - `issues/update-group-stores-text.md` covers only the field form, `group=`.
+  - It is not deferrable: no GOAL criterion requires keeping it, and it can be repaired this cycle.
+- **Touches invariant / requirement:**
+  - R3, the F2 ruling, and the R9 sentence at `submit_desc.rst:57-63`.
+  - No invariant is violated. The exception is raised while the retries are built, before any mark,
+    so no mark or retry row is written. The failed row stays unmarked and retryable, which keeps one
+    retry per failure (§3).
+  - `data/model.py` is high-blast-radius.
+- **Remediation:** for `hs-build` to design. It needs a test red on 3dd066a4, in the style of the F2
+  tests.
+
+### Triaged, not findings
+
+- **PostgreSQL cost on an all-finished table** (reviewer N2, which it graded LOW/CONFIRMED). Not a
+  finding: it is a performance difference with identical results, and it is linear and below a
+  second at 1M rows. The rubric's scope is correctness. F1 was a finding because its cost was
+  quadratic: minutes per `hs submit` at 100k rows on SQLite.
+  - Cause: with the scalar subquery, PostgreSQL rewrites `max("group")` as a `Limit` over
+    `Index Scan Backward using index_tasks_unscheduled`. When the pass start is NULL, no row passes
+    the filter and the whole index is walked.
+  - Measured at 1M rows: 0.23–0.26 s (orchestrator) or 0.67–0.79 s (reviewer) on HEAD, against
+    0.14–0.16 s on c1. At 3M rows: about 2.0 s against 0.42 s (reviewer).
+  - In other shapes HEAD is as fast as c1 or faster.
+  - It is paid once per database-mode `hs submit`, `hs cluster FILE` or `hs server FILE`. Base does
+    not run this query at all.
+  - For the human: whether a 2.9.x follow-up should make the all-finished case cheap, for example by
+    reading the pass start first and returning None when it is NULL.
+
+### Outside the diff (not graded)
+
+- **A retry does not carry `cores`, `memory` or `timeout`** (reviewer). The retry call does not
+  pass those columns, and `Task.new` takes them from the tags, which no longer hold them after the
+  first submission. So a retried task runs with no timeout. This is the same on base and HEAD. By
+  the code at `model.py:1010-1020` and the reviewer's drive (a file line `false  # HYPERSHELL:
+  timeout:30 cores:1 memory:1MB` with `-r 1`). A candidate seed for the foreman; not graded here.
+
+### Human-gate triggers
+
+- **Triggered.** G1 is CONFIRMED in `data/model.py`, a high-blast-radius file.
+  - It violates no security or DB-lifecycle invariant: the `CANCEL_STATUS` filters are unchanged,
+    and no mark or retry row is written on the failing path.
+  - Cycle 1's trigger was discharged by the maintainer's sign-off on the review-cycle-1 rulings. This
+    one needs a new sign-off before `/hs-build` remediates G1 and review cycle 3, the last before
+    escalation, grades it.
