@@ -109,6 +109,9 @@ Options
     This is used by both the `submit` thread and forwarded to each `client`. The `client` collector
     thread that accumulates finished task bundles to return to the `server` will push out a bundle
     after this period of time regardless of whether it has reached the preferred bundle size.
+    A client with nothing left to run returns what it holds at once. The `submit` thread does not:
+    it checks this period only when another task arrives, so it holds tasks until a bundle is
+    full, a task arrives after the period, or the input ends.
 
     See also ``--bundlesize``.
 
@@ -123,7 +126,8 @@ Options
     This controls how frequently the scheduler checks the database for new tasks when idle.
     Lower values (e.g., 1-2 seconds) provide faster responsiveness but may increase database
     query load. Higher values (e.g., 10-30 seconds) reduce query frequency, useful for
-    workflows with infrequent task submission.
+    workflows with infrequent task submission. The result that finishes a run ends the
+    scheduler's wait at once.
 
 ``-r``, ``--max-retries`` *NUM*
     Auto-retry failed tasks (default: 0).

@@ -69,4 +69,14 @@ Description
    ``-P``/``--period`` and ``autoscale.period`` must be greater than zero; zero or a negative
    value is refused.
 
+.. versionchanged:: 2.9.0
+   Each client with nothing left to run (no task running and none waiting to start) returns the
+   results it holds at once, instead of waiting out ``-w``/``--bundlewait``. With work in hand it
+   bundles as before.
+
+.. versionchanged:: 2.9.0
+   The result that finishes a run ends the scheduler's wait at once: a server whose input has ended
+   no longer waits out its back-off (up to ``-Q``/``--poll``) after the last task. With
+   ``--forever`` it keeps waiting, and nothing else about scheduling changes.
+
 .. include:: ../_include/cluster_help.rst

@@ -1,0 +1,15 @@
+# relay-shutdown-tail: regression tests that must fail on the base build (f3fb4dd2) for what they check.
+# Checked by the landed checker, read-only, from the repository root:
+#   RED_LIST=spec/relay-shutdown-tail/drive/red.txt RED_BASE_REV=f3fb4dd2 sh spec/relay-hardening/drive/red_check.sh
+# Each line is a pytest node id; ` raises=NAME` means RED by that exception rather than an assertion.
+# Tests of new names (TaskCount, Receiver(scheduler=...), client_environments) fail on the base by their
+# absence, not by the defect, and are not listed: the checker would call them NOT RED.
+
+# R1: a client with nothing left to run returns a partial bundle at once (bundle of 8, wait 60 s, 3 tasks).
+tests/test_client_return.py::test_idle_client_returns_what_it_holds
+
+# R3: the result that finishes a run ends a back-off grown to the full poll (600 s; at least 8 s).
+tests/test_finish_wake.py::test_finishing_result_ends_a_long_back_off
+
+# R7: AccessDenied from one process's environment read propagates out of scan_site on the base.
+tests/test_relay_workload.py::test_scans_skip_a_process_whose_read_is_refused[AccessDenied] raises=AccessDenied

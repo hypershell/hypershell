@@ -377,7 +377,7 @@ scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and
 its laptop evidence (`relay-hardening` landed, #103)*
-**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
+**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: adopted:relay-shutdown-tail*
 
 ## `rotatedb` lost-update window
 
@@ -632,8 +632,8 @@ small test-side fixes.
 
 *Target: 2.9.x (the relay site-key test: 2.9.0, with `relay-shutdown-tail`) · Horizon: near-term,
 small · Depends on: — · Refs: CI on #104, #107 and #110*
-**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md),
-[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: unshaped*
+**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md) · *status: unshaped*;
+[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: adopted:relay-shutdown-tail*
 
 ## `pytest -n auto` fails at collection
 

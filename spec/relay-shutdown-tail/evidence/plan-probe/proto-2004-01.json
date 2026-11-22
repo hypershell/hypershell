@@ -1,0 +1,74 @@
+{
+  "commit": "6f4e809f",
+  "complete": true,
+  "direct": {
+    "completed": 2004,
+    "last_task": "01a1ff79-e104-7e02-8a70-c28685643251",
+    "site": "<scratch>/relay-throughput-direct-hrv48o4r",
+    "status": 0,
+    "t_exit": 1795287557.265,
+    "t_last": 1795287556.584263,
+    "tail": 0.681,
+    "tail_poll": 1.06,
+    "wall": 19.284
+  },
+  "kind": "relay-hardening-tail",
+  "label": "proto-2004",
+  "level": "TRACE",
+  "r8_size": false,
+  "relay": {
+    "completed": 2004,
+    "counts": {
+      "relay": {
+        "CRITICAL": 0,
+        "ERROR": 0,
+        "WARNING": 2
+      },
+      "server": {
+        "CRITICAL": 0,
+        "ERROR": 0,
+        "WARNING": 0
+      }
+    },
+    "last_task": "01a1ff7a-2bb7-70c1-b62a-0a7f046e9810",
+    "segments": {
+      "s1": 0.017,
+      "s2": 0.048,
+      "s3": 0.024,
+      "s4": 0.002,
+      "s5": 0.0,
+      "s6": 0.001,
+      "s7": 0.946,
+      "s8": 0.501,
+      "s9": 0.004
+    },
+    "site": "<scratch>/relay-throughput-relay-ftnwl220",
+    "stamps": {
+      "collected": 1795287576.882,
+      "exit": 1795287578.408,
+      "final": 1795287578.404,
+      "heard": 1795287576.957,
+      "landed": 1795287576.954,
+      "last": 1795287576.864737,
+      "returned": 1795287576.93,
+      "scheduler": 1795287576.956,
+      "signal": 1795287576.956,
+      "site_stop": 1795287577.903
+    },
+    "status": 0,
+    "t_exit": 1795287578.408,
+    "t_last": 1795287576.864737,
+    "tail": 1.543,
+    "tail_poll": 2.076,
+    "wall": 19.779
+  },
+  "run_id": "proto-2004-01",
+  "scrubbed": 0,
+  "sizes": {
+    "clients": 4,
+    "sleep": "0.2",
+    "tasks": 2004,
+    "threads": 8
+  },
+  "src_changed": false
+}

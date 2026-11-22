@@ -32,4 +32,9 @@ Description
    ``--delay-start``, where a leading ``-`` still asks for a random delay (e.g.,
    ``--delay-start=-10m``).
 
+.. versionchanged:: 2.9.0
+   A client with nothing left to run (no task running and none waiting to start) returns the results
+   it holds at once, instead of waiting out ``-w``/``--bundlewait``. With work in hand it bundles as
+   before.
+
 .. include:: ../_include/client_help.rst
