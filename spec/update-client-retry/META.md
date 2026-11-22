@@ -69,3 +69,10 @@
 - **Skill cause:** Step 6 requires "a real `verify:` command" and the brief asks for every verify to be dry-run, but the skill gives no procedure for the green side of a phase that has no code yet, and its `uv run`-based examples break in a scratch tree.
 - **Recommended fix:** Add the scratch-`src` emulation to Step 6 (export the tree with `git archive`, apply the design to the copy, put its `src` first on `PYTHONPATH`, run the drive through `sh` and the docs build with a scratch venv), and require both outcomes (red on base, green on the emulation) in `TECH.md`'s plan-time evidence.
 - **Confidence:** high · **Effort:** small
+
+## F8 — The whole-suite gate was dry-run without the PostgreSQL environment it requires
+`origin=hs-build:P5 severity=medium category=instruction status=open target=.claude/skills/hs-plan/SKILL.md`
+- **What happened:** P5's verify requires `HS_TEST_POSTGRES` and then runs the whole suite. With it set, as TECH says, `tests/test_upgrade_postgres.py` (28 cases: `HS_TEST_POSTGRES_TEMPLATES` unset, templates need Docker) and two `tests/test_timescale.py` cases (the local server has TimescaleDB while `HS_TEST_TIMESCALE` is empty) fail, on `1f688c7c` too. The plan-time evidence ran the whole suite sandboxed with no PostgreSQL, where those tests skip, so the gate was never proved runnable as written.
+- **Skill cause:** `hs-plan` Step 6 asks for every verify to be dry-run but does not require the dry run to use the verify's own environment preconditions (here `HS_TEST_POSTGRES`), and TECH's "Running the verify commands here" names no setting for the suite's other PostgreSQL knobs (`HS_TEST_POSTGRES_TEMPLATES`, `HS_TEST_TIMESCALE`).
+- **Recommended fix:** Require the whole-suite gate's dry run under the exact environment the verify asserts, and have TECH list every `HS_TEST_*` variable the suite reads with its value on the build host (or deselect, by name in the verify, the tests that host cannot run).
+- **Confidence:** high · **Effort:** small
