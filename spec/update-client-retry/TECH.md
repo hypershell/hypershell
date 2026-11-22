@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/update-client-retry
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -41,7 +41,7 @@ phases:
 - id: P2
   name: hs update refuses --delete with a change and the single-task form with an
     action option (R1, R2, their docs)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -277,20 +277,20 @@ the touched and neighbouring test files passes.
 **Goal:** `--delete` with a change, and the single-task form with an action option or `--remove-tag`,
 exit 2 before the database is opened; the `hs update` page says so.
 
-- [ ] `task.py` `TaskUpdateApp.run`: PLAN §2.1 — `legacy` computed once; the R2 refusal
+- [x] `task.py` `TaskUpdateApp.run`: PLAN §2.1 — `legacy` computed once; the R2 refusal
       (`Cannot use {options} with the single-task form ID FIELD VALUE`, options in the order
       `--cancel`, `--revert`, `--delete`, `--remove-tag`, joined by `, `); else the R1 refusal
       (`Cannot use --delete with changes (given: {words})`, positionals as typed, then `--remove-tag`
       and its names); then `ensuredb()` and the existing routing on `legacy`. `ArgumentError` from
       `cmdkit.cli` (already imported).
-- [ ] `UPDATE_HELP` (`task.py`), `docs/_include/task_update_help.rst` (the `--delete` entry and
+- [x] `UPDATE_HELP` (`task.py`), `docs/_include/task_update_help.rst` (the `--delete` entry and
       "Legacy Mode"), `docs/_include/task_update_desc.rst` (the `--delete` paragraph and the
       single-task paragraph): the sentences "``--delete`` takes no change: given a ``FIELD=VALUE``, a
       ``KEY:VALUE`` or ``--remove-tag``, ``hs update`` exits with status 2 before it counts or asks,
       and deletes nothing." and "The single-task form takes no ``--cancel``, ``--revert``,
       ``--delete`` or ``--remove-tag``; given one, it exits with status 2 and writes nothing."
       (plain text in `UPDATE_HELP`; wrap so each verify phrase stays on one line).
-- [ ] `docs/cli/task_update.rst`: one `.. versionchanged:: 2.9.0` after the existing 2.9.0 block:
+- [x] `docs/cli/task_update.rst`: one `.. versionchanged:: 2.9.0` after the existing 2.9.0 block:
       both refusals and what happened before (deleted with the changes ignored; wrote the field and
       ignored the option).
 - **Verify:** see frontmatter: the two test files and `test_main.py`; drive `update`; the phrases in

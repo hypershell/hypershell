@@ -33,6 +33,9 @@ Options
     Deleting a task fully drops the record from the database.
     All task information will be lost and not recoverable.
 
+    ``--delete`` takes no change: given a ``FIELD=VALUE``, a ``KEY:VALUE`` or ``--remove-tag``,
+    ``hs update`` exits with status 2 before it counts or asks, and deletes nothing.
+
 ``--remove-tag`` *TAG...*
     Strip the specified `tag` from task records.
 
@@ -100,6 +103,8 @@ Legacy Mode
 
 In previous releases of the software the update command had the following signature.
 Executing the command with these three positional arguments is still valid.
+The single-task form takes no ``--cancel``, ``--revert``, ``--delete`` or ``--remove-tag``;
+given one, it exits with status 2 and writes nothing.
 
 ID
     Unique UUID.
