@@ -4,11 +4,11 @@ title: 'Submitted input is checked: # is part of the command, a group is an inte
   and a group below the reached one is refused'
 kind: fix
 appetite: big
-status: in_review
+status: blocked
 branch: fix/submit-input-checks
 base: develop
 current_phase: done
-last_updated: '2026-11-21'
+last_updated: '2026-11-22'
 phases:
 - id: P1
   name: 'Tests first: merge develop; the five test files and two flipped tests; the
@@ -174,10 +174,11 @@ phases:
     do .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh"
     $mode || exit 1; done
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 44e177b4
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: F1 reached_group quadratic on SQLite (HIGH), F2
+    retry re-parse crash (MEDIUM); human gate (data/model.py)'
+  cycle: 1
 ---
 # TECH.md — Submitted input is checked: `#` is part of the command, a group is an integer, and a group below the reached one is refused
 

@@ -46,3 +46,17 @@
 - **Confidence:** high · **Effort:** small
 
 **What worked well:** Step 3's numbered research paths let five briefs run in parallel with no write conflicts, and the digest step settled the briefs' disagreements in one place.
+
+## F5 — Step 2 hands over "the full text of `invariants.md`" without saying which copy, when the branch edits it · seen again (other cycles)
+`origin=hs-review:step-2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** this diff edits §3 of `.agents/factory/invariants.md` and `AGENTS.md`, naming its own `ensure_group`, `reached_group` and gate split. The reviewer was given the base copies only because the brief said so.
+- **Skill cause:** Same as `spec/relay-topology/META.md` F6 and `spec/zone-autoscale/META.md` F4. The step is silent on the copy, so the branch's own rule could become the yardstick for its code. That would weaken blind-review integrity, which is why this finding is severity medium.
+- **Recommended fix:** As there: Step 2 passes `git show {base}:.agents/factory/invariants.md` and `git show {base}:AGENTS.md`, and grades the branch's edits to them as diff.
+- **Confidence:** high · **Effort:** small
+
+## F6 — Binding plan-gate rulings live in `PLAN.md`, which Step 2 forbids passing to the blind reviewer · seen again (other cycles)
+`origin=hs-review:step-2 severity=medium category=missing-guidance status=open target=.agents/skills/hs-review/SKILL.md`
+- **What happened:** plan-gate rulings D1–D9 change how R5, R7, R3 and R4 read: the all-refused stream hang, old files refused on `--restart`, 32-bit groups, `--template`, `-t` in queue mode and JSON numbering from 0. They are recorded only at the end of `PLAN.md`. The orchestrator restated them in the reviewer's prompt as the brief directed, although Step 2 lists only `GOAL.md`, the diff, the invariants and the rubric.
+- **Skill cause:** Same as `spec/env-config-keys/META.md` F6 and `spec/cluster-launch-followups/META.md` F6. No skill says where a gate ruling that changes a contract reading must live for the blind pass to see it.
+- **Recommended fix:** As there: the plan gate appends contract-reading rulings to `GOAL.md`'s ruled block (or a `RULINGS.md` the reviewer may read), and Step 2 names that block as an input.
+- **Confidence:** high · **Effort:** small
