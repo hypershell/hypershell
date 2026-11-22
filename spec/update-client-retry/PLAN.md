@@ -317,3 +317,20 @@ Foreman, gate judge under the maintainer's mandate. Approved as planned.
 - **Absurd input:** the review rubric's rule applies. Ranges belong to `bounded-inputs`; do not add
   handlers for absurd values here.
 - The `run_local` fresh-SQLite failure is filed as a seed by the foreman.
+
+## P5 gate ruling (2026-11-22)
+
+Foreman, under the maintainer's mandate. P5's first run failed 30 tests, all environmental and
+identical on `1f688c7c`. Twenty-eight need PostgreSQL upgrade templates built with Docker, which this
+host lacks. Two expect `HS_TEST_TIMESCALE` to match the local TimescaleDB 2.32. P5 runs the way
+#118's P8 did:
+
+- the whole suite serially with `HS_TEST_POSTGRES` unset;
+- then the PostgreSQL-aware files with it set, excluding `test_upgrade_postgres.py` and the two
+  TimescaleDB version-match tests, which CI covers;
+- then the rest of the gate as written.
+
+Retune the verify through `set_phase.py` and record it. Before that, merge `develop` (#118 landed
+as `2af6a734`). Resolve the retry block as `cls.new_retry(task)`, keep both sides' prose and docs
+markers, add "and its cores, memory and walltime" to `submit_desc.rst`, and run #118's three retry
+tests on both dialects.
