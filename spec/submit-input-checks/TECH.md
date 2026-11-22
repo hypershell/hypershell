@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P7
+current_phase: P8
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -117,7 +117,7 @@ phases:
 - id: P7
   name: Docs (versionchanged 2.9.0), AGENTS.md and invariants.md, the release-note
     draft
-  status: in_progress
+  status: done
   satisfies:
   - R9
   depends_on:
@@ -603,14 +603,16 @@ P7 and P8 gates with `set_phase.py --verify`, and closed each again after its ga
 - **Verified, P3 (2026-11-22):** suites 281 passed (PostgreSQL on); guards 19 passed;
   `input_drive.sh group` PASS 6 of 6. The three retry tests fail on `44e177b4` by assertion (exit 5
   on the text group and on the relaxed tag; the command cut to `false` on the integer group).
-- [ ] **Retry window (P7).** `task_groups_alt.rst` already says it twice: "a failure counts as
+- [x] **Retry window (P7).** `task_groups_alt.rst` already says it twice: "a failure counts as
       finished unless its retry has been created" and, among the under-estimates, "while a failure
       waits for its retry to be created". No change.
-- [ ] **Docs and release note (P7).** `submit_desc.rst`'s `--from-json` paragraph says `args` is taken
+- [x] **Docs and release note (P7).** `submit_desc.rst`'s `--from-json` paragraph says `args` is taken
       as written and a retry runs that command in the task's group with its tags, with its own
       `versionchanged:: 2.9.0`. `RELEASE-NOTE.md` names D2 (an old file refused on `--restart` or
       `--update` when a re-identified line is below the reached group; an old failed cut task) and
       the retry fix.
+- **Verified, P7 (2026-11-22):** help and completion tests 66 passed; html and man builds with `-W`
+  clean; every grep holds, the two new ones included.
 - [ ] **Red list for this cycle.** [`drive/red-cycle1.txt`](drive/red-cycle1.txt) (4 ids) is checked
       against `44e177b4` by the landed `red_check.sh`; P8's gate runs it after the `dfdbaed5` list.
 - **Verified, P5 (2026-11-22):** suites 155 passed, 1 skipped (PostgreSQL on); guards 19 passed;

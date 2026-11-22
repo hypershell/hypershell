@@ -54,7 +54,13 @@ must itself be the list, and a ``FILE`` of ``-`` reads from ``<stdin>``. Each ta
 object's keys become named ``{key}`` template fields (and task tags), and an optional
 ``args`` key provides the base command (reachable as ``{}``). All ``{key}`` fields are
 validated against every task object up front, so submission is rejected before any task
-is committed if a field is missing.
+is committed if a field is missing. The ``args`` value is taken as written: ``#`` and
+``# HYPERSHELL:`` text in it are part of the command, and a failed task's retry runs that same
+command in the task's group, with its tags.
+
+.. versionchanged:: 2.9.0
+   A retry runs its task's command as stored, in the task's group and with its tags; earlier
+   releases read the command of a ``--from-json`` task again for its retry, cutting it at a ``#``.
 
 Re-submitting a named task file is guarded to prevent accidental double submission. Each
 named file is recorded as a *source* (its absolute path, a content fingerprint, and the
