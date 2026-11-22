@@ -1,0 +1,9 @@
+# submit-input-checks, review cycle 2: regression tests that must fail on the reviewed build (3dd066a4)
+# for what they check. Checked by the landed checker, read-only, from the repository root:
+#   RED_LIST=spec/submit-input-checks/drive/red-cycle2.txt RED_BASE_REV=3dd066a4 sh spec/relay-hardening/drive/red_check.sh
+# G1: a retry runs in its failed task's group column; a `group` tag written by `hs update` is copied,
+# not read (the reviewed build exits 5 on a text tag, and moves the retry to group 7 on an integer one).
+tests/test_group_integer.py::test_cluster_retry_ignores_group_tag[sqlite-text]
+tests/test_group_integer.py::test_cluster_retry_ignores_group_tag[sqlite-integer]
+pg:tests/test_group_integer.py::test_cluster_retry_ignores_group_tag[postgres-text]
+pg:tests/test_group_integer.py::test_cluster_retry_ignores_group_tag[postgres-integer]

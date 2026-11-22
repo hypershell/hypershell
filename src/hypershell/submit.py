@@ -53,6 +53,8 @@ import functools
 import threading
 from enum import Enum
 from datetime import datetime
+from argparse import ArgumentTypeError
+from dataclasses import dataclass
 from queue import Queue, Empty as QueueEmpty, Full as QueueFull
 from multiprocessing import AuthenticationError
 
@@ -76,13 +78,17 @@ from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
+                                   TaskGroupInfo, TaskGroupError, ensure_group, parse_group, tag_text,
                                    serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 'json_source_key',
-           'validate_json_expansion',
-           'GatedSource', 'source_fingerprint_and_count', 'apply_source_gate',
+           'validate_json_expansion', 'validate_json_groups',
+           'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint', 'is_file_input',
+           'source_name',
+           'source_fingerprint_and_count', 'apply_source_gate', 'decide_source_gate', 'GateDecision',
+           'task_fingerprints', 'json_fingerprints', 'refuse_below_reached_group',
            'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
@@ -127,41 +133,181 @@ class GatedSource:
         return iter(self.iterable)
 
 
+def is_file_input(source: Iterable[str | dict]) -> bool:
+    """True if `source` is a whole task file: a seekable file (not standard input), or a list or tuple.
+
+    Standard input, pipes, FIFOs, process substitution and other iterables are streams, which
+    are scheduled as they arrive.
+    """
+    # A gated source carries the stream it wraps as `iterable`.
+    inner = getattr(source, 'iterable', source)
+    if isinstance(inner, (list, tuple)):
+        return True
+    if isinstance(inner, io.IOBase) and inner is not sys.stdin:
+        try:
+            return inner.seekable()
+        except (OSError, ValueError):
+            return False
+    return False
+
+
+def source_name(source: Iterable[str | dict]) -> str:
+    """Name of a task source for messages: a gated source's name, ``<stdin>``, a file's name, or ``<iterable>``."""
+    if isinstance(source, GatedSource):
+        return source.name or '<iterable>'
+    elif source is sys.stdin:
+        return '<stdin>'
+    elif isinstance(source, io.TextIOWrapper):
+        return source.name
+    else:
+        return '<iterable>'
+
+
+def split_task_line(line: str, template: Template) -> Tuple[str, str, Dict[str, JSONData]]:
+    """Split a raw text `line` into its command, the command expanded by `template`, and its inline tags.
+
+    The raw line is split before the template is applied, so a comment line, a blank line and a
+    tag-only line are never tasks, and a ``#`` in the template text stays in the command. The
+    expanded command is empty for a line that is not a task.
+    """
+    command, inline_tags = Task.split_argline(str(line).strip())
+    return command, (template.expand(command).strip() if command else ''), inline_tags
+
+
 def line_is_task(line: str, template: Template) -> bool:
     """True if `line` yields a task under `template`.
 
-    A raw text line becomes a task iff, after template expansion and inline-comment
-    stripping, the command is non-empty. This mirrors the :class:`Loader`'s own
-    task/non-task split (blank, comment-only, and inline-tag-only lines are *not* tasks),
-    so an upfront count matches exactly what the Loader will submit.
+    This is the :class:`Loader`'s own task/non-task split (:func:`split_task_line`): blank,
+    comment and tag-only lines are not tasks, so an upfront count matches exactly what the
+    Loader will submit.
     """
-    args, _ = Task.split_argline(template.expand(str(line).strip()))
-    return bool(args)
+    return bool(split_task_line(line, template)[1])
+
+
+@dataclass
+class InputScan:
+    """What input read in full holds: its task count and the group of each task, in order.
+
+    The count is exactly the Loader's (:func:`line_is_task`). A task's group is its inline group,
+    else the group a tag-only line or the submission's tags set before it, else the submission's
+    default group (None in queue mode, where the server has no database to choose one).
+    """
+
+    count: int
+    groups: List[Optional[int]]
+
+
+def task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
+               tags: Optional[Dict[str, JSONData]] = None,
+               name: str = '<input>') -> Iterator[Tuple[str, str, Dict[str, JSONData]]]:
+    """Replay the Loader's line rules over `lines`: each task's command, expanded command and tags.
+
+    Lines are split as the Loader splits them (:func:`split_task_line`) and numbered from 1 as
+    physical lines. A tag-only line updates a running copy of `tags`, and only after its group is
+    accepted; a task's tags are the running tags with its inline tags over them. A group that is
+    not an integer raises :class:`~hypershell.data.model.TaskGroupError` naming the value as
+    written and ``{name}, line {n}``.
+    """
+    engine = Template(template)
+    running = dict(tags or {})
+    for number, line in enumerate(lines, start=1):
+        try:
+            command, args, inline_tags = split_task_line(line, engine)
+        except TaskGroupError as error:
+            raise error.at(f'{name}, line {number}') from error
+        if args:
+            yield command, args, {**running, **inline_tags}
+        elif not command and inline_tags:
+            running.update(inline_tags)
+
+
+def scan_task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
+                    group: Optional[int] = DEFAULT_TASK_GROUP, tags: Optional[Dict[str, JSONData]] = None,
+                    name: str = '<input>') -> InputScan:
+    """Check every line of input read in full before anything is written, and count its tasks.
+
+    The Loader's own line rules (:func:`task_lines`) are replayed over `lines`; a task's group is
+    its tags' group, else `group`. Nothing is read from or written to the database.
+    """
+    groups = [task_tags.get('group', group)
+              for _, _, task_tags in task_lines(lines, template=template, tags=tags, name=name)]
+    return InputScan(count=len(groups), groups=groups)
+
+
+def task_fingerprints(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
+                      group: Optional[int] = DEFAULT_TASK_GROUP,
+                      tags: Optional[Dict[str, JSONData]] = None) -> List[str]:
+    """The identity of each task in `lines`, in order, as the Loader builds it (see :meth:`Loader.load_line_task`)."""
+    return [Task.new(args=args, raw_args=command, parse_inline=False, group=group, tag=task_tags).fingerprint
+            for command, args, task_tags in task_lines(lines, template=template, tags=tags)]
+
+
+def json_record_tags(record: dict) -> Dict[str, JSONData]:
+    """The tags of a JSON task record: every key but ``args``, nested values serialized as JSON."""
+    return {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
+            for key, value in record.items() if key != 'args'}
+
+
+def json_fingerprints(records: List[dict], *, group: Optional[int] = DEFAULT_TASK_GROUP,
+                      tags: Optional[Dict[str, JSONData]] = None) -> List[str]:
+    """The identity of each JSON record's task, in order, as the Loader builds it (see :meth:`Loader.load_json_task`).
+
+    The identity is taken over the record's pre-template ``args``, so no template is needed.
+    """
+    return [Task.new(args=str(record.get('args', '')), raw_args=str(record.get('args', '')), group=group,
+                     tag={**(tags or {}), **json_record_tags(record)}, strict_tag=False,
+                     parse_inline=False).fingerprint
+            for record in records]
+
+
+def source_fingerprint(path: str) -> str:
+    """The content md5 of a named file, over its raw bytes (parsing-independent), read in chunks."""
+    digest = hashlib.md5()
+    with open(path, mode='rb') as raw_stream:
+        for chunk in iter(lambda: raw_stream.read(1 << 20), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def source_fingerprint_and_count(path: str, template: str = DEFAULT_TEMPLATE) -> Tuple[str, int]:
     """Read a named file upfront: content md5 (raw bytes) + task count.
 
-    The md5 is over the raw file bytes (parsing-independent). The count is taken over a
-    *text-mode* read — the same universal-newline decoding the Loader uses — replaying the
-    shared :func:`line_is_task` predicate, so blank/comment/inline-tag-only lines are
-    excluded and the recorded count matches exactly what the Loader will submit, for any
-    newline convention (LF, CRLF, or bare CR). Both reads stream (no whole-file buffering).
-    Callers must route only seekable, re-readable files here; non-seekable inputs (pipes,
-    FIFOs, piped ``/dev/stdin``) are handled upstream (streamed like ``<stdin>``), because a
-    second independent read would drain them.
+    The count is :func:`scan_task_lines` over a *text-mode* read, the same universal-newline
+    decoding the Loader uses, so it matches exactly what the Loader will submit for any newline
+    convention (LF, CRLF, or bare CR), and a group that is not an integer is refused first. Callers
+    must route only seekable, re-readable files here; non-seekable inputs (pipes, FIFOs, piped
+    ``/dev/stdin``) are handled upstream, because a second independent read would drain them.
     """
-    engine = Template(template)
-    digest = hashlib.md5()
-    with open(path, mode='rb') as raw_stream:
-        for chunk in iter(lambda: raw_stream.read(1 << 20), b''):
-            digest.update(chunk)
-    count = 0
-    with open(path, mode='r') as text_stream:  # text mode == the Loader's universal-newline split
-        for line in text_stream:
-            if line_is_task(line, engine):
-                count += 1
-    return digest.hexdigest(), count
+    with open(path, mode='r') as text_stream:
+        scan = scan_task_lines(text_stream, template=template, name=path)
+    return source_fingerprint(path), scan.count
+
+
+def read_in_full(stream: Iterable[str]) -> List[str]:
+    """Every line of `stream`, one element per physical line, read to its end before anything is inserted.
+
+    The read runs in a worker thread and the main thread waits for it in bounded steps
+    (:func:`~hypershell.core.thread.join_waking`), so a signal taken by any thread is still handled
+    while the input stays open. The lines are held in memory.
+    """
+    reader = StreamReader(stream)
+    reader.start()
+    join_waking(reader)
+    return reader.lines
+
+
+class StreamReader(Thread):
+    """Read a stream to its end in a dedicated thread."""
+
+    def __init__(self: StreamReader, stream: Iterable[str]) -> None:
+        """Initialize with the stream to read."""
+        super().__init__(name='hypershell-submit-reader')
+        self.stream = stream
+        self.lines: List[str] = []
+
+    def run_with_exceptions(self: StreamReader) -> None:
+        """Read every line."""
+        self.lines = list(self.stream)
 
 
 def _new_source_id(path: str, fingerprint: str, count: int) -> str:
@@ -196,16 +342,50 @@ def _warn_if_incomplete(source: Source, lineage: List[Source]) -> None:
                     f'{landed} of {source.task_count} tasks present (source {source.id})')
 
 
+@dataclass
+class GateDecision:
+    """The re-submission gate's decision for a named source, made before anything is written.
+
+    ``source_id`` is a prior source to reuse (a same-file ``--restart``), else None: a new
+    :class:`Source` row is recorded on :meth:`commit`. ``skip`` is the set of task identities
+    already present in the same-path lineage, which the :class:`Loader` drops (None: no de-dup).
+    """
+
+    path: str
+    fingerprint: str
+    count: int
+    source_id: Optional[str] = None
+    skip: Optional[set] = None
+
+    def commit(self: GateDecision) -> Tuple[str, Optional[set]]:
+        """Write the decision: record a new Source row unless a prior one is reused; return its id and the skip set."""
+        if self.source_id is None:
+            self.source_id = _new_source_id(self.path, self.fingerprint, self.count)
+        return self.source_id, self.skip
+
+
 def apply_source_gate(path: str, fingerprint: str, count: int, *,
                       repeat: bool, update: bool, restart: bool = False) -> Tuple[str, Optional[set]]:
-    """Decide whether to submit, de-dup, or refuse a named-file submission.
+    """Decide whether to submit, de-dup, or refuse a named-file submission, and record it.
 
-    Consults the :class:`Source` table for the file's ``(path, fingerprint)`` and returns
-    the ``source_id`` to stamp onto tasks plus an optional ``skip_fingerprints`` set — task
-    identities already present in the same-path lineage, which the :class:`Loader` drops for
-    de-dup. Raises :class:`~cmdkit.cli.ArgumentError` (→ ``exit_status.bad_argument``) on a
-    refusal, with an actionable message. Emits detection logging (prior source,
-    incomplete-prior warning, submit/de-dup intent, refusal reason).
+    The composition of :func:`decide_source_gate` and :meth:`GateDecision.commit`: returns the
+    ``source_id`` to stamp onto tasks plus an optional ``skip_fingerprints`` set.
+    """
+    return decide_source_gate(path, fingerprint, count, repeat=repeat, update=update, restart=restart).commit()
+
+
+def decide_source_gate(path: str, fingerprint: str, count: int, *,
+                       repeat: bool, update: bool, restart: bool = False) -> GateDecision:
+    """Decide whether to submit, de-dup, or refuse a named-file submission, writing nothing.
+
+    Consults the :class:`Source` table for the file's ``(path, fingerprint)`` and returns the
+    decision: a prior ``source_id`` to reuse or a new source to record on
+    :meth:`GateDecision.commit`, plus an optional ``skip`` set — task identities already present
+    in the same-path lineage, which the :class:`Loader` drops for de-dup. Raises
+    :class:`~cmdkit.cli.ArgumentError` (→ ``exit_status.bad_argument``) on a refusal, with an
+    actionable message. Emits detection logging (prior source, incomplete-prior warning,
+    submit/de-dup intent, refusal reason). Checks made between the decision and its commit can
+    still refuse with no Source row written.
 
     This is the shared gate for both entry points: ``hs submit`` calls it with
     ``restart=False``; ``hsx``/``hs cluster`` also passes ``restart``. Callers guarantee a
@@ -231,12 +411,12 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
     if repeat:
         # Brand-new source; submit everything even on an identical match.
         log.info(f'Submitting all {count} tasks from {path} as a new source (--repeat)')
-        return _new_source_id(path, fingerprint, count), None
+        return GateDecision(path, fingerprint, count)
     if update:
         # New source version; submit only identities absent from the same-path lineage.
         skip = Task.fingerprints_for_sources([source.id for source in lineage])
         log.info(f'Updating {path}: {len(skip)} task identity(ies) already present; submitting only new tasks')
-        return _new_source_id(path, fingerprint, count), skip
+        return GateDecision(path, fingerprint, count, skip=skip)
     if restart:
         # File-aware restart (cluster). Reusing the matched source keeps requeues
         # idempotent (no row/count drift); the server's revert-interrupted flow re-runs any
@@ -244,12 +424,12 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
         if match:
             skip = Task.fingerprints_for_sources([source.id for source in lineage])
             log.info(f'Restarting {path} (source {match.id}): {len(skip)} present; submitting only new tasks')
-            return match.id, skip
+            return GateDecision(path, fingerprint, count, source_id=match.id, skip=skip)
         if lineage:
             raise ArgumentError(f'File {path} differs from its prior submission (content changed); '
                                 f'pass --update --restart to submit only the new tasks')
         log.info(f'Submitting all {count} tasks from {path} as a new source (--restart)')
-        return _new_source_id(path, fingerprint, count), None
+        return GateDecision(path, fingerprint, count)
     # No gating flag: refuse a known (path, fingerprint), else submit as a new source.
     if match:
         raise ArgumentError(f'File {path} was already submitted as source {match.id} '
@@ -259,7 +439,7 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
         raise ArgumentError(f'A file at {path} was previously submitted with different content; '
                             f'pass --update to submit only new tasks, or --repeat to submit all again')
     log.info(f'Submitting all {count} tasks from {path} as a new source')
-    return _new_source_id(path, fingerprint, count), None
+    return GateDecision(path, fingerprint, count)
 
 
 class LoaderState(State, Enum):
@@ -287,6 +467,9 @@ class Loader(StateMachine):
     count: int
     present: int
     tags: Dict[str, str]
+    name: str
+    line: int
+    refuse_lines: bool
 
     state = LoaderState.START
     states = LoaderState
@@ -305,6 +488,9 @@ class Loader(StateMachine):
         A :class:`GatedSource` is unwrapped here: its ``source_id`` is stamped onto every
         task and its ``skip_fingerprints`` (if any) drive de-dup. A plain iterable leaves
         both unset (no stamping, no de-dup) — unchanged behavior for every legacy caller.
+
+        A stream (:func:`is_file_input` is false) refuses a line whose group is not an integer and
+        reads on; whole input raises instead, since it is checked whole before it reaches the Loader.
         """
         if isinstance(source, GatedSource):
             self.source_id = source.source_id
@@ -321,9 +507,12 @@ class Loader(StateMachine):
         self.memory = memory
         self.timeout = timeout
         self.group = group
-        self.tags = tags
+        self.tags = dict(tags or {})  # A copy: a tag-only line updates the Loader's tags, never the caller's.
         self.count = 0
         self.present = 0
+        self.name = source_name(source)
+        self.line = 0
+        self.refuse_lines = not is_file_input(source)
 
     @functools.cached_property
     def actions(self: Loader) -> Dict[LoaderState, Callable[[], LoaderState]]:
@@ -341,40 +530,51 @@ class Loader(StateMachine):
         return LoaderState.GET
 
     def get_task(self: Loader) -> LoaderState:
-        """Get the next item from the source and dispatch by its kind."""
+        """Get the next item from the source and dispatch by its kind.
+
+        Text lines are numbered from 1, every physical line counted. On a stream, a line whose group
+        is not an integer is refused alone: an ERROR names it and the Loader reads on, and a refused
+        tag-only line sets nothing. Any other error still ends the input.
+        """
         try:
             item = next(self.source)
         except StopIteration:
             return LoaderState.FINAL
         if isinstance(item, dict):
             return self.load_json_task(item)
-        else:
+        self.line += 1
+        try:
             return self.load_line_task(item)
+        except TaskGroupError as error:
+            if not self.refuse_lines:
+                raise error.at(f'{self.name}, line {self.line}') from error
+            log.error(f'Refused line {self.line} of {self.name}: {error}')
+            return LoaderState.GET
 
     def load_line_task(self: Loader, line: str) -> LoaderState:
-        """Build the next task from a command-line string in the text source."""
-        raw = str(line).strip()
-        args = self.template.expand(raw)
-        self.task = Task.new(args=args, raw_args=raw, source=self.source_id, zone=self.zone_id,
-                             cores=self.cores, memory=self.memory, timeout=self.timeout,
-                             group=self.group, tag=self.tags)
-        if self.task.args:
+        """Build the next task from a command-line string in the text source.
+
+        The raw line is split first (:func:`split_task_line`) and the template expands only its
+        command. A tag-only line sets its tags for the lines after it; group, cores, memory and
+        timeout are carried as tags and taken out again by :meth:`Task.new`.
+        """
+        command, args, inline_tags = split_task_line(line, self.template)
+        if args:
+            self.task = Task.new(args=args, raw_args=command, parse_inline=False,
+                                 source=self.source_id, zone=self.zone_id,
+                                 cores=self.cores, memory=self.memory, timeout=self.timeout,
+                                 group=self.group, tag={**self.tags, **inline_tags})
             if self.skip_task():
                 return LoaderState.GET
             log.trace(f'Loaded task ({self.task.args})')
             return LoaderState.PUT
+        if not command and inline_tags:
+            tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
+            log.debug(f'Setting global attribute or tag: {tagline}')
+            self.tags.update(inline_tags)
         else:
-            # NOTE: group, cores, memory, etc. are processed as "tags" here,
-            # Though passed as 'tag' they are re-extracted in Task.new()
-            _, inline_tags = Task.split_argline(args)  # Simpler to just reprocess
-            if inline_tags:
-                tagline = ', '.join(format_tag(k, v) for k, v in inline_tags.items())
-                log.debug(f'Setting global attribute or tag: {tagline}')
-                for k, v in inline_tags.items():
-                    self.tags[k] = v
-            else:
-                log.trace(f'Skipping empty line')
-            return LoaderState.GET
+            log.trace(f'Skipping empty line')
+        return LoaderState.GET
 
     def load_json_task(self: Loader, record: dict) -> LoaderState:
         """Build the next task from a JSON record (named `{key}` expansion + tags)."""
@@ -383,9 +583,7 @@ class Loader(StateMachine):
         # tags (nested values are JSON-serialized; scalars are kept as-is).
         base = str(record.get('args', ''))
         args = self.template.expand(base, context=record)
-        record_tags = {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
-                       for key, value in record.items() if key != 'args'}
-        tags = {**(self.tags or {}), **record_tags}
+        tags = {**(self.tags or {}), **json_record_tags(record)}
         self.task = Task.new(args=args, raw_args=base, source=self.source_id, zone=self.zone_id,
                              cores=self.cores, memory=self.memory, timeout=self.timeout,
                              group=self.group, tag=tags, strict_tag=False, parse_inline=False)
@@ -655,25 +853,13 @@ class SubmitThread(Thread):
 
     def run_with_exceptions(self: SubmitThread) -> None:
         """Start child threads, wait."""
-        log.debug(f'Started ({self.source_name})')
+        log.debug(f'Started ({source_name(self.source)})')
         self.loader.start()
         self.committer.start()
         self.loader.join_unless_left()
         self.put_end()
         self.committer.join()
         log.debug('Done')
-
-    @functools.cached_property
-    def source_name(self: SubmitThread) -> str:
-        """Log details of source."""
-        if isinstance(self.source, GatedSource):
-            return self.source.name or '<iterable>'
-        elif self.source is sys.stdin:
-            return '<stdin>'
-        elif isinstance(self.source, io.TextIOWrapper):
-            return self.source.name
-        else:
-            return '<iterable>'
 
     def stop(self: SubmitThread, wait: bool = False, timeout: int = None, leave_input: bool = False) -> None:
         """Stop child threads before main thread.
@@ -927,7 +1113,7 @@ class LiveSubmitThread(Thread):
 
     def run_with_exceptions(self: LiveSubmitThread) -> None:
         """Start child threads, wait."""
-        log.debug(f'Started ({self.source_name})')
+        log.debug(f'Started ({source_name(self.source)})')
         with self.client:
             self.check_server()
             self.loader.start()
@@ -945,18 +1131,6 @@ class LiveSubmitThread(Thread):
             raise QueueSubmitRefused(f'Server at {self.client.config.host}:{self.client.config.port} schedules '
                                      f'from its database and does not serve tasks submitted with --queue; '
                                      f'submit without --queue, or start the server with --no-db')
-
-    @functools.cached_property
-    def source_name(self: LiveSubmitThread) -> str:
-        """Log details of source."""
-        if isinstance(self.source, GatedSource):
-            return self.source.name or '<iterable>'
-        elif self.source is sys.stdin:
-            return '<stdin>'
-        elif isinstance(self.source, io.TextIOWrapper):
-            return self.source.name
-        else:
-            return '<iterable>'
 
     def stop(self: LiveSubmitThread, wait: bool = False, timeout: int = None, leave_input: bool = False) -> None:
         """Stop child threads before main thread.
@@ -1008,6 +1182,11 @@ def submit_from(source: Iterable[str | dict],
     If `queue_config` is provided, the :class:`LiveSubmitThread` is used to submit
     task bundles directly to the shared queue hosted by the server. Otherwise,
     the :class:`SubmitThread` submits tasks to the database.
+
+    A list or a seekable file is whole input: a line whose task group is not an integer raises
+    :class:`~hypershell.data.model.TaskGroupError`, after any earlier bundles were committed (the
+    command line checks the whole input first with :func:`scan_task_lines`). Any other iterable is
+    a stream, which refuses such a line alone, with an ERROR, and reads on.
 
     Args:
         source (Iterable[str]):
@@ -1266,6 +1445,55 @@ def validate_json_expansion(records: List[dict], template: str = DEFAULT_TEMPLAT
                                 f'(provide an "args" field or a --template with fields)')
 
 
+def validate_json_groups(records: List[dict]) -> None:
+    """Fail-fast pre-flight: ensure the ``group`` of every record in `records` is a JSON integer in range.
+
+    Raises :class:`~hypershell.data.model.TaskGroupError` naming the value and its record (numbered
+    from 0, as :func:`validate_json_expansion` does) on the first refusal, before any task is
+    committed.
+    """
+    for index, record in enumerate(records):
+        if 'group' in record:
+            try:
+                ensure_group(record['group'])
+            except TaskGroupError as error:
+                raise error.at(f'record {index}') from error
+
+
+def group_option(text: str) -> int:
+    """The `-g/--group` option's type: a task group by :func:`~hypershell.data.model.parse_group` (else exit 2)."""
+    try:
+        return parse_group(text)
+    except TaskGroupError as error:
+        raise ArgumentTypeError(str(error)) from error
+
+
+def refuse_below_reached_group(groups: List[Optional[int]], reached: Optional[int], *,
+                               skip: Optional[set] = None,
+                               fingerprints: Optional[Callable[[], List[str]]] = None) -> None:
+    """Refuse a submission holding a task below the database's reached group, all or nothing.
+
+    `groups` are the groups of the input's tasks, in order, and `reached` is
+    :meth:`~hypershell.data.model.Task.reached_group` (None: any group is accepted). A task whose
+    identity is in the gate's `skip` set is not being submitted and is not checked; `fingerprints`
+    gives every task's identity, in the same order, and is called only when a task below the
+    reached group could be skipped. A task with no group of its own (None) is not checked. Raises
+    :class:`~cmdkit.cli.ArgumentError` (exit 2) naming the lowest offending group, the reached
+    group and the ways forward.
+    """
+    if reached is None:
+        return
+    below = [index for index, group in enumerate(groups) if isinstance(group, int) and group < reached]
+    if below and skip and fingerprints is not None:
+        identities = fingerprints()
+        below = [index for index in below if identities[index] not in skip]
+    if below:
+        lowest = min(groups[index] for index in below)
+        raise ArgumentError(f'Task group {lowest} is below the reached group {reached} of the database '
+                            f'(nothing submitted); submit at group {reached} or higher, wait for the run '
+                            f'to finish, or use a fresh database')
+
+
 DEFAULT_HOST: Final[str] = QueueConfig.host
 """Default host for server connection."""
 
@@ -1340,7 +1568,10 @@ class SubmitApp(Application):
 
     source: IO | List[str] | None = None
     source_path: Optional[str] = None       # absolute path of a named task file (else None)
+    source_name: Optional[str] = None       # name of a stream read in full ('<stdin>' or its path)
+    scan: Optional[InputScan] = None        # what input read in full holds, checked before any write
     source_id: Optional[str] = None         # resolved Source.id stamped onto submitted tasks
+    gate: Optional[GateDecision] = None     # the re-submission gate's decision for a named source
     json_fingerprint: Optional[str] = None  # content md5 of a --from-json file (else None)
     task_args: List[str] = []
     task_file: str = None
@@ -1367,7 +1598,7 @@ class SubmitApp(Application):
     interface.add_argument('-W', '--timeout', type=parse_time, default=timeout)
 
     group: Optional[int] = None
-    interface.add_argument('-g', '--group', type=int, default=group)
+    interface.add_argument('-g', '--group', type=group_option, default=group)
 
     repeat_mode: bool = False
     interface.add_argument('--repeat', action='store_true', dest='repeat_mode')
@@ -1428,8 +1659,15 @@ class SubmitApp(Application):
                 raise ArgumentError(str(error)) from error
 
     def run(self: SubmitApp) -> None:
-        """Run submit thread."""
+        """Run submit thread.
+
+        Input read in full is checked whole before anything is written: tags (exit 2) before any
+        input is read, then the input (exit 5), the re-submission gate's decision and each task's
+        group against the database's reached group (exit 2); only then the zone, the source and
+        the tasks.
+        """
         self.check_arguments()
+        self.check_tags()
         self.check_source()
         self.queue = None
         if self.queue_mode:
@@ -1440,20 +1678,69 @@ class SubmitApp(Application):
                 log.warning('Using default authentication key - do not use this in production!')
             if not self.tls_enabled:
                 log.warning('TLS is disabled - this is not recommended for production!')
+            self.scan_source()
         else:
             self.check_database()
-            self.check_tags()
+            self.read_source()
+            if self.group is None:
+                self.group = self.default_group()
+            self.scan_source()
+            self.decide_source()
+            self.check_reached_group()
             if self.zone is not None:
                 self.zone_id = Zone.ensure(self.zone)
-            if self.group is None:
-                group = Task.current_group()
-                self.group = group.value
-                log.info(f'Auto-selected task group {group.value} ({group.reason})')
             self.prepare_source()
         if self.source is not None:
             self.submit_all()
         else:
             self.submit_one()
+
+    @functools.cached_property
+    def reached_group(self: SubmitApp) -> Optional[int]:
+        """The database's reached group (:meth:`~hypershell.data.model.Task.reached_group`), read once."""
+        return Task.reached_group()
+
+    def default_group(self: SubmitApp) -> int:
+        """The task group of a submission that names none.
+
+        This is the most recently scheduled group, unless that is below the reached group (a late
+        lower group is running) or is not an integer; then it is the reached group, so a submission
+        that names no group is never refused for it.
+        """
+        group = Task.current_group()
+        reached = self.reached_group
+        if reached is not None and (not isinstance(group.value, int) or group.value < reached):
+            reason = 'below it' if isinstance(group.value, int) else 'not an integer'
+            group = TaskGroupInfo(reached, f'reached group; most recently scheduled group {group.value} is {reason}')
+        log.info(f'Auto-selected task group {group.value} ({group.reason})')
+        return group.value
+
+    def task_groups(self: SubmitApp) -> List[Optional[int]]:
+        """The group of every task in this submission's input, in order."""
+        if self.from_json:
+            default = self.tags.get('group', self.group)
+            return [record.get('group', default) for record in self.source]
+        if self.source is None:
+            _, inline_tags = Task.split_argline(self.direct_args)
+            return [inline_tags.get('group', self.tags.get('group', self.group))]
+        return self.scan.groups
+
+    def task_fingerprints(self: SubmitApp) -> List[str]:
+        """The identity of every task in a named source, in order, as the Loader builds it."""
+        if self.from_json:
+            return json_fingerprints(self.source, group=self.group, tags=self.tags)
+        with open(self.source_path, mode='r') as stream:
+            return task_fingerprints(stream, template=self.template, group=self.group, tags=self.tags)
+
+    def check_reached_group(self: SubmitApp) -> None:
+        """Refuse the whole submission (exit 2) when a task it would insert is below the reached group.
+
+        Tasks the re-submission gate skips as already present are not being submitted and are
+        not checked.
+        """
+        refuse_below_reached_group(self.task_groups(), self.reached_group,
+                                   skip=None if self.gate is None else self.gate.skip,
+                                   fingerprints=self.task_fingerprints)
 
     def submit_all(self: SubmitApp) -> None:
         """Submit multiple tasks from file-like source."""
@@ -1462,9 +1749,14 @@ class SubmitApp(Application):
                             bundlesize=self.bundlesize, bundlewait=self.bundlewait, tags=self.tags)
         log.info(f'Submitted {count} tasks')
 
+    @functools.cached_property
+    def direct_args(self: SubmitApp) -> str:
+        """The one task given as arguments, joined as a command line."""
+        return ' '.join([self.quote_arg(arg) for arg in self.task_args])
+
     def submit_one(self: SubmitApp) -> None:
         """Submit one task from arguments."""
-        args = ' '.join([self.quote_arg(arg) for arg in self.task_args])
+        args = self.direct_args
         if self.queue_mode:
             submit_from([args, ], queue_config=self.queue,
                         cores=self.cores, memory=self.memory, timeout=self.timeout, group=self.group,
@@ -1486,12 +1778,20 @@ class SubmitApp(Application):
             checkdb()
 
     def check_tags(self: SubmitApp) -> None:
-        """Ensure valid tags."""
-        self.tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
+        """Ensure valid tags, before any input is read: a group among them must be an integer (else exit 2).
+
+        Tags are checked in both modes, but only a submission to the database applies them: queue
+        mode leaves them unset, as it always has.
+        """
+        tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
         try:
-            Task.ensure_valid_tag(self.tags)
-        except (ValueError, TypeError) as error:
+            Task.ensure_valid_tag(tags)
+            if 'group' in tags:
+                tags['group'] = ensure_group(tags['group'], text=tag_text(self.taglist, 'group'))
+        except (ValueError, TypeError, TaskGroupError) as error:
             raise ArgumentError(str(error)) from error
+        if not self.queue_mode:
+            self.tags = tags
 
     def check_source(self: SubmitApp) -> None:
         """Determine task submission mode."""
@@ -1500,6 +1800,7 @@ class SubmitApp(Application):
                 raise ArgumentError('Cannot combine --from-json with -f/--task-file or positional arguments')
             records, self.json_fingerprint = load_json_source(self.from_json)
             validate_json_expansion(records, self.template)
+            validate_json_groups(records)
             log.debug(f'Loaded {len(records)} tasks from JSON ({self.from_json})')
             self.source = records
             return
@@ -1535,16 +1836,75 @@ class SubmitApp(Application):
             log.debug(f'Submitted single task (explicit)')
             self.source = None
 
-    def prepare_source(self: SubmitApp) -> None:
-        """Resolve the task Source, apply the re-submission gate, and wrap the stream (DB mode only).
+    def read_source(self: SubmitApp) -> None:
+        """Read a stream in full (standard input, a FIFO, a process substitution), with a database.
 
-        A named file passes through :func:`apply_source_gate`: a duplicate or
-        changed-content re-submission is refused unless ``--repeat``/``--update`` relaxes it,
-        and the resolved :class:`Source` row's ``task_count`` is the upfront-counted
-        expectation, committed *before* any task so an incomplete prior stays detectable.
-        ``<stdin>`` and single-command ``<direct>`` submissions resolve their
-        reserved fixed-id rows and are exempt from gating — a gating flag there is a
-        no-op and says so. A ``--from-json`` source is gated too (see :meth:`prepare_json_source`).
+        Nothing is inserted until the input has ended and been checked whole. The stream becomes
+        a list of its lines, submitted under the reserved ``<stdin>`` source.
+        """
+        if self.from_json or self.source is None or isinstance(self.source, list):
+            return
+        if self.source is sys.stdin or not self.source.seekable():
+            stream = self.source
+            self.source_name = '<stdin>' if stream is sys.stdin else self.source_path
+            self.source = read_in_full(stream)
+            if stream is not sys.stdin:
+                stream.close()
+            log.info(f'Read {len(self.source)} lines from {self.source_name}')
+
+    def scan_source(self: SubmitApp) -> None:
+        """Check every group of input read in full before anything is written (exit 5, naming value and line).
+
+        A named file, a stream read in full and the arguments are scanned with the template, the
+        default group and the tags the submission uses; a ``--from-json`` source was checked as it
+        was loaded. A stream in queue mode is checked line by line as it arrives.
+        """
+        if self.from_json:
+            return
+        if self.source is None:
+            try:
+                Task.split_argline(self.direct_args)
+            except TaskGroupError as error:
+                raise error.at('arguments') from error
+            return
+        if isinstance(self.source, list):
+            self.scan = scan_task_lines(self.source, template=self.template, group=self.group,
+                                        tags=self.tags, name=self.source_name)
+        elif self.source is not sys.stdin and self.source.seekable():
+            with open(self.source_path, mode='r') as stream:
+                self.scan = scan_task_lines(stream, template=self.template, group=self.group,
+                                            tags=self.tags, name=self.source_path)
+
+    def decide_source(self: SubmitApp) -> None:
+        """Make the re-submission gate's decision for a named file or ``--from-json`` file, writing nothing.
+
+        A duplicate or changed-content re-submission is refused here (exit 2) unless
+        ``--repeat``/``--update`` relaxes it (:func:`decide_source_gate`); the decision is
+        recorded by :meth:`prepare_source` once every check has passed. Called in DB mode only.
+        """
+        if not DATABASE_ENABLED:
+            return
+        if self.from_json:
+            key = json_source_key(self.from_json)
+            if key is not None:
+                log.info(f'Found {len(self.source)} tasks in {key} (md5={self.json_fingerprint})')
+                self.gate = decide_source_gate(key, self.json_fingerprint, len(self.source),
+                                               repeat=self.repeat_mode, update=self.update_mode)
+        elif self.source is not None and not isinstance(self.source, list):
+            fingerprint, count = source_fingerprint(self.source_path), self.scan.count
+            log.info(f'Found {count} tasks in {self.source_path} (md5={fingerprint})')
+            self.gate = decide_source_gate(self.source_path, fingerprint, count,
+                                           repeat=self.repeat_mode, update=self.update_mode)
+
+    def prepare_source(self: SubmitApp) -> None:
+        """Resolve the task Source, record the re-submission gate's decision, and wrap the stream (DB mode only).
+
+        A named file passed through the gate in :meth:`decide_source`, and its resolved
+        :class:`Source` row's ``task_count`` is the upfront-counted expectation, committed
+        *before* any task so an incomplete prior stays detectable. ``<stdin>`` and
+        single-command ``<direct>`` submissions resolve their reserved fixed-id rows and are
+        exempt from gating — a gating flag there is a no-op and says so. A ``--from-json``
+        source is gated too (see :meth:`prepare_json_source`).
         """
         if not DATABASE_ENABLED:
             return  # non-persistent DB: nothing to record against (invariant §4)
@@ -1554,28 +1914,23 @@ class SubmitApp(Application):
         if self.source is None:
             self.warn_gating_no_effect('<direct>')
             self.source_id = Source.reserved(DIRECT_SOURCE_ID).id
-        elif self.source is sys.stdin or not self.source.seekable():
+        elif isinstance(self.source, list):
             # Real <stdin> and non-seekable named inputs (process substitution, FIFOs, a
-            # piped /dev/stdin) have no stable identity and cannot be re-read for an upfront
-            # count — stream them under the reserved <stdin> source, exempt from gating. A
-            # second read would drain the pipe and silently drop every task.
+            # piped /dev/stdin) have no stable identity and cannot be re-read: they were read
+            # in full (read_source) and go under the reserved <stdin> source, exempt from gating.
             self.warn_gating_no_effect('<stdin>')
             self.source_id = Source.reserved(STDIN_SOURCE_ID).id
-            name = '<stdin>' if self.source is sys.stdin else self.source_path
-            self.source = GatedSource(self.source, self.source_id, name=name, zone_id=self.zone_id)
+            self.source = GatedSource(self.source, self.source_id, name=self.source_name, zone_id=self.zone_id)
         else:
-            fingerprint, count = source_fingerprint_and_count(self.source_path, self.template)
-            log.info(f'Found {count} tasks in {self.source_path} (md5={fingerprint})')
-            self.source_id, skip = apply_source_gate(self.source_path, fingerprint, count,
-                                                     repeat=self.repeat_mode, update=self.update_mode)
+            self.source_id, skip = self.gate.commit()
             self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip,
                                       name=self.source_path, zone_id=self.zone_id)
 
     def prepare_json_source(self: SubmitApp) -> None:
-        """Apply the re-submission gate to a ``--from-json`` source.
+        """Record the re-submission gate's decision for a ``--from-json`` source.
 
         The JSON file's content md5 (captured in :meth:`check_source`, no second read) and
-        record count feed the same :func:`apply_source_gate` as a line file, keyed by
+        record count fed the same :func:`decide_source_gate` as a line file, keyed by
         ``abspath(FILE)[@node]``. The per-task fingerprint keys off the pre-template ``args``
         and tags, so ``--update`` de-dup matches whether the tasks were first ingested
         here or from a line file. ``--from-json -`` (stdin JSON) has no stable path and is
@@ -1587,10 +1942,7 @@ class SubmitApp(Application):
             self.source_id = Source.reserved(STDIN_SOURCE_ID).id
             self.source = GatedSource(self.source, self.source_id, name='<stdin>', zone_id=self.zone_id)
             return
-        count = len(self.source)
-        log.info(f'Found {count} tasks in {key} (md5={self.json_fingerprint})')
-        self.source_id, skip = apply_source_gate(key, self.json_fingerprint, count,
-                                                 repeat=self.repeat_mode, update=self.update_mode)
+        self.source_id, skip = self.gate.commit()
         self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip, name=key,
                                   zone_id=self.zone_id)
 

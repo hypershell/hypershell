@@ -46,7 +46,7 @@ from typing import List, Dict, Tuple, Iterable, IO, Optional, Callable, Type, Fi
 from types import TracebackType
 
 # Standard libs
-import io
+import os
 import sys
 import json
 import math
@@ -83,7 +83,8 @@ from hypershell.core.topology import SiteRegistry
 from hypershell.data.model import (Task, Client, Zone, ResultOutcome, CONTENDED_RERUNS, serialize_tasks,
                                    deserialize_tasks, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
-from hypershell.submit import SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE
+from hypershell.submit import (SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE, scan_task_lines,
+                               is_file_input, refuse_below_reached_group)
 from hypershell.client import ClientInfo
 
 # Public interface
@@ -1438,24 +1439,6 @@ class ServerThread(Thread):
         super().stop(wait=wait, timeout=timeout)
 
 
-def is_file_input(source: Iterable[str | dict]) -> bool:
-    """True if `source` is a whole task file: a seekable file (not standard input), or a list or tuple.
-
-    Standard input, pipes, FIFOs, process substitution and other iterables are streams, which
-    are scheduled as they arrive.
-    """
-    # A gated source carries the stream it wraps as `iterable`.
-    inner = getattr(source, 'iterable', source)
-    if isinstance(inner, (list, tuple)):
-        return True
-    if isinstance(inner, io.IOBase) and inner is not sys.stdin:
-        try:
-            return inner.seekable()
-        except (OSError, ValueError):
-            return False
-    return False
-
-
 def serve_from(source: Iterable[str],
                restart_mode: bool = False,
                task_cores: int = None,
@@ -1926,6 +1909,7 @@ class ServerApp(Application):
         self.check_args()
         self.enable_tls()
         self.check_database()
+        self.prepare_source()
         if self.autoscaling_policy is not None:
             # Imported here: the cluster package imports this module.
             from hypershell.cluster.topology import serve_with_sites
@@ -2019,6 +2003,21 @@ class ServerApp(Application):
         """Initialize the database with --initdb, else check (and upgrade) it; never open it with --no-db."""
         if not self.in_memory:
             ensuredb(auto_init=self.auto_initdb)
+
+    def prepare_source(self: ServerApp) -> None:
+        """Check a named task file whole before anything is inserted or dispatched, with a database or without.
+
+        A group that is not an integer refuses the file (exit 5). The server ingests raw lines, so
+        the scan uses the default template. With a database, a task below the reached group
+        refuses the file (exit 2); tasks in flight do not count toward it, since the scheduler
+        reverts them when it starts. A stream is checked line by line as it arrives.
+        """
+        if self.input_stream is not None and is_file_input(self.input_stream):
+            path = os.path.abspath(self.filepath)
+            with open(path, mode='r') as stream:
+                scan = scan_task_lines(stream, name=path)
+            if not self.in_memory and DATABASE_ENABLED:
+                refuse_below_reached_group(scan.groups, Task.reached_group(in_flight=False))
 
     def special_options(self: ServerApp) -> bool:
         """Special terminating options print information lazily (not import time)."""

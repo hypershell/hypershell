@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:submit-input-checks
 kind: fix
 appetite: small
 target: 2.9.0

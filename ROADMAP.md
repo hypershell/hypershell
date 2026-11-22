@@ -55,7 +55,7 @@ must not have, and it contradicts our own "the shell line is the contract" desig
 already implements comment semantics correctly.
 
 *Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs: —*
-**Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md)
+**Seed:** [`issues/submit-comment-truncation.md`](issues/submit-comment-truncation.md) · *status: adopted:submit-input-checks*
 
 ## Unguarded task start kills the executor and poisons the task
 
@@ -185,7 +185,7 @@ a behaviour change, not a defect fix, so it ships on `develop` only (2.9).
 
 *Target: 2.9.0 · Horizon: near-term · Depends on: `group-advance-strands-lower-group` (landed, #74)
 · Refs: overlaps `issues/ingest-robustness.md` (same ingest path)*
-**Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: shaped*
+**Seed:** [`issues/submit-refuses-lower-group.md`](issues/submit-refuses-lower-group.md) · *status: adopted:submit-input-checks*
 
 ## A client that times out during a pause in a stream leaves a late line unrun
 
@@ -362,7 +362,7 @@ ships in 2.9.0, not a 2.8.x patch. Pre-existing, and found by that cycle's revie
 *Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs:
 `spec/group-advance-strands-lower-group/` (REVIEW cycles 2 and 3); same committer death as
 `issues/database-locked-during-ingest-hangs.md`*
-**Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
+**Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: adopted:submit-input-checks*
 
 ## On PostgreSQL, a task cannot ask for 2 GB of memory or more
 

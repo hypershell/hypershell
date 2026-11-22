@@ -1,0 +1,31 @@
+# submit-input-checks: guard tests that must pass on the base build AND after every phase (what must not
+# change). Run from the repository root:
+#   sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt
+# `pg:` lines run only with HS_TEST_POSTGRES set (sandbox off).
+
+# R2: comment lines, a marker after a command and a tag-only line keep today's meaning and count.
+tests/test_command_hash.py::test_submit_comment_and_marker_count[sqlite]
+pg:tests/test_command_hash.py::test_submit_comment_and_marker_count[postgres]
+tests/test_command_hash.py::test_quoted_marker_still_refused
+tests/test_submit.py::test_source_stamp_named_file
+
+# R3: the accepted forms stay accepted.
+tests/test_group_integer.py::test_submit_file_accepts_group[sqlite-plain]
+tests/test_group_integer.py::test_submit_file_accepts_group[sqlite-zero-padded]
+tests/test_group_integer.py::test_submit_file_accepts_group[sqlite-plus]
+tests/test_group_integer.py::test_submit_file_accepts_group[sqlite-minus]
+pg:tests/test_group_integer.py::test_submit_file_accepts_group[postgres-plain]
+tests/test_group_integer.py::test_submit_json_accepts_integer_group
+
+# R6, C9: no reached group (empty, all finished) accepts any group; at and above the reached group are accepted.
+tests/test_reached_group.py::test_submit_any_group_without_reached_group[sqlite-empty]
+tests/test_reached_group.py::test_submit_any_group_without_reached_group[sqlite-finished]
+pg:tests/test_reached_group.py::test_submit_any_group_without_reached_group[postgres-finished]
+tests/test_reached_group.py::test_submit_at_or_above_reached_group[sqlite-at]
+tests/test_reached_group.py::test_submit_at_or_above_reached_group[sqlite-above]
+tests/test_groups.py::test_group_starts_based_on_previous_scheduled_tasks
+
+# R7: a same-file --restart onto a stranded database is not refused; a stream's late lower group still runs.
+tests/test_resubmit_lower_group.py::test_same_file_restart_onto_stranded_database[sqlite]
+pg:tests/test_resubmit_lower_group.py::test_same_file_restart_onto_stranded_database[postgres]
+tests/test_resubmit_lower_group.py::test_stream_late_lower_group_runs_with_warning

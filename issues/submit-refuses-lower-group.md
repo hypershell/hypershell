@@ -1,5 +1,5 @@
 ---
-status: shaped
+status: adopted:submit-input-checks
 kind: feature
 appetite: small
 target: 2.9.0

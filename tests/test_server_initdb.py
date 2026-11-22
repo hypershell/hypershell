@@ -101,10 +101,15 @@ PROVIDERS: Final[Dict[str, Tuple[str, bool]]] = {
 
 @fixture
 def recorder(monkeypatch, tmp_path: Path) -> Recorder:
-    """Replace the database steps, the serving entry points, and the key lookup with recorders."""
+    """Replace the database steps, the serving entry points, and the key lookup with recorders.
+
+    The steps that would create the schema are recorders, so the reached-group read that a task
+    file meets on a database reads no table: it finds no reached group.
+    """
     rec = Recorder()
     for name in ('checkdb', 'upgradedb'):
         monkeypatch.setattr(hypershell.data, name, rec.step(name))
+    monkeypatch.setattr(hypershell.server.Task, 'reached_group', classmethod(lambda cls, in_flight=True: None))
     for name in ('prepare', 'converge'):
         monkeypatch.setattr(timescale, name, rec.step(name))
     for name in ('serve_from', 'serve_forever'):
