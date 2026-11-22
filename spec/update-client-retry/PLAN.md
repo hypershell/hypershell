@@ -349,3 +349,11 @@ rulings, under the maintainer's mandate:
   checked against the code.
 - **Notes (not findings).** `cores:100000` overflowing SMALLINT on PostgreSQL is absurd input
   (`bounded-inputs`). `-m 4GB` overflowing INTEGER is `memory-column-overflows-postgres`.
+
+## Review-cycle-2 ruling (2026-11-22)
+
+Review cycle 2 was changes-requested at `568d35e7`, on F3 alone (LOW, docs; the human gate was not
+triggered). Foreman's fix, under the maintainer's mandate: `docs/api/cluster.rst` limits the
+in-process clause to `LocalCluster` and says that the launching classes start `hs client`
+processes, which read their own configuration for any option not passed, and that launcher-mode
+classes give each launch the `[export]` environment. Review cycle 3 is scoped to F3.
