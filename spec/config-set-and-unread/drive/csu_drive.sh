@@ -21,7 +21,8 @@
 #   evict  server.evict under hs cluster: under the floor exits 5 before listening; 1m30s runs; a
 #          file's 1e300 and a 401-digit integer exit 5 before listening, with no traceback (R7)
 #   rate   -R and client.ratelimit: a launched client takes -R 0.5 and is throttled; task.ratelimit
-#          is not read; a file's ratelimit = inf stops a launching hs cluster with exit 2 (R8)
+#          is not read; a file's ratelimit = inf or 1e-300 stops a launching hs cluster with exit 2,
+#          and so does -R 1e-300 (R8)
 
 set -u
 mode=${1:?usage: csu_drive.sh set|eager|evict|rate}
@@ -140,6 +141,20 @@ rate)
     grep -q 'listening' err.txt && fail 'server started listening before the refusal'
     [ -s out.txt ] && fail "tasks ran: $(cat out.txt)"
     pass 'a file'"'"'s ratelimit = inf stops a launching hs cluster with exit 2 before listening'
+    printf '[client]\nratelimit = 1e-300\n' > config.toml
+    HYPERSHELL_CONFIG_FILE=$PWD/config.toml hs cluster t.in --no-db --no-tls -H 127.0.0.1 --launcher=env -N 1 \
+        > out.txt 2> err.txt; status=$?
+    [ "$status" -eq 2 ] || fail "ratelimit = 1e-300 exited $status, not 2: $(tail -3 err.txt)"
+    grep -q 'client.ratelimit: Rate 1e-300 is not valid: expected 0 (no limit) or at least 0.000001' err.txt \
+        || fail "message: $(cat err.txt)"
+    grep -q 'listening' err.txt && fail 'server started listening before the refusal'
+    [ -s out.txt ] && fail "tasks ran: $(cat out.txt)"
+    pass 'a file'"'"'s ratelimit = 1e-300 stops a launching hs cluster with exit 2 before listening'
+    hs cluster t.in --no-db -R 1e-300 > out.txt 2> err.txt; status=$?
+    [ "$status" -eq 2 ] || fail "-R 1e-300 exited $status, not 2: $(tail -3 err.txt)"
+    grep -q 'argument -R/--ratelimit' err.txt || fail "message: $(cat err.txt)"
+    [ -s out.txt ] && fail "tasks ran: $(cat out.txt)"
+    pass '-R 1e-300 is refused with exit 2'
     ;;
 *)
     echo "usage: csu_drive.sh set|eager|evict|rate" >&2

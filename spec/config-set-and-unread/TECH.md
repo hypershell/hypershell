@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -75,7 +75,7 @@ phases:
     uv run sh "$PWD/spec/config-set-and-unread/drive/csu_drive.sh" $m || exit 1; done
 - id: P4
   name: -R takes a number, and hs cluster reads client.ratelimit
-  status: in_progress
+  status: done
   satisfies:
   - R8
   depends_on:
@@ -326,9 +326,11 @@ integer word and a fraction as a plain decimal.
   `test_cluster_launch.py`, `test_client.py`, `test_relay_launch.py`; drive mode `rate`.
 - [x] Review cycle 1, F2: `hs cluster` refuses a `client.ratelimit` that is a number but not finite at
       its start check, exit 2, as `-R` refuses one (see the remediation section).
+- [x] Review cycle 2, F9: `-R` and `hs cluster`'s `client.ratelimit` start check refuse a rate other
+      than 0 under `RATE_MINIMUM` (1e-6 per second), exit 2 (see the cycle-2 remediation section).
 - **Touches:** `src/hypershell/core/types.py`, `src/hypershell/client.py`, `src/hypershell/cluster/__init__.py`,
   `src/hypershell/cluster/launch.py`, `src/hypershell/cluster/local.py`, `src/hypershell/cluster/remote.py`,
-  `src/hypershell/cluster/ssh.py`, `tests/test_cluster_launch.py`.
+  `src/hypershell/cluster/ssh.py`, `tests/test_cluster_launch.py`; cycle 2: `tests/test_config_unread.py`.
 
 ## Phase P5 — Docs, help snippets, markers; AGENTS.md and invariants in lockstep (R9)
 **Satisfies:** R9 · **Depends on:** P2, P3, P4
@@ -546,6 +548,36 @@ file as of `d6d83afa`), running the new tests, and restoring it. `red.txt` stays
     listening, no exception log); on `d6d83afa`'s `server.py` it fails at the message.
   - P3's verify: 26 passed (`-k 'eager or attempts'`), then 534 passed, 1 skipped (6 min 20 s); drives
     `eager` and `evict` ok.
+- **F9 (P4) — a rate so small the executor's wait overflows.** The floor is `RATE_MINIMUM = 1e-6`
+  tasks per second (`src/hypershell/core/types.py`), one task in about 11.6 days.
+  - **Why this value.** A client's executor waits `timedelta(seconds=1/rate)` between tasks on each
+    thread, where `rate` is the client's rate divided by its thread count (`client.py`, unchanged).
+    A `timedelta` holds at most 86,399,999,913,600 seconds, so at the floor the wait overflows only
+    with more than 86,399,999 threads in one client, twenty times the most thread ids a Linux host
+    gives a process (4,194,304, its `pid_max` ceiling); other platforms allow fewer. Under the floor,
+    `1e-7` would leave a margin of two, and the reviewer's `1e-14` none. No realistic limit is
+    affected: the slowest rate a user would set is far above one task in 11.6 days.
+  - **What is refused.** A rate other than 0 whose size is under the floor: `0 < abs(rate) <
+    RATE_MINIMUM`. `0` stays no limit (R8), and a negative rate is read as before; a tiny negative
+    one is refused too, since its wait overflows the same way.
+  - `parse_rate` refuses it, so `-R` on `hs client` and `hs cluster`, and any `client.ratelimit`
+    given as text (which `-R`'s type reads as its default), exit 2 naming `-R/--ratelimit`:
+    `Rate '1e-300' is not valid: expected 0 (no limit) or at least 0.000001 tasks per second in size`.
+    `ClusterApp.check_arguments` refuses a file's TOML float under the floor after the finite check,
+    exit 2, naming `client.ratelimit` and its source, before a database, a port, a server or a launch.
+    `client.py` is not changed.
+  - Tests, `tests/test_config_unread.py`: `test_rate_option_under_floor_refused` (`1e-300`, `9e-7`,
+    `-1e-300` on both commands), `test_cluster_rate_under_floor_refused` (a file's `1e-300` in local
+    and `--launcher` modes: exit 2, the message, the file named, nothing run or launched, no
+    traceback file). Guards, green on the base too: `test_rate_option_takes_number` gains `1e-6`,
+    and `test_cluster_rate_at_floor` (a file's `1e-6` passes the start check as given).
+  - Red on `d6d83afa` (its `core/types.py` and `cluster/__init__.py`): 8 of 8 failed (the option
+    took each rate; the cluster ran into the executor's `OverflowError`). The guards passed. Green:
+    23 passed.
+  - Drive mode `rate` gains a file's `ratelimit = 1e-300` under `--launcher=env` (exit 2, the
+    message, never listening, no task output) and `-R 1e-300` (exit 2, naming the option). On
+    `d6d83afa`'s two files the drive hangs at the first, as the review found, until its bound.
+  - P4's verify: 699 passed, 1 skipped (2 min 39 s); drive `rate` ok.
 ---
 
 ## How `hs-build` drives this

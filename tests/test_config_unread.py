@@ -196,7 +196,8 @@ RATE_APPS: Final[Dict[str, Type[Application]]] = {'client': ClientApp, 'cluster'
 
 @mark.unit
 @mark.parametrize('app', list(RATE_APPS))
-@mark.parametrize('word, rate', [('0.5', 0.5), ('2.5', 2.5), ('1e-3', 0.001), ('5', 5), ('0', 0), ('-1', -1)])
+@mark.parametrize('word, rate', [('0.5', 0.5), ('2.5', 2.5), ('1e-3', 0.001), ('5', 5), ('0', 0), ('-1', -1),
+                                 ('1e-6', 1e-06)])
 def test_rate_option_takes_number(app: str, word: str, rate: Any) -> None:
     """`-R` takes a whole or decimal number on both commands; a whole word stays an integer (R8, change 8)."""
     value = parsed_rate(RATE_APPS[app], word)
@@ -210,6 +211,16 @@ def test_rate_option_refused(app: str, word: str) -> None:
     """`-R` refuses what is not a finite number, as a usage error naming the option (R8)."""
     value = parsed_rate(RATE_APPS[app], word)
     assert isinstance(value, str) and value.startswith('error: ') and '-R/--ratelimit' in value, value
+
+
+@mark.unit
+@mark.parametrize('app', list(RATE_APPS))
+@mark.parametrize('word', ['1e-300', '9e-7', '-1e-300'])
+def test_rate_option_under_floor_refused(app: str, word: str) -> None:
+    """`-R` refuses a rate other than 0 under the floor, as a usage error naming the option."""
+    value = parsed_rate(RATE_APPS[app], word)
+    assert isinstance(value, str) and value.startswith('error: ') and '-R/--ratelimit' in value, value
+    assert 'at least 0.000001 tasks per second' in value, value
 
 
 LAUNCH_ARGS: Final[Dict[str, Any]] = {
@@ -395,3 +406,29 @@ def test_cluster_rate_file_text(temp_site, text: str, rate: float) -> None:
                                    APPS, **file_layer(site, f'[client]\nratelimit = {text}\n'))
     assert rc == exit_status.success, stderr
     assert eval(seen) == rate and type(eval(seen)) is type(rate)
+
+
+@mark.integration
+@mark.parametrize('mode', ['local', 'launcher'])
+def test_cluster_rate_under_floor_refused(temp_site, mode: str) -> None:
+    """A file's `client.ratelimit` under the floor stops `hs cluster` with exit 2 before anything is launched,
+    naming the key and the file, as `-R` refuses it."""
+    site = Path(str(temp_site))
+    status, stdout, stderr, marker = run_rate_cluster(site, mode, '[client]\nratelimit = 1e-300\n', {})
+    assert status == exit_status.bad_argument, stderr
+    assert 'client.ratelimit: Rate 1e-300 is not valid: expected 0 (no limit)' in stderr, stderr
+    assert 'config.toml' in stderr, stderr
+    assert 'Server listening' not in stderr and stdout == '' and not marker.exists(), stderr
+    assert 'Traceback' not in stderr and not list(site.rglob('exception-*.log')), stderr
+
+
+@mark.integration
+def test_cluster_rate_at_floor(temp_site) -> None:
+    """A file's `client.ratelimit` at the floor passes `hs cluster`'s start check as given."""
+    site = Path(str(temp_site))
+    create_taskfile(site, ['echo hi'], 't.in')
+    rc, seen, stderr = config_repr(site, '(lambda a: (a.check_arguments(), a.ratelimit)[1])'
+                                         '(ClusterApp.from_cmdline(["t.in", "--no-db"]))',
+                                   APPS, **file_layer(site, '[client]\nratelimit = 1e-6\n'))
+    assert rc == exit_status.success, stderr
+    assert eval(seen) == 1e-06

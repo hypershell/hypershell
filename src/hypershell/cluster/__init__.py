@@ -24,7 +24,8 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.config import config, blame, find_available_ports, config_seconds, PARAM_UNSET
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import parse_bytes, parse_time, parse_delay, parse_period, parse_rate, UnitError
+from hypershell.core.types import (parse_bytes, parse_time, parse_delay, parse_period, parse_rate, UnitError,
+                                   RATE_MINIMUM, RATE_FORMS)
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -388,6 +389,10 @@ class ClusterApp(Application):
         if isinstance(self.ratelimit, float) and not math.isfinite(self.ratelimit):
             # The option reads a rate given as text; a number from a file is refused here, as the option refuses it.
             raise ArgumentError(f'client.ratelimit: Rate {self.ratelimit!r} is not valid: expected a finite number '
+                                f'({blame(config, "client", "ratelimit")})')
+        if isinstance(self.ratelimit, float) and 0 < abs(self.ratelimit) < RATE_MINIMUM:
+            # A number from a file under the floor is refused here, as the option refuses it.
+            raise ArgumentError(f'client.ratelimit: Rate {self.ratelimit!r} is not valid: expected {RATE_FORMS} '
                                 f'({blame(config, "client", "ratelimit")})')
         given_filepath = self.filepath is not None
         if self.from_json:

@@ -23,7 +23,8 @@ from hypershell.core.config_schema import read_number
 __all__ = [
     'smart_coerce', 'NoneType', 'JSONData', 'ExtendedValue',
     'to_json_type', 'from_json_type', 'serialize', 'deserialize',
-    'parse_bytes', 'parse_time', 'parse_delay', 'parse_period', 'parse_rate', 'UnitError',
+    'parse_bytes', 'parse_time', 'parse_delay', 'parse_period', 'parse_rate', 'RATE_MINIMUM', 'RATE_FORMS',
+    'UnitError',
 ]
 
 
@@ -178,10 +179,27 @@ def parse_period(value: str | int | float) -> int | float:
     return seconds
 
 
+RATE_MINIMUM: Final[float] = 1e-6
+"""Smallest rate other than 0 a client takes, in tasks per second (one task in about 11.6 days).
+
+A client waits `1 / (rate / threads)` seconds between tasks on each thread, held as a `timedelta`,
+which holds at most 86,399,999,913,600 seconds. At this floor the wait overflows only past 86 million
+threads, twenty times the most thread ids a Linux host gives a process (4,194,304).
+"""
+
+RATE_FORMS: Final[str] = f'0 (no limit) or at least {RATE_MINIMUM:.6f} tasks per second in size'
+"""What a rate under the floor is refused in favour of."""
+
+
 def parse_rate(value: str) -> int | float:
-    """Tasks per second: a whole or decimal number, finite (e.g., '5', '0.5'); a whole word stays an integer."""
+    """Tasks per second: a whole or decimal number, finite (e.g., '5', '0.5'); a whole word stays an integer.
+
+    A rate other than 0 under RATE_MINIMUM in size is refused.
+    """
     if (rate := read_number(str(value))) is None:
         raise UnitError(f'Rate {value!r} is not valid: expected a number')
+    if 0 < abs(rate) < RATE_MINIMUM:
+        raise UnitError(f'Rate {value!r} is not valid: expected {RATE_FORMS}')
     return rate
 
 
