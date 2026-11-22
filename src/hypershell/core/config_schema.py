@@ -29,7 +29,7 @@ from enum import Enum
 # Public interface
 __all__ = ['Kind', 'TableKind', 'KEYS', 'TABLES', 'ZONE_KEYS', 'TIMESCALE_KEYS', 'PROCESS_VARIABLES',
            'PROSE_KEYS', 'SCALAR_TABLES', 'EMPTY_UNSET', 'VARIANTS', 'PREFIX', 'VariableError', 'read_value',
-           'read_untyped', 'match_name', 'read_environment', 'variable_name']
+           'read_untyped', 'match_name', 'match_path', 'read_environment', 'variable_name']
 
 
 PREFIX: Final[str] = 'HYPERSHELL_'
@@ -231,7 +231,7 @@ def read_value(kind: Kind, text: str) -> Any:
     if kind is Kind.LOGGING_FILE:
         if word == 'enabled' or BOOL_WORDS.get(word) is True:
             return True
-        if word not in BOOL_WORDS:
+        if word not in BOOL_WORDS and text != '':
             return text
     if kind in (Kind.INT, Kind.INT_OR_NONE) and INT_FORM.fullmatch(text.strip()):
         return int(text.strip())
@@ -305,6 +305,28 @@ def match_name(name: str) -> Optional[Match]:
             return (*path, entry.lower()), Kind.TEXT
         return (*path, entry.lower()), Kind.UNTYPED
     return None  # Unreachable: the root table matches every other name.
+
+
+def match_path(path: str) -> Kind:
+    """The kind a value written at the dotted `path` is read as, the path matched as written.
+
+    A documented key is read by its own kind, and its `_env` and `_eval` forms as text. One entry past
+    an `[export]` table or `ssh.nodelist` is text, and a key of a `relay.zone.<name>` table is read by
+    its zone key's kind. Every other path (an entry of an open table, an undocumented key, a path
+    below a key or in another letter case) has no type of its own.
+    """
+    if path in KEYS:
+        return KEYS[path]
+    for variant in VARIANTS:
+        if path.endswith(variant) and path[:-len(variant)] in KEYS:
+            return Kind.TEXT
+    *table, entry = path.split('.')
+    parent = '.'.join(table)
+    if TABLES.get(parent) is TableKind.EXPORT or parent == 'ssh.nodelist':
+        return Kind.TEXT
+    if len(table) > 1 and TABLES.get('.'.join(table[:-1])) is TableKind.ZONE:
+        return ZONE_KEYS.get(entry, Kind.UNTYPED)
+    return Kind.UNTYPED
 
 
 def _set(tree: Dict[str, Any], path: Tuple[str, ...], value: Any) -> None:

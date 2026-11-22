@@ -63,6 +63,21 @@ Description
    still runs. Input that is never closed keeps the run going until it is.
 
 .. versionchanged:: 2.9.0
+   ``server.eager`` takes effect without ``--eager``, and ``server.attempts`` sets the retries
+   without ``-r``; before, both keys were ignored. A value in a file for ``server.eager`` takes the
+   boolean words, ``1``/``0`` included, and any other value stops the cluster before it starts.
+
+.. versionchanged:: 2.9.0
+   ``server.evict`` sets the eviction period in every mode; before, it was always 600 seconds. A
+   value ``hs server`` refuses stops the cluster before it binds a port or launches a client.
+
+.. versionchanged:: 2.9.0
+   ``-R``/``--ratelimit`` takes a number (e.g., ``-R 0.5``), and defaults to ``client.ratelimit``
+   in every mode; the undocumented ``task.ratelimit`` is no longer read. A fractional rate is
+   passed to launched clients, which must be of this release or later. A rate other than ``0``
+   under ``0.000001`` is refused before anything starts.
+
+.. versionchanged:: 2.9.0
    ``--no-db`` leaves the configured database alone: it is not opened, created or initialized.
 
 .. versionchanged:: 2.9.0

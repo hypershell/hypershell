@@ -205,7 +205,7 @@ class RemoteCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second per client (default: none).
             There is no limit on task throughput unless specified.
 
@@ -220,6 +220,10 @@ class RemoteCluster(Thread):
 
         advertise (str, optional):
             Address the clients are told to dial, whatever the bind (default: the bind rule above).
+
+        evict_after (int, optional):
+            Period in seconds the server waits on a client's heartbeat before evicting it.
+            See :const:`~hypershell.server.DEFAULT_EVICT`.
 
     Example:
         >>> from hypershell.cluster import RemoteCluster
@@ -267,11 +271,12 @@ class RemoteCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None,
+                 ratelimit: float = None,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
                  zone: Optional[str] = None,
-                 advertise: Optional[str] = None) -> None:
+                 advertise: Optional[str] = None,
+                 evict_after: int = DEFAULT_EVICT) -> None:
         """Initialize server and client threads with external launcher."""
         auth = secrets.token_hex(64)
         # In JSON mode the template is expanded submit-side by the server; remote clients
@@ -295,6 +300,7 @@ class RemoteCluster(Thread):
                                    redirect_failures=redirect_failures,
                                    template=template,
                                    from_json=from_json,
+                                   evict_after=evict_after,
                                    tls=tls)
         if launcher_args is None:
             launcher_args = []
@@ -864,7 +870,7 @@ class AutoScalingCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second per client (default: none).
             There is no limit on task throughput unless specified.
 
@@ -969,7 +975,7 @@ class AutoScalingCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None,
+                 ratelimit: float = None,
                  poll: int = DEFAULT_SERVER_POLL,
                  policy: str = DEFAULT_AUTOSCALE_POLICY,
                  period: int = DEFAULT_AUTOSCALE_PERIOD,

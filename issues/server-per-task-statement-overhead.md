@@ -20,6 +20,19 @@ peaked at 129.0 tasks/s. The evidence points at the server process's CPU as the 
 about 6% CPU per task and cost 4.3% of throughput, and on a 1-CPU server node it cost 8.0%. Nobody
 has yet shown how much of the ceiling the database accounts for.
 
+`nf-hypershell` (the Nextflow executor, 2.9.0a8, SQLite, 2026-11-21) adds evidence that where a
+commit is slow, the database sets the ceiling instead. Its figures are end to end, from Nextflow's
+submission to the task's start, so they bound the server from below rather than measure it:
+
+- Gautschi, database on Lustre scratch: 38 tasks/s. A single SQLite commit there cost about 4.8 ms
+  in the default journal mode and about 0.5 ms in WAL, measured apart from HyperShell.
+- Gautschi, the same run with the database on home: 77 tasks/s, and 71/s for 3000 empty tasks.
+- A laptop, 3000 empty tasks, where a commit costs almost nothing: near 150 tasks/s.
+
+At about three commits per task, 4.8 ms per commit alone allows at most about 70 tasks/s, so on
+Lustre the commits, not the CPU, are the limit. Fewer commits per task (an option the Notes below
+already weigh) would help most there.
+
 `writeback-prebuilt-update` showed that building an ORM statement per call is expensive.
 `Task.__apply_result` built a new `update(cls).where(…).values(…)` for every result, and SQLAlchemy
 coerced it and generated a fresh cache key on every execute, which cost about 0.1 ms of CPU per
@@ -59,4 +72,6 @@ fence stay exactly as they are.
 - Related: `spec/writeback-prebuilt-update/` (the writeback half, and the measurement method),
   `spec/writeback-scoped-conditional/` (#70), `spec/relay/` (#82; relay multiplies
   fan-out, not row throughput, so this per-task cost still bounds a relayed campaign).
-- Found by: `writeback-prebuilt-update` shaping, from the foreman's 2026-11-04 profiling.
+- Found by: `writeback-prebuilt-update` shaping, from the foreman's 2026-11-04 profiling. The
+  slow-commit evidence is from `hypershell/hypershell-nextflow` development, 2026-11-21 (its
+  `DESIGN.md`, *What HyperShell should grow*, item 11).

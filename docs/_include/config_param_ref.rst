@@ -269,10 +269,15 @@
         task is considered to have failed if it has a non-zero exit status. The original is not over-written,
         a new task is submitted and later scheduled.
 
-        Counterpart to the ``-r``/``--max-retries`` command-line option. Setting ``--max-retries 1``
-        is equivalent to setting ``.attempts`` to 2.
+        Read by ``hs server`` and ``hs cluster``, as the counterpart to the ``-r``/``--max-retries``
+        command-line option. Setting ``--max-retries 1`` is equivalent to setting ``.attempts`` to 2.
 
         See also ``.eager``.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               ``hs cluster`` reads it; before, it retried no task unless given ``-r``.
 
     ``.eager``
         Schedule failed tasks before new tasks (default: `false`).
@@ -280,6 +285,16 @@
         If ``.attempts`` is greater than one, this option defines the appetite for re-submitting
         failed tasks. By default, failed tasks will only be scheduled when there are no more
         remaining novel tasks.
+
+        Read by ``hs server`` and ``hs cluster``; ``--eager`` turns it on for one run. A value in a
+        file other than ``true`` or ``false`` takes the boolean words: ``"yes"``/``"no"``,
+        ``"on"``/``"off"``, ``"true"``/``"false"`` in any letter case, or ``1``/``0`` as a number or as
+        text. Any other value stops the command before it starts.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               ``hs server`` and ``hs cluster`` read it; before, only ``--eager`` took effect.
 
     ``.poll``
         Maximum polling interval in seconds between database queries when no tasks are
@@ -313,8 +328,9 @@
         returned for each. If a client is defunct, this will hang the shutdown process.
         Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
-        fractions are kept. ``hs server`` and ``hs relay`` stop before they start if the value is
-        not a duration.
+        fractions are kept. ``hs server``, ``hs cluster`` and ``hs relay`` stop before they start if
+        the value is not a duration; ``hs server`` and ``hs cluster`` also if it is under 10 seconds,
+        not finite, or over 999,999,999 days.
 
         .. only:: html
 
@@ -323,6 +339,9 @@
 
             .. versionchanged:: 2.9.0
                A string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               ``hs cluster`` reads it in every mode; before, it always used 600 seconds.
 
     ``[tls]``
         Transport-layer security for queue connections. Enabled by default; every key below
@@ -470,10 +489,19 @@
     ``.ratelimit``
         Maximum number of tasks started per second (default: no limit).
 
-        A value of ``0`` disables rate limiting. Useful to throttle very short tasks so that
-        task launch does not overwhelm a shared resource.
+        A number (e.g., ``0.5``, one task every two seconds), read by ``hs client`` and by
+        ``hs cluster`` for each of its clients. A value of ``0`` disables rate limiting. Useful to
+        throttle very short tasks so that task launch does not overwhelm a shared resource.
+        ``-R`` refuses a rate other than ``0`` under ``0.000001`` (one task in about 11.6 days), and
+        ``hs cluster`` stops before it launches a client if the value is not a finite number or is
+        such a rate.
 
         See also ``-R``/``--ratelimit`` command-line option.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               ``hs cluster`` reads it, in place of an undocumented ``task.ratelimit``.
 
 ``[submit]``
     Section for `submit` workflow parameters.

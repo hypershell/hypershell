@@ -29,7 +29,7 @@ named in each entry. Horizons are indicative; the stated dependencies are the ha
 seed carries the same value as `target:` in its frontmatter. `2.9.0` is work to land before the
 2.9.0 release; `2.9.x` a 2.9 patch release; `2.10.0` the next minor, developed as `2.10.0aN` alphas;
 `2.8.x` a patch on the 2.8 line; a combination such as `2.9.x, 2.8.x` a fix that is also backported;
-and `unscheduled` an idea no release is planned for (Part IV). An interface change (a new option or
+and `unscheduled` an idea no release is planned for (Part V). An interface change (a new option or
 configuration key, refusing input accepted today, a changed default or changed output) goes to a
 minor release; an interface-neutral fix goes to a patch.
 
@@ -138,7 +138,8 @@ forms stay by design, but a quoted token should exist and the contract should be
 `compile_env` builds environment assignments without shell quoting, so a value containing a space or
 `$` corrupts the remote launch line, and there is no dry run to preview what would actually execute.
 
-*Target: 2.10.0 · Horizon: mid-term · Depends on: — · Refs: —*
+*Target: 2.10.0 · Horizon: mid-term · Depends on: — · Refs: its quoted token (R1) is a prerequisite
+of client-side sandboxing (Part IV)*
 **Seed:** [`issues/templating-and-remote-env-contract.md`](issues/templating-and-remote-env-contract.md)
 
 ## Deterministic sentinels retry to exhaustion, then stall the group
@@ -229,6 +230,17 @@ it exits 0 once that relay has drained; the same run on a database stays up. Fou
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-advertise/`*
 **Seed:** [`issues/forever-nodb-server-exits-when-relay-drains.md`](issues/forever-nodb-server-exits-when-relay-drains.md) · *status: unshaped*
+
+## SIGUSR1 stops an autoscaling cluster's scheduling but not the cluster
+
+After SIGUSR1, an autoscaling `hs cluster` stops scheduling and its clients drain and disconnect, but
+the process stays up until SIGTERM: it waits on the autoscaler, which never looks at the signal. A
+program that owns such a cluster cannot ask it to drain, so it terminates it, killing any client
+still connected (the client's Slurm job ends `FAILED`).
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `hypershell/hypershell-nextflow`
+(`DESIGN.md` item 6)*
+**Seed:** [`issues/autoscaling-cluster-ignores-usr1.md`](issues/autoscaling-cluster-ignores-usr1.md) · *status: unshaped*
 
 ## `hs update group=…` stores a non-integer group
 
@@ -324,6 +336,18 @@ statement. Pre-existing; out of scope for `hs-update-contended-writes` (#111).
 `spec/hs-update-contended-writes/` (Non-goals)*
 **Seed:** [`issues/update-legacy-tag-lost-write.md`](issues/update-legacy-tag-lost-write.md) · *status: unshaped*
 
+## Every numeric setting has one declared range, one parser and one error
+
+Bounds on numeric input were added one cycle at a time (a period above zero, an evict cap, a rate
+floor, 32-bit groups), and each review finds the next absurd value that slips through. One table of
+ranges beside each key's kind, one parser per kind for options, files and the environment, one
+error, and a start-up backstop that turns any stray numeric error into a clean refusal would end
+that. It absorbs the absurd-input seeds filed during the 2.9.0 cycles.
+
+*Target: 2.9.0 · Horizon: near-term · Depends on: `config-set-and-unread`, `submit-input-checks`,
+`update-client-retry` · Refs: `core/config_schema.py`; review rubric (Scope)*
+**Seed:** [`issues/bounded-inputs.md`](issues/bounded-inputs.md) · *status: unshaped*
+
 ## A non-integer task group is accepted at submit time
 
 The inline `group:` tag, `-t group:…` and a `--from-json` record's `group` key accept any value.
@@ -339,6 +363,18 @@ ships in 2.9.0, not a 2.8.x patch. Pre-existing, and found by that cycle's revie
 `spec/group-advance-strands-lower-group/` (REVIEW cycles 2 and 3); same committer death as
 `issues/database-locked-during-ingest-hangs.md`*
 **Seed:** [`issues/group-tag-integer-validation.md`](issues/group-tag-integer-validation.md) · *status: unshaped*
+
+## On PostgreSQL, a task cannot ask for 2 GB of memory or more
+
+`memory` is a byte count in an `INTEGER` column: 64-bit on SQLite, 32-bit on PostgreSQL. So on
+PostgreSQL `hs submit -m 4GB` is refused at insert, and then hangs (the committer death above). A
+retry is then refused as "already submitted", though nothing was stored. Every submitter that sets
+memory meets it, `hypershell-mcp` and `nf-hypershell` included. The fix is `BIGINT` and an upgrade
+step that retypes the column in place, which the upgrade step does not do yet.
+
+*Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs: same committer death as
+`issues/database-locked-during-ingest-hangs.md`; `issues/ingest-robustness.md`*
+**Seed:** [`issues/memory-column-overflows-postgres.md`](issues/memory-column-overflows-postgres.md) · *status: unshaped*
 
 ## Docs and runtime surfacing
 
@@ -362,6 +398,17 @@ that seam, so this waited rather than building one twice.
 *Target: 2.10.0 · Horizon: mid-term · Depends on: `zone-dispatch`'s request path (landed, #78) ·
 Refs: the corruption half was closed separately by `writeback-scoped-conditional` (#70)*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
+
+## `Task.cancel_all` overwrites a result that lands before it
+
+The model's cancel writes each row by id whatever its state, so a caller that reads its unfinished
+tasks and then cancels them overwrites any result that lands in between with `-1`. `hypershell-mcp`
+does exactly that; `nf-hypershell` keeps its own conditional copy. `hs update --cancel` is not
+affected: its filter is part of the UPDATE.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: prerequisite for the submitter
+lease (Part V); `hypershell/hypershell-nextflow` (`DESIGN.md` item 7)*
+**Seed:** [`issues/cancel-all-conditional.md`](issues/cancel-all-conditional.md) · *status: unshaped*
 
 ## A task whose confirmation has not landed is invisible to orphan recovery
 
@@ -399,7 +446,7 @@ this command too. Pre-existing.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: `env-config-keys` (landed, #113: the key
 table) · Refs: its GOAL's Non-goals*
-**Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: unshaped*
+**Seed:** [`issues/config-set-coerces-text.md`](issues/config-set-coerces-text.md) · *status: adopted:config-set-and-unread*
 
 ## `hs relay` cannot name the address its site clients dial
 
@@ -517,7 +564,7 @@ above. Pre-existing; found by `env-config-keys`' research, out of its scope.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
 `spec/env-config-keys/research/03-duration-keys.md`, `04-typed-readers.md`*
-**Seed:** [`issues/config-keys-unread.md`](issues/config-keys-unread.md) · *status: unshaped*
+**Seed:** [`issues/config-keys-unread.md`](issues/config-keys-unread.md) · *status: adopted:config-set-and-unread*
 
 ## `hs submit -q` cannot feed a server with a database
 
@@ -565,6 +612,17 @@ is the one most likely to be asked for first.
 drain-only does not · Refs: —*
 **Seed:** [`issues/failure-budget-halt-policy.md`](issues/failure-budget-halt-policy.md)
 
+## A submitter that owns its retries cannot opt its tasks out of the server's
+
+Retries are one setting per server. A submitter that retries for itself (Nextflow, an agent) gets
+its failed tasks run twice: once by HyperShell, in the old work directory, and once by itself. It
+can attach only to a site run with `--max-retries 0`, which takes retries away from every other task
+there. A per-task mark (a column or a reserved tag) would let it opt out alone.
+
+*Target: 2.10.0 · Horizon: mid-term, small · Depends on: — · Refs: `hypershell/hypershell-nextflow`
+(`DESIGN.md` item 9)*
+**Seed:** [`issues/per-task-retry-opt-out.md`](issues/per-task-retry-opt-out.md) · *status: unshaped*
+
 ## Live progress and ETA
 
 Watching a campaign means polling `hs list --count` against the database the scheduler is contending
@@ -583,13 +641,26 @@ does. Zones reduce how often this happens without fixing the mechanism.
 *Target: 2.9.x · Horizon: long-term · Depends on: — · Refs: —*
 **Seed:** [`issues/head-of-line-blocking.md`](issues/head-of-line-blocking.md)
 
+## A client takes work it cannot start while other clients have room
+
+A client asks for work whenever an executor thread is free, and its request says nothing about free
+cores, so it can hold a wide task it cannot start while another client could. On Gautschi the first
+client to connect took all six 32-core tasks of a run; the sixth waited 20 s on that node while two
+other nodes had cores free. The wait inside one client is the head-of-line entry above. Moving work
+between clients needs capacity in the request, or a hand-back.
+
+*Target: 2.10.0 · Horizon: mid-term · Depends on: — · Refs: `issues/head-of-line-blocking.md`;
+`hypershell/hypershell-nextflow` (`DESIGN.md` item 10)*
+**Seed:** [`issues/client-takes-unstartable-work.md`](issues/client-takes-unstartable-work.md) · *status: unshaped*
+
 ## Server CPU per task bounds throughput at small bundle sizes
 
 At bundle size 1, the server's main process runs its own scheduling, confirm and writeback
 statements for every task, and the evidence points at its CPU as the throughput ceiling.
 `writeback-prebuilt-update` recovers the writeback's share by building that statement once. The
 scheduler and confirm paths may carry the same per-call cost, and batching results across bundles
-is a further option.
+is a further option. Where a commit is slow (SQLite on Lustre), the commits set the ceiling instead:
+`nf-hypershell` measured 38 tasks/s there against 77/s with the database on home.
 
 *Target: 2.9.x · Horizon: mid-term · Depends on: `writeback-prebuilt-update` (landed, #73; the
 measurement method) · Refs: —*
@@ -728,7 +799,69 @@ turso-upstream-repro, or a Turso release · Refs: `spec/turso/` P3, review cycle
 
 ---
 
-# Part IV — Beyond 2.9.0
+# Part IV — Clients that do not have to trust their server
+
+Three entries, ruled on by the maintainer 2026-11-22. Today a client runs whatever command it is
+handed, so whoever controls the server or its database runs code, as the user, on every connected
+client. `docs/security.rst` says so: it is the design's trust model, not a hidden defect, so this
+work is planned here, not in the security lane. The first entry is the prerequisite, planned for
+2.9.0a10: a queue envelope that carries data, not pickled objects, so that a client can distrust its
+server at all. Then a 2.10.0 pair, which can ship in either order: signing stops a server from
+authoring work, and sandboxing bounds what a signed task can still do.
+
+## The queue's RPC envelope is pickled in both directions
+
+The queue is a `multiprocessing` manager, and every request and reply around HyperShell's own JSON
+payloads is pickled. Unpickling can run code chosen by whoever produced the bytes, so each end of a
+connection trusts the other with its process. The manager serializes only through its connection's
+`send`/`recv`, the standard library already swaps those for its XML-RPC serializer, and HyperShell
+owns both connection pairs. So a codec for a closed vocabulary of plain values (requests, five reply
+kinds, proxy tokens, `queue.Empty`) replaces pickle with no change to the queues, the dispatcher or
+any FSM. A pre-codec peer is refused with a clear error, and there is no pickle fallback. The envelope
+is JSON, like the payloads. It adds microseconds per task, against milliseconds for the database, so
+msgpack's extra dependency buys nothing.
+
+*Target: 2.9.0 (2.9.0a10) · Horizon: near-term, big · Depends on: — · Refs: prerequisite of both
+entries below; `docs/security.rst` ("Pickle-serialized RPC"); `tests/bench/bench_queue.py` (the
+no-regression check)*
+**Seed:** [`issues/queue-wire-codec.md`](issues/queue-wire-codec.md) · *status: unshaped*
+
+## A sandbox template around each task confines nothing
+
+A user can wrap each task in a sandbox through `-t/--template`, but `{}` is spliced unquoted into a
+`shell=True` line, so the task's own shell syntax runs outside the wrapper:
+`bwrap … {}` with `true; curl … | sh` sandboxes `true` and runs the pipeline unconfined. With the
+templating contract's quoted token, a wrapper receives the whole task as one argument. The cycle
+documents client-side sandboxing as a supported pattern: worked templates for `srt`, `bwrap`,
+Landlock and Apptainer, a baseline credential-denying policy, and the whole-client alternative. A
+`--sandbox` flag with a fail-closed startup probe is the stretch.
+
+*Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the templating contract's
+quoted token (R1 of `issues/templating-and-remote-env-contract.md`; this cycle pulls it in if it
+has not shipped); the queue envelope above, for the client process itself · Refs: pairs with task
+signing below*
+**Seed:** [`issues/untrusted-server-client-sandbox.md`](issues/untrusted-server-client-sandbox.md) · *status: unshaped*
+
+## Clients cannot tell a submitter's command from one the server made up
+
+Neither credential HyperShell has speaks to where a task came from: the authkey is shared with the
+server, and TLS authenticates the server, which is the party in question. The submitter would sign
+each task with an Ed25519 key the server never holds. The server and database carry the signature
+untouched, and a client under `--require-signed` runs only what verifies against its own local trust
+file, before its expiry and for its audience. `hs update --sign` signs again, but only a command
+given with it or a row whose current signature still verifies, never `args` read back from the
+database. Open for shaping: the terminal state of a refused task, which today's failure and retry
+queries must not pick up, and how much replay of a signed command under retry to allow.
+
+*Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the queue envelope above,
+to hold against a compromised server · Refs: pairs with
+client-side sandboxing above; `issues/resource-error-terminal-and-retry-defaults.md` (never-ran
+sentinels and retries)*
+**Seed:** [`issues/untrusted-server-task-signing.md`](issues/untrusted-server-task-signing.md) · *status: unshaped*
+
+---
+
+# Part V — Beyond 2.9.0
 
 Candidates beyond 2.9.0. Each may be taken up, reshaped or declined; an entry here records the idea
 and its open problems, and promises nothing. Its Target says whether a release is planned for it:
@@ -759,8 +892,8 @@ recorded. A returning owner re-claims its key, with fencing so two live claimant
 Tasks without a lease behave as today. The open problems are whose clock judges expiry (SQLite
 stores naive local times), who sweeps, and reaching tasks already running or held by a relay.
 
-*Target: 2.10.0 · Horizon: after 2.9.0, maybe · Depends on: a conditional `Task.cancel_all`; cancel
-reach for running tasks (`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs:
+*Target: 2.10.0 · Horizon: after 2.9.0, maybe · Depends on: a conditional `Task.cancel_all`
+(`issues/cancel-all-conditional.md`); cancel reach for running tasks (`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs:
 `hypershell/hypershell-nextflow` attached mode*
 **Seed:** [`issues/submitter-lease.md`](issues/submitter-lease.md) · *status: unshaped*
 

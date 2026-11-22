@@ -440,7 +440,9 @@ seen they steer every polling FSM toward shutdown. **Do not add stray `reset_sig
   mode that starts clients as processes (`RemoteCluster`, `AutoScalingCluster`, `SSHCluster`):
   it owns the shared client options and the key handoff, so a change to launched-client
   arguments goes there (and only options a 2.9.0a4 client accepts may be emitted; a contract
-  test pins this). `LocalCluster` runs its clients in-process and builds no argv. In JSON
+  test pins this). One value is a sanctioned exception: `plain_rate` emits a whole `-R` rate as an
+  integer word, which a 2.9.0a4 client reads, and a fractional one as a plain decimal, which needs
+  a client of 2.9.0 or later. `LocalCluster` runs its clients in-process and builds no argv. In JSON
   mode, clients must be sent `DEFAULT_TEMPLATE` (never the user template) to avoid double
   expansion. Every launch mode, and a relay's site clients, tells its clients the address
   `cluster/launch.py::advertised_host` gives: `--advertise`/`server.advertise` when given (remote
@@ -514,6 +516,11 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   `tests/test_config_schema.py` fails otherwise. An empty variable for a key of `EMPTY_UNSET` is
   not given (the key's default applies); every other text key holds an empty variable as written,
   as it holds a file's `""`.
+- `hs config set` writes a value by the same rule: `match_path` finds the kind of the dotted path as
+  written (no letter-case folding; a path with no type of its own takes TOML's own scalars) and
+  `read_value` converts the value. A value that does not convert is refused with exit 2
+  (`ArgumentError`) before `update()`, so the file and its backups are left as they were.
+  `update()` reads and writes the file as UTF-8 whatever the locale, as every reader decodes it.
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means
   **`0` = unlimited/auto** for many numeric knobs.
 - Defaults agents care about: server `port`, `bundlesize`, `bundlewait`, `evict` (≥10s),

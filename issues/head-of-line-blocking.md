@@ -37,6 +37,8 @@ A blocked executor makes progress on work it *can* run, and a persistently block
 
 - R1 interacts with priority aging/backfill in `core/resource.py` — check that reordering here does
   not defeat the aging that already exists.
+- The same wait across clients (a client holds work another client could start now) is
+  `issues/client-takes-unstartable-work.md`.
 - `zone` reduces the *frequency* of this (right-sized clients pull right-sized work) without fixing
   the mechanism.
 - Found by: GNU Parallel comparison review, 2026-08 (L8).

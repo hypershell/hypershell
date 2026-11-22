@@ -42,6 +42,21 @@ prevent, and a deferral's stated reason is exactly the kind of author intent tha
 gap-hunting reviewer manufactures gaps, which drives over-engineering. Silence on a clean diff is a
 valid, valuable result.
 
+**Absurd input is not a finding.** A value no real run would use, outside a setting's sane range
+(thousands of digits, `1e-300`, `1e300`, a period of millennia, a rate of one task per century),
+is handled in one place. Each setting has a declared range, every option, configuration key and
+environment variable of that kind is read through one parser, and out-of-range or non-numeric input
+stops the command with one error. Do not grade the next absurd value a diff fails to refuse
+gracefully. Report it only when:
+
+- a value **inside** a setting's declared or documented range misbehaves;
+- the diff reads a value around the central parser, bypassing it;
+- the declared range itself is wrong for real use.
+
+Otherwise list it at most as a one-line note in `REVIEW.md`, never as a finding. It never loops a
+cycle or triggers the human gate. Where no central range exists yet (before `bounded-inputs`
+lands), note the case for that seed and move on (2026-11-22, maintainer).
+
 ## Reviewer conduct (the subagent)
 
 - **Leave the tree clean.** Make no edits to tracked files; if you must instrument to reproduce a
