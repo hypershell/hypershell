@@ -335,3 +335,193 @@ No invariant violation (§1–§12) was found.
 back to `/hs-build` for F7 (R1/R4), F8 (R7, the F3 ruling) and F9 (R8), and for F10 if the human
 rules that it applies. One cycle remains before the bound. F8 and F9 are absurd-input edges, so the
 human may narrow or waive either at the gate to keep the loop converging.
+
+## Review cycle 3 — changes-requested (2026-11-22)
+
+- **Reviewed commit:** `4ae6a324`  ·  **Base:** `origin/develop` `6a0c28ea` (the merge base; the branch
+  fast-forwards it)  ·  **Cycle:** 3 of ≤3, the last
+- **Mode:** remediation plus a fresh pass, as the foreman's brief scoped it. The orchestrator graded
+  the remediation of F7, F8, F9 and F10, the maintainer's ruling on `hs config set`'s refusal
+  messages, and the builder's recorded deviations. A fresh blind reviewer passed over the delta
+  `d6d83afa..4ae6a324`, spec-excluded, and over the full diff wherever the delta touches it.
+- **Reviewer inputs:** `GOAL.md`; the spec-excluded delta and full diff; the **base** copies of
+  `invariants.md`, `AGENTS.md` and `review-rubric.md`; and, as binding contract readings, the
+  plan-gate, review-cycle-1 and review-cycle-2 rulings. Each was handed over as a copy in a curated
+  folder outside the repository. It did not read `PLAN.md`, `TECH.md`, `REVIEW.md`, `META.md`,
+  `research/` or `drive/`.
+- **Contract drift:** none since cycle 1. `GOAL.md` has the same two commits, `28c4df99` and
+  `81b762aa`.
+- **Human sign-off for cycle 2's gate (F8, F9):** given before the remediation, and recorded in the
+  review-cycle-2 rulings commit `2f7587fc`.
+
+### Verification run
+
+- **Whole suite**, serial, Python 3.14, `uv run --frozen pytest -q -p no:cacheprovider`: 3860 passed, 138 skipped, 0 failed (26 min 41 s; the 2 warnings are the base's `test_logging.py` fork tests).
+- **Targeted runs (reviewer):**
+  - `tests/test_config_set_types.py tests/test_config_unread.py tests/test_cluster_evict.py`: 246
+    passed. The two Latin-1 tests ran: this host has `en_US.ISO8859-1`.
+  - `test_config_schema.py test_cluster_launch.py test_server_fsm.py test_zone_dispatch.py
+    test_relay_roster.py test_topology_server.py`: 397 passed, 1 skipped.
+- **Red on `d6d83afa`:** the delta's new tests, run from `HEAD` against a `git archive` extract of
+  `d6d83afa`'s `src` through `PYTHONPATH`. The orchestrator saw 6 failed and 1 passed in
+  `test_config_set_types.py`: the four key-form cases, the two Latin-1 tests, and the passing
+  guard. It saw 26 failed and 34 passed in `test_cluster_evict.py` and `test_config_unread.py`: the
+  18 wide-integer eviction cases, the 8 under-floor rate cases, and the guards passing. The
+  reviewer's run agrees: 32 failed, 21 passed.
+- **Docs:** `sphinx-build -W --keep-going -q -E -b html docs …` (Python 3.12, docs group) exits 0.
+  The new sentences render in `config.html`, `cli/client.html`, `cli/cluster.html` and
+  `cli/config_set.html`.
+- **CLI drives**, all in throwaway sites (`temp_site.sh`, `HOME` redirected into the site), with the
+  key from `HYPERSHELL_SERVER_AUTH`, binding 127.0.0.1, and every run bounded by `drive/bound.sh`:
+  - `hs config set` under `LC_ALL=en_US.ISO8859-1` (`PYTHONUTF8=0`), and under `LC_ALL=C` with
+    locale coercion off: `--local` and `--user`, a new file and an existing one, with an existing
+    UTF-8 comment kept;
+  - the six forms of `server.auth` and `relay.upstream.auth`, and `Server.Auth`, each with a byte
+    that is not UTF-8;
+  - `server.evict` from a file, the environment, `_env` and `_eval`: 401-digit integers (plain,
+    negative and as days), `inf`, `-inf`, `nan`, `1e300`, the cap plus one, and the cap itself;
+    then day counts of 4,296 to 4,401 digits, on the branch and on `origin/develop`;
+  - `-R` and `client.ratelimit` (a file's number and text, `_env`, `_eval` and the environment
+    variable) at, under and around the floor, under `hs client` and `hs cluster`, in local and
+    `--launcher=env` modes;
+  - `hs client` against an `hs server --no-db` with a file's `ratelimit = 1e-300`, on the branch
+    and on `origin/develop`.
+
+  The orchestrator reproduced each finding below itself.
+- **Merge:**
+  - `git merge-tree --write-tree HEAD origin/develop` gives `89b7b01f`, which is `HEAD^{tree}`:
+    the branch merges cleanly and fast-forwards.
+  - Against `origin/fix/submit-input-checks` (`44e177b4`, #118), the merge is clean (tree
+    `2adadf38`). Its docs build `-W` exits 0. On that merged tree,
+    `test_config_set_types.py test_config_unread.py test_cluster_evict.py test_cluster_launch.py
+    test_group_integer.py test_reached_group.py test_resubmit_lower_group.py` gives 494 passed and
+    44 skipped.
+
+### Remediation of cycle 2
+
+| Item | Ruling | Status | Evidence |
+|------|--------|--------|----------|
+| F7 | write the file, and its backups, as UTF-8 whatever the locale | ✅ | Under `en_US.ISO8859-1`, `logging.datefmt '€'` exits 0. The file holds `€` as UTF-8 beside the seed's `port`, the one backup is the seed byte for byte, and no exception log is written. An `é` set there, then a second set, reads back by `hs config get` under both locales. A new `--user` file is UTF-8, and an existing UTF-8 comment (`résumé €`) is kept as written. On `d6d83afa`, the first exits 5 with the file truncated, and the second exits 3 with a `UnicodeDecodeError`. |
+| F8 | `check_evict` compares against the cap before any float conversion | ⚠️ partly: N2 | A 401-digit integer, from a file, the environment, `_env` or `_eval`, or as days, exits 5 with the cap's message in both commands, with no exception log. `inf` gives the finite-number message. `-inf`, `nan` and negative wide integers give the floor's message, as before. The cap passes and the cap plus one is refused. A day count of 4,298 digits or more still ends in a traceback (N2). |
+| F9 | `-R` and `client.ratelimit` refuse a rate under a floor, exit 2 naming the option or key | ✅ for `-R` and for `hs cluster`; N1 open for triage | `-R` with `1e-300`, `9e-7`, `-1e-300`, `0.0000009`, `1e-7` and `5e-324` exits 2 on both commands, naming `-R/--ratelimit` and the floor. Under `hs cluster`, a file's `1e-300`, `-1e-300`, `9.99e-7` or `5e-324`, in local and `--launcher=env` modes, exits 2 naming `client.ratelimit` and the file. `HYPERSHELL_CLIENT_RATELIMIT=1e-300` names the variable. Text, `_env` and `_eval` forms exit 2 through `-R`'s type. `1e-6` passes the start check, and `0`, `-5` and `0.5` run to completion. `hs client` reading the key from a file or the environment is N1. |
+| F10 | no spec ids in the branch's test docstrings | ✅ | No added line in `tests/`, `src/` or `docs/` of the full diff matches `(R#`, `(P#`, `(S#`, `F#`, `change N`, GOAL or Clarifications. All five test files the branch adds or edits carry none. |
+| Refusal messages | a refusal in `hs config set` names the key | ✅ | Each of the six forms of `server.auth` and `relay.upstream.auth`, and `Server.Auth`, with a byte that is not UTF-8, exits 2 with `<path>: expected text that can be written as UTF-8`. The file is as before and no backup is left. A typed key's refusal is unchanged (`server.port: expected a whole number, given 'abc'`). Public text says only that a refusal exits 2. A key form takes text, so the UTF-8 refusal is the only one it can meet. |
+
+**The builder's recorded deviations:**
+- **The floor is by magnitude; `0` and negative rates are left alone.** Sound. A negative rate
+  gives a negative wait, so it does not limit, as on the base, and `-5` runs to completion. A tiny
+  negative overflows the wait the same way a tiny positive does, so refusing it is the same repair.
+- **The Latin-1 tests skip on a host without such a locale.** Acceptable: the fix is an explicit
+  `encoding='utf-8'` on each `open()` of the write path, and the tests ran and were red here. CI
+  runs on `ubuntu-latest` only, whose default locales are UTF-8 ones, so CI will likely skip both
+  tests (not verified here).
+- **Gap: `hs client` reading a TOML number under the floor.** Graded as N1 below.
+- **Gap: an integer rate wider than a float.** Not raised. Cycle 2 named it inside F9 and the
+  maintainer's ruling asked for a floor only. It predates the branch for `-R`, whose base type was
+  `int`. Under `hs cluster` a file's 401-digit `ratelimit` now exits 5 at start with a traceback,
+  in local mode at `client.py`'s per-thread division and in `--launcher` mode at `plain_rate`'s
+  `float()`. It never hangs. A candidate seed.
+
+**Unmapped changes:** none. Every hunk of the delta maps to F7, F8, F9, F10 or the refusal ruling.
+
+### Findings (cycle 3)
+
+No invariant violation (§1–§12) was found.
+
+#### [LOW/CONFIRMED] N2 — A day count of about 4,300 digits makes `check_evict`'s message raise instead of refusing
+- **Where:** `src/hypershell/server.py:827` (and `:823`, `:826`). The message formats `given
+  {seconds}`. Python refuses to turn an integer of more than 4,300 digits into text (its default
+  int-to-text limit), so the `RuntimeError` is never raised.
+- **Failure scenario:** `server.evict` given as a day, hour or minute count that the duration parser
+  still reads (at most 4,300 digits) but whose seconds pass 4,300 digits. For example,
+  `HYPERSHELL_SERVER_EVICT=1` followed by 4,298 zeros and `d`. `hs server` and `hs cluster` exit 5
+  through the traceback writer, not with the cap's clean refusal that F8's ruling gives an integer
+  wider than a float.
+- **Evidence:**
+  - With 4,298 or 4,299 zeros and `d`, both commands exit 5 with `ValueError: Exceeds the limit
+    (4300 digits) for integer string conversion` and an exception log.
+  - With 4,295 zeros they exit 5 cleanly with the cap's message.
+  - In process, `check_evict(10**4300)` raises `ValueError`, and `check_evict(10**4299)` raises the
+    cap's `RuntimeError`.
+  - **Before the delta:** on `d6d83afa` the same input failed earlier, with an `OverflowError` from
+    `math.isfinite`. The remediation narrowed F8 to this window without closing it.
+  - **The same width one step earlier (context, not counted separately):**
+    - A unit form of more than 4,300 digits (for example 4,400 zeros and `d`) fails before
+      `check_evict`, inside `config_seconds` (`src/hypershell/core/config.py:367`).
+      `_match_seconds` builds a `Fraction` from the digits and raises `ValueError`, and the
+      helper catches only `OverflowError`.
+    - The result is exit 5 with a traceback. `hs server` behaves identically on `origin/develop`.
+      Under R7 `hs cluster` now does what `hs server` does; on the base it ignored the key.
+    - A plain number that wide is refused cleanly by the environment layer, with exit 3.
+- **Touches requirement:** R7 and the F8 ruling (an integer wider than a float gets the same clean
+  exit 5).
+- **Not deferrable:** no criterion requires preserving it.
+- **Fix (small):** in `check_evict`, name the value only when it can be printed, for example
+  through a helper that falls back to `an integer of N digits` (`len` from `math.log10`, or the
+  bit length) when `str()` raises `ValueError`. Add one `REFUSALS` case to
+  `tests/test_cluster_evict.py`: `'1' + '0' * 4298 + 'd'`, exit 5, no exception log.
+- **Optional, same class:** `config_seconds` could take `_match_seconds` into its `try` and treat a
+  `ValueError` like an `OverflowError`. Its own refusal then gives exit 3 naming the key, for
+  `server.evict` and every other key it reads. `core/config.py` is not on the gate list.
+- **Note:** the input is absurd. A cap of 86,399,999,913,600 seconds is already about 2.7 million
+  years, and this one is a number of days with 4,299 digits. The human may waive it at the gate.
+
+#### [PLAUSIBLE] N1 — `hs client` takes a `client.ratelimit` under the floor from a file or the environment
+- **Where:**
+  - `src/hypershell/client.py:1658`: the `-R` default is `config.client.ratelimit`, and argparse
+    does not run a non-text default through `parse_rate`.
+  - `ClientApp.check_args` (`client.py:1751`) has no floor check.
+- **Failure scenario:** a file's `[client] ratelimit = 1e-300`, or
+  `HYPERSHELL_CLIENT_RATELIMIT=1e-300`, under `hs client`. The first task runs. Then the executor
+  dies with `OverflowError` at `client.py:992`, and the client does not exit by itself. The same
+  value as TOML text (`"1e-300"`) is refused with exit 2 by `-R`'s type.
+- **Evidence:** against an `hs server --no-db` on 127.0.0.1, the branch prints `one`, then
+  `Uncaught exception from <class 'hypershell.client.TaskExecutor'>` and `OverflowError: Python int
+  too large to convert to C int`. It is still running at the 30 s bound. `origin/develop` behaves
+  identically, so this is pre-existing.
+- **Why PLAUSIBLE:** the F9 ruling says "`-R` and `client.ratelimit` refuse a rate below a floor".
+  Cycle 2's F9 concerned `hs cluster` (R8) and recorded `hs client`'s own reading as pre-existing.
+  GOAL's non-goals keep `hs client` "unchanged except `-R`'s form", and the docs name only `-R`
+  and `hs cluster`. Whether the ruling reaches `hs client`'s own reading of the key is the human's
+  call. It does not auto-loop.
+- **If ruled in scope:** in `ClientApp.check_args`, refuse a float `ratelimit` that is not finite,
+  or whose magnitude is under `RATE_MINIMUM` (but not 0), with exit 2. Name `client.ratelimit` and
+  its source, as `ClusterApp.check_arguments` does. Add tests for the file and environment forms.
+  This touches `client.py`, so it is behind the gate.
+- **If ruled out of scope:** a candidate seed, together with `hs client`'s non-finite file value,
+  which behaves the same way.
+
+### Considered and not raised
+- **No `versionchanged` marker for writing UTF-8 in any locale.** This is a bug fix: 2.8 wrote a
+  file no reader could decode. The prose is in the `hs config set` include, so it is not a §12
+  finding.
+- **`hs relay`'s copy of the configuration for a site** (`src/hypershell/relay/site.py:473`) is
+  written in the locale's encoding. This predates the branch, `relay/` is unchanged, and `hs relay`
+  is a non-goal. A candidate seed.
+- **`hs cluster` with a rate at the floor does not finish within the bound.** This is the limiter's
+  design: a result is held until 1/rate seconds have passed since the task was received.
+- **The new `is_key_variable(env_variable(…))` line** raised nothing for odd paths: the reviewer
+  fuzzed 20,000 random paths, and the orchestrator tried `server.`, `.x`, `a..b`, `relay.zone.x` and
+  `relay.zone.`. The one-word path is refused before it, as before.
+
+### Human-gate triggers
+- **Triggered by N2** (`server.py`, `check_evict`). It is LOW, but the rule is categorical:
+  explicit human sign-off is required before any further step.
+- **N1**, if the human rules it in scope, touches `client.py` and is gated too.
+- No security or DB-lifecycle invariant is touched.
+
+### Routing
+`changes-requested` at cycle 3 of ≤3. This is the bound, so the loop does not continue on its own:
+it **escalates to the maintainer**.
+
+**For N2**, one of:
+- waive it as an absurd input, which approves the branch as it stands, apart from N1's triage; or
+- approve the small fix above (a few lines in `check_evict` and one test case), with a confirming
+  pass scoped to it.
+
+**For N1**, rule it in scope (the fix above) or out of scope (a seed).
+
+**Candidate seeds:**
+- an integer rate wider than a float;
+- `hs client`'s file rate checks, if N1 is ruled out;
+- the relay site copy's encoding.
