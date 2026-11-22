@@ -24,13 +24,14 @@ from pathlib import Path
 
 # Standard libs
 import re
+import sys
 import uuid
 from datetime import datetime, timedelta
 
 # External libs
 import pytest
 from pytest import mark, fixture
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, update
 from sqlalchemy.engine import Engine, make_url
 
 # Internal libs
@@ -39,7 +40,8 @@ from hypershell.data.core import Session
 from hypershell.data.model import Entity, Task, CANCEL_STATUS
 from hypershell.data.upgrade import upgrade_schema
 from tests import create_taskfile
-from tests.input_checks import db_site, stored_args, stored_groups, set_task, finish, submit, submit_ok  # noqa: F401
+from tests.input_checks import (db_site, stored_args, stored_groups, set_task, finish, submit, submit_ok,  # noqa: F401
+                                bounded, sqlite_engine)
 from tests.test_timescale import admin, ts_database, ts_site, needs_server, ADMIN_URL  # noqa: F401
 
 
@@ -288,3 +290,46 @@ def test_submit_default_group_is_reached_group(db_site: Tuple[Path, Engine]) -> 
     rc, _, stderr = submit('-f', '-', stdin='echo piped\n', cwd=site)
     assert rc == 0, stderr[-4000:]
     assert stored_groups(engine)['echo piped'] == 5
+
+
+# --- At scale --------------------------------------------------------------------------------------
+
+SCALE: int = 20_000
+"""Rows in the scale test: half a finished group 0, half a queued group 1."""
+
+SCALE_BOUND: float = 10
+"""Seconds a reached-group read on that table may take: generous for a query that runs in milliseconds."""
+
+REACHED_SCRIPT = (
+    'from hypershell.data.model import Task; '
+    'print(Task.reached_group(), Task.reached_group(in_flight=False))'
+)
+"""Read the reached group of the site's database, with tasks in flight counted and not."""
+
+
+@mark.integration
+def test_reached_group_at_scale(temp_site: Path) -> None:
+    """On SQLite the reached group of a large table is read in one pass over it, within a generous bound.
+
+    The pass start is computed once per statement; a plan that recomputed it for every row scanned
+    takes minutes at this size and fails by the bound.
+    """
+    site = Path(str(temp_site))
+    path = create_taskfile(site, [f'echo {n}  # HYPERSHELL: group:{n * 2 // SCALE}' for n in range(SCALE)])
+    rc, _, stderr = bounded(['hs', 'submit', str(path)], cwd=site, timeout=120)
+    assert rc == 0, stderr[-4000:]
+    engine = sqlite_engine()
+    try:
+        now = datetime.now().astimezone()
+        table = Task.__table__
+        with engine.begin() as conn:
+            result = conn.execute(update(table).where(table.c.group == 0)
+                                  .values(schedule_time=now, completion_time=now, exit_status=0))
+            assert result.rowcount == SCALE // 2
+    finally:
+        engine.dispose()
+    rc, stdout, stderr = bounded([sys.executable, '-c', REACHED_SCRIPT], cwd=site, timeout=SCALE_BOUND)
+    assert rc == 0, stderr[-4000:]
+    assert stdout.split() == ['0', '0']
+    rc, _, stderr = bounded(['hs', 'submit', '-g', '0', '--', 'echo', 'again'], cwd=site, timeout=SCALE_BOUND)
+    assert rc == 0, stderr[-4000:]

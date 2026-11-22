@@ -19,8 +19,8 @@ from datetime import datetime
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import (Column, Index, func, text, update, delete, select, bindparam, literal, or_, and_, true,
-                        cast, inspect)
+from sqlalchemy import (Column, Index, func, text, update, delete, select, bindparam, literal, or_, and_, cast,
+                        inspect)
 from sqlalchemy.orm import Query, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound, StaleDataError
 from sqlalchemy.exc import IntegrityError
@@ -849,22 +849,23 @@ class Task(Entity):
 
         With `in_flight=False` a task still in flight does not count: a server reverts in-flight
         tasks when it starts, so they do not hold a lower group back for a run about to start.
+
+        The pass start is an uncorrelated scalar subquery, so each dialect computes it once per
+        statement rather than once per row scanned.
         """
         pass_start = (
-            select(func.min(cls.submit_time).label('submit_time'))
+            select(func.min(cls.submit_time))
             .where(cls.completion_time.is_(None))
-            .cte('pass_start')
+            .scalar_subquery()
         )
-        since_start = or_(cls.schedule_time >= pass_start.c.submit_time,
-                          cls.completion_time >= pass_start.c.submit_time)
+        since_start = or_(cls.schedule_time >= pass_start, cls.completion_time >= pass_start)
         if in_flight:
             scheduled = and_(cls.schedule_time.isnot(None), or_(cls.completion_time.is_(None), since_start))
         else:
             scheduled = and_(cls.schedule_time.isnot(None), cls.completion_time.isnot(None), since_start)
-        retry = and_(cls.previous_id.isnot(None), cls.submit_time >= pass_start.c.submit_time)
+        retry = and_(cls.previous_id.isnot(None), cls.submit_time >= pass_start)
         query = (
             select(func.max(cls.group))
-            .select_from(cls.__table__.join(pass_start, true()))
             .where(or_(cls.exit_status.is_(None), cls.exit_status != CANCEL_STATUS))
             .where(or_(scheduled, retry))
         )

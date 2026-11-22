@@ -4,10 +4,10 @@ title: 'Submitted input is checked: # is part of the command, a group is an inte
   and a group below the reached one is refused'
 kind: fix
 appetite: big
-status: blocked
+status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: done
+current_phase: P3
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -49,7 +49,7 @@ phases:
 - id: P3
   name: The integer rule; read-in-full input scanned before any write (hs submit incl.
     stdin, hs cluster incl. --no-db, hs server FILE, --from-json, -t, -g)
-  status: done
+  status: in_progress
   satisfies:
   - R3
   - R4
@@ -117,7 +117,7 @@ phases:
 - id: P7
   name: Docs (versionchanged 2.9.0), AGENTS.md and invariants.md, the release-note
     draft
-  status: done
+  status: in_progress
   satisfies:
   - R9
   depends_on:
@@ -142,11 +142,12 @@ phases:
     group'' AGENTS.md && grep -q ''reached group'' .agents/factory/invariants.md &&
     grep -q ''must be an integer'' AGENTS.md && grep -q ''must be an integer'' .agents/factory/invariants.md
     && test -s spec/submit-input-checks/RELEASE-NOTE.md && test "$(git diff dfdbaed5
-    -- docs src AGENTS.md .agents | grep -c ''^+.*hs task '')" -eq 0'
+    -- docs src AGENTS.md .agents | grep -c ''^+.*hs task '')" -eq 0 && grep -q ''refused
+    instead'' spec/submit-input-checks/RELEASE-NOTE.md && grep -q ''retry runs'' docs/_include/submit_desc.rst'
 - id: P8
   name: Whole suite, serially; the PostgreSQL-aware files with PostgreSQL; the red
     list re-proved on dfdbaed5; the four drives
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -168,11 +169,14 @@ phases:
     2700 uv run pytest -q -p no:cacheprovider tests/test_command_hash.py tests/test_group_integer.py
     tests/test_group_stream.py tests/test_reached_group.py tests/test_resubmit_lower_group.py
     tests/test_submit.py tests/test_groups.py tests/test_zone_postgres.py tests/test_contended_write.py
-    tests/test_server_initdb.py tests/test_writeback_postgres.py && RED_LIST=spec/submit-input-checks/drive/red.txt
-    RED_BASE_REV=dfdbaed5 python3 spec/submit-input-checks/drive/bounded.py 2700 sh
-    spec/relay-hardening/drive/red_check.sh && for mode in hash group stream reached;
-    do .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh"
-    $mode || exit 1; done
+    tests/test_server_initdb.py tests/test_writeback_postgres.py tests/test_data/test_model.py
+    tests/test_group_order.py && RED_LIST=spec/submit-input-checks/drive/red.txt RED_BASE_REV=dfdbaed5
+    python3 spec/submit-input-checks/drive/bounded.py 2700 sh spec/relay-hardening/drive/red_check.sh
+    && RED_LIST=spec/submit-input-checks/drive/red-cycle1.txt RED_BASE_REV=44e177b4
+    python3 spec/submit-input-checks/drive/bounded.py 900 sh spec/relay-hardening/drive/red_check.sh
+    && for mode in hash group stream reached; do .agents/factory/bin/temp_site.sh
+    uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh" $mode || exit 1;
+    done
 review:
   last_reviewed_commit: 44e177b4
   verdict: changes-requested
@@ -566,6 +570,49 @@ list still fails on `dfdbaed5`; every drive passes.
   `reached` 5/5. The red list on this tree, PostgreSQL on: **56 passed**.
 - **Verify:** as in the frontmatter.
 - **Touches:** `tests/test_server_initdb.py` (the recorder stub, P6's amendment).
+
+## Review cycle 1 — remediation (2026-11-22)
+
+[`REVIEW.md`](REVIEW.md) cycle 1 asked for changes (F1 HIGH, F2 MEDIUM, both in `data/model.py`);
+the maintainer signed the fixes off ([`PLAN.md`](PLAN.md) § *Review-cycle-1 rulings*). `hs-build`
+reopened P5 (F1), P3 (F2), P7 (docs and the release note) and P8 (the whole suite), tightened the
+P7 and P8 gates with `set_phase.py --verify`, and closed each again after its gate held. In
+`data/model.py` only `Task.reached_group` and the retry construction changed.
+
+- [x] **F1 (P5).** `Task.reached_group` takes the pass start as an uncorrelated scalar subquery
+      (`select(min(submit_time)) … .scalar_subquery()`) instead of a CTE joined `ON true`; every
+      predicate is kept (the `CANCEL_STATUS` filter, in flight against completed, the retry-row
+      branch, the SQLite `typeof` filter), and the unused `true` import is dropped. SQLite's plan
+      goes from `CO-ROUTINE pass_start` searched inside `SCAN task` to three `SCALAR SUBQUERY` steps,
+      each run once. New test `test_reached_group.py::test_reached_group_at_scale` (SQLite, 20 000 rows:
+      a finished group 0 and a queued group 1) reads the reached group in a subprocess bounded at 10 s
+      and then runs `hs submit -g 0` under the same bound; it asserts `0 0` and exit 0.
+- [ ] **F2 (P3).** The retry in `__schedule_next_failed_tasks` passes `parse_inline=False` and
+      `strict_tag=False`: the retry's command is the failed task's stored command, its group the task's
+      group and its tags the task's tags, none read again. New tests in `test_group_integer.py`:
+      `test_cluster_json_retry_keeps_command_and_group[text|integer]` (a `--from-json` record
+      `false # HYPERSHELL: group:x` or `…group:3` with `--max-retries 1`: exit 0, and the retry row
+      keeps the command and group 0) and `test_cluster_json_retry_keeps_tags` (a record tag
+      `input: data/a b.txt`, valid only under the relaxed JSON check, is copied to the retry).
+      **Base behaviour checked:** for a valid marker in `args`, 44e177b4 and `dfdbaed5` both cut the
+      retry's command at the marker and moved it to the marker's group (`false`, group 3); the retry
+      now runs the first attempt's command in its group, as the first attempt did, since a JSON
+      record's `args` are never read for tags. The strict tag re-check on a retry is an older bug of
+      the same construction (the run exits 5 when it retries such a task, on `dfdbaed5` too); the
+      ruling's "copies the failed task's tags" covers it.
+- [ ] **Retry window (P7).** `task_groups_alt.rst` already says it twice: "a failure counts as
+      finished unless its retry has been created" and, among the under-estimates, "while a failure
+      waits for its retry to be created". No change.
+- [ ] **Docs and release note (P7).** `submit_desc.rst`'s `--from-json` paragraph says `args` is taken
+      as written and a retry runs that command in the task's group with its tags, with its own
+      `versionchanged:: 2.9.0`. `RELEASE-NOTE.md` names D2 (an old file refused on `--restart` or
+      `--update` when a re-identified line is below the reached group; an old failed cut task) and
+      the retry fix.
+- [ ] **Red list for this cycle.** [`drive/red-cycle1.txt`](drive/red-cycle1.txt) (4 ids) is checked
+      against `44e177b4` by the landed `red_check.sh`; P8's gate runs it after the `dfdbaed5` list.
+- **Verified, P5 (2026-11-22):** suites 155 passed, 1 skipped (PostgreSQL on); guards 19 passed;
+  `input_drive.sh reached` PASS 5 of 5. `test_reached_group_at_scale` fails by its 10 s bound on
+  `44e177b4` (the reached-group read) and passes here in 14 s, nearly all of it the 20 000-line submit.
 
 ---
 
