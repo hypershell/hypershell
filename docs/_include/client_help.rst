@@ -41,7 +41,8 @@ Options
 
     The `client` collector thread that accumulates finished task bundles to return to
     the `server` will push out a bundle after this period of time regardless of whether
-    it has reached the preferred bundle size.
+    it has reached the preferred bundle size. A client with nothing left to run returns what it
+    holds at once.
 
     See also ``--bundlesize``.
 

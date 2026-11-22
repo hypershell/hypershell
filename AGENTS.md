@@ -264,13 +264,16 @@ input is best effort: a late lower group runs after the current one, with a warn
 non-`forever` scheduler stops for having run out of work only once its submitter has ended and
 every task is terminal** (`Scheduler.load_bundle`). It also stops, input open or not, when a group
 fails permanently while a task waits in another group (above), and on SIGUSR1/SIGUSR2; each takes
-effect on its next pass, within `server.poll`, not during a back-off. To decide it is out of work,
-it reads `submission_complete()` before the counts (a submitter ends only after its last commit, so
-its rows are then visible), and with every task done and the input still open it backs off without
-`increment_group`. A failed group with no task waiting in another group is the same case (a result
-can land between the count and `increment_group`): it backs off while the input is open and stops
-without the halt once the input has ended. So neither a pause in a stream nor a failed task with no
-retry left ends the run early. The server wakes it once the submitter has ended.
+effect on its next pass, within `server.poll`, not during a back-off, except that the out-of-work
+stop also takes effect when the result that finishes the run lands: a pass that loads nothing with
+the input ended arms before its counts, and once enough results have landed the receiver reads the
+same counts and wakes the scheduler (`Scheduler.results_landed`), whose next pass stops. To decide
+it is out of work, it reads `submission_complete()` before the counts (a submitter ends only after
+its last commit, so its rows are then visible), and with every task done and the input still open it
+backs off without `increment_group`. A failed group with no task waiting in another group is the
+same case (a result can land between the count and `increment_group`): it backs off while the input
+is open and stops without the halt once the input has ended. So neither a pause in a stream nor a
+failed task with no retry left ends the run early. The server wakes it once the submitter has ended.
 
 ## Concurrency model (read before touching `server.py`, `client.py`, `core/fsm.py|thread.py|signal.py`)
 
