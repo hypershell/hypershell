@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P5
+current_phase: P6
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -90,7 +90,7 @@ phases:
     $m || exit 1; done
 - id: P5
   name: Docs, help snippets and markers; AGENTS.md and invariants in lockstep
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on:
@@ -314,22 +314,22 @@ integer word and a fraction as a plain decimal.
 **Goal:** every page and help line says what R1–R8 changed, marked `versionchanged:: 2.9.0`; the agent
 docs state the two new rules.
 
-- [ ] `hs config set`: `SET_HELP` `VALUE` line and `docs/_include/config_set_help.rst` ("Value to be
+- [x] `hs config set`: `SET_HELP` `VALUE` line and `docs/_include/config_set_help.rst` ("Value to be
       set, written by the key's type."); `docs/_include/config_set_desc.rst` paragraph with
       `:ref:`by the key's type <config_value_types>`` (refusal exits 2, nothing written; a text key's
       `""` is written); label `.. _config_value_types:` before `config_intro.rst`'s "The value is read
       by the key's type:" (not lines 146–153); marker in `docs/cli/config_set.rst` between `|` and the
       help include.
-- [ ] `docs/_include/config_param_ref.rst`: `.attempts`, `.eager` (boolean words for file text),
+- [x] `docs/_include/config_param_ref.rst`: `.attempts`, `.eager` (boolean words for file text),
       `.evict` (the "stop before they start" sentence, PLAN §2.6; third marker in its block), `[client]
       .ratelimit` (a number; `hs client` and `hs cluster`), each with the house `.. only:: html` marker.
       No body line holding only a ``` ``.name`` ``` term.
-- [ ] `-R` help in `client.py` and `cluster/__init__.py` `HELP`, `docs/_include/client_help.rst`
+- [x] `-R` help in `client.py` and `cluster/__init__.py` `HELP`, `docs/_include/client_help.rst`
       (155–157) and `cluster_help.rst` (358–360): "a number, e.g. 0.5".
-- [ ] Markers in `docs/cli/client.rst` (`-R`), `docs/cli/server.rst` (`server.eager`),
+- [x] Markers in `docs/cli/client.rst` (`-R`), `docs/cli/server.rst` (`server.eager`),
       `docs/cli/cluster.rst` (`server.eager`, `server.attempts`, `server.evict`, `client.ratelimit`,
       `-R`), placed above the existing 2.9.0 markers (PLAN §2.6).
-- [ ] AGENTS.md § Configuration and invariants §10: `hs config set` writes by the key's kind
+- [x] AGENTS.md § Configuration and invariants §10: `hs config set` writes by the key's kind
       (`match_path` + `read_value`; exit 2; nothing written). AGENTS.md's `client_launch` paragraph and
       invariants §11: a whole `-R` is an integer word; a fractional one needs a client of this release.
 - **Verify:** greps for each edit, `tests/test_config_schema.py`, the docs build with `-W`.

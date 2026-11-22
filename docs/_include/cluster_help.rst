@@ -356,7 +356,7 @@ Options
     See also ``--capture``.
 
 ``-R``, ``--ratelimit`` *NUM*
-    Maximum allowed tasks per second per client. (default: none).
+    Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
     Individual tasks are throttled if exceeding this average limit.
 
 ``-S``, ``--signalwait`` *SEC*

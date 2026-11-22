@@ -32,6 +32,10 @@ Description
    a Slurm time, as ``-W`` does, and a signed value is refused.
 
 .. versionchanged:: 2.9.0
+   ``server.eager`` takes effect without ``--eager``; before, the key was ignored. Text in a file
+   takes the boolean words, and any other value stops the server before it starts.
+
+.. versionchanged:: 2.9.0
    A run fed by a stream (standard input, a pipe or a named pipe) ends once that input ends and
    every task is done, not once the tasks read so far are done, so a line that arrives after a pause
    still runs. Input that is never closed keeps the run going until it is.

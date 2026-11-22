@@ -1571,7 +1571,7 @@ Options:
   -M, --client-memory MEM   Memory limit for client; K/M/G/T[B|iB] are powers of 1024 (default: all memory).
   -T, --timeout       SEC   Shutdown if no tasks received; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: never).
   -W, --task-timeout  SEC   Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
-  -R, --ratelimit     NUM   Maximum allowed tasks per second (default: none).
+  -R, --ratelimit     NUM   Maximum allowed tasks per second; a number, e.g. 0.5 (default: none).
   -S, --signalwait    SEC   Task-level signal escalation wait period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SIGNALWAIT}).
   -h, --help                Show this message and exit.\
 """

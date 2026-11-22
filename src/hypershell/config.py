@@ -262,7 +262,7 @@ SET_HELP = f"""\
 
 Arguments:
   SECTION[...].VAR        Path to variable.
-  VALUE                   Value to be set.
+  VALUE                   Value to be set, written by the key's type.
 
 Options:
       --system            Apply to system configuration.

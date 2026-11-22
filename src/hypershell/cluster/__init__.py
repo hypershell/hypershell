@@ -112,7 +112,7 @@ Options:
   -f, --failures       PATH     File path to write failed task args (default: <none>).
   -T, --timeout        SEC      Shutdown clients if no tasks received; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: never).
   -W, --task-timeout   SEC      Task-level walltime limit; seconds, 1h30m, 1.5h or [D-]HH:MM:SS (default: none).
-  -R, --ratelimit      NUM      Maximum allowed tasks per second per client (default: none).
+  -R, --ratelimit      NUM      Maximum allowed tasks per second per client; a number, e.g. 0.5 (default: none).
   -S, --signalwait     SEC      Task-level signal escalation wait period; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SIGNALWAIT}).
   -Q, --poll           SEC      Polling interval between database queries if no tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_SERVER_POLL}).
   -A, --autoscaling   [MODE]    Enable autoscaling per zone (default: disabled). Used with --launcher.

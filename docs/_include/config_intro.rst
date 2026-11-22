@@ -139,6 +139,8 @@ in a file (see above): ``HYPERSHELL_SERVER_AUTH_ENV=MY_KEY`` reads the key from 
 forms of one key (``server.auth`` or ``relay.upstream.auth``) set in the environment are refused,
 as they are in one file.
 
+.. _config_value_types:
+
 The value is read by the key's type:
 
 - A key that takes text holds the value as written, including ``false``, ``null``, an empty value,
