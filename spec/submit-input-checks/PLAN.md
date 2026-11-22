@@ -301,3 +301,15 @@ ruled in session (2026-11-22) "Approve both", approving review cycle 2 and a mer
   warning covers it.
 - **Release note.** `RELEASE-NOTE.md` names D2: an old file can be refused on `--restart` or
   `--update`.
+
+## Review-cycle-2 rulings (2026-11-22)
+
+The review's human gate was triggered by G1 (`data/model.py`). The maintainer ruled in session
+(2026-11-22) "Approve the fix", approving review cycle 3 (the last) and a merge on approval.
+
+- **G1.** A retry takes its group from the failed task's `group` column, and a `group` key in the
+  copied tags is ignored. A text group tag (written by `hs update`'s tag form) no longer stops the
+  run. An integer group tag no longer moves the retry. Tests for both are red on `3dd066a4`.
+- **N2 (triaged).** On PostgreSQL, a table where every task has finished is read in linear time,
+  slower than before (results identical). It is filed as a 2.9.x seed by the foreman. A retry not
+  carrying cores, memory or walltime is R7 of `update-client-retry`.
