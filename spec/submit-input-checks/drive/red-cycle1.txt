@@ -1,0 +1,12 @@
+# submit-input-checks, review cycle 1: regression tests that must fail on the reviewed build (44e177b4)
+# for what they check. Checked by the landed checker, read-only, from the repository root:
+#   RED_LIST=spec/submit-input-checks/drive/red-cycle1.txt RED_BASE_REV=44e177b4 sh spec/relay-hardening/drive/red_check.sh
+# F1: the reached group of a 20k-row SQLite table, read within a 10 s bound (the reviewed build takes
+# minutes: it fails by pytest.fail at the bound).
+tests/test_reached_group.py::test_reached_group_at_scale
+# F2: a retry keeps its command as stored, its group and its tags (the reviewed build exits 5 on the
+# text group, cuts the command at the marker and moves the group on the integer one, and exits 5 on a
+# tag outside the inline grammar).
+tests/test_group_integer.py::test_cluster_json_retry_keeps_command_and_group[text]
+tests/test_group_integer.py::test_cluster_json_retry_keeps_command_and_group[integer]
+tests/test_group_integer.py::test_cluster_json_retry_keeps_tags

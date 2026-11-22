@@ -4,10 +4,10 @@ title: 'Submitted input is checked: # is part of the command, a group is an inte
   and a group below the reached one is refused'
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/submit-input-checks
 base: develop
-current_phase: P8
+current_phase: done
 last_updated: '2026-11-22'
 phases:
 - id: P1
@@ -147,7 +147,7 @@ phases:
 - id: P8
   name: Whole suite, serially; the PostgreSQL-aware files with PostgreSQL; the red
     list re-proved on dfdbaed5; the four drives
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -587,6 +587,9 @@ P7 and P8 gates with `set_phase.py --verify`, and closed each again after its ga
       each run once. New test `test_reached_group.py::test_reached_group_at_scale` (SQLite, 20 000 rows:
       a finished group 0 and a queued group 1) reads the reached group in a subprocess bounded at 10 s
       and then runs `hs submit -g 0` under the same bound; it asserts `0 0` and exit 0.
+- **Verified, P5 (2026-11-22):** suites 155 passed, 1 skipped (PostgreSQL on); guards 19 passed;
+  `input_drive.sh reached` PASS 5 of 5. `test_reached_group_at_scale` fails by its 10 s bound on
+  `44e177b4` (the reached-group read) and passes here in 14 s, nearly all of it the 20 000-line submit.
 - [x] **F2 (P3).** The retry in `__schedule_next_failed_tasks` passes `parse_inline=False` and
       `strict_tag=False`: the retry's command is the failed task's stored command, its group the task's
       group and its tags the task's tags, none read again. New tests in `test_group_integer.py`:
@@ -613,11 +616,20 @@ P7 and P8 gates with `set_phase.py --verify`, and closed each again after its ga
       the retry fix.
 - **Verified, P7 (2026-11-22):** help and completion tests 66 passed; html and man builds with `-W`
   clean; every grep holds, the two new ones included.
-- [ ] **Red list for this cycle.** [`drive/red-cycle1.txt`](drive/red-cycle1.txt) (4 ids) is checked
+- [x] **Red list for this cycle.** [`drive/red-cycle1.txt`](drive/red-cycle1.txt) (4 ids) is checked
       against `44e177b4` by the landed `red_check.sh`; P8's gate runs it after the `dfdbaed5` list.
-- **Verified, P5 (2026-11-22):** suites 155 passed, 1 skipped (PostgreSQL on); guards 19 passed;
-  `input_drive.sh reached` PASS 5 of 5. `test_reached_group_at_scale` fails by its 10 s bound on
-  `44e177b4` (the reached-group read) and passes here in 14 s, nearly all of it the 20 000-line submit.
+- **Verified, P8 (2026-11-22, the gate as tightened):** whole suite with `HS_TEST_POSTGRES` unset
+  **3727 passed, 186 skipped in 25 min 52 s**; the PostgreSQL-aware files (now with `test_model` and
+  `test_group_order`) **391 passed, 6 skipped** (5 min 33 s); red check **56 of 56 RED** on `dfdbaed5`
+  and **4 of 4 RED** on `44e177b4`; drives `hash` 4/4, `group` 6/6, `stream` 6/6, `reached` 5/5.
+- **Query plans and timings (in-process, SQLite, unscheduled rows).** Before (`44e177b4`):
+  `CO-ROUTINE pass_start`, `SCAN task`, `SEARCH task USING INDEX index_tasks_unscheduled`, `SEARCH
+  pass_start`; 1.15 s at 5 000 rows, 7.8 s at 10 000. After: `SEARCH task USING INDEX
+  index_tasks_unscheduled` and three `SCALAR SUBQUERY` steps, each a `SEARCH task` run once; 3 ms at
+  5 000 rows, 7 ms at 20 000 (12 ms with 20 000 finished rows). PostgreSQL now plans three InitPlans
+  (U computed once by each) where it had a materialized one-row join; at 100 000 rows 13 ms after
+  against 16 ms before, and at 1 000 000 rows 95–120 ms against 123–137 ms (both runs alongside
+  test load).
 
 ---
 
