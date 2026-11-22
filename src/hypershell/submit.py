@@ -87,7 +87,8 @@ __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 
            'validate_json_expansion', 'validate_json_groups',
            'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint', 'is_file_input',
            'source_name',
-           'source_fingerprint_and_count', 'apply_source_gate', 'refuse_below_reached_group',
+           'source_fingerprint_and_count', 'apply_source_gate', 'decide_source_gate', 'GateDecision',
+           'task_fingerprints', 'json_fingerprints', 'refuse_below_reached_group',
            'SubmitThread', 'LiveSubmitThread', 'SubmitApp',
            'DEFAULT_TASK_GROUP', 'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_TEMPLATE']
 
@@ -196,30 +197,67 @@ class InputScan:
     groups: List[Optional[int]]
 
 
-def scan_task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
-                    group: Optional[int] = DEFAULT_TASK_GROUP, tags: Optional[Dict[str, JSONData]] = None,
-                    name: str = '<input>') -> InputScan:
-    """Check every line of input read in full before anything is written, and count its tasks.
+def task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
+               tags: Optional[Dict[str, JSONData]] = None,
+               name: str = '<input>') -> Iterator[Tuple[str, str, Dict[str, JSONData]]]:
+    """Replay the Loader's line rules over `lines`: each task's command, expanded command and tags.
 
-    The Loader's own line rules (:func:`split_task_line`) are replayed over `lines`, numbered from 1
-    as physical lines: a tag-only line updates a running copy of `tags`, and only after its group is
-    accepted. A group that is not an integer raises :class:`~hypershell.data.model.TaskGroupError`
-    naming the value as written and ``{name}, line {n}``. Nothing is read from or written to the
-    database.
+    Lines are split as the Loader splits them (:func:`split_task_line`) and numbered from 1 as
+    physical lines. A tag-only line updates a running copy of `tags`, and only after its group is
+    accepted; a task's tags are the running tags with its inline tags over them. A group that is
+    not an integer raises :class:`~hypershell.data.model.TaskGroupError` naming the value as
+    written and ``{name}, line {n}``.
     """
     engine = Template(template)
     running = dict(tags or {})
-    groups: List[Optional[int]] = []
     for number, line in enumerate(lines, start=1):
         try:
             command, args, inline_tags = split_task_line(line, engine)
         except TaskGroupError as error:
             raise error.at(f'{name}, line {number}') from error
         if args:
-            groups.append(inline_tags.get('group', running.get('group', group)))
+            yield command, args, {**running, **inline_tags}
         elif not command and inline_tags:
             running.update(inline_tags)
+
+
+def scan_task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
+                    group: Optional[int] = DEFAULT_TASK_GROUP, tags: Optional[Dict[str, JSONData]] = None,
+                    name: str = '<input>') -> InputScan:
+    """Check every line of input read in full before anything is written, and count its tasks.
+
+    The Loader's own line rules (:func:`task_lines`) are replayed over `lines`; a task's group is
+    its tags' group, else `group`. Nothing is read from or written to the database.
+    """
+    groups = [task_tags.get('group', group)
+              for _, _, task_tags in task_lines(lines, template=template, tags=tags, name=name)]
     return InputScan(count=len(groups), groups=groups)
+
+
+def task_fingerprints(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
+                      group: Optional[int] = DEFAULT_TASK_GROUP,
+                      tags: Optional[Dict[str, JSONData]] = None) -> List[str]:
+    """The identity of each task in `lines`, in order, as the Loader builds it (see :meth:`Loader.load_line_task`)."""
+    return [Task.new(args=args, raw_args=command, parse_inline=False, group=group, tag=task_tags).fingerprint
+            for command, args, task_tags in task_lines(lines, template=template, tags=tags)]
+
+
+def json_record_tags(record: dict) -> Dict[str, JSONData]:
+    """The tags of a JSON task record: every key but ``args``, nested values serialized as JSON."""
+    return {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
+            for key, value in record.items() if key != 'args'}
+
+
+def json_fingerprints(records: List[dict], *, group: Optional[int] = DEFAULT_TASK_GROUP,
+                      tags: Optional[Dict[str, JSONData]] = None) -> List[str]:
+    """The identity of each JSON record's task, in order, as the Loader builds it (see :meth:`Loader.load_json_task`).
+
+    The identity is taken over the record's pre-template ``args``, so no template is needed.
+    """
+    return [Task.new(args=str(record.get('args', '')), raw_args=str(record.get('args', '')), group=group,
+                     tag={**(tags or {}), **json_record_tags(record)}, strict_tag=False,
+                     parse_inline=False).fingerprint
+            for record in records]
 
 
 def source_fingerprint(path: str) -> str:
@@ -304,16 +342,50 @@ def _warn_if_incomplete(source: Source, lineage: List[Source]) -> None:
                     f'{landed} of {source.task_count} tasks present (source {source.id})')
 
 
+@dataclass
+class GateDecision:
+    """The re-submission gate's decision for a named source, made before anything is written.
+
+    ``source_id`` is a prior source to reuse (a same-file ``--restart``), else None: a new
+    :class:`Source` row is recorded on :meth:`commit`. ``skip`` is the set of task identities
+    already present in the same-path lineage, which the :class:`Loader` drops (None: no de-dup).
+    """
+
+    path: str
+    fingerprint: str
+    count: int
+    source_id: Optional[str] = None
+    skip: Optional[set] = None
+
+    def commit(self: GateDecision) -> Tuple[str, Optional[set]]:
+        """Write the decision: record a new Source row unless a prior one is reused; return its id and the skip set."""
+        if self.source_id is None:
+            self.source_id = _new_source_id(self.path, self.fingerprint, self.count)
+        return self.source_id, self.skip
+
+
 def apply_source_gate(path: str, fingerprint: str, count: int, *,
                       repeat: bool, update: bool, restart: bool = False) -> Tuple[str, Optional[set]]:
-    """Decide whether to submit, de-dup, or refuse a named-file submission.
+    """Decide whether to submit, de-dup, or refuse a named-file submission, and record it.
 
-    Consults the :class:`Source` table for the file's ``(path, fingerprint)`` and returns
-    the ``source_id`` to stamp onto tasks plus an optional ``skip_fingerprints`` set — task
-    identities already present in the same-path lineage, which the :class:`Loader` drops for
-    de-dup. Raises :class:`~cmdkit.cli.ArgumentError` (→ ``exit_status.bad_argument``) on a
-    refusal, with an actionable message. Emits detection logging (prior source,
-    incomplete-prior warning, submit/de-dup intent, refusal reason).
+    The composition of :func:`decide_source_gate` and :meth:`GateDecision.commit`: returns the
+    ``source_id`` to stamp onto tasks plus an optional ``skip_fingerprints`` set.
+    """
+    return decide_source_gate(path, fingerprint, count, repeat=repeat, update=update, restart=restart).commit()
+
+
+def decide_source_gate(path: str, fingerprint: str, count: int, *,
+                       repeat: bool, update: bool, restart: bool = False) -> GateDecision:
+    """Decide whether to submit, de-dup, or refuse a named-file submission, writing nothing.
+
+    Consults the :class:`Source` table for the file's ``(path, fingerprint)`` and returns the
+    decision: a prior ``source_id`` to reuse or a new source to record on
+    :meth:`GateDecision.commit`, plus an optional ``skip`` set — task identities already present
+    in the same-path lineage, which the :class:`Loader` drops for de-dup. Raises
+    :class:`~cmdkit.cli.ArgumentError` (→ ``exit_status.bad_argument``) on a refusal, with an
+    actionable message. Emits detection logging (prior source, incomplete-prior warning,
+    submit/de-dup intent, refusal reason). Checks made between the decision and its commit can
+    still refuse with no Source row written.
 
     This is the shared gate for both entry points: ``hs submit`` calls it with
     ``restart=False``; ``hsx``/``hs cluster`` also passes ``restart``. Callers guarantee a
@@ -339,12 +411,12 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
     if repeat:
         # Brand-new source; submit everything even on an identical match.
         log.info(f'Submitting all {count} tasks from {path} as a new source (--repeat)')
-        return _new_source_id(path, fingerprint, count), None
+        return GateDecision(path, fingerprint, count)
     if update:
         # New source version; submit only identities absent from the same-path lineage.
         skip = Task.fingerprints_for_sources([source.id for source in lineage])
         log.info(f'Updating {path}: {len(skip)} task identity(ies) already present; submitting only new tasks')
-        return _new_source_id(path, fingerprint, count), skip
+        return GateDecision(path, fingerprint, count, skip=skip)
     if restart:
         # File-aware restart (cluster). Reusing the matched source keeps requeues
         # idempotent (no row/count drift); the server's revert-interrupted flow re-runs any
@@ -352,12 +424,12 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
         if match:
             skip = Task.fingerprints_for_sources([source.id for source in lineage])
             log.info(f'Restarting {path} (source {match.id}): {len(skip)} present; submitting only new tasks')
-            return match.id, skip
+            return GateDecision(path, fingerprint, count, source_id=match.id, skip=skip)
         if lineage:
             raise ArgumentError(f'File {path} differs from its prior submission (content changed); '
                                 f'pass --update --restart to submit only the new tasks')
         log.info(f'Submitting all {count} tasks from {path} as a new source (--restart)')
-        return _new_source_id(path, fingerprint, count), None
+        return GateDecision(path, fingerprint, count)
     # No gating flag: refuse a known (path, fingerprint), else submit as a new source.
     if match:
         raise ArgumentError(f'File {path} was already submitted as source {match.id} '
@@ -367,7 +439,7 @@ def apply_source_gate(path: str, fingerprint: str, count: int, *,
         raise ArgumentError(f'A file at {path} was previously submitted with different content; '
                             f'pass --update to submit only new tasks, or --repeat to submit all again')
     log.info(f'Submitting all {count} tasks from {path} as a new source')
-    return _new_source_id(path, fingerprint, count), None
+    return GateDecision(path, fingerprint, count)
 
 
 class LoaderState(State, Enum):
@@ -511,9 +583,7 @@ class Loader(StateMachine):
         # tags (nested values are JSON-serialized; scalars are kept as-is).
         base = str(record.get('args', ''))
         args = self.template.expand(base, context=record)
-        record_tags = {key: (json.dumps(value, separators=(',', ':')) if isinstance(value, (dict, list)) else value)
-                       for key, value in record.items() if key != 'args'}
-        tags = {**(self.tags or {}), **record_tags}
+        tags = {**(self.tags or {}), **json_record_tags(record)}
         self.task = Task.new(args=args, raw_args=base, source=self.source_id, zone=self.zone_id,
                              cores=self.cores, memory=self.memory, timeout=self.timeout,
                              group=self.group, tag=tags, strict_tag=False, parse_inline=False)
@@ -1398,19 +1468,28 @@ def group_option(text: str) -> int:
         raise ArgumentTypeError(str(error)) from error
 
 
-def refuse_below_reached_group(groups: Iterable[Optional[int]], reached: Optional[int]) -> None:
+def refuse_below_reached_group(groups: List[Optional[int]], reached: Optional[int], *,
+                               skip: Optional[set] = None,
+                               fingerprints: Optional[Callable[[], List[str]]] = None) -> None:
     """Refuse a submission holding a task below the database's reached group, all or nothing.
 
-    `groups` are the groups of the tasks to be inserted and `reached` is
-    :meth:`~hypershell.data.model.Task.reached_group` (None: any group is accepted). Raises
+    `groups` are the groups of the input's tasks, in order, and `reached` is
+    :meth:`~hypershell.data.model.Task.reached_group` (None: any group is accepted). A task whose
+    identity is in the gate's `skip` set is not being submitted and is not checked; `fingerprints`
+    gives every task's identity, in the same order, and is called only when a task below the
+    reached group could be skipped. A task with no group of its own (None) is not checked. Raises
     :class:`~cmdkit.cli.ArgumentError` (exit 2) naming the lowest offending group, the reached
-    group and the ways forward. A task with no group of its own (None) is not checked.
+    group and the ways forward.
     """
     if reached is None:
         return
-    below = [group for group in groups if isinstance(group, int) and group < reached]
+    below = [index for index, group in enumerate(groups) if isinstance(group, int) and group < reached]
+    if below and skip and fingerprints is not None:
+        identities = fingerprints()
+        below = [index for index in below if identities[index] not in skip]
     if below:
-        raise ArgumentError(f'Task group {min(below)} is below the reached group {reached} of the database '
+        lowest = min(groups[index] for index in below)
+        raise ArgumentError(f'Task group {lowest} is below the reached group {reached} of the database '
                             f'(nothing submitted); submit at group {reached} or higher, wait for the run '
                             f'to finish, or use a fresh database')
 
@@ -1492,6 +1571,7 @@ class SubmitApp(Application):
     source_name: Optional[str] = None       # name of a stream read in full ('<stdin>' or its path)
     scan: Optional[InputScan] = None        # what input read in full holds, checked before any write
     source_id: Optional[str] = None         # resolved Source.id stamped onto submitted tasks
+    gate: Optional[GateDecision] = None     # the re-submission gate's decision for a named source
     json_fingerprint: Optional[str] = None  # content md5 of a --from-json file (else None)
     task_args: List[str] = []
     task_file: str = None
@@ -1582,8 +1662,9 @@ class SubmitApp(Application):
         """Run submit thread.
 
         Input read in full is checked whole before anything is written: tags (exit 2) before any
-        input is read, then the input (exit 5), then each task's group against the database's
-        reached group (exit 2); only then the zone, the source and the tasks.
+        input is read, then the input (exit 5), the re-submission gate's decision and each task's
+        group against the database's reached group (exit 2); only then the zone, the source and
+        the tasks.
         """
         self.check_arguments()
         self.check_tags()
@@ -1604,7 +1685,8 @@ class SubmitApp(Application):
             if self.group is None:
                 self.group = self.default_group()
             self.scan_source()
-            refuse_below_reached_group(self.task_groups(), self.reached_group)
+            self.decide_source()
+            self.check_reached_group()
             if self.zone is not None:
                 self.zone_id = Zone.ensure(self.zone)
             self.prepare_source()
@@ -1634,7 +1716,7 @@ class SubmitApp(Application):
         return group.value
 
     def task_groups(self: SubmitApp) -> List[Optional[int]]:
-        """The group of every task this submission would insert, checked whole before any write."""
+        """The group of every task in this submission's input, in order."""
         if self.from_json:
             default = self.tags.get('group', self.group)
             return [record.get('group', default) for record in self.source]
@@ -1642,6 +1724,23 @@ class SubmitApp(Application):
             _, inline_tags = Task.split_argline(self.direct_args)
             return [inline_tags.get('group', self.tags.get('group', self.group))]
         return self.scan.groups
+
+    def task_fingerprints(self: SubmitApp) -> List[str]:
+        """The identity of every task in a named source, in order, as the Loader builds it."""
+        if self.from_json:
+            return json_fingerprints(self.source, group=self.group, tags=self.tags)
+        with open(self.source_path, mode='r') as stream:
+            return task_fingerprints(stream, template=self.template, group=self.group, tags=self.tags)
+
+    def check_reached_group(self: SubmitApp) -> None:
+        """Refuse the whole submission (exit 2) when a task it would insert is below the reached group.
+
+        Tasks the re-submission gate skips as already present are not being submitted and are
+        not checked.
+        """
+        refuse_below_reached_group(self.task_groups(), self.reached_group,
+                                   skip=None if self.gate is None else self.gate.skip,
+                                   fingerprints=self.task_fingerprints)
 
     def submit_all(self: SubmitApp) -> None:
         """Submit multiple tasks from file-like source."""
@@ -1776,16 +1875,36 @@ class SubmitApp(Application):
                 self.scan = scan_task_lines(stream, template=self.template, group=self.group,
                                             tags=self.tags, name=self.source_path)
 
-    def prepare_source(self: SubmitApp) -> None:
-        """Resolve the task Source, apply the re-submission gate, and wrap the stream (DB mode only).
+    def decide_source(self: SubmitApp) -> None:
+        """Make the re-submission gate's decision for a named file or ``--from-json`` file, writing nothing.
 
-        A named file passes through :func:`apply_source_gate`: a duplicate or
-        changed-content re-submission is refused unless ``--repeat``/``--update`` relaxes it,
-        and the resolved :class:`Source` row's ``task_count`` is the upfront-counted
-        expectation, committed *before* any task so an incomplete prior stays detectable.
-        ``<stdin>`` and single-command ``<direct>`` submissions resolve their
-        reserved fixed-id rows and are exempt from gating — a gating flag there is a
-        no-op and says so. A ``--from-json`` source is gated too (see :meth:`prepare_json_source`).
+        A duplicate or changed-content re-submission is refused here (exit 2) unless
+        ``--repeat``/``--update`` relaxes it (:func:`decide_source_gate`); the decision is
+        recorded by :meth:`prepare_source` once every check has passed. Called in DB mode only.
+        """
+        if not DATABASE_ENABLED:
+            return
+        if self.from_json:
+            key = json_source_key(self.from_json)
+            if key is not None:
+                log.info(f'Found {len(self.source)} tasks in {key} (md5={self.json_fingerprint})')
+                self.gate = decide_source_gate(key, self.json_fingerprint, len(self.source),
+                                               repeat=self.repeat_mode, update=self.update_mode)
+        elif self.source is not None and not isinstance(self.source, list):
+            fingerprint, count = source_fingerprint(self.source_path), self.scan.count
+            log.info(f'Found {count} tasks in {self.source_path} (md5={fingerprint})')
+            self.gate = decide_source_gate(self.source_path, fingerprint, count,
+                                           repeat=self.repeat_mode, update=self.update_mode)
+
+    def prepare_source(self: SubmitApp) -> None:
+        """Resolve the task Source, record the re-submission gate's decision, and wrap the stream (DB mode only).
+
+        A named file passed through the gate in :meth:`decide_source`, and its resolved
+        :class:`Source` row's ``task_count`` is the upfront-counted expectation, committed
+        *before* any task so an incomplete prior stays detectable. ``<stdin>`` and
+        single-command ``<direct>`` submissions resolve their reserved fixed-id rows and are
+        exempt from gating — a gating flag there is a no-op and says so. A ``--from-json``
+        source is gated too (see :meth:`prepare_json_source`).
         """
         if not DATABASE_ENABLED:
             return  # non-persistent DB: nothing to record against (invariant §4)
@@ -1803,18 +1922,15 @@ class SubmitApp(Application):
             self.source_id = Source.reserved(STDIN_SOURCE_ID).id
             self.source = GatedSource(self.source, self.source_id, name=self.source_name, zone_id=self.zone_id)
         else:
-            fingerprint, count = source_fingerprint(self.source_path), self.scan.count
-            log.info(f'Found {count} tasks in {self.source_path} (md5={fingerprint})')
-            self.source_id, skip = apply_source_gate(self.source_path, fingerprint, count,
-                                                     repeat=self.repeat_mode, update=self.update_mode)
+            self.source_id, skip = self.gate.commit()
             self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip,
                                       name=self.source_path, zone_id=self.zone_id)
 
     def prepare_json_source(self: SubmitApp) -> None:
-        """Apply the re-submission gate to a ``--from-json`` source.
+        """Record the re-submission gate's decision for a ``--from-json`` source.
 
         The JSON file's content md5 (captured in :meth:`check_source`, no second read) and
-        record count feed the same :func:`apply_source_gate` as a line file, keyed by
+        record count fed the same :func:`decide_source_gate` as a line file, keyed by
         ``abspath(FILE)[@node]``. The per-task fingerprint keys off the pre-template ``args``
         and tags, so ``--update`` de-dup matches whether the tasks were first ingested
         here or from a line file. ``--from-json -`` (stdin JSON) has no stable path and is
@@ -1826,10 +1942,7 @@ class SubmitApp(Application):
             self.source_id = Source.reserved(STDIN_SOURCE_ID).id
             self.source = GatedSource(self.source, self.source_id, name='<stdin>', zone_id=self.zone_id)
             return
-        count = len(self.source)
-        log.info(f'Found {count} tasks in {key} (md5={self.json_fingerprint})')
-        self.source_id, skip = apply_source_gate(key, self.json_fingerprint, count,
-                                                 repeat=self.repeat_mode, update=self.update_mode)
+        self.source_id, skip = self.gate.commit()
         self.source = GatedSource(self.source, self.source_id, skip_fingerprints=skip, name=key,
                                   zone_id=self.zone_id)
 

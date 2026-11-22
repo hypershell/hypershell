@@ -81,7 +81,7 @@ from hypershell.data.model import (Task, Client, Zone, ResultOutcome, CONTENDED_
                                    deserialize_tasks, DEFAULT_ZONE_ID, DEFAULT_ZONE_NAME)
 from hypershell.data import ensuredb, DATABASE_ENABLED
 from hypershell.submit import (SubmitThread, LiveSubmitThread, DEFAULT_BUNDLEWAIT, DEFAULT_TEMPLATE, scan_task_lines,
-                               is_file_input)
+                               is_file_input, refuse_below_reached_group)
 from hypershell.client import ClientInfo
 
 # Public interface
@@ -1965,12 +1965,16 @@ class ServerApp(Application):
         """Check a named task file whole before anything is inserted or dispatched, with a database or without.
 
         A group that is not an integer refuses the file (exit 5). The server ingests raw lines, so
-        the scan uses the default template. A stream is checked line by line as it arrives.
+        the scan uses the default template. With a database, a task below the reached group
+        refuses the file (exit 2); tasks in flight do not count toward it, since the scheduler
+        reverts them when it starts. A stream is checked line by line as it arrives.
         """
         if self.input_stream is not None and is_file_input(self.input_stream):
             path = os.path.abspath(self.filepath)
             with open(path, mode='r') as stream:
-                scan_task_lines(stream, name=path)
+                scan = scan_task_lines(stream, name=path)
+            if not self.in_memory and DATABASE_ENABLED:
+                refuse_below_reached_group(scan.groups, Task.reached_group(in_flight=False))
 
     def special_options(self: ServerApp) -> bool:
         """Special terminating options print information lazily (not import time)."""

@@ -7,7 +7,7 @@ appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P6
+current_phase: P7
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -101,7 +101,7 @@ phases:
 - id: P6
   name: hs cluster FILE and hs server FILE refuse a lower group on an advanced database
     (gate split into decision and commit)
-  status: pending
+  status: done
   satisfies:
   - R7
   depends_on:
@@ -477,13 +477,29 @@ submission takes the reached group (PLAN § 2.5).
 **Goal:** a file that would insert a task below the reached group is refused before anything is
 inserted or dispatched; skipped tasks never trigger it; streams are unchanged (PLAN § 2.3, § 2.5).
 
-- [ ] `submit.py`: split `apply_source_gate` into `decide_source_gate` and `GateDecision.commit`
+- [x] `submit.py`: split `apply_source_gate` into `decide_source_gate` and `GateDecision.commit`
       (keep `apply_source_gate` as the wrapper); `hs submit` uses the split so its refusals write no
       Source row.
-- [ ] `ClusterApp.prepare_source`/`prepare_json_source`: decide → R7
+- [x] `ClusterApp.prepare_source`/`prepare_json_source`: decide → R7
       (`Task.reached_group(in_flight=False)`, the skip set excluded; fingerprints computed only when
       needed) → commit; read `zone_id` after.
-- [ ] `ServerApp.prepare_source`: R7 over every task line with a database.
+- [x] `ServerApp.prepare_source`: R7 over every task line with a database.
+- **Built:** `GateDecision(path, fingerprint, count, source_id=None, skip=None)`; `commit()` records
+  a new Source row unless a prior one is reused (same-file `--restart`) and returns `(source_id,
+  skip)`. `decide_source_gate` keeps every log line and refusal of the old gate. The Loader's line
+  replay is now `task_lines(lines, *, template, tags, name)` (yields command, expanded command and
+  tags per task); `scan_task_lines` and the new `task_fingerprints` use it, and
+  `json_fingerprints`/`json_record_tags` (shared with `Loader.load_json_task`) do the same for
+  records. `refuse_below_reached_group(groups, reached, *, skip, fingerprints)` calls
+  `fingerprints()` only when a task below R could be skipped. `SubmitApp`: `decide_source()` (the
+  gate decision for a named file or `--from-json` file) → `check_reached_group()` (the P5 check,
+  now with the skip set) → `Zone.ensure` → `prepare_source()` (commit). `ClusterApp` checks only a
+  named file (a stream and `--from-json -` are not refused); the default group of an untagged line
+  there is `DEFAULT_TASK_GROUP`, as the server's Loader. `ServerApp` checks only with a database.
+  **Extra drive (temp site):** `hs submit --update` of an advanced file adding group 6 (the group 0
+  line skipped) exit 0; adding group 1 exit 2, Source rows unchanged; `hs cluster --restart
+  --update` adding groups 6 and 7 ran `c d f`.
+- **Verified (2026-11-21):** suites 183 passed, 1 skipped (PostgreSQL on); guards 19 passed.
 - **Verify:** `test_resubmit_lower_group.py` and the source, restart, no-db, server and JSON suites;
   guards.
 - **Touches:** `src/hypershell/submit.py`, `src/hypershell/cluster/__init__.py`,
