@@ -15,8 +15,10 @@
 #   set    hs config set: a digit key kept as text, a typed value converted, a refusal (exit 2) that
 #          leaves the file as it was, an untyped TOML integer, a value that is not UTF-8 refused
 #          (exit 2) with the file and its backups as they were (R1, R2, R4)
-#   eager  server.eager: a file's "no" runs, an unreadable value stops hs cluster with exit 3 (R5)
-#   evict  server.evict under hs cluster: under the floor exits 5 before listening; 1m30s runs (R7)
+#   eager  server.eager: a file's "no" runs, an unreadable value stops hs cluster with exit 3, and so
+#          does one from eager_env, its message naming the key and source but not the value (R5)
+#   evict  server.evict under hs cluster: under the floor exits 5 before listening; 1m30s runs; a
+#          file's 1e300 exits 5 before listening, with no traceback (R7)
 #   rate   -R and client.ratelimit: a launched client takes -R 0.5 and is throttled; task.ratelimit
 #          is not read (R8)
 
@@ -67,6 +69,13 @@ eager)
     [ "$status" -eq 3 ] || fail "eager \"maybe\" exited $status, not 3"
     grep -q 'server.eager' err.txt || fail "message: $(cat err.txt)"
     pass 'eager = "maybe" stops hs cluster with exit 3'
+    printf '[server]\neager_env = "CSU_EAGER_WORD"\n' > config.toml
+    CSU_EAGER_WORD=notaword HYPERSHELL_CONFIG_FILE=$PWD/config.toml hs cluster t.in --no-db > out.txt 2> err.txt; status=$?
+    [ "$status" -eq 3 ] || fail "eager_env to notaword exited $status, not 3: $(cat err.txt)"
+    grep -q 'server.eager_env: expected a boolean' err.txt && grep -q 'config.toml' err.txt || fail "message: $(cat err.txt)"
+    grep -q notaword err.txt && fail "message repeats the value: $(cat err.txt)"
+    ls Logs/exception-* > /dev/null 2>&1 && fail "exception log written: $(ls Logs)"
+    pass 'eager_env to notaword stops hs cluster with exit 3, naming key and source, not the value'
     ;;
 evict)
     HYPERSHELL_SERVER_EVICT=5 hs cluster t.in --no-db --no-tls -H 127.0.0.1 > out.txt 2> err.txt; status=$?
@@ -79,6 +88,13 @@ evict)
         || fail "evict 1m30s run failed: $(tail -3 err.txt)"
     [ "$(wc -l < out.txt)" -eq 3 ] || fail "expected 3 task outputs: $(cat out.txt)"
     pass 'server.evict 1m30s runs'
+    printf '[server]\nevict = 1e300\n' > config.toml
+    HYPERSHELL_CONFIG_FILE=$PWD/config.toml hs cluster t.in --no-db --no-tls -H 127.0.0.1 > out.txt 2> err.txt; status=$?
+    [ "$status" -eq 5 ] || fail "evict 1e300 exited $status, not 5: $(cat err.txt)"
+    grep -q 'Evict period must be at most 86399999913600 seconds: given 1e+300' err.txt || fail "message: $(cat err.txt)"
+    grep -q 'listening' err.txt && fail 'server started listening before the refusal'
+    ls Logs/exception-* > /dev/null 2>&1 && fail "exception log written: $(ls Logs)"
+    pass 'server.evict 1e300 refused with exit 5 before listening, no traceback'
     ;;
 rate)
     start=$(date +%s)

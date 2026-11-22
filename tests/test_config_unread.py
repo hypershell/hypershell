@@ -26,6 +26,7 @@ from cmdkit.cli import ArgumentError
 
 # Internal libs
 from tests import create_taskfile
+from tests.conftest import free_port
 from tests.test_env_config import KEY, DEADLINE, child_env, config_repr, run_bounded
 from hypershell.client import ClientApp
 from hypershell.cluster import ClusterApp
@@ -129,6 +130,54 @@ def test_eager_unreadable_refused(temp_site, text: str) -> None:
     assert status == exit_status.bad_config, stderr
     assert 'server.eager' in stderr and 'config.toml' in stderr, stderr
     assert 'Traceback' not in stderr, stderr
+
+
+HIDDEN: Final[str] = 'Wq7hiddenword'
+"""A value an `_env` or `_eval` form resolves to, which no refusal may repeat."""
+
+EAGER_VARIANTS: Final[Dict[str, Tuple[str, str, Dict[str, str]]]] = {
+    'file-env': ('eager_env', f'[server]\neager_env = "EAGER_WORD"\n', {'EAGER_WORD': HIDDEN}),
+    'file-eval': ('eager_eval', f'[server]\neager_eval = "echo {HIDDEN}"\n', {}),
+    'env-env': ('eager_env', '', {'HYPERSHELL_SERVER_EAGER_ENV': 'EAGER_WORD', 'EAGER_WORD': HIDDEN}),
+    'env-eval': ('eager_eval', '', {'HYPERSHELL_SERVER_EAGER_EVAL': f'echo {HIDDEN}'}),
+}
+"""`server.eager` given by a variant that resolves to no boolean: the form, the file (or none) and the variables."""
+
+
+@mark.integration
+@mark.parametrize('command', ['server', 'cluster'])
+@mark.parametrize('case', list(EAGER_VARIANTS))
+def test_eager_variant_refused(temp_site, case: str, command: str) -> None:
+    """A `server.eager` from its `_env` or `_eval` form that is no boolean stops the command with exit 3; the
+    message names the key and its source, not the value (R5)."""
+    site = Path(str(temp_site))
+    form, text, variables = EAGER_VARIANTS[case]
+    if text:
+        variables = {**variables, **file_layer(site, text)}
+    source = 'config.toml' if text else f'HYPERSHELL_SERVER_{form.upper()}'
+    create_taskfile(site, ['echo hi'], 't.in')
+    env = child_env(site, HYPERSHELL_SERVER_AUTH=KEY, **variables)
+    status, _, stderr = run_bounded(site, ['hs', command, 't.in', '--no-db', '--no-tls', '-H', '127.0.0.1',
+                                           '-p', str(free_port())], env)
+    assert status == exit_status.bad_config, stderr
+    assert f'server.{form}: expected a boolean' in stderr and source in stderr, stderr
+    assert HIDDEN not in stderr, stderr
+    assert 'Traceback' not in stderr and not list(site.rglob('exception-*.log')), stderr
+
+
+@mark.integration
+@mark.parametrize('command', ['server', 'cluster'])
+def test_eager_env_unset_refused(temp_site, command: str) -> None:
+    """A `server.eager_env` naming a variable that is not set stops the command with exit 3, naming both (R5)."""
+    site = Path(str(temp_site))
+    variables = file_layer(site, '[server]\neager_env = "EAGER_WORD"\n')
+    create_taskfile(site, ['echo hi'], 't.in')
+    env = child_env(site, HYPERSHELL_SERVER_AUTH=KEY, EAGER_WORD=None, **variables)
+    status, _, stderr = run_bounded(site, ['hs', command, 't.in', '--no-db', '--no-tls', '-H', '127.0.0.1',
+                                           '-p', str(free_port())], env)
+    assert status == exit_status.bad_config, stderr
+    assert 'server.eager_env names EAGER_WORD, which is not set' in stderr and 'config.toml' in stderr, stderr
+    assert 'Traceback' not in stderr and not list(site.rglob('exception-*.log')), stderr
 
 
 # --------------------------------------------------------------------------------------------------

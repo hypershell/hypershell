@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -56,7 +56,7 @@ phases:
     $m || exit 1; done
 - id: P3
   name: server.eager, server.attempts and server.evict reach hs server and hs cluster
-  status: in_progress
+  status: done
   satisfies:
   - R5
   - R6
@@ -286,6 +286,9 @@ to the server in every mode.
       import where missing. `AutoScalingCluster` unchanged.
 - **Verify:** `tests/test_config_unread.py -k 'eager or attempts'`, `test_cluster_evict.py` and the
   cluster/server neighbours; drive modes `eager`, `evict`.
+- [x] Review cycle 1, F3: `check_evict` refuses a period over `EVICT_MAXIMUM`; and the `server.eager`
+      refusal names the key and its source, the value only for the direct form (see the remediation
+      section).
 - **Touches:** `src/hypershell/server.py`, `src/hypershell/cluster/__init__.py`,
   `src/hypershell/cluster/local.py`, `src/hypershell/cluster/remote.py`, `src/hypershell/cluster/ssh.py`.
 
@@ -377,6 +380,40 @@ change aside in the worktree, running the new tests, and restoring it. `red.txt`
   - Drive mode `set` gains the check (`printf 'a\377'` under `database.pragmas.x`: exit 2, the
     message, the file and the backup count unchanged); on the base source it fails there at exit 5.
   - P2's verify: 373 passed; drive `set` ok.
+
+- **F3 (P3) — an eviction period past the monitor's range.** `check_evict` refuses a period over
+  `EVICT_MAXIMUM`, `timedelta.max.days * 86_400` seconds (999,999,999 days, 86399999913600 s), with
+  `RuntimeError`: `Evict period must be at most 86399999913600 seconds: given <seconds>`. Both
+  commands already call it at their start check, so `hs server` and `hs cluster` exit 5 cleanly,
+  before a database, a port or a server, as for an infinite period. The floor and finiteness checks
+  run first, so their messages are unchanged. `server.py` changes only `check_evict`, its new
+  constant beside `EVICT_MINIMUM`, and that constant's name in `__all__`.
+  - Tests, `tests/test_cluster_evict.py`: `REFUSALS` gains `over-cap` (`HYPERSHELL_SERVER_EVICT` one
+    past the cap) and `file-float-huge` (a file's TOML float `1e300`; `evict_layer` takes a `toml`
+    layer that writes the value as given), so `test_cluster_evict_refused` covers them in every
+    mode and `test_server_evict_refused` for `hs server`; `test_evict_over_cap_cli` runs a real
+    `hs server` and `hs cluster` with that file (exit 5, the message, never listening, no traceback
+    file). The tests compute the cap from `timedelta` rather than import it.
+- **`server.eager`'s message (P3, the maintainer's ruling).** `configured_eager` finds the form the
+  deciding layer gives (`eager`, `eager_env` or `eager_eval`, as `config_seconds` does). The
+  message names the key and its source; the value is named only for the direct form:
+  `server.eager: expected a boolean (…), given 'maybe' (from: …)` as before, and
+  `server.eager_env: expected a boolean (…) (from: …)` for a variant. A `server.eager_env` naming a
+  variable that is not set gives `server.eager_env names <VAR>, which is not set (from: …)`. Before,
+  either variant ended in a `KeyError` traceback (exit 5), since `blame` was asked for the direct
+  form.
+  - Tests, `tests/test_config_unread.py`: `test_eager_variant_refused` (file and environment, `_env`
+    and `_eval`, `hs server` and `hs cluster`: exit 3, the form and the source named, the resolved
+    value absent, no traceback file) and `test_eager_env_unset_refused`.
+- Red on `f8293303` (its `server.py`): all 24 new P3 cases failed: the 14 eviction cases at the
+  message (an `OverflowError`, or the run going on past the start check), the 10 eager cases at
+  exit 5 for 3 (`KeyError: "Not found: ('server', 'eager')"`). Green: 24 passed.
+- Drive: mode `eager` gains `eager_env` naming a variable set to `notaword` (exit 3, key and source
+  named, `notaword` absent, no exception log); mode `evict` gains a file's `evict = 1e300` (exit 5,
+  the message, never listening, no exception log). On the base `server.py` both new checks fail
+  (exit 5 with the `KeyError`; the `OverflowError` message).
+  - P3's verify: 26 passed (`-k 'eager or attempts'`), then 516 passed, 1 skipped (6 min 14 s); drives
+    `eager` and `evict` ok.
 
 ---
 

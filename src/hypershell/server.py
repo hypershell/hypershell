@@ -89,7 +89,7 @@ from hypershell.client import ClientInfo
 # Public interface
 __all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp', 'is_file_input',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
-           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL', 'EVICT_MINIMUM',
+           'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL', 'EVICT_MINIMUM', 'EVICT_MAXIMUM',
            'check_evict', 'configured_eager',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
 
@@ -120,17 +120,23 @@ def configured_eager(value: bool | int | float | str) -> bool:
     """The eager mode `server.eager` gives, read by the boolean words the environment layer takes.
 
     A boolean is used as given. Any other value (a file's text or number) must be one of the boolean
-    words in any letter case, or `ConfigurationError` names the key, the form, the value and where it
-    came from.
+    words in any letter case, or `ConfigurationError` names the key and its source. The value is named
+    too when the key gives it directly, not by its `_env` or `_eval` form.
     """
     if isinstance(value, bool):
         return value
     try:
         return read_value(Kind.BOOL, str(value))
     except ValueError:
-        source = blame(config, 'server', 'eager')
-        raise ConfigurationError(f'server.eager: expected {FORMS[Kind.BOOL]}, given {value!r}'
-                                 + (f' ({source})' if source else '')) from None
+        table = config.server
+        form = next((given for given in ('eager', 'eager_env', 'eager_eval') if given in table), 'eager')
+        source = blame(config, 'server', form)
+        where = f' ({source})' if source else ''
+        if form == 'eager':
+            raise ConfigurationError(f'server.eager: expected {FORMS[Kind.BOOL]}, given {value!r}{where}') from None
+        if value is None and form == 'eager_env':
+            raise ConfigurationError(f'server.eager_env names {table[form]}, which is not set{where}') from None
+        raise ConfigurationError(f'server.{form}: expected {FORMS[Kind.BOOL]}{where}') from None
 
 DEFAULT_QUERY_PAUSE: Final[int] = default.server.poll  # Backwards compatibility
 DEFAULT_SERVER_POLL: Final[int] = default.server.poll
@@ -807,13 +813,18 @@ DEFAULT_EVICT: Final[int] = default.server.evict
 EVICT_MINIMUM: Final[int] = 10
 """Shortest client eviction period in seconds."""
 
+EVICT_MAXIMUM: Final[int] = timedelta.max.days * 86_400
+"""Longest client eviction period in seconds (999,999,999 days, the most a heartbeat monitor's interval holds)."""
+
 
 def check_evict(seconds: int | float) -> int | float:
-    """The eviction period `seconds`, refused with `RuntimeError` under the floor or when not finite."""
+    """The eviction period `seconds`, refused with `RuntimeError` under the floor, when not finite, or over the cap."""
     if not seconds >= EVICT_MINIMUM:
         raise RuntimeError(f'Evict period must be greater than {EVICT_MINIMUM} seconds: given {seconds}')
     if not math.isfinite(seconds):
         raise RuntimeError(f'Evict period must be a finite number of seconds: given {seconds}')
+    if seconds > EVICT_MAXIMUM:
+        raise RuntimeError(f'Evict period must be at most {EVICT_MAXIMUM} seconds: given {seconds}')
     return seconds
 
 
