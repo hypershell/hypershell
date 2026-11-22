@@ -29,7 +29,7 @@ named in each entry. Horizons are indicative; the stated dependencies are the ha
 seed carries the same value as `target:` in its frontmatter. `2.9.0` is work to land before the
 2.9.0 release; `2.9.x` a 2.9 patch release; `2.10.0` the next minor, developed as `2.10.0aN` alphas;
 `2.8.x` a patch on the 2.8 line; a combination such as `2.9.x, 2.8.x` a fix that is also backported;
-and `unscheduled` an idea no release is planned for (Part IV). An interface change (a new option or
+and `unscheduled` an idea no release is planned for (Part V). An interface change (a new option or
 configuration key, refusing input accepted today, a changed default or changed output) goes to a
 minor release; an interface-neutral fix goes to a patch.
 
@@ -138,7 +138,8 @@ forms stay by design, but a quoted token should exist and the contract should be
 `compile_env` builds environment assignments without shell quoting, so a value containing a space or
 `$` corrupts the remote launch line, and there is no dry run to preview what would actually execute.
 
-*Target: 2.10.0 · Horizon: mid-term · Depends on: — · Refs: —*
+*Target: 2.10.0 · Horizon: mid-term · Depends on: — · Refs: its quoted token (R1) is a prerequisite
+of client-side sandboxing (Part IV)*
 **Seed:** [`issues/templating-and-remote-env-contract.md`](issues/templating-and-remote-env-contract.md)
 
 ## Deterministic sentinels retry to exhaustion, then stall the group
@@ -394,7 +395,7 @@ does exactly that; `nf-hypershell` keeps its own conditional copy. `hs update --
 affected: its filter is part of the UPDATE.
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: prerequisite for the submitter
-lease (Part IV); `hypershell/hypershell-nextflow` (`DESIGN.md` item 7)*
+lease (Part V); `hypershell/hypershell-nextflow` (`DESIGN.md` item 7)*
 **Seed:** [`issues/cancel-all-conditional.md`](issues/cancel-all-conditional.md) · *status: unshaped*
 
 ## A task whose confirmation has not landed is invisible to orphan recovery
@@ -786,7 +787,50 @@ turso-upstream-repro, or a Turso release · Refs: `spec/turso/` P3, review cycle
 
 ---
 
-# Part IV — Beyond 2.9.0
+# Part IV — Clients that do not have to trust their server
+
+A paired 2.10.0 feature set (the maintainer's ruling, 2026-11-22). Today a client runs whatever
+command it is handed, so whoever controls the server or its database runs code, as the user, on every
+connected client. `docs/security.rst` states this, and it is the design's trust model, not a defect,
+so the pair is planned here and not in the security lane. Signing stops a server from authoring
+work; sandboxing bounds what a signed task can still do. Either can ship first. Neither holds fully
+against a compromised server until the queue transport stops deserializing objects from the server.
+That replacement is tracked in the security lane, and both seeds say so.
+
+## A sandbox template around each task confines nothing
+
+A user can wrap each task in a sandbox through `-t/--template`, but `{}` is spliced unquoted into a
+`shell=True` line, so the task's own shell syntax runs outside the wrapper:
+`bwrap … {}` with `true; curl … | sh` sandboxes `true` and runs the pipeline unconfined. With the
+templating contract's quoted token, a wrapper receives the whole task as one argument. The cycle
+documents client-side sandboxing as a supported pattern: worked templates for `srt`, `bwrap`,
+Landlock and Apptainer, a baseline credential-denying policy, and the whole-client alternative. A
+`--sandbox` flag with a fail-closed startup probe is the stretch.
+
+*Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the templating contract's
+quoted token (R1 of `issues/templating-and-remote-env-contract.md`; this cycle pulls it in if it
+has not shipped) · Refs: pairs with task signing below*
+**Seed:** [`issues/untrusted-server-client-sandbox.md`](issues/untrusted-server-client-sandbox.md) · *status: unshaped*
+
+## Clients cannot tell a submitter's command from one the server made up
+
+Neither credential HyperShell has speaks to where a task came from: the authkey is shared with the
+server, and TLS authenticates the server, which is the party in question. The submitter would sign
+each task with an Ed25519 key the server never holds. The server and database carry the signature
+untouched, and a client under `--require-signed` runs only what verifies against its own local trust
+file, before its expiry and for its audience. Open for shaping: the terminal state of a refused task,
+which today's failure and retry queries must not pick up, and how much replay of a signed command
+under retry to allow.
+
+*Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: holds against a compromised
+server only once the queue transport stops trusting the server (security lane) · Refs: pairs with
+client-side sandboxing above; `issues/resource-error-terminal-and-retry-defaults.md` (never-ran
+sentinels and retries)*
+**Seed:** [`issues/untrusted-server-task-signing.md`](issues/untrusted-server-task-signing.md) · *status: unshaped*
+
+---
+
+# Part V — Beyond 2.9.0
 
 Candidates beyond 2.9.0. Each may be taken up, reshaped or declined; an entry here records the idea
 and its open problems, and promises nothing. Its Target says whether a release is planned for it:
