@@ -374,6 +374,17 @@ that seam, so this waited rather than building one twice.
 Refs: the corruption half was closed separately by `writeback-scoped-conditional` (#70)*
 **Seed:** [`issues/evicted-client-fencing-and-cancel-reach.md`](issues/evicted-client-fencing-and-cancel-reach.md)
 
+## `Task.cancel_all` overwrites a result that lands before it
+
+The model's cancel writes each row by id whatever its state, so a caller that reads its unfinished
+tasks and then cancels them overwrites any result that lands in between with `-1`. `hypershell-mcp`
+does exactly that; `nf-hypershell` keeps its own conditional copy. `hs update --cancel` is not
+affected: its filter is part of the UPDATE.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: prerequisite for the submitter
+lease (Part IV); `hypershell/hypershell-nextflow` (`DESIGN.md` item 7)*
+**Seed:** [`issues/cancel-all-conditional.md`](issues/cancel-all-conditional.md) · *status: unshaped*
+
 ## A task whose confirmation has not landed is invisible to orphan recovery
 
 Orphan recovery finds an evicted client's rows by `client_id`, which only the client's confirmation
@@ -770,8 +781,8 @@ recorded. A returning owner re-claims its key, with fencing so two live claimant
 Tasks without a lease behave as today. The open problems are whose clock judges expiry (SQLite
 stores naive local times), who sweeps, and reaching tasks already running or held by a relay.
 
-*Target: 2.10.0 · Horizon: after 2.9.0, maybe · Depends on: a conditional `Task.cancel_all`; cancel
-reach for running tasks (`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs:
+*Target: 2.10.0 · Horizon: after 2.9.0, maybe · Depends on: a conditional `Task.cancel_all`
+(`issues/cancel-all-conditional.md`); cancel reach for running tasks (`issues/evicted-client-fencing-and-cancel-reach.md`) · Refs:
 `hypershell/hypershell-nextflow` attached mode*
 **Seed:** [`issues/submitter-lease.md`](issues/submitter-lease.md) · *status: unshaped*
 
