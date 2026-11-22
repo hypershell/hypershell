@@ -616,6 +616,18 @@ does. Zones reduce how often this happens without fixing the mechanism.
 *Target: 2.9.x · Horizon: long-term · Depends on: — · Refs: —*
 **Seed:** [`issues/head-of-line-blocking.md`](issues/head-of-line-blocking.md)
 
+## A client takes work it cannot start while other clients have room
+
+A client asks for work whenever an executor thread is free, and its request says nothing about free
+cores, so it can hold a wide task it cannot start while another client could. On Gautschi the first
+client to connect took all six 32-core tasks of a run; the sixth waited 20 s on that node while two
+other nodes had cores free. The wait inside one client is the head-of-line entry above. Moving work
+between clients needs capacity in the request, or a hand-back.
+
+*Target: 2.10.0 · Horizon: mid-term · Depends on: — · Refs: `issues/head-of-line-blocking.md`;
+`hypershell/hypershell-nextflow` (`DESIGN.md` item 10)*
+**Seed:** [`issues/client-takes-unstartable-work.md`](issues/client-takes-unstartable-work.md) · *status: unshaped*
+
 ## Server CPU per task bounds throughput at small bundle sizes
 
 At bundle size 1, the server's main process runs its own scheduling, confirm and writeback
