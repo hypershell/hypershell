@@ -1,93 +1,183 @@
 ---
 slug: submit-input-checks
-title: "Submitted input is checked: # is part of the command, a group is an integer, and a group below the reached one is refused"
+title: 'Submitted input is checked: # is part of the command, a group is an integer,
+  and a group below the reached one is refused'
 kind: fix
 appetite: big
 status: in_progress
 branch: fix/submit-input-checks
 base: develop
-current_phase: P1
-last_updated: "2026-11-21"
+current_phase: P2
+last_updated: '2026-11-21'
 phases:
-  - id: P1
-    name: "Tests first: merge develop; the five test files and two flipped tests; the red list on dfdbaed5 and the guards"
-    status: pending
-    satisfies: [R8]
-    depends_on: []
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -n \"$HS_TEST_POSTGRES\" && git merge-base --is-ancestor 02f53777 HEAD && RED_LIST=spec/submit-input-checks/drive/red.txt RED_BASE_REV=dfdbaed5 python3 spec/submit-input-checks/drive/bounded.py 2700 sh spec/relay-hardening/drive/red_check.sh && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt 1200 && python3 spec/submit-input-checks/drive/bounded.py 120 uv run pytest -q -p no:cacheprovider --collect-only tests/test_command_hash.py tests/test_group_integer.py tests/test_group_stream.py tests/test_reached_group.py tests/test_resubmit_lower_group.py tests/test_data/test_model.py tests/test_group_order.py"
-  - id: P2
-    name: "The # parser: no bare cut, comment rule on the raw line, split before the template, the Loader's tags copy"
-    status: pending
-    satisfies: [R1, R2]
-    depends_on: [P1]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -n \"$HS_TEST_POSTGRES\" && python3 spec/submit-input-checks/drive/bounded.py 2400 uv run pytest -q -p no:cacheprovider tests/test_command_hash.py tests/test_data/test_model.py tests/test_submit.py tests/test_template.py tests/test_source.py tests/test_queue_workload.py tests/test_stream_input.py && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt 1200 && .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/submit-input-checks/drive/input_drive.sh\" hash"
-  - id: P3
-    name: "The integer rule; read-in-full input scanned before any write (hs submit incl. stdin, hs cluster incl. --no-db, hs server FILE, --from-json, -t, -g)"
-    status: pending
-    satisfies: [R3, R4]
-    depends_on: [P2]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -n \"$HS_TEST_POSTGRES\" && python3 spec/submit-input-checks/drive/bounded.py 2700 uv run pytest -q -p no:cacheprovider tests/test_group_integer.py tests/test_command_hash.py tests/test_submit.py tests/test_submit_json.py tests/test_group_order.py tests/test_cluster_no_db.py tests/test_signal_wake.py tests/test_restart.py tests/test_source.py tests/test_data/test_model.py && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt 1200 && .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/submit-input-checks/drive/input_drive.sh\" group"
-  - id: P4
-    name: "Streams refuse one line: the Loader's line count and stream policy"
-    status: pending
-    satisfies: [R5]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -n \"$HS_TEST_POSTGRES\" && python3 spec/submit-input-checks/drive/bounded.py 2700 uv run pytest -q -p no:cacheprovider tests/test_group_stream.py tests/test_group_integer.py tests/test_stream_input.py tests/test_cluster_exit.py tests/test_queue_workload.py tests/test_group_order.py && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt 1200 && .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/submit-input-checks/drive/input_drive.sh\" stream"
-  - id: P5
-    name: "The reached group: Task.reached_group, hs submit's all-or-nothing refusal, the C9 default"
-    status: pending
-    satisfies: [R6]
-    depends_on: [P3]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -n \"$HS_TEST_POSTGRES\" && python3 spec/submit-input-checks/drive/bounded.py 2700 uv run pytest -q -p no:cacheprovider tests/test_reached_group.py tests/test_groups.py tests/test_group_order.py tests/test_submit.py tests/test_submit_json.py tests/test_zone_postgres.py tests/test_signal_wake.py && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt 1200 && .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/submit-input-checks/drive/input_drive.sh\" reached"
-  - id: P6
-    name: "hs cluster FILE and hs server FILE refuse a lower group on an advanced database (gate split into decision and commit)"
-    status: pending
-    satisfies: [R7]
-    depends_on: [P5]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -n \"$HS_TEST_POSTGRES\" && python3 spec/submit-input-checks/drive/bounded.py 3600 uv run pytest -q -p no:cacheprovider tests/test_resubmit_lower_group.py tests/test_reached_group.py tests/test_source.py tests/test_restart.py tests/test_cluster_no_db.py tests/test_server.py tests/test_submit_json.py tests/test_group_order.py && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt 1200"
-  - id: P7
-    name: "Docs (versionchanged 2.9.0), AGENTS.md and invariants.md, the release-note draft"
-    status: pending
-    satisfies: [R9]
-    depends_on: [P4, P6]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "python3 spec/submit-input-checks/drive/bounded.py 300 uv run pytest -q -p no:cacheprovider tests/test_main.py tests/test_completions.py && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-sic python3 spec/submit-input-checks/drive/bounded.py 900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-sic && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-sic python3 spec/submit-input-checks/drive/bounded.py 900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b man docs /tmp/claude-501/docs-man-sic && grep -q 'versionchanged:: 2.9.0' docs/_include/submit_desc.rst && grep -q 'versionchanged:: 2.9.0' docs/_include/task_groups_alt.rst && test \"$(git diff dfdbaed5 -- docs/cli/cluster.rst | grep -c '^+.*versionchanged:: 2.9.0')\" -ge 1 && test \"$(git diff dfdbaed5 -- docs/cli/server.rst | grep -c '^+.*versionchanged:: 2.9.0')\" -ge 1 && grep -qF \"echo '#'' HYPERSHELL:'\" docs/_include/submit_desc.rst && grep -q 'reached group' docs/_include/task_groups_alt.rst && grep -q 'reached group' /tmp/claude-501/docs-man-sic/hs.1 && grep -q 'reached group' AGENTS.md && grep -q 'reached group' .agents/factory/invariants.md && grep -q 'must be an integer' AGENTS.md && grep -q 'must be an integer' .agents/factory/invariants.md && test -s spec/submit-input-checks/RELEASE-NOTE.md && test \"$(git diff dfdbaed5 -- docs src AGENTS.md .agents | grep -c '^+.*hs task ')\" -eq 0"
-  - id: P8
-    name: "Whole suite, serially; the PostgreSQL-aware files with PostgreSQL; the red list re-proved on dfdbaed5; the four drives"
-    status: pending
-    satisfies: [R1, R2, R3, R4, R5, R6, R7, R8, R9]
-    depends_on: [P7]
-    parallel: false
-    hammerable: false
-    hill: uphill
-    verify: "test -n \"$HS_TEST_POSTGRES\" && env -u HS_TEST_POSTGRES python3 spec/submit-input-checks/drive/bounded.py 7200 uv run pytest -q -p no:cacheprovider && python3 spec/submit-input-checks/drive/bounded.py 2700 uv run pytest -q -p no:cacheprovider tests/test_command_hash.py tests/test_group_integer.py tests/test_group_stream.py tests/test_reached_group.py tests/test_resubmit_lower_group.py tests/test_submit.py tests/test_groups.py tests/test_zone_postgres.py tests/test_contended_write.py tests/test_server_initdb.py tests/test_writeback_postgres.py && RED_LIST=spec/submit-input-checks/drive/red.txt RED_BASE_REV=dfdbaed5 python3 spec/submit-input-checks/drive/bounded.py 2700 sh spec/relay-hardening/drive/red_check.sh && for mode in hash group stream reached; do .agents/factory/bin/temp_site.sh uv run sh \"$PWD/spec/submit-input-checks/drive/input_drive.sh\" $mode || exit 1; done"
+- id: P1
+  name: 'Tests first: merge develop; the five test files and two flipped tests; the
+    red list on dfdbaed5 and the guards'
+  status: done
+  satisfies:
+  - R8
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -n "$HS_TEST_POSTGRES" && git merge-base --is-ancestor 02f53777 HEAD
+    && RED_LIST=spec/submit-input-checks/drive/red.txt RED_BASE_REV=dfdbaed5 python3
+    spec/submit-input-checks/drive/bounded.py 2700 sh spec/relay-hardening/drive/red_check.sh
+    && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt
+    1200 && python3 spec/submit-input-checks/drive/bounded.py 120 uv run pytest -q
+    -p no:cacheprovider --collect-only tests/test_command_hash.py tests/test_group_integer.py
+    tests/test_group_stream.py tests/test_reached_group.py tests/test_resubmit_lower_group.py
+    tests/test_data/test_model.py tests/test_group_order.py
+- id: P2
+  name: 'The # parser: no bare cut, comment rule on the raw line, split before the
+    template, the Loader''s tags copy'
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
+    2400 uv run pytest -q -p no:cacheprovider tests/test_command_hash.py tests/test_data/test_model.py
+    tests/test_submit.py tests/test_template.py tests/test_source.py tests/test_queue_workload.py
+    tests/test_stream_input.py && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt
+    1200 && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh"
+    hash
+- id: P3
+  name: The integer rule; read-in-full input scanned before any write (hs submit incl.
+    stdin, hs cluster incl. --no-db, hs server FILE, --from-json, -t, -g)
+  status: pending
+  satisfies:
+  - R3
+  - R4
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
+    2700 uv run pytest -q -p no:cacheprovider tests/test_group_integer.py tests/test_command_hash.py
+    tests/test_submit.py tests/test_submit_json.py tests/test_group_order.py tests/test_cluster_no_db.py
+    tests/test_signal_wake.py tests/test_restart.py tests/test_source.py tests/test_data/test_model.py
+    && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt
+    1200 && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh"
+    group
+- id: P4
+  name: 'Streams refuse one line: the Loader''s line count and stream policy'
+  status: pending
+  satisfies:
+  - R5
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
+    2700 uv run pytest -q -p no:cacheprovider tests/test_group_stream.py tests/test_group_integer.py
+    tests/test_stream_input.py tests/test_cluster_exit.py tests/test_queue_workload.py
+    tests/test_group_order.py && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt
+    1200 && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh"
+    stream
+- id: P5
+  name: 'The reached group: Task.reached_group, hs submit''s all-or-nothing refusal,
+    the C9 default'
+  status: pending
+  satisfies:
+  - R6
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
+    2700 uv run pytest -q -p no:cacheprovider tests/test_reached_group.py tests/test_groups.py
+    tests/test_group_order.py tests/test_submit.py tests/test_submit_json.py tests/test_zone_postgres.py
+    tests/test_signal_wake.py && sh spec/submit-input-checks/drive/run_list.sh spec/submit-input-checks/drive/guards.txt
+    1200 && .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh"
+    reached
+- id: P6
+  name: hs cluster FILE and hs server FILE refuse a lower group on an advanced database
+    (gate split into decision and commit)
+  status: pending
+  satisfies:
+  - R7
+  depends_on:
+  - P5
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -n "$HS_TEST_POSTGRES" && python3 spec/submit-input-checks/drive/bounded.py
+    3600 uv run pytest -q -p no:cacheprovider tests/test_resubmit_lower_group.py tests/test_reached_group.py
+    tests/test_source.py tests/test_restart.py tests/test_cluster_no_db.py tests/test_server.py
+    tests/test_submit_json.py tests/test_group_order.py && sh spec/submit-input-checks/drive/run_list.sh
+    spec/submit-input-checks/drive/guards.txt 1200
+- id: P7
+  name: Docs (versionchanged 2.9.0), AGENTS.md and invariants.md, the release-note
+    draft
+  status: pending
+  satisfies:
+  - R9
+  depends_on:
+  - P4
+  - P6
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: 'python3 spec/submit-input-checks/drive/bounded.py 300 uv run pytest -q
+    -p no:cacheprovider tests/test_main.py tests/test_completions.py && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-sic
+    python3 spec/submit-input-checks/drive/bounded.py 900 uv run --python 3.12 --group
+    docs sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-sic
+    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-sic python3 spec/submit-input-checks/drive/bounded.py
+    900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b man
+    docs /tmp/claude-501/docs-man-sic && grep -q ''versionchanged:: 2.9.0'' docs/_include/submit_desc.rst
+    && grep -q ''versionchanged:: 2.9.0'' docs/_include/task_groups_alt.rst && test
+    "$(git diff dfdbaed5 -- docs/cli/cluster.rst | grep -c ''^+.*versionchanged::
+    2.9.0'')" -ge 1 && test "$(git diff dfdbaed5 -- docs/cli/server.rst | grep -c
+    ''^+.*versionchanged:: 2.9.0'')" -ge 1 && grep -qF "echo ''#'''' HYPERSHELL:''"
+    docs/_include/submit_desc.rst && grep -q ''reached group'' docs/_include/task_groups_alt.rst
+    && grep -q ''reached group'' /tmp/claude-501/docs-man-sic/hs.1 && grep -q ''reached
+    group'' AGENTS.md && grep -q ''reached group'' .agents/factory/invariants.md &&
+    grep -q ''must be an integer'' AGENTS.md && grep -q ''must be an integer'' .agents/factory/invariants.md
+    && test -s spec/submit-input-checks/RELEASE-NOTE.md && test "$(git diff dfdbaed5
+    -- docs src AGENTS.md .agents | grep -c ''^+.*hs task '')" -eq 0'
+- id: P8
+  name: Whole suite, serially; the PostgreSQL-aware files with PostgreSQL; the red
+    list re-proved on dfdbaed5; the four drives
+  status: pending
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  depends_on:
+  - P7
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES python3 spec/submit-input-checks/drive/bounded.py
+    7200 uv run pytest -q -p no:cacheprovider && python3 spec/submit-input-checks/drive/bounded.py
+    2700 uv run pytest -q -p no:cacheprovider tests/test_command_hash.py tests/test_group_integer.py
+    tests/test_group_stream.py tests/test_reached_group.py tests/test_resubmit_lower_group.py
+    tests/test_submit.py tests/test_groups.py tests/test_zone_postgres.py tests/test_contended_write.py
+    tests/test_server_initdb.py tests/test_writeback_postgres.py && RED_LIST=spec/submit-input-checks/drive/red.txt
+    RED_BASE_REV=dfdbaed5 python3 spec/submit-input-checks/drive/bounded.py 2700 sh
+    spec/relay-hardening/drive/red_check.sh && for mode in hash group stream reached;
+    do .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/submit-input-checks/drive/input_drive.sh"
+    $mode || exit 1; done
 review:
-  last_reviewed_commit: ""
+  last_reviewed_commit: ''
   verdict: none
-  blocked_reason: ""
+  blocked_reason: ''
   cycle: 0
 ---
-
 # TECH.md — Submitted input is checked: `#` is part of the command, a group is an integer, and a group below the reached one is refused
 
 The **context engine and finite-state machine** for building this fix. The YAML frontmatter above is
@@ -211,43 +301,62 @@ The guards ([`drive/guards.txt`](drive/guards.txt), 19 ids) pass on the base and
 **Goal:** the branch carries develop's #115, and every new test exists, collects on the base, fails
 there for what it checks (the red list) or passes there (the guards).
 
-- [ ] Merge develop into the branch (`git merge develop`; clean at plan time, `git merge-tree`), so
-      the build runs on `02f53777`. A signed merge commit.
-- [ ] `tests/test_command_hash.py` (R1, R2): `split_argline` unit cases for every Problem-1 line, a
+- [x] Merge develop into the branch (`git merge develop`; clean at plan time, `git merge-tree`), so
+      the build runs on `02f53777`. A signed merge commit. **Built:** `origin/develop` was
+      `6a0c28ea` at build time (it holds #116 `dfdbaed5`, #115 `02f53777` and a seed commit); merged
+      clean as the signed merge `50f665e4`. The red list stays proved against `dfdbaed5`.
+- [x] Shared helpers in `tests/input_checks.py` (not collected): `bounded` (own session, killed with
+      its group at the bound, `pytest.fail`), the `db_site` fixture (SQLite or PostgreSQL, `hs initdb
+      --yes`, a private engine), and row readers/writers (`set_task` writes typed columns through
+      `Task.__table__`, so SQLite times compare as stored).
+- [x] `tests/test_command_hash.py` (R1, R2): `split_argline` unit cases for every Problem-1 line, a
       full-line comment, `#` beside a marker, `## HYPERSHELL:`/`# c # HYPERSHELL:` (now comments), the
       quote escape; CLI through `hs submit` file/arguments/stdin with a database (both dialects) and
       `--queue` (to `hs server --no-db`, bounded client), `--template`, `hs cluster` file and stream,
       a tag-only line through `hs cluster` file and stream; guards for comment and marker counts and
       the quoted-marker refusal (exit 5, the non-goal).
-- [ ] `tests/test_group_integer.py` (R3, R4): unit `ensure_group`/`parse_group` accepted and refused
+- [x] `tests/test_group_integer.py` (R3, R4): unit `ensure_group`/`parse_group` accepted and refused
       values; `hs submit FILE` refused whole per value (ids `x, empty, float, exp, hex, true, null, nan,
       inf, huge, tagline`; a refused tag-only line in a file), naming the value and line, nothing
       inserted (no task, no Source row); stdin refused whole; `--from-json` per type (`string, float,
       bool, null`) naming the record; `-t group:x` exits 2 in both modes; `-g 3000000000` exits 2;
       `hs cluster FILE` with a database and `--no-db`, `hs server FILE`: exit 5, nothing run or
       inserted; accepted forms as guards.
-- [ ] `tests/test_group_stream.py` (R5): `Loader` unit tests over `iter([...])` (stream policy) and a
+- [x] `tests/test_group_stream.py` (R5): `Loader` unit tests over `iter([...])` (stream policy) and a
       list (whole policy) with a plain `Queue` and `caplog`; `hs cluster` stream with `x`/`nan` (both
       dialects for `x`), `--no-db` stream, a refused tag-only line keeping the group, `hs submit
       --queue` stream; each with an accepted line (an all-refused stream on a fresh database meets
       the pre-existing empty-input hang, out of scope — PLAN § 5.1).
-- [ ] `tests/test_reached_group.py` (R6, C9): unit `Task.reached_group` over research 03's scenarios
+- [x] `tests/test_reached_group.py` (R6, C9): unit `Task.reached_group` over research 03's scenarios
       S0–S11 on both dialects (rows written through the model, then their columns set); CLI refusals
       below the reached group (arguments, file, stdin, all or nothing, naming both groups), at and above
       it, no reached group (empty, all finished), the C9 default.
-- [ ] `tests/test_resubmit_lower_group.py` (R7): `hs cluster FILE --update` of a changed file adding
+      **Amendment (P1, for P5):** the scenarios use realistic times (a task is scheduled after it is
+      submitted) and pin research 03's table for both columns. Under those times PLAN § 2.5's SQL
+      sketch makes `in_flight=False` a no-op, because an in-flight row's `schedule_time` is at or
+      after its own `submit_time`, hence `>= U`: S1, S4, S10 and S11 would give the `in_flight`
+      value. The table's intent ("in-flight rows are reverted when the server starts, so they do not
+      hold lower groups back") is what the tests pin: with `in_flight=False` the scheduled branch
+      counts only completed rows (`completion_time IS NOT NULL AND (schedule_time >= U OR
+      completion_time >= U)`); the retry-row branch is unchanged. Also: the in-process tests bind the
+      session to PostgreSQL while `DATABASE_DIALECT` is `sqlite`, so the `typeof` filter must be chosen
+      from the session's bind (`Session.get_bind().dialect.name`, as `Source.reserved` does), not
+      the module constant.
+- [x] `tests/test_resubmit_lower_group.py` (R7): `hs cluster FILE --update` of a changed file adding
       a lower group onto an advanced database (exit 2, nothing inserted); `hs server FILE` likewise; the
       same-file `--restart` onto a stranded database (built as in
       `test_group_order.py::test_restart_runs_stranded_lower_group`) runs (guard); a stream's late lower
       group still runs with the warning (guard).
-- [ ] Flip `tests/test_data/test_model.py::TestTask::test_split_argline` lines 29–33 (kept whole), and
+- [x] Flip `tests/test_data/test_model.py::TestTask::test_split_argline` lines 29–33 (kept whole), and
       rename/rewrite `tests/test_group_order.py::test_cluster_runs_group_stored_as_text` as
       `test_cluster_refuses_group_stored_as_text` (exit 5, nothing inserted). Leave
       `test_late_lower_group_warns_after_text_group_started_first` as is (`Task.new(group=…)` stays
       unchecked).
-- [ ] Make every id in `drive/red.txt` and `drive/guards.txt` exist; amend the lists only to fix an id,
-      never to drop a requirement.
+- [x] Make every id in `drive/red.txt` and `drive/guards.txt` exist; amend the lists only to fix an id,
+      never to drop a requirement. (Every id existed as written; neither list changed.)
 - **Verify:** red list RED on `dfdbaed5` (both dialects), guards green, all five files collect.
+- **Verified (2026-11-21):** red check 56 of 56 RED on `dfdbaed5` (11 `pg:` included), guards 19
+  passed (PostgreSQL on), 215 tests collected.
 - **Touches:** `tests/`.
 
 ## Phase P2 — The `#` parser

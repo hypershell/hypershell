@@ -455,16 +455,17 @@ def test_cluster_clients_with_timeout_wait_for_file(temp_site: Path) -> None:
 
 
 @mark.integration
-def test_cluster_runs_group_stored_as_text(temp_site: Path) -> None:
-    """A group SQLite stores as text, which cannot be ordered against an integer group, still runs."""
+def test_cluster_refuses_group_stored_as_text(temp_site: Path) -> None:
+    """A group that is not an integer, which SQLite would store as text, refuses the file: nothing inserted, exit 5."""
     taskfile = create_taskfile(temp_site, ['echo 0  # HYPERSHELL: group:0',
                                            'echo x  # HYPERSHELL: group:x'])
     try:
-        proc = run(['hs', 'cluster', str(taskfile), '-N1', '--no-tls'],
+        proc = run(['hs', 'cluster', str(taskfile), '-N1', '--no-tls', '-H', '127.0.0.1'],
                    stdout=PIPE, stderr=PIPE, env=os.environ, timeout=120)
     except TimeoutExpired:
         pytest.fail('hs cluster did not finish within 120 seconds')
-    assert proc.returncode == exit_status.success
+    assert proc.returncode == exit_status.runtime_error
+    assert b'must be an integer' in proc.stderr
 
-    rc, stdout, _ = main(['hs', 'list', '-c', '-S'])
-    assert rc == exit_status.success and stdout == '2'
+    rc, stdout, _ = main(['hs', 'list', '-c'])
+    assert rc == exit_status.success and stdout == '0'
