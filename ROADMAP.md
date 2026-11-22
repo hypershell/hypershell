@@ -634,7 +634,8 @@ At bundle size 1, the server's main process runs its own scheduling, confirm and
 statements for every task, and the evidence points at its CPU as the throughput ceiling.
 `writeback-prebuilt-update` recovers the writeback's share by building that statement once. The
 scheduler and confirm paths may carry the same per-call cost, and batching results across bundles
-is a further option.
+is a further option. Where a commit is slow (SQLite on Lustre), the commits set the ceiling instead:
+`nf-hypershell` measured 38 tasks/s there against 77/s with the database on home.
 
 *Target: 2.9.x · Horizon: mid-term · Depends on: `writeback-prebuilt-update` (landed, #73; the
 measurement method) · Refs: —*
