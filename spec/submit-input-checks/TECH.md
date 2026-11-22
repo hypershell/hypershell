@@ -4,10 +4,10 @@ title: 'Submitted input is checked: # is part of the command, a group is an inte
   and a group below the reached one is refused'
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/submit-input-checks
 base: develop
-current_phase: P8
+current_phase: done
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -146,7 +146,7 @@ phases:
 - id: P8
   name: Whole suite, serially; the PostgreSQL-aware files with PostgreSQL; the red
     list re-proved on dfdbaed5; the four drives
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -162,6 +162,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES python3 spec/submit-input-checks/drive/bounded.py
     7200 uv run pytest -q -p no:cacheprovider && python3 spec/submit-input-checks/drive/bounded.py
     2700 uv run pytest -q -p no:cacheprovider tests/test_command_hash.py tests/test_group_integer.py
@@ -500,6 +501,13 @@ inserted or dispatched; skipped tasks never trigger it; streams are unchanged (P
   line skipped) exit 0; adding group 1 exit 2, Source rows unchanged; `hs cluster --restart
   --update` adding groups 6 and 7 ran `c d f`.
 - **Verified (2026-11-21):** suites 183 passed, 1 skipped (PostgreSQL on); guards 19 passed.
+- **Amendment (P8, for P6):** the first P8 run failed 6 cases of
+  `tests/test_server_initdb.py::test_database_step[*-file-none|initdb]` (exit 5, `no such table:
+  task`): that unit test replaces `checkdb`/`upgradedb` with recorders, so the schema never exists,
+  and `ServerApp.prepare_source` now reads the reached group for `hs server FILE` with a database.
+  The `recorder` fixture also stubs `Task.reached_group` to return None (no reached group); the
+  steps it records are unchanged. In a real launch `check_database` creates or checks the schema
+  before `prepare_source`. P6's verify list did not include that file; P8's does.
 - **Verify:** `test_resubmit_lower_group.py` and the source, restart, no-db, server and JSON suites;
   guards.
 - **Touches:** `src/hypershell/submit.py`, `src/hypershell/cluster/__init__.py`,
@@ -545,12 +553,18 @@ and the constitution says the new rules.
 **Goal:** the whole suite passes serially; the PostgreSQL-aware files pass with PostgreSQL; the red
 list still fails on `dfdbaed5`; every drive passes.
 
-- [ ] Run the whole suite with `HS_TEST_POSTGRES` unset (bounded 7200 s; this host's TimescaleDB and
+- [x] Run the whole suite with `HS_TEST_POSTGRES` unset (bounded 7200 s; this host's TimescaleDB and
       missing upgrade templates fail 30 environment-gated tests otherwise — see the dry run), then the
       PostgreSQL-aware files with it set, the red list, and the four drive modes. A failure here is
       fixed in the phase it belongs to, recorded as an amendment, and re-verified.
+- **Attempt 1 (red):** the whole suite failed 6 cases of `test_server_initdb.py::test_database_step`
+  (`*-file-none`, `*-file-initdb`): a P6 test gap, fixed in the unit recorder (see P6's amendment).
+- **Verified (2026-11-21, attempt 2):** whole suite with `HS_TEST_POSTGRES` unset **3723 passed, 186
+  skipped in 26 min 8 s**; the PostgreSQL-aware files **364 passed, 6 skipped** (4 min 27 s); red
+  check **56 of 56 RED** on `dfdbaed5` (11 `pg:`); drives `hash` 4/4, `group` 6/6, `stream` 6/6,
+  `reached` 5/5. The red list on this tree, PostgreSQL on: **56 passed**.
 - **Verify:** as in the frontmatter.
-- **Touches:** nothing new.
+- **Touches:** `tests/test_server_initdb.py` (the recorder stub, P6's amendment).
 
 ---
 
