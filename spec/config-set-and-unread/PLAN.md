@@ -307,3 +307,22 @@ Checked against [`.agents/factory/invariants.md`](../../.agents/factory/invarian
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan-gate rulings (2026-11-21)
+
+Foreman, gate judge under the maintainer's mandate. Approved as planned, with S1–S5 accepted.
+
+- **S1:** `server.eager` is read by the boolean words, and anything else is refused with exit 3. A
+  2.8 file's `eager = "no"` therefore stays off. The release note says so.
+- **S2:** `check_evict` refuses an infinite `server.evict` with a clean exit 5 in `hs server` and
+  `hs cluster`.
+- **S3:** the invariant §11 bend is accepted. A fractional `-R` is sent to launched clients, and
+  whole rates stay integer words. Only a 2.9.0a4-era client reading a fractional rate refuses it, a
+  prerelease-only gap. It is recorded as a deviation and as a release-note clause.
+- **S4:** child-interpreter and CLI tests are `@mark.integration`, in-process tests `@mark.unit`.
+- **S5:** one docs phase (P5).
+- **Base:** the branch builds on `d9901cf0` (the red list's base) and merges `develop` at publish. By
+  then `develop` holds #115 and #116; keep off the fenced lines as TECH says.
+- **Candidate seeds** from research are filed by the foreman: the cluster classes' `max_retries`
+  defaults, a text `attempts` crashing at import, integers wider than 64 bits written to TOML, and
+  the `--eager` help wording.
