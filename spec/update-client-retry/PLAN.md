@@ -357,3 +357,8 @@ triggered). Foreman's fix, under the maintainer's mandate: `docs/api/cluster.rst
 in-process clause to `LocalCluster` and says that the launching classes start `hs client`
 processes, which read their own configuration for any option not passed, and that launcher-mode
 classes give each launch the `[export]` environment. Review cycle 3 is scoped to F3.
+
+## Review-cycle-3 ruling (2026-11-22)
+
+Review cycle 3 approved at `4e495e3c` with no finding; the loop converged. The human gate was
+never triggered, so the cycle publishes and merges on green under the maintainer's standing mandate.

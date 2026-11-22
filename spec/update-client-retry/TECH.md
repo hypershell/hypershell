@@ -4,7 +4,7 @@ title: hs update --delete refuses changes it would ignore, hs client reads its o
   bundle keys, and a task that never ran is not retried
 kind: fix
 appetite: big
-status: in_review
+status: done
 branch: fix/update-client-retry
 base: develop
 current_phase: done
