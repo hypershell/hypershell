@@ -46,3 +46,24 @@
 - **Skill cause:** As `spec/relay-advertise/META.md` F3: Step 6 names neither the tests-first phase nor the shared scripts.
 - **Recommended fix:** As recorded there.
 - **Confidence:** high · **Effort:** small
+
+## F6 — Binding plan-gate rulings live in `PLAN.md`, which Step 2 forbids passing to the blind reviewer · seen again
+`origin=hs-review:step2 severity=low category=missing-guidance status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** The plan-gate rulings S1–S5 bind how R5, R7 and R8 are read; they are recorded only at the end of `PLAN.md`. The orchestrator extracted that block alone and gave it to the reviewer as contract readings, as the brief directed, although Step 2 lists only `GOAL.md`, the diff, `invariants.md` and the rubric.
+- **Skill cause:** As `spec/cluster-launch-followups/META.md` F6 and `spec/env-config-keys/META.md` F6.
+- **Recommended fix:** As there. The fix must not weaken blind-review integrity: name the rulings block as a sanctioned input, or record contract-binding rulings in `GOAL.md`, never the plan's design.
+- **Confidence:** high · **Effort:** small
+
+## F7 — REVIEW template's human-gate list omits `core/tls.py` and `cluster/remote|ssh.py` · seen again
+`origin=hs-review:step3 severity=low category=template status=open target=.agents/factory/templates/REVIEW.md`
+- **What happened:** The "Human-gate triggers" section was filled from `review-rubric.md`'s list, since the template's own list still leaves out `core/tls.py` and `cluster/remote|ssh.py`, two files this diff edits.
+- **Skill cause:** As `spec/cluster-launch-failures/META.md` F3.
+- **Recommended fix:** As there.
+- **Confidence:** high · **Effort:** small
+
+## F8 — Step 1's drift check flags the GOAL gate's dated rulings as mid-build drift · seen again
+`origin=hs-review:step1 severity=low category=instruction status=open target=.claude/skills/hs-review/SKILL.md`
+- **What happened:** `git log origin/develop..HEAD -- spec/config-set-and-unread/GOAL.md` listed the GOAL-gate commit `81b762aa` beside the shaping commit; it only appends the dated ruling block and predates the first build commit. The orchestrator, a subagent, recorded it in `REVIEW.md`'s pre-flight and graded the gated contract rather than stopping to ask.
+- **Skill cause:** As `spec/relay-topology/META.md` F7.
+- **Recommended fix:** As there.
+- **Confidence:** high · **Effort:** small
