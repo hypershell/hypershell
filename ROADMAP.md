@@ -294,6 +294,18 @@ and after `group-advance-strands-lower-group`. Pre-existing, and found by that c
 `spec/group-advance-strands-lower-group/` (REVIEW cycle 2)*
 **Seed:** [`issues/database-locked-during-ingest-hangs.md`](issues/database-locked-during-ingest-hangs.md) · *status: unshaped*
 
+## On a fresh SQLite site, the Python API's `run_local` fails and then hangs
+
+The commands create the schema before they submit; `run_local` and `LocalCluster` do not. On a
+site whose SQLite database was never initialized, the submitter's committer dies on its first
+insert with `no such table: task`, no task runs, and the run hangs as in the entry above:
+`run_local` never returns, and `stop()` blocks on the submitter's full queue. Confirmed by a probe
+on `develop`. Pre-existing; found by `update-client-retry` at plan time.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: same committer death as
+`issues/database-locked-during-ingest-hangs.md`*
+**Seed:** [`issues/run-local-fresh-sqlite.md`](issues/run-local-fresh-sqlite.md) · *status: unshaped*
+
 ## `hs update --delete` ignores field assignments and tag changes given with it
 
 `hs update --delete group=9` deletes the selected tasks and says nothing about `group=9`; a mistaken
@@ -314,6 +326,18 @@ statement. Pre-existing; out of scope for `hs-update-contended-writes` (#111).
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
 `spec/hs-update-contended-writes/` (Non-goals)*
 **Seed:** [`issues/update-legacy-tag-lost-write.md`](issues/update-legacy-tag-lost-write.md) · *status: unshaped*
+
+## The single-task `hs update ID FIELD VALUE` form ignores filter options
+
+The three-argument form writes the named task and never reads `-w`, `-t`, `-g`, `--limit` or the
+filter aliases given with it, so `hs update ID args … -F` writes whether or not the task failed. The
+filtered form honours the same options. The fix applies the filters or refuses the combination;
+refusing would be an interface change, which shaping weighs against the Target. Pre-existing; named
+by `update-client-retry`'s shaping, which takes the same form's action options.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — (sequence after `update-client-retry`,
+same routing) · Refs: `issues/update-legacy-tag-lost-write.md`*
+**Seed:** [`issues/update-legacy-form-ignores-filters.md`](issues/update-legacy-form-ignores-filters.md) · *status: unshaped*
 
 ## Every numeric setting has one declared range, one parser and one error
 
@@ -578,6 +602,17 @@ is a further option. Where a commit is slow (SQLite on Lustre), the commits set 
 *Target: 2.9.x · Horizon: mid-term · Depends on: `writeback-prebuilt-update` (landed, #73; the
 measurement method) · Refs: —*
 **Seed:** [`issues/server-per-task-statement-overhead.md`](issues/server-per-task-statement-overhead.md) · *status: unshaped*
+
+## On PostgreSQL, the reached-group read walks a whole index once every task has finished
+
+Since #118, `hs submit` with a database, `hs cluster FILE` and `hs server FILE` read the reached
+group once. On PostgreSQL a table whose tasks have all finished makes that read walk the whole
+index before it returns nothing: 0.23–0.79 s at 1M rows against about 0.15 s for the earlier form, and
+about 2 s at 3M, with identical results. Reading the pass start first would make it one lookup.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
+`spec/submit-input-checks/REVIEW.md` (cycle 2, *Triaged, not findings*)*
+**Seed:** [`issues/reached-group-postgres-finished-scan.md`](issues/reached-group-postgres-finished-scan.md) · *status: unshaped*
 
 ---
 
