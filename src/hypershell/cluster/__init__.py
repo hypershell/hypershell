@@ -23,7 +23,7 @@ from cmdkit.cli import Interface, ArgumentError
 from hypershell.core.config import config, blame, find_available_ports, config_seconds, PARAM_UNSET
 from hypershell.core.tls import (TLSConfig, TLSError, DEFAULT_HANDSHAKE, handshake_seconds,
                                  from_namespace as tls_from_namespace)
-from hypershell.core.types import parse_bytes, parse_time, parse_delay, parse_period, UnitError
+from hypershell.core.types import parse_bytes, parse_time, parse_delay, parse_period, parse_rate, UnitError
 from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.exceptions import get_shared_exception_mapping
@@ -238,8 +238,8 @@ class ClusterApp(Application):
     interface.add_argument('-C', '--client-cores', type=int, default=client_cores)
     interface.add_argument('-M', '--client-memory', type=parse_bytes, default=client_memory)
 
-    ratelimit: int = config.task.get('ratelimit', None)
-    interface.add_argument('-R', '--ratelimit', type=int, default=ratelimit)
+    ratelimit: Optional[float] = config.client.ratelimit or None
+    interface.add_argument('-R', '--ratelimit', type=parse_rate, default=ratelimit)
 
     failure_path: str = None
     interface.add_argument('-f', '--failures', default=None, dest='failure_path')

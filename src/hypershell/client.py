@@ -66,7 +66,7 @@ from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, 
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
-from hypershell.core.types import parse_bytes, parse_time, parse_delay, serialize, deserialize
+from hypershell.core.types import parse_bytes, parse_time, parse_delay, parse_rate, serialize, deserialize
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.signal import check_signal, SIGNAL_MAP, SIGUSR1, SIGUSR2, SIGINT
 from hypershell.core.logging import HOSTNAME, INSTANCE, Logger
@@ -695,7 +695,7 @@ class TaskExecutor(StateMachine):
     elapsed: timedelta
     timeout: Optional[int]
     signalwait: int
-    ratelimit: Optional[int]
+    ratelimit: Optional[float]
     stop_requested: Optional[datetime]
     attempted_sigint: bool
     attempted_sigterm: bool
@@ -1234,7 +1234,7 @@ class ClientThread(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second (default: none).
             There is no limit on task throughput unless specified.
 
@@ -1287,7 +1287,7 @@ class ClientThread(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None,
+                 ratelimit: float = None,
                  tls: Optional[TLSConfig] = None,
                  zone: Optional[str] = None) -> None:
         """Initialize queue manager and child threads."""
@@ -1402,7 +1402,7 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
                client_timeout: int = None,
                task_timeout: int = None,
                task_signalwait: int = DEFAULT_SIGNALWAIT,
-               ratelimit: int = None,
+               ratelimit: float = None,
                tls: Optional[TLSConfig] = None,
                zone: Optional[str] = None) -> None:
     """
@@ -1474,7 +1474,7 @@ def run_client(num_threads: int = DEFAULT_NUM_THREADS,
             Signal escalation waiting period in seconds on task timeout.
             See :const:`DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second (default: none).
             There is no limit on task throughput unless specified.
 
@@ -1613,10 +1613,10 @@ class ClientApp(Application):
 
     task_timeout: Optional[int] = config.task.timeout or None
     client_timeout: Optional[int] = config.client.timeout or None
-    ratelimit: Optional[int] = config.client.ratelimit or None
+    ratelimit: Optional[float] = config.client.ratelimit or None
     interface.add_argument('-T', '--timeout', type=parse_time, default=client_timeout, dest='client_timeout')
     interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout, dest='task_timeout')
-    interface.add_argument('-R', '--ratelimit', type=int, default=ratelimit)
+    interface.add_argument('-R', '--ratelimit', type=parse_rate, default=ratelimit)
 
     task_signalwait: int = config.task.signalwait
     interface.add_argument('-S', '--signalwait', type=parse_time, default=task_signalwait, dest='task_signalwait')

@@ -977,6 +977,8 @@ CONTRACT_CLIENT_OPTIONS: Final[Dict[str, bool]] = {
     '-p': True, '--port': True, '-k': True, '--auth': True, '-t': True, '--template': True,
     '-b': True, '--bundlesize': True, '-w': True, '--bundlewait': True, '-d': True, '--delay-start': True,
     '--zone': True, '-T': True, '--timeout': True, '-W': True, '--task-timeout': True,
+    # A whole `-R` rate is launched as an integer word, which a 2.9.0a4 client reads; a fractional rate
+    # is launched as a plain decimal and needs a client of this release (a sanctioned exception).
     '-R': True, '--ratelimit': True, '-S': True, '--signalwait': True, '--no-confirm': False,
     '-o': True, '--output': True, '-e': True, '--errors': True, '--capture': False, '--monitor': False,
     '-C': True, '--client-cores': True, '-M': True, '--client-memory': True, '--no-tls': False,

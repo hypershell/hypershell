@@ -191,7 +191,7 @@ class SSHCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second per client (default: none).
             There is no limit on task throughput unless specified.
 
@@ -261,7 +261,7 @@ class SSHCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None,
+                 ratelimit: float = None,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
                  zone: Optional[str] = None,

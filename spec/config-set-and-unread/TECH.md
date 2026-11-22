@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/config-set-and-unread
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-21'
 phases:
 - id: P1
@@ -75,7 +75,7 @@ phases:
     uv run sh "$PWD/spec/config-set-and-unread/drive/csu_drive.sh" $m || exit 1; done
 - id: P4
   name: -R takes a number, and hs cluster reads client.ratelimit
-  status: pending
+  status: done
   satisfies:
   - R8
   depends_on:
@@ -291,17 +291,17 @@ to the server in every mode.
 `client.ratelimit` (not `task.ratelimit`) in every mode; a launched client gets a whole rate as an
 integer word and a fraction as a plain decimal.
 
-- [ ] `core/types.py`: `parse_rate(value) -> int | float` beside `parse_period`, over
+- [x] `core/types.py`: `parse_rate(value) -> int | float` beside `parse_period`, over
       `config_schema.read_number` (top-level import), raising `UnitError` (`Rate {value!r} is not
       valid: expected a number`); in `__all__`.
-- [ ] `client.py`: `-R` `type=parse_rate`; the `ratelimit` annotations/docstrings say a number
+- [x] `client.py`: `-R` `type=parse_rate`; the `ratelimit` annotations/docstrings say a number
       (`Optional[float]`). **Do not edit 1312–1314** (they already divide as floats).
-- [ ] `cluster/__init__.py`: `ratelimit: Optional[float] = config.client.ratelimit or None`,
+- [x] `cluster/__init__.py`: `ratelimit: Optional[float] = config.client.ratelimit or None`,
       `type=parse_rate`.
-- [ ] `cluster/launch.py`: `plain_rate(value)` beside `plain_seconds` (doctest example), used for `-R`
+- [x] `cluster/launch.py`: `plain_rate(value)` beside `plain_seconds` (doctest example), used for `-R`
       under the existing `if ratelimit is not None`; annotations in `client_launch`/`client_options`;
       `local.py`, `remote.py`, `ssh.py` rate annotations and docstrings.
-- [ ] `tests/test_cluster_launch.py`: one comment at `CONTRACT_CLIENT_OPTIONS`'s `-R` entry naming the
+- [x] `tests/test_cluster_launch.py`: one comment at `CONTRACT_CLIENT_OPTIONS`'s `-R` entry naming the
       sanctioned bend (a fractional rate needs a client of this release; PLAN §3).
 - **Verify:** `tests/test_config_unread.py` (all of it now), `test_duration_options.py`,
   `test_cluster_launch.py`, `test_client.py`, `test_relay_launch.py`; drive mode `rate`.

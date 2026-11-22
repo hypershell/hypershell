@@ -205,7 +205,7 @@ class RemoteCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second per client (default: none).
             There is no limit on task throughput unless specified.
 
@@ -271,7 +271,7 @@ class RemoteCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None,
+                 ratelimit: float = None,
                  from_json: bool = False,
                  tls: Optional[TLSConfig] = None,
                  zone: Optional[str] = None,
@@ -870,7 +870,7 @@ class AutoScalingCluster(Thread):
             Signal escalation waiting period in seconds on task timeout.
             See :const:`~hypershell.client.DEFAULT_SIGNALWAIT`.
 
-        ratelimit (int, optional):
+        ratelimit (float, optional):
             Maximum allowed tasks per second per client (default: none).
             There is no limit on task throughput unless specified.
 
@@ -975,7 +975,7 @@ class AutoScalingCluster(Thread):
                  client_timeout: int = None,
                  task_timeout: int = None,
                  task_signalwait: int = DEFAULT_SIGNALWAIT,
-                 ratelimit: int = None,
+                 ratelimit: float = None,
                  poll: int = DEFAULT_SERVER_POLL,
                  policy: str = DEFAULT_AUTOSCALE_POLICY,
                  period: int = DEFAULT_AUTOSCALE_PERIOD,

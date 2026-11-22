@@ -16,11 +16,14 @@ from fractions import Fraction
 from argparse import ArgumentTypeError
 from datetime import datetime
 
+# Internal libs
+from hypershell.core.config_schema import read_number
+
 # Public interface
 __all__ = [
     'smart_coerce', 'NoneType', 'JSONData', 'ExtendedValue',
     'to_json_type', 'from_json_type', 'serialize', 'deserialize',
-    'parse_bytes', 'parse_time', 'parse_delay', 'parse_period', 'UnitError',
+    'parse_bytes', 'parse_time', 'parse_delay', 'parse_period', 'parse_rate', 'UnitError',
 ]
 
 
@@ -173,6 +176,13 @@ def parse_period(value: str | int | float) -> int | float:
         if seconds < 1:
             return 1
     return seconds
+
+
+def parse_rate(value: str) -> int | float:
+    """Tasks per second: a whole or decimal number, finite (e.g., '5', '0.5'); a whole word stays an integer."""
+    if (rate := read_number(str(value))) is None:
+        raise UnitError(f'Rate {value!r} is not valid: expected a number')
+    return rate
 
 
 def parse_delay(value: str) -> float:
