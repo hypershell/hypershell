@@ -185,7 +185,7 @@ def test_configured_bundlesize_is_advertised(group: Group) -> None:
     server = group.start('server', 'server', '--restart', '-b', '100', '-H', 'localhost', '-p', str(port))
     wait_listening(server, port, group, 'server')
     client = group.start('client', 'client', '-N4', '-H', 'localhost', '-p', str(port), '-T', '30',
-                         env={'HYPERSHELL_SUBMIT_BUNDLESIZE': '3'})
+                         env={'HYPERSHELL_CLIENT_BUNDLESIZE': '3'})
     assert group.wait(server, deadline) == 0, group.text('server')
     assert group.wait(client, deadline) == 0, group.text('client')
     sizes = received(group.text('client'))

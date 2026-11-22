@@ -1,114 +1,165 @@
 ---
 slug: update-client-retry
-title: hs update --delete refuses changes it would ignore, hs client reads its own bundle keys, and a task that never ran is not retried
+title: hs update --delete refuses changes it would ignore, hs client reads its own
+  bundle keys, and a task that never ran is not retried
 kind: fix
 appetite: big
 status: in_progress
 branch: fix/update-client-retry
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-22'
 phases:
 - id: P1
   name: 'Tests first: the red list on 1f688c7c (tests only)'
-  status: pending
-  satisfies: [R1, R2, R3, R4, R5, R6, R7, R8]
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
   depends_on: []
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    git diff --quiet 1f688c7c -- src docs share AGENTS.md .agents
-    && test -z "$(git diff --name-only 1f688c7c -- . ':!spec' ':!tests' ':!issues' ':!ROADMAP.md')"
-    && test -n "$HS_TEST_POSTGRES"
-    && test "$(grep -cvE '^#|^$' spec/update-client-retry/red.txt)" -eq 79
-    && RED_BASE_REV=1f688c7c RED_LIST="$PWD/spec/update-client-retry/red.txt" sh spec/update-client-retry/drive/bound.sh 1200 sh spec/relay-hardening/drive/red_check.sh
-    && RED_LIST="$PWD/spec/update-client-retry/red.txt" sh spec/update-client-retry/drive/bound.sh 2400 sh spec/contended-writes/drive/rest_green.sh
-    tests/test_update_refusals.py tests/test_client_bundle_keys.py tests/test_retry_terminal.py tests/test_retry_declarations.py tests/test_retry_defaults.py
-    tests/test_client_request.py tests/test_duration_options.py tests/test_dispatch_workload.py tests/test_update.py tests/test_retry_gate.py
-    tests/test_groups.py tests/test_zone_model.py tests/test_zone_postgres.py tests/test_client.py tests/test_finish_wake.py tests/test_restart.py
+  verify: git diff --quiet 1f688c7c -- src docs share AGENTS.md .agents && test -z
+    "$(git diff --name-only 1f688c7c -- . ':!spec' ':!tests' ':!issues' ':!ROADMAP.md')"
+    && test -n "$HS_TEST_POSTGRES" && test "$(grep -cvE '^#|^$' spec/update-client-retry/red.txt)"
+    -eq 79 && RED_BASE_REV=1f688c7c RED_LIST="$PWD/spec/update-client-retry/red.txt"
+    sh spec/update-client-retry/drive/bound.sh 1200 sh spec/relay-hardening/drive/red_check.sh
+    && RED_LIST="$PWD/spec/update-client-retry/red.txt" sh spec/update-client-retry/drive/bound.sh
+    2400 sh spec/contended-writes/drive/rest_green.sh tests/test_update_refusals.py
+    tests/test_client_bundle_keys.py tests/test_retry_terminal.py tests/test_retry_declarations.py
+    tests/test_retry_defaults.py tests/test_client_request.py tests/test_duration_options.py
+    tests/test_dispatch_workload.py tests/test_update.py tests/test_retry_gate.py
+    tests/test_groups.py tests/test_zone_model.py tests/test_zone_postgres.py tests/test_client.py
+    tests/test_finish_wake.py tests/test_restart.py
 - id: P2
-  name: hs update refuses --delete with a change and the single-task form with an action option (R1, R2, their docs)
+  name: hs update refuses --delete with a change and the single-task form with an
+    action option (R1, R2, their docs)
   status: pending
-  satisfies: [R1, R2, R9]
-  depends_on: [P1]
+  satisfies:
+  - R1
+  - R2
+  - R9
+  depends_on:
+  - P1
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    sh spec/update-client-retry/drive/bound.sh 900 uv run pytest -q -p no:cacheprovider
-    tests/test_update_refusals.py tests/test_update.py tests/test_main.py
-    && sh spec/update-client-retry/drive/bound.sh 300 .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/update-client-retry/drive/ucr_drive.sh" update
-    && for f in docs/_include/task_update_desc.rst docs/_include/task_update_help.rst src/hypershell/task.py; do grep -q 'takes no change' $f && grep -q 'single-task form takes no' $f || exit 1; done
-    && test "$(grep -c 'versionchanged:: 2.9.0' docs/cli/task_update.rst)" -ge 8
-    && ! grep -rn 'hs task ' docs/_include/task_update_desc.rst docs/_include/task_update_help.rst docs/cli/task_update.rst
-    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
-    sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucr
+  verify: 'sh spec/update-client-retry/drive/bound.sh 900 uv run pytest -q -p no:cacheprovider
+    tests/test_update_refusals.py tests/test_update.py tests/test_main.py && sh spec/update-client-retry/drive/bound.sh
+    300 .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/update-client-retry/drive/ucr_drive.sh"
+    update && for f in docs/_include/task_update_desc.rst docs/_include/task_update_help.rst
+    src/hypershell/task.py; do grep -q ''takes no change'' $f && grep -q ''single-task
+    form takes no'' $f || exit 1; done && test "$(grep -c ''versionchanged:: 2.9.0''
+    docs/cli/task_update.rst)" -ge 8 && ! grep -rn ''hs task '' docs/_include/task_update_desc.rst
+    docs/_include/task_update_help.rst docs/cli/task_update.rst && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr
+    sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
+    sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucr'
 - id: P3
-  name: hs client reads client.bundlesize and client.bundlewait, not submit.* (R3, R4, their docs)
+  name: hs client reads client.bundlesize and client.bundlewait, not submit.* (R3,
+    R4, their docs)
   status: pending
-  satisfies: [R3, R4, R9]
-  depends_on: [P2]
+  satisfies:
+  - R3
+  - R4
+  - R9
+  depends_on:
+  - P2
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    sh spec/update-client-retry/drive/bound.sh 1200 uv run pytest -q -p no:cacheprovider
-    tests/test_client_bundle_keys.py tests/test_client_request.py tests/test_duration_options.py tests/test_dispatch_workload.py
-    tests/test_client.py tests/test_config_unread.py tests/test_config_schema.py tests/test_env_config.py tests/test_main.py
-    && sh spec/update-client-retry/drive/bound.sh 300 .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/update-client-retry/drive/ucr_drive.sh" client
-    && for f in docs/_include/client_help.rst src/hypershell/client.py; do grep -q 'HYPERSHELL_CLIENT_BUNDLESIZE' $f && grep -q 'client.bundlesize' $f && ! grep -q 'HYPERSHELL_SUBMIT_BUNDLESIZE' $f || exit 1; done
-    && ! grep -q 'HYPERSHELL_SUBMIT_BUNDLESIZE' docs/_include/config_param_ref.rst
-    && test "$(grep -c 'Read by ``hs client``' docs/_include/config_param_ref.rst)" -ge 2
-    && grep -q 'Read by ``hs submit`` only' docs/_include/config_param_ref.rst
-    && grep -q 'Read by ``hs submit``, ``hs server`` and ``hs cluster``' docs/_include/config_param_ref.rst
-    && test "$(grep -c 'versionchanged:: 2.9.0' docs/_include/config_param_ref.rst)" -ge 29
-    && test "$(grep -c 'versionchanged:: 2.9.0' docs/cli/client.rst)" -ge 6
-    && ! grep -q 'config.submit.\*` for CLI defaults' AGENTS.md
-    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
-    sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucr
+  verify: 'sh spec/update-client-retry/drive/bound.sh 1200 uv run pytest -q -p no:cacheprovider
+    tests/test_client_bundle_keys.py tests/test_client_request.py tests/test_duration_options.py
+    tests/test_dispatch_workload.py tests/test_client.py tests/test_config_unread.py
+    tests/test_config_schema.py tests/test_env_config.py tests/test_main.py && sh
+    spec/update-client-retry/drive/bound.sh 300 .agents/factory/bin/temp_site.sh uv
+    run sh "$PWD/spec/update-client-retry/drive/ucr_drive.sh" client && for f in docs/_include/client_help.rst
+    src/hypershell/client.py; do grep -q ''HYPERSHELL_CLIENT_BUNDLESIZE'' $f && grep
+    -q ''client.bundlesize'' $f && ! grep -q ''HYPERSHELL_SUBMIT_BUNDLESIZE'' $f ||
+    exit 1; done && ! grep -q ''HYPERSHELL_SUBMIT_BUNDLESIZE'' docs/_include/config_param_ref.rst
+    && test "$(grep -c ''Read by ``hs client``'' docs/_include/config_param_ref.rst)"
+    -ge 2 && grep -q ''Read by ``hs submit`` only'' docs/_include/config_param_ref.rst
+    && grep -q ''Read by ``hs submit``, ``hs server`` and ``hs cluster``'' docs/_include/config_param_ref.rst
+    && test "$(grep -c ''versionchanged:: 2.9.0'' docs/_include/config_param_ref.rst)"
+    -ge 29 && test "$(grep -c ''versionchanged:: 2.9.0'' docs/cli/client.rst)" -ge
+    6 && ! grep -q ''config.submit.\*` for CLI defaults'' AGENTS.md && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr
+    sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
+    sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucr'
 - id: P4
-  name: Never-ran statuses are not retried and fail their group; a retry keeps its declarations; one retry default (R5-R8, their docs)
+  name: Never-ran statuses are not retried and fail their group; a retry keeps its
+    declarations; one retry default (R5-R8, their docs)
   status: pending
-  satisfies: [R5, R6, R7, R8, R9]
-  depends_on: [P3]
+  satisfies:
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  depends_on:
+  - P3
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    test -n "$HS_TEST_POSTGRES"
-    && sh spec/update-client-retry/drive/bound.sh 2400 uv run pytest -q -p no:cacheprovider
-    tests/test_retry_terminal.py tests/test_retry_declarations.py tests/test_retry_defaults.py tests/test_retry_gate.py tests/test_groups.py
-    tests/test_group_order.py tests/test_stream_input.py tests/test_zone_model.py tests/test_zone_postgres.py tests/test_zone_autoscale.py
-    tests/test_autoscale.py tests/test_restart.py tests/test_finish_wake.py tests/test_writeback.py tests/test_client.py
-    tests/test_cluster_launch.py tests/test_cluster_no_db.py tests/test_config_unread.py tests/test_main.py
-    && for m in retry defaults; do sh spec/update-client-retry/drive/bound.sh 300 .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/update-client-retry/drive/ucr_drive.sh" $m || exit 1; done
-    && for f in docs/_include/config_param_ref.rst docs/_include/server_desc.rst docs/_include/server_help.rst docs/_include/cluster_help.rst src/hypershell/server.py src/hypershell/cluster/__init__.py;
-    do grep -q 'never retried' $f && grep -q 'cores, memory and walltime' $f || exit 1; done
-    && grep -q -- '-1001' docs/_include/server_desc.rst && grep -q -- '-1002' docs/_include/server_desc.rst
-    && for f in docs/api/server.rst docs/api/cluster.rst; do grep -q 'server.attempts' $f || exit 1; done
-    && test "$(grep -c 'versionchanged:: 2.9.0' docs/api/server.rst)" -ge 2 && test "$(grep -c 'versionchanged:: 2.9.0' docs/api/cluster.rst)" -ge 3
-    && test "$(grep -c 'versionchanged:: 2.9.0' docs/cli/server.rst)" -ge 10 && test "$(grep -c 'versionchanged:: 2.9.0' docs/cli/cluster.rst)" -ge 16
-    && for f in AGENTS.md .agents/factory/invariants.md; do grep -q NO_RETRY_STATUSES $f && grep -q new_retry $f && grep -q configured_retries $f || exit 1; done
-    && ! grep -rn 'hs task ' docs/_include/server_desc.rst docs/_include/config_param_ref.rst docs/api/server.rst docs/api/cluster.rst
-    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
-    sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucr
+  verify: 'test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
+    2400 uv run pytest -q -p no:cacheprovider tests/test_retry_terminal.py tests/test_retry_declarations.py
+    tests/test_retry_defaults.py tests/test_retry_gate.py tests/test_groups.py tests/test_group_order.py
+    tests/test_stream_input.py tests/test_zone_model.py tests/test_zone_postgres.py
+    tests/test_zone_autoscale.py tests/test_autoscale.py tests/test_restart.py tests/test_finish_wake.py
+    tests/test_writeback.py tests/test_client.py tests/test_cluster_launch.py tests/test_cluster_no_db.py
+    tests/test_config_unread.py tests/test_main.py && for m in retry defaults; do
+    sh spec/update-client-retry/drive/bound.sh 300 .agents/factory/bin/temp_site.sh
+    uv run sh "$PWD/spec/update-client-retry/drive/ucr_drive.sh" $m || exit 1; done
+    && for f in docs/_include/config_param_ref.rst docs/_include/server_desc.rst docs/_include/server_help.rst
+    docs/_include/cluster_help.rst src/hypershell/server.py src/hypershell/cluster/__init__.py;
+    do grep -q ''never retried'' $f && grep -q ''cores, memory and walltime'' $f ||
+    exit 1; done && grep -q -- ''-1001'' docs/_include/server_desc.rst && grep -q
+    -- ''-1002'' docs/_include/server_desc.rst && for f in docs/api/server.rst docs/api/cluster.rst;
+    do grep -q ''server.attempts'' $f || exit 1; done && test "$(grep -c ''versionchanged::
+    2.9.0'' docs/api/server.rst)" -ge 2 && test "$(grep -c ''versionchanged:: 2.9.0''
+    docs/api/cluster.rst)" -ge 3 && test "$(grep -c ''versionchanged:: 2.9.0'' docs/cli/server.rst)"
+    -ge 10 && test "$(grep -c ''versionchanged:: 2.9.0'' docs/cli/cluster.rst)" -ge
+    16 && for f in AGENTS.md .agents/factory/invariants.md; do grep -q NO_RETRY_STATUSES
+    $f && grep -q new_retry $f && grep -q configured_retries $f || exit 1; done &&
+    ! grep -rn ''hs task '' docs/_include/server_desc.rst docs/_include/config_param_ref.rst
+    docs/api/server.rst docs/api/cluster.rst && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr
+    sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
+    sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucr'
 - id: P5
-  name: 'Gate: the whole suite serially, the red list, PostgreSQL, the drive, the docs'
+  name: 'Gate: the whole suite serially, the red list, PostgreSQL, the drive, the
+    docs'
   status: pending
-  satisfies: [R1, R2, R3, R4, R5, R6, R7, R8, R9]
-  depends_on: [P4]
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  depends_on:
+  - P4
   parallel: false
   hammerable: false
   hill: uphill
-  verify: >-
-    test -n "$HS_TEST_POSTGRES"
-    && sh spec/update-client-retry/drive/bound.sh 5400 uv run --python 3.14 pytest -p no:cacheprovider -q
-    && sh spec/update-client-retry/drive/bound.sh 900 uv run pytest -q -p no:cacheprovider $(sed -e '/^#/d' -e '/^$/d' -e 's/^pg://' -e 's/ raises=.*$//' spec/update-client-retry/red.txt)
-    && RED_BASE_REV=1f688c7c RED_LIST="$PWD/spec/update-client-retry/red.txt" sh spec/update-client-retry/drive/bound.sh 1200 sh spec/relay-hardening/drive/red_check.sh
-    && for m in update client retry defaults; do sh spec/update-client-retry/drive/bound.sh 300 .agents/factory/bin/temp_site.sh uv run sh "$PWD/spec/update-client-retry/drive/ucr_drive.sh" $m || exit 1; done
-    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr sh spec/update-client-retry/drive/bound.sh 900 uv run --python 3.12 --group docs
-    sphinx-build -W --keep-going -q -E -b html docs /tmp/claude-501/docs-html-ucr
+  verify: test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
+    5400 uv run --python 3.14 pytest -p no:cacheprovider -q && sh spec/update-client-retry/drive/bound.sh
+    900 uv run pytest -q -p no:cacheprovider $(sed -e '/^#/d' -e '/^$/d' -e 's/^pg://'
+    -e 's/ raises=.*$//' spec/update-client-retry/red.txt) && RED_BASE_REV=1f688c7c
+    RED_LIST="$PWD/spec/update-client-retry/red.txt" sh spec/update-client-retry/drive/bound.sh
+    1200 sh spec/relay-hardening/drive/red_check.sh && for m in update client retry
+    defaults; do sh spec/update-client-retry/drive/bound.sh 300 .agents/factory/bin/temp_site.sh
+    uv run sh "$PWD/spec/update-client-retry/drive/ucr_drive.sh" $m || exit 1; done
+    && UV_PROJECT_ENVIRONMENT=/tmp/claude-501/docs-venv-ucr sh spec/update-client-retry/drive/bound.sh
+    900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
+    docs /tmp/claude-501/docs-html-ucr
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -201,19 +252,19 @@ code+state commit.
 **Goal:** every new test is in the tree and fails on `1f688c7c` for what it checks; everything else in
 the touched and neighbouring test files passes.
 
-- [ ] `tests/test_update_refusals.py`, `tests/test_client_bundle_keys.py`,
+- [x] `tests/test_update_refusals.py`, `tests/test_client_bundle_keys.py`,
       `tests/test_retry_terminal.py`, `tests/test_retry_declarations.py`, `tests/test_retry_defaults.py`
       from the prototypes (see above), otherwise unchanged.
-- [ ] `tests/test_client_request.py::test_advertise_only_an_explicit_size`: its `submit` layers become
+- [x] `tests/test_client_request.py::test_advertise_only_an_explicit_size`: its `submit` layers become
       `client` layers (`env`/`local` `client.bundlesize` 7, 1, 3 advertised; `user` `submit.bundlesize`
       9 → `None`; `-b 5` over `client` 7 → 5). Red on `1f688c7c`.
-- [ ] `tests/test_duration_options.py` `SECONDS_KEYS`: drop `('ClientApp', [], 'bundlewait')` from the
+- [x] `tests/test_duration_options.py` `SECONDS_KEYS`: drop `('ClientApp', [], 'bundlewait')` from the
       `submit.bundlewait` row (the client's key is covered by `tests/test_client_bundle_keys.py`; a
       `client.bundlewait` row would run `test_seconds_key_refused` through `hs cluster`, which does
       not read it). Green on both.
-- [ ] `tests/test_dispatch_workload.py::test_configured_bundlesize_is_advertised`: the client's
+- [x] `tests/test_dispatch_workload.py::test_configured_bundlesize_is_advertised`: the client's
       `env` becomes `{'HYPERSHELL_CLIENT_BUNDLESIZE': '3'}`. Red on `1f688c7c`.
-- [ ] Nothing outside `tests/` and `spec/` changes. A renamed or split test is renamed in `red.txt`
+- [x] Nothing outside `tests/` and `spec/` changes. A renamed or split test is renamed in `red.txt`
       too (never dropped without a PLAN note).
 - **Verify:** see frontmatter: the fence; `HS_TEST_POSTGRES` set; `red.txt` holds 79 ids;
   `red_check` 79 of 79 red on `1f688c7c`; `rest_green` over the five new files, the three edited ones

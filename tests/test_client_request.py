@@ -169,8 +169,8 @@ def test_advertise_only_an_explicit_size() -> None:
     assert advertised_size(None, layered()) is None
     assert advertised_size(4, layered()) == 4
     assert advertised_size(1, layered()) == 1
-    assert advertised_size(None, layered(env={'submit': {'bundlesize': 7}})) == 7
-    assert advertised_size(None, layered(env={'submit': {'bundlesize': 1}})) == 1
-    assert advertised_size(None, layered(local={'submit': {'bundlesize': 3}})) == 3
-    assert advertised_size(None, layered(user={'client': {'bundlesize': 9}})) is None
-    assert advertised_size(5, layered(env={'submit': {'bundlesize': 7}})) == 5
+    assert advertised_size(None, layered(env={'client': {'bundlesize': 7}})) == 7
+    assert advertised_size(None, layered(env={'client': {'bundlesize': 1}})) == 1
+    assert advertised_size(None, layered(local={'client': {'bundlesize': 3}})) == 3
+    assert advertised_size(None, layered(user={'submit': {'bundlesize': 9}})) is None
+    assert advertised_size(5, layered(env={'client': {'bundlesize': 7}})) == 5

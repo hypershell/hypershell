@@ -263,7 +263,7 @@ SECONDS_KEYS: Final[List[tuple[str, str, str, List[tuple[str, List[str], str]]]]
     ('autoscale', 'period', '5m', [('ServerApp', [], 'autoscaling_period'),
                                    ('ClusterApp', [], 'autoscaling_period')]),
     ('submit', 'bundlewait', '30s', [('SubmitApp', [], 'bundlewait'), ('ServerApp', [], 'bundlewait'),
-                                     ('ClientApp', [], 'bundlewait'), ('ClusterApp', [], 'bundlewait')]),
+                                     ('ClusterApp', [], 'bundlewait')]),
     ('task', 'signalwait', '5s', [('ClientApp', [], 'task_signalwait'), ('ClusterApp', [], 'task_signalwait')]),
     ('server', 'poll', '1m', [('ServerApp', [], 'poll'), ('ClusterApp', [], 'poll')]),
 ]
