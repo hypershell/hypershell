@@ -11,8 +11,10 @@ server alone retries tasks, so a failure at the site is a completed row like any
 
 Every site client is launched through a `ClientLaunch` (see `hypershell.cluster.launch.client_launch`):
 the site key is handed over in the client's environment, never on its command line, and a client
-passes it to none of its tasks. Site clients dial the site server's bind address, or this host's own
-name when it binds every interface (`hypershell.cluster.launch.advertised_host`).
+passes it to none of its tasks. Site clients dial the address the relay advertises when it names one,
+else the site server's bind address, or this host's own name when it binds every interface
+(`hypershell.cluster.launch.advertised_host`). The cluster computes that address once
+(`AutoScalingCluster.advertised`), and every zone's launch takes it from there.
 
 A relay serving several zones keeps one fleet per zone, all served by the one site server. The first
 zone's fleet is the cluster's own; each further zone's (`zone_fleet`) is a fixed-policy autoscaler
@@ -66,7 +68,7 @@ from hypershell.core.logging import Logger
 from hypershell.core.tls import TLSConfig
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.core.topology import Entry, TopologyReply
-from hypershell.cluster.launch import ClientLaunch, advertised_host, client_launch
+from hypershell.cluster.launch import ClientLaunch, client_launch
 from hypershell.cluster.remote import (AutoScalingCluster, AutoScaler, AutoScalerThread, AutoScalerState,
                                        AutoScalerPhase, DEFAULT_REMOTE_EXE)
 from hypershell.cluster.demand import ZoneRef
@@ -111,16 +113,18 @@ def site_cluster(address: Tuple[str, int],
                  init_size: Optional[int] = None,
                  min_size: Optional[int] = None,
                  max_size: Optional[int] = None,
-                 view: Optional[TopologyView] = None) -> AutoScalingCluster:
+                 view: Optional[TopologyView] = None,
+                 advertise: Optional[str] = None) -> AutoScalingCluster:
     """The relay's site cluster: a forever server on the relay database and its first zone's site clients.
 
     Without a topology the fleet is fixed: `init_size` clients at start and never fewer than
     `min_size` (each `size` when not given). With a topology in `view`, the fleet follows its zone's
     entry (see `SiteScaler`).
 
-    Site clients are launched with `launcher` (empty runs them directly on this host) and dial the
-    bind address in `address`, or this host by name when it is 0.0.0.0, so the relay must be
-    reachable there from wherever they run. They serve `zone` (None is the default zone), which is
+    Site clients are launched with `launcher` (empty runs them directly on this host) and dial
+    `advertise` when it is given, else the bind address in `address`, or this host by name when it is
+    0.0.0.0, so the relay must be reachable there from wherever they run. The address is passed on as
+    given, never resolved or checked. They serve `zone` (None is the default zone), which is
     named to the launcher as `{zone}` and `HYPERSHELL_ZONE` (see `zone_launch`). The site server
     evicts a site client silent for `evict_after` seconds.
 
@@ -138,7 +142,8 @@ def site_cluster(address: Tuple[str, int],
                                  init_size=size if init_size is None else init_size,
                                  min_size=size if min_size is None else min_size,
                                  max_size=size if max_size is None else max_size,
-                                 tls=tls, zone=zone, evict_after=evict_after, discover_zones=False)
+                                 tls=tls, zone=zone, evict_after=evict_after, discover_zones=False,
+                                 advertise=advertise)
     if cluster.server.confirm is not None:
         cluster.server.confirm.machine.strict = False
     # The first zone's clients are launched as every further zone's are, naming their zone.
@@ -166,13 +171,14 @@ def zone_launch(cluster: AutoScalingCluster,
                 tls: Optional[TLSConfig] = None) -> ClientLaunch:
     """The invocation of a site client of `cluster` serving `zone`, built as the cluster builds its own.
 
-    The site key and the address the clients dial are the cluster's; every other value must be the
+    The site key and the address the clients dial (`cluster.advertised`) are the cluster's, so every
+    zone's clients dial the one site server at one address; every other value must be the
     one `site_cluster` was given (with `launcher` and `launcher_args` the zone's own, if it has any),
     so a client of this zone differs from one of the cluster's only in the zone it serves.
     """
     queue = cluster.server.queue.config
     args = [arg for group in (launcher_args or []) for arg in shlex.split(group)]
-    return client_launch(DEFAULT_REMOTE_EXE, (advertised_host(queue.host), queue.port), queue.auth,
+    return client_launch(DEFAULT_REMOTE_EXE, cluster.advertised, queue.auth,
                          launcher=shlex.split(launcher or ''), launcher_args=args,
                          num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                          template=template, delay_start=DEFAULT_DELAY, task_signalwait=DEFAULT_SIGNALWAIT,

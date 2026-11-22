@@ -85,7 +85,7 @@ Options:
       --advertise      ADDR     Address remote clients dial instead (default: by -H).
   -p, --port           PORT     Port number (default: {DEFAULT_PORT}).
   -b, --bundlesize     SIZE     Size of task bundle (default: {DEFAULT_BUNDLESIZE}).
-  -w, --bundlewait     SEC      Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
+  -w, --bundlewait     SEC      Wait before flushing tasks, none for an idle client; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --zone           NAME     Zone of the submitted tasks and every client; own zone if autoscaling (default: none).
   -r, --max-retries    NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
       --eager                   Schedule failed tasks before new tasks.

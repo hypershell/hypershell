@@ -229,6 +229,7 @@ MATCHES: Dict[str, Tuple[Tuple[str, ...], Kind]] = {
     'HYPERSHELL_DATABASE': (('database', ), Kind.TEXT),
     'HYPERSHELL_SSH_NODELIST_MY_GROUP': (('ssh', 'nodelist', 'my_group'), Kind.TEXT),
     'HYPERSHELL_RELAY_ZONE': (('relay', 'zone'), Kind.TEXT),
+    'HYPERSHELL_RELAY_ADVERTISE': (('relay', 'advertise'), Kind.TEXT),
     'HYPERSHELL_RELAY_ZONE_GPU_A100_LAUNCHER_ARGS': (('relay', 'zone', 'gpu_a100', 'launcher_args'), Kind.TEXT),
     'HYPERSHELL_RELAY_ZONE_GPU_MAX_SIZE': (('relay', 'zone', 'gpu_max', 'size'), Kind.INT),
     'HYPERSHELL_EXPORT_MyVar': (('export', 'MyVar'), Kind.TEXT),

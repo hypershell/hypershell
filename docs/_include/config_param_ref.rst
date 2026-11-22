@@ -199,8 +199,8 @@
         ``--launcher`` and ``--autoscaling``), for a name the clients must use that differs from
         the bind address, such as the name on the server's certificate. The ``--advertise``
         option takes precedence. A local `cluster`, whose clients are not launched, ignores it,
-        and so do a relay's site clients. Its environment form is
-        ``HYPERSHELL_SERVER_ADVERTISE``.
+        and so does a relay: its site *clients* are told ``relay.advertise`` instead. Its
+        environment form is ``HYPERSHELL_SERVER_ADVERTISE``.
 
         .. only:: html
 
@@ -301,7 +301,7 @@
 
         The scheduler backs off exponentially from a small floor, doubling the wait after
         each empty query up to this ceiling. This waiting only occurs when no tasks are
-        returned by the query.
+        returned by the query. The result that finishes a run ends the scheduler's wait at once.
         A string takes the same forms as ``-Q``/``--poll``: units ``d``, ``h``, ``m`` and ``s``
         (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number is
         seconds.
@@ -312,6 +312,9 @@
 
             .. versionchanged:: 2.9.0
                A string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               The result that finishes a run ends the wait.
 
     ``.evict``
         Eviction period in seconds for clients (default: `600`).
@@ -433,11 +436,17 @@
 
         If this period of time expires since the previous bundle was returned to the server,
         the current group of finished tasks will be pushed regardless of `bundlesize`.
+        A client with nothing left to run returns what it holds at once.
 
         For larger distributed workflows it is a good idea to make this waiting period sufficiently
         long so that most bundles are returned whole.
 
         See also ``-w``/``--bundlewait`` command-line option.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               A client with nothing left to run returns what it holds without waiting.
 
     ``.heartrate``
         Interval in seconds between heartbeats sent to server (default `10`).
@@ -774,6 +783,22 @@
 
         The *clients* at the site connect here. See also ``--bind`` command-line option.
 
+    ``.advertise``
+        Address the *clients* at the site are told to dial (default: by ``.bind``).
+
+        A relay tells its site *clients*, of every zone it serves, to dial its bind address when
+        it is one specific address, and this host's own name when it is *0.0.0.0*, unless
+        ``.advertise`` names another: a name the *clients* must use that differs from the bind
+        address, such as one the site's compute nodes resolve to this host. The value is passed on
+        as given, never resolved or checked. The ``--advertise`` option takes precedence;
+        ``server.advertise`` does not reach a relay. With TLS verified against the system CA
+        bundle (``[server.tls] cafile`` empty) and no ``servername``, it must be a name the
+        relay-local *server*'s certificate carries. It is the address the site's *clients* dial,
+        not the client bounds a zone advertises upstream. Its environment form is
+        ``HYPERSHELL_RELAY_ADVERTISE``.
+
+        See also ``--advertise`` command-line option.
+
     ``.port``
         Port of the relay-local *server* (default: `50002`).
 
@@ -789,7 +814,8 @@
     ``.bundlewait``
         Seconds the relay waits before returning finished tasks upstream regardless of
         `bundlesize` (default: `5`). Once nothing is left to run at the site, it returns what it
-        holds at once. The *clients* at the site are given it as ``-w``.
+        holds at once. The *clients* at the site are given it as ``-w``; each of them too, with
+        nothing left to run, returns what it holds at once.
         Takes a number of seconds or a string in the duration forms: units ``d``, ``h``, ``m``
         and ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``);
         fractions are kept. ``hs relay`` stops before it starts if the value is not a duration.
@@ -798,6 +824,9 @@
 
             .. versionchanged:: 2.9.0
                A string with units or a Slurm time.
+
+            .. versionchanged:: 2.9.0
+               A site client with nothing left to run returns what it holds without waiting.
 
     ``.poll``
         Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).

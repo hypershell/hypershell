@@ -331,6 +331,7 @@ EMPTY_NOT_GIVEN: Final[Dict[str, Tuple[str, str]]] = {
     'database.database': ('database.database', 'HYPERSHELL_DATABASE_DATABASE'),
     'server.bind': ('server.bind', 'HYPERSHELL_SERVER_BIND'),
     'relay.bind': ('relay.bind', 'HYPERSHELL_RELAY_BIND'),
+    'relay.advertise': ('relay.advertise', 'HYPERSHELL_RELAY_ADVERTISE'),
     'server.tls.cert': ('server.tls.cert', 'HYPERSHELL_SERVER_TLS_CERT'),
     'task.cwd': ('task.cwd', 'HYPERSHELL_TASK_CWD'),
 }

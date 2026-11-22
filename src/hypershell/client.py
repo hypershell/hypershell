@@ -157,6 +157,24 @@ class SchedulerState(State, Enum):
     HALT = 7
 
 
+class TaskCount:
+    """The number of tasks a client has received and its collector has not yet taken, shared by its threads.
+
+    The client's scheduler raises it when a reply brings tasks; its collector lowers it as it takes each
+    finished task. At zero the client has no task running or waiting to start.
+    """
+
+    def __init__(self: TaskCount) -> None:
+        """Start at zero."""
+        self.lock = Lock()
+        self.value = 0
+
+    def add(self: TaskCount, count: int) -> None:
+        """Raise the count by `count` (negative to lower it)."""
+        with self.lock:
+            self.value += count
+
+
 class ClientScheduler(StateMachine):
     """Request task bundles from server and schedule locally."""
 
@@ -168,6 +186,7 @@ class ClientScheduler(StateMachine):
     timeout: Optional[timedelta]
     bundlesize: Optional[int]
     zone: Optional[str]
+    inflight: Optional[TaskCount]
 
     previous_received: datetime
 
@@ -183,12 +202,17 @@ class ClientScheduler(StateMachine):
                  no_confirm: bool = False,
                  timeout: int = None,
                  bundlesize: Optional[int] = None,
-                 zone: Optional[str] = None) -> None:
-        """Assign remote queue client and local task queue; `bundlesize` is the size advertised (or None)."""
+                 zone: Optional[str] = None,
+                 inflight: Optional[TaskCount] = None) -> None:
+        """Assign remote queue client and local task queue; `bundlesize` is the size advertised (or None).
+
+        Tasks received are added to `inflight` when given.
+        """
         self.queue = queue
         self.local = local
         self.bundlesize = bundlesize
         self.zone = zone
+        self.inflight = inflight
         self.bundle = []
         self.tasks = []
         self.client_info = None
@@ -231,6 +255,8 @@ class ClientScheduler(StateMachine):
                                     f'client protocol {PROTOCOL}): {reply.get("message")} '
                                     f'(server {reply.get("server_version")}, client {build_version()})')
         if reply['tasks']:
+            if self.inflight is not None:
+                self.inflight.add(len(reply['tasks']))
             self.bundle = reply['tasks']
             self.previous_received = datetime.now()
             return SchedulerState.UNPACK
@@ -295,11 +321,12 @@ class ClientSchedulerThread(Thread):
                  no_confirm: bool = False,
                  timeout: Optional[int] = None,
                  bundlesize: Optional[int] = None,
-                 zone: Optional[str] = None) -> None:
+                 zone: Optional[str] = None,
+                 inflight: Optional[TaskCount] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-client-scheduler')
         self.machine = ClientScheduler(queue=queue, local=local, no_confirm=no_confirm, timeout=timeout,
-                                       bundlesize=bundlesize, zone=zone)
+                                       bundlesize=bundlesize, zone=zone, inflight=inflight)
 
     def run_with_exceptions(self: ClientSchedulerThread) -> None:
         """Run machine."""
@@ -357,19 +384,26 @@ class ClientCollector(StateMachine):
     bundlesize: int
     bundlewait: int
     previous_send: datetime
+    inflight: Optional[TaskCount]
 
     state = CollectorState.START
     states = CollectorState
 
     def __init__(self: ClientCollector, queue: QueueClient, local: Queue[Optional[Task]],
-                 bundlesize: int = DEFAULT_BUNDLESIZE, bundlewait: int = DEFAULT_BUNDLEWAIT) -> None:
-        """Collect tasks from local queue of finished tasks and push them to the server."""
+                 bundlesize: int = DEFAULT_BUNDLESIZE, bundlewait: int = DEFAULT_BUNDLEWAIT,
+                 inflight: Optional[TaskCount] = None) -> None:
+        """Collect tasks from local queue of finished tasks and push them to the server.
+
+        With `inflight`, each task taken is removed from it, and a partial bundle is returned at once
+        when it reaches zero (nothing left running or waiting to start).
+        """
         self.tasks = []
         self.bundle = None
         self.local = local
         self.queue = queue
         self.bundlesize = bundlesize
         self.bundlewait = bundlewait
+        self.inflight = inflight
 
     @functools.cached_property
     def actions(self: ClientCollector) -> Dict[CollectorState, Callable[[], CollectorState]]:
@@ -395,6 +429,8 @@ class ClientCollector(StateMachine):
             self.local.task_done()
             if task:
                 self.tasks.append(task)
+                if self.inflight is not None:
+                    self.inflight.add(-1)
                 return CollectorState.CHECK_BUNDLE
             else:
                 return CollectorState.FINAL
@@ -407,6 +443,9 @@ class ClientCollector(StateMachine):
         since_last = wait_time.total_seconds()
         if len(self.tasks) >= self.bundlesize:
             log.trace(f'Bundle size reached ({len(self.tasks)} tasks)')
+            return CollectorState.PACK_BUNDLE
+        elif self.tasks and self.inflight is not None and self.inflight.value == 0:
+            log.trace(f'Client idle - returning {len(self.tasks)} tasks')
             return CollectorState.PACK_BUNDLE
         elif since_last >= self.bundlewait:
             log.trace(f'Bundle wait exceeded ({wait_time})')
@@ -450,10 +489,12 @@ class ClientCollectorThread(Thread):
     """Run client collector within dedicated thread."""
 
     def __init__(self: ClientCollectorThread, queue: QueueClient, local: Queue[Optional[bytes]],
-                 bundlesize: int = DEFAULT_BUNDLESIZE, bundlewait: int = DEFAULT_BUNDLEWAIT) -> None:
+                 bundlesize: int = DEFAULT_BUNDLESIZE, bundlewait: int = DEFAULT_BUNDLEWAIT,
+                 inflight: Optional[TaskCount] = None) -> None:
         """Initialize machine."""
         super().__init__(name='hypershell-client-collector')
-        self.machine = ClientCollector(queue=queue, local=local, bundlesize=bundlesize, bundlewait=bundlewait)
+        self.machine = ClientCollector(queue=queue, local=local, bundlesize=bundlesize, bundlewait=bundlewait,
+                                       inflight=inflight)
 
     def run_with_exceptions(self: ClientCollectorThread) -> None:
         """Run machine."""
@@ -1303,12 +1344,13 @@ class ClientThread(Thread):
         self.client = QueueClient(config=QueueConfig(host=address[0], port=address[1], auth=auth, tls=tls))
         self.inbound = Queue(maxsize=bundlesize)
         self.outbound = Queue(maxsize=bundlesize)
+        self.inflight = TaskCount()
         self.scheduler = ClientSchedulerThread(queue=self.client, local=self.inbound,
                                                no_confirm=no_confirm, timeout=client_timeout,
-                                               bundlesize=advertised, zone=zone)
+                                               bundlesize=advertised, zone=zone, inflight=self.inflight)
         self.heartbeat = ClientHeartbeatThread(queue=self.client, heartrate=heartrate)
         self.collector = ClientCollectorThread(queue=self.client, local=self.outbound,
-                                               bundlesize=bundlesize, bundlewait=bundlewait)
+                                               bundlesize=bundlesize, bundlewait=bundlewait, inflight=self.inflight)
         if ratelimit is not None:
             ratelimit = ratelimit / num_threads
             log.debug(f'Rate limit enabled: {ratelimit:.2} tasks per second per thread')
@@ -1553,7 +1595,7 @@ Options:
   -N, --num-threads   NUM   Number executor threads, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template      CMD   Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
   -b, --bundlesize    SIZE  Bundle size to request and return (default: server's).
-  -w, --bundlewait    SEC   Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
+  -w, --bundlewait    SEC   Wait before flushing tasks, none once idle; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --zone          NAME  Run only tasks of this zone (default: tasks without a zone).
   -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).

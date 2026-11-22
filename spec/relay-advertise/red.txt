@@ -1,0 +1,52 @@
+# Tests that must fail on 08d867df (the base of feature/relay-advertise), checked with
+#   RED_BASE_REV=08d867df RED_LIST="$PWD/spec/relay-advertise/red.txt" sh spec/relay-hardening/drive/red_check.sh
+# One pytest node id per line. hs-build P1 writes tests/test_relay_advertise.py from
+# research/prototypes/relay_advertise_proto.py and the two one-line table entries below; it may
+# rename a test, and then renames its line here in the same commit.
+#
+# Most fail by an assertion about the gap. A line ending in ` raises=NAME` fails by the gap's own
+# error instead: `TypeError` where the base has no `advertise` keyword to name the address
+# (site_cluster, RelayThread), `ArgumentError` where the base refuses `--advertise` as an
+# unrecognized argument, `AttributeError` where the base RelayApp has no resolution
+# (`advertise_host`) at all. Guards that pass on the base, and stay green, are not listed:
+#   test_relay_thread_tells_every_fleet[unset], test_relay_advertise_is_fenced,
+#   test_relay_tells_its_site_clients[bind], [empty-key] and [server-key].
+
+# The launch (R1, R3)
+tests/test_relay_advertise.py::test_site_clients_of_every_zone_dial_the_advertised_address[specific] raises=TypeError
+tests/test_relay_advertise.py::test_site_clients_of_every_zone_dial_the_advertised_address[wildcard] raises=TypeError
+tests/test_relay_advertise.py::test_site_clients_of_every_zone_dial_the_advertised_address[empty] raises=TypeError
+tests/test_relay_advertise.py::test_site_clients_of_every_zone_dial_the_advertised_address[wildcard-advertise] raises=TypeError
+tests/test_relay_advertise.py::test_site_clients_of_every_zone_dial_the_advertised_address[specific-advertise] raises=TypeError
+tests/test_relay_advertise.py::test_relay_thread_tells_every_fleet[advertise] raises=TypeError
+
+# The option and its resolution (R1, R2, R3, R4)
+tests/test_relay_advertise.py::test_relay_app_advertise_host[unset] raises=AttributeError
+tests/test_relay_advertise.py::test_relay_app_advertise_host[option] raises=ArgumentError
+tests/test_relay_advertise.py::test_relay_app_advertise_host[key] raises=AttributeError
+tests/test_relay_advertise.py::test_relay_app_advertise_host[option-over-key] raises=ArgumentError
+tests/test_relay_advertise.py::test_relay_app_advertise_host[empty-key] raises=AttributeError
+tests/test_relay_advertise.py::test_relay_app_advertise_host[none-key] raises=AttributeError
+tests/test_relay_advertise.py::test_relay_app_advertise_host[server-key-ignored] raises=AttributeError
+tests/test_relay_advertise.py::test_relay_app_refuses_an_empty_advertise[empty] raises=ArgumentError
+tests/test_relay_advertise.py::test_relay_app_refuses_an_empty_advertise[blank] raises=ArgumentError
+tests/test_relay_advertise.py::test_relay_help_lists_advertise_after_bind
+
+# The key (R2, R5)
+tests/test_relay_advertise.py::test_relay_advertise_is_a_declared_text_key
+tests/test_relay_advertise.py::test_relay_advertise_variable
+tests/test_relay_advertise.py::test_relay_advertise_key_reference
+tests/test_config_schema.py::test_match_name[HYPERSHELL_RELAY_ADVERTISE]
+tests/test_env_config.py::test_empty_optional_text_not_given[relay.advertise]
+
+# A relay process (R1, R2, R4)
+tests/test_relay_advertise.py::test_relay_tells_its_site_clients[option]
+tests/test_relay_advertise.py::test_relay_tells_its_site_clients[zones]
+tests/test_relay_advertise.py::test_relay_tells_its_site_clients[key]
+tests/test_relay_advertise.py::test_relay_tells_its_site_clients[option-over-key]
+tests/test_relay_advertise.py::test_relay_refuses_an_empty_advertise_before_its_database[empty]
+tests/test_relay_advertise.py::test_relay_refuses_an_empty_advertise_before_its_database[blank]
+
+# The docs and completions (R6)
+tests/test_relay_advertise.py::test_relay_advertise_documented_in_the_help_pages
+tests/test_relay_advertise.py::test_relay_advertise_documented_in_the_completions

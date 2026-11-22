@@ -230,6 +230,55 @@ it exits 0 once that relay has drained; the same run on a database stays up. Fou
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-advertise/`*
 **Seed:** [`issues/forever-nodb-server-exits-when-relay-drains.md`](issues/forever-nodb-server-exits-when-relay-drains.md) · *status: unshaped*
 
+## `hs update group=…` stores a non-integer group
+
+`hs update` accepts any value for `group` and stores it, so a text group reaches the scheduler even after submit-time validation (`submit-input-checks`) refuses one. Apply the submit-time integer rule to `hs update group=…`, refusing with exit 2 before anything is written.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/submit-input-checks/GOAL.md` (Non-goals)*
+**Seed:** [`issues/update-group-stores-text.md`](issues/update-group-stores-text.md) · *status: unshaped*
+
+## An empty `logging.style` makes every command exit 3 until the file is hand-edited
+
+`hs config set logging.style ''` writes an empty style, after which every command, `hs config` included, exits 3, so the only way out is to edit the file by hand. Either refuse an empty or unknown style in `hs config set` (it takes a fixed word), or let `hs config` itself start with a bad logging style so the user can fix it.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/GOAL.md` (Non-goals)*
+**Seed:** [`issues/config-empty-logging-style.md`](issues/config-empty-logging-style.md) · *status: unshaped*
+
+## A local `hs cluster`'s in-process client ignores `client.heartrate`
+
+Under a local `hs cluster`, the in-process client uses the built-in heartrate rather than `client.heartrate`; the reference names only `hs client` as the key's reader. Pass the configured heartrate to the local cluster's client, or document that it applies only to launched clients.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/GOAL.md` (Non-goals)*
+**Seed:** [`issues/cluster-local-client-heartrate.md`](issues/cluster-local-client-heartrate.md) · *status: unshaped*
+
+## The cluster classes' `max_retries` defaults disagree with the server's
+
+The `LocalCluster`/`RemoteCluster`/`SSHCluster` constructors default `max_retries` differently from `ServerThread`, so the Python API and the commands can retry differently for the same configuration. Use one default, derived from `server.attempts`, everywhere; pin it with a test of each constructor.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/research/`*
+**Seed:** [`issues/cluster-max-retries-defaults.md`](issues/cluster-max-retries-defaults.md) · *status: unshaped*
+
+## A text `attempts = "3"` in a file crashes every command at import
+
+A configuration file holding `server.attempts` as a string makes every command fail at import with a traceback instead of a configuration error. Read typed keys from a file by the key's declared kind, as the environment layer does since #113, and refuse a value that does not convert with exit 3 naming the key and file.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/env-config-keys/` (the typed reader); `spec/config-set-and-unread/research/`*
+**Seed:** [`issues/config-text-attempts-crashes.md`](issues/config-text-attempts-crashes.md) · *status: unshaped*
+
+## `hs config set` writes integers wider than 64 bits to TOML
+
+An integer value wider than 64 bits is written to the configuration file, which TOML readers then refuse or misread. Refuse an integer outside TOML's 64-bit range in `hs config set` with exit 2 naming the key.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/research/`*
+**Seed:** [`issues/config-set-wide-integers.md`](issues/config-set-wide-integers.md) · *status: unshaped*
+
+## The `--eager` help says "greater than one" where it means zero
+
+The `--eager` help text describes the retry condition as attempts "greater than one"; the behaviour turns on a retry count above zero. Correct the help text and its docs snippet.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/research/`*
+**Seed:** [`issues/eager-help-wording.md`](issues/eager-help-wording.md) · *status: unshaped*
+
 ## An empty task file never finishes
 
 `hsx` given an empty task file on an empty database never exits: the server logs `Empty database -
@@ -364,7 +413,7 @@ keep clear of the relay hardening work, since landed.
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `cluster-launch-failures`
 (landed, #107: the rule and the cluster override); relay (#82, which left `--advertise` for later)*
-**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: unshaped*
+**Seed:** [`issues/advertised-host-ignores-bind.md`](issues/advertised-host-ignores-bind.md) · *status: adopted:relay-advertise*
 
 ## A relay run can still end up to about 5 s late
 
@@ -377,7 +426,7 @@ scheduler, whose back-off doubles toward `server.poll`; one diagnostic run lost 
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-hardening/` R8 and
 its laptop evidence (`relay-hardening` landed, #103)*
-**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: unshaped*
+**Seed:** [`issues/relay-shutdown-tail.md`](issues/relay-shutdown-tail.md) · *status: adopted:relay-shutdown-tail*
 
 ## `rotatedb` lost-update window
 
@@ -632,8 +681,8 @@ small test-side fixes.
 
 *Target: 2.9.x (the relay site-key test: 2.9.0, with `relay-shutdown-tail`) · Horizon: near-term,
 small · Depends on: — · Refs: CI on #104, #107 and #110*
-**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md),
-[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: unshaped*
+**Seed:** [`issues/queue-limits-open-file-test-flaky.md`](issues/queue-limits-open-file-test-flaky.md) · *status: unshaped*;
+[`issues/relay-site-key-scan-access-denied.md`](issues/relay-site-key-scan-access-denied.md) · *status: adopted:relay-shutdown-tail*
 
 ## `pytest -n auto` fails at collection
 
