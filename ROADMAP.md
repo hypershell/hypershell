@@ -224,6 +224,17 @@ A relay launches every site client as the literal `hyper-shell client …` (`rel
 user guide's tier 4*
 **Seed:** [`issues/relay-client-exe-deprecated-name.md`](issues/relay-client-exe-deprecated-name.md) · *status: unshaped*
 
+## A relay with no launcher exits when its client program is missing
+
+Started directly, a site client whose program does not exist raises in the site scaler, and the
+relay logs CRITICAL and exits instead of counting a failed launch and serving its other zones.
+`relay-client-exe-deprecated-name` removes the trigger it found, but an explicit `--remote-exe`
+naming a missing program still ends the relay.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: `relay-client-exe-deprecated-name` · Refs:
+`relay/site.py`, `cluster/remote.py` (direct launches)*
+**Seed:** [`issues/relay-direct-launch-missing-program.md`](issues/relay-direct-launch-missing-program.md) · *status: unshaped*
+
 ## `hs update group=…` stores a non-integer group
 
 `hs update` accepts any value for `group` and stores it, so a text group reaches the scheduler even after submit-time validation (`submit-input-checks`) refuses one. Apply the submit-time integer rule to `hs update group=…`, refusing with exit 2 before anything is written.
