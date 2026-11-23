@@ -222,7 +222,7 @@ A relay launches every site client as the literal `hyper-shell client …` (`rel
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `cluster/__init__.py`
 (`--remote-exe`), `cluster/ssh.py` and `cluster/remote.py` (`DEFAULT_REMOTE_EXE`); blocks the RCAC
 user guide's tier 4*
-**Seed:** [`issues/relay-client-exe-deprecated-name.md`](issues/relay-client-exe-deprecated-name.md) · *status: unshaped*
+**Seed:** [`issues/relay-client-exe-deprecated-name.md`](issues/relay-client-exe-deprecated-name.md) · *status: adopted:relay-client-exe-deprecated-name*
 
 ## `hs update group=…` stores a non-integer group
 
