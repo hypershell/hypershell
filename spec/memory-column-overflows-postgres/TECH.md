@@ -3,7 +3,7 @@ slug: memory-column-overflows-postgres
 title: On PostgreSQL, a task can declare 2 GiB of memory or more
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/memory-column-overflows-postgres
 base: develop
 current_phase: done
@@ -79,10 +79,10 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     "$TMPDIR/docs-html"
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 397c402d
+  verdict: changes-requested
+  blocked_reason: 'F1 (LOW): rewrite notice repeats on every lock-wait slice'
+  cycle: 1
 ---
 # TECH.md — On PostgreSQL, a task can declare 2 GiB of memory or more
 
