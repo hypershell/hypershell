@@ -5,15 +5,18 @@
 Bring an existing database schema up to the model declarations, in place.
 
 The step only adds what the models declare and the database lacks: tables, columns, and
-indexes. It never drops, renames, or retypes a table or column and never rewrites a row.
-The one removal it makes is the retired retry-chain uniqueness on PostgreSQL (see
-`RETIRED_UNIQUE`). A current schema costs one read-only reflection and takes no lock.
+indexes. It never drops, renames, or retypes a table or column, with two exceptions, both on
+PostgreSQL only. It drops the retired retry-chain uniqueness (see `RETIRED_UNIQUE`). And it
+widens the `WIDENED` columns that earlier releases created narrower (`task.memory`), by a
+rewrite of their table under the table's exclusive lock that keeps every row and value; the
+rewrite is announced in the log before it starts. A current schema costs one read-only
+reflection and takes no lock.
 """
 
 
 # Type annotations
 from __future__ import annotations
-from typing import Callable, Final, Iterator, List, Optional, Tuple, FrozenSet, TypeVar
+from typing import Callable, Final, Iterator, List, NamedTuple, Optional, Set, Tuple, FrozenSet, TypeVar
 
 # Standard libs
 import re
@@ -22,7 +25,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import inspect, text, Column, Index, MetaData, Table
+from sqlalchemy import inspect, text, BigInteger, Column, Index, Integer, MetaData, Table
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.schema import CreateTable, CreateIndex, CreateColumn, DefaultClause
@@ -34,7 +38,7 @@ from hypershell.core.exceptions import SchemaUpgradeError
 from hypershell.data.model import Entity
 
 # Public interface
-__all__ = ['upgrade_schema', 'SCHEMA_UPGRADE_LOCK_KEY', 'RETIRED_UNIQUE',
+__all__ = ['upgrade_schema', 'SCHEMA_UPGRADE_LOCK_KEY', 'RETIRED_UNIQUE', 'WIDENED',
            'LOCK_WAIT_SLICE', 'LOCK_WAIT_CEILING', ]
 
 # Initialize logger
@@ -50,6 +54,25 @@ SCHEMA_UPGRADE_LOCK_KEY: Final[int] = -4139901733377976503
 # step ever drops, and only on PostgreSQL: SQLite cannot drop a table constraint without
 # rebuilding the table, so older SQLite databases keep them.
 RETIRED_UNIQUE: Final[FrozenSet[Tuple[str, str]]] = frozenset({('task', 'previous_id'), ('task', 'next_id')})
+
+# Columns the models declare wider than earlier releases created them. On PostgreSQL the step
+# widens each in place (a rewrite of its table under the table's exclusive lock); SQLite's
+# INTEGER already holds 64 bits. These are the only columns the step ever retypes.
+WIDENED: Final[FrozenSet[Tuple[str, str]]] = frozenset({('task', 'memory')})
+
+# The first TimescaleDB release that changes a column's type on a hypertable with the
+# columnstore enabled and no compressed chunk (timescale/timescaledb#8849, 2.24.0; see
+# `check_alter_table_allowed_on_ht_with_compression` in its src/process_utility.c). Earlier
+# releases refuse it whenever the columnstore is enabled, and every release refuses it while
+# any chunk is compressed. The step never turns the columnstore off or on to get past either.
+COLUMN_TYPE_VERSION: Final[Tuple[int, int, int]] = (2, 24, 0)
+
+# TimescaleDB's own refusal of a type change on a hypertable with compressed chunks, met when a
+# chunk is compressed between the step's plan and its statement.
+COMPRESSED_REFUSAL: Final[str] = 'operation not supported on hypertables with compressed chunks'
+
+# A TimescaleDB extension version: major, minor, and patch, ignoring any suffix (e.g., '-dev').
+EXTENSION_VERSION: Final[re.Pattern] = re.compile(r'^\s*(\d+)\.(\d+)(?:\.(\d+))?')
 
 # How the step waits on a lock another session holds (seconds). Every lock wait in the step is
 # bounded by one slice. When a slice runs out the step rolls back, logs that it is still waiting,
@@ -77,6 +100,9 @@ DUPLICATE_SQLSTATES: Final[FrozenSet[str]] = frozenset({'42701', '42P07', '23505
 
 T = TypeVar('T')
 
+# The widened columns' types and names are rendered for PostgreSQL, the only database they are widened on.
+POSTGRESQL: Final[postgresql.dialect] = postgresql.dialect()
+
 
 class LockWait(Exception):
     """A lock wait in the step ran out its slice; the attempt was rolled back."""
@@ -88,10 +114,21 @@ class LockWait(Exception):
 
 @dataclass(frozen=True)
 class Step:
-    """One schema change: the table it touches, a log message, and the statement."""
+    """
+    One schema change: the table it touches, a log message, and the statement. A `notice`
+    is logged once before the statement first runs, for a change that can take a while.
+    """
     table: str
     message: str
     sql: str
+    notice: Optional[str] = None
+
+
+class Columnstore(NamedTuple):
+    """A hypertable's TimescaleDB release, whether its columnstore is enabled, and its compressed chunks."""
+    version: Tuple[int, int, int]
+    enabled: bool
+    compressed: int
 
 
 @dataclass(frozen=True)
@@ -103,11 +140,12 @@ class Plan:
 
 def upgrade_schema(bind: Engine, metadata: MetaData = None) -> List[str]:
     """
-    Create every table, column, and index in `metadata` that the database lacks.
+    Create every table, column, and index in `metadata` that the database lacks, and on
+    PostgreSQL widen the `WIDENED` columns an earlier release created narrower.
 
     Returns the changes made (empty when the schema was already current). Raises
-    `SchemaUpgradeError`, with the schema unchanged, for a column that cannot be added in
-    place or when the change cannot be applied.
+    `SchemaUpgradeError`, with the schema unchanged, for a column that cannot be added or
+    widened in place or when the change cannot be applied.
     """
     metadata = metadata if metadata is not None else Entity.metadata
     plan = _waiting(bind, lambda timeout: _check(bind, metadata, timeout), plain_first=True)
@@ -150,7 +188,7 @@ def _plan(conn: Connection, metadata: MetaData) -> Plan:
     insp = inspect(conn)  # A fresh inspector per call; it caches reflection.
     dialect = conn.dialect
     prep = dialect.identifier_preparer
-    tables, columns, drops, indexes = [], [], [], []
+    tables, columns, widens, drops, indexes = [], [], [], [], []
     existing = False
     for table in metadata.sorted_tables:
         qualified = prep.format_table(table)
@@ -160,14 +198,20 @@ def _plan(conn: Connection, metadata: MetaData) -> Plan:
             indexes.extend(_create_index(index, conn) for index in _sorted(table.indexes))
             continue
         existing = True
-        present = {column['name'] for column in insp.get_columns(table.name, schema=table.schema)}
+        reflected = {column['name']: column['type'] for column in insp.get_columns(table.name, schema=table.schema)}
         for column in table.columns:
-            if column.name not in present:
+            if column.name not in reflected:
                 _check_column(table, column)
                 columns.append(Step(table.name, f'Added column {table.name}.{column.name}',
                                     f'ALTER TABLE {qualified} ADD COLUMN '
                                     f'{CreateColumn(column).compile(dialect=dialect)}'))
         if dialect.name == 'postgresql':
+            due = [column for column in _widened(table)
+                   if column.name in reflected and _is_narrow_integer(reflected[column.name])]
+            if due:
+                state = _columnstore(conn, table)
+                for column in due:
+                    widens.extend(_widen(table, column, state))
             for constraint in insp.get_unique_constraints(table.name, schema=table.schema):
                 if _is_retired(table, constraint):
                     name = constraint['name']
@@ -181,7 +225,7 @@ def _plan(conn: Connection, metadata: MetaData) -> Plan:
                         f'Cannot upgrade table \'{table.name}\': index \'{index.name}\' is UNIQUE, so existing '
                         f'rows may violate it. Create it by hand after checking the existing rows.')
                 indexes.append(_create_index(index, conn))
-    return Plan(steps=tables + columns + drops + indexes, existing=existing)
+    return Plan(steps=tables + columns + widens + drops + indexes, existing=existing)
 
 
 def _check_column(table: Table, column: Column) -> None:
@@ -234,6 +278,96 @@ def _is_retired(table: Table, constraint: dict) -> bool:
             and names[0] in table.c and not table.c[names[0]].unique)
 
 
+def _widened(table: Table) -> List[Column]:
+    """The model columns of `table` named in `WIDENED`, in table order."""
+    return [column for column in table.columns if (table.name, column.name) in WIDENED]
+
+
+def _is_narrow_integer(reflected: object) -> bool:
+    """True for a reflected INTEGER or SMALLINT; a BIGINT, or any type changed by hand, is left as it is."""
+    return isinstance(reflected, Integer) and not isinstance(reflected, BigInteger)
+
+
+def _columnstore(conn: Connection, table: Table) -> Optional[Columnstore]:
+    """
+    The TimescaleDB state of `table`, or None when the database has no TimescaleDB extension
+    or `table` is not a hypertable. Read-only.
+    """
+    version = conn.execute(text('SELECT extversion FROM pg_extension WHERE extname = \'timescaledb\'')).scalar()
+    if version is None:
+        return None
+    params = {'schema': table.schema or conn.execute(text('SELECT current_schema()')).scalar(), 'name': table.name}
+    enabled = conn.execute(text('SELECT compression_enabled FROM timescaledb_information.hypertables '
+                                'WHERE hypertable_schema = :schema AND hypertable_name = :name'), params).first()
+    if enabled is None:
+        return None
+    compressed = conn.execute(text('SELECT count(*) FROM timescaledb_information.chunks '
+                                   'WHERE hypertable_schema = :schema AND hypertable_name = :name '
+                                   'AND is_compressed'), params).scalar()
+    return Columnstore(_extension_version(version), bool(enabled[0]), int(compressed or 0))
+
+
+def _extension_version(value: str) -> Tuple[int, int, int]:
+    """The (major, minor, patch) of the TimescaleDB extension version."""
+    match = EXTENSION_VERSION.match(value or '')
+    if match is None:
+        raise SchemaUpgradeError(f'Cannot upgrade database schema: cannot read the TimescaleDB version '
+                                 f'\'{value}\'. The schema is unchanged.')
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch or 0)
+
+
+def _widen(table: Table, column: Column, state: Optional[Columnstore]) -> List[Step]:
+    """
+    The steps widening `column` of `table` to its model type on PostgreSQL, given the table's
+    TimescaleDB `state` (version, columnstore enabled, compressed chunks), or None for a plain
+    table. Where TimescaleDB would refuse the change, raise `SchemaUpgradeError` instead,
+    before any statement runs.
+    """
+    prep = POSTGRESQL.identifier_preparer
+    name = f'{table.name}.{column.name}'
+    target = column.type.dialect_impl(POSTGRESQL).compile(dialect=POSTGRESQL)
+    if state is not None:
+        version, enabled, compressed = state
+        if compressed:
+            chunks = f'{compressed} compressed chunk' + ('s are' if compressed != 1 else ' is')
+            raise SchemaUpgradeError(_compressed_refusal(f'Cannot upgrade table \'{table.name}\': column {name} '
+                                                         f'must be widened to {target}', chunks,
+                                                         prep.format_table(table)))
+        if enabled and tuple(version) < tuple(COLUMN_TYPE_VERSION):
+            raise SchemaUpgradeError(_release_refusal(table.name, column.name, target, version))
+    return [Step(table.name, f'Widened column {name} to {target}',
+                 f'ALTER TABLE {prep.format_table(table)} ALTER COLUMN {prep.format_column(column)} TYPE {target}',
+                 notice=f'Rewriting table {table.name} to widen {name} to {target} '
+                        f'(this can take a while on a large table)')]
+
+
+def _compressed_refusal(subject: str, chunks: str, qualified: str) -> str:
+    """Why a widening is refused while chunks are compressed, and how to convert them back."""
+    return (f'{subject}, but {chunks} in the columnstore, and TimescaleDB cannot change a column\'s type '
+            f'while chunks are compressed. HyperShell does not decompress your data for you. Convert the chunks back to the rowstore '
+            f'(SELECT decompress_chunk(c) FROM show_chunks(\'{qualified}\') c), pausing the columnstore '
+            f'policy first if it could compress them again, then run any hs command again. '
+            f'The schema is unchanged.')
+
+
+def _release_refusal(table: str, column: str, target: str, version: Tuple[int, ...]) -> str:
+    """Why a widening is refused on a release that cannot change a type with the columnstore on, and the ways out."""
+    found, needed = _dotted(version), _dotted(COLUMN_TYPE_VERSION)
+    return (f'Cannot upgrade table \'{table}\': column {table}.{column} must be widened to {target}, but '
+            f'TimescaleDB {found} cannot change a column\'s type while the columnstore is enabled on the '
+            f'hypertable (TimescaleDB {needed} and later can). Either update TimescaleDB to {needed} or later '
+            f'(install it on the server, then ALTER EXTENSION timescaledb UPDATE) and run any hs command again, '
+            f'or by hand turn the columnstore off on {table}, widen {column} to {target}, then turn the '
+            f'columnstore back on and run hs initdb to restore its settings; the TimescaleDB section of the '
+            f'database documentation gives the exact statements. The schema is unchanged.')
+
+
+def _dotted(version: Tuple[int, ...]) -> str:
+    """A version as major.minor.patch."""
+    return '.'.join(str(part) for part in version)
+
+
 def _sorted(indexes: set) -> List[Index]:
     """Indexes in name order, for a stable plan."""
     return sorted(indexes, key=lambda index: index.name or '')
@@ -255,7 +389,8 @@ def _apply(bind: Engine, metadata: MetaData) -> List[str]:
     if bind.dialect.name == 'sqlite':
         plan = _waiting(bind, lambda timeout: _apply_sqlite(bind, metadata, timeout))
     else:
-        plan = _waiting(bind, lambda timeout: _apply_transactional(bind, metadata, timeout))
+        noticed: Set[str] = set()
+        plan = _waiting(bind, lambda timeout: _apply_transactional(bind, metadata, timeout, noticed))
     messages = [step.message for step in plan.steps]
     for message in messages:
         if plan.existing:
@@ -317,8 +452,12 @@ def _rollback_sqlite(conn: Connection) -> None:
             log.debug(f'Rollback after failed schema upgrade: {_message(error)}')
 
 
-def _apply_transactional(bind: Engine, metadata: MetaData, timeout: float) -> Plan:
-    """Databases with transactional DDL: one transaction, serialized by an advisory lock on PostgreSQL."""
+def _apply_transactional(bind: Engine, metadata: MetaData, timeout: float, noticed: Set[str]) -> Plan:
+    """
+    Databases with transactional DDL: one transaction, serialized by an advisory lock on PostgreSQL.
+    A step's notice is logged on the first attempt only and added to `noticed`, so an attempt
+    repeated after a lock wait does not announce the same change again.
+    """
     with bind.connect() as conn:
         committed = False
         try:
@@ -329,6 +468,9 @@ def _apply_transactional(bind: Engine, metadata: MetaData, timeout: float) -> Pl
             with _waiting_for(WAIT_TABLES):
                 plan = _plan(conn, metadata)
                 for step in plan.steps:
+                    if step.notice and step.notice not in noticed:
+                        noticed.add(step.notice)
+                        log.info(step.notice)
                     conn.exec_driver_sql(step.sql)
                 conn.commit()
             committed = True
@@ -429,4 +571,9 @@ def _is_locked(error: DBAPIError) -> bool:
 
 def _wrap(error: DBAPIError) -> SchemaUpgradeError:
     """An actionable error for a failed upgrade; the transaction was rolled back."""
+    if COMPRESSED_REFUSAL in _message(error):  # A chunk compressed after the plan was made.
+        names = ', '.join(f'{table}.{column}' for table, column in sorted(WIDENED))
+        table = sorted(WIDENED)[0][0]
+        return SchemaUpgradeError(_compressed_refusal(f'Cannot upgrade database schema: {names} must be widened',
+                                                      'a chunk compressed while the upgrade ran is', table))
     return SchemaUpgradeError(f'Cannot upgrade database schema: {_message(error)}. The schema is unchanged.')

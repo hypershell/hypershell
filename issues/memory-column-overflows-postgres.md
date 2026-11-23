@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:memory-column-overflows-postgres
 kind: fix
 appetite: small
 target: 2.9.0

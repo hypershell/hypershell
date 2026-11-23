@@ -360,7 +360,7 @@ step that retypes the column in place, which the upgrade step does not do yet.
 
 *Target: 2.9.0 · Horizon: near-term · Depends on: — · Refs: same committer death as
 `issues/database-locked-during-ingest-hangs.md`; `issues/ingest-robustness.md`*
-**Seed:** [`issues/memory-column-overflows-postgres.md`](issues/memory-column-overflows-postgres.md) · *status: unshaped*
+**Seed:** [`issues/memory-column-overflows-postgres.md`](issues/memory-column-overflows-postgres.md) · *status: adopted:memory-column-overflows-postgres*
 
 ## Docs and runtime surfacing
 

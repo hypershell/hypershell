@@ -10,8 +10,9 @@ Postgres must be explicitly initialized via ``hs initdb``, or by launching ``hs 
 ``hs submit``, or ``hs cluster`` with the ``--initdb`` command-line option.
 An existing database created by an earlier release is upgraded in place on first use,
 for both SQLite and Postgres. The upgrade only adds missing tables, columns, and indexes and never
-rewrites existing tasks; on Postgres it also drops the ``UNIQUE`` constraints on the retry-chain
-columns. It holds an exclusive lock while it runs (minutes, on a large database), and processes
+changes existing tasks; on Postgres it also drops the ``UNIQUE`` constraints on the retry-chain
+columns, and widens ``task.memory`` to 64 bits (so a task can declare more than 2 GiB) by
+rewriting the ``task`` table, every task kept, announced in the log before it starts. It holds an exclusive lock while it runs (minutes, on a large database), and processes
 started meanwhile wait for it. A SQLite database created by an
 earlier release (2.8, or the 2.9.0a1 pre-release) keeps those constraints, with no effect on
 behaviour in normal operation. Only in the rare case where a failed task could be retried twice

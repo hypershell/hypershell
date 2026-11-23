@@ -27,7 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.sql.elements import ClauseElement, ColumnElement
 from sqlalchemy.types import Integer, Float, DateTime, Text, Boolean, JSON as JSON_TEXT
-from sqlalchemy.dialects.postgresql import SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES, ARRAY
+from sqlalchemy.dialects.postgresql import BIGINT, SMALLINT, UUID as POSTGRES_UUID, JSONB as JSON_BYTES, ARRAY
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -43,7 +43,7 @@ from hypershell.data.core import schema, Session
 # Public interface
 __all__ = [
     'Task', 'Client', 'Source', 'Zone', 'Entity', 'to_json_type', 'from_json_type', 'serialize_tasks', 'deserialize_tasks',
-    'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
+    'UUID', 'TEXT', 'INTEGER', 'SMALL_INTEGER', 'BIG_INTEGER', 'DATETIME', 'BOOLEAN', 'JSON',
     'DEFAULT_TASK_GROUP', 'CANCEL_STATUS', 'TASK_TEMPLATE_ERROR', 'TASK_RESOURCE_ERROR', 'NO_RETRY_STATUSES',
     'DIRECT_SOURCE_ID', 'STDIN_SOURCE_ID', 'TaskGroupInfo', 'ResultOutcome',
     'GROUP_MIN', 'GROUP_MAX', 'TaskGroupError', 'ensure_group', 'parse_group', 'tag_text',
@@ -239,6 +239,7 @@ UUID = Text().with_variant(POSTGRES_UUID(as_uuid=False), 'postgresql')
 TEXT = Text()
 INTEGER = Integer()
 SMALL_INTEGER = Integer().with_variant(SMALLINT, 'postgresql')
+BIG_INTEGER = Integer().with_variant(BIGINT, 'postgresql')
 FLOAT = Float()
 DATETIME = DateTime(timezone=True)
 BOOLEAN = Boolean()
@@ -433,7 +434,7 @@ class Task(Entity):
     submit_host: Mapped[Optional[str]] = mapped_column(TEXT, nullable=True)
 
     cores: Mapped[int] = mapped_column(SMALL_INTEGER, nullable=True)  # NULL means untracked
-    memory: Mapped[int] = mapped_column(INTEGER, nullable=True)  # NULL means untracked
+    memory: Mapped[int] = mapped_column(BIG_INTEGER, nullable=True)  # NULL means untracked
     cores_max: Mapped[float] = mapped_column(FLOAT, nullable=True)
     memory_max: Mapped[float] = mapped_column(FLOAT, nullable=True)
     timeout: Mapped[int] = mapped_column(INTEGER, nullable=True)  # NULL means untracked
