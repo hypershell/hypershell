@@ -5,9 +5,12 @@
 Bring an existing database schema up to the model declarations, in place.
 
 The step only adds what the models declare and the database lacks: tables, columns, and
-indexes. It never drops, renames, or retypes a table or column and never rewrites a row.
-The one removal it makes is the retired retry-chain uniqueness on PostgreSQL (see
-`RETIRED_UNIQUE`). A current schema costs one read-only reflection and takes no lock.
+indexes. It never drops, renames, or retypes a table or column, with two exceptions, both on
+PostgreSQL only. It drops the retired retry-chain uniqueness (see `RETIRED_UNIQUE`). And it
+widens the `WIDENED` columns that earlier releases created narrower (`task.memory`), by a
+rewrite of their table under the table's exclusive lock that keeps every row and value; the
+rewrite is announced in the log before it starts. A current schema costs one read-only
+reflection and takes no lock.
 """
 
 
@@ -22,7 +25,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 # External libs
-from sqlalchemy import inspect, text, Column, Index, MetaData, Table
+from sqlalchemy import inspect, text, BigInteger, Column, Index, Integer, MetaData, Table
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine, Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.schema import CreateTable, CreateIndex, CreateColumn, DefaultClause
@@ -34,7 +38,7 @@ from hypershell.core.exceptions import SchemaUpgradeError
 from hypershell.data.model import Entity
 
 # Public interface
-__all__ = ['upgrade_schema', 'SCHEMA_UPGRADE_LOCK_KEY', 'RETIRED_UNIQUE',
+__all__ = ['upgrade_schema', 'SCHEMA_UPGRADE_LOCK_KEY', 'RETIRED_UNIQUE', 'WIDENED',
            'LOCK_WAIT_SLICE', 'LOCK_WAIT_CEILING', ]
 
 # Initialize logger
@@ -50,6 +54,11 @@ SCHEMA_UPGRADE_LOCK_KEY: Final[int] = -4139901733377976503
 # step ever drops, and only on PostgreSQL: SQLite cannot drop a table constraint without
 # rebuilding the table, so older SQLite databases keep them.
 RETIRED_UNIQUE: Final[FrozenSet[Tuple[str, str]]] = frozenset({('task', 'previous_id'), ('task', 'next_id')})
+
+# Columns the models declare wider than earlier releases created them. On PostgreSQL the step
+# widens each in place (a rewrite of its table under the table's exclusive lock); SQLite's
+# INTEGER already holds 64 bits. These are the only columns the step ever retypes.
+WIDENED: Final[FrozenSet[Tuple[str, str]]] = frozenset({('task', 'memory')})
 
 # How the step waits on a lock another session holds (seconds). Every lock wait in the step is
 # bounded by one slice. When a slice runs out the step rolls back, logs that it is still waiting,
@@ -77,6 +86,9 @@ DUPLICATE_SQLSTATES: Final[FrozenSet[str]] = frozenset({'42701', '42P07', '23505
 
 T = TypeVar('T')
 
+# The widened columns' types and names are rendered for PostgreSQL, the only database they are widened on.
+POSTGRESQL: Final[postgresql.dialect] = postgresql.dialect()
+
 
 class LockWait(Exception):
     """A lock wait in the step ran out its slice; the attempt was rolled back."""
@@ -88,10 +100,14 @@ class LockWait(Exception):
 
 @dataclass(frozen=True)
 class Step:
-    """One schema change: the table it touches, a log message, and the statement."""
+    """
+    One schema change: the table it touches, a log message, and the statement. A `notice`
+    is logged before the statement runs, for a change that can take a while.
+    """
     table: str
     message: str
     sql: str
+    notice: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -103,11 +119,12 @@ class Plan:
 
 def upgrade_schema(bind: Engine, metadata: MetaData = None) -> List[str]:
     """
-    Create every table, column, and index in `metadata` that the database lacks.
+    Create every table, column, and index in `metadata` that the database lacks, and on
+    PostgreSQL widen the `WIDENED` columns an earlier release created narrower.
 
     Returns the changes made (empty when the schema was already current). Raises
-    `SchemaUpgradeError`, with the schema unchanged, for a column that cannot be added in
-    place or when the change cannot be applied.
+    `SchemaUpgradeError`, with the schema unchanged, for a column that cannot be added or
+    widened in place or when the change cannot be applied.
     """
     metadata = metadata if metadata is not None else Entity.metadata
     plan = _waiting(bind, lambda timeout: _check(bind, metadata, timeout), plain_first=True)
@@ -150,7 +167,7 @@ def _plan(conn: Connection, metadata: MetaData) -> Plan:
     insp = inspect(conn)  # A fresh inspector per call; it caches reflection.
     dialect = conn.dialect
     prep = dialect.identifier_preparer
-    tables, columns, drops, indexes = [], [], [], []
+    tables, columns, widens, drops, indexes = [], [], [], [], []
     existing = False
     for table in metadata.sorted_tables:
         qualified = prep.format_table(table)
@@ -160,14 +177,17 @@ def _plan(conn: Connection, metadata: MetaData) -> Plan:
             indexes.extend(_create_index(index, conn) for index in _sorted(table.indexes))
             continue
         existing = True
-        present = {column['name'] for column in insp.get_columns(table.name, schema=table.schema)}
+        reflected = {column['name']: column['type'] for column in insp.get_columns(table.name, schema=table.schema)}
         for column in table.columns:
-            if column.name not in present:
+            if column.name not in reflected:
                 _check_column(table, column)
                 columns.append(Step(table.name, f'Added column {table.name}.{column.name}',
                                     f'ALTER TABLE {qualified} ADD COLUMN '
                                     f'{CreateColumn(column).compile(dialect=dialect)}'))
         if dialect.name == 'postgresql':
+            for column in _widened(table):
+                if column.name in reflected and _is_narrow_integer(reflected[column.name]):
+                    widens.extend(_widen(table, column, None))
             for constraint in insp.get_unique_constraints(table.name, schema=table.schema):
                 if _is_retired(table, constraint):
                     name = constraint['name']
@@ -181,7 +201,7 @@ def _plan(conn: Connection, metadata: MetaData) -> Plan:
                         f'Cannot upgrade table \'{table.name}\': index \'{index.name}\' is UNIQUE, so existing '
                         f'rows may violate it. Create it by hand after checking the existing rows.')
                 indexes.append(_create_index(index, conn))
-    return Plan(steps=tables + columns + drops + indexes, existing=existing)
+    return Plan(steps=tables + columns + widens + drops + indexes, existing=existing)
 
 
 def _check_column(table: Table, column: Column) -> None:
@@ -232,6 +252,35 @@ def _is_retired(table: Table, constraint: dict) -> bool:
     return (bool(constraint.get('name')) and len(names) == 1
             and (table.name, names[0]) in RETIRED_UNIQUE
             and names[0] in table.c and not table.c[names[0]].unique)
+
+
+def _widened(table: Table) -> List[Column]:
+    """The model columns of `table` named in `WIDENED`, in table order."""
+    return [column for column in table.columns if (table.name, column.name) in WIDENED]
+
+
+def _is_narrow_integer(reflected: object) -> bool:
+    """True for a reflected INTEGER or SMALLINT; a BIGINT, or any type changed by hand, is left as it is."""
+    return isinstance(reflected, Integer) and not isinstance(reflected, BigInteger)
+
+
+def _widen(table: Table, column: Column, state: Optional[Tuple[Tuple[int, int, int], bool, int]]) -> List[Step]:
+    """
+    The steps widening `column` of `table` to its model type on PostgreSQL, given the table's
+    TimescaleDB `state` (version, columnstore enabled, compressed chunks), or None for a plain
+    table.
+    """
+    if state is not None:
+        version, enabled, compressed = state
+        if enabled:
+            raise NotImplementedError('Widening a column of a hypertable with the columnstore enabled')
+    prep = POSTGRESQL.identifier_preparer
+    name = f'{table.name}.{column.name}'
+    target = column.type.dialect_impl(POSTGRESQL).compile(dialect=POSTGRESQL)
+    return [Step(table.name, f'Widened column {name} to {target}',
+                 f'ALTER TABLE {prep.format_table(table)} ALTER COLUMN {prep.format_column(column)} TYPE {target}',
+                 notice=f'Rewriting table {table.name} to widen {name} to {target} '
+                        f'(this can take a while on a large table)')]
 
 
 def _sorted(indexes: set) -> List[Index]:
@@ -329,6 +378,8 @@ def _apply_transactional(bind: Engine, metadata: MetaData, timeout: float) -> Pl
             with _waiting_for(WAIT_TABLES):
                 plan = _plan(conn, metadata)
                 for step in plan.steps:
+                    if step.notice:
+                        log.info(step.notice)
                     conn.exec_driver_sql(step.sql)
                 conn.commit()
             committed = True

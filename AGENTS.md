@@ -570,9 +570,11 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   the model, the relevant queries, and any dialect-variant type handling.
 - **The schema-upgrade step** (`upgradedb()` → `data/upgrade.py`) runs from `initdb` (every SQLite
   start, `--initdb`, `hs initdb`) and `checkdb` (every PostgreSQL start), and brings an existing
-  database up to the model in place. It only adds missing tables, columns and indexes — the one
-  removal is the retired `previous_id`/`next_id` `UNIQUE` constraints, on PostgreSQL only — and logs
-  each change at INFO (the no-op path at `trace`). A new column must be nullable or carry a
+  database up to the model in place. It only adds missing tables, columns and indexes, with two
+  PostgreSQL-only exceptions: the retired `previous_id`/`next_id` `UNIQUE` constraints
+  (`RETIRED_UNIQUE`) are dropped, and the `WIDENED` columns (`task.memory`) are widened by a rewrite
+  of their table, with an INFO notice before the rewrite starts. It logs each change at INFO (the
+  no-op path at `trace`). A new column must be nullable or carry a
   constant `server_default`, and a new index must not be `UNIQUE`, or the step refuses to upgrade
   an existing table (`SchemaUpgradeError`). Python API callers bypass the CLI helpers and must
   call `ensuredb()` first.

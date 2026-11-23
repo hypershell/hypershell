@@ -260,7 +260,6 @@ def test_upgrade_logged_once(pg_database, pg_site, template: str) -> None:
     assert schema_signature(engine) == signature
 
 
-@mark.xfail(strict=True, reason='memory-column P2')
 def test_concurrent_first_use(pg_database, pg_site) -> None:
     """Concurrent processes opening one 2.8 database all succeed; exactly one upgrades it."""
     engine = pg_site(pg_database('hs283'))
@@ -514,7 +513,6 @@ def created(engine: Engine) -> Engine:
     return engine
 
 
-@mark.xfail(strict=True, reason='memory-column P2')
 def test_memory_fresh_database(pg_database, pg_site, tmp_path: Path) -> None:
     """A database created by this release holds 64-bit memory; a 4 GB task is stored, run, and retried."""
     engine = pg_site(pg_database())
@@ -524,7 +522,6 @@ def test_memory_fresh_database(pg_database, pg_site, tmp_path: Path) -> None:
     check_large_memory(tmp_path)
 
 
-@mark.xfail(strict=True, reason='memory-column P2')
 def test_memory_narrowed_widened(pg_database, pg_site) -> None:
     """First use widens a 32-bit column, announcing the rewrite first; rows are kept; the next use is silent."""
     engine = pg_site(pg_database())
@@ -546,7 +543,6 @@ def test_memory_narrowed_widened(pg_database, pg_site) -> None:
     assert sorted(main_lines(['hs', 'list', 'memory'])[1]) == [str(2 ** 30), FOUR_GB]
 
 
-@mark.xfail(strict=True, reason='memory-column P2')
 def test_memory_widening_rolls_back(pg_database, monkeypatch) -> None:
     """A statement failing after the widening rolls it back: the column stays 32-bit, schema unchanged."""
     engine = created(database_engine(pg_database()))
@@ -571,7 +567,6 @@ def test_memory_widening_rolls_back(pg_database, monkeypatch) -> None:
         engine.dispose()
 
 
-@mark.xfail(strict=True, reason='memory-column P2')
 def test_memory_widening_lock_ceiling(pg_database, monkeypatch) -> None:
     """A session holding `task` past the wait ceiling fails the widening with the usual error, column unchanged."""
     engine = created(database_engine(pg_database()))
@@ -590,7 +585,6 @@ def test_memory_widening_lock_ceiling(pg_database, monkeypatch) -> None:
         engine.dispose()
 
 
-@mark.xfail(strict=True, reason='memory-column P2')
 def test_memory_concurrent_widening(pg_database, pg_site) -> None:
     """Concurrent first uses all succeed; exactly one widens the column."""
     engine = pg_site(pg_database())
@@ -617,7 +611,6 @@ def test_memory_concurrent_widening(pg_database, pg_site) -> None:
     assert memory_type(engine) == 'bigint'
 
 
-@mark.xfail(strict=True, reason='memory-column P2')
 @mark.parametrize('template', LEGACY)
 def test_memory_legacy_widened(pg_database, pg_site, template: str) -> None:
     """First use widens a 2.8.3 or 2.9.0a1 database's column once, keeping its rows; then it takes a 4 GB task."""

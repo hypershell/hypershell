@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/memory-column-overflows-postgres
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-23'
 phases:
 - id: P1
@@ -29,7 +29,7 @@ phases:
     "$l"
 - id: P2
   name: PostgreSQL widens task.memory in place; model, upgrade step, docs
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -221,26 +221,26 @@ xfail, and the ones that hold today (SQLite R2) pass. No source change.
 **Goal:** a fresh PostgreSQL database holds 64-bit memory, and an old one is widened on first use
 with its rows kept and the rewrite announced. Concurrent first uses widen once. The docs say so.
 
-- [ ] `src/hypershell/data/model.py`: add `BIG_INTEGER = Integer().with_variant(BIGINT,
+- [x] `src/hypershell/data/model.py`: add `BIG_INTEGER = Integer().with_variant(BIGINT,
       'postgresql')` (import `BIGINT` with `SMALLINT`), and give `Task.memory` that type. Nothing
       else changes.
-- [ ] `src/hypershell/data/upgrade.py` (PLAN §2.2):
-  - [ ] `WIDENED` beside `RETIRED_UNIQUE`, with its comment, and added to `__all__`.
-  - [ ] `Step.notice: Optional[str] = None`. `_apply_transactional` logs it at INFO immediately
+- [x] `src/hypershell/data/upgrade.py` (PLAN §2.2):
+  - [x] `WIDENED` beside `RETIRED_UNIQUE`, with its comment, and added to `__all__`.
+  - [x] `Step.notice: Optional[str] = None`. `_apply_transactional` logs it at INFO immediately
         before the step's statement. `_apply_sqlite` never sees one.
-  - [ ] `_widen(table, column, state)`. In P2 it returns the widen step when `state` is
+  - [x] `_widen(table, column, state)`. In P2 it returns the widen step when `state` is
         `None` or the columnstore is off, and raises `NotImplementedError` for the columnstore rows
         (P3 fills them). In P2 `_plan` always passes `None`.
-  - [ ] In `_plan`'s PostgreSQL block, after the added columns and before the drops, a `WIDENED`
+  - [x] In `_plan`'s PostgreSQL block, after the added columns and before the drops, a `WIDENED`
         pair whose reflected type is `INTEGER`/`SMALLINT` adds `_widen(...)`'s steps. The SQL is
         `ALTER TABLE {qualified} ALTER COLUMN {quoted} TYPE {model type compiled for the dialect}`.
-  - [ ] `upgrade_schema`'s signature does not change (no `converges` flag; PLAN §7).
-  - [ ] Module docstring: name the `WIDENED` exception (R8).
-- [ ] Remove the `memory-column P2` markers. Run the verify. Then run
+  - [x] `upgrade_schema`'s signature does not change (no `converges` flag; PLAN §7).
+  - [x] Module docstring: name the `WIDENED` exception (R8).
+- [x] Remove the `memory-column P2` markers. Run the verify. Then run
       `tests/test_upgrade_postgres.py -k "not legacy"` locally once more: the existing
       template-free tests (`test_fresh_schema`) are still green. Note in the commit body that the
       template cases are CI-only.
-- [ ] Docs (PLAN §2.5, the PostgreSQL parts): `docs/_include/database.rst` Initialization gets the
+- [x] Docs (PLAN §2.5, the PostgreSQL parts): `docs/_include/database.rst` Initialization gets the
       `.. versionchanged:: 2.9.0` clause, the exception sentence and the "rerun after a long
       rewrite" sentence. `docs/_include/database_alt.rst` gets one sentence. `AGENTS.md` § Data
       layer specifics names `WIDENED`. Read each against the behaviour.

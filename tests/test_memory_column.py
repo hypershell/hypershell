@@ -107,7 +107,6 @@ def test_sqlite_column_unchanged() -> None:
 
 
 @mark.unit
-@mark.xfail(strict=True, reason='memory-column P2')
 def test_postgres_column_bigint() -> None:
     """PostgreSQL creates `memory BIGINT`."""
     assert re.search(r'\bmemory BIGINT\b', task_ddl(postgresql.dialect()))
@@ -119,10 +118,10 @@ def test_postgres_column_bigint() -> None:
 
 @mark.unit
 @mark.parametrize('reflected, due', [
-    pytest.param(INTEGER(), True, marks=mark.xfail(strict=True, reason='memory-column P2'), id='integer'),
-    pytest.param(SMALLINT(), True, marks=mark.xfail(strict=True, reason='memory-column P2'), id='smallint'),
-    pytest.param(BIGINT(), False, marks=mark.xfail(strict=True, reason='memory-column P2'), id='bigint'),
-    pytest.param(NUMERIC(), False, marks=mark.xfail(strict=True, reason='memory-column P2'), id='numeric'),
+    pytest.param(INTEGER(), True, id='integer'),
+    pytest.param(SMALLINT(), True, id='smallint'),
+    pytest.param(BIGINT(), False, id='bigint'),
+    pytest.param(NUMERIC(), False, id='numeric'),
 ])
 def test_widening_due(reflected: object, due: bool) -> None:
     """Only a narrower integer is widened; BIGINT, or a type changed by hand, is left as it is."""
@@ -137,11 +136,9 @@ def widen(state: Optional[tuple]) -> List[Tuple[str, str, Optional[str], str]]:
 
 @mark.unit
 @mark.parametrize('state', [
-    pytest.param(None, marks=mark.xfail(strict=True, reason='memory-column P2'), id='plain'),
-    pytest.param(((2, 31, 0), False, 0), marks=mark.xfail(strict=True, reason='memory-column P2'),
-                 id='columnstore-off'),
-    pytest.param(((2, 22, 0), False, 0), marks=mark.xfail(strict=True, reason='memory-column P2'),
-                 id='columnstore-off-old-release'),
+    pytest.param(None, id='plain'),
+    pytest.param(((2, 31, 0), False, 0), id='columnstore-off'),
+    pytest.param(((2, 22, 0), False, 0), id='columnstore-off-old-release'),
     pytest.param(((2, 24, 0), True, 0), marks=mark.xfail(strict=True, reason='memory-column P3'),
                  id='columnstore-on-2.24.0'),
     pytest.param(((2, 31, 0), True, 0), marks=mark.xfail(strict=True, reason='memory-column P3'),

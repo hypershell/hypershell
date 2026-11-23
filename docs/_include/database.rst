@@ -106,20 +106,28 @@ Initialization
 .. versionchanged:: 2.9.0
    :pr:`69`: a database from an earlier release is upgraded in place on first use.
 
+.. versionchanged:: 2.9.0
+   On Postgres the upgrade widens ``task.memory``, so a task can declare more than 2 GiB of memory.
+
 SQLite is automatically initialized upon opening the connection but
 Postgres must be explicitly initialized via ``hs initdb``, or by launching ``hs server``,
 ``hs submit``, or ``hs cluster`` with the ``--initdb`` command-line option.
 
 An existing database created by an earlier release is upgraded in place on first use,
 for both SQLite and Postgres; there is no separate migration step. The upgrade only adds what
-is missing (tables, columns, and indexes) and never drops or rewrites existing tasks. The one
-removal is on Postgres, where the ``UNIQUE`` constraints on the retry-chain columns
-(``previous_id`` and ``next_id``) are dropped. The upgrade holds an exclusive lock on the
-tables while it adds columns and builds indexes, which can take minutes on a large database.
-Processes started meanwhile wait for it, logging a line every 30 seconds, and then carry on.
-If the lock is still held after 15 minutes (e.g., by a session left idle in a transaction), the
-upgrade gives up with an error that names what it waited on and leaves the schema unchanged;
-find and stop that session, then try again.
+is missing (tables, columns, and indexes) and never drops or changes existing tasks, with two
+exceptions, both on Postgres. The ``UNIQUE`` constraints on the retry-chain columns
+(``previous_id`` and ``next_id``) are dropped. And the ``task.memory`` column, which earlier
+releases created with 32 bits (so a task could declare at most 2 GiB), is widened to 64 bits by
+rewriting the ``task`` table under its exclusive lock, keeping every task and every value. The
+rewrite can take minutes on a large table, and the log says so before it starts. The upgrade
+holds an exclusive lock on the tables while it adds columns and builds indexes, which can take
+minutes on a large database. Processes started meanwhile wait for it, logging a line every
+30 seconds, and then carry on. If the lock is still held after 15 minutes (e.g., by a session left
+idle in a transaction), the upgrade gives up with an error that names what it waited on and leaves
+the schema unchanged; find and stop that session, then try again. A process waiting behind a
+rewrite of ``task`` that lasts longer than 15 minutes gives up the same way while the rewrite
+carries on; run its command again once the rewrite is done.
 
 .. versionchanged:: 2.9.0
    :pr:`109`: a failed task's retry and its ``retried`` mark are recorded together, so a server

@@ -1118,7 +1118,6 @@ def compressed_chunks(engine: Engine) -> int:
 @mark.integration
 @needs_server
 @with_timescale
-@mark.xfail(strict=True, reason='memory-column P2')
 def test_memory_fresh_hypertable(ts_database, ts_site, tmp_path: Path) -> None:
     """A hypertable created by this release holds 64-bit memory; a 4 GB task is stored, run, and retried."""
     engine = ts_site(ts_database())
