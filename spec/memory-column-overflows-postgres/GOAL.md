@@ -13,6 +13,17 @@
   recorded there rather than growing this cycle.*
 - **target:** 2.9.0  ·  *for 2.9.0a10; the seed's target.*
 
+**Ruled at the GOAL gate** (2026-11-23). Approved by the foreman, gate judge under the maintainer's
+mandate, with the maintainer's own rulings on Q1 and Q2.
+
+- **Q1 (maintainer, 2026-11-23):** option A. Widen a `timescale`-provider database in place: directly
+  where TimescaleDB allows it; where the columnstore blocks it and no chunk is compressed, turn the
+  columnstore off, widen, and let the converge step turn it back on; where any chunk is compressed,
+  refuse with an actionable `SchemaUpgradeError`, schema unchanged. If A outgrows a small appetite,
+  the cycle ships B and files A as a follow-up seed.
+- **Q2 (maintainer, 2026-11-23):** option A. 2.9.0 only; no 2.8 change.
+- The contract is locked; `hs-plan` designs against it.
+
 ## Problem
 
 A task's memory is a byte count (`hs submit -m` and an inline `memory:` tag both go through
@@ -94,9 +105,12 @@ the long table rewrite announced in the log. A database already current costs no
   as other changes do; and WHEN two processes first use the same old database at once, the column
   SHALL be widened once and both SHALL proceed.
 - **R7** — WHEN this release first uses a `timescale`-provider database created by 2.9.0a3–a9, the
-  step SHALL [NEEDS CLARIFICATION: Q1 — widen the hypertable's `task.memory` in place, or refuse
-  with an actionable error naming the manual steps; recommended: option A below] and the converge
-  step SHALL leave the hypertable in its configured shape (columnstore settings and policy) after.
+  step SHALL widen the hypertable's `task.memory` in place (Q1, option A): directly where TimescaleDB
+  allows it; where the enabled columnstore blocks it and no chunk is compressed, by turning the
+  columnstore off, widening, and leaving the converge step to turn it back on; and IF any chunk is
+  compressed, THEN it SHALL refuse with an actionable `SchemaUpgradeError` naming the manual steps,
+  the schema unchanged. The converge step SHALL leave the hypertable in its configured shape
+  (columnstore settings and policy) after.
 - **R8** — The user docs on the in-place upgrade (`docs/_include/database.rst`,
   `docs/_include/database_alt.rst`) and `AGENTS.md` § Data layer specifics SHALL state that the step
   also widens `task.memory` on PostgreSQL, rewriting the `task` table under its exclusive lock, marked
@@ -118,7 +132,7 @@ the long table rewrite announced in the log. A database already current costs no
   trigger only.
 - **The source row committed for a submission that stored nothing.** That is the all-or-nothing gap
   in `issues/ingest-robustness.md`.
-- **A 2.8.x patch release** carrying the widening, unless Q2 is answered otherwise.
+- **A 2.8.x patch release** carrying the widening (Q2, option A).
 - **Changes in other repositories.** `hypershell-mcp`'s strict expected failure (`memory_overflows`
   in `tests/conftest.py`) will start passing against a server on this release; flipping it is that
   repository's change. `nf-hypershell` needs nothing.
@@ -137,7 +151,13 @@ the long table rewrite announced in the log. A database already current costs no
   CI's `postgres` job runs it on PostgreSQL 13 and 18 and three TimescaleDB images, so R9 asks for
   real-server tests. Its TimescaleDB note asks about compressed chunks; the likelier block is the
   columnstore being enabled at all (Problem), unverified.
-- **[NEEDS CLARIFICATION: Q1 — how a `timescale`-provider database from 2.9.0a3–a9 is widened (R7).]**
+- **Q1 — how a `timescale`-provider database from 2.9.0a3–a9 is widened (R7). Resolved
+  2026-11-23** (maintainer): **option A**. Widen directly where TimescaleDB allows it; where the
+  columnstore blocks it and no chunk is compressed, turn the columnstore off, widen, and let the
+  converge step turn it back on; where any chunk is compressed, refuse with an actionable
+  `SchemaUpgradeError` and leave the schema unchanged. If A outgrows a small appetite, the cycle
+  ships B (widen directly, else refuse and document the manual steps) and files A as a follow-up
+  seed. The options as shaped:
   - **A (recommended):** widen in place. Where TimescaleDB allows `ALTER COLUMN … TYPE` on the
     hypertable as it stands (an Apache-only server, or a release that permits it), do it directly.
     Where the enabled columnstore blocks it and no chunk has been converted, turn the columnstore off,
@@ -152,8 +172,8 @@ the long table rewrite announced in the log. A database already current costs no
     error and document the manual steps. Smaller; a Community-edition alpha user does a manual step.
   - **C:** no in-place path for the `timescale` provider: it only shipped in pre-releases, so refuse
     with an error telling the user to recreate the database or widen by hand.
-- **[NEEDS CLARIFICATION: Q2 — does 2.8.x get a patch?]** A 2.8 user on PostgreSQL has the same
-  limit.
+- **Q2 — does 2.8.x get a patch? Resolved 2026-11-23** (maintainer): **option A**. 2.9.0 only,
+  with no 2.8 change. A 2.8 user on PostgreSQL has the same limit. The options as shaped:
   - **A (recommended):** no. 2.9.0 only. A retyping migration that rewrites the `task` table is a
     large step for a patch release, and R5 already makes a database widened by hand safe for 2.9.0.
   - **B:** 2.9.0 only, and the docs also give 2.8 PostgreSQL users the one manual statement that
