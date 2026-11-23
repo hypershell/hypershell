@@ -24,6 +24,7 @@ from typing import Callable, Dict, Iterator, List, Optional, Tuple
 # Standard libs
 import os
 import re
+import sys
 import uuid
 import threading
 from datetime import timedelta
@@ -45,6 +46,8 @@ from hypershell.data import timescale
 from hypershell.data.timescale import (TimescaleError, Gates, Settings, gates, parse_version, extension_error,
                                        normalize_columns)
 from tests import main, main_lines
+from tests.test_memory_column import check_large_memory, MESSAGE
+from tests.test_upgrade_postgres import narrow, memory_type, widening_lines
 
 
 ADMIN_URL: Optional[str] = os.getenv('HS_TEST_POSTGRES')
@@ -1084,3 +1087,122 @@ def test_configured_columns_converge(ts_database, ts_site, tmp_path: Path) -> No
         assert (state['segmentby'], state['orderby']) == ('client_id, group', 'submit_time desc, id desc'), state
     rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
     assert rc == exit_status.success and pass_lines(stderr, 'INFO') == [], stderr
+
+
+# --------------------------------------------------------------------------------------------------
+# task.memory on a hypertable: widened where TimescaleDB allows it, refused where it would refuse
+
+
+# `hs` with the release that lets the columnstore stay on during the change forced above any server,
+# so the refusal for TimescaleDB 2.22/2.23 runs against the server under test.
+FORCED_GATE = ('import sys; from hypershell.data import upgrade; upgrade.COLUMN_TYPE_VERSION = (99, 0, 0); '
+               'from hypershell import main; sys.exit(main())')
+
+
+def run_tasks(engine: Engine, count: int) -> None:
+    """Submit `count` tasks and run them, so `task` holds rows in a chunk."""
+    for n in range(count):
+        assert main_lines(['hs', 'submit', 'echo', f'task-{n}'])[0] == exit_status.success
+    rc, stdout, stderr = main(['hs', 'cluster', '--restart', '-N1', '--no-tls'])
+    assert rc == exit_status.success, stderr
+    assert sorted(stdout.split()) == [f'task-{n}' for n in range(count)]
+
+
+def compressed_chunks(engine: Engine) -> int:
+    """The number of `task` chunks in the columnstore."""
+    with engine.connect() as conn:
+        return conn.execute(text('SELECT count(*) FROM timescaledb_information.chunks '
+                                 'WHERE hypertable_name = \'task\' AND is_compressed')).scalar()
+
+
+@mark.integration
+@needs_server
+@with_timescale
+@mark.xfail(strict=True, reason='memory-column P2')
+def test_memory_fresh_hypertable(ts_database, ts_site, tmp_path: Path) -> None:
+    """A hypertable created by this release holds 64-bit memory; a 4 GB task is stored, run, and retried."""
+    engine = ts_site(ts_database())
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert_converged(engine)
+    assert memory_type(engine) == 'bigint'
+    check_large_memory(tmp_path)
+
+
+@mark.integration
+@needs_server
+@with_timescale
+@mark.xfail(strict=True, reason='memory-column P3')
+def test_memory_hypertable_widened(ts_database, ts_site) -> None:
+    """First use widens a hypertable's 32-bit column directly; its shape and rows are kept."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    run_tasks(engine, 3)
+    narrow(engine)
+    state, rows = shape(engine), task_rows(engine)
+    rc, stdout, stderr = main_lines(['hs', 'list', '--count'])
+    assert (rc, stdout) == (exit_status.success, ['3']), stderr
+    notices, widened = widening_lines(stderr)
+    assert len(notices) == 1 and len(widened) == 1 and notices[0] < widened[0], stderr
+    assert memory_type(engine) == 'bigint'
+    assert shape(engine) == state
+    assert_converged(engine)
+    assert task_rows(engine) == rows
+
+
+@mark.integration
+@needs_server
+@with_timescale
+@mark.xfail(strict=True, reason='memory-column P3')
+def test_memory_old_release_refused(ts_database, ts_site) -> None:
+    """With the columnstore on and the server taken as older than 2.24.0, first use refuses and changes nothing."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    run_tasks(engine, 1)
+    narrow(engine)
+    state = shape(engine)
+    rc, stdout, stderr = main([sys.executable, '-c', FORCED_GATE, 'list', '--count'])
+    if not server_gates(engine).columnstore:  # Apache-only: no columnstore, so nothing blocks the change.
+        assert (rc, stdout) == (exit_status.success, '1'), stderr
+        assert MESSAGE in stderr
+        assert memory_type(engine) == 'bigint'
+        return
+    assert rc == exit_status.runtime_error, stderr
+    for token in (f'TimescaleDB {extension_installed(engine)}', '2.24.0', 'ALTER EXTENSION timescaledb UPDATE',
+                  'hs initdb', 'The schema is unchanged.'):
+        assert token in stderr, stderr
+    assert memory_type(engine) == 'integer'
+    assert shape(engine) == state
+
+
+@mark.integration
+@needs_server
+@with_timescale
+@mark.xfail(strict=True, reason='memory-column P3')
+def test_memory_compressed_refused(ts_database, ts_site) -> None:
+    """With a chunk in the columnstore, first use refuses and changes nothing; once decompressed, it widens."""
+    engine = ts_site(ts_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    if not server_gates(engine).columnstore:
+        pytest.skip('needs the columnstore (TimescaleDB Community edition)')
+    run_tasks(engine, 3)
+    narrow(engine)
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT compress_chunk(c) FROM show_chunks(\'task\') c')).all()
+        conn.commit()
+    chunks = compressed_chunks(engine)
+    assert chunks
+    rc, _, stderr = main(['hs', 'list', '--count'])
+    assert rc == exit_status.runtime_error, stderr
+    for token in (f'{chunks} compressed chunk', 'decompress_chunk', 'The schema is unchanged.'):
+        assert token in stderr, stderr
+    assert memory_type(engine) == 'integer'
+    assert compressed_chunks(engine) == chunks
+
+    with engine.connect() as conn:
+        conn.execute(text('SELECT decompress_chunk(c) FROM show_chunks(\'task\') c'))
+        conn.commit()
+    rc, stdout, stderr = main(['hs', 'list', '--count'])
+    assert (rc, stdout) == (exit_status.success, '3'), stderr
+    assert MESSAGE in stderr
+    assert memory_type(engine) == 'bigint'

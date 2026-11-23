@@ -39,6 +39,7 @@ from hypershell.data import upgrade
 from hypershell.data.model import Entity
 from hypershell.data.upgrade import upgrade_schema, Step, Plan
 from tests import main, main_lines, NO_OUTPUT, ORIGINAL_TASK_COLUMNS
+from tests.test_memory_column import check_large_memory, FOUR_GB, NOTICE, MESSAGE
 
 
 ADMIN_URL: Optional[str] = os.getenv('HS_TEST_POSTGRES')
@@ -53,7 +54,8 @@ LEGACY = ['hs283', 'hs290a1']
 FAIL_ARGS = "sh -c 'exit 3'"
 NEW_TASK_COLUMNS = ('source', 'fingerprint', 'part')
 NEW_INDEXES = ('index_tasks_source', 'index_tasks_previous_id', 'index_tasks_next_id')
-UPGRADE_LINE = re.compile(r'^INFO \[hypershell\.data[\w.]*\] (Added column|Created index|Created table|Dropped) ')
+UPGRADE_LINE = re.compile(r'^INFO \[hypershell\.data[\w.]*\] '
+                          r'(Added column|Created index|Created table|Dropped|Widened|Rewriting) ')
 
 
 @fixture(scope='module')
@@ -258,6 +260,7 @@ def test_upgrade_logged_once(pg_database, pg_site, template: str) -> None:
     assert schema_signature(engine) == signature
 
 
+@mark.xfail(strict=True, reason='memory-column P2')
 def test_concurrent_first_use(pg_database, pg_site) -> None:
     """Concurrent processes opening one 2.8 database all succeed; exactly one upgrades it."""
     engine = pg_site(pg_database('hs283'))
@@ -279,6 +282,7 @@ def test_concurrent_first_use(pg_database, pg_site) -> None:
     assert [rc for rc, _, _ in results] == [exit_status.success] * count, results
     assert [stdout for _, stdout, _ in results] == ['7'] * count
     assert len([stderr for _, _, stderr in results if 'Added column task.source' in stderr]) == 1, results
+    assert len([stderr for _, _, stderr in results if MESSAGE in stderr]) == 1, results
     assert_schema_current(engine)
 
 
@@ -477,3 +481,154 @@ def test_end_to_end(pg_database, pg_site, tmp_path: Path) -> None:
     old = dict(zip(columns, after[second]))
     assert old['retried'] is True
     assert str(old['next_id']) == str(retries[0]['id'])
+
+
+# --------------------------------------------------------------------------------------------------
+# task.memory: BIGINT on a new database, widened in place on an old one
+
+
+def narrow(engine: Engine, schema: str = None) -> None:
+    """Put `task.memory` back to the 32-bit column of earlier releases."""
+    table = f'{schema}.task' if schema else 'task'
+    with engine.begin() as conn:
+        conn.execute(text(f'ALTER TABLE {table} ALTER COLUMN memory TYPE integer'))
+
+
+def memory_type(engine: Engine, schema: str = None) -> str:
+    """The data type of `task.memory`, from the information schema."""
+    return task_columns(engine, schema)['memory']
+
+
+def widening_lines(stderr: List[str]) -> Tuple[List[int], List[int]]:
+    """Positions of the rewrite notice and of the completed-change line in the log."""
+    notices = [i for i, line in enumerate(stderr) if line == f'INFO [hypershell.data.upgrade] {NOTICE}']
+    widened = [i for i, line in enumerate(stderr) if line == f'INFO [hypershell.data.upgrade] {MESSAGE}']
+    return notices, widened
+
+
+def created(engine: Engine) -> Engine:
+    """A database holding this release's schema, then `task.memory` narrowed as earlier releases made it."""
+    assert upgrade_schema(engine)
+    narrow(engine)
+    assert memory_type(engine) == 'integer'
+    return engine
+
+
+@mark.xfail(strict=True, reason='memory-column P2')
+def test_memory_fresh_database(pg_database, pg_site, tmp_path: Path) -> None:
+    """A database created by this release holds 64-bit memory; a 4 GB task is stored, run, and retried."""
+    engine = pg_site(pg_database())
+    rc, _, stderr = main_lines(['hs', 'initdb', '--yes'])
+    assert rc == exit_status.success, stderr
+    assert memory_type(engine) == 'bigint'
+    check_large_memory(tmp_path)
+
+
+@mark.xfail(strict=True, reason='memory-column P2')
+def test_memory_narrowed_widened(pg_database, pg_site) -> None:
+    """First use widens a 32-bit column, announcing the rewrite first; rows are kept; the next use is silent."""
+    engine = pg_site(pg_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    assert main_lines(['hs', 'submit', '-m', '1GB', '--', 'echo', 'one'])[0] == exit_status.success
+    narrow(engine)
+    before = snapshot(engine)
+    rc, stdout, stderr = main_lines(['hs', 'list', '--count'])
+    assert (rc, stdout) == (exit_status.success, ['1']), stderr
+    notices, widened = widening_lines(stderr)
+    assert len(notices) == 1 and len(widened) == 1 and notices[0] < widened[0], stderr
+    assert memory_type(engine) == 'bigint'
+    assert snapshot(engine) == before
+
+    signature = schema_signature(engine)
+    assert main_lines(['hs', 'list', '--count']) == (exit_status.success, ['1'], NO_OUTPUT)
+    assert schema_signature(engine) == signature
+    assert main_lines(['hs', 'submit', '-m', '4GB', '--', 'echo', 'big'])[0] == exit_status.success
+    assert sorted(main_lines(['hs', 'list', 'memory'])[1]) == [str(2 ** 30), FOUR_GB]
+
+
+@mark.xfail(strict=True, reason='memory-column P2')
+def test_memory_widening_rolls_back(pg_database, monkeypatch) -> None:
+    """A statement failing after the widening rolls it back: the column stays 32-bit, schema unchanged."""
+    engine = created(database_engine(pg_database()))
+    real_plan = upgrade._plan
+    planned: List[str] = []
+
+    def _plan(conn, metadata):
+        plan = real_plan(conn, metadata)
+        planned.extend(step.sql for step in plan.steps)
+        return Plan(steps=plan.steps + [Step('task', 'broken', 'CREATE INDEX broken ON no_such_table (x)')],
+                    existing=plan.existing)
+
+    monkeypatch.setattr(upgrade, '_plan', _plan)
+    try:
+        before = schema_signature(engine)
+        with pytest.raises(SchemaUpgradeError, match='no_such_table'):
+            upgrade_schema(engine)
+        assert any('ALTER COLUMN memory TYPE BIGINT' in sql for sql in planned), planned
+        assert memory_type(engine) == 'integer'
+        assert schema_signature(engine) == before
+    finally:
+        engine.dispose()
+
+
+@mark.xfail(strict=True, reason='memory-column P2')
+def test_memory_widening_lock_ceiling(pg_database, monkeypatch) -> None:
+    """A session holding `task` past the wait ceiling fails the widening with the usual error, column unchanged."""
+    engine = created(database_engine(pg_database()))
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_SLICE', 0.2)
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_CEILING', 1)
+    holder = engine.connect()
+    try:
+        holder.execute(text('SELECT 1 FROM task LIMIT 1'))  # Open transaction holding a lock on task.
+        with pytest.raises(SchemaUpgradeError, match='gave up after 1 s waiting for another session to release '
+                                                     'its lock on the tables. Find the session'):
+            upgrade_schema(engine)
+        holder.rollback()
+        assert memory_type(engine) == 'integer'
+    finally:
+        holder.close()
+        engine.dispose()
+
+
+@mark.xfail(strict=True, reason='memory-column P2')
+def test_memory_concurrent_widening(pg_database, pg_site) -> None:
+    """Concurrent first uses all succeed; exactly one widens the column."""
+    engine = pg_site(pg_database())
+    assert main_lines(['hs', 'initdb', '--yes'])[0] == exit_status.success
+    narrow(engine)
+    count = 4
+    barrier = threading.Barrier(count)
+    results: List[Tuple[int, str, str]] = [None] * count
+
+    def worker(i: int) -> None:
+        barrier.wait()
+        results[i] = main(['hs', 'list', '--count'])
+
+    threads = [threading.Thread(target=worker, args=(i, )) for i in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=180)
+    if any(result is None for result in results):
+        pytest.fail('a worker did not finish')
+    assert [rc for rc, _, _ in results] == [exit_status.success] * count, results
+    assert [stdout for _, stdout, _ in results] == ['0'] * count
+    assert len([stderr for _, _, stderr in results if MESSAGE in stderr]) == 1, results
+    assert memory_type(engine) == 'bigint'
+
+
+@mark.xfail(strict=True, reason='memory-column P2')
+@mark.parametrize('template', LEGACY)
+def test_memory_legacy_widened(pg_database, pg_site, template: str) -> None:
+    """First use widens a 2.8.3 or 2.9.0a1 database's column once, keeping its rows; then it takes a 4 GB task."""
+    engine = pg_site(pg_database(template))
+    assert memory_type(engine) == 'integer'
+    before = snapshot(engine)
+    rc, stdout, stderr = main_lines(['hs', 'list', '--count'])
+    assert (rc, stdout) == (exit_status.success, ['7']), stderr
+    notices, widened = widening_lines(stderr)
+    assert len(notices) == 1 and len(widened) == 1 and notices[0] < widened[0], stderr
+    assert memory_type(engine) == 'bigint'
+    assert snapshot(engine) == before
+    assert main_lines(['hs', 'submit', '-m', '4GB', '--', 'echo', 'big'])[0] == exit_status.success
+    assert FOUR_GB in main_lines(['hs', 'list', 'memory'])[1]

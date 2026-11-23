@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/memory-column-overflows-postgres
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-23'
 phases:
 - id: P1
   name: Tests first, red where the fix is missing (strict xfail)
-  status: pending
+  status: done
   satisfies:
   - R9
   depends_on: []
@@ -152,64 +152,64 @@ one atomic code+state commit.
 **Goal:** every test this cycle needs is written and collected. Tests that need the fix are strict
 xfail, and the ones that hold today (SQLite R2) pass. No source change.
 
-- [ ] New `tests/test_memory_column.py` (default suite; module docstring names the cycle):
-  - [ ] `@mark.unit` R1: compile `CreateTable(Task.__table__)` for the SQLite dialect and assert
+- [x] New `tests/test_memory_column.py` (default suite; module docstring names the cycle):
+  - [x] `@mark.unit` R1: compile `CreateTable(Task.__table__)` for the SQLite dialect and assert
         `memory INTEGER`. For the PostgreSQL dialect assert `memory BIGINT` (xfail P2).
-  - [ ] `@mark.unit` the `_widen` decision table of PLAN §2.2, one parametrized row per state, each
+  - [x] `@mark.unit` the `_widen` decision table of PLAN §2.2, one parametrized row per state, each
         asserting the step list (SQL, `notice`, `message`) or the `SchemaUpgradeError` text.
         Plain/no hypertable and columnstore off → widen (xfail P2). Columnstore on with none
         compressed at ≥ 2.24.0 → widen; at < 2.24.0 → the 2.22/2.23 refusal naming 2.24.0 and the
         manual steps; any compressed chunk → the compressed refusal (xfail P3). No row yields a
         TimescaleDB statement (no `enable_columnstore` in any step). A narrower reflected type
         `INTEGER`/`SMALLINT` is due; `BIGINT` and `NUMERIC` are not (xfail P2).
-  - [ ] `@mark.integration` R2 on SQLite (`temp_site`), expected to pass today. `hs submit -m 4GB --
+  - [x] `@mark.integration` R2 on SQLite (`temp_site`), expected to pass today. `hs submit -m 4GB --
         echo big` and a task file line `echo inline # HYPERSHELL: memory:4GB`. `hs list memory` and
         `hs info ID -x memory` print `4294967296`. `hs cluster --restart -N1 --no-tls` completes
         both. A `-m 4GB -- sh -c 'exit 3'` task with `-r 2` gives a retry row whose memory is
         `4294967296`.
-- [ ] `tests/test_upgrade_postgres.py` (template-free cases run locally):
-  - [ ] Helper `narrow(engine)`: `ALTER TABLE task ALTER COLUMN memory TYPE integer`. Helper
+- [x] `tests/test_upgrade_postgres.py` (template-free cases run locally):
+  - [x] Helper `narrow(engine)`: `ALTER TABLE task ALTER COLUMN memory TYPE integer`. Helper
         `memory_type(engine)` from `information_schema.columns`.
-  - [ ] `test_memory_fresh_database` R1/R2: `hs initdb --yes`, `bigint`, then the SQLite R2 drive
+  - [x] `test_memory_fresh_database` R1/R2: `hs initdb --yes`, `bigint`, then the SQLite R2 drive
         against the server (xfail P2).
-  - [ ] `test_memory_narrowed_widened` R3/R4/R5. Fresh database, narrow, `hs submit -m 1GB`, then
+  - [x] `test_memory_narrowed_widened` R3/R4/R5. Fresh database, narrow, `hs submit -m 1GB`, then
         `hs list --count`. The notice line comes before the `Widened column task.memory` line, each
         exactly once and at INFO. The column is `bigint` and the snapshot is unchanged. A second
         `hs list --count` is `NO_OUTPUT` and `schema_signature` is unchanged. Then `hs submit -m
         4GB` succeeds (xfail P2).
-  - [ ] `test_memory_widening_rolls_back` R6: narrowed database, a broken `Step` appended after the
+  - [x] `test_memory_widening_rolls_back` R6: narrowed database, a broken `Step` appended after the
         plan (as in `test_failure_mid_step_rolls_back`) → `SchemaUpgradeError`, still `integer`,
         signature unchanged (xfail P2).
-  - [ ] `test_memory_widening_lock_ceiling` R6: narrowed database, a holder session with an open
+  - [x] `test_memory_widening_lock_ceiling` R6: narrowed database, a holder session with an open
         read of `task`, slice 0.2 s, ceiling 1 s → the `WAIT_TABLES` error, still `integer`
         (xfail P2).
-  - [ ] `test_memory_concurrent_widening` R6: narrowed database, 4 threads of `hs list --count`.
+  - [x] `test_memory_concurrent_widening` R6: narrowed database, 4 threads of `hs list --count`.
         All succeed, exactly one stderr holds `Widened column task.memory`, and the column ends
         `bigint` (xfail P2).
-  - [ ] **CI only:** `test_memory_legacy_widened[hs283|hs290a1]` R3/R2. First use via `hs list
+  - [x] **CI only:** `test_memory_legacy_widened[hs283|hs290a1]` R3/R2. First use via `hs list
         --count` widens, the snapshot is unchanged, then `hs submit -m 4GB` and `hs list memory`
         (xfail P2). Extend `test_concurrent_first_use` to assert the widening is logged once (the
         same xfail on the new assertion's test). Teach `UPGRADE_LINE` the `Widened` and `Rewriting`
         prefixes.
-- [ ] `tests/test_timescale.py` (**CI only**; `@needs_server @with_timescale`):
-  - [ ] `test_memory_fresh_hypertable` R1/R2: `hs initdb --yes`, `bigint`, then the 4GB drive
+- [x] `tests/test_timescale.py` (**CI only**; `@needs_server @with_timescale`):
+  - [x] `test_memory_fresh_hypertable` R1/R2: `hs initdb --yes`, `bigint`, then the 4GB drive
         (xfail P2).
-  - [ ] `test_memory_hypertable_widened` R7 direct. `hs initdb`, narrow, submit and run 3 tasks
+  - [x] `test_memory_hypertable_widened` R7 direct. `hs initdb`, narrow, submit and run 3 tasks
         (rows in a chunk), then `hs list --count`: widened, `shape()` unchanged, `assert_converged`,
         `task_rows` unchanged (xfail P3; CI runs it only after P3, so its P2 pass on the
         2.24.0+ images never meets the strict marker).
-  - [ ] `test_memory_old_release_refused` R7, the 2.22/2.23 refusal on real servers. Monkeypatch
+  - [x] `test_memory_old_release_refused` R7, the 2.22/2.23 refusal on real servers. Monkeypatch
         `hypershell.data.upgrade.COLUMN_TYPE_VERSION` to `(99, 0, 0)`, narrow, submit and run a
         task, then `hs list --count`. With the columnstore on (Community; `server_gates(engine)`),
         expect exit 5, stderr holding the refusal (the server's version, `2.24.0`, the manual steps,
         "schema is unchanged"), the column still `integer` and `shape()` unchanged. Without it
         (Apache-only), expect the forced gate to change nothing and the column to be widened
         (xfail P3).
-  - [ ] `test_memory_compressed_refused` R7, Community only. Narrow, submit and run tasks,
+  - [x] `test_memory_compressed_refused` R7, Community only. Narrow, submit and run tasks,
         `compress_chunk` on every chunk, then `hs list --count`: exit 5, stderr holds the refusal
         (compressed chunks, `decompress_chunk`, "schema is unchanged"). The column stays `integer`
         and the chunks stay compressed. Then decompress them and rerun: widened (xfail P3).
-- [ ] **Red check:** run the verify. The `xfailed` count is non-zero, and no case fails or
+- [x] **Red check:** run the verify. The `xfailed` count is non-zero, and no case fails or
       unexpectedly passes. Record in the commit body which tests are xfail and which pass today.
 - **Verify:** see frontmatter (default suite, local PostgreSQL cases not skipped, CI-only cases
   collected).
