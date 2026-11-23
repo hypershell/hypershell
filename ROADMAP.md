@@ -54,7 +54,7 @@ revert re-runs it into the same crash, and the client degrades executor-by-execu
 Template and resource errors are already handled gracefully in the same file — spawn failure just
 never got the same treatment.
 
-*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: —*
+*Target: 2.10.0 · Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/task-start-spawn-guard.md`](issues/task-start-spawn-guard.md)
 
 ## No process-group ownership; SIGTERM and Ctrl-C tear down without cleanup
@@ -66,7 +66,7 @@ actually bound node usage for any task that is a pipeline or backgrounds childre
 on every node plus guaranteed duplicate re-execution on restart. The two must be fixed together:
 Ctrl-C currently kills tasks only *because* they share the client's process group.
 
-*Target: 2.9.x · Horizon: near-term · Depends on: — · Refs: —*
+*Target: 2.10.0 · Horizon: near-term · Depends on: — · Refs: —*
 **Seed:** [`issues/process-group-signal-teardown.md`](issues/process-group-signal-teardown.md)
 
 ## Transient coordinator failures should degrade to retry, not process death
@@ -214,7 +214,7 @@ still connected (the client's Slurm job ends `FAILED`).
 
 `hs update` accepts any value for `group` and stores it, so a text group reaches the scheduler even after submit-time validation (`submit-input-checks`) refuses one. Apply the submit-time integer rule to `hs update group=…`, refusing with exit 2 before anything is written.
 
-*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/submit-input-checks/GOAL.md` (Non-goals)*
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `spec/submit-input-checks/GOAL.md` (Non-goals)*
 **Seed:** [`issues/update-group-stores-text.md`](issues/update-group-stores-text.md) · *status: unshaped*
 
 ## An empty `logging.style` makes every command exit 3 until the file is hand-edited
@@ -306,7 +306,7 @@ filtered form honours the same options. The fix applies the filters or refuses t
 refusing would be an interface change, which shaping weighs against the Target. Pre-existing; named
 by `update-client-retry`'s shaping, which takes the same form's action options.
 
-*Target: 2.9.x · Horizon: near-term, small · Depends on: — (sequence after `update-client-retry`,
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — (sequence after `update-client-retry`,
 same routing) · Refs: `issues/update-legacy-tag-lost-write.md`*
 **Seed:** [`issues/update-legacy-form-ignores-filters.md`](issues/update-legacy-form-ignores-filters.md) · *status: unshaped*
 
@@ -389,7 +389,7 @@ sets, and confirmations are not ordered against eviction. A client evicted befor
 is applied leaves its rows in flight with a NULL `client_id`, never reverted or redispatched; a late
 confirmation then names the already-evicted client. Either way the row waits until restart.
 
-*Target: 2.9.x · Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same
+*Target: 2.10.0 · Horizon: mid-term · Depends on: — · Refs: `writeback-scoped-conditional` (#70, same
 token); relay*
 **Seed:** [`issues/stale-confirm-hides-orphan.md`](issues/stale-confirm-hides-orphan.md)
 
