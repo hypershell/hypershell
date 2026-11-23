@@ -3,10 +3,10 @@ slug: relay-client-exe-deprecated-name
 title: A relay starts its site clients with its own hs, not the legacy hyper-shell
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/relay-client-exe-deprecated-name
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-23'
 phases:
 - id: P1
@@ -78,7 +78,7 @@ phases:
     docs /tmp/claude-501/docs-html-rexe'
 - id: P4
   name: 'Gate: the whole suite serially under 3.14 and 3.11, the docs'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -305,7 +305,7 @@ release note.
 **Satisfies:** R1–R6 · **Depends on:** P3
 **Goal:** the change holds together on both Pythons, with the docs.
 
-- [ ] Commit body: the suite totals per Python. A flaky failure is re-run once and recorded with its
+- [x] Commit body: the suite totals per Python. A flaky failure is re-run once and recorded with its
       node id and both outcomes.
 - **Verify:** see frontmatter.
 - **Touches:** `spec/relay-client-exe-deprecated-name/TECH.md` only.
