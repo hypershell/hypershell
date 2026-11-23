@@ -65,8 +65,8 @@ client.
 - `.local/IMPROVEMENTS.md` suggests `TASK_SPAWN_ERROR = -1003`; the value is the plan's to confirm
   against the current sentinel table.
 - Interaction to check at plan time: whether a spawn-error sentinel should be *terminal* or
-  retryable. `issues/resource-error-terminal-and-retry-defaults.md` asks the same question for
-  `-1001`/`-1002`, and the two answers should be consistent — a deterministic failure retried to
+  retryable. #119 (`spec/update-client-retry/GOAL.md`) made
+  `-1001`/`-1002` terminal, never retried, and the answer here should be consistent — a deterministic failure retried to
   exhaustion pins the group.
 - `client.py` has **no dedicated test file** (`AGENTS.md` high-risk list); its coverage is
   indirect. Plan for real tests here rather than relying on integration coverage.

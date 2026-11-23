@@ -52,5 +52,5 @@ They are declined as **standing debt** — we are not carrying them as things Hy
 ## Notes
 
 - The related-but-different question of *routing* a task to a node that fits it is answered by
-  `zone`, not by measurement — see `issues/resource-error-terminal-and-retry-defaults.md`.
+  `zone`, not by measurement — see `spec/update-client-retry/GOAL.md` (#119).
 - Origin: GNU Parallel comparison review, 2026-08 (M1, L1); declined 2026-08-07.

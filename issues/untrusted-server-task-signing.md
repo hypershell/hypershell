@@ -88,7 +88,7 @@ submitter set.
   its columns, and today's "never ran" outcomes are `exit_status` sentinels below `-1000`
   (`TASK_TEMPLATE_ERROR`, `TASK_RESOURCE_ERROR`, `client.py:717`). A refused task needs a terminal
   state that no failure or retry query picks up. Otherwise it is retried until its attempts run out
-  and then stalls its group (see `issues/resource-error-terminal-and-retry-defaults.md`), or, if left
+  and then stalls its group (as `-1001`/`-1002` did before #119, `spec/update-client-retry/GOAL.md`), or, if left
   unscheduled, it is dispatched to client after client indefinitely. Either it gets a reserved
   sentinel excluded from those queries, or R4's "never as a task exit status" needs a new column.
 

@@ -63,6 +63,6 @@ is written.
 ## Notes
 
 - Related: [`update-legacy-tag-lost-write.md`](update-legacy-tag-lost-write.md) (the same method's
-  tag write), [`update-delete-ignores-assignments.md`](update-delete-ignores-assignments.md) (the
-  other form's dropped arguments).
+  tag write), [`spec/update-client-retry/GOAL.md`](../spec/update-client-retry/GOAL.md) (#119: the
+  other form's dropped arguments, now refused).
 - Found by: `update-client-retry` shaping (2026-11-22), as a candidate seed.

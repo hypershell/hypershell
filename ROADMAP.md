@@ -134,17 +134,6 @@ forms stay by design, but a quoted token should exist and the contract should be
 of client-side sandboxing (Part IV)*
 **Seed:** [`issues/templating-and-remote-env-contract.md`](issues/templating-and-remote-env-contract.md)
 
-## Deterministic sentinels retry to exhaustion, then stall the group
-
-Both never-ran sentinels pass the failure filters, so a deterministic template error burns its whole
-retry budget and then pins the group. Retry defaults also diverge between standalone and cluster
-launch paths for no documented reason. The heterogeneous-fleet half of this finding — requeueing an
-over-large task to a fitter node — is answered by zones, not by fleet-capability introspection.
-
-*Target: 2.9.0 · Horizon: mid-term · Depends on: — · Refs: zones, shipped by `zone-dispatch` (#78),
-for the routing half*
-**Seed:** [`issues/resource-error-terminal-and-retry-defaults.md`](issues/resource-error-terminal-and-retry-defaults.md) · *status: adopted:update-client-retry*
-
 ## A restarted run stops before a pending retry
 
 `--restart` into a database whose only unfinished work is a retryable failure stops at START,
@@ -242,13 +231,6 @@ Under a local `hs cluster`, the in-process client uses the built-in heartrate ra
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/GOAL.md` (Non-goals)*
 **Seed:** [`issues/cluster-local-client-heartrate.md`](issues/cluster-local-client-heartrate.md) · *status: unshaped*
 
-## The cluster classes' `max_retries` defaults disagree with the server's
-
-The `LocalCluster`/`RemoteCluster`/`SSHCluster` constructors default `max_retries` differently from `ServerThread`, so the Python API and the commands can retry differently for the same configuration. Use one default, derived from `server.attempts`, everywhere; pin it with a test of each constructor.
-
-*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/research/`*
-**Seed:** [`issues/cluster-max-retries-defaults.md`](issues/cluster-max-retries-defaults.md) · *status: adopted:update-client-retry*
-
 ## A text `attempts = "3"` in a file crashes every command at import
 
 A configuration file holding `server.attempts` as a string makes every command fail at import with a traceback instead of a configuration error. Read typed keys from a file by the key's declared kind, as the environment layer does since #113, and refuse a value that does not convert with exit 3 naming the key and file.
@@ -306,17 +288,6 @@ on `develop`. Pre-existing; found by `update-client-retry` at plan time.
 `issues/database-locked-during-ingest-hangs.md`*
 **Seed:** [`issues/run-local-fresh-sqlite.md`](issues/run-local-fresh-sqlite.md) · *status: unshaped*
 
-## `hs update --delete` ignores field assignments and tag changes given with it
-
-`hs update --delete group=9` deletes the selected tasks and says nothing about `group=9`; a mistaken
-`--delete` in place of an update loses rows without a warning. `--delete` should refuse assignments,
-tag changes and `--remove-tag` as a usage error before the count. Pre-existing; out of scope for
-`hs-update-contended-writes` (#111).
-
-*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
-`spec/hs-update-contended-writes/` (Non-goals)*
-**Seed:** [`issues/update-delete-ignores-assignments.md`](issues/update-delete-ignores-assignments.md) · *status: adopted:update-client-retry*
-
 ## The legacy single-task tag edit can lose a concurrent tag change
 
 `hs update ID tag KEY:VALUE` reads the task's tags and writes back the merge, so a tag change
@@ -351,6 +322,19 @@ that. It absorbs the absurd-input seeds filed during the 2.9.0 cycles.
 `submit-input-checks` (landed, #118), `update-client-retry` · Refs: `core/config_schema.py`;
 review rubric (Scope)*
 **Seed:** [`issues/bounded-inputs.md`](issues/bounded-inputs.md) · *status: unshaped*
+
+## An unrecognized configuration key is silently ignored
+
+A misspelled key in a configuration file (`[server] attempt = 3`) or a `HYPERSHELL_*` variable that
+names no key loads without a word, and the command runs with the default. Since #113 the schema
+declares every key and how each table reads names past it, so an unknown key under a closed table
+can warn, naming its file and the closest declared key, and otherwise be ignored as today. Open
+tables, `[export]`, zone tables and the `_env`/`_eval` forms are exempt. A warning is patch-safe; a
+strict mode that refuses unknown keys would be a 2.10.0 interface change.
+
+*Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs:
+`src/hypershell/core/config_schema.py` (`KEYS`, `TABLES`); `issues/bounded-inputs.md` for values*
+**Seed:** [`issues/config-unknown-key-warning.md`](issues/config-unknown-key-warning.md) · *status: unshaped*
 
 ## On PostgreSQL, a task cannot ask for 2 GB of memory or more
 
@@ -491,17 +475,6 @@ first.
 (`zone-queue-primitive`, landed, #76) · Refs: `spec/zone-queue-primitive/` (review cycles 3–6: C5,
 C7–C10)*
 **Seed:** [`issues/queue-proxies-without-refcount.md`](issues/queue-proxies-without-refcount.md)
-
-## `hs client -b` reads the submit section's key, not the client section's
-
-`hs client` takes its `-b`/`-w` defaults from `submit.bundlesize`/`submit.bundlewait`, while the
-configuration reference documents `[client]`. Since zone-dispatch a client advertises an explicit
-`-b` as the size it requests, so a `submit.bundlesize` set for `hs submit` is advertised by every
-client too.
-
-*Target: 2.9.0 · Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) ·
-Refs: `spec/zone-dispatch/` (plan gate ruling N4)*
-**Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md) · *status: adopted:update-client-retry*
 
 ## `hs submit -q` cannot feed a server with a database
 
@@ -800,8 +773,8 @@ queries must not pick up, and how much replay of a signed command under retry to
 
 *Target: 2.10.0 · Horizon: near-term, in the 2.10.0 alphas · Depends on: the queue envelope above,
 to hold against a compromised server · Refs: pairs with
-client-side sandboxing above; `issues/resource-error-terminal-and-retry-defaults.md` (never-ran
-sentinels and retries)*
+client-side sandboxing above; `spec/update-client-retry/GOAL.md` (#119: never-ran
+sentinels are not retried)*
 **Seed:** [`issues/untrusted-server-task-signing.md`](issues/untrusted-server-task-signing.md) · *status: unshaped*
 
 ---
