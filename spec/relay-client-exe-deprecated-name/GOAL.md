@@ -90,7 +90,7 @@ whose clients must run a different installation says so with `hs relay --remote-
 - **Changing `hs cluster`'s `--remote-exe` default.** It already works; the plan may share code
   with it but SHALL NOT change what `hs cluster` launches.
 - **A per-zone remote executable** (`remote_exe` in `[relay.zone.NAME]`). All zones of one relay
-  run one installation (pending Q5).
+  run one installation (Q5).
 - **A command line as the remote executable.** The value names one program; a wrapper
   (`apptainer exec …`, `env …`) belongs in `--launcher`.
 - **Checking that the remote executable exists on the client's node**, or new diagnostics for a
@@ -106,7 +106,9 @@ whose clients must run a different installation says so with `hs relay --remote-
   seed's R1 ("resolved the way `hs cluster` resolves `--remote-exe`") is restated as an outcome,
   because `sys.argv[0]` is `-c` after the relay's re-execution (Problem); its R3 became R4 here.
 
-- **Q1** `[NEEDS CLARIFICATION: Python API default.]` `SSHCluster`, `RemoteCluster` and
+- **Q1 — The Python API default. Resolved 2026-11-23** (maintainer): **option (b)**. Both
+  `DEFAULT_REMOTE_EXE` constants (`cluster/ssh.py`, `cluster/remote.py`) become `'hs'`, the
+  exported name kept, and the 2.9.0 release notes say so (R6). As shaped: `SSHCluster`, `RemoteCluster` and
   `AutoScalingCluster` default `remote_exe` to `DEFAULT_REMOTE_EXE = 'hyper-shell'` (two
   constants, `ssh.py:42` and `remote.py:54`; the first is exported from `hypershell.cluster`).
   Options:
@@ -121,7 +123,10 @@ whose clients must run a different installation says so with `hs relay --remote-
   asserts `hyper-shell client` in an `hs cluster`-style launch message built from this default and
   will change with it.
 
-- **Q2** `[NEEDS CLARIFICATION: how the relay's own hs is resolved.]` Start forms: `hs relay` via
+- **Q2 — How the relay's own `hs` is resolved. Resolved 2026-11-23** (maintainer): **option (c)**.
+  `sys.argv[0]` made absolute when it names an existing file, captured before re-execution and
+  carried across it; else the `hs` in the interpreter's scripts directory; else the bare `hs`. The
+  mechanism is the plan's. As shaped: start forms: `hs relay` via
   `PATH` (`sys.argv[0]` is then the full path the shell found, symlink unresolved); `./bin/hs relay`
   (a relative path); `hyper-shell relay`; a site wrapper script that execs the real `hs`;
   `main(['relay', …])` from Python; and any of these with `--database`, which re-executes as
@@ -136,13 +141,17 @@ whose clients must run a different installation says so with `hs relay --remote-
   `bin/hs` stays the symlink, matching `hs cluster`), survives `--database`, and degrades to a
   path that still exists. The mechanism for carrying it across re-execution is `hs-plan`'s.
 
-- **Q3** `[NEEDS CLARIFICATION: a relay started as hyper-shell.]` When the user runs
+- **Q3 — A relay started as `hyper-shell`. Resolved 2026-11-23** (foreman, under the maintainer's
+  mandate): clients are launched as **the program the user ran**, whatever its name. As shaped:
+  when the user runs
   `hyper-shell relay`, should clients be launched as that `hyper-shell` path, or as the `hs`
   beside it? **Recommendation: the program the user ran, whatever its name.** It exists by
   construction, and the seed's "never by the deprecated name" targets the bare-name default,
   not an absolute path the user chose. R4 is worded to allow this.
 
-- **Q4** `[NEEDS CLARIFICATION: launchers that leave the host.]` The relay has no `--ssh` mode,
+- **Q4 — Launchers that leave the host. Resolved 2026-11-23** (foreman, under the maintainer's
+  mandate): **option (a)**, no special case; the docs say the absolute path assumes a shared
+  installation and that `--remote-exe` is the escape hatch. As shaped: the relay has no `--ssh` mode,
   but `--launcher` may be `srun`, `mpirun` or `ssh HOST`, and a client may land on a node that does
   not see the relay's installation at the same path. Options: (a) no special case: the absolute
   path assumes a shared installation, and `--remote-exe`/`relay.remote_exe` is the escape hatch,
@@ -150,16 +159,33 @@ whose clients must run a different installation says so with `hs relay --remote-
   (a).** It is what `hs cluster` does under `--ssh` and `--launcher`, and (b) reintroduces the
   `PATH` dependency that caused this defect.
 
-- **Q5** `[NEEDS CLARIFICATION: per-zone remote executable.]` Should `[relay.zone.NAME]` accept
+- **Q5 — A per-zone remote executable. Resolved 2026-11-23** (foreman, under the maintainer's
+  mandate): **no**, not in this cycle. As shaped: should `[relay.zone.NAME]` accept
   `remote_exe` beside `launcher` and `launcher_args`? **Recommendation: no, not in this cycle**
   (Non-goals). The zones of one relay share its host and filesystem; a zone that needs another
   installation can wrap it in its own launcher. A later seed can add it.
 
-- **Q6** `[NEEDS CLARIFICATION: an empty relay.remote_exe.]` Should an empty value (including an
+- **Q6 — An empty `relay.remote_exe`. Resolved 2026-11-23** (foreman, under the maintainer's
+  mandate): **not given**; the key joins `EMPTY_UNSET`. As shaped: should an empty value (including an
   empty `HYPERSHELL_RELAY_REMOTE_EXE`) mean "not given" (add the key to `EMPTY_UNSET`, like
   `relay.advertise`), or be refused at start? **Recommendation: not given**, matching the other
   optional text keys of `[relay]`; an empty `--remote-exe ''` on the command line is absurd input
   and out of scope.
+
+**Ruled at the GOAL gate** (2026-11-23). Approved by the foreman, gate judge under the maintainer's
+mandate, with the maintainer's own rulings on Q1 and Q2.
+
+- **Q1 (maintainer, 2026-11-23):** option (b). Both `DEFAULT_REMOTE_EXE` constants become `'hs'`,
+  keeping the exported name. The 2.9.0 release notes say so.
+- **Q2 (maintainer, 2026-11-23):** option (c). `sys.argv[0]` made absolute when it names an existing
+  file, captured before re-execution and carried across it; else the `hs` in the interpreter's
+  scripts directory; else the bare `hs`. The mechanism is the plan's.
+- **Q3:** `hyper-shell relay` launches clients as the program the user ran.
+- **Q4:** no special case for launchers that leave the host. The absolute path assumes a shared
+  installation, `--remote-exe` is the escape hatch, and the docs say so.
+- **Q5:** no per-zone `remote_exe` this cycle.
+- **Q6:** an empty `relay.remote_exe` is not given (`EMPTY_UNSET`).
+- The contract is locked; `hs-plan` designs against it.
 
 ## Related materials
 
