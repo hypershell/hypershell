@@ -56,6 +56,11 @@ sites where clients must run a different installation.
 
 - Check every caller of `client_launch` and `DEFAULT_REMOTE_EXE` (`cluster/remote.py` SSH and
   autoscaling paths as well as `relay/site.py`), so the fix lands once.
+- There are two constants, not one: `cluster/ssh.py:42` defines its own `DEFAULT_REMOTE_EXE =
+  'hyper-shell'`, exported from `hypershell.cluster`. The Python API's `SSHCluster` and the remote
+  and autoscaling cluster classes default `remote_exe` to them (`ssh.py:248`, `remote.py:259`,
+  `:964`), so changing the default changes the Python API as well as the relay. Shaping decides
+  whether the API keeps the name.
 - With `--ssh`, the remote host may lay out the installation differently; keep `--remote-exe` as
   the escape hatch there, as today.
 - Found while drafting the RCAC Workflow Automation guide's tier 4 (RCAC-Docs PR #338), 2026-11-23.

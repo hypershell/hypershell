@@ -211,6 +211,19 @@ has the same shape: it waits on its topology publisher, which never looks at the
 (`DESIGN.md` item 6)*
 **Seed:** [`issues/autoscaling-cluster-ignores-usr1.md`](issues/autoscaling-cluster-ignores-usr1.md) · *status: unshaped*
 
+## A relay starts its clients as the deprecated `hyper-shell`
+
+A relay launches every site client as the literal `hyper-shell client …` (`relay/site.py`, from
+`DEFAULT_REMOTE_EXE`), with no option or key to change it. Where an installation puts only `hs` and
+`hsx` on `PATH`, every relay launch fails with command-not-found. `hs cluster` already defaults
+`--remote-exe` to the path of the `hs` the user ran. The fix gives the relay the same default plus
+`--remote-exe` and `relay.remote_exe`, and retires `hyper-shell` as a launch default.
+
+*Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs: `cluster/__init__.py`
+(`--remote-exe`), `cluster/ssh.py` and `cluster/remote.py` (`DEFAULT_REMOTE_EXE`); blocks the RCAC
+user guide's tier 4*
+**Seed:** [`issues/relay-client-exe-deprecated-name.md`](issues/relay-client-exe-deprecated-name.md) · *status: unshaped*
+
 ## `hs update group=…` stores a non-integer group
 
 `hs update` accepts any value for `group` and stores it, so a text group reaches the scheduler even after submit-time validation (`submit-input-checks`) refuses one. Apply the submit-time integer rule to `hs update group=…`, refusing with exit 2 before anything is written.
