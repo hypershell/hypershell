@@ -214,8 +214,8 @@ in that process's environment. A client started by hand has it there only if
 its key comes from that variable rather than from ``server.auth``.
 
 .. versionchanged:: 2.9.0
-   A client started by hand takes its key from the environment or a configuration
-   file, never from the command line.
+   :pr:`104`: a client started by hand takes its key from the environment or a configuration file,
+   never from the command line.
 
 Incoming arguments are intelligently coerced into the expected type.
 E.g., ``2`` will be an integer, ``4.67`` a float, ``null`` and ``none``

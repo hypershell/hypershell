@@ -136,8 +136,8 @@ must hold. Give the key in the ``HYPERSHELL_SERVER_AUTH`` environment variable, 
 command line, where every user on the host could see it.
 
 .. versionchanged:: 2.9.0
-   A key on the command line is refused; the server and its clients take it from the environment
-   or a configuration file.
+   :pr:`104`: a key on the command line is refused; the server and its clients take it from the
+   environment or a configuration file.
 
 .. admonition:: Server
     :class: note

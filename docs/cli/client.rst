@@ -23,26 +23,26 @@ Description
    size it asks for; left unset, the server's size applies.
 
 .. versionchanged:: 2.9.0
-   A key on the command line is refused; the client takes it from the environment or a configuration
-   file.
+   :pr:`104`: a key on the command line is refused; the client takes it from the environment or a
+   configuration file.
 
 .. versionchanged:: 2.9.0
-   ``-R``/``--ratelimit`` takes a number (e.g., ``-R 0.5``, one task every two seconds), as
-   ``client.ratelimit`` does. A rate other than ``0`` under ``0.000001`` is refused.
+   :pr:`117`: ``-R``/``--ratelimit`` takes a number (e.g., ``-R 0.5``, one task every two seconds),
+   as ``client.ratelimit`` does. A rate other than ``0`` under ``0.000001`` is refused.
 
 .. versionchanged:: 2.9.0
-   ``-w``/``--bundlewait``, ``-S``/``--signalwait`` and ``-d``/``--delay-start`` take a duration
-   with units or a Slurm time, as ``-W`` does, and a signed value is refused except on
+   :pr:`106`: ``-w``/``--bundlewait``, ``-S``/``--signalwait`` and ``-d``/``--delay-start`` take a
+   duration with units or a Slurm time, as ``-W`` does, and a signed value is refused except on
    ``--delay-start``, where a leading ``-`` still asks for a random delay (e.g.,
    ``--delay-start=-10m``).
 
 .. versionchanged:: 2.9.0
-   A client with nothing left to run (no task running and none waiting to start) returns the results
-   it holds at once, instead of waiting out ``-w``/``--bundlewait``. With work in hand it bundles as
-   before.
+   :pr:`115`: a client with nothing left to run (no task running and none waiting to start) returns
+   the results it holds at once, instead of waiting out ``-w``/``--bundlewait``. With work in hand
+   it bundles as before.
 
 .. versionchanged:: 2.9.0
-   ``hs client`` reads ``client.bundlesize`` (or ``HYPERSHELL_CLIENT_BUNDLESIZE``) and
+   :pr:`119`: ``hs client`` reads ``client.bundlesize`` (or ``HYPERSHELL_CLIENT_BUNDLESIZE``) and
    ``client.bundlewait`` for its ``-b`` and ``-w`` defaults; ``submit.bundlesize`` and
    ``submit.bundlewait`` no longer reach it (move them to ``[client]``).
 

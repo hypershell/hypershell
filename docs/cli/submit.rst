@@ -24,11 +24,11 @@ Description
    with ``--no-db``.
 
 .. versionchanged:: 2.9.0
-   A key on the command line is refused; ``--queue`` takes it from the environment or a
+   :pr:`104`: a key on the command line is refused; ``--queue`` takes it from the environment or a
    configuration file.
 
 .. versionchanged:: 2.9.0
-   ``-w``/``--bundlewait`` takes a duration with units or a Slurm time, as ``-W`` does, and a
-   signed value is refused.
+   :pr:`106`: ``-w``/``--bundlewait`` takes a duration with units or a Slurm time, as ``-W`` does,
+   and a signed value is refused.
 
 .. include:: ../_include/submit_help.rst

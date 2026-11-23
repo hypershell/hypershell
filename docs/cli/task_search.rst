@@ -24,7 +24,7 @@ Description
    ``--count``. :commit:`210a93e`: output to a terminal is colorized by exit status.
 
 .. versionchanged:: 2.9.0
-   On SQLite, ``-t``/``--with-tag`` with several tag names and no values requires every one of
-   them, as on PostgreSQL; before, only the last name was checked.
+   :pr:`111`: on SQLite, ``-t``/``--with-tag`` with several tag names and no values requires every
+   one of them, as on PostgreSQL; before, only the last name was checked.
 
 .. include:: ../_include/task_search_help.rst

@@ -122,8 +122,8 @@ upgrade gives up with an error that names what it waited on and leaves the schem
 find and stop that session, then try again.
 
 .. versionchanged:: 2.9.0
-   A failed task's retry and its ``retried`` mark are recorded together, so a server stopped
-   while scheduling a retry no longer leaves the task to be retried twice.
+   :pr:`109`: a failed task's retry and its ``retried`` mark are recorded together, so a server
+   stopped while scheduling a retry no longer leaves the task to be retried twice.
 
 SQLite cannot drop a table constraint without rebuilding the table, so a SQLite database
 created by an earlier release (2.8, or the 2.9.0a1 pre-release) keeps those ``UNIQUE``

@@ -22,8 +22,8 @@ an error naming its value and line; the lines after it run as they would without
 tag-only line sets nothing. ``-t group:x`` exits with status 2 before any input is read.
 
 .. versionchanged:: 2.9.0
-   A group that is not an integer is refused. Earlier releases stored such values as given on
-   SQLite and ran them in an undocumented order, and ``group:nan`` hung the run.
+   :pr:`118`: a group that is not an integer is refused. Earlier releases stored such values as
+   given on SQLite and ran them in an undocumented order, and ``group:nan`` hung the run.
 
 The server advances through groups automatically as each one completes. If a group cannot be
 completed because it still holds failed tasks (after any ``--max-retries`` attempts are
@@ -73,8 +73,9 @@ file whose such line is in a lower group is refused. An old task stored cut that
 group failed until it is cancelled or updated with ``hs update``.
 
 .. versionchanged:: 2.9.0
-   A task below the reached group is refused by ``hs submit``, and a task file holding one by
-   ``hs cluster`` and ``hs server``; ``hs submit`` reads standard input in full before submitting.
+   :pr:`118`: a task below the reached group is refused by ``hs submit``, and a task file holding
+   one by ``hs cluster`` and ``hs server``; ``hs submit`` reads standard input in full before
+   submitting.
 
 Filter or update tasks by group with the ``-g``/``--group`` option of ``hs list`` and
 ``hs update``.

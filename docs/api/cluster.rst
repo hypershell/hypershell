@@ -28,8 +28,8 @@ classes also give each launch the ``[export]`` environment. Otherwise everything
 caller.
 
 .. versionchanged:: 2.9.0
-   A ``max_retries`` not given follows ``server.attempts`` (none with the built-in default);
-   before, each cluster class retried every failed task once, whatever the configuration.
+   :pr:`119`: a ``max_retries`` not given follows ``server.attempts`` (none with the built-in
+   default); before, each cluster class retried every failed task once, whatever the configuration.
 
 |
 

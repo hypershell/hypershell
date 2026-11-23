@@ -25,9 +25,9 @@ with shell quoting (``echo '#'' HYPERSHELL:'``). With ``--template``, each line 
 template is applied, so comment, blank and tag-only lines never become tasks.
 
 .. versionchanged:: 2.9.0
-   A ``#`` after a line's first non-blank character is part of the command; earlier releases cut
-   the command at the first ``#``. Under ``--template``, comment, blank and tag-only lines are no
-   longer submitted as tasks.
+   :pr:`118`: a ``#`` after a line's first non-blank character is part of the command; earlier
+   releases cut the command at the first ``#``. Under ``--template``, comment, blank and tag-only
+   lines are no longer submitted as tasks.
 
 A task's group must be an integer, as ``-g``/``--group`` takes it, whether it comes from
 ``-t group:N``, an inline ``group:`` tag or a ``--from-json`` record. A task file, a JSON source,
@@ -44,8 +44,8 @@ submission that names no group (no ``-g`` and no group tag) takes the reached gr
 recently scheduled group is below it, so it is never refused.
 
 .. versionchanged:: 2.9.0
-   A group that is not an integer is refused; a task below the reached group is refused; with the
-   database, standard input is read in full before anything is submitted.
+   :pr:`118`: a group that is not an integer is refused; a task below the reached group is refused;
+   with the database, standard input is read in full before anything is submitted.
 
 With ``--from-json``, read tasks from a JSON file instead. The value is
 ``FILE[@path]`` where the optional dotted ``path`` locates the list of task objects
@@ -59,8 +59,9 @@ is committed if a field is missing. The ``args`` value is taken as written: ``#`
 command in the task's group, with its tags and its cores, memory and walltime.
 
 .. versionchanged:: 2.9.0
-   A retry runs its task's command as stored, in the task's group and with its tags; earlier
-   releases read the command of a ``--from-json`` task again for its retry, cutting it at a ``#``.
+   :pr:`118`: a retry runs its task's command as stored, in the task's group and with its tags;
+   earlier releases read the command of a ``--from-json`` task again for its retry, cutting it at a
+   ``#``.
 
 Re-submitting a named task file is guarded to prevent accidental double submission. Each
 named file is recorded as a *source* (its absolute path, a content fingerprint, and the

@@ -85,7 +85,7 @@ variable name, the environment's value wins over a file's; ``HYPERSHELL_EXPORT_f
 file's ``foo`` gives a task both ``foo`` and ``FOO``.
 
 .. versionchanged:: 2.9.0
-   A ``HYPERSHELL_EXPORT_`` variable reaches tasks with its name and value as written.
+   :pr:`113`: a ``HYPERSHELL_EXPORT_`` variable reaches tasks with its name and value as written.
 
 For example,
 

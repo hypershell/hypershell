@@ -17,7 +17,7 @@ characters drawn from ``[A-Za-z0-9._+/=-]``. The key is never transmitted over t
 even so, treat every host that holds it as inside the trust boundary.
 
 .. versionchanged:: 2.9.0
-   A key on the command line is refused.
+   :pr:`104`: a key on the command line is refused.
 
 Disable TLS per invocation with ``--no-tls``, or permanently with ``server.tls.enabled = false``
 (not recommended; a warning is logged). The client verifies the server certificate in one of four

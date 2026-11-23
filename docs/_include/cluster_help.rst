@@ -116,7 +116,7 @@ Options
     See also ``--bundlesize``.
 
 ``-Q``, ``--poll`` *SEC*
-    Polling interval between database queries if no tasks are available (default: 5).
+    Polling interval between database queries if no tasks are available (default: 30).
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,

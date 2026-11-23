@@ -477,8 +477,8 @@ subcommand accepts, e.g. ``--bind <tab>`` offering ``localhost`` or ``0.0.0.0``)
 * ``hsx ... --ssh-group <tab>`` completes SSH nodelist groups from your config.
 
 .. versionchanged:: 2.9.0
-   The completions for ``hs server``, ``hs client`` and ``hs submit`` no longer offer a key option,
-   since those commands refuse a key on the command line.
+   :pr:`104`: the completions for ``hs server``, ``hs client`` and ``hs submit`` no longer offer a
+   key option, since those commands refuse a key on the command line.
 
 .. admonition:: Completions that query the database
     :class: note

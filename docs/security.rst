@@ -101,7 +101,7 @@ channel:
    so DoS resistance must come from firewall and rate-limit controls at the network layer.
 
    .. versionchanged:: 2.9.0
-      A TLS queue server closes a connection that does not complete its handshake within
+      :pr:`108`: a TLS queue server closes a connection that does not complete its handshake within
       ``server.tls.handshake``.
 
 The defenses below address (1)–(3) directly and partially address (4). DoS mitigation is
@@ -184,8 +184,8 @@ of them there is refused with a usage error that does not repeat it, and the com
 else.
 
 .. versionchanged:: 2.9.0
-   A key on the command line is refused; ``hs server``, ``hs client`` and ``hs submit`` take it
-   from the environment or the configuration.
+   :pr:`104`: a key on the command line is refused; ``hs server``, ``hs client`` and ``hs submit``
+   take it from the environment or the configuration.
 
 To keep the shared secret meaningful, ``hs server`` **refuses to start** with the built-in
 placeholder key and enforces a minimum key policy: the key must be at least 16 characters and
@@ -249,8 +249,8 @@ key generators used in the deployment guides below satisfy this policy.
     recognised by the matcher wherever *HyperShell* handles them by name.
 
     .. versionchanged:: 2.9.0
-       Key variables and relay variables are recognised by the matcher wherever *HyperShell*
-       handles them by name.
+       :pr:`113`: key variables and relay variables are recognised by the matcher wherever
+       *HyperShell* handles them by name.
 
     Tasks run with their client's environment, except that the client passes no key variable
     to them, and takes ``HYPERSHELL_SERVER_AUTH`` out of
@@ -386,7 +386,7 @@ dial, so advertise a name the certificate carries, or set ``servername``. With C
 certificate is checked against ``servername`` instead, and fingerprint pinning checks no name.
 
 .. versionadded:: 2.9.0
-   ``--advertise``, ``server.advertise`` and ``relay.advertise``.
+   ``--advertise`` and ``server.advertise`` (:pr:`107`); ``relay.advertise`` (:pr:`116`).
 
 |
 
@@ -429,7 +429,7 @@ Understanding these properties matters most for deployments on untrusted network
    protection must come from the network layer (see the deployment guides).
 
    .. versionchanged:: 2.9.0
-      The ``server.tls.handshake`` deadline.
+      :pr:`108`: the ``server.tls.handshake`` deadline.
 
 5. **IPv4 only.** The built-in TLS queue listener binds ``AF_INET`` (IPv4). On IPv6-only or
    IPv6-preferred networks, clients must reach the server over an IPv4 address.

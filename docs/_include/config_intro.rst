@@ -191,5 +191,6 @@ hold (e.g., a zone ``gpu-a100``).
 .. only:: html
 
     .. versionchanged:: 2.9.0
-       A key whose name has an underscore, open-table entries, zone tables, ``_ENV``/``_EVAL``,
-       values as written, and an empty value for an optional text key read as not given.
+       :pr:`113`: a key whose name has an underscore, open-table entries, zone tables,
+       ``_ENV``/``_EVAL``, values as written, and an empty value for an optional text key read as
+       not given.

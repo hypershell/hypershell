@@ -60,7 +60,8 @@ Design elements include but are not limited to:
     * **TimescaleDB and in-place upgrades:** a TimescaleDB provider with compression, and the first
       2.9 process upgrades a 2.8 database in place.
     * **Task files:** submit tasks from JSON, submit the same file again safely, and pin each task
-      to its own core or GPU.
+      to its own core or GPU. A ``#`` inside a command now stays in it, and a task group must be a
+      whole number.
     * **Installing 2.9:** it is a pre-release, so use ``pip install --pre hypershell``. Upgrade the
       server and every client together, and back up the database first.
     * **2.8.1 to 2.8.7:** fixes for cancelled tasks, retries, and stranded task groups, and the run

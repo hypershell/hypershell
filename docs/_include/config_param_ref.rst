@@ -59,8 +59,8 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               ``HYPERSHELL_LOGGING_FILE`` takes ``enabled`` in any letter case and refuses the
-               false words.
+               :pr:`113`: ``HYPERSHELL_LOGGING_FILE`` takes ``enabled`` in any letter case and
+               refuses the false words.
 
         ``.path``
             Destination file path. Defaults to a per-process, host-scoped file in the site
@@ -205,6 +205,7 @@
         .. only:: html
 
             .. versionadded:: 2.9.0
+               :pr:`107`
 
     ``.port``
         Port number (default: `50001`).
@@ -285,13 +286,13 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               ``hs cluster`` reads it; before, it retried no task unless given ``-r``.
+               :pr:`117`: ``hs cluster`` reads it; before, it retried no task unless given ``-r``.
 
             .. versionchanged:: 2.9.0
-               A task that did not run (``-1001``, ``-1002``) is never retried, and a retry keeps its
-               task's cores, memory and walltime. The Python API reads it for a ``max_retries`` not
-               given; before, the cluster classes retried each failed task once and the server
-               functions never.
+               :pr:`119`: a task that did not run (``-1001``, ``-1002``) is never retried, and a
+               retry keeps its task's cores, memory and walltime. The Python API reads it for a
+               ``max_retries`` not given; before, the cluster classes retried each failed task once
+               and the server functions never.
 
     ``.eager``
         Schedule failed tasks before new tasks (default: `false`).
@@ -308,7 +309,8 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               ``hs server`` and ``hs cluster`` read it; before, only ``--eager`` took effect.
+               :pr:`117`: ``hs server`` and ``hs cluster`` read it; before, only ``--eager`` took
+               effect.
 
     ``.poll``
         Maximum polling interval in seconds between database queries when no tasks are
@@ -326,10 +328,10 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`106`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               The result that finishes a run ends the wait.
+               :pr:`115`: the result that finishes a run ends the wait.
 
     ``.evict``
         Eviction period in seconds for clients (default: `600`).
@@ -349,13 +351,14 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A heartbeat is aged from when the server received it, not by the client's clock.
+               :pr:`103`: a heartbeat is aged from when the server received it, not by the client's
+               clock.
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`113`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               ``hs cluster`` reads it in every mode; before, it always used 600 seconds.
+               :pr:`117`: ``hs cluster`` reads it in every mode; before, it always used 600 seconds.
 
     ``[tls]``
         Transport-layer security for queue connections. Enabled by default; every key below
@@ -430,6 +433,7 @@
             .. only:: html
 
                 .. versionadded:: 2.9.0
+                   :pr:`108`
 
 ``[client]``
     Section for `client` workflow parameters.
@@ -456,7 +460,8 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               ``hs client`` reads it and advertises it when set; before, it read ``submit.bundlesize``.
+               :pr:`119`: ``hs client`` reads it and advertises it when set; before, it read
+               ``submit.bundlesize``.
 
     ``.bundlewait``
         Seconds to wait before flushing task bundle (default: `5`).
@@ -477,8 +482,8 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A client with nothing left to run returns what it holds without waiting.
-               ``hs client`` reads it; before, it read ``submit.bundlewait``.
+               :pr:`115`: a client with nothing left to run returns what it holds without
+               waiting. :pr:`119`: ``hs client`` reads it; before, it read ``submit.bundlewait``.
 
     ``.heartrate``
         Interval in seconds between heartbeats sent to server (default `10`).
@@ -491,7 +496,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`113`: a string with units or a Slurm time.
 
     ``.timeout``
         Timeout in seconds for client. Automatically shutdown if no tasks received (default: never).
@@ -532,7 +537,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               ``hs cluster`` reads it, in place of an undocumented ``task.ratelimit``.
+               :pr:`117`: ``hs cluster`` reads it, in place of an undocumented ``task.ratelimit``.
 
 ``[submit]``
     Section for `submit` workflow parameters.
@@ -551,7 +556,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               ``hs client`` no longer reads it; it reads ``client.bundlesize``.
+               :pr:`119`: ``hs client`` no longer reads it; it reads ``client.bundlesize``.
 
     ``.bundlewait``
         Seconds to wait before flushing tasks (default: `5`).
@@ -570,7 +575,8 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time. ``hs client`` no longer reads it.
+               :pr:`106`: a string with units or a Slurm time. :pr:`119`: ``hs client`` no longer
+               reads it.
 
 
 ``[task]``
@@ -618,7 +624,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`106`: a string with units or a Slurm time.
 
 ``[ssh]``
     SSH configuration section.
@@ -695,10 +701,11 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`106`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               A period of zero or less is refused; a number below one second is one second.
+               :pr:`112`: a period of zero or less is refused; a number below one second is one
+               second.
 
     ``.launcher``
         Command prefix used to launch each client as a scaling unit (default: none).
@@ -771,6 +778,7 @@
         .. only:: html
 
             .. versionadded:: 2.9.0
+               :pr:`107`
 
     ``[size]``
         ``.init``
@@ -834,6 +842,11 @@
 
         See also ``--advertise`` command-line option.
 
+        .. only:: html
+
+            .. versionadded:: 2.9.0
+               :pr:`116`
+
     ``.port``
         Port of the relay-local *server* (default: `50002`).
 
@@ -858,10 +871,11 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`113`: a string with units or a Slurm time.
 
             .. versionchanged:: 2.9.0
-               A site client with nothing left to run returns what it holds without waiting.
+               :pr:`115`: a site client with nothing left to run returns what it holds without
+               waiting.
 
     ``.poll``
         Maximum polling interval of the relay-local scheduler in seconds (default: `0.1`).
@@ -874,7 +888,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`113`: a string with units or a Slurm time.
 
     ``.retention``
         Seconds a result is kept in the relay database after it has been returned upstream
@@ -886,7 +900,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`113`: a string with units or a Slurm time.
 
     ``.zone``
         Zone or zones the relay serves (default: none, the default zone).
@@ -985,7 +999,7 @@
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               :pr:`113`: a string with units or a Slurm time.
 
     ``[upstream]``
         Connection to the upstream *server*. These settings are never read from ``[server]``,
@@ -1026,7 +1040,7 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   A string with units or a Slurm time.
+                   :pr:`113`: a string with units or a Slurm time.
 
         ``.deadline``
             Seconds a call to the upstream *server* may take before the relay takes the connection
@@ -1042,7 +1056,7 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   A string with units or a Slurm time.
+                   :pr:`113`: a string with units or a Slurm time.
 
         ``.backoff``
             Longest wait in seconds between attempts to reach the upstream *server* again
@@ -1057,7 +1071,7 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   A string with units or a Slurm time.
+                   :pr:`113`: a string with units or a Slurm time.
 
         ``.evict_hint``
             Seconds of lost contact after which the relay takes the upstream *server* to have
@@ -1074,7 +1088,7 @@
             .. only:: html
 
                 .. versionchanged:: 2.9.0
-                   A string with units or a Slurm time.
+                   :pr:`113`: a string with units or a Slurm time.
 
         ``[tls]``
             ``.enabled``

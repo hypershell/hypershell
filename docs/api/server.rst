@@ -19,7 +19,8 @@ queue size (``server.queuesize``) and bundle maximum (``server.bundlemax``) of
 passed by the caller, and configuration does not override the defaults below.
 
 .. versionchanged:: 2.9.0
-   A ``max_retries`` not given follows ``server.attempts`` (none with the built-in default).
+   :pr:`119`: a ``max_retries`` not given follows ``server.attempts`` (none with the built-in
+   default).
 
 |
 

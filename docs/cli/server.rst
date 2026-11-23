@@ -20,51 +20,52 @@ Description
    for no size of its own, and ``server.bundlemax`` caps every reply.
 
 .. versionchanged:: 2.9.0
-   A key on the command line is refused; the server takes it from the environment or a configuration
-   file.
+   :pr:`104`: a key on the command line is refused; the server takes it from the environment or a
+   configuration file.
 
 .. versionchanged:: 2.9.0
-   ``--initdb`` initializes the database at launch, as for ``hs submit`` and ``hs cluster``, and
-   ``--no-db`` leaves the configured database alone.
+   :pr:`105`: ``--initdb`` initializes the database at launch, as for ``hs submit`` and
+   ``hs cluster``, and ``--no-db`` leaves the configured database alone.
 
 .. versionchanged:: 2.9.0
-   ``-w``/``--bundlewait``, ``-Q``/``--poll`` and ``-P``/``--period`` take a duration with units or
-   a Slurm time, as ``-W`` does, and a signed value is refused.
+   :pr:`106`: ``-w``/``--bundlewait``, ``-Q``/``--poll`` and ``-P``/``--period`` take a duration
+   with units or a Slurm time, as ``-W`` does, and a signed value is refused.
 
 .. versionchanged:: 2.9.0
-   ``server.eager`` takes effect without ``--eager``; before, the key was ignored. A value in a file
-   takes the boolean words, ``1``/``0`` included, and any other value stops the server before it starts.
+   :pr:`117`: ``server.eager`` takes effect without ``--eager``; before, the key was ignored. A
+   value in a file takes the boolean words, ``1``/``0`` included, and any other value stops the
+   server before it starts.
 
 .. versionchanged:: 2.9.0
-   A run fed by a stream (standard input, a pipe or a named pipe) ends once that input ends and
-   every task is done, not once the tasks read so far are done, so a line that arrives after a pause
-   still runs. Input that is never closed keeps the run going until it is.
+   :pr:`110`: a run fed by a stream (standard input, a pipe or a named pipe) ends once that input
+   ends and every task is done, not once the tasks read so far are done, so a line that arrives
+   after a pause still runs. Input that is never closed keeps the run going until it is.
 
 .. versionchanged:: 2.9.0
-   ``-P``/``--period`` and ``autoscale.period`` must be greater than zero; zero or a negative
-   value is refused.
+   :pr:`112`: ``-P``/``--period`` and ``autoscale.period`` must be greater than zero; zero or a
+   negative value is refused.
 
 .. versionchanged:: 2.9.0
-   The result that finishes a run ends the scheduler's wait at once: a server whose input has ended
-   no longer waits out its back-off (up to ``-Q``/``--poll``) after the last task. With
+   :pr:`115`: the result that finishes a run ends the scheduler's wait at once: a server whose input
+   has ended no longer waits out its back-off (up to ``-Q``/``--poll``) after the last task. With
    ``--forever`` it keeps waiting, and nothing else about scheduling changes.
 
 .. versionchanged:: 2.9.0
-   A task that did not run, its template not expanding (``-1001``) or it needing more cores or
-   memory than its client has (``-1002``), is never retried, and its group fails at once, as for a
-   task with no retries left; before, with retries, it was retried until they ran out. A retry
-   keeps its task's cores, memory and walltime; before, it ran with none of them.
+   :pr:`119`: a task that did not run, its template not expanding (``-1001``) or it needing more
+   cores or memory than its client has (``-1002``), is never retried, and its group fails at once,
+   as for a task with no retries left; before, with retries, it was retried until they ran out. A
+   retry keeps its task's cores, memory and walltime; before, it ran with none of them.
 
 .. versionchanged:: 2.9.0
-   A line whose first non-blank character is ``#`` is a comment, and a ``#`` anywhere else is part
-   of the command, run as written; earlier releases cut the command at the first ``#``. The
-   ``# HYPERSHELL:`` marker is recognised anywhere on a line, so a command that must contain that
-   text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be an
+   :pr:`118`: a line whose first non-blank character is ``#`` is a comment, and a ``#`` anywhere
+   else is part of the command, run as written; earlier releases cut the command at the first ``#``.
+   The ``# HYPERSHELL:`` marker is recognised anywhere on a line, so a command that must contain
+   that text breaks it with shell quoting (``echo '#'' HYPERSHELL:'``). A task's group must be an
    integer: a *FILE* holding any other group value is refused whole, with nothing run, naming the
    value and its line, while on a stream only the offending line is refused, with an error naming
-   it. With a database kept from an earlier run, a *FILE* that would submit a task below its
-   reached group is refused before anything runs; tasks still in flight from an interrupted run do
-   not count. A stream's late lower group still runs, with a warning.
+   it. With a database kept from an earlier run, a *FILE* that would submit a task below its reached
+   group is refused before anything runs; tasks still in flight from an interrupted run do not
+   count. A stream's late lower group still runs, with a warning.
 
 .. include:: ../_include/server_help.rst
 
