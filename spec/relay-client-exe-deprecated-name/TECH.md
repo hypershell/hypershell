@@ -3,7 +3,7 @@ slug: relay-client-exe-deprecated-name
 title: A relay starts its site clients with its own hs, not the legacy hyper-shell
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/relay-client-exe-deprecated-name
 base: develop
 current_phase: done
