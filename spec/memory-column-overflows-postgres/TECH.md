@@ -3,7 +3,7 @@ slug: memory-column-overflows-postgres
 title: On PostgreSQL, a task can declare 2 GiB of memory or more
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/memory-column-overflows-postgres
 base: develop
 current_phase: done
