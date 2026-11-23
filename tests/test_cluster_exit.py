@@ -321,6 +321,7 @@ def test_watch_only_warns_when_the_server_ends_on_its_own(monkeypatch: MonkeyPat
     pytest.param("sh -c 'exit 3'", 'status 3', id='status'),
     pytest.param("sh -c 'kill -9 $$'", 'signal 9 (SIGKILL)', id='signal'),
 ])
+@mark.xfail(strict=True, reason='relay-remote-exe P3')
 def test_launcher_cluster_exits_when_every_client_fails(temp_site: Path, in_memory: bool,
                                                         launcher: str, exited: str) -> None:
     """A launcher that fails with work left stops the server and raises within the bound, naming it."""
@@ -329,7 +330,7 @@ def test_launcher_cluster_exits_when_every_client_fails(temp_site: Path, in_memo
     assert seen['error']['type'] == 'ClusterLaunchError'
     message = seen['error']['message']
     assert message.startswith('every launched client has exited with tasks remaining: ')
-    assert f'{launcher} hyper-shell client ' in message and f'exited with {exited}' in message
+    assert f'{launcher} hs client ' in message and f'exited with {exited}' in message
     assert f'clients were told to dial {ADDRESS}:' in message
     assert seen['elapsed'] <= STOP_BOUND, seen
     assert not seen['server_alive']

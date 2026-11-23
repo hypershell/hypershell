@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/relay-client-exe-deprecated-name
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-23'
 phases:
 - id: P1
   name: Tests first, strict xfail where the fix is missing (tests only)
-  status: pending
+  status: done
   satisfies:
   - R5
   depends_on: []
@@ -189,12 +189,12 @@ one atomic code+state commit.
 **Goal:** every test this cycle needs is in the tree and collected; each that needs the fix is a
 strict xfail naming the phase that fixes it; the rest pass. No change outside `tests/` and `spec/`.
 
-- [ ] New `tests/test_relay_remote_exe.py` (module docstring: the program a relay's site clients are
+- [x] New `tests/test_relay_remote_exe.py` (module docstring: the program a relay's site clients are
       launched as — the option, else the key, else the relay's own `hs` — and the Python API default):
-  - [ ] **R5 end to end** (`@mark.integration`, xfail P2): the prototype's
+  - [x] **R5 end to end** (`@mark.integration`, xfail P2): the prototype's
         `test_relay_from_a_symlinked_hs_runs_its_clients[plain|database]`, unchanged but for the
         docstring sentence about being a prototype.
-  - [ ] **R3/R5 precedence** (`@mark.integration`, xfail P2), with `relays` and `recording_launcher`
+  - [x] **R3/R5 precedence** (`@mark.integration`, xfail P2), with `relays` and `recording_launcher`
         (imported as `tests/test_relay_advertise.py` does): the word after the launcher in every
         recorded argv is `/opt/key/bin/hs` with `HYPERSHELL_RELAY_REMOTE_EXE=/opt/key/bin/hs`;
         `/opt/opt/bin/hs` with `--remote-exe /opt/opt/bin/hs` as well (option over key); with
@@ -202,47 +202,47 @@ strict xfail naming the phase that fixes it; the rest pass. No change outside `t
         program: the harness's `tmp/hs` is not executable, so the interpreter's scripts `hs`); and
         with `--database tmp/relay.db` plus the key, the program is the key's and no recorded
         environment holds `_HYPERSHELL_RELAY_PROGRAM`.
-  - [ ] **`relay_program`** (`@mark.unit`, xfail P2; the import guarded so collection survives:
+  - [x] **`relay_program`** (`@mark.unit`, xfail P2; the import guarded so collection survives:
         `relay_program = getattr(relay_module, 'relay_program', None)`): an executable file by
         absolute path → itself; by relative path (`monkeypatch.chdir`) → its absolute path; a symlink
         → the link's absolute path, not the target; a non-executable file, `'-c'`, `None`, a missing
         path → `os.path.join(sysconfig.get_path('scripts'), 'hs')` when that exists; with
         `sysconfig.get_path` patched to an empty directory → `'hs'`.
-  - [ ] **`RelayApp.program`** (`@mark.unit`, xfail P2): `sys.argv` patched to
+  - [x] **`RelayApp.program`** (`@mark.unit`, xfail P2): `sys.argv` patched to
         `[exe, 'relay', '--port', '1']` and `RelayApp.argv` to `['--port', '1']` → `exe` (absolute);
         `sys.argv` an embedding program's (`[exe, 'tests/x.py']`) → the scripts `hs`, not `exe`;
         `_HYPERSHELL_RELAY_PROGRAM=/carried/hs` with `_HYPERSHELL_RELAY_REEXEC=1` → `/carried/hs`;
         without the re-execution marker → ignored; the variable is gone from `os.environ` after
         either read.
-  - [ ] **`RelayApp.client_exe`** (`@mark.unit`, xfail P2), as `test_relay_app_advertise_host`:
+  - [x] **`RelayApp.client_exe`** (`@mark.unit`, xfail P2), as `test_relay_app_advertise_host`:
         option; key; option over key; empty key → `program`; `None` key → `program`
         (`RelayApp.program` patched to a sentinel).
-  - [ ] **The re-execution carries it** (`@mark.unit`, xfail P2): `os.execve` patched to record and
+  - [x] **The re-execution carries it** (`@mark.unit`, xfail P2): `os.execve` patched to record and
         raise; `RelayApp.from_cmdline(['--database', str(tmp_path / 'other.db')])` with `program`
         patched → the recorded environment's `_HYPERSHELL_RELAY_PROGRAM` is that value, beside the
         two existing markers.
-  - [ ] **Every fleet** (`@mark.unit`, xfail P2): `RelayThread(address=('127.0.0.1', free_port()),
+  - [x] **Every fleet** (`@mark.unit`, xfail P2): `RelayThread(address=('127.0.0.1', free_port()),
         zones=['cpu', 'gpu', None], remote_exe='/opt/x/bin/hs')` → every `machine.launch.argv[0]`
         (cluster autoscaler and each fleet) is `/opt/x/bin/hs`; with `launcher='srun --exact'` the
         word after `srun --exact` is; `site_cluster(..., remote_exe=…)` and
         `zone_launch(cluster, 'gpu', remote_exe=…)` likewise.
-  - [ ] **The key** (`@mark.unit`, xfail P2): `KEYS['relay.remote_exe'] is Kind.TEXT`, it is in
+  - [x] **The key** (`@mark.unit`, xfail P2): `KEYS['relay.remote_exe'] is Kind.TEXT`, it is in
         `EMPTY_UNSET`, `match_name('HYPERSHELL_RELAY_REMOTE_EXE')`, `default['relay']['remote_exe']
         is PARAM_UNSET`, and `scrub_environment` removes `HYPERSHELL_RELAY_REMOTE_EXE`.
-  - [ ] **Help and docs** (`@mark.unit`, xfail P2): `APP_USAGE`/`APP_HELP` list `--remote-exe`
+  - [x] **Help and docs** (`@mark.unit`, xfail P2): `APP_USAGE`/`APP_HELP` list `--remote-exe`
         after `--launcher-args`; `relay_usage.rst` and `relay_help.rst` have it, and `relay_help.rst`
         no longer says `hyper-shell client`; `config_param_ref.rst`'s `[relay]` has `.remote_exe`
         (`parse_reference` from `tests/test_config_schema.py`); both completions offer it in their
         relay sections; `core/config.py`'s `launcher` comment does not say `'hs client` literally
         unqualified (assert the new wording, PLAN §2.3).
-  - [ ] **R4** (`@mark.unit`, xfail P3): `hypershell.cluster.ssh.DEFAULT_REMOTE_EXE`,
+  - [x] **R4** (`@mark.unit`, xfail P3): `hypershell.cluster.ssh.DEFAULT_REMOTE_EXE`,
         `hypershell.cluster.remote.DEFAULT_REMOTE_EXE` and `hypershell.cluster.DEFAULT_REMOTE_EXE`
         are `'hs'`; the `remote_exe` default (`inspect.signature`) of `SSHCluster`, `RemoteCluster`,
         `AutoScalingCluster`, `site_cluster`, `zone_launch` is `'hs'`; `RelayThread(...)` built
         without `remote_exe` launches `hs`.
-- [ ] `tests/test_cluster_exit.py::test_launcher_cluster_exits_when_every_client_fails`: assert
+- [x] `tests/test_cluster_exit.py::test_launcher_cluster_exits_when_every_client_fails`: assert
       `f'{launcher} hs client '` (`:332`), the test marked xfail P3.
-- [ ] Nothing outside `tests/` and `spec/` changes.
+- [x] Nothing outside `tests/` and `spec/` changes.
 - **Verify:** see frontmatter (the fence against `11faef5e`; the new file and `test_cluster_exit.py`
   pass with strict xfails; the R5 `database` case and the `test_cluster_exit` case are among the
   XFAILs).
