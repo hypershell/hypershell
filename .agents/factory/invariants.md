@@ -70,12 +70,15 @@ subsystems.
 | `0` | success |
 | `> 0` | real process exit code |
 | `-1 .. -64` | killed by signal N (`-N`); **`-1` = `CANCEL_STATUS`** |
-| `-1001` | `TASK_TEMPLATE_ERROR` (never ran) |
-| `-1002` | `TASK_RESOURCE_ERROR` (never ran) |
+| `-1001` | `TASK_TEMPLATE_ERROR` (never ran; never retried) |
+| `-1002` | `TASK_RESOURCE_ERROR` (never ran; never retried) |
 
 - New "never ran" sentinels go **below `-1000`**. **Never** use `-1..-64` (reserved for signals).
 - **Every failure/retry/count-as-failed query MUST filter `exit_status != 0 AND exit_status !=
-  CANCEL_STATUS`** — or cancelled tasks get resurrected.
+  CANCEL_STATUS`** — or cancelled tasks get resurrected. The retry selection (and every count of
+  failures awaiting retry) also excludes `NO_RETRY_STATUSES` (`-1001`, `-1002`, `data/model.py`),
+  beside those filters and only where `exit_status IS NOT NULL` holds; the gate's failed count
+  includes them on any attempt.
 
 ## 3. Retry model
 
@@ -96,7 +99,13 @@ subsystems.
   an evicted client cannot reopen a retried or cancelled row.
 - `attempts == max_retries + 1`; this relationship spans `server.py`,
   `Task.query_retryable`/`select_failed`/`count_retryable`, and `Task.increment_group` — change
-  them together. Every one of those queries keeps the `CANCEL_STATUS` filter (§2).
+  them together, with `NO_RETRY_STATUSES`, which the retry side (`Task.__awaiting_retry`) excludes
+  and the gate counts as failed on any attempt. Every one of those queries keeps the
+  `CANCEL_STATUS` filter (§2). The gate keeps its own filter, never `__awaiting_retry`'s.
+- A retry is `Task.new_retry`: its task's `Task.retry_columns` as stored (command, tags, group,
+  fingerprint, source, zone, cores, memory, timeout), with a fresh id and submit stamps; never
+  `Task.new`, so the command is not re-parsed and no tag sets a column. A new column belongs to
+  exactly one of `retry_columns`, `result_columns` or the fresh set (a test pins it).
 - Group-gating can stall **by design**: `increment_group` won't advance while the group has
   incomplete tasks or failures still awaiting retry, so a permanently-failing task halts the group
   (and, in non-`forever` mode, the server); don't "fix" it without understanding it. Once the
@@ -108,7 +117,7 @@ subsystems.
   32-bit range) wherever input sets it: an inline or tag-only `group:` tag, `-t group:…` (exit 2,
   before any input is read), a `--from-json` `group` key. Anything else raises `TaskGroupError`
   (exit 5) naming the value and its line or record. `Task.new(group=…)` stays unchecked (queue mode
-  passes None; a retry copies a legacy text group). Read-in-full input (a named file to `hs submit`,
+  passes None), and a retry (`Task.new_retry`) copies the stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`,
   `hs cluster` or `hs server`, `--from-json`, arguments, and `hs submit` stdin with a database) is
   scanned whole (`scan_task_lines`) before any write, with or without a database; a stream's
   `Loader` (`refuse_lines`) refuses only the offending line with an ERROR and reads on, the run's
@@ -234,7 +243,8 @@ subsystems.
   written, then `read_value`): a value that does not convert exits 2 before `update()`, and nothing
   is written; `update()` reads and writes the file as UTF-8 whatever the locale. `server.eager` and
   `server.evict` are read at each command's start check
-  (`configured_eager`, `check_evict`), never at import.
+  (`configured_eager`, `check_evict`), never at import. `server.attempts` is read when a Python API
+  entry point is built without `max_retries` (`configured_retries()`).
 - **Relay process:** `core/config.py` replaces the whole `[database]` section with the relay's private
   SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes;
   never rebind after import. Relay-only tables live on their own `MetaData`, never `Entity`.
@@ -263,7 +273,9 @@ subsystems.
   at each launch site): `--advertise`/`server.advertise` for remote `hs cluster` modes, and
   `hs relay --advertise`/`relay.advertise` for a relay's site clients (never `server.advertise`),
   else the bind address, else `HOSTNAME` for a wildcard bind. Constructors take `advertise=` and
-  never read configuration; only `ClusterApp`/`RelayApp` read the keys. A relay's site cluster
+  `evict_after=` and never read those keys; only `ClusterApp`/`RelayApp` read them. A
+  `max_retries=None` is the exception: `ServerThread`, `AutoScalingCluster` and `AutoScalingServer`
+  resolve it through `server.configured_retries()` (`server.attempts - 1`). A relay's site cluster
   computes the address once (`AutoScalingCluster.advertised`) and every zone's
   `relay/site.py::zone_launch` dials it, so no zone can diverge. It must be routable from clients. The
   autoscaler never terminates clients (they self-exit on idle) and ignores

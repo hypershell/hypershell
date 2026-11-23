@@ -56,7 +56,7 @@ object's keys become named ``{key}`` template fields (and task tags), and an opt
 validated against every task object up front, so submission is rejected before any task
 is committed if a field is missing. The ``args`` value is taken as written: ``#`` and
 ``# HYPERSHELL:`` text in it are part of the command, and a failed task's retry runs that same
-command in the task's group, with its tags.
+command in the task's group, with its tags and its cores, memory and walltime.
 
 .. versionchanged:: 2.9.0
    A retry runs its task's command as stored, in the task's group and with its tags; earlier

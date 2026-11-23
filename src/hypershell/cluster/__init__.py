@@ -33,7 +33,7 @@ from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 from hypershell.data.model import Task, Source, Zone, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP, zone_name
 from hypershell.client import DEFAULT_NUM_THREADS, DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.server import (DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT, DEFAULT_EVICT,
-                               is_file_input, check_evict, configured_eager)
+                               is_file_input, check_evict, configured_eager, configured_retries)
 from hypershell.submit import (DEFAULT_BUNDLEWAIT, load_json_source, json_source_key, validate_json_expansion,
                                validate_json_groups, scan_task_lines, source_fingerprint, GatedSource,
                                decide_source_gate, refuse_below_reached_group, task_fingerprints,
@@ -92,6 +92,8 @@ Options:
   -w, --bundlewait     SEC      Wait before flushing tasks, none for an idle client; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
       --zone           NAME     Zone of the submitted tasks and every client; own zone if autoscaling (default: none).
   -r, --max-retries    NUM      Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
+                                A task that did not run (-1001, -1002) is never retried;
+                                a retry keeps its task's cores, memory and walltime.
       --eager                   Schedule failed tasks before new tasks.
       --no-db                   Disable database (submit directly to clients).
       --initdb                  Auto-initialize database.
@@ -165,7 +167,7 @@ class ClusterApp(Application):
     interface.add_argument('--zone', default=None)
 
     eager_mode: bool = config.server.eager
-    max_retries: int = config.server.attempts - 1
+    max_retries: int = configured_retries()
     interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
     interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 

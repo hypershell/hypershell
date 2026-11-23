@@ -216,8 +216,8 @@ next server start.
 | `0` | success |
 | `> 0` | real process exit code |
 | `-1 .. -64` | killed by signal N (`-N`); **`-1` = `CANCEL_STATUS`** (collides with SIGHUP death) |
-| `-1001` | `TASK_TEMPLATE_ERROR` — template expansion failed, task never ran (`client.py:612`) |
-| `-1002` | `TASK_RESOURCE_ERROR` — insufficient local resources, never ran (`client.py:613`) |
+| `-1001` | `TASK_TEMPLATE_ERROR` — template expansion failed, task never ran; never retried (`data/model.py`) |
+| `-1002` | `TASK_RESOURCE_ERROR` — more cores or memory than the client has in total, never ran; never retried (`data/model.py`) |
 
 **New internal "never ran" sentinels go below `-1000`. Never use `-1..-64`** (reserved for
 signal deaths).
@@ -228,6 +228,17 @@ old row, which gets `retried=True` and `next_id`) — never mutate a row in plac
 `Task.query_retryable`/`select_failed`/`count_retryable`, and `Task.increment_group` — change them
 together. **Every failure/retry/count-as-failed query MUST filter `exit_status != 0 AND
 exit_status != CANCEL_STATUS`**, or cancelled tasks get resurrected.
+
+A task that never ran (`NO_RETRY_STATUSES`: `-1001`, `-1002`) is never retried, whatever the
+retries: `Task.__awaiting_retry`, which feeds the retry selection, the retry mark, `count_retryable`,
+`count_retryable_by_zone` and so the autoscaler's demand, excludes it, and `Task.increment_group`
+counts it as failed on any attempt (not only at `attempt >= attempts`), naming it "not retried
+because they did not run". The gate keeps its own filter: reusing the retry tuple would hide these
+rows from it. A retry is built by `Task.new_retry` from its task's `Task.retry_columns` as stored
+(command, tags, group, fingerprint, source, zone, cores, memory, timeout), never through `Task.new`,
+so nothing is re-parsed and no tag sets a column. Every Python API `max_retries=None` resolves
+through `server.configured_retries()` (`server.attempts - 1`, read when called), as `hs server` and
+`hs cluster` do.
 
 Nothing in the schema prevents a doubled retry. A failed row is retried once because the
 server's single Scheduler thread is the only caller of `Task.next`, and `Task.query_retryable`
@@ -264,8 +275,8 @@ input is best effort: a late lower group runs after the current one, with a warn
 must be an integer: `ensure_group` accepts an `int` (not a `bool`) in PostgreSQL's 32-bit range,
 from an inline or tag-only `group:` tag, `-t group:…` (exit 2, before any input is read) or a
 `--from-json` `group` key, and anything else raises `TaskGroupError` (exit 5) naming the value and
-its line or record; `Task.new(group=…)` is the caller's and stays unchecked (a retry copies a legacy
-text group). Read-in-full input (a named file to `hs submit`, `hs cluster` or `hs server`,
+its line or record; `Task.new(group=…)` is the caller's and stays unchecked, and a retry
+(`Task.new_retry`) copies its task's stored group, a legacy text group too. Read-in-full input (a named file to `hs submit`, `hs cluster` or `hs server`,
 `--from-json`, arguments, and `hs submit` stdin with a database, read by `read_in_full`) is scanned
 whole by `scan_task_lines` before any write, with or without a database; on a stream the `Loader`
 (`refuse_lines`) logs an ERROR for the offending line and reads on, leaving the run's exit status
@@ -542,8 +553,10 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
 - Sentinels: `'<auto>'` (materialize), `'<none>'` (unset). The `X or None` idiom means
   **`0` = unlimited/auto** for many numeric knobs.
 - Defaults agents care about: server `port`, `bundlesize`, `bundlewait`, `evict` (≥10s),
-  `attempts`, and `tls.enabled = True`. Note `bundlesize`/`bundlewait` are read from
-  `config.submit.*` for CLI defaults but `config.client.*` for module defaults — two sections.
+  `attempts`, and `tls.enabled = True`. `hs client` reads `client.bundlesize` (advertised only
+  when a layer above the built-in default sets it, in any form) and `client.bundlewait`;
+  `hs submit` reads `submit.*`; `hs server`/`hs cluster` read `submit.bundlewait` and
+  `server.bundlesize` — separate sections.
 
 ## Data layer specifics
 

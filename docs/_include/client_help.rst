@@ -20,8 +20,8 @@ Options
     Size of task bundle to request from the server and to return results in (default: the
     server's).
 
-    When given (on the command line, by ``HYPERSHELL_SUBMIT_BUNDLESIZE``, or in a configuration
-    file as ``submit.bundlesize``), the client advertises this size and the server replies with
+    When given (on the command line, by ``HYPERSHELL_CLIENT_BUNDLESIZE``, or in a configuration
+    file as ``client.bundlesize``), the client advertises this size and the server replies with
     up to this many tasks, never more than its cap (``server.bundlemax``). When not given, the
     client advertises no size and the server uses its own ``--bundlesize``; finished tasks are then
     returned in bundles of the built-in default (1).
@@ -32,7 +32,7 @@ Options
     See also ``--num-threads`` and ``--bundlewait``.
 
 ``-w``, ``--bundlewait`` *SEC*
-    Time to wait before flushing tasks (default: 5).
+    Time to wait before flushing tasks (default: 5, or ``client.bundlewait``).
 
     Specify a number of seconds, units ``d``, ``h``, ``m`` and ``s`` in that order, whole or
     fractional (e.g., ``30s``, ``5m``, ``1h30m``, ``1.5h``), or a Slurm time ``MM:SS``,

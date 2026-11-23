@@ -17,7 +17,7 @@ from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.core.tls import TLSConfig
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import (ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL, DEFAULT_PORT,
+from hypershell.server import (ServerThread, DEFAULT_BUNDLESIZE, DEFAULT_SERVER_POLL, DEFAULT_PORT,
                                DEFAULT_EVICT)
 from hypershell.client import ClientThread, DEFAULT_DELAY, DEFAULT_SIGNALWAIT, set_client_standalone
 
@@ -116,7 +116,7 @@ class LocalCluster(Thread):
 
         max_retries (int, optional):
             Number of allowed task retries.
-            See :const:`~hypershell.server.DEFAULT_ATTEMPTS`.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -202,7 +202,7 @@ class LocalCluster(Thread):
                  poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
-                 max_retries: int = DEFAULT_ATTEMPTS,
+                 max_retries: Optional[int] = None,
                  eager: bool = False,
                  redirect_failures: IO = None,
                  redirect_output: IO = None,

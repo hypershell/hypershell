@@ -143,7 +143,7 @@ over-large task to a fitter node — is answered by zones, not by fleet-capabili
 
 *Target: 2.9.0 · Horizon: mid-term · Depends on: — · Refs: zones, shipped by `zone-dispatch` (#78),
 for the routing half*
-**Seed:** [`issues/resource-error-terminal-and-retry-defaults.md`](issues/resource-error-terminal-and-retry-defaults.md)
+**Seed:** [`issues/resource-error-terminal-and-retry-defaults.md`](issues/resource-error-terminal-and-retry-defaults.md) · *status: adopted:update-client-retry*
 
 ## A restarted run stops before a pending retry
 
@@ -247,7 +247,7 @@ Under a local `hs cluster`, the in-process client uses the built-in heartrate ra
 The `LocalCluster`/`RemoteCluster`/`SSHCluster` constructors default `max_retries` differently from `ServerThread`, so the Python API and the commands can retry differently for the same configuration. Use one default, derived from `server.attempts`, everywhere; pin it with a test of each constructor.
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/config-set-and-unread/research/`*
-**Seed:** [`issues/cluster-max-retries-defaults.md`](issues/cluster-max-retries-defaults.md) · *status: unshaped*
+**Seed:** [`issues/cluster-max-retries-defaults.md`](issues/cluster-max-retries-defaults.md) · *status: adopted:update-client-retry*
 
 ## A text `attempts = "3"` in a file crashes every command at import
 
@@ -315,7 +315,7 @@ tag changes and `--remove-tag` as a usage error before the count. Pre-existing; 
 
 *Target: 2.9.0 · Horizon: near-term, small · Depends on: — · Refs:
 `spec/hs-update-contended-writes/` (Non-goals)*
-**Seed:** [`issues/update-delete-ignores-assignments.md`](issues/update-delete-ignores-assignments.md) · *status: unshaped*
+**Seed:** [`issues/update-delete-ignores-assignments.md`](issues/update-delete-ignores-assignments.md) · *status: adopted:update-client-retry*
 
 ## The legacy single-task tag edit can lose a concurrent tag change
 
@@ -501,7 +501,7 @@ client too.
 
 *Target: 2.9.0 · Horizon: near-term, low priority · Depends on: zone-dispatch (Z2, landed, #78) ·
 Refs: `spec/zone-dispatch/` (plan gate ruling N4)*
-**Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md)
+**Seed:** [`issues/client-bundlesize-config-key.md`](issues/client-bundlesize-config-key.md) · *status: adopted:update-client-retry*
 
 ## `hs submit -q` cannot feed a server with a database
 

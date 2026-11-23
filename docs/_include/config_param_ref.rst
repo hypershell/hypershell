@@ -269,8 +269,16 @@
         task is considered to have failed if it has a non-zero exit status. The original is not over-written,
         a new task is submitted and later scheduled.
 
+        A task whose template does not expand (``-1001``) or that needs more cores or memory than its
+        client has (``-1002``) is never retried: it did not run. Its group fails at once, as for a task
+        with no retries left.
+        A retry keeps its task's cores, memory and walltime.
+
         Read by ``hs server`` and ``hs cluster``, as the counterpart to the ``-r``/``--max-retries``
         command-line option. Setting ``--max-retries 1`` is equivalent to setting ``.attempts`` to 2.
+        Also read by the Python API's entry points (``ServerThread``, ``serve_from``, ``serve_file``,
+        ``serve_forever``, the cluster classes and ``run_local``, ``run_cluster``, ``run_ssh``) when
+        they are not given ``max_retries``.
 
         See also ``.eager``.
 
@@ -278,6 +286,12 @@
 
             .. versionchanged:: 2.9.0
                ``hs cluster`` reads it; before, it retried no task unless given ``-r``.
+
+            .. versionchanged:: 2.9.0
+               A task that did not run (``-1001``, ``-1002``) is never retried, and a retry keeps its
+               task's cores, memory and walltime. The Python API reads it for a ``max_retries`` not
+               given; before, the cluster classes retried each failed task once and the server
+               functions never.
 
     ``.eager``
         Schedule failed tasks before new tasks (default: `false`).
@@ -430,7 +444,19 @@
         idea to coordinate bundle size between the client and server so that the client returns the
         same sized bundles that it receives.
 
+        Read by ``hs client`` for its ``-b``/``--bundlesize`` default. When it is set (here, by
+        ``HYPERSHELL_CLIENT_BUNDLESIZE``, or by its ``bundlesize_env`` or ``bundlesize_eval``
+        forms), a client advertises it as the size of bundle it requests and returns finished tasks
+        in bundles of that size; when it is left at the built-in default, a client advertises no
+        size and the server uses its own. ``hs client`` stops before it starts if the value is not
+        a whole number.
+
         See also ``-b``/``--bundlesize`` command-line option.
+
+        .. only:: html
+
+            .. versionchanged:: 2.9.0
+               ``hs client`` reads it and advertises it when set; before, it read ``submit.bundlesize``.
 
     ``.bundlewait``
         Seconds to wait before flushing task bundle (default: `5`).
@@ -442,12 +468,17 @@
         For larger distributed workflows it is a good idea to make this waiting period sufficiently
         long so that most bundles are returned whole.
 
+        Read by ``hs client`` for its ``-w``/``--bundlewait`` default. A string takes the same
+        forms as ``-w``/``--bundlewait``: units ``d``, ``h``, ``m`` and ``s`` (e.g., ``"30s"``,
+        ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number is seconds.
+
         See also ``-w``/``--bundlewait`` command-line option.
 
         .. only:: html
 
             .. versionchanged:: 2.9.0
                A client with nothing left to run returns what it holds without waiting.
+               ``hs client`` reads it; before, it read ``submit.bundlewait``.
 
     ``.heartrate``
         Interval in seconds between heartbeats sent to server (default `10`).
@@ -513,17 +544,14 @@
         Using larger bundles is a good idea for large distributed workflows; specifically, it is best
         to coordinate bundle size with the number of executors in use by each client.
 
-        The `client` reads its ``-b``/``--bundlesize`` default from this key. When it is set (here
-        or by ``HYPERSHELL_SUBMIT_BUNDLESIZE``), a client advertises it as the size of bundle it
-        requests; when it is left at the built-in default, a client advertises no size and the
-        server uses its own.
+        Read by ``hs submit`` only.
 
         See also ``-b``/``--bundlesize`` command-line option.
 
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               :pr:`78`: a client advertises it as the size it requests.
+               ``hs client`` no longer reads it; it reads ``client.bundlesize``.
 
     ``.bundlewait``
         Seconds to wait before flushing tasks (default: `5`).
@@ -534,12 +562,15 @@
         ``s`` (e.g., ``"30s"``, ``"5m"``, ``"1h30m"``) or a Slurm time (e.g., ``"1:30"``); a number
         is seconds.
 
+        Read by ``hs submit``, ``hs server`` and ``hs cluster`` (which hands it to its clients as ``-w``).
+        ``hs client`` reads ``client.bundlewait``.
+
         See also ``-w``/``--bundlewait`` command-line option.
 
         .. only:: html
 
             .. versionchanged:: 2.9.0
-               A string with units or a Slurm time.
+               A string with units or a Slurm time. ``hs client`` no longer reads it.
 
 
 ``[task]``

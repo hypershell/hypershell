@@ -52,6 +52,13 @@ Description
    only when no task has that ID.
 
 .. versionchanged:: 2.9.0
+   ``--delete`` with a ``FIELD=VALUE``, a ``KEY:VALUE`` or ``--remove-tag`` exits with status 2
+   before it counts or asks, and deletes nothing; before, the tasks were deleted and the changes
+   ignored. The single-task form ``hs update ID FIELD VALUE`` with ``--cancel``, ``--revert``,
+   ``--delete`` or ``--remove-tag`` exits with status 2 and writes nothing; before, it wrote the
+   field and ignored the option.
+
+.. versionchanged:: 2.9.0
    On SQLite, ``-t``/``--with-tag`` with several tag names and no values requires every one of
    them, as on PostgreSQL; before, only the last name was checked. ``hs list`` is fixed the same
    way.

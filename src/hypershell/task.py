@@ -963,9 +963,13 @@ UPDATE_HELP = f"""\
   exit_status to {CANCEL_STATUS}); they will not be scheduled, retried, or reverted.
   Using --revert reverts everything as if the task was new again.
   Using --delete drops the row from the database entirely.
+  --delete takes no change: given a FIELD=VALUE, a KEY:VALUE or --remove-tag,
+  hs update exits with status 2 before it counts or asks, and deletes nothing.
 
-  The legacy interface for updating a single task with the ID, FIELD, 
+  The legacy interface for updating a single task with the ID, FIELD,
   and VALUE as positional arguments remains valid.
+  The single-task form takes no --cancel, --revert, --delete or --remove-tag;
+  given one, it exits with status 2 and writes nothing.
 
 Arguments:
   ARGS...                    Assignment pairs for update.
@@ -1062,8 +1066,19 @@ class TaskUpdateApp(Application, SearchableMixin):
 
     def run(self: TaskUpdateApp) -> None:
         """Update task attributes in bulk."""
+        legacy = len(self.update_args) == 3 and UUID_PATTERN.match(self.update_args[0])
+        # Refused before the database is opened, so nothing is counted, asked or written.
+        if legacy:
+            options = [name for name, given in (('--cancel', self.cancel_mode), ('--revert', self.revert_mode),
+                                                ('--delete', self.delete_mode), ('--remove-tag', self.remove_tag))
+                       if given]
+            if options:
+                raise ArgumentError(f'Cannot use {", ".join(options)} with the single-task form ID FIELD VALUE')
+        elif self.delete_mode and (self.update_args or self.remove_tag):
+            words = [*self.update_args, *(['--remove-tag', *self.remove_tag] if self.remove_tag else [])]
+            raise ArgumentError(f'Cannot use --delete with changes (given: {" ".join(words)})')
         ensuredb()
-        if len(self.update_args) == 3 and UUID_PATTERN.match(self.update_args[0]):
+        if legacy:
             self.update_legacy()
         else:
             self.update_tasks()

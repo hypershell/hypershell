@@ -26,7 +26,7 @@ from hypershell.core.logging import Logger
 from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL,
+from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_SERVER_POLL,
                                DEFAULT_EVICT)
 from hypershell.cluster.launch import ClientLaunch, advertised_host, client_launch, ssh_env_exports, ssh_launch_args
 from hypershell.cluster.watch import watch_launched
@@ -160,7 +160,7 @@ class SSHCluster(Thread):
 
         max_retries (int, optional):
             Number of allowed task retries.
-            See :const:`~hypershell.server.DEFAULT_ATTEMPTS`.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -252,7 +252,7 @@ class SSHCluster(Thread):
                  poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
-                 max_retries: int = DEFAULT_ATTEMPTS,
+                 max_retries: Optional[int] = None,
                  eager: bool = False,
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,

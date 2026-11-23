@@ -1,0 +1,98 @@
+# Red list for update-client-retry: every test here must fail on 1f688c7c (develop with #117; the src,
+# tests and docs of this branch's merge commit eb2a4487) for what it checks, and pass after the fix.
+# Checked by spec/relay-hardening/drive/red_check.sh with RED_BASE_REV=1f688c7c. A `pg:` line needs
+# HS_TEST_POSTGRES (sandbox off); ` raises=KeyError` marks the one test whose base failure is the
+# defect's own error (cmdkit's KeyError on a displaced `submit.bundlesize_env`), not an assertion.
+
+# tests/test_update_refusals.py
+tests/test_update_refusals.py::test_delete_with_change_refused[field-and-tag]
+tests/test_update_refusals.py::test_delete_with_change_refused[field-limit]
+tests/test_update_refusals.py::test_delete_with_change_refused[field-tag-filter]
+tests/test_update_refusals.py::test_delete_with_change_refused[field-where]
+tests/test_update_refusals.py::test_delete_with_change_refused[no-filter]
+tests/test_update_refusals.py::test_delete_with_change_refused[remove-tag-limit]
+tests/test_update_refusals.py::test_delete_with_change_refused[tag-limit]
+tests/test_update_refusals.py::test_delete_with_change_refused_before_prompt
+tests/test_update_refusals.py::test_delete_with_change_refused_before_database
+tests/test_update_refusals.py::test_legacy_form_with_option_refused[cancel]
+tests/test_update_refusals.py::test_legacy_form_with_option_refused[delete]
+tests/test_update_refusals.py::test_legacy_form_with_option_refused[remove-tag]
+tests/test_update_refusals.py::test_legacy_form_with_option_refused[revert]
+
+# tests/test_client_request.py
+tests/test_client_request.py::test_advertise_only_an_explicit_size
+
+# tests/test_client_bundle_keys.py
+tests/test_client_bundle_keys.py::test_submit_bundlesize_not_advertised
+tests/test_client_bundle_keys.py::test_submit_bundlesize_form_not_read raises=KeyError
+tests/test_client_bundle_keys.py::test_advertise_client_bundlesize_forms
+tests/test_client_bundle_keys.py::test_client_bundlesize_form_refused
+tests/test_client_bundle_keys.py::test_client_keys_from_environment[11-11]
+tests/test_client_bundle_keys.py::test_client_keys_from_environment[30s-30]
+tests/test_client_bundle_keys.py::test_client_keys_from_environment[1m30s-90]
+tests/test_client_bundle_keys.py::test_client_keys_from_environment[0.5-0.5]
+tests/test_client_bundle_keys.py::test_client_keys_from_config_file
+tests/test_client_bundle_keys.py::test_submit_keys_do_not_reach_client
+tests/test_client_bundle_keys.py::test_client_bundlewait_refused
+
+# tests/test_dispatch_workload.py
+tests/test_dispatch_workload.py::test_configured_bundlesize_is_advertised
+
+# tests/test_retry_terminal.py
+tests/test_retry_terminal.py::test_never_ran_halts_group[False-False-2--1001]
+tests/test_retry_terminal.py::test_never_ran_halts_group[False-False-2--1002]
+tests/test_retry_terminal.py::test_never_ran_halts_group[False-False-3--1001]
+tests/test_retry_terminal.py::test_never_ran_halts_group[False-False-3--1002]
+tests/test_retry_terminal.py::test_never_ran_halts_group[False-True-2--1001]
+tests/test_retry_terminal.py::test_never_ran_halts_group[False-True-2--1002]
+tests/test_retry_terminal.py::test_never_ran_halts_group[False-True-3--1001]
+tests/test_retry_terminal.py::test_never_ran_halts_group[False-True-3--1002]
+tests/test_retry_terminal.py::test_never_ran_halts_group[True-False-2--1001]
+tests/test_retry_terminal.py::test_never_ran_halts_group[True-False-2--1002]
+tests/test_retry_terminal.py::test_never_ran_halts_group[True-False-3--1001]
+tests/test_retry_terminal.py::test_never_ran_halts_group[True-False-3--1002]
+tests/test_retry_terminal.py::test_never_ran_halts_group[True-True-2--1001]
+tests/test_retry_terminal.py::test_never_ran_halts_group[True-True-2--1002]
+tests/test_retry_terminal.py::test_never_ran_halts_group[True-True-3--1001]
+tests/test_retry_terminal.py::test_never_ran_halts_group[True-True-3--1002]
+tests/test_retry_terminal.py::test_revert_clears_never_ran_hold[-1001]
+tests/test_retry_terminal.py::test_revert_clears_never_ran_hold[-1002]
+tests/test_retry_terminal.py::test_never_ran_not_retryable[False]
+tests/test_retry_terminal.py::test_never_ran_not_retryable[True]
+tests/test_retry_terminal.py::test_halt_message_names_both_kinds
+tests/test_retry_terminal.py::test_cluster_does_not_retry_never_ran[template]
+tests/test_retry_terminal.py::test_cluster_does_not_retry_never_ran[resources]
+pg:tests/test_retry_terminal.py::test_never_ran_not_retryable_postgres[False]
+pg:tests/test_retry_terminal.py::test_never_ran_not_retryable_postgres[True]
+
+# tests/test_retry_declarations.py
+tests/test_retry_declarations.py::test_retry_keeps_declarations[False]
+tests/test_retry_declarations.py::test_retry_keeps_declarations[True]
+tests/test_retry_declarations.py::test_retry_reads_columns_not_tags
+tests/test_retry_declarations.py::test_cluster_retry_keeps_walltime
+pg:tests/test_retry_declarations.py::test_retry_keeps_declarations_postgres[False]
+pg:tests/test_retry_declarations.py::test_retry_keeps_declarations_postgres[True]
+
+# tests/test_retry_defaults.py
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[AutoScalingCluster-default]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[AutoScalingCluster-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[LocalCluster-default]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[LocalCluster-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[RemoteCluster-default]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[RemoteCluster-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[SSHCluster-default]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[SSHCluster-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[ServerThread-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[run_cluster-default]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[run_cluster-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[run_cluster-autoscaling-default]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[run_cluster-autoscaling-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[run_local-default]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[run_local-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[run_ssh-default]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[run_ssh-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[serve_file-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[serve_forever-3]
+tests/test_retry_defaults.py::test_default_retries_follow_configuration[serve_from-3]
+tests/test_retry_defaults.py::test_in_memory_default_does_not_warn
+tests/test_retry_defaults.py::test_default_retries_from_environment

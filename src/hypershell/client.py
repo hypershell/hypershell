@@ -55,14 +55,16 @@ from multiprocessing import AuthenticationError, cpu_count
 # External libs
 from cmdkit.app import Application, exit_status
 from cmdkit.cli import Interface, ArgumentError
-from cmdkit.config import Namespace, Configuration
+from cmdkit.config import Namespace, Configuration, ConfigurationError
 
 # Internal libs
-from hypershell.data.model import Task, serialize_tasks, deserialize_tasks, zone_name
+from hypershell.data.model import (Task, serialize_tasks, deserialize_tasks, zone_name,
+                                   TASK_TEMPLATE_ERROR, TASK_RESOURCE_ERROR)
 from hypershell.core.heartbeat import Heartbeat, ClientState
 from hypershell.core.platform import default_path
 from hypershell.core.config import (default, config, load_task_env, SSH_GROUPS, resolve_auth, refuse_key_option,
-                                    AUTH_ENV, is_key_variable, config_seconds)
+                                    AUTH_ENV, is_key_variable, config_seconds, blame)
+from hypershell.core.config_schema import Kind, read_value
 from hypershell.core.fsm import State, StateMachine
 from hypershell.core.pretty_print import format_bytes
 from hypershell.core.resource import check_resources, clear_processes, CPU_COUNT, MEMORY_TOTAL
@@ -351,14 +353,36 @@ def advertised_size(value: Optional[int], base: Configuration = config) -> Optio
     The bundle size a client advertises to the server, or None to let the server choose.
 
     An explicit `value` (the command line) is advertised; otherwise the configured
-    ``submit.bundlesize`` is, when any layer above the built-in default sets it (a file or the
-    environment), even to the default's value. The built-in default advertises nothing.
+    ``client.bundlesize`` is, when any layer above the built-in default sets it (a file or the
+    environment, in any of its forms: ``bundlesize``, ``bundlesize_env``, ``bundlesize_eval``),
+    even to the default's value. The built-in default advertises nothing. A configured value that
+    is not a whole number raises `ConfigurationError` naming the key and where it came from, never
+    the value (an ``_eval`` value is command output).
     """
     if value is not None:
         return value
-    if base.which('submit', 'bundlesize') not in (None, 'default'):
-        return base.submit.bundlesize
-    return None
+    form = next((name for name in ('bundlesize', 'bundlesize_env', 'bundlesize_eval')
+                 if _source(base, 'client', name) not in (None, 'default')), None)
+    if form is None:
+        return None
+    configured = base.client.bundlesize
+    if isinstance(configured, int) and not isinstance(configured, bool):
+        return configured
+    try:
+        if configured is None:
+            raise ValueError(f'{form} names a variable that is not set')
+        return read_value(Kind.INT, str(configured))
+    except ValueError:
+        raise ConfigurationError(f'client.bundlesize: expected a whole number '
+                                 f'({blame(base, "client", form)})') from None
+
+
+def _source(base: Configuration, *varpath: str) -> Optional[str]:
+    """The layer that sets `varpath`, or None; a form another layer displaced is not set."""
+    try:
+        return base.which(*varpath)
+    except KeyError:
+        return None
 
 
 class CollectorState(State, Enum):
@@ -714,8 +738,8 @@ class TaskState(State, Enum):
 # so the range -1..-64 can collide with real signal deaths (e.g. SIGHUP=-1, SIGINT=-2, SIGTERM=-15).
 # We reserve codes below -1000 for HyperShell-internal conditions to stay clear of that range.
 # (The cancel sentinel -1 is an intentional exception - see model.CANCEL_STATUS / SIGHUP cancel.)
-TASK_TEMPLATE_ERROR: Final[int] = -1001  # Template expansion failed (task never ran)
-TASK_RESOURCE_ERROR: Final[int] = -1002  # Insufficient local resources (task never ran)
+# TASK_TEMPLATE_ERROR (-1001, template expansion failed) and TASK_RESOURCE_ERROR (-1002, insufficient
+# local resources) are defined in `hypershell.data.model` with NO_RETRY_STATUSES: never retried.
 
 
 class TaskExecutor(StateMachine):
@@ -824,14 +848,14 @@ class TaskExecutor(StateMachine):
             self.task.command = self.template.expand(
                 self.task.args, context={'slot': self.slot, 'slot_count': self.slot_count})
         except Exception as error:
-            log.error(f'Template expansion failed for task ({self.task.id}): {error} (cancelled)')
+            log.error(f'Template expansion failed for task ({self.task.id}): {error} (task did not run)')
             self.task.start_time = datetime.now().astimezone()
             self.task.completion_time = datetime.now().astimezone()
             self.task.exit_status = TASK_TEMPLATE_ERROR
             return TaskState.PUT_LOCAL
         eligible, reason = insufficient_resources(self.task)
         if not eligible:
-            log.error(f'Insufficient resources for task ({self.task.id}): {reason} (cancelled)')
+            log.error(f'Insufficient resources for task ({self.task.id}): {reason} (task did not run)')
             self.task.start_time = datetime.now().astimezone()
             self.task.completion_time = datetime.now().astimezone()
             self.task.exit_status = TASK_RESOURCE_ERROR
@@ -1594,8 +1618,9 @@ APP_HELP = f"""\
 Options:
   -N, --num-threads   NUM   Number executor threads, 0=auto (default: {DEFAULT_NUM_THREADS}).
   -t, --template      CMD   Command-line template pattern (default: "{DEFAULT_TEMPLATE}").
-  -b, --bundlesize    SIZE  Bundle size to request and return (default: server's).
-  -w, --bundlewait    SEC   Wait before flushing tasks, none once idle; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
+  -b, --bundlesize    SIZE  Bundle size to request and return (default: client.bundlesize or
+                            HYPERSHELL_CLIENT_BUNDLESIZE when set, else server's).
+  -w, --bundlewait    SEC   Wait before flushing tasks, none once idle; seconds, 30s, 5m or [D-]HH:MM:SS (default: client.bundlewait, {DEFAULT_BUNDLEWAIT}).
       --zone          NAME  Run only tasks of this zone (default: tasks without a zone).
   -H, --host          ADDR  Hostname for server (default: {DEFAULT_HOST}).
   -p, --port          NUM   Port number for server (default: {DEFAULT_PORT}).
@@ -1644,7 +1669,7 @@ class ClientApp(Application):
     bundlesize: Optional[int] = None  # Advertised only when given (see advertised_size)
     interface.add_argument('-b', '--bundlesize', type=int, default=bundlesize)
 
-    bundlewait: int = config.submit.bundlewait
+    bundlewait: int = config.client.bundlewait
     interface.add_argument('-w', '--bundlewait', type=parse_time, default=bundlewait)
 
     delay_start: float = DEFAULT_DELAY

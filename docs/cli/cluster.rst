@@ -95,6 +95,12 @@ Description
    ``--forever`` it keeps waiting, and nothing else about scheduling changes.
 
 .. versionchanged:: 2.9.0
+   A task that did not run, its template not expanding (``-1001``) or it needing more cores or
+   memory than its client has (``-1002``), is never retried, and its group fails at once, as for a
+   task with no retries left; before, with retries, it was retried until they ran out. A retry
+   keeps its task's cores, memory and walltime; before, it ran with none of them.
+
+.. versionchanged:: 2.9.0
    A line whose first non-blank character is ``#`` is a comment, and a ``#`` anywhere else is part
    of the command, run as written; earlier releases cut the command at the first ``#``. The
    ``# HYPERSHELL:`` marker is recognised anywhere on a line, so a command that must contain that

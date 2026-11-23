@@ -91,7 +91,7 @@ from hypershell.client import ClientInfo
 __all__ = ['serve_from', 'serve_file', 'serve_forever', 'ServerThread', 'ServerApp', 'is_file_input',
            'DEFAULT_BUNDLESIZE', 'DEFAULT_BUNDLEWAIT', 'DEFAULT_ATTEMPTS',
            'DEFAULT_EVICT', 'DEFAULT_EAGER_MODE', 'DEFAULT_SERVER_POLL', 'EVICT_MINIMUM', 'EVICT_MAXIMUM',
-           'check_evict', 'configured_eager',
+           'check_evict', 'configured_eager', 'configured_retries',
            'DEFAULT_BIND', 'DEFAULT_PORT', 'DEFAULT_AUTH']
 
 # Initialize logger
@@ -112,6 +112,11 @@ DEFAULT_BUNDLESIZE: Final[int] = default.server.bundlesize
 
 DEFAULT_ATTEMPTS: Final[int] = default.server.attempts
 """Default number of attempts for task retries."""
+
+
+def configured_retries() -> int:
+    """Retries `server.attempts` allows, read when called: the default of every `max_retries` not given."""
+    return config.server.attempts - 1
 
 DEFAULT_EAGER_MODE: Final[bool] = default.server.eager
 """When enabled tasks are retried immediately ahead scheduling new tasks."""
@@ -1199,7 +1204,8 @@ class ServerThread(Thread):
             Server authentication key. See :const:`DEFAULT_AUTH`.
 
         max_retries (int, optional):
-            Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
+            Number of allowed task retries.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -1256,7 +1262,7 @@ class ServerThread(Thread):
                  restart_mode: bool = False,
                  address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                  auth: str = DEFAULT_AUTH,
-                 max_retries: int = DEFAULT_ATTEMPTS - 1,
+                 max_retries: Optional[int] = None,
                  eager: bool = False,
                  redirect_failures: IO = None,
                  evict_after: int = DEFAULT_EVICT,
@@ -1265,6 +1271,7 @@ class ServerThread(Thread):
                  tls: Optional[TLSConfig] = None,
                  sites: Optional[SiteRegistry] = None) -> None:
         """Initialize queue manager and child threads."""
+        max_retries = configured_retries() if max_retries is None else max_retries
         self.in_memory = in_memory
         self.no_confirm = no_confirm
         self.sites = sites
@@ -1451,7 +1458,7 @@ def serve_from(source: Iterable[str],
                poll: int = DEFAULT_SERVER_POLL,
                address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
-               max_retries: int = DEFAULT_ATTEMPTS - 1,
+               max_retries: Optional[int] = None,
                eager: bool = DEFAULT_EAGER_MODE,
                redirect_failures: IO = None,
                evict_after: int = DEFAULT_EVICT,
@@ -1504,7 +1511,8 @@ def serve_from(source: Iterable[str],
             Server authentication key. See :const:`DEFAULT_AUTH`.
 
         max_retries (int, optional):
-            Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
+            Number of allowed task retries.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -1565,7 +1573,7 @@ def serve_file(path: str,
                poll: int = DEFAULT_SERVER_POLL,
                address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                auth: str = DEFAULT_AUTH,
-               max_retries: int = DEFAULT_ATTEMPTS - 1,
+               max_retries: Optional[int] = None,
                eager: bool = DEFAULT_EAGER_MODE,
                redirect_failures: Optional[IO] = None,
                evict_after: int = DEFAULT_EVICT,
@@ -1614,7 +1622,8 @@ def serve_file(path: str,
             Server authentication key. See :const:`DEFAULT_AUTH`.
 
         max_retries (int, optional):
-            Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
+            Number of allowed task retries.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -1669,7 +1678,7 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
                   poll: int = DEFAULT_SERVER_POLL,
                   address: Tuple[str, int] = (DEFAULT_BIND, DEFAULT_PORT),
                   auth: str = DEFAULT_AUTH,
-                  max_retries: int = DEFAULT_ATTEMPTS - 1,
+                  max_retries: Optional[int] = None,
                   eager: bool = DEFAULT_EAGER_MODE,
                   redirect_failures: IO = None,
                   evict_after: int = DEFAULT_EVICT,
@@ -1695,7 +1704,8 @@ def serve_forever(bundlesize: int = DEFAULT_BUNDLESIZE,
             Server authentication key. See :const:`DEFAULT_AUTH`.
 
         max_retries (int, optional):
-            Number of allowed task retries. See :const:`DEFAULT_ATTEMPTS`.
+            Number of allowed task retries.
+            Default: ``server.attempts`` - 1, read when called.
 
         poll (int, optional):
             Polling interval in seconds between database queries if no tasks are available.
@@ -1802,6 +1812,8 @@ Options:
   -w, --bundlewait      SEC   Wait before flushing tasks; seconds, 30s, 5m or [D-]HH:MM:SS (default: {DEFAULT_BUNDLEWAIT}).
   -Q, --poll            SEC   Polling interval between database queries if no tasks available; seconds, 30s, 5m or [D-]HH:MM:SS.
   -r, --max-retries     NUM   Auto-retry failed tasks (default: {DEFAULT_ATTEMPTS - 1}).
+                              A task that did not run (-1001, -1002) is never retried;
+                              a retry keeps its task's cores, memory and walltime.
       --eager                 Schedule failed tasks before new tasks.
       --no-db                 Disable database (submit directly to clients).
       --initdb                Auto-initialize database.
@@ -1835,7 +1847,7 @@ class ServerApp(Application):
     interface.add_argument('-W', '--task-timeout', type=parse_time, default=task_timeout)
 
     eager_mode: bool = config.server.eager
-    max_retries: int = config.server.attempts - 1
+    max_retries: int = configured_retries()
     interface.add_argument('-r', '--max-retries', type=int, default=max_retries)
     interface.add_argument('--eager', action='store_true', dest='eager_mode', default=eager_mode)
 

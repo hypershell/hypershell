@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:update-client-retry
 kind: fix
 appetite: small
 target: 2.9.x

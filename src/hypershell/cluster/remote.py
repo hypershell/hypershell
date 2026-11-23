@@ -31,8 +31,8 @@ from hypershell.core.template import DEFAULT_TEMPLATE
 from hypershell.data.model import Task, Client
 from hypershell.client import DEFAULT_DELAY, DEFAULT_SIGNALWAIT
 from hypershell.submit import DEFAULT_BUNDLEWAIT
-from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_ATTEMPTS, DEFAULT_SERVER_POLL,
-                               DEFAULT_EVICT)
+from hypershell.server import (ServerThread, DEFAULT_PORT, DEFAULT_BUNDLESIZE, DEFAULT_SERVER_POLL,
+                               DEFAULT_EVICT, configured_retries)
 from hypershell.cluster.launch import ClientLaunch, LaunchActuator, advertised_host, client_launch, redact_secrets
 from hypershell.cluster.demand import (AutoScalerPolicy, ZoneRef, ZoneLoad, ScalingKnobs,
                                        read_zone_loads, fleet_demand)
@@ -174,7 +174,7 @@ class RemoteCluster(Thread):
 
         max_retries (int, optional):
             Number of allowed task retries.
-            See :const:`~hypershell.server.DEFAULT_ATTEMPTS`.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -262,7 +262,7 @@ class RemoteCluster(Thread):
                  poll: int = DEFAULT_SERVER_POLL,
                  forever_mode: bool = False,
                  restart_mode: bool = False,
-                 max_retries: int = DEFAULT_ATTEMPTS,
+                 max_retries: Optional[int] = None,
                  eager: bool = False,
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,
@@ -839,7 +839,7 @@ class AutoScalingCluster(Thread):
 
         max_retries (int, optional):
             Number of allowed task retries.
-            See :const:`~hypershell.server.DEFAULT_ATTEMPTS`.
+            Default: ``server.attempts`` - 1, read when called.
 
         eager (bool, optional):
             When enabled tasks are retried immediately ahead scheduling new tasks.
@@ -966,7 +966,7 @@ class AutoScalingCluster(Thread):
                  no_confirm: bool = False,  # noqa: ignored (passed by ClusterApp)
                  forever_mode: bool = False,  # noqa: ignored (passed by ClusterApp)
                  restart_mode: bool = False,  # noqa: ignored (passed by ClusterApp)
-                 max_retries: int = DEFAULT_ATTEMPTS,
+                 max_retries: Optional[int] = None,
                  eager: bool = False,
                  redirect_failures: IO = None,
                  delay_start: float = DEFAULT_DELAY,
@@ -992,6 +992,7 @@ class AutoScalingCluster(Thread):
                  failed_launches: int = DEFAULT_AUTOSCALE_FAILED_LAUNCHES,
                  ) -> None:
         """Initialize server and autoscaler."""
+        max_retries = configured_retries() if max_retries is None else max_retries
         auth = secrets.token_hex(64)
         # In JSON mode the template is expanded submit-side by the server; remote clients
         # run the fully-resolved commands verbatim (avoids double expansion).

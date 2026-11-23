@@ -26,6 +26,10 @@ scheduled, retried, or reverted on ``--restart``.
 Using ``--revert`` reverts everything as if the task was new again.
 
 Using ``--delete`` drops the row from the database entirely.
+``--delete`` takes no change: given a ``FIELD=VALUE``, a ``KEY:VALUE`` or ``--remove-tag``,
+``hs update`` exits with status 2 before it counts or asks, and deletes nothing.
 
 The legacy interface for updating a single task with the `ID`, `FIELD`,
 and `VALUE` as positional arguments remains valid.
+The single-task form takes no ``--cancel``, ``--revert``, ``--delete`` or ``--remove-tag``;
+given one, it exits with status 2 and writes nothing.
