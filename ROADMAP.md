@@ -199,12 +199,13 @@ it exits 0 once that relay has drained; the same run on a database stays up. Fou
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `spec/relay-advertise/`*
 **Seed:** [`issues/forever-nodb-server-exits-when-relay-drains.md`](issues/forever-nodb-server-exits-when-relay-drains.md) · *status: unshaped*
 
-## SIGUSR1 stops an autoscaling cluster's scheduling but not the cluster
+## SIGUSR1 stops an autoscaling cluster's or server's scheduling but not the process
 
 After SIGUSR1, an autoscaling `hs cluster` stops scheduling and its clients drain and disconnect, but
 the process stays up until SIGTERM: it waits on the autoscaler, which never looks at the signal. A
 program that owns such a cluster cannot ask it to drain, so it terminates it, killing any client
-still connected (the client's Slurm job ends `FAILED`).
+still connected (the client's Slurm job ends `FAILED`). `hs server --autoscaling` with relay sites
+has the same shape: it waits on its topology publisher, which never looks at the signal either.
 
 *Target: 2.9.x · Horizon: near-term, small · Depends on: — · Refs: `hypershell/hypershell-nextflow`
 (`DESIGN.md` item 6)*
