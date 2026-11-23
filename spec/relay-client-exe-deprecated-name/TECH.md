@@ -99,10 +99,10 @@ phases:
     900 uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html
     docs /tmp/claude-501/docs-html-rexe
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 35d500f9
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 # TECH.md — A relay starts its site clients with its own `hs`, not the legacy `hyper-shell`
 
