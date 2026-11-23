@@ -16,7 +16,7 @@ reflection and takes no lock.
 
 # Type annotations
 from __future__ import annotations
-from typing import Callable, Final, Iterator, List, NamedTuple, Optional, Tuple, FrozenSet, TypeVar
+from typing import Callable, Final, Iterator, List, NamedTuple, Optional, Set, Tuple, FrozenSet, TypeVar
 
 # Standard libs
 import re
@@ -116,7 +116,7 @@ class LockWait(Exception):
 class Step:
     """
     One schema change: the table it touches, a log message, and the statement. A `notice`
-    is logged before the statement runs, for a change that can take a while.
+    is logged once before the statement first runs, for a change that can take a while.
     """
     table: str
     message: str
@@ -389,7 +389,8 @@ def _apply(bind: Engine, metadata: MetaData) -> List[str]:
     if bind.dialect.name == 'sqlite':
         plan = _waiting(bind, lambda timeout: _apply_sqlite(bind, metadata, timeout))
     else:
-        plan = _waiting(bind, lambda timeout: _apply_transactional(bind, metadata, timeout))
+        noticed: Set[str] = set()
+        plan = _waiting(bind, lambda timeout: _apply_transactional(bind, metadata, timeout, noticed))
     messages = [step.message for step in plan.steps]
     for message in messages:
         if plan.existing:
@@ -451,8 +452,12 @@ def _rollback_sqlite(conn: Connection) -> None:
             log.debug(f'Rollback after failed schema upgrade: {_message(error)}')
 
 
-def _apply_transactional(bind: Engine, metadata: MetaData, timeout: float) -> Plan:
-    """Databases with transactional DDL: one transaction, serialized by an advisory lock on PostgreSQL."""
+def _apply_transactional(bind: Engine, metadata: MetaData, timeout: float, noticed: Set[str]) -> Plan:
+    """
+    Databases with transactional DDL: one transaction, serialized by an advisory lock on PostgreSQL.
+    A step's notice is logged on the first attempt only and added to `noticed`, so an attempt
+    repeated after a lock wait does not announce the same change again.
+    """
     with bind.connect() as conn:
         committed = False
         try:
@@ -463,7 +468,8 @@ def _apply_transactional(bind: Engine, metadata: MetaData, timeout: float) -> Pl
             with _waiting_for(WAIT_TABLES):
                 plan = _plan(conn, metadata)
                 for step in plan.steps:
-                    if step.notice:
+                    if step.notice and step.notice not in noticed:
+                        noticed.add(step.notice)
                         log.info(step.notice)
                     conn.exec_driver_sql(step.sql)
                 conn.commit()

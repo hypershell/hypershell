@@ -3,7 +3,7 @@ slug: memory-column-overflows-postgres
 title: On PostgreSQL, a task can declare 2 GiB of memory or more
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/memory-column-overflows-postgres
 base: develop
 current_phase: done
@@ -228,6 +228,11 @@ with its rows kept and the rewrite announced. Concurrent first uses widen once. 
   - [x] `WIDENED` beside `RETIRED_UNIQUE`, with its comment, and added to `__all__`.
   - [x] `Step.notice: Optional[str] = None`. `_apply_transactional` logs it at INFO immediately
         before the step's statement. `_apply_sqlite` never sees one.
+  - [x] F1 remediation (review cycle 1): the notice is logged once per `_apply` run, on the first
+        attempt only. `_apply` keeps a `noticed` set across `_waiting`'s retries, so an attempt
+        repeated after a lock-wait slice does not announce the rewrite again. Regression tests in
+        `test_upgrade_postgres.py`: a session holding `SELECT 1 FROM task` past the ceiling gives
+        exactly one notice, and one released mid-wait gives one notice before "Widened…".
   - [x] `_widen(table, column, state)`. In P2 it returns the widen step when `state` is
         `None` or the columnstore is off, and raises `NotImplementedError` for the columnstore rows
         (P3 fills them). In P2 `_plan` always passes `None`.

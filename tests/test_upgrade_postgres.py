@@ -585,6 +585,51 @@ def test_memory_widening_lock_ceiling(pg_database, monkeypatch) -> None:
         engine.dispose()
 
 
+def test_memory_rewrite_notice_once_while_waiting(pg_database, monkeypatch, upgrade_log) -> None:
+    """A widening that waits out many slices and then gives up announces the rewrite once, not per slice."""
+    engine = created(database_engine(pg_database()))
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_SLICE', 0.2)
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_CEILING', 1)
+    holder = engine.connect()
+    try:
+        holder.execute(text('SELECT 1 FROM task LIMIT 1'))  # Open transaction holding a lock on task.
+        with pytest.raises(SchemaUpgradeError, match='gave up after 1 s'):
+            upgrade_schema(engine)
+        holder.rollback()
+        waits = [message for _, message in upgrade_log if WAIT_MESSAGE.match(message)]
+        notices = [message for _, message in upgrade_log if message == NOTICE]
+        assert len(waits) >= 2, upgrade_log
+        assert len(notices) == 1, upgrade_log
+        assert memory_type(engine) == 'integer'
+    finally:
+        holder.close()
+        engine.dispose()
+
+
+def test_memory_rewrite_notice_once_after_wait(pg_database, monkeypatch, upgrade_log) -> None:
+    """A widening that waits for a lock, then runs, announces the rewrite once, before the change is logged."""
+    engine = created(database_engine(pg_database()))
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_SLICE', 0.2)
+    monkeypatch.setattr(upgrade, 'LOCK_WAIT_CEILING', 60)
+    holder = engine.connect()
+    timer = threading.Timer(1, holder.rollback)
+    try:
+        holder.execute(text('SELECT 1 FROM task LIMIT 1'))  # Open transaction holding a lock on task.
+        timer.start()
+        assert upgrade_schema(engine) == [MESSAGE]
+        timer.join()
+        messages = [message for _, message in upgrade_log]
+        assert len([message for message in messages if WAIT_MESSAGE.match(message)]) >= 2, upgrade_log
+        assert messages.count(NOTICE) == 1 and messages.count(MESSAGE) == 1, upgrade_log
+        assert messages.index(NOTICE) < messages.index(MESSAGE)
+        assert all(level == logging.INFO for level, message in upgrade_log if message in (NOTICE, MESSAGE))
+        assert memory_type(engine) == 'bigint'
+    finally:
+        timer.cancel()
+        holder.close()
+        engine.dispose()
+
+
 def test_memory_concurrent_widening(pg_database, pg_site) -> None:
     """Concurrent first uses all succeed; exactly one widens the column."""
     engine = pg_site(pg_database())
