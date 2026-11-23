@@ -815,6 +815,17 @@ stores naive local times), who sweeps, and reaching tasks already running or hel
 `hypershell/hypershell-nextflow` attached mode*
 **Seed:** [`issues/submitter-lease.md`](issues/submitter-lease.md) · *status: unshaped*
 
+## Retire the forked queue manager
+
+`SecureManager.start` still serves the queue from a forked child, though every command serves
+in-process through `QueueServer`. Only one test uses it, but it keeps a second server path in the
+decref and handshake logic. `SecureManager` is public, so retiring the method is a 2.10.0 interface
+change. Deferred by `queue-wire-codec`, which gives the path the new codec unchanged.
+
+*Target: 2.10.0 · Horizon: after 2.9.0, small · Depends on: `queue-wire-codec` · Refs:
+`src/hypershell/core/queue.py` (`SecureManager.start`, `_child_bootstrap`)*
+**Seed:** [`issues/retire-forked-manager.md`](issues/retire-forked-manager.md) · *status: unshaped*
+
 ---
 
 # Settled questions
