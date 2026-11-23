@@ -91,3 +91,27 @@ Unmapped changes: none material. The seed and ROADMAP status moved to `adopted:�
 - None. F1 is in `data/upgrade.py`, which is outside the high-blast-radius list. It is a log line
   and touches no DB-lifecycle invariant: the schema and rows are unchanged in every case. The foreman
   gates under the maintainer's mandate.
+
+## Review cycle 2 — approved (2026-11-23)
+
+- **Reviewed commit:** 13df84a7 · **Mode:** a fresh blind pass over the full diff, excluding `spec/`,
+  not scoped to the remediation · xhigh effort.
+- **Verification:**
+  - The reviewer built the `hs283` and `hs290a1` templates itself from the real 2.8.3 and 2.9.0a1
+    releases, without Docker, so the template tests ran locally: `test_upgrade_postgres.py` 38
+    passed.
+  - `test_timescale.py` with `HS_TEST_TIMESCALE=community`: 98 passed, 1 skipped.
+  - `test_memory_column.py`: 17 passed. `test_data/` and `test_server_initdb.py`: 92 passed.
+  - The full default suite: 4121 passed.
+- **F1 (cycle 1) is fixed.** Through the CLI, with the real 30 s slice and another session holding
+  `task` for 45 s, the notice is logged once at 0.4 s, before the wait and the rewrite, and
+  "Widened" follows at 45.0 s. Both regression tests pass.
+- **All of R1–R9 were re-verified**, including:
+  - real 2.9.0a9 postgres and timescale databases, with rows byte-identical after widening;
+  - interruption and concurrency on 2M rows;
+  - the compressed-chunk refusal, including a chunk compressed between plan and statement;
+  - the documented recovery SQL.
+- **Findings:** none.
+- **Absurd input (not a finding):** `-m 8388608TB` (2^63 bytes) gives a DataError, exit 5, with
+  nothing stored and no hang. That belongs to `issues/bounded-inputs.md`.
+- **Human gate:** not triggered.

@@ -79,10 +79,10 @@ phases:
     uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
     "$TMPDIR/docs-html"
 review:
-  last_reviewed_commit: 397c402d
-  verdict: changes-requested
+  last_reviewed_commit: 13df84a7
+  verdict: approved
   blocked_reason: 'F1 (LOW): rewrite notice repeats on every lock-wait slice'
-  cycle: 1
+  cycle: 2
 ---
 # TECH.md — On PostgreSQL, a task can declare 2 GiB of memory or more
 
