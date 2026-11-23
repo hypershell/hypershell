@@ -113,8 +113,13 @@ def stored_rows() -> List[tuple]:
 
 @mark.integration
 def test_cluster_retry_keeps_walltime(temp_site: Path) -> None:
-    """A task submitted with -c, -m and -W is killed at its walltime on its retry too (the client sets none)."""
-    rc, _, stderr = main(['hs', 'submit', '-c', '1', '-m', '1MB', '-W', '2', 'sleep', '6'])
+    """A task submitted with -c, -m and -W is killed at its walltime on its retry too (the client sets none).
+
+    The command is `exec sleep 6` so the walltime signal reaches `sleep` itself whichever `/bin/sh` runs
+    it: a shell that runs the command as a child instead of replacing itself would see the signal while
+    `sleep` ran on to 6 s.
+    """
+    rc, _, stderr = main(['hs', 'submit', '-c', '1', '-m', '1MB', '-W', '2', 'exec', 'sleep', '6'])
     assert rc == cli_status.success, stderr
     rc, _, stderr = main(['hs', 'cluster', '--restart', '-r', '1', '-N1'])
     assert rc == cli_status.success, stderr
