@@ -22,6 +22,8 @@ mandate, with the maintainer's own rulings on Q1 and Q2.
   refuse with an actionable `SchemaUpgradeError`, schema unchanged. If A outgrows a small appetite,
   the cycle ships B and files A as a follow-up seed.
 - **Q2 (maintainer, 2026-11-23):** option A. 2.9.0 only; no 2.8 change.
+- **Q1 amended at the plan gate (maintainer, 2026-11-23):** TimescaleDB 2.22.x/2.23.x with the
+  columnstore enabled is refused, not toggled (Clarifications, "Q1 amended"; R7).
 - The contract is locked; `hs-plan` designs against it.
 
 ## Problem
@@ -105,12 +107,14 @@ the long table rewrite announced in the log. A database already current costs no
   as other changes do; and WHEN two processes first use the same old database at once, the column
   SHALL be widened once and both SHALL proceed.
 - **R7** — WHEN this release first uses a `timescale`-provider database created by 2.9.0a3–a9, the
-  step SHALL widen the hypertable's `task.memory` in place (Q1, option A): directly where TimescaleDB
-  allows it; where the enabled columnstore blocks it and no chunk is compressed, by turning the
-  columnstore off, widening, and leaving the converge step to turn it back on; and IF any chunk is
-  compressed, THEN it SHALL refuse with an actionable `SchemaUpgradeError` naming the manual steps,
-  the schema unchanged. The converge step SHALL leave the hypertable in its configured shape
-  (columnstore settings and policy) after.
+  step SHALL widen the hypertable's `task.memory` in place, directly, wherever TimescaleDB allows it
+  (Q1 option A as amended at the plan gate). IF TimescaleDB refuses it, THEN the step SHALL refuse
+  with an actionable `SchemaUpgradeError`, the schema unchanged, and SHALL never toggle the
+  columnstore. That covers TimescaleDB 2.22.x/2.23.x with the columnstore enabled, whose error names
+  the manual steps or upgrading TimescaleDB to 2.24.0 or later, and any release with a compressed
+  chunk, whose error names the manual steps. A `postgres`-provider database whose `task` is such a
+  hypertable gets the same outcome. The hypertable SHALL keep its columnstore settings and policy
+  across the widening.
 - **R8** — The user docs on the in-place upgrade (`docs/_include/database.rst`,
   `docs/_include/database_alt.rst`) and `AGENTS.md` § Data layer specifics SHALL state that the step
   also widens `task.memory` on PostgreSQL, rewriting the `task` table under its exclusive lock, marked
@@ -180,6 +184,14 @@ the long table rewrite announced in the log. A database already current costs no
     widens the column (2.8 reads and writes a widened column unchanged), so they need not wait.
     One more paragraph of docs.
   - **C:** also backport the widening to a 2.8.x patch.
+- **Q1 amended. Resolved 2026-11-23** (maintainer, at the plan gate, answering PLAN §5): on
+  TimescaleDB 2.22.x/2.23.x with the columnstore enabled, **refuse** with an actionable
+  `SchemaUpgradeError` that gives the manual steps or says to upgrade TimescaleDB to 2.24.0 or later,
+  the schema unchanged. There is no columnstore off/on toggling anywhere in the upgrade path, no
+  `converges=` flag, and no converge call from `checkdb`. TimescaleDB 2.24.0 and later (columnstore
+  on, nothing compressed) widen directly, and any release with a compressed chunk is refused, as
+  planned. The `postgres` provider follows the same rule: it refuses where TimescaleDB would refuse.
+  This supersedes Q1 option A for the 2.22/2.23 case only; R7 is reworded to match.
 
 ## Related materials
 

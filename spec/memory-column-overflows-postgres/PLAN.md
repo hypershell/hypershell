@@ -1,6 +1,6 @@
 # PLAN — On PostgreSQL, a task can declare 2 GiB of memory or more
 
-> **Status:** Draft for review · **Last updated:** 2026-11-23
+> **Status:** Approved at the plan gate, with one ruling (§7) · **Last updated:** 2026-11-23
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
 > [`research/`](research/). Every design element traces to a GOAL R-ID.
@@ -12,10 +12,11 @@ change. The in-place upgrade step gains one enumerated widening, `WIDENED = {('t
 next to `RETIRED_UNIQUE`. It runs in the step's existing transaction, under the existing advisory
 lock and lock ceiling, and logs an INFO notice before the rewrite. On a TimescaleDB hypertable the
 step probes the columnstore. Where the release allows it (2.24.0 and later, no compressed chunk), the
-step widens directly. On 2.22/2.23 with the columnstore on, it turns the columnstore off and widens,
-and the converge pass turns it back on. Where any chunk is compressed, it refuses before running any
-statement. Three phases: tests first, then the PostgreSQL widening, then the TimescaleDB path. Option
-A fits the small appetite, so the cycle is not split.
+step widens directly. Where TimescaleDB would refuse, it refuses first with an actionable
+`SchemaUpgradeError`, before running any statement and with the schema unchanged: on 2.22/2.23 with
+the columnstore on, and on any release with a compressed chunk. It never toggles the columnstore
+(plan gate, §7). Three phases: tests first, then the PostgreSQL widening, then the TimescaleDB probe
+and refusals. The appetite stays small.
 
 ## 2. Design
 
@@ -61,35 +62,34 @@ table holds:
    `timescaledb_information.hypertables`. Otherwise it returns `(version, enabled, compressed)`,
    where `compressed` is the number of `timescaledb_information.chunks` rows with `is_compressed`.
    The extension check comes first so the probe works on a plain server.
-3. Decide with `_widen(table, column, state, converges)`, a new pure function that the unit tests
-   drive:
+3. Decide with `_widen(table, column, state)`, a new pure function that the unit tests drive.
+   The rule is the same under both providers:
 
 | State | Steps / outcome |
 |---|---|
 | no hypertable, or columnstore off (Apache-only, or `columnstore = false`) | widen |
 | columnstore on, `compressed > 0` | `SchemaUpgradeError` before any statement, schema unchanged |
 | columnstore on, none compressed, version ≥ `COLUMN_TYPE_VERSION` | widen (columnstore left on) |
-| columnstore on, none compressed, version < `COLUMN_TYPE_VERSION`, `converges` | turn the columnstore off, then widen |
-| same, not `converges` | `SchemaUpgradeError` naming the manual steps |
+| columnstore on, none compressed, version < `COLUMN_TYPE_VERSION` (2.22.x/2.23.x) | `SchemaUpgradeError` before any statement, schema unchanged |
 
 The steps the table names:
 
 - **widen.** SQL: `ALTER TABLE {qualified} ALTER COLUMN {col} TYPE BIGINT` (the model column's type
   compiled for the dialect). Notice: `Rewriting table task to widen task.memory to BIGINT (this can
   take a while on a large table)`. Message: `Widened column task.memory to BIGINT`.
-- **turn the columnstore off.** SQL: `ALTER TABLE {qualified} SET (timescaledb.enable_columnstore =
-  false)`. Message: `columnstore_off_message(table, column)`, a function in `upgrade.py`, worded
-  `Turned off the columnstore on task to widen task.memory (the TimescaleDB pass turns it back on)`.
-  It leaves any policy in place (research 02).
 - **compressed-chunk refusal.** It names the table, the column, the count of compressed chunks, and
   why: TimescaleDB cannot change a column's type while chunks are in the columnstore, and HyperShell
   does not decompress data without the user's say. It gives the manual steps: convert the chunks
   back to the rowstore (`SELECT decompress_chunk(c) FROM show_chunks('task') c`, with the policy
   paused if it could convert them again first), then run any `hs` command again. It ends with "The
   schema is unchanged."
-- **2.22/2.23 refusal, not `converges`.** It names the TimescaleDB version and the two ways out: use
-  the `timescale` provider, which turns the columnstore off and back on itself, or run the three
-  statements by hand.
+- **2.22/2.23 refusal.** It names the table, the column and the TimescaleDB version, and says why:
+  this release cannot change a column's type while the columnstore is enabled. It gives two ways
+  out. The first is to upgrade TimescaleDB to 2.24.0 or later (`ALTER EXTENSION timescaledb UPDATE`
+  after installing it on the server) and run any `hs` command again. The second is the manual steps
+  (`ALTER TABLE task SET (timescaledb.enable_columnstore = false)`, `ALTER TABLE task ALTER COLUMN
+  memory TYPE bigint`, then `hs initdb` to restore the columnstore and its settings). It ends with
+  "The schema is unchanged."
 
 The probe and the decision run in `_check`, which is lock-free, so a refusal costs no lock. They run
 again under the advisory lock in `_apply_transactional`, as every plan does. A chunk compressed by
@@ -98,9 +98,9 @@ transaction (`0A000`, research 02). The rollback and `_wrap` then raise `SchemaU
 the schema unchanged. `_wrap` maps that one TimescaleDB message to the refusal text above, so the
 error is actionable either way.
 
-**`upgrade_schema(bind, metadata=None, *, converges: bool = False)`.** `converges` means that the
-caller runs the TimescaleDB pass after the step, so the step may turn a columnstore off. It reaches
-`_plan` through `_check` and `_apply`. Only `upgradedb()` passes `converges=TIMESCALE`.
+**No new parameter.** `upgrade_schema(bind, metadata=None)` keeps its signature. The step never
+issues a TimescaleDB statement, so `upgradedb()`, `initdb()` and `checkdb()` in
+`src/hypershell/data/__init__.py` are unchanged (§2.4).
 
 **Module docstring.** It names the exceptions: the retired uniqueness and the `WIDENED` columns,
 which are widened on PostgreSQL by a table rewrite under the table's exclusive lock (R8).
@@ -128,18 +128,12 @@ The lock ceiling stays as it is: `LOCK_WAIT_SLICE` 30 s and `LOCK_WAIT_CEILING` 
   peer's command succeeds. R8's docs say so in one sentence. A separate ceiling for the widening was
   rejected (§3).
 
-### 2.4 Who turns the columnstore back on (`src/hypershell/data/__init__.py`)
+### 2.4 The hypertable's shape is never touched (`src/hypershell/data/__init__.py` unchanged)
 
-- `upgradedb()` calls `upgrade_schema(engine, converges=TIMESCALE)` and returns its changes as
-  today.
-- `initdb()` is unchanged. It already runs `timescale.converge` after `upgradedb()`.
-- `checkdb()`: under `TIMESCALE`, when the changes `upgradedb()` returns include
-  `columnstore_off_message('task', 'memory')`, it runs `timescale.converge(engine, schema,
-  TIMESCALE_SETTINGS)` straight after. With any other outcome, `checkdb` does exactly what it does
-  today. That includes the current path, which takes no converge, no lock and no new query (R5).
-- Converge then enables the columnstore with the configured `segmentby`/`orderby` and adds or
-  keeps the configured policy, logging its own INFO lines (R7: "the converge step SHALL leave the
-  hypertable in its configured shape").
+- The step widens directly or refuses, and the direct `ALTER` leaves the columnstore settings and
+  the policy as they were. R7's "keep its columnstore settings and policy" holds by construction.
+- `initdb()` still runs `timescale.converge` after `upgradedb()`, as today. `checkdb()` still runs
+  `upgradedb()` alone, so the current path adds no converge, no lock and no new query (R5).
 
 ### 2.5 Docs (R8)
 
@@ -151,14 +145,16 @@ The lock ceiling stays as it is: `LOCK_WAIT_SLICE` 30 s and `LOCK_WAIT_CEILING` 
   announced in the log. Add one sentence on a waiter that gives up after 15 minutes behind a long
   rewrite: rerun it.
 - `docs/_include/database.rst`, TimescaleDB section (P3). Add one paragraph covering three cases.
-  The hypertable is widened in place. On TimescaleDB 2.22/2.23 the columnstore is turned off for the
-  widening and the pass turns it back on. With compressed chunks the upgrade refuses, naming the
-  manual steps.
+  On TimescaleDB 2.24.0 or later the hypertable is widened in place, with the columnstore left on.
+  On 2.22/2.23 with the columnstore enabled the upgrade refuses, naming the update to 2.24.0 or the
+  manual steps. With compressed chunks it refuses, naming the manual steps (`decompress_chunk`).
+  The schema is unchanged when it refuses.
 - `docs/_include/database_alt.rst`: the same exception, one sentence.
 - `AGENTS.md` § Data layer specifics, the schema-upgrade bullet: "only adds … the one removal is …"
   becomes "only adds …, with two PostgreSQL-only exceptions, the retired `UNIQUE` constraints
   (`RETIRED_UNIQUE`) and the `WIDENED` columns (`task.memory`, widened by a rewrite, an INFO notice
-  first)". Add one clause on the TimescaleDB case and `checkdb`'s converge.
+  first)". Add one clause: on a TimescaleDB hypertable the step widens only where TimescaleDB
+  allows it and otherwise refuses, never toggling the columnstore.
 - No CLI option changes, so the `*_usage.rst`/`*_help.rst` files and the `share/` completions stay as
   they are. The man pages are `hs-release`'s job. Docs use top-level commands only (`hs submit`,
   `hs list`, `hs info`, `hs initdb`) and never show a key on a command line.
@@ -171,9 +167,9 @@ The lock ceiling stays as it is: `LOCK_WAIT_SLICE` 30 s and `LOCK_WAIT_CEILING` 
 | R2   | §2.1, so the insert is accepted; the retry copies `memory` through `retry_columns` unchanged |
 | R3   | §2.2 `WIDENED` + widen step in `_plan`, applied in the existing transaction |
 | R4   | §2.2 `Step.notice` logged at INFO before the statement; after-commit message at INFO |
-| R5   | §2.2 widening due only on `INTEGER`/`SMALLINT`; no probe, no lock, nothing above `trace` otherwise; §2.4 `checkdb` unchanged on that path |
+| R5   | §2.2 widening due only on `INTEGER`/`SMALLINT`; no probe, no lock, nothing above `trace` otherwise; §2.4 `checkdb` unchanged |
 | R6   | §2.3: existing transaction, slices, ceiling, `_wrap`; re-plan under the advisory lock |
-| R7   | §2.2 `_columnstore` probe + `_widen` decision table; `converges`; §2.4 `checkdb` converge after a columnstore-off |
+| R7   | §2.2 `_columnstore` probe + `_widen` decision table (widen directly, or refuse before any statement); §2.4 shape untouched |
 | R8   | §2.5 docs, `AGENTS.md`, module docstring |
 | R9   | §6 and TECH P1: tests across the default suite, the PostgreSQL suite (templates) and the TimescaleDB suite |
 
@@ -203,7 +199,6 @@ research and again after this design was drafted.
 | Deviation | Why needed | Simpler alternative rejected because |
 |-----------|-----------|--------------------------------------|
 | `Step.notice`, a second log point inside the transaction | R4 asks for a line *before* the rewrite; every other message is logged after commit | Logging before `_apply` would announce a rewrite a concurrent peer may already have done, and would print on refusals |
-| `upgrade_schema(…, converges=)` and a conditional `converge` in `checkdb` | R7/Q1: the converge step turns the columnstore back on, but today only `initdb` runs converge; `checkdb` is every other first use | (a) Re-enabling the columnstore in the step's own transaction with the database's stored settings is simpler and atomic, but contradicts Q1's ruled mechanism and R7's text, so it goes to the gate as an option (§5), not into the design. (b) Running converge in every `checkdb` breaks R5 (a lock on the current path) |
 | The TimescaleDB probe lives in `upgrade.py`, not `timescale.py` | `_plan` calls it; `timescale.py` imports from `upgrade.py` | A lazy import inside `_plan` hides a cycle |
 | Lock ceiling unchanged for a rewrite that may outlast it | Keeps one wait policy for the whole step | A per-step ceiling is a new knob for a once-per-database event whose error is already actionable and whose rerun succeeds |
 
@@ -219,21 +214,18 @@ research and again after this design was drafted.
   block beside `RETIRED_UNIQUE`. Reflection is not blocked by an uncommitted `ALTER` and reads the
   old type (probed on PostgreSQL 18, 2026-11-23). See
   [`research/01-upgrade-step.md`](research/01-upgrade-step.md).
-- **Does converge follow every upgrade?** No, only in `initdb`. Hence §2.4.
+- **Does converge follow every upgrade?** No, only in `initdb`. That made turning the columnstore off
+  and back on fragile, and the plan gate replaced it with a refusal (§7).
 
 ## 5. Risks & open questions
 
-- **For the gate: the converge mechanism.** Following Q1 literally means `checkdb` gains a converge
-  after a columnstore-off. If that converge fails or the process dies between the two transactions,
-  the columnstore stays off until `hs initdb` runs: the error names it, and nothing else notices.
-  The alternative is to re-enable the columnstore in the step's own transaction with the settings
-  the database had. That is atomic and needs no `converges` flag and no `checkdb` change. It differs
-  from the ruling's wording, so it needs the maintainer's word. The design follows the ruling. The
-  window only exists on TimescaleDB 2.22.x/2.23.x Community servers.
-- **The 2.22/2.23 branch has no real-version test.** CI has no image older than 2.24.0. P3 forces
-  `COLUMN_TYPE_VERSION` above the server's version on the 2.24.0 and 2.31.0 Community entries, so
-  the off/widen/converge statements run against real servers. The refusal they bypass is confirmed
-  only from the 2.23.0 source.
+- **2.22/2.23 Community users of the alpha `timescale` provider do a manual step**, or update
+  TimescaleDB, before this release can use their database. The error says how. This is the ruled
+  trade (§7).
+- **The 2.22/2.23 refusal has no real-version test.** CI has no image older than 2.24.0. P3 raises
+  `COLUMN_TYPE_VERSION` above the server's version on the 2.24.0 and 2.31.0 Community entries, so the
+  probe and the refusal run against real servers. That TimescaleDB itself refuses on those releases
+  is confirmed from the 2.23.0 source only. Our refusal comes first either way.
 - **A rewrite longer than 15 minutes** makes concurrent first uses give up with the existing error.
   The docs say to rerun. Processes of an earlier release that are using the database are blocked for
   the rewrite's duration (ACCESS EXCLUSIVE). This is inherent, and it is announced by R4's notice and
@@ -257,9 +249,6 @@ Local runs are serial, with no `-n auto`, and use the sandbox off for the local 
 - `@mark.unit` R3/R5/R7: the `_widen` decision table, every row, through a fake state. That covers
   the steps' SQL, notices and messages, both refusals' text, and the no-op on `BIGINT`, `numeric` and
   absent.
-- `@mark.unit` §2.4: `checkdb` runs `timescale.converge` only under `TIMESCALE` and only when the
-  changes include the columnstore-off message. `upgradedb` passes `converges=TIMESCALE`. Recorders
-  are monkeypatched.
 - `@mark.integration` R2 on SQLite (a guard, expected to pass today). `hs submit -m 4GB` and a task
   file line with `# HYPERSHELL: memory:4GB`. `hs list memory` and `hs info ID -x memory` show
   `4294967296`. `hs cluster --restart --no-tls` runs both to completion. A failing 4GB task's retry
@@ -281,10 +270,23 @@ Community, 2.31.0 Apache-only and 2.24.0 Community).
 - Fresh hypertable R1/R2.
 - Narrowed hypertable (rows in chunks), first use through `hs list --count`: widened directly, the
   columnstore still on, `assert_converged`, rows kept.
-- Community only, gate forced above the server's version, first use through `hs list --count`
-  (`checkdb`) and, separately, through `hs initdb`: columnstore-off and widened INFO lines, the
-  converge pass re-enables, `assert_converged`.
+- Community only, gate forced above the server's version (the 2.22/2.23 refusal), first use
+  through `hs list --count`: exit 5, the refusal text naming 2.24.0 and the manual steps, still
+  `integer`, `shape()` unchanged. On the Apache-only entry the same forced gate still widens, since
+  there is no columnstore.
 - Community only, a compressed chunk: exit 5, the refusal text, still `integer`, the chunk still
   compressed. Then the documented manual step (decompress) and a rerun: widened.
 
 **Docs:** the build passes with `-W`, plus greps for the `versionchanged` and the exception wording.
+
+## 7. Plan gate (2026-11-23)
+
+Ruled by the maintainer at the plan gate, answering §5's converge risk. On TimescaleDB 2.22.x/2.23.x
+with the columnstore enabled, the step **refuses** with an actionable `SchemaUpgradeError`: it gives
+the manual steps or says to upgrade TimescaleDB to 2.24.0 or later, and leaves the schema unchanged.
+There is no columnstore off/on toggling anywhere in the upgrade path, no `converges=` flag, and no
+converge call from `checkdb`. 2.24.0 and later (columnstore on, nothing compressed) widen directly.
+Any release with a compressed chunk is refused, as planned. The `postgres` provider follows the same
+rule. This supersedes GOAL Q1 option A for the 2.22/2.23 case only; GOAL.md records it as a dated
+Clarification, with R7 reworded and R-IDs unchanged. This PLAN and TECH.md P3 are revised to match.
+The plan is otherwise approved by the foreman, gate judge under the maintainer's mandate.

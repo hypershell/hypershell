@@ -25,3 +25,8 @@
    only. The 2.22/2.23 branch is exercised in CI by forcing the release gate on the Community
    entries.
 6. **Appetite.** Option A fits small: three phases, the TimescaleDB part one of them. No split.
+
+**Superseded at the plan gate (2026-11-23):** items 3 and 4's "turn the columnstore off, then widen"
+for TimescaleDB 2.22/2.23 is replaced by a refusal (PLAN §7). The step never toggles the columnstore,
+so `checkdb` gains no converge and `upgrade_schema` gains no `converges` flag. Brief 02's findings
+stand; its "dance" section is background only.

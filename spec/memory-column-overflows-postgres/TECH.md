@@ -25,7 +25,7 @@ phases:
     tests/test_upgrade_postgres.py tests/test_timescale.py -k memory >> "$l" 2>&1;
     r=$?; tail -n 20 "$l"; test $r -eq 0 && grep -q "xfailed" "$l" && ! grep -q "SKIPPED.*test_upgrade_postgres"
     "$l" && grep -q "test_upgrade_postgres.py::test_memory_legacy" "$l" && grep -q
-    "test_timescale.py::test_memory_compressed" "$l" && grep -q "test_timescale.py::test_memory_columnstore_off"
+    "test_timescale.py::test_memory_compressed" "$l" && grep -q "test_timescale.py::test_memory_old_release_refused"
     "$l"
 - id: P2
   name: PostgreSQL widens task.memory in place; model, upgrade step, docs
@@ -55,8 +55,8 @@ phases:
     && UV_PROJECT_ENVIRONMENT="$TMPDIR/docs-venv" uv run --python 3.12 --group docs
     sphinx-build -W --keep-going -q -E -b html docs "$TMPDIR/docs-html"
 - id: P3
-  name: TimescaleDB hypertable widened directly, via the columnstore off and back
-    on, or refused
+  name: TimescaleDB hypertable widened directly, or refused where TimescaleDB would
+    refuse
   status: pending
   satisfies:
   - R7
@@ -72,9 +72,12 @@ phases:
     HS_TEST_TIMESCALE= uv run --extra postgres pytest -q -rxXs tests/test_upgrade_postgres.py
     -k "memory and not legacy or fresh_schema" >> "$l" 2>&1; r=$?; tail -n 20 "$l";
     test $r -eq 0 && ! grep -q "XFAIL" "$l" && ! grep -rqE "memory-column P[23]" tests
-    && grep -q "COLUMN_TYPE_VERSION" src/hypershell/data/upgrade.py && grep -q "decompress_chunk"
-    docs/_include/database.rst && UV_PROJECT_ENVIRONMENT="$TMPDIR/docs-venv" uv run
-    --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs "$TMPDIR/docs-html"
+    && grep -q "COLUMN_TYPE_VERSION" src/hypershell/data/upgrade.py && ! grep -q "enable_columnstore"
+    src/hypershell/data/upgrade.py && git diff --quiet bbc55679 -- src/hypershell/data/__init__.py
+    src/hypershell/data/timescale.py && grep -q "decompress_chunk" docs/_include/database.rst
+    && grep -q "2.24.0" docs/_include/database.rst && UV_PROJECT_ENVIRONMENT="$TMPDIR/docs-venv"
+    uv run --python 3.12 --group docs sphinx-build -W --keep-going -q -E -b html docs
+    "$TMPDIR/docs-html"
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -91,7 +94,8 @@ the per-phase checklists below are the work. `hs-build` executes the next action
 one atomic code+state commit.
 
 - **Vision / requirements (locked):** [`GOAL.md`](GOAL.md). The R-IDs are the contract. Q1 and Q2
-  were ruled at the GOAL gate (2026-11-23).
+  were ruled at the GOAL gate (2026-11-23). Q1 was amended at the plan gate (2026-11-23):
+  TimescaleDB 2.22/2.23 with the columnstore on is refused, never toggled (PLAN §7).
 - **Authoritative design:** [`PLAN.md`](PLAN.md).
 - **Backing research:** [`research/00-digest.md`](research/00-digest.md) and its briefs.
 
@@ -153,13 +157,11 @@ xfail, and the ones that hold today (SQLite R2) pass. No source change.
         `memory INTEGER`. For the PostgreSQL dialect assert `memory BIGINT` (xfail P2).
   - [ ] `@mark.unit` the `_widen` decision table of PLAN §2.2, one parametrized row per state, each
         asserting the step list (SQL, `notice`, `message`) or the `SchemaUpgradeError` text.
-        Plain/no hypertable and columnstore off → widen (xfail P2). Compressed, ≥ 2.24.0, < 2.24.0
-        with and without `converges` → (xfail P3). A narrower reflected type `INTEGER`/`SMALLINT`
-        is due; `BIGINT` and `NUMERIC` are not (xfail P2).
-  - [ ] `@mark.unit` `checkdb`/`upgradedb` wiring (PLAN §2.4), with recorders for
-        `hypershell.data.upgrade_schema`/`timescale.converge`: `upgradedb` passes
-        `converges=TIMESCALE`, and `checkdb` converges only under `TIMESCALE` and only when the
-        changes include `columnstore_off_message('task', 'memory')` (xfail P3).
+        Plain/no hypertable and columnstore off → widen (xfail P2). Columnstore on with none
+        compressed at ≥ 2.24.0 → widen; at < 2.24.0 → the 2.22/2.23 refusal naming 2.24.0 and the
+        manual steps; any compressed chunk → the compressed refusal (xfail P3). No row yields a
+        TimescaleDB statement (no `enable_columnstore` in any step). A narrower reflected type
+        `INTEGER`/`SMALLINT` is due; `BIGINT` and `NUMERIC` are not (xfail P2).
   - [ ] `@mark.integration` R2 on SQLite (`temp_site`), expected to pass today. `hs submit -m 4GB --
         echo big` and a task file line `echo inline # HYPERSHELL: memory:4GB`. `hs list memory` and
         `hs info ID -x memory` print `4294967296`. `hs cluster --restart -N1 --no-tls` completes
@@ -196,12 +198,13 @@ xfail, and the ones that hold today (SQLite R2) pass. No source change.
         (rows in a chunk), then `hs list --count`: widened, `shape()` unchanged, `assert_converged`,
         `task_rows` unchanged (xfail P3; CI runs it only after P3, so its P2 pass on the
         2.24.0+ images never meets the strict marker).
-  - [ ] `test_memory_columnstore_off[list|initdb]` R7, Community only (skip when
-        `server_gates(engine).columnstore` is false). Monkeypatch
-        `hypershell.data.upgrade.COLUMN_TYPE_VERSION` to `(99, 0, 0)`, narrow, run the command.
-        The INFO lines are `Turned off the columnstore on task …`, `Widened column task.memory`, and
-        the converge pass's `Enabled the columnstore on task`. Then `assert_converged`; do not assert
-        on policy lines (xfail P3).
+  - [ ] `test_memory_old_release_refused` R7, the 2.22/2.23 refusal on real servers. Monkeypatch
+        `hypershell.data.upgrade.COLUMN_TYPE_VERSION` to `(99, 0, 0)`, narrow, submit and run a
+        task, then `hs list --count`. With the columnstore on (Community; `server_gates(engine)`),
+        expect exit 5, stderr holding the refusal (the server's version, `2.24.0`, the manual steps,
+        "schema is unchanged"), the column still `integer` and `shape()` unchanged. Without it
+        (Apache-only), expect the forced gate to change nothing and the column to be widened
+        (xfail P3).
   - [ ] `test_memory_compressed_refused` R7, Community only. Narrow, submit and run tasks,
         `compress_chunk` on every chunk, then `hs list --count`: exit 5, stderr holds the refusal
         (compressed chunks, `decompress_chunk`, "schema is unchanged"). The column stays `integer`
@@ -225,14 +228,13 @@ with its rows kept and the rewrite announced. Concurrent first uses widen once. 
   - [ ] `WIDENED` beside `RETIRED_UNIQUE`, with its comment, and added to `__all__`.
   - [ ] `Step.notice: Optional[str] = None`. `_apply_transactional` logs it at INFO immediately
         before the step's statement. `_apply_sqlite` never sees one.
-  - [ ] `_widen(table, column, state, converges)`. In P2 it returns the widen step when `state` is
+  - [ ] `_widen(table, column, state)`. In P2 it returns the widen step when `state` is
         `None` or the columnstore is off, and raises `NotImplementedError` for the columnstore rows
         (P3 fills them). In P2 `_plan` always passes `None`.
   - [ ] In `_plan`'s PostgreSQL block, after the added columns and before the drops, a `WIDENED`
         pair whose reflected type is `INTEGER`/`SMALLINT` adds `_widen(...)`'s steps. The SQL is
         `ALTER TABLE {qualified} ALTER COLUMN {quoted} TYPE {model type compiled for the dialect}`.
-  - [ ] `upgrade_schema(bind, metadata=None, *, converges=False)` threads `converges` through
-        `_check`/`_apply` to `_plan`. It is unused until P3.
+  - [ ] `upgrade_schema`'s signature does not change (no `converges` flag; PLAN §7).
   - [ ] Module docstring: name the `WIDENED` exception (R8).
 - [ ] Remove the `memory-column P2` markers. Run the verify. Then run
       `tests/test_upgrade_postgres.py -k "not legacy"` locally once more: the existing
@@ -247,11 +249,14 @@ with its rows kept and the rewrite announced. Concurrent first uses widen once. 
   `tests/test_memory_column.py`, `tests/test_upgrade_postgres.py`, `tests/test_timescale.py`
   (markers only), `docs/_include/database.rst`, `docs/_include/database_alt.rst`, `AGENTS.md`.
 
-## Phase P3 — TimescaleDB: widen directly, through the columnstore off and back on, or refuse
+## Phase P3 — TimescaleDB: widen directly, or refuse where TimescaleDB would refuse
 **Satisfies:** R7, R8 · **Depends on:** P2
-**Goal:** a `timescale`-provider database from 2.9.0a3–a9 is widened on first use by any command.
-The columnstore stays on where the release allows it. On 2.22/2.23 it is turned off and the
-converge pass turns it back on. With a compressed chunk the step refuses and changes nothing.
+**Goal:** a hypertable `task` (from the `timescale` provider in 2.9.0a3–a9, or under the `postgres`
+provider) is widened directly on first use by any command where TimescaleDB allows it: 2.24.0 or
+later, or no columnstore. The columnstore and its settings and policy are left as they are. On
+2.22/2.23 with the columnstore on, or with any compressed chunk, the step refuses before any
+statement and changes nothing. Nothing toggles the columnstore, and `data/__init__.py` does not
+change.
 
 - [ ] `src/hypershell/data/upgrade.py`:
   - [ ] `COLUMN_TYPE_VERSION = (2, 24, 0)` with its source comment (timescale/timescaledb#8849,
@@ -261,25 +266,25 @@ converge pass turns it back on. With a compressed chunk the step refuses and cha
         `timescaledb_information.hypertables` and `timescaledb_information.chunks.is_compressed`,
         schema-aware like `_plan`. It parses the version with a local helper (do not import
         `timescale.py`; that would be circular).
-  - [ ] `_widen` fills the columnstore rows of PLAN §2.2's table. `columnstore_off_message(table,
-        column)` is public, the refusal texts are as in PLAN §2.2, and `_plan` passes the probe's
-        state.
+  - [ ] `_widen` fills the columnstore rows of PLAN §2.2's table: widen at ≥
+        `COLUMN_TYPE_VERSION`, otherwise the 2.22/2.23 refusal, and the compressed refusal first.
+        The refusal texts are as in PLAN §2.2, and `_plan` passes the probe's state.
   - [ ] `_wrap`: TimescaleDB's `operation not supported on hypertables with compressed chunks` (a
         chunk compressed after the probe) maps to the same refusal text.
-- [ ] `src/hypershell/data/__init__.py`: `upgradedb()` passes `converges=TIMESCALE`. `checkdb()`
-      runs `timescale.converge(engine, schema, TIMESCALE_SETTINGS)` after `upgradedb()` when
-      `TIMESCALE` and the changes include `upgrade.columnstore_off_message('task', 'memory')`.
-      `initdb()` is unchanged.
+- [ ] `src/hypershell/data/__init__.py` and `timescale.py` stay unchanged (the verify checks this
+      against `bbc55679`).
 - [ ] Remove the `memory-column P3` markers. Run the verify. The TimescaleDB integration cases are
       CI-only: say so in the commit body, and `hs-publish` reads CI's `timescale`,
       `timescale-oss` and `timescale-floor` entries before landing.
 - [ ] Docs: one paragraph in `docs/_include/database.rst`'s TimescaleDB section (PLAN §2.5), with
-      the `decompress_chunk` manual step written as SQL, not as an `hs` command. Add the
-      TimescaleDB clause to `AGENTS.md`'s bullet.
-- **Verify:** see frontmatter (unit decision table and wiring, the TimescaleDB unit tests, the local
-  PostgreSQL cases still green, no xfail markers left, the docs build).
-- **Touches:** `src/hypershell/data/upgrade.py`, `src/hypershell/data/__init__.py`,
-  `tests/test_memory_column.py`, `tests/test_timescale.py`, `docs/_include/database.rst`,
+      the manual steps written as SQL, not as `hs` commands: `decompress_chunk` for compressed
+      chunks, and the 2.24.0 update or the three statements for 2.22/2.23. Add the TimescaleDB
+      clause to `AGENTS.md`'s bullet: widen where TimescaleDB allows it, otherwise refuse, never
+      toggling the columnstore.
+- **Verify:** see frontmatter: the unit decision table, the TimescaleDB unit tests, the local
+  PostgreSQL cases still green, no xfail markers left, no `enable_columnstore` in `upgrade.py`,
+  `data/__init__.py` and `timescale.py` unchanged, and the docs build.
+- **Touches:** `src/hypershell/data/upgrade.py`, `tests/test_memory_column.py`, `tests/test_timescale.py`, `docs/_include/database.rst`,
   `AGENTS.md`.
 
 ---
