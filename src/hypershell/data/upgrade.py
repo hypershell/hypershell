@@ -16,7 +16,7 @@ reflection and takes no lock.
 
 # Type annotations
 from __future__ import annotations
-from typing import Callable, Final, Iterator, List, Optional, Tuple, FrozenSet, TypeVar
+from typing import Callable, Final, Iterator, List, NamedTuple, Optional, Tuple, FrozenSet, TypeVar
 
 # Standard libs
 import re
@@ -59,6 +59,20 @@ RETIRED_UNIQUE: Final[FrozenSet[Tuple[str, str]]] = frozenset({('task', 'previou
 # widens each in place (a rewrite of its table under the table's exclusive lock); SQLite's
 # INTEGER already holds 64 bits. These are the only columns the step ever retypes.
 WIDENED: Final[FrozenSet[Tuple[str, str]]] = frozenset({('task', 'memory')})
+
+# The first TimescaleDB release that changes a column's type on a hypertable with the
+# columnstore enabled and no compressed chunk (timescale/timescaledb#8849, 2.24.0; see
+# `check_alter_table_allowed_on_ht_with_compression` in its src/process_utility.c). Earlier
+# releases refuse it whenever the columnstore is enabled, and every release refuses it while
+# any chunk is compressed. The step never turns the columnstore off or on to get past either.
+COLUMN_TYPE_VERSION: Final[Tuple[int, int, int]] = (2, 24, 0)
+
+# TimescaleDB's own refusal of a type change on a hypertable with compressed chunks, met when a
+# chunk is compressed between the step's plan and its statement.
+COMPRESSED_REFUSAL: Final[str] = 'operation not supported on hypertables with compressed chunks'
+
+# A TimescaleDB extension version: major, minor, and patch, ignoring any suffix (e.g., '-dev').
+EXTENSION_VERSION: Final[re.Pattern] = re.compile(r'^\s*(\d+)\.(\d+)(?:\.(\d+))?')
 
 # How the step waits on a lock another session holds (seconds). Every lock wait in the step is
 # bounded by one slice. When a slice runs out the step rolls back, logs that it is still waiting,
@@ -108,6 +122,13 @@ class Step:
     message: str
     sql: str
     notice: Optional[str] = None
+
+
+class Columnstore(NamedTuple):
+    """A hypertable's TimescaleDB release, whether its columnstore is enabled, and its compressed chunks."""
+    version: Tuple[int, int, int]
+    enabled: bool
+    compressed: int
 
 
 @dataclass(frozen=True)
@@ -185,9 +206,12 @@ def _plan(conn: Connection, metadata: MetaData) -> Plan:
                                     f'ALTER TABLE {qualified} ADD COLUMN '
                                     f'{CreateColumn(column).compile(dialect=dialect)}'))
         if dialect.name == 'postgresql':
-            for column in _widened(table):
-                if column.name in reflected and _is_narrow_integer(reflected[column.name]):
-                    widens.extend(_widen(table, column, None))
+            due = [column for column in _widened(table)
+                   if column.name in reflected and _is_narrow_integer(reflected[column.name])]
+            if due:
+                state = _columnstore(conn, table)
+                for column in due:
+                    widens.extend(_widen(table, column, state))
             for constraint in insp.get_unique_constraints(table.name, schema=table.schema):
                 if _is_retired(table, constraint):
                     name = constraint['name']
@@ -264,23 +288,84 @@ def _is_narrow_integer(reflected: object) -> bool:
     return isinstance(reflected, Integer) and not isinstance(reflected, BigInteger)
 
 
-def _widen(table: Table, column: Column, state: Optional[Tuple[Tuple[int, int, int], bool, int]]) -> List[Step]:
+def _columnstore(conn: Connection, table: Table) -> Optional[Columnstore]:
+    """
+    The TimescaleDB state of `table`, or None when the database has no TimescaleDB extension
+    or `table` is not a hypertable. Read-only.
+    """
+    version = conn.execute(text('SELECT extversion FROM pg_extension WHERE extname = \'timescaledb\'')).scalar()
+    if version is None:
+        return None
+    params = {'schema': table.schema or conn.execute(text('SELECT current_schema()')).scalar(), 'name': table.name}
+    enabled = conn.execute(text('SELECT compression_enabled FROM timescaledb_information.hypertables '
+                                'WHERE hypertable_schema = :schema AND hypertable_name = :name'), params).first()
+    if enabled is None:
+        return None
+    compressed = conn.execute(text('SELECT count(*) FROM timescaledb_information.chunks '
+                                   'WHERE hypertable_schema = :schema AND hypertable_name = :name '
+                                   'AND is_compressed'), params).scalar()
+    return Columnstore(_extension_version(version), bool(enabled[0]), int(compressed or 0))
+
+
+def _extension_version(value: str) -> Tuple[int, int, int]:
+    """The (major, minor, patch) of the TimescaleDB extension version."""
+    match = EXTENSION_VERSION.match(value or '')
+    if match is None:
+        raise SchemaUpgradeError(f'Cannot upgrade database schema: cannot read the TimescaleDB version '
+                                 f'\'{value}\'. The schema is unchanged.')
+    major, minor, patch = match.groups()
+    return int(major), int(minor), int(patch or 0)
+
+
+def _widen(table: Table, column: Column, state: Optional[Columnstore]) -> List[Step]:
     """
     The steps widening `column` of `table` to its model type on PostgreSQL, given the table's
     TimescaleDB `state` (version, columnstore enabled, compressed chunks), or None for a plain
-    table.
+    table. Where TimescaleDB would refuse the change, raise `SchemaUpgradeError` instead,
+    before any statement runs.
     """
-    if state is not None:
-        version, enabled, compressed = state
-        if enabled:
-            raise NotImplementedError('Widening a column of a hypertable with the columnstore enabled')
     prep = POSTGRESQL.identifier_preparer
     name = f'{table.name}.{column.name}'
     target = column.type.dialect_impl(POSTGRESQL).compile(dialect=POSTGRESQL)
+    if state is not None:
+        version, enabled, compressed = state
+        if compressed:
+            chunks = f'{compressed} compressed chunk' + ('s are' if compressed != 1 else ' is')
+            raise SchemaUpgradeError(_compressed_refusal(f'Cannot upgrade table \'{table.name}\': column {name} '
+                                                         f'must be widened to {target}', chunks,
+                                                         prep.format_table(table)))
+        if enabled and tuple(version) < tuple(COLUMN_TYPE_VERSION):
+            raise SchemaUpgradeError(_release_refusal(table.name, column.name, target, version))
     return [Step(table.name, f'Widened column {name} to {target}',
                  f'ALTER TABLE {prep.format_table(table)} ALTER COLUMN {prep.format_column(column)} TYPE {target}',
                  notice=f'Rewriting table {table.name} to widen {name} to {target} '
                         f'(this can take a while on a large table)')]
+
+
+def _compressed_refusal(subject: str, chunks: str, qualified: str) -> str:
+    """Why a widening is refused while chunks are compressed, and how to convert them back."""
+    return (f'{subject}, but {chunks} in the columnstore, and TimescaleDB cannot change a column\'s type '
+            f'while chunks are compressed. HyperShell does not decompress your data for you. Convert the chunks back to the rowstore '
+            f'(SELECT decompress_chunk(c) FROM show_chunks(\'{qualified}\') c), pausing the columnstore '
+            f'policy first if it could compress them again, then run any hs command again. '
+            f'The schema is unchanged.')
+
+
+def _release_refusal(table: str, column: str, target: str, version: Tuple[int, ...]) -> str:
+    """Why a widening is refused on a release that cannot change a type with the columnstore on, and the ways out."""
+    found, needed = _dotted(version), _dotted(COLUMN_TYPE_VERSION)
+    return (f'Cannot upgrade table \'{table}\': column {table}.{column} must be widened to {target}, but '
+            f'TimescaleDB {found} cannot change a column\'s type while the columnstore is enabled on the '
+            f'hypertable (TimescaleDB {needed} and later can). Either update TimescaleDB to {needed} or later '
+            f'(install it on the server, then ALTER EXTENSION timescaledb UPDATE) and run any hs command again, '
+            f'or by hand turn the columnstore off on {table}, widen {column} to {target}, then turn the '
+            f'columnstore back on and run hs initdb to restore its settings; the TimescaleDB section of the '
+            f'database documentation gives the exact statements. The schema is unchanged.')
+
+
+def _dotted(version: Tuple[int, ...]) -> str:
+    """A version as major.minor.patch."""
+    return '.'.join(str(part) for part in version)
 
 
 def _sorted(indexes: set) -> List[Index]:
@@ -480,4 +565,9 @@ def _is_locked(error: DBAPIError) -> bool:
 
 def _wrap(error: DBAPIError) -> SchemaUpgradeError:
     """An actionable error for a failed upgrade; the transaction was rolled back."""
+    if COMPRESSED_REFUSAL in _message(error):  # A chunk compressed after the plan was made.
+        names = ', '.join(f'{table}.{column}' for table, column in sorted(WIDENED))
+        table = sorted(WIDENED)[0][0]
+        return SchemaUpgradeError(_compressed_refusal(f'Cannot upgrade database schema: {names} must be widened',
+                                                      'a chunk compressed while the upgrade ran is', table))
     return SchemaUpgradeError(f'Cannot upgrade database schema: {_message(error)}. The schema is unchanged.')

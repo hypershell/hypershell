@@ -290,3 +290,10 @@ Any release with a compressed chunk is refused, as planned. The `postgres` provi
 rule. This supersedes GOAL Q1 option A for the 2.22/2.23 case only; GOAL.md records it as a dated
 Clarification, with R7 reworded and R-IDs unchanged. This PLAN and TECH.md P3 are revised to match.
 The plan is otherwise approved by the foreman, gate judge under the maintainer's mandate.
+
+**Amended 2026-11-23 (foreman, at build).** The 2.22/2.23 refusal names the manual steps in words
+(turn the columnstore off on `task`, widen `memory` to BIGINT, turn the columnstore back on, then
+`hs initdb`; or upgrade TimescaleDB to 2.24.0 or later) and points to the TimescaleDB section of
+the database documentation, which holds the exact SQL statements. `upgrade.py` therefore never
+contains `enable_columnstore`, and TECH P3's grep stays unchanged as the guard against any
+columnstore toggling in the upgrade step.

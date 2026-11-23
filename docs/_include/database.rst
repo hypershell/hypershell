@@ -268,6 +268,41 @@ Only ``hs initdb`` (with or without ``--truncate``), and ``hs server``, ``hs sub
 for PostgreSQL, and stops on a database that was never initialized. Run ``hs initdb`` after
 upgrading *HyperShell* or TimescaleDB.
 
+.. versionchanged:: 2.9.0
+   The schema step widens ``task.memory`` on a hypertable where TimescaleDB allows it, and
+   otherwise refuses with the schema unchanged.
+
+A database created by a 2.9.0 pre-release has a 32-bit ``task.memory`` column, which the schema
+step widens on first use (see :ref:`database_initialization`). On a hypertable it does so only
+where TimescaleDB allows it, and it never turns the columnstore off or on to get there. On
+TimescaleDB 2.24.0 or later, or on the Apache edition, the column is widened in place, and the
+columnstore, its settings, and the policy stay as they are. On 2.22.x or 2.23.x with the
+columnstore enabled, TimescaleDB cannot change a column's type, so every command stops with an
+error and the schema unchanged. Update TimescaleDB to 2.24.0 or later (``ALTER EXTENSION
+timescaledb UPDATE`` once the server has it) and run the command again, or make the change by
+hand: turn the columnstore off, widen the column, and turn the columnstore back on, then run
+``hs initdb``, which puts back the configured ``segmentby`` and ``orderby``:
+
+.. code-block:: sql
+
+    ALTER TABLE task SET (timescaledb.enable_columnstore = false);
+    ALTER TABLE task ALTER COLUMN memory TYPE bigint;
+    ALTER TABLE task SET (timescaledb.enable_columnstore = true);
+
+On any release, while a chunk of ``task`` is compressed, TimescaleDB cannot change a column's
+type either, and we do not decompress your data for you, so every command stops with an error and
+the schema unchanged. Pause the columnstore policy if it could compress the chunks again, convert
+them back to the rowstore, run any command (which widens the column), and resume the policy:
+
+.. code-block:: sql
+
+    SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs
+        WHERE proc_name = 'policy_compression' AND hypertable_name = 'task';
+    SELECT decompress_chunk(c) FROM show_chunks('task') c;
+    -- run any hs command, then:
+    SELECT alter_job(job_id, scheduled => true) FROM timescaledb_information.jobs
+        WHERE proc_name = 'policy_compression' AND hypertable_name = 'task';
+
 |
 
 Tuning

@@ -26,6 +26,7 @@ import pytest
 from pytest import mark
 from cmdkit.app import exit_status
 from sqlalchemy.dialects import sqlite, postgresql
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.types import BIGINT, INTEGER, NUMERIC, SMALLINT
 
@@ -139,10 +140,8 @@ def widen(state: Optional[tuple]) -> List[Tuple[str, str, Optional[str], str]]:
     pytest.param(None, id='plain'),
     pytest.param(((2, 31, 0), False, 0), id='columnstore-off'),
     pytest.param(((2, 22, 0), False, 0), id='columnstore-off-old-release'),
-    pytest.param(((2, 24, 0), True, 0), marks=mark.xfail(strict=True, reason='memory-column P3'),
-                 id='columnstore-on-2.24.0'),
-    pytest.param(((2, 31, 0), True, 0), marks=mark.xfail(strict=True, reason='memory-column P3'),
-                 id='columnstore-on-2.31.0'),
+    pytest.param(((2, 24, 0), True, 0), id='columnstore-on-2.24.0'),
+    pytest.param(((2, 31, 0), True, 0), id='columnstore-on-2.31.0'),
 ])
 def test_widened_directly(state: Optional[tuple]) -> None:
     """One ALTER, announced before it runs and logged after; never a TimescaleDB statement."""
@@ -153,10 +152,8 @@ def test_widened_directly(state: Optional[tuple]) -> None:
 
 @mark.unit
 @mark.parametrize('state, version', [
-    pytest.param(((2, 22, 0), True, 0), '2.22.0', marks=mark.xfail(strict=True, reason='memory-column P3'),
-                 id='2.22.0'),
-    pytest.param(((2, 23, 1), True, 0), '2.23.1', marks=mark.xfail(strict=True, reason='memory-column P3'),
-                 id='2.23.1'),
+    pytest.param(((2, 22, 0), True, 0), '2.22.0', id='2.22.0'),
+    pytest.param(((2, 23, 1), True, 0), '2.23.1', id='2.23.1'),
 ])
 def test_old_release_refused(state: tuple, version: str) -> None:
     """With the columnstore on before 2.24.0, the step refuses, naming the update and the manual steps."""
@@ -164,16 +161,15 @@ def test_old_release_refused(state: tuple, version: str) -> None:
         widen(state)
     message = str(caught.value)
     for token in ('task.memory', f'TimescaleDB {version}', '2.24.0', 'ALTER EXTENSION timescaledb UPDATE',
-                  'ALTER TABLE task ALTER COLUMN memory TYPE bigint', 'hs initdb', 'The schema is unchanged.'):
+                  'turn the columnstore off on task, widen memory to BIGINT', 'columnstore back on', 'hs initdb',
+                  'TimescaleDB section of the database documentation', 'The schema is unchanged.'):
         assert token in message, message
 
 
 @mark.unit
 @mark.parametrize('state, count', [
-    pytest.param(((2, 31, 0), True, 3), 3, marks=mark.xfail(strict=True, reason='memory-column P3'),
-                 id='2.31.0'),
-    pytest.param(((2, 23, 0), True, 1), 1, marks=mark.xfail(strict=True, reason='memory-column P3'),
-                 id='2.23.0'),
+    pytest.param(((2, 31, 0), True, 3), 3, id='2.31.0'),
+    pytest.param(((2, 23, 0), True, 1), 1, id='2.23.0'),
 ])
 def test_compressed_refused(state: tuple, count: int) -> None:
     """Any compressed chunk is refused first, on any release, naming the chunks and how to convert them back."""
@@ -183,6 +179,23 @@ def test_compressed_refused(state: tuple, count: int) -> None:
     assert 'TimescaleDB 2.24.0' not in message, message
     for token in ('task.memory', f'{count} compressed chunk', 'decompress_chunk', 'show_chunks',
                   'The schema is unchanged.'):
+        assert token in message, message
+
+
+class CompressedChunks(Exception):
+    """TimescaleDB's refusal of a type change on a hypertable with compressed chunks, as the driver raises it."""
+    sqlstate = '0A000'
+
+    def __str__(self) -> str:
+        return 'operation not supported on hypertables with compressed chunks'
+
+
+@mark.unit
+def test_compressed_during_upgrade() -> None:
+    """A chunk compressed between the plan and the statement gives the same actionable refusal."""
+    message = str(upgrade._wrap(DBAPIError('ALTER TABLE task ALTER COLUMN memory TYPE BIGINT', None,
+                                           CompressedChunks())))
+    for token in ('task.memory', 'compressed', 'decompress_chunk', 'show_chunks', 'The schema is unchanged.'):
         assert token in message, message
 
 

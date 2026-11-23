@@ -1131,7 +1131,6 @@ def test_memory_fresh_hypertable(ts_database, ts_site, tmp_path: Path) -> None:
 @mark.integration
 @needs_server
 @with_timescale
-@mark.xfail(strict=True, reason='memory-column P3')
 def test_memory_hypertable_widened(ts_database, ts_site) -> None:
     """First use widens a hypertable's 32-bit column directly; its shape and rows are kept."""
     engine = ts_site(ts_database())
@@ -1152,7 +1151,6 @@ def test_memory_hypertable_widened(ts_database, ts_site) -> None:
 @mark.integration
 @needs_server
 @with_timescale
-@mark.xfail(strict=True, reason='memory-column P3')
 def test_memory_old_release_refused(ts_database, ts_site) -> None:
     """With the columnstore on and the server taken as older than 2.24.0, first use refuses and changes nothing."""
     engine = ts_site(ts_database())
@@ -1167,8 +1165,8 @@ def test_memory_old_release_refused(ts_database, ts_site) -> None:
         assert memory_type(engine) == 'bigint'
         return
     assert rc == exit_status.runtime_error, stderr
-    for token in (f'TimescaleDB {extension_installed(engine)}', '2.24.0', 'ALTER EXTENSION timescaledb UPDATE',
-                  'hs initdb', 'The schema is unchanged.'):
+    for token in (f'TimescaleDB {extension_installed(engine)} cannot change', 'TimescaleDB 99.0.0 and later',
+                  'ALTER EXTENSION timescaledb UPDATE', 'hs initdb', 'The schema is unchanged.'):
         assert token in stderr, stderr
     assert memory_type(engine) == 'integer'
     assert shape(engine) == state
@@ -1177,7 +1175,6 @@ def test_memory_old_release_refused(ts_database, ts_site) -> None:
 @mark.integration
 @needs_server
 @with_timescale
-@mark.xfail(strict=True, reason='memory-column P3')
 def test_memory_compressed_refused(ts_database, ts_site) -> None:
     """With a chunk in the columnstore, first use refuses and changes nothing; once decompressed, it widens."""
     engine = ts_site(ts_database())

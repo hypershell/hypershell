@@ -3,10 +3,10 @@ slug: memory-column-overflows-postgres
 title: On PostgreSQL, a task can declare 2 GiB of memory or more
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/memory-column-overflows-postgres
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-23'
 phases:
 - id: P1
@@ -57,7 +57,7 @@ phases:
 - id: P3
   name: TimescaleDB hypertable widened directly, or refused where TimescaleDB would
     refuse
-  status: pending
+  status: done
   satisfies:
   - R7
   - R8
@@ -258,25 +258,25 @@ later, or no columnstore. The columnstore and its settings and policy are left a
 statement and changes nothing. Nothing toggles the columnstore, and `data/__init__.py` does not
 change.
 
-- [ ] `src/hypershell/data/upgrade.py`:
-  - [ ] `COLUMN_TYPE_VERSION = (2, 24, 0)` with its source comment (timescale/timescaledb#8849,
+- [x] `src/hypershell/data/upgrade.py`:
+  - [x] `COLUMN_TYPE_VERSION = (2, 24, 0)` with its source comment (timescale/timescaledb#8849,
         `check_alter_table_allowed_on_ht_with_compression`).
-  - [ ] `_columnstore(conn, table)`: `None` without the extension or when `table` is not a
+  - [x] `_columnstore(conn, table)`: `None` without the extension or when `table` is not a
         hypertable, else `(version, enabled, compressed)` from `pg_extension`,
         `timescaledb_information.hypertables` and `timescaledb_information.chunks.is_compressed`,
         schema-aware like `_plan`. It parses the version with a local helper (do not import
         `timescale.py`; that would be circular).
-  - [ ] `_widen` fills the columnstore rows of PLAN §2.2's table: widen at ≥
+  - [x] `_widen` fills the columnstore rows of PLAN §2.2's table: widen at ≥
         `COLUMN_TYPE_VERSION`, otherwise the 2.22/2.23 refusal, and the compressed refusal first.
         The refusal texts are as in PLAN §2.2, and `_plan` passes the probe's state.
-  - [ ] `_wrap`: TimescaleDB's `operation not supported on hypertables with compressed chunks` (a
+  - [x] `_wrap`: TimescaleDB's `operation not supported on hypertables with compressed chunks` (a
         chunk compressed after the probe) maps to the same refusal text.
-- [ ] `src/hypershell/data/__init__.py` and `timescale.py` stay unchanged (the verify checks this
+- [x] `src/hypershell/data/__init__.py` and `timescale.py` stay unchanged (the verify checks this
       against `bbc55679`).
-- [ ] Remove the `memory-column P3` markers. Run the verify. The TimescaleDB integration cases are
+- [x] Remove the `memory-column P3` markers. Run the verify. The TimescaleDB integration cases are
       CI-only: say so in the commit body, and `hs-publish` reads CI's `timescale`,
       `timescale-oss` and `timescale-floor` entries before landing.
-- [ ] Docs: one paragraph in `docs/_include/database.rst`'s TimescaleDB section (PLAN §2.5), with
+- [x] Docs: one paragraph in `docs/_include/database.rst`'s TimescaleDB section (PLAN §2.5), with
       the manual steps written as SQL, not as `hs` commands: `decompress_chunk` for compressed
       chunks, and the 2.24.0 update or the three statements for 2.22/2.23. Add the TimescaleDB
       clause to `AGENTS.md`'s bullet: widen where TimescaleDB allows it, otherwise refuse, never
