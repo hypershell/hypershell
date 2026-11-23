@@ -59,7 +59,6 @@ SCRIPTS_HS = os.path.join(sysconfig.get_path('scripts'), 'hs')
 
 relay_program = getattr(relay_module, 'relay_program', None)
 
-API = pytest.mark.xfail(strict=True, reason='relay-remote-exe P3')
 
 
 def executable(path: Path) -> Path:
@@ -489,7 +488,6 @@ def test_relay_launcher_default_comment_names_the_relays_program() -> None:
 
 
 @mark.unit
-@API
 @mark.parametrize('value', [
     pytest.param(lambda: hypershell.cluster.ssh.DEFAULT_REMOTE_EXE, id='ssh'),
     pytest.param(lambda: hypershell.cluster.remote.DEFAULT_REMOTE_EXE, id='remote'),

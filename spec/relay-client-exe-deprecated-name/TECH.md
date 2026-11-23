@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/relay-client-exe-deprecated-name
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-23'
 phases:
 - id: P1
@@ -56,7 +56,7 @@ phases:
     docs /tmp/claude-501/docs-html-rexe
 - id: P3
   name: The Python API launches hs; the release note
-  status: pending
+  status: done
   satisfies:
   - R4
   - R6
@@ -289,10 +289,10 @@ reference entry and completion says so — one commit (§12).
 **Goal:** no built-in default anywhere names `hyper-shell`; the change is in the docs and the
 release note.
 
-- [ ] `cluster/ssh.py:42`, `cluster/remote.py:54`: `DEFAULT_REMOTE_EXE: Final[str] = 'hs'`, the
+- [x] `cluster/ssh.py:42`, `cluster/remote.py:54`: `DEFAULT_REMOTE_EXE: Final[str] = 'hs'`, the
       "retain old name" comment removed, docstrings with `.. versionchanged:: 2.9.0` (PLAN §2.4).
-- [ ] `spec/relay-client-exe-deprecated-name/RELEASE-NOTE.md`: the squash-body draft (PLAN §2.5, P3).
-- [ ] Remove every `relay-remote-exe P3` marker (the R4 tests, `test_cluster_exit.py`).
+- [x] `spec/relay-client-exe-deprecated-name/RELEASE-NOTE.md`: the squash-body draft (PLAN §2.5, P3).
+- [x] Remove every `relay-remote-exe P3` marker (the R4 tests, `test_cluster_exit.py`).
 - **Verify:** see frontmatter (the new file, `test_cluster_exit.py`, `test_cluster_launch.py`,
   `test_relay_workload.py`; no marker left; no `'hyper-shell'` literal in `src/hypershell/cluster` or
   `src/hypershell/relay`; both docstrings carry the marker; the release note names
