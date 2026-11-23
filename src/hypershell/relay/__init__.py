@@ -36,7 +36,9 @@ import sys
 import time
 import errno
 import shlex
+import shutil
 import platform
+import sysconfig
 import threading
 import functools
 from signal import signal as register, SIG_DFL
@@ -73,7 +75,7 @@ from hypershell.relay.upstream import (UpstreamPullerThread, UpstreamReturnerThr
                                        served_zones, upstream_config, upstream_key, relay_site, first_connect,
                                        drain_signalled, log_drain, DEFAULT_UPSTREAM_BUNDLESIZE,
                                        DEFAULT_UPSTREAM_HEARTRATE, DEFAULT_RETENTION, LINK_STAGES)
-from hypershell.cluster.remote import AutoScalingCluster, AutoScalerThread
+from hypershell.cluster.remote import AutoScalingCluster, AutoScalerThread, DEFAULT_REMOTE_EXE
 from hypershell.server import ServerThread
 
 try:
@@ -211,6 +213,22 @@ REEXEC_MARKER: Final[str] ='_HYPERSHELL_RELAY_REEXEC'
 
 REEXEC_CODE: Final[str] = 'import sys; from hypershell import main; sys.exit(main())'
 """Program a relay re-executes with; it reads the relay arguments from the command line."""
+
+PROGRAM_MARKER: Final[str] = '_HYPERSHELL_RELAY_PROGRAM'
+"""Private environment variable a re-executed relay is handed its own program in (see `RelayApp.program`)."""
+
+
+def relay_program(argv0: Optional[str]) -> str:
+    """The program a relay started as `argv0` launches its site clients as (see `RelayApp.program`).
+
+    `argv0` made absolute (not resolved, so a symlinked `bin/hs` stays the link) when it names an
+    executable file; else the `hs` in this interpreter's scripts directory; else `hs`, from `PATH`.
+    """
+    if argv0 and os.path.isfile(argv0) and os.access(argv0, os.X_OK):
+        return os.path.abspath(argv0)
+    scripts = sysconfig.get_path('scripts')
+    found = shutil.which('hs', path=scripts) if scripts else None
+    return os.path.abspath(found) if found else 'hs'
 
 
 class RelayDatabaseLocked(RuntimeError):
@@ -476,6 +494,10 @@ class RelayThread(Thread):
             Address every site client, of every zone, is told to dial. Default: the bind address in
             `address`, or this host's own name when it is 0.0.0.0
             (see :func:`~hypershell.cluster.launch.advertised_host`).
+
+        remote_exe (str, optional):
+            Program every site client, of every zone, is launched as.
+            See :const:`~hypershell.cluster.remote.DEFAULT_REMOTE_EXE`.
     """
 
     cluster: AutoScalingCluster
@@ -528,9 +550,11 @@ class RelayThread(Thread):
                  min_size: Optional[int] = None,
                  max_size: Optional[int] = None,
                  init_size: Optional[int] = None,
-                 advertise: Optional[str] = None) -> None:
+                 advertise: Optional[str] = None,
+                 remote_exe: Optional[str] = None) -> None:
         """Initialize the site and the upstream side."""
         bundlesize = site_bundlesize(bundlesize, num_threads)
+        remote_exe = remote_exe or DEFAULT_REMOTE_EXE
         self.zones = list(zones) if zones else [zone]
         self.zone = self.zones[0]
         settings = {name: {'size': size, 'launcher': launcher, 'launcher_args': launcher_args,
@@ -547,11 +571,12 @@ class RelayThread(Thread):
                                     template=template, client_timeout=client_timeout,
                                     period=period, evict_after=evict, init_size=fallback.init,
                                     min_size=fallback.min, max_size=fallback.max, view=self.view,
-                                    advertise=advertise)
+                                    advertise=advertise, remote_exe=remote_exe)
         self.fleets = [zone_fleet(zone_launch(self.cluster, name, launcher=settings[name]['launcher'],
                                               launcher_args=settings[name]['launcher_args'],
                                               num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
-                                              template=template, client_timeout=client_timeout, tls=tls),
+                                              template=template, client_timeout=client_timeout, tls=tls,
+                                              remote_exe=remote_exe),
                                   name, size=settings[name]['size'], period=period,
                                   init_size=bounds[name][1].init, min_size=bounds[name][1].min,
                                   max_size=bounds[name][1].max, view=self.view)
@@ -999,8 +1024,8 @@ APP_NAME = 'hs relay'
 APP_USAGE = f"""\
 Usage:
   hs relay [-h] [-H ADDR] [-p NUM] [--no-tls] [--zone NAME ...] [-N NUM] [--launcher CMD]
-           [--launcher-args ARGS] [--bind ADDR] [--advertise ADDR] [--port NUM]
-           [--database PATH]
+           [--launcher-args ARGS] [--remote-exe PATH] [--bind ADDR] [--advertise ADDR]
+           [--port NUM] [--database PATH]
 
   Run relay for one site.\
 """
@@ -1025,6 +1050,10 @@ APP_HELP = f"""\
   tasks inherit, and they are given the configuration file without the relay settings.
   Site clients receive the relay's own site key in their environment, never on their
   command line, so the launcher must pass the environment through.
+
+  Site clients are launched as the hs that runs the relay, by its full path, unless
+  --remote-exe ([relay] remote_exe) names another program: the path assumes the site's
+  nodes see this installation where this host does.
 
   Site clients dial the relay at its bind address, or at this host's name when it binds
   every interface (0.0.0.0), unless --advertise ([relay] advertise) names another address
@@ -1071,6 +1100,7 @@ Options:
   -N, --size          NUM   Clients kept launched at the site, at least 1 (default: {DEFAULT_RELAY_SIZE}).
       --launcher      CMD   Command prefix that launches each client (default: none).
       --launcher-args ARGS  Extra arguments for the launcher.
+      --remote-exe    PATH  Program site clients are launched as (default: this hs).
       --bind          ADDR  Bind address of relay-local server (default: {DEFAULT_RELAY_BIND}).
       --advertise     ADDR  Address site clients dial instead (default: by --bind).
       --port          NUM   Port of relay-local server (default: {DEFAULT_RELAY_PORT}).
@@ -1108,6 +1138,10 @@ class RelayApp(Application):
 
     launcher_args: str = DEFAULT_RELAY_LAUNCHER_ARGS
     interface.add_argument('--launcher-args', default=launcher_args)
+
+    # None when not given, so the option can be told from `relay.remote_exe` (see `client_exe`).
+    remote_exe: Optional[str] = None
+    interface.add_argument('--remote-exe', default=remote_exe)
 
     bind: str = DEFAULT_RELAY_BIND
     interface.add_argument('--bind', default=bind)
@@ -1155,6 +1189,9 @@ class RelayApp(Application):
     def run(self: RelayApp) -> None:
         """Run relay."""
         self.check_args()
+        # Read before the database is bound: a re-executed relay's `sys.argv[0]` is `-c`, so it is
+        # handed this value across the re-execution instead.
+        self.program  # noqa: resolved here, in the process the user started
         self.bind_database()
         path = config.database.file
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1191,7 +1228,8 @@ class RelayApp(Application):
                              evict_hint=self.durations['relay.upstream.evict_hint'],
                              evict=self.durations['server.evict'],
                              period=self.site_period,
-                             advertise=self.advertise_host)
+                             advertise=self.advertise_host,
+                             remote_exe=self.client_exe)
         try:
             thread.start()
             join_waking(thread)
@@ -1245,6 +1283,34 @@ class RelayApp(Application):
         value = config.relay.get('advertise', None)
         if value is None or value == '' or value == PARAM_UNSET:
             return None
+        return str(value)
+
+    @functools.cached_property
+    def program(self: RelayApp) -> str:
+        """The relay's own program: what its site clients are launched as unless told otherwise.
+
+        A relay re-executed to bind its database takes the value it was handed (`PROGRAM_MARKER`),
+        and keeps the variable out of its environment, so no site client or task inherits it. Otherwise
+        `sys.argv[0]` counts only when this process's command line is this relay's (not a program that
+        calls `main(['relay', ...])`), and only when it names an executable file (see `relay_program`).
+        """
+        carried = os.environ.pop(PROGRAM_MARKER, None)
+        if carried and REEXEC_MARKER in os.environ:
+            return carried
+        own = sys.argv[1:] == ['relay', *self.argv]
+        return relay_program(sys.argv[0] if own else None)
+
+    @functools.cached_property
+    def client_exe(self: RelayApp) -> str:
+        """Program site clients are launched as: --remote-exe, else relay.remote_exe, else the relay's own program.
+
+        The value is passed on as given, never resolved or checked.
+        """
+        if self.remote_exe is not None:
+            return self.remote_exe
+        value = config.relay.get('remote_exe', None)
+        if value is None or value == '' or value == PARAM_UNSET:
+            return self.program
         return str(value)
 
     @functools.cached_property
@@ -1358,7 +1424,7 @@ class RelayApp(Application):
 
         The database engine is built when the package is imported, so a relay started after import
         (`main(['relay', ...])`) or naming another relay database (`--database`) starts again as a
-        new program in the same process, marked as a relay.
+        new program in the same process, marked as a relay, and handed its own program (`program`).
         """
         reexecuted = os.environ.pop(REEXEC_MARKER, None)
         env: Dict[str, str] = {}
@@ -1374,7 +1440,7 @@ class RelayApp(Application):
         for stream in (sys.stdout, sys.stderr):
             stream.flush()
         os.execve(sys.executable, [sys.executable, '-c', REEXEC_CODE, 'relay', *self.argv],
-                  {**os.environ, **env, RELAY_MARKER: '1', REEXEC_MARKER: '1'})
+                  {**os.environ, **env, RELAY_MARKER: '1', REEXEC_MARKER: '1', PROGRAM_MARKER: self.program})
 
     def __enter__(self: RelayApp) -> RelayApp:
         """Resource management."""

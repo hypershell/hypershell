@@ -59,7 +59,6 @@ SCRIPTS_HS = os.path.join(sysconfig.get_path('scripts'), 'hs')
 
 relay_program = getattr(relay_module, 'relay_program', None)
 
-FIXED = pytest.mark.xfail(strict=True, reason='relay-remote-exe P2')
 API = pytest.mark.xfail(strict=True, reason='relay-remote-exe P3')
 
 
@@ -129,7 +128,6 @@ def installation(tmp_path: Path) -> Iterator[Installation]:
 
 
 @mark.integration
-@FIXED
 @mark.parametrize('database', [pytest.param(False, id='plain'), pytest.param(True, id='database')])
 def test_relay_from_a_symlinked_hs_runs_its_clients(installation: Installation, database: bool) -> None:
     """A relay from a `bin/` with only `hs` and `hsx` launches its clients as that `hs`, and they run the tasks."""
@@ -172,7 +170,6 @@ def wait_launch(relay: Any, tmp_path: Path) -> List[dict]:
 
 
 @mark.integration
-@FIXED
 @mark.parametrize('args, env, expected, reexec', [
     pytest.param([], {'HYPERSHELL_RELAY_REMOTE_EXE': '/opt/key/bin/hs'}, '/opt/key/bin/hs', False, id='key'),
     pytest.param(['--remote-exe', '/opt/opt/bin/hs'], {'HYPERSHELL_RELAY_REMOTE_EXE': '/opt/key/bin/hs'},
@@ -207,7 +204,6 @@ def test_relay_launches_its_clients_as(relays, tmp_path: Path, args: List[str], 
 
 
 @mark.unit
-@FIXED
 def test_relay_program_takes_an_executable_by_absolute_path(tmp_path: Path) -> None:
     """An executable file named by absolute path is itself."""
     exe = executable(tmp_path / 'hs')
@@ -215,7 +211,6 @@ def test_relay_program_takes_an_executable_by_absolute_path(tmp_path: Path) -> N
 
 
 @mark.unit
-@FIXED
 def test_relay_program_makes_a_relative_path_absolute(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """An executable file named by relative path is its absolute path."""
     (tmp_path / 'bin').mkdir()
@@ -225,7 +220,6 @@ def test_relay_program_makes_a_relative_path_absolute(tmp_path: Path, monkeypatc
 
 
 @mark.unit
-@FIXED
 def test_relay_program_keeps_a_symlink(tmp_path: Path) -> None:
     """A symlink is named as the link the user ran, not its target."""
     (tmp_path / 'libexec').mkdir()
@@ -237,7 +231,6 @@ def test_relay_program_keeps_a_symlink(tmp_path: Path) -> None:
 
 
 @mark.unit
-@FIXED
 @mark.parametrize('argv0', [
     pytest.param('not-executable', id='not-executable'),
     pytest.param('-c', id='dash-c'),
@@ -256,7 +249,6 @@ def test_relay_program_falls_back_to_the_scripts_hs(tmp_path: Path, argv0: Optio
 
 
 @mark.unit
-@FIXED
 def test_relay_program_falls_back_to_hs(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """No usable `argv[0]` and no `hs` in the scripts directory: `hs`, from `PATH`."""
     empty = tmp_path / 'scripts'
@@ -277,7 +269,6 @@ def no_markers(monkeypatch: MonkeyPatch) -> MonkeyPatch:
 
 
 @mark.unit
-@FIXED
 def test_relay_app_program_is_argv0_on_its_own_command_line(tmp_path: Path, no_markers: MonkeyPatch) -> None:
     """A process whose command line is this relay's names the program it was started as."""
     exe = executable(tmp_path / 'hs')
@@ -287,7 +278,6 @@ def test_relay_app_program_is_argv0_on_its_own_command_line(tmp_path: Path, no_m
 
 
 @mark.unit
-@FIXED
 def test_relay_app_program_ignores_an_embedding_program(tmp_path: Path, no_markers: MonkeyPatch) -> None:
     """`main(['relay', ...])` inside another program does not name that program."""
     exe = executable(tmp_path / 'x.py')
@@ -298,7 +288,6 @@ def test_relay_app_program_ignores_an_embedding_program(tmp_path: Path, no_marke
 
 
 @mark.unit
-@FIXED
 def test_relay_app_program_takes_the_carried_value(no_markers: MonkeyPatch) -> None:
     """A re-executed relay takes the program it was handed, and keeps the variable out of its environment."""
     no_markers.setenv(PROGRAM_MARKER, '/carried/hs')
@@ -310,7 +299,6 @@ def test_relay_app_program_takes_the_carried_value(no_markers: MonkeyPatch) -> N
 
 
 @mark.unit
-@FIXED
 def test_relay_app_program_ignores_a_stray_carried_value(no_markers: MonkeyPatch) -> None:
     """Without the re-execution marker the variable is dropped and ignored."""
     no_markers.setenv(PROGRAM_MARKER, '/carried/hs')
@@ -331,7 +319,6 @@ def with_remote_exe(value: Any) -> Namespace:
 
 
 @mark.unit
-@FIXED
 @mark.parametrize('argv, key, expected', [
     pytest.param(['--remote-exe', '/opt/opt/bin/hs'], PARAM_UNSET, '/opt/opt/bin/hs', id='option'),
     pytest.param([], '/opt/key/bin/hs', '/opt/key/bin/hs', id='key'),
@@ -355,7 +342,6 @@ class Executed(Exception):
 
 
 @mark.unit
-@FIXED
 def test_reexecution_hands_on_the_program(tmp_path: Path, no_markers: MonkeyPatch) -> None:
     """A relay re-executing to bind its database hands its program to the new process."""
     recorded: Dict[str, Any] = {}
@@ -385,7 +371,6 @@ def programs(relay: RelayThread) -> List[List[str]]:
 
 
 @mark.unit
-@FIXED
 def test_relay_thread_launches_every_fleet_as_its_program() -> None:
     """The cluster's zone and each further zone, fixed or following a topology, launch `remote_exe`."""
     relay = RelayThread(address=('127.0.0.1', free_port()), zones=['cpu', 'gpu', None], launcher=None,
@@ -397,7 +382,6 @@ def test_relay_thread_launches_every_fleet_as_its_program() -> None:
 
 
 @mark.unit
-@FIXED
 def test_relay_thread_launches_its_program_after_the_launcher() -> None:
     """With a launcher, the word after it is `remote_exe`, in every fleet."""
     relay = RelayThread(address=('127.0.0.1', free_port()), zones=['cpu', 'gpu', None], launcher='srun --exact',
@@ -406,7 +390,6 @@ def test_relay_thread_launches_its_program_after_the_launcher() -> None:
 
 
 @mark.unit
-@FIXED
 def test_site_cluster_and_zone_launch_take_the_program() -> None:
     """`site_cluster` and `zone_launch` launch the program they are given."""
     cluster = site_cluster(address=('127.0.0.1', free_port()), zone='cpu', remote_exe='/opt/x/bin/hs')
@@ -419,7 +402,6 @@ def test_site_cluster_and_zone_launch_take_the_program() -> None:
 
 
 @mark.unit
-@FIXED
 def test_relay_remote_exe_is_a_declared_text_key() -> None:
     """`relay.remote_exe` is declared text, unset by default, and an empty variable sets nothing."""
     assert KEYS.get('relay.remote_exe') is Kind.TEXT
@@ -445,7 +427,6 @@ def text(path: str) -> str:
 
 
 @mark.unit
-@FIXED
 def test_relay_help_lists_remote_exe_after_launcher_args() -> None:
     """`hs relay --help` lists `--remote-exe` after `--launcher-args`, in the usage line and the options."""
     assert '[--remote-exe PATH]' in APP_USAGE
@@ -456,7 +437,6 @@ def test_relay_help_lists_remote_exe_after_launcher_args() -> None:
 
 
 @mark.unit
-@FIXED
 def test_relay_remote_exe_documented_in_the_help_pages() -> None:
     """The usage and help includes list `--remote-exe` after `--launcher-args`, and no longer name `hyper-shell`."""
     usage = text('docs/_include/relay_usage.rst')
@@ -473,7 +453,6 @@ def test_relay_remote_exe_documented_in_the_help_pages() -> None:
 
 
 @mark.unit
-@FIXED
 def test_relay_remote_exe_key_reference() -> None:
     """The reference gives `relay.remote_exe` after `.launcher_args`, its variable, and its default in words."""
     reference = parse_reference()
@@ -486,7 +465,6 @@ def test_relay_remote_exe_key_reference() -> None:
 
 
 @mark.unit
-@FIXED
 def test_relay_remote_exe_documented_in_the_completions() -> None:
     """The bash and zsh completions of `hs relay` offer `--remote-exe`, completing files."""
     bash = text('share/bash_completion.d/hs')
@@ -501,7 +479,6 @@ def test_relay_remote_exe_documented_in_the_completions() -> None:
 
 
 @mark.unit
-@FIXED
 def test_relay_launcher_default_comment_names_the_relays_program() -> None:
     """The relay's `launcher` default says an empty launcher runs the relay's own `hs`."""
     source = text('src/hypershell/core/config.py')

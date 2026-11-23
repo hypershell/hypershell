@@ -701,14 +701,16 @@ compatibility until v3, but are never referenced.
 - **`relay/`** — **one relay per process**: `core/config.py` swaps the whole `[database]` section
   for the relay's private SQLite file **at import** (`RELAY_PROCESS`), before `data/core.py` builds
   the engine, so `RelayApp` re-executes the interpreter when started after import or with another
-  `--database`; never rebind the engine after import. `relay_task`/`relay_result` are **relay-only
-  tables** on their own `MetaData` (never `Entity`, or `upgrade_schema` would create them in every
+  `--database`, handing the new process its own program in `_HYPERSHELL_RELAY_PROGRAM` (beside
+  `_HYPERSHELL_RELAY_REEXEC`, popped before any launch); never rebind the engine after import.
+  `relay_task`/`relay_result` are **relay-only tables** on their own `MetaData` (never `Entity`, or `upgrade_schema` would create them in every
   primary). **Nothing in the relay dials its own relay-local server in-process** (the upstream TLS
   trust is process-wide; the local listener keeps its own context), and tests run the upstream
   server and each relay as separate processes. Site clients are launched only through
   `client_launch()` (every zone's via `relay/site.py::zone_launch`, the first zone's set as the
-  `AutoScalingCluster`'s launch), behind `fence_site`, which keeps the upstream key
-  off every site command line and environment and removes every relay variable
+  `AutoScalingCluster`'s launch), every one naming `RelayApp.client_exe` (`--remote-exe`, else
+  `relay.remote_exe`, else the relay's own program), behind `fence_site`, which keeps the upstream
+  key off every site command line and environment and removes every relay variable
   (`is_fenced()`: recognised by the matcher). Its signal handling is the carve-out under *Signals*.
 
 ## Working on this codebase as an agent

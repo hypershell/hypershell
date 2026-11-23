@@ -246,8 +246,10 @@ subsystems.
   (`configured_eager`, `check_evict`), never at import. `server.attempts` is read when a Python API
   entry point is built without `max_retries` (`configured_retries()`).
 - **Relay process:** `core/config.py` replaces the whole `[database]` section with the relay's private
-  SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes;
-  never rebind after import. Relay-only tables live on their own `MetaData`, never `Entity`.
+  SQLite file at import (`RELAY_PROCESS`), so one relay runs per process and a late start re-executes,
+  handing the new process its own program in `_HYPERSHELL_RELAY_PROGRAM` (beside
+  `_HYPERSHELL_RELAY_REEXEC`, popped before any launch); never rebind after import. Relay-only
+  tables live on their own `MetaData`, never `Entity`.
   `DISTRIBUTED_ROLES` (commands with their own log, `relay` among them) is in `core/logging.py`.
 
 ## 11. Cluster orchestration
@@ -319,7 +321,8 @@ subsystems.
   `core/remote.py` for SFTP).
 - The relay's site fleets are launched only through `client_launch()`: every zone's by
   `relay/site.py::zone_launch` with the cluster's values (the first zone's set as the
-  `AutoScalingCluster`'s launch), and
+  `AutoScalingCluster`'s launch), every one naming `RelayApp.client_exe` (`--remote-exe`, else
+  `relay.remote_exe`, else the relay's own program), and
   every launch passes `fence_site` (no upstream key on a site argv or in a site environment). Nothing
   in a relay dials its own relay-local server in-process.
 - `submit.py` queue-mode silently ignores `-t/--tag` (asymmetric vs DB mode).

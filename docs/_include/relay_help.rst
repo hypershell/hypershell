@@ -37,9 +37,9 @@ Options
     Command prefix used to launch each *client* at the site (default: none).
 
     With none, *clients* run directly on the relay's host. Otherwise each is launched as
-    ``CMD [ARGS...] hyper-shell client ...`` (e.g., ``srun``). A ``{zone}`` in the launcher or
-    its arguments is replaced by the zone the *client* serves, and the launched process has it in
-    ``HYPERSHELL_ZONE``. The *clients* connect back to the relay at its bind address (``--bind``),
+    ``CMD [ARGS...] HS client ...`` (e.g., ``srun``), where *HS* is the relay's own program (see
+    ``--remote-exe``). A ``{zone}`` in the launcher or its arguments is replaced by the zone the
+    *client* serves, and the launched process has it in ``HYPERSHELL_ZONE``. The *clients* connect back to the relay at its bind address (``--bind``),
     or by its host name when it binds every interface (*0.0.0.0*, the default), unless
     ``--advertise`` names another address for them to dial. The launcher must
     pass the environment through: each *client* receives the site key there
@@ -50,6 +50,17 @@ Options
     Extra arguments for the launcher, placed after it (quoted as one argument).
 
     See also ``relay.launcher_args``.
+
+``--remote-exe`` *PATH*
+    Program the *clients* at the site are launched as (default: the ``hs`` that runs the relay).
+
+    By default the relay launches its *clients* as the ``hs`` it was started as, by its full path
+    and as the user ran it (a symlinked ``bin/hs`` stays the link), and keeps that program when it
+    starts again to bind its database (``--database``). The path assumes the site's nodes see this
+    installation where this host does; where they see it at another path, or run another
+    installation, name the program here. It is one program, not a command line: a wrapper belongs
+    in ``--launcher``. The value is passed on as given, never resolved or checked. It takes
+    precedence over ``relay.remote_exe``. See also ``relay.remote_exe``.
 
 ``--bind`` *ADDR*
     Bind address of the relay-local *server* (default: 0.0.0.0).

@@ -114,17 +114,18 @@ def site_cluster(address: Tuple[str, int],
                  min_size: Optional[int] = None,
                  max_size: Optional[int] = None,
                  view: Optional[TopologyView] = None,
-                 advertise: Optional[str] = None) -> AutoScalingCluster:
+                 advertise: Optional[str] = None,
+                 remote_exe: str = DEFAULT_REMOTE_EXE) -> AutoScalingCluster:
     """The relay's site cluster: a forever server on the relay database and its first zone's site clients.
 
     Without a topology the fleet is fixed: `init_size` clients at start and never fewer than
     `min_size` (each `size` when not given). With a topology in `view`, the fleet follows its zone's
     entry (see `SiteScaler`).
 
-    Site clients are launched with `launcher` (empty runs them directly on this host) and dial
-    `advertise` when it is given, else the bind address in `address`, or this host by name when it is
-    0.0.0.0, so the relay must be reachable there from wherever they run. The address is passed on as
-    given, never resolved or checked. They serve `zone` (None is the default zone), which is
+    Site clients are launched as `remote_exe`, with `launcher` (empty runs them directly on this
+    host), and dial `advertise` when it is given, else the bind address in `address`, or this host by
+    name when it is 0.0.0.0, so the relay must be reachable there from wherever they run. The address
+    is passed on as given, never resolved or checked. They serve `zone` (None is the default zone), which is
     named to the launcher as `{zone}` and `HYPERSHELL_ZONE` (see `zone_launch`). The site server
     evicts a site client silent for `evict_after` seconds.
 
@@ -143,13 +144,14 @@ def site_cluster(address: Tuple[str, int],
                                  min_size=size if min_size is None else min_size,
                                  max_size=size if max_size is None else max_size,
                                  tls=tls, zone=zone, evict_after=evict_after, discover_zones=False,
-                                 advertise=advertise)
+                                 advertise=advertise, remote_exe=remote_exe)
     if cluster.server.confirm is not None:
         cluster.server.confirm.machine.strict = False
     # The first zone's clients are launched as every further zone's are, naming their zone.
     cluster.launch = zone_launch(cluster, zone, launcher=launcher, launcher_args=launcher_args,
                                  num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
-                                 template=template, client_timeout=client_timeout, tls=tls)
+                                 template=template, client_timeout=client_timeout, tls=tls,
+                                 remote_exe=remote_exe)
     cluster.autoscaler.machine = site_scaler(cluster.autoscaler.machine, cluster.launch, view)
     return cluster
 
@@ -168,17 +170,19 @@ def zone_launch(cluster: AutoScalingCluster,
                 bundlewait: int = 5,
                 template: str = '{}',
                 client_timeout: Optional[int] = None,
-                tls: Optional[TLSConfig] = None) -> ClientLaunch:
+                tls: Optional[TLSConfig] = None,
+                remote_exe: str = DEFAULT_REMOTE_EXE) -> ClientLaunch:
     """The invocation of a site client of `cluster` serving `zone`, built as the cluster builds its own.
 
     The site key and the address the clients dial (`cluster.advertised`) are the cluster's, so every
-    zone's clients dial the one site server at one address; every other value must be the
-    one `site_cluster` was given (with `launcher` and `launcher_args` the zone's own, if it has any),
+    zone's clients dial the one site server at one address; every other value, the program
+    `remote_exe` among them, must be the one `site_cluster` was given (with `launcher` and
+    `launcher_args` the zone's own, if it has any),
     so a client of this zone differs from one of the cluster's only in the zone it serves.
     """
     queue = cluster.server.queue.config
     args = [arg for group in (launcher_args or []) for arg in shlex.split(group)]
-    return client_launch(DEFAULT_REMOTE_EXE, cluster.advertised, queue.auth,
+    return client_launch(remote_exe, cluster.advertised, queue.auth,
                          launcher=shlex.split(launcher or ''), launcher_args=args,
                          num_threads=num_threads, bundlesize=bundlesize, bundlewait=bundlewait,
                          template=template, delay_start=DEFAULT_DELAY, task_signalwait=DEFAULT_SIGNALWAIT,

@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/relay-client-exe-deprecated-name
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-23'
 phases:
 - id: P1
@@ -28,7 +28,7 @@ phases:
 - id: P2
   name: 'The relay launches as its own program: --remote-exe, relay.remote_exe, docs
     and completions'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -254,26 +254,26 @@ strict xfail naming the phase that fixes it; the rest pass. No change outside `t
 `--database`, in every zone; `--remote-exe` and `relay.remote_exe` override it; every help page,
 reference entry and completion says so — one commit (§12).
 
-- [ ] `relay/site.py`: `zone_launch(..., remote_exe: str = DEFAULT_REMOTE_EXE)` →
+- [x] `relay/site.py`: `zone_launch(..., remote_exe: str = DEFAULT_REMOTE_EXE)` →
       `client_launch(remote_exe, …)`; `site_cluster(..., remote_exe: str = DEFAULT_REMOTE_EXE)` →
       `AutoScalingCluster(..., remote_exe=remote_exe)` and `zone_launch(..., remote_exe=remote_exe)`;
       docstrings (PLAN §2.1).
-- [ ] `relay/__init__.py`: `PROGRAM_MARKER`, `relay_program` (PLAN §2.2); `RelayThread.__init__(...,
+- [x] `relay/__init__.py`: `PROGRAM_MARKER`, `relay_program` (PLAN §2.2); `RelayThread.__init__(...,
       remote_exe: Optional[str] = None)` → `site_cluster` and every further `zone_launch`, with its
       `Args` entry; `RelayApp`: `--remote-exe` after `--launcher-args`, `program` and `client_exe`
       cached properties, `run()` reads `self.program` before `bind_database()` (with the comment) and
       passes `remote_exe=self.client_exe`; `bind_database` adds `PROGRAM_MARKER: self.program` to the
       `execve` environment; `APP_USAGE`/`APP_HELP` (PLAN §2.5).
-- [ ] `core/config.py` (`'remote_exe': PARAM_UNSET` after `launcher_args`; the `launcher` comment) and
+- [x] `core/config.py` (`'remote_exe': PARAM_UNSET` after `launcher_args`; the `launcher` comment) and
       `core/config_schema.py` (`KEYS`, `EMPTY_UNSET`) (PLAN §2.3).
-- [ ] `tests/test_config_schema.py::MATCHES` gains `'HYPERSHELL_RELAY_REMOTE_EXE': (('relay',
+- [x] `tests/test_config_schema.py::MATCHES` gains `'HYPERSHELL_RELAY_REMOTE_EXE': (('relay',
       'remote_exe'), Kind.TEXT)`; `tests/test_env_config.py::EMPTY_NOT_GIVEN` gains `'relay.remote_exe':
       ('relay.remote_exe', 'HYPERSHELL_RELAY_REMOTE_EXE')`.
-- [ ] Docs and completions (PLAN §2.5, P2 list): `docs/_include/relay_usage.rst`, `relay_help.rst`,
+- [x] Docs and completions (PLAN §2.5, P2 list): `docs/_include/relay_usage.rst`, `relay_help.rst`,
       `config_param_ref.rst` (`[relay]` `.remote_exe`), `docs/cli/relay.rst` (`versionadded`),
       `share/bash_completion.d/hs`, `share/zsh/site-functions/_hs`; `AGENTS.md` and
       `.agents/factory/invariants.md` §10/§11 in lockstep.
-- [ ] Remove every `relay-remote-exe P2` marker.
+- [x] Remove every `relay-remote-exe P2` marker.
 - **Verify:** see frontmatter (the new file and every relay, config and completion suite the change
   touches, no P2 marker left; `hs relay --help` lists `--remote-exe` after `--launcher-args`;
   `relay_help.rst` no longer says `hyper-shell client`; both completions parse; both agent docs name

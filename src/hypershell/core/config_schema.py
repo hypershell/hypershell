@@ -99,7 +99,7 @@ KEYS: Final[Dict[str, Kind]] = {
     'relay.database': T, 'relay.bind': T, 'relay.advertise': T, 'relay.port': I, 'relay.bundlesize': I,
     'relay.bundlewait': D, 'relay.poll': D, 'relay.retention': D, 'relay.zone': T, 'relay.site': T,
     'relay.size': I, 'relay.min': Kind.INT_OR_NONE, 'relay.max': Kind.INT_OR_NONE, 'relay.init': Kind.INT_OR_NONE,
-    'relay.launcher': T, 'relay.launcher_args': T, 'relay.num_threads': I, 'relay.template': T,
+    'relay.launcher': T, 'relay.launcher_args': T, 'relay.remote_exe': T, 'relay.num_threads': I, 'relay.template': T,
     'relay.timeout': D,
     'relay.upstream.host': T, 'relay.upstream.port': I, 'relay.upstream.auth': T,
     'relay.upstream.bundlesize': I, 'relay.upstream.heartrate': D, 'relay.upstream.deadline': D,
@@ -153,7 +153,7 @@ EMPTY_UNSET: Final[Tuple[str, ...]] = (
     'server.bind', 'server.advertise', 'server.tls.cert', 'server.tls.key', 'server.tls.cafile',
     'server.tls.fingerprint', 'server.tls.ciphers', 'server.tls.servername',
     'task.cwd', 'ssh.args', 'ssh.nodelist', 'autoscale.sites',
-    'relay.database', 'relay.bind', 'relay.advertise', 'relay.zone', 'relay.site',
+    'relay.database', 'relay.bind', 'relay.advertise', 'relay.zone', 'relay.site', 'relay.remote_exe',
     'relay.upstream.tls.cert', 'relay.upstream.tls.cafile', 'relay.upstream.tls.fingerprint',
 )
 """Optional text keys, the bind addresses, the database host and the task directory: an empty variable
