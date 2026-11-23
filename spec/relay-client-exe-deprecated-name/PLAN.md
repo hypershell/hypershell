@@ -1,6 +1,6 @@
 # PLAN — A relay starts its site clients with its own `hs`, not the legacy `hyper-shell`
 
-> **Status:** Draft for review · **Last updated:** 2026-11-23
+> **Status:** Approved at the plan gate · **Last updated:** 2026-11-23
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
 > [`research/`](research/). Every design element traces to a GOAL R-ID.
@@ -217,7 +217,7 @@ research and again after this design. Touched: §8 (relay carve-out, process lif
   made absolute when it names an existing file"; the plan adds "and the process's command line is
   this relay's, and the file is executable". Without it `main(['relay', …])` from Python names the
   embedding program. Both narrowings fall through to the next ruled candidate, never to
-  `hyper-shell`.
+  `hyper-shell`. **Accepted at the plan gate (2026-11-23)** (see *Plan gate* below).
 - **The relay names the link, not its target.** A `bin/hs` symlink into `libexec/bin/` is what the
   clients run, as the user ran it. Where nodes see the installation at another path, `--remote-exe`
   is the escape hatch (Q4); the docs say so.
@@ -225,8 +225,8 @@ research and again after this design. Touched: §8 (relay carve-out, process lif
   `FileNotFoundError` inside `SiteScaler`, the relay logs CRITICAL and exits (reproduced on `develop` with the
   old default, and on the prototype with `relay.remote_exe=/nonexistent/hs`). The GOAL's non-goal
   assumes "the relay's existing relaunch warnings cover that"; they cover a launcher that exits
-  non-zero, not a direct launch. This cycle's default removes the common trigger. Proposed: a
-  follow-up seed, `relay-direct-launch-missing-program`, filed by the foreman.
+  non-zero, not a direct launch. This cycle's default removes the common trigger. A follow-up seed,
+  `relay-direct-launch-missing-program`, is filed by the foreman, outside this cycle (plan gate).
 - **Python API behaviour change** (Q1, ruled). An API user whose nodes have only `hyper-shell` on
   `PATH` (impossible for a normal install, which has both) would break; the release note gives
   `remote_exe='hyper-shell'`.
@@ -263,6 +263,20 @@ them. New `tests/test_relay_remote_exe.py`:
   `tests/test_config_schema.py::MATCHES` and `tests/test_env_config.py::EMPTY_NOT_GIVEN` gain the key
   in P2, with it (dict-driven parametrization cannot carry a per-row mark).
 - **Gate (P4):** the whole suite serially under 3.14 and 3.11, the Sphinx `-W` build.
+
+## Plan gate (2026-11-23)
+
+**Approved** by the foreman, gate judge under the maintainer's mandate.
+
+- **The `argv[0]` narrowing of Q2** (§3 deviation, §5 first risk) is accepted as a faithful reading
+  of the maintainer's ruling: `argv[0]` counts only when the process's command line is the relay's
+  own and it names an executable file. Otherwise resolution falls to the next ruled candidate (the
+  `hs` in the interpreter's scripts directory, then the bare `hs`), never to `hyper-shell`. The
+  maintainer is told of it.
+- **A missing program still ends the relay** (§5): the follow-up seed
+  `relay-direct-launch-missing-program` is filed by the foreman, outside this cycle.
+- **Accepted as planned:** the relay names the link, not its target; the Python API behaviour
+  change; Windows (§5).
 
 ---
 
