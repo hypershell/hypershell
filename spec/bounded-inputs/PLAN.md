@@ -1,6 +1,6 @@
 # PLAN — Every numeric setting has one declared range, one parser and one error
 
-> **Status:** Draft for review · **Last updated:** 2026-11-24
+> **Status:** Approved at the plan gate, with rulings (*Plan gate*) · **Last updated:** 2026-11-24
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
 > [`research/`](research/) (`appetite: big`). Every design element traces to a GOAL R-ID.
@@ -277,3 +277,23 @@ For the plan gate:
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
+
+## Plan gate (2026-11-24)
+
+**Approved** by the foreman, gate judge under the maintainer's mandate. The rulings, by subject (the
+numbers in brackets are § 5's):
+
+- **`hs client -T` and `-W` of 0** (5.2): they keep a floor of 1, as today; 0 stays refused, exit 2.
+  R2 says a working value behaves as today, and a value refused today stays refused rather than gain
+  a new meaning in this cycle. Recorded in TECH.md's range-change notes. The keys `client.timeout` and
+  `task.timeout`, and `hs cluster`'s options, keep the Duration range from 0.
+- **`_eval` runs once** (5.3, § 3 deviation): accepted. A numeric `_eval` runs once per process. It
+  goes in the release note.
+- **`HeartMonitor`'s explicit `evict_after` guard** (§ 3 deviation): accepted as a small deviation
+  from C3. It reads the `EVICT` entry's bounds. Reported to the maintainer, who may overrule it.
+- **C2's reach** (5.4): the maintainer's C2 ruling, as designed.
+- **Test flips, merge order, phase size, the docs build** (5.5–5.8): accepted as planned.
+- **The two proposed advisory limits** (`autoscale.period` above 3,600 s; `client.ratelimit` below
+  0.001 other than 0): accepted. Reported to the maintainer.
+- **The R1 range changes** (5.1: the threads' floor of 0 for `-N 0`, all cores; the interval's
+  floor of 1 s; `server.tls.handshake` 1 … 86,400 s): accepted.

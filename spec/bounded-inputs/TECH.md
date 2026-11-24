@@ -160,6 +160,7 @@ or spins. Each change, with its reason:
 | Threads (`-N/--num-threads`, `relay.num_threads`) | 1 … 4,194,304 | **0** … 4,194,304; 0 is "all cores" | (a) | `-N 0` sets `CPU_COUNT` threads (`client.py:1362`), documented in `client_help.rst` and `cluster_help.rst` ("0=auto") and offered by both shells' completions. Refusing it would break a documented form. The advisory limit (above 1,024) is unchanged; 0 is never advised. |
 | Interval (`-n/--interval`, `hs wait`, `hs run`) | 0 … 2³¹−1 s | **1 s** … 2³¹−1 s | (c) | `-n 0` polls the database in a tight loop (research 01). Durations round up, so 1 s is the least non-zero interval. |
 | `server.tls.handshake` | 0 … 2³¹−1 s (Duration) | **1 … 86,400 s**, its own entry | (b) | `core/tls.py` `handshake_seconds` already refuses anything above one day (`MAX_HANDSHAKE`) and 0; the narrower place it is used. The floor stays 1, as today (0 is refused today, so no value accepted today is refused). |
+| `hs client -T/--timeout`, `-W/--task-timeout` (the options only) | 0 … 2³¹−1 s (the keys' Duration range) | **1 s** … 2³¹−1 s, entries `option.client.timeout` and `option.client.task_timeout` | R2 (plan gate) | Refused at 0 today, exit 2 (`client.py:1786-1790`). R2: a value that works today behaves as today, and a value refused today stays refused rather than gain a new meaning ("none") in this cycle. Ruled at the plan gate, 2026-11-24. The keys `client.timeout` and `task.timeout`, and `hs cluster`'s `-T`/`-W`, keep the Duration range from 0 ("none"). |
 
 Not range changes, stated so the review grades them as intended:
 
@@ -167,9 +168,6 @@ Not range changes, stated so the review grades them as intended:
 - "Count or none": only `relay.min`, `relay.max` and `relay.init` take `<none>` (`int_or_none`);
   `logging.file.keep`, `autoscale.failed_launches`, `autoscale.size.*` and zone `min`/`max`/`init`
   are whole numbers from 0.
-- `hs client -T/--timeout 0` and `-W/--task-timeout 0`, refused today by `client.py:1786-1790`, are
-  inside the Duration range and read as "none", as `client.timeout`/`task.timeout` and `hs cluster`
-  read 0. PLAN § 5.2 puts it to the plan gate.
 - The size parser is exact, so 2⁶³−1 bytes (`9223372036854775807`) is reachable and 2⁶³ refused.
 - `database.port` has no built-in default; R1's default test skips it.
 
@@ -264,8 +262,8 @@ every command reads through it, refuses with the R4 line (exit 2) and advises on
 - [ ] Every numeric option to `ranged(...)` (research 01's 59, by command and destination):
       `submit.py`, `server.py`, `client.py`, `cluster/__init__.py`, `relay/__init__.py`, `task.py`
       (`hs list -l/-g/--part`, `hs update -l/-g`, `hs wait`/`hs run -n`). Remove the option checks the
-      table replaces (`client.py:1786-1790`, the relay's size < 1, the option halves of
-      `check_arguments`); keep the relations.
+      table replaces (`client.py:1786-1790` becomes the floor of `hs client`'s `-T`/`-W` entries,
+      the relay's size < 1, the option halves of `check_arguments`); keep the relations.
 - [ ] Help snippets (`docs/_include/*_help.rst`) give each ranged option's range and advisory limit;
       the `versionchanged:: 2.9.0` above each `.. include::` in `docs/cli/*.rst`; completions unchanged
       (`-N` still offers 0, PLAN § 5.1).
