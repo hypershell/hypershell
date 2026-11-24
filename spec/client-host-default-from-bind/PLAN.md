@@ -304,6 +304,17 @@ Tests come first (P1). Each test that needs the fix is a strict xfail with reaso
   - the Sphinx `-W` build;
   - `zsh -n` on the completion.
 
+## Plan gate (2026-11-23)
+
+**Approved** by the foreman, gate judge under the maintainer's mandate.
+
+- **Accepted:**
+  - resolving the host when the command starts rather than at import (§5, risk 1; §3 deviation);
+  - refusing an `_env` form that names an unset variable (§5, risk 2; §3 deviation);
+  - risks 3, 4, 6 and 7 as planned (§5).
+- **Risk 5** (`hs cluster`'s `advertised_host` ignores `advertise_env`/`advertise_eval`): the
+  foreman files a follow-up seed, outside this cycle.
+
 ---
 
 *Backing research: [`research/00-digest.md`](research/00-digest.md).*
