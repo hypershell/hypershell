@@ -563,6 +563,13 @@ preload > defaults**. `hs config set` writes to disk but **does not mutate the l
   `_ZONE` are process variables, not keys. Text is kept as written; whole numbers, numbers and
   booleans convert or stop every command at import with exit 3 naming the variable; durations and
   sizes stay as given for the command that reads them.
+- **Every numeric setting has one range, in one table**: `SETTINGS` in `core/config_schema.py`, beside
+  `KEYS`, holds each numeric key, zone key and option-only setting with its range, reason and any
+  advisory limit. One parser per kind reads a value against its entry (`parse_setting`,
+  `Range.parse`) and refuses it with one `SettingError` in one form; an option declares it with
+  `ranged(...)` (`RangedOption`, exit 2). A value past an advisory limit runs, with one WARNING per
+  setting per process (`advise`). Never type a numeric option `int`/`float` or read a numeric key
+  around the table; a new numeric key or option needs its entry (`tests/test_bounded_table.py`).
 - **Every numeric key is checked when the configuration loads**, for every command
   (`check_settings` in `core/config.py`): a file's or variable's value, `_env`/`_eval` resolved
   once there, is read by its range entry and pinned in the layer that gave it, so later reads need

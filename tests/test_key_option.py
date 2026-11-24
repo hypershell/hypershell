@@ -279,6 +279,8 @@ ALLOWED: Final[Dict[str, Callable[[str], bool]]] = {
     'src/hypershell/core/config.py': lambda line: 'KEY_OPTION_STRINGS' in line,
     # pytest's own -k.
     'tests/test_factory_fsm.py': lambda line: True,
+    # Every option that takes text, the refused key option among them (a new one forces a decision).
+    'tests/test_bounded_table.py': lambda line: line.strip().startswith("'--advertise', '--auth',"),
     # This file passes the option only to see it refused.
     'tests/test_key_option.py': lambda line: True,
 }

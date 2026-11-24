@@ -73,19 +73,21 @@ from hypershell.core.queue import (QueueClient, QueueConfig, QueueSubmitRefused,
 from hypershell.core.thread import Thread, join_waking
 from hypershell.core.template import Template, DEFAULT_TEMPLATE
 from hypershell.core.types import JSONData, ranged
+from hypershell.core.config_schema import SETTINGS, figure
 from hypershell.core.pretty_print import format_tag
 from hypershell.core.tag import Tag
 from hypershell.core.exceptions import (handle_exception, handle_disconnect,
                                         handle_address_unknown, HostAddressInfo, get_shared_exception_mapping,
                                         ReadingMixin, reading)
 from hypershell.data.model import (Task, Source, Zone, DIRECT_SOURCE_ID, STDIN_SOURCE_ID, DEFAULT_TASK_GROUP,
-                                   TaskGroupInfo, TaskGroupError, ensure_group, tag_text,
+                                   TaskGroupInfo, TaskGroupError, TaskInputError, ensure_group, ensure_resources,
+                                   RESOURCE_SETTINGS, tag_text,
                                    serialize_tasks, zone_name)
 from hypershell.data import initdb, checkdb, DATABASE_DIALECT, DATABASE_ENABLED
 
 # Public interface
 __all__ = ['submit_from', 'submit_file', 'load_json_tasks', 'load_json_source', 'json_source_key',
-           'validate_json_expansion', 'validate_json_groups',
+           'validate_json_expansion', 'validate_json_groups', 'validate_json_records', 'TagAdvice',
            'GatedSource', 'InputScan', 'scan_task_lines', 'read_in_full', 'source_fingerprint', 'is_file_input',
            'source_name',
            'source_fingerprint_and_count', 'apply_source_gate', 'decide_source_gate', 'GateDecision',
@@ -198,25 +200,58 @@ class InputScan:
     groups: List[Optional[int]]
 
 
+class TagAdvice:
+    """Tasks whose resource tags are past an advisory limit, counted for one summary per submission."""
+
+    logged: set = set()  # The settings this process has summarized
+
+    def __init__(self: TagAdvice) -> None:
+        """Start with no task counted."""
+        self.count: Dict[str, int] = {}
+        self.first: Dict[str, str] = {}
+
+    def note(self: TagAdvice, tags: Dict[str, JSONData], origin: str) -> None:
+        """Count the task whose `tags` came from `origin`, for each resource tag past its advisory limit."""
+        for name, setting in RESOURCE_SETTINGS.items():
+            if name in tags and SETTINGS[setting].advised(tags[name]):
+                self.count[setting] = self.count.get(setting, 0) + 1
+                self.first.setdefault(setting, origin)
+
+    def log(self: TagAdvice) -> None:
+        """One WARNING for each setting past its advisory limit: the count of tasks and the first one."""
+        for setting, count in self.count.items():
+            if setting in TagAdvice.logged:
+                continue
+            TagAdvice.logged.add(setting)
+            entry = SETTINGS[setting]
+            direction, limit, reason = entry.advise
+            tasks = '1 task' if count == 1 else f'{count:,} tasks'
+            log.warning(f'{setting}: {tasks} {direction} the advised {figure(limit)}{entry.unit} ({reason}), '
+                        f'the first at {self.first[setting]}; running anyway')
+
+
 def task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
                tags: Optional[Dict[str, JSONData]] = None,
-               name: str = '<input>') -> Iterator[Tuple[str, str, Dict[str, JSONData]]]:
+               name: str = '<input>', advice: Optional[TagAdvice] = None) -> Iterator[Tuple[str, str, Dict[str, JSONData]]]:
     """Replay the Loader's line rules over `lines`: each task's command, expanded command and tags.
 
     Lines are split as the Loader splits them (:func:`split_task_line`) and numbered from 1 as
     physical lines. A tag-only line updates a running copy of `tags`, and only after its group is
     accepted; a task's tags are the running tags with its inline tags over them. A group that is
-    not an integer raises :class:`~hypershell.data.model.TaskGroupError` naming the value as
-    written and ``{name}, line {n}``.
+    not an integer, or a resource tag out of its range, raises
+    :class:`~hypershell.data.model.TaskInputError` naming the value as written and ``{name}, line {n}``.
+    A task whose resource tags are past an advisory limit is counted in `advice`.
     """
     engine = Template(template)
     running = dict(tags or {})
     for number, line in enumerate(lines, start=1):
         try:
             command, args, inline_tags = split_task_line(line, engine)
-        except TaskGroupError as error:
+        except TaskInputError as error:
             raise error.at(f'{name}, line {number}') from error
         if args:
+            if advice is not None:
+                advice.note({**running, **inline_tags}, f'{name}, line {number}')
             yield command, args, {**running, **inline_tags}
         elif not command and inline_tags:
             running.update(inline_tags)
@@ -230,8 +265,10 @@ def scan_task_lines(lines: Iterable[str], *, template: str = DEFAULT_TEMPLATE,
     The Loader's own line rules (:func:`task_lines`) are replayed over `lines`; a task's group is
     its tags' group, else `group`. Nothing is read from or written to the database.
     """
+    advice = TagAdvice()
     groups = [task_tags.get('group', group)
-              for _, _, task_tags in task_lines(lines, template=template, tags=tags, name=name)]
+              for _, _, task_tags in task_lines(lines, template=template, tags=tags, name=name, advice=advice)]
+    advice.log()
     return InputScan(count=len(groups), groups=groups)
 
 
@@ -514,6 +551,7 @@ class Loader(StateMachine):
         self.name = source_name(source)
         self.line = 0
         self.refuse_lines = not is_file_input(source)
+        self.advice = TagAdvice()
 
     @functools.cached_property
     def actions(self: Loader) -> Dict[LoaderState, Callable[[], LoaderState]]:
@@ -546,7 +584,7 @@ class Loader(StateMachine):
         self.line += 1
         try:
             return self.load_line_task(item)
-        except TaskGroupError as error:
+        except TaskInputError as error:
             if not self.refuse_lines:
                 raise error.at(f'{self.name}, line {self.line}') from error
             log.error(f'Refused line {self.line} of {self.name}: {error}')
@@ -561,6 +599,7 @@ class Loader(StateMachine):
         """
         command, args, inline_tags = split_task_line(line, self.template)
         if args:
+            self.advice.note({**self.tags, **inline_tags}, f'{self.name}, line {self.line}')
             self.task = Task.new(args=args, raw_args=command, parse_inline=False,
                                  source=self.source_id, zone=self.zone_id,
                                  cores=self.cores, memory=self.memory, timeout=self.timeout,
@@ -616,7 +655,12 @@ class Loader(StateMachine):
             return LoaderState.PUT
 
     def finalize(self: Loader) -> LoaderState:
-        """Log the de-dup tally (when active) and return HALT."""
+        """Log the de-dup tally (when active) and a stream's advisory summary, and return HALT.
+
+        Input read in full was summarized as it was checked, so only a stream's tags are summarized here.
+        """
+        if self.refuse_lines:
+            self.advice.log()
         if self.skip_fingerprints is not None:
             log.info(f'{self.present} tasks already present; submitting {self.count} new tasks')
         log.debug('Done (loader)')
@@ -1446,19 +1490,27 @@ def validate_json_expansion(records: List[dict], template: str = DEFAULT_TEMPLAT
                                 f'(provide an "args" field or a --template with fields)')
 
 
-def validate_json_groups(records: List[dict]) -> None:
-    """Fail-fast pre-flight: ensure the ``group`` of every record in `records` is a JSON integer in range.
+def validate_json_records(records: List[dict]) -> None:
+    """Fail-fast pre-flight: the ``group`` of every record in `records` is a JSON integer in range, and its
+    resource tags (``cores``, ``memory``, ``timeout``) are inside their ranges.
 
-    Raises :class:`~hypershell.data.model.TaskGroupError` naming the value and its record (numbered
+    Raises :class:`~hypershell.data.model.TaskInputError` naming the value and its record (numbered
     from 0, as :func:`validate_json_expansion` does) on the first refusal, before any task is
-    committed.
+    committed. Records past an advisory limit give one summary.
     """
+    advice = TagAdvice()
     for index, record in enumerate(records):
-        if 'group' in record:
-            try:
+        try:
+            if 'group' in record:
                 ensure_group(record['group'])
-            except TaskGroupError as error:
-                raise error.at(f'record {index}') from error
+            advice.note(ensure_resources({name: record[name] for name in RESOURCE_SETTINGS if name in record}),
+                        f'record {index}')
+        except TaskInputError as error:
+            raise error.at(f'record {index}') from error
+    advice.log()
+
+
+validate_json_groups = validate_json_records  # The name callers knew it by
 
 
 def refuse_below_reached_group(groups: List[Optional[int]], reached: Optional[int], *,
@@ -1782,10 +1834,11 @@ class SubmitApp(ReadingMixin, Application):
         """
         tags = {} if not self.taglist else Tag.parse_cmdline_list(self.taglist)
         try:
+            ensure_resources(tags, {name: tag_text(self.taglist, name) for name in RESOURCE_SETTINGS if name in tags})
             Task.ensure_valid_tag(tags)
             if 'group' in tags:
                 tags['group'] = ensure_group(tags['group'], text=tag_text(self.taglist, 'group'))
-        except (ValueError, TypeError, TaskGroupError) as error:
+        except (ValueError, TypeError, TaskInputError) as error:
             raise ArgumentError(str(error)) from error
         if not self.queue_mode:
             self.tags = tags
@@ -1797,7 +1850,7 @@ class SubmitApp(ReadingMixin, Application):
                 raise ArgumentError('Cannot combine --from-json with -f/--task-file or positional arguments')
             records, self.json_fingerprint = load_json_source(self.from_json)
             validate_json_expansion(records, self.template)
-            validate_json_groups(records)
+            validate_json_records(records)
             log.debug(f'Loaded {len(records)} tasks from JSON ({self.from_json})')
             self.source = records
             return
@@ -1861,7 +1914,7 @@ class SubmitApp(ReadingMixin, Application):
         if self.source is None:
             try:
                 Task.split_argline(self.direct_args)
-            except TaskGroupError as error:
+            except TaskInputError as error:
                 raise error.at('arguments') from error
             return
         if isinstance(self.source, list):

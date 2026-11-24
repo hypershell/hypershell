@@ -710,12 +710,13 @@ def test_zone_option_repeats() -> None:
 
 
 @mark.unit
-@mark.parametrize('size', [0, -1, True, 1.5, '2'])
+@mark.parametrize('size', [0, -1, True, 1.5, 'x'])
 def test_zone_table_size_must_be_a_whole_number_of_at_least_one(size) -> None:
-    """A zone table's `size` is refused unless it is a whole number of at least one; a good one is kept."""
+    """A zone table's `size` is refused unless it is a whole number of at least one (text read by its kind, as a
+    file's is); a good one is kept."""
     app = RelayApp.from_cmdline(['--zone', 'gpu'])
     app.__dict__['zone_plan'] = (['gpu'], {'gpu': {'size': size}})  # As `[relay.zone.gpu]` would give it.
-    with pytest.raises(ArgumentError, match='Site size of zone gpu'):
+    with pytest.raises(ArgumentError, match=r'relay\.zone\.gpu\.size: expected a whole number from 1 to'):
         app.zone_settings  # noqa: checked when first read
     good = RelayApp.from_cmdline(['--zone', 'gpu'])
     good.__dict__['zone_plan'] = (['gpu'], {'gpu': {'size': 3}})

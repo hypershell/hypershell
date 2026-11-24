@@ -319,8 +319,8 @@ def test_timeout_tag_refused(value: str) -> None:
     assert repr(value) in str(exc_info.value)
     with raises(RuntimeError, match='Failed to parse task timeout'):
         Task.new(args='echo a', timeout=value)
-    with raises(RuntimeError, match='Failed to parse task timeout'):
-        Task.new(args=f'echo a # HYPERSHELL: naked timeout:{value}')  # Tags after a naked tag are not checked.
+    with raises(RuntimeError, match=rf"task\.timeout: expected a duration .*given '{value}'"):
+        Task.new(args=f'echo a # HYPERSHELL: naked timeout:{value}')  # Read by its entry after a naked tag too.
 
 
 @mark.integration

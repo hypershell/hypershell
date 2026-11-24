@@ -3,10 +3,10 @@ slug: bounded-inputs
 title: Every numeric setting has one declared range, one parser and one error
 kind: fix
 appetite: big
-status: in_progress
+status: in_review
 branch: fix/bounded-inputs
 base: develop
-current_phase: P4
+current_phase: done
 last_updated: '2026-11-24'
 phases:
 - id: P1
@@ -86,7 +86,7 @@ phases:
   name: Resource tags through the parsers with one advisory summary; PostgreSQL storage;
     AGENTS.md, invariants, rubric; the whole suite, the red list green and the docs
     build
-  status: pending
+  status: done
   satisfies:
   - R9
   - R11
@@ -96,7 +96,7 @@ phases:
   - P3
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: test -n "$HS_TEST_POSTGRES" && env -u HS_TEST_POSTGRES python3 spec/submit-input-checks/drive/bounded.py
     7200 uv run pytest -q -p no:cacheprovider && python3 spec/submit-input-checks/drive/bounded.py
     2700 uv run pytest -q -p no:cacheprovider tests/test_bounded_tags.py tests/test_bounded_advisory.py
@@ -347,21 +347,35 @@ the table; nothing numeric before work ends in a traceback.
 refuses a group; one advisory summary per submission; every doc names the table; the whole suite,
 the red list and the docs build pass.
 
-- [ ] `data/model.py`: `TaskInputError` base of `TaskGroupError` and a new `TaskResourceError`;
+- [x] `data/model.py`: `TaskInputError` base of `TaskGroupError` and a new `TaskResourceError`;
       `ensure_resources(tags, texts)` beside `ensure_group`, called from `split_argline`, `check_tags`
       and the JSON record check (`validate_json_records`, alias `validate_json_groups` kept).
-- [ ] `submit.py`: the four group-error catches widen to `TaskInputError`; the whole-input scan and
+- [x] `submit.py`: the four group-error catches widen to `TaskInputError`; the whole-input scan and
       the stream `Loader` count advisory tags and log one summary per submission.
-- [ ] PostgreSQL: the largest `cores`, `memory`, `timeout` and `attempt` stored (the P1 test).
-- [ ] Docs: the task-input page (`docs/_include/submit_desc.rst` and the task tags page) gives the
+- [x] PostgreSQL: the largest `cores`, `memory`, `timeout` and `attempt` stored (the P1 test).
+- [x] Docs: the task-input page (`docs/_include/submit_desc.rst` and the task tags page) gives the
       resource tags' ranges, advisory limit and refusal; `AGENTS.md` § Configuration names the table and
       the advisory tier; `invariants.md` §3 names `TaskInputError` and the resource check; the review
       rubric's "Absurd input is not a finding" drops "before `bounded-inputs` lands" and points at
       `SETTINGS`.
-- [ ] The whole suite serially (bounded 7,200 s), the red list passing, the guards, `no_bypass.sh`,
+- [x] The whole suite serially (bounded 7,200 s), the red list passing, the guards, `no_bypass.sh`,
       every `bounds_drive.sh` mode, and the docs build (html and man, `-W`, sandbox off).
-- [ ] A `RELEASE-NOTE.md` draft naming the six user-visible changes, the R1 range changes and the
+- [x] A `RELEASE-NOTE.md` draft naming the six user-visible changes, the R1 range changes and the
       `_eval`-once note, for `hs-publish`'s squash body.
+- **Built (P4 notes):** `ensure_resources` reads a tag's text as written (a line, `-t`) as the option
+  reads it, and a JSON value as a file's value; it runs in `split_argline` before the tag character checks, so a
+  resource tag after a bare tag is read too. The advisory summary is `TagAdvice` (`submit.py`): the whole-input
+  scan and the JSON record check log it, and a stream's `Loader` logs it when its input ends; each setting at
+  most once per process, so a source scanned twice still gives one. `Task.new`'s own `memory`/`timeout` reads
+  name their `task.*` key. There is no separate task tags page: `submit_desc.rst` carries the ranges. A test
+  amended where the GOAL changed what it pins: a `timeout` tag after a bare tag is read by its entry
+  (`test_timeout_tag_refused`). The whole suite found more such pins, amended the same way: a variable's bad
+  duration exits 3 at load for every command, in the one form (`test_seconds_key_refused`,
+  `test_relay_refuses_bad_period`, `test_client_bundlewait_refused`); a period set after load is a configuration
+  refusal (`test_relay_site_period_refused`); a zone table's size refusal is the one form and its text `'2'` reads
+  as 2 (`test_zone_table_size_must_be_a_whole_number_of_at_least_one`); the never-ran retry case asks for
+  `cores:32767`, inside the range (`test_cluster_does_not_retry_never_ran`). The key-option sweep allows
+  `TEXT_OPTIONS`'s line in `tests/test_bounded_table.py`. Develop had not moved (`d132d45c`), so no merge.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `src/hypershell/data/model.py`, `submit.py`, `cluster/__init__.py`, `docs/`,
   `AGENTS.md`, `.agents/factory/invariants.md`, `.agents/factory/review-rubric.md`,
