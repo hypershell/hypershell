@@ -50,7 +50,8 @@ from hypershell.core.types import smart_coerce, JSONData, to_json_type, parse_ti
 from hypershell.core.pretty_print import format_tag, format_json, format_bytes, format_source
 from hypershell.core.tag import Tag
 from hypershell.data.core import Session
-from hypershell.data.model import Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME
+from hypershell.data.model import (Task, Source, Zone, JSON, CANCEL_STATUS, zone_name, DEFAULT_ZONE_NAME,
+                                   TaskGroupError, parse_group)
 from hypershell.data import ensuredb, DATABASE_DIALECT
 
 # Public interface
@@ -959,6 +960,10 @@ UPDATE_HELP = f"""\
   Include any number of FIELD=VALUE or tag KEY:VALUE positional arguments.
   The -w/--where and -t/--with-tag operate just as in the search command.
 
+  A group change (group=VALUE, or ID group VALUE in the single-task form)
+  takes an integer as hs submit -g does; any other value exits with status 2
+  before anything is counted, asked or written.
+
   Using --cancel marks tasks terminal (schedule_time and completion_time to now,
   exit_status to {CANCEL_STATUS}); they will not be scheduled, retried, or reverted.
   Using --revert reverts everything as if the task was new again.
@@ -995,6 +1000,19 @@ Options:
   -f, --no-confirm           Do not ask for confirmation.
   -h, --help                 Show this message and exit.\
 """
+
+
+def change_value(field: str, text: str) -> Any:
+    """The value a change writes to task column `field`, given as `text` (exit 2 for a group that is not one)."""
+    if field == 'group':
+        try:
+            return parse_group(text)
+        except TaskGroupError as error:
+            raise ArgumentError(str(error)) from error
+    if Task.columns.get(field) is str:
+        # A text column takes the text as given (e.g., `args=1` stays text); `none` and `null` clear it.
+        return None if text.lower() in {'none', 'null'} else text
+    return smart_coerce(text)
 
 
 class TaskUpdateApp(Application, SearchableMixin):
@@ -1093,11 +1111,7 @@ class TaskUpdateApp(Application, SearchableMixin):
                 Task.update(uuid, tag={**Task.from_id(uuid).tag,
                                        **Tag.parse_cmdline_list([value, ])})
             else:
-                if Task.columns.get(field) is str:
-                    value = None if value.lower() in {'none', 'null'} else value
-                else:
-                    value = smart_coerce(value)
-                Task.update(uuid, **{field: value, })
+                Task.update(uuid, **{field: change_value(field, value), })
         except StaleDataError as err:
             raise Task.NotFound(str(err)) from err
 
@@ -1193,13 +1207,7 @@ class TaskUpdateApp(Application, SearchableMixin):
                     raise ArgumentError(f'Cannot alter task "id" (given: {field}={value})')
                 if field not in Task.columns:
                     raise ArgumentError(f'Unrecognized task field "{field}"')
-                if Task.columns.get(field) is str:
-                    # We want to coerce the value (e.g., as an int or None)
-                    # But also allow for, e.g., args==1 which expects type str.
-                    value = None if value.lower() in {'none', 'null'} else value
-                else:
-                    value = smart_coerce(value)
-                field_updates[field] = value
+                field_updates[field] = change_value(field, value)
             elif ':' in arg:
                 key, value = arg.split(':', 1)
                 tag_updates[key] = smart_coerce(value)

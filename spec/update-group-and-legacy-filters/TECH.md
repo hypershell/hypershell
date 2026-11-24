@@ -7,7 +7,7 @@ appetite: small
 status: in_progress
 branch: fix/update-group-and-legacy-filters
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-24'
 phases:
 - id: P1
@@ -34,7 +34,7 @@ phases:
     tests/test_update.py tests/test_group_integer.py
 - id: P2
   name: An integer group in both forms (R1, R2, R6 part)
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -43,7 +43,7 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
+  hill: downhill
   verify: 'test -n "$HS_TEST_POSTGRES" && sh spec/update-client-retry/drive/bound.sh
     1800 uv run pytest -q -p no:cacheprovider tests/test_update_group.py tests/test_update.py
     tests/test_group_integer.py tests/test_contended_recovery.py && sh spec/update-client-retry/drive/bound.sh
@@ -191,17 +191,17 @@ every other test in the touched files passes.
 **Goal:** `group=VALUE` and `ID group VALUE` write only a group `parse_group` accepts, and refuse
 anything else with exit 2 before counting, asking or writing; the help and docs say so.
 
-- [ ] `task.py`: `change_value(field, text)` (PLAN §2.1), importing `parse_group` and
+- [x] `task.py`: `change_value(field, text)` (PLAN §2.1), importing `parse_group` and
       `TaskGroupError` from `hypershell.data.model`; `process_arguments` and `update_legacy` call it in
       place of their two copies of the typing code (`tag` path in `update_legacy` unchanged).
-- [ ] `UPDATE_HELP`, `docs/_include/task_update_desc.rst`, `docs/_include/task_update_help.rst`
+- [x] `UPDATE_HELP`, `docs/_include/task_update_desc.rst`, `docs/_include/task_update_help.rst`
       (`ARGS`): PLAN §2.3's group sentence.
-- [ ] `docs/cli/task_update.rst`: one `.. versionchanged:: 2.9.0` after #119's entry: the group
+- [x] `docs/cli/task_update.rst`: one `.. versionchanged:: 2.9.0` after #119's entry: the group
       refusal and what happened before (PLAN §2.3). P3 adds its sentence to the same entry.
-- [ ] `AGENTS.md` and `.agents/factory/invariants.md` §3: PLAN §2.3's clause, in lockstep.
-- [ ] `.github/workflows/tests.yml`: `tests/test_update_group.py` added to the PostgreSQL job's list
+- [x] `AGENTS.md` and `.agents/factory/invariants.md` §3: PLAN §2.3's clause, in lockstep.
+- [x] `.github/workflows/tests.yml`: `tests/test_update_group.py` added to the PostgreSQL job's list
       (PLAN §5; drop this step and its verify term if the plan gate rules otherwise).
-- [ ] `spec/update-group-and-legacy-filters/drive/ugl_drive.sh` (new, SPDX header, modes `group` and
+- [x] `spec/update-group-and-legacy-filters/drive/ugl_drive.sh` (new, SPDX header, modes `group` and
       `legacy`, `legacy` failing "not built" until P3): PLAN §6's drive; `group` mode here.
 - **Verify:** see frontmatter: the group tests (both dialects) and neighbours; the `group` drive;
   the phrase in all three files; `parse_group` used and no group bound in `task.py`; the constitution
