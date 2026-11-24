@@ -3,7 +3,7 @@ slug: client-host-default-from-bind
 title: hs client dials server.host when no -H is given
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/client-host-default-from-bind
 base: develop
 current_phase: done
